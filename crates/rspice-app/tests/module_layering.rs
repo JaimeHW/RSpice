@@ -820,6 +820,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "workflows/file_actions"),
     ("app", "frame"),
     ("app", "cross_probe"),
+    // The source find dialog's test, which only seeds and reads code's state,
+    // runs over the code feature's harness, as code's own seeders do.
+    ("app", "code"), // retires at the code flip
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //
@@ -841,10 +844,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app_state", "app"),
     ("app_state", "slots"),
     ("app_state", "workflows/file_workflow"),
-    // What still reaches the application root rather than the session data.
-    // These name `RSpiceApp` itself, so they retire as signatures stop taking
-    // the whole application, not with a module move.
-    ("documents/code_workspace", "app"),
     // The code workspace's tests that only seed and read state run over the
     // code feature on its own, and the feature builds that harness, as the
     // models feature builds the model editor's below.

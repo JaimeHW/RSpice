@@ -8,7 +8,8 @@ use crate::workbench::documents::code_workspace;
 
 /// Replace the open view's root source with `source`.
 pub(crate) fn edit_source(app: &mut RSpiceApp, source: &str) {
-    let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
+        .expect("a Verilog-A view is open");
     let path = selected.document().logical_path().to_owned();
     assert!(
         code_workspace::replace_selected_veriloga_file(

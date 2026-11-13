@@ -21,7 +21,8 @@ const DISCARDED: &str = "The source changed during the compile, so its result wa
 
 /// A compile three seconds in, which answers only when the test sends.
 fn running_compile(user: &mut User) -> (mpsc::Sender<VerilogACompileOutcome>, CompileCancellation) {
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let token = selected.token(user.app.state.model.workspace.content.project.id());
     let (sender, receiver) = mpsc::channel();
     let mut pending = PendingVerilogACompile::new(token, receiver, None, Default::default());
@@ -34,7 +35,8 @@ fn running_compile(user: &mut User) -> (mpsc::Sender<VerilogACompileOutcome>, Co
 
 /// What the strip above the source says.
 fn strip(user: &User) -> Option<String> {
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     code_workspace::veriloga_compile_status(
         &user.app.state.code.code_workspace.veriloga,
         user.app.state.model.workspace.content.project.id(),
@@ -154,7 +156,8 @@ fn an_edit_under_a_running_compile_stops_it_and_says_so() {
 fn a_result_for_a_source_that_moved_on_is_discarded_aloud() {
     let mut user = op_amp();
     let (sender, _cancellation) = running_compile(&mut user);
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     let text = format!("{}// x\n", source(&user));
     user.app

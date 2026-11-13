@@ -241,7 +241,8 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
     .expect("the view's module lookup resolves");
     assert_eq!(binding.selected_module(), "sensor_bridge");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source(&app).expect("the tab has a source");
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
+        .expect("the tab has a source");
     assert_eq!(selected.bundle().id(), legacy_id);
 }
 
@@ -672,7 +673,8 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     assert_eq!(binds(&app, &second), "second");
 
     open_in_design(&mut app.state, &second);
-    let selected = code_workspace::selected_veriloga_source(&app).expect("second's source");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&app.state.model).expect("second's source");
     assert_eq!(selected.view(), &second);
     assert_eq!(selected.selected_module(), Some("second"));
     let edited = TWO_TOP_MODULES.replace("/ 1k", "/ 2k");

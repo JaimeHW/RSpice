@@ -15,8 +15,6 @@ use crate::state::{
 };
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::accessibility::counted;
-#[cfg(test)]
-use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
@@ -183,20 +181,6 @@ pub(crate) fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> R
             open_source_search(parts, ProjectSourceLanguage::RSpiceAutomation, &active_path)
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) fn source_search_results(
-    app: &RSpiceApp,
-    search: &CodeSourceSearchState,
-) -> Result<CodeSourceSearchResults, String> {
-    source_search_results_in(
-        &app.state.model,
-        &app.state.code.code_workspace,
-        &app.state.code.netlist,
-        &app.state.platform,
-        search,
-    )
 }
 
 /// The matches the search finds in its source bundle, over the model, the
@@ -791,6 +775,10 @@ fn search_options(search: &CodeSourceSearchState) -> FindOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::code::{
+        CodeFeature,
+        tests::{CodeHarness, harness},
+    };
 
     fn veriloga_reference() -> crate::state::CellViewRef {
         crate::state::CellViewRef::new("behavioral", "sensor_bridge", "veriloga")
@@ -801,8 +789,8 @@ mod tests {
     }
 
     /// A test app with a Verilog-A cell view open over a one-file bundle.
-    fn veriloga_view_app() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
+    fn veriloga_view_app() -> CodeHarness {
+        let mut harness = harness();
         let reference = veriloga_reference();
         let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
         view.metadata
@@ -811,9 +799,8 @@ mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new(&reference.library);
         library.add_cell(cell);
-        app.state.model.library_manager.add_library(library);
-        app.state
-            .model.workspace
+        harness.model.library_manager.add_library(library);
+        harness.model.workspace
             .content
             .project_sources
             .insert_bundle(
@@ -828,11 +815,11 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-        app.state
+        harness
             .model
             .workspace
             .open_view(reference, crate::state::ViewType::VerilogA);
-        app
+        harness
     }
 
     #[test]
@@ -879,10 +866,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn selection_scope_reports_absolute_ranges_and_replaces_only_the_capture() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let (bundle_id, root) = {
-            let bundle = app
-                .state
+            let bundle = harness
                 .model
                 .workspace
                 .content
@@ -891,7 +877,7 @@ mod tests {
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -901,39 +887,39 @@ mod tests {
                 "alpha gain beta gain gamma".to_owned(),
             )
             .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_selections
             .insert((bundle_id, root.clone()), (6, 10));
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
         {
-            let search = app
-                .state
-                .code
-                .code_workspace
-                .source_search
-                .as_mut()
-                .unwrap();
+            let search = harness.state.code_workspace.source_search.as_mut().unwrap();
             search.scope = CodeSourceSearchScope::Selection;
             search.query = "gain".to_owned();
             search.replacement = "stage".to_owned();
         }
-        let search = app.state.code.code_workspace.source_search.clone().unwrap();
-        let results = source_search_results(&app, &search).unwrap();
+        let search = harness.state.code_workspace.source_search.clone().unwrap();
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .unwrap();
         assert_eq!(results.total_matches, 1);
         assert_eq!(results.matches[0].byte_start, 6);
         assert_eq!(results.matches[0].byte_end, 10);
         assert_eq!((results.matches[0].line, results.matches[0].column), (1, 7));
 
-        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
-        let bundle = app
-            .state
+        commit_source_search_replace(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        let bundle = harness
             .model
             .workspace
             .content
@@ -949,10 +935,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn unicode_case_alias_is_canonicalized_before_search_state_is_published() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let (bundle_id, original_path) = {
-            let bundle = app
-                .state
+            let bundle = harness
                 .model
                 .workspace
                 .content
@@ -962,13 +947,13 @@ mod tests {
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
         let retained_path = "Models/étage.va";
-        app.state
+        harness
             .model
             .workspace
             .content
             .rename_project_source_bundle_file(bundle_id, &original_path, retained_path)
             .unwrap();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -980,23 +965,24 @@ mod tests {
             .unwrap();
 
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             "MODELS/ÉTAGE.VA",
         )
         .unwrap();
-        let search = app
-            .state
-            .code
-            .code_workspace
-            .source_search
-            .as_mut()
-            .unwrap();
+        let search = harness.state.code_workspace.source_search.as_mut().unwrap();
         assert_eq!(search.active_path, retained_path);
         search.scope = CodeSourceSearchScope::CurrentDocument;
         search.query = "gain".to_owned();
         let search = search.clone();
-        let results = source_search_results(&app, &search).unwrap();
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .unwrap();
 
         assert_eq!(results.total_matches, 1);
         assert_eq!(results.matches[0].logical_path, retained_path);
@@ -1005,9 +991,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replacement_rejects_stale_results_and_commits_atomically() {
-        let mut app = veriloga_view_app();
-        let active_path = app
-            .state
+        let mut harness = veriloga_view_app();
+        let active_path = harness
             .model
             .workspace
             .content
@@ -1018,28 +1003,28 @@ mod tests {
             .logical_path()
             .to_owned();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &active_path,
         )
         .unwrap();
         {
-            let search = app
-                .state
-                .code
-                .code_workspace
-                .source_search
-                .as_mut()
-                .unwrap();
+            let search = harness.state.code_workspace.source_search.as_mut().unwrap();
             search.query = "gain".to_owned();
             search.replacement = "stage_gain".to_owned();
         }
-        let search = app.state.code.code_workspace.source_search.clone().unwrap();
-        let results = source_search_results(&app, &search).unwrap();
+        let search = harness.state.code_workspace.source_search.clone().unwrap();
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .unwrap();
         assert!(!results.matches.is_empty());
-        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
-        let bundle = app
-            .state
+        commit_source_search_replace(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1047,24 +1032,23 @@ mod tests {
             .bundle_for_owner(&veriloga_owner())
             .unwrap();
         assert!(bundle.root().content().contains("stage_gain"));
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert!(harness.model.workspace.content.project_sources_dirty);
         let root = bundle.root().logical_path().to_owned();
 
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &active_path,
         )
         .unwrap();
-        let bundle_id = app
+        let bundle_id = harness
             .state
-            .code
             .code_workspace
             .source_search
             .as_ref()
             .unwrap()
             .bundle_id;
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1074,17 +1058,18 @@ mod tests {
                 "module changed; endmodule\n".to_owned(),
             )
             .unwrap();
-        let error = commit_source_search_replace(&mut app.code_workspace_parts()).unwrap_err();
+        let error =
+            commit_source_search_replace(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+                .unwrap_err();
         assert!(error.contains("changed after this search began"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replacement_can_exclude_comments_without_rewriting_them() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let (bundle_id, root) = {
-            let bundle = app
-                .state
+            let bundle = harness
                 .model
                 .workspace
                 .content
@@ -1094,44 +1079,36 @@ mod tests {
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
         let source = "module gain; // gain\nreal gain; /* gain */\nendmodule\n";
-        app.state
+        harness
             .model
             .workspace
             .content
             .replace_project_source_bundle_file(bundle_id, &root, source.to_owned())
             .unwrap();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
         {
-            let search = app
-                .state
-                .code
-                .code_workspace
-                .source_search
-                .as_mut()
-                .unwrap();
+            let search = harness.state.code_workspace.source_search.as_mut().unwrap();
             search.query = "gain".to_owned();
             search.replacement = "stage".to_owned();
             search.include_comments = false;
         }
-        let results = source_search_results(
-            &app,
-            app.state
-                .code
-                .code_workspace
-                .source_search
-                .as_ref()
-                .unwrap(),
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            harness.state.code_workspace.source_search.as_ref().unwrap(),
         )
         .unwrap();
         assert_eq!(results.total_matches, 2);
-        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
+        commit_source_search_replace(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert_eq!(
-            app.state
+            harness
                 .model
                 .workspace
                 .content
@@ -1146,12 +1123,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn generated_references_are_find_only_and_stale_bound() {
-        let mut app = veriloga_view_app();
-        app.state.model.netlist_artifacts.generated_source =
+        let mut harness = veriloga_view_app();
+        harness.model.netlist_artifacts.generated_source =
             "XMODEL generated_reference\n".to_owned();
-        app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
-        let active_path = app
-            .state
+        harness.state.netlist.revision = harness.state.netlist.revision.wrapping_add(1);
+        let active_path = harness
             .model
             .workspace
             .content
@@ -1162,49 +1138,55 @@ mod tests {
             .logical_path()
             .to_owned();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &active_path,
         )
         .unwrap();
         {
-            let search = app
-                .state
-                .code
-                .code_workspace
-                .source_search
-                .as_mut()
-                .unwrap();
+            let search = harness.state.code_workspace.source_search.as_mut().unwrap();
             search.query = "generated_reference".to_owned();
             search.include_generated_references = true;
         }
-        let search = app.state.code.code_workspace.source_search.clone().unwrap();
-        let results = source_search_results(&app, &search).unwrap();
+        let search = harness.state.code_workspace.source_search.clone().unwrap();
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .unwrap();
         assert_eq!(results.total_matches, 1);
         assert_eq!(results.read_only_matches, 1);
         assert_eq!(results.matches[0].logical_path, GENERATED_REFERENCE_PATH);
         assert!(!results.matches[0].editable);
 
-        app.state
+        harness
             .model
             .netlist_artifacts
             .generated_source
             .push_str("* changed\n");
-        app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
+        harness.state.netlist.revision = harness.state.netlist.revision.wrapping_add(1);
         assert!(
-            source_search_results(&app, &search)
-                .unwrap_err()
-                .contains("generated reference deck changed")
+            source_search_results_in(
+                &harness.model,
+                &harness.state.code_workspace,
+                &harness.state.netlist,
+                &harness.platform,
+                &search
+            )
+            .unwrap_err()
+            .contains("generated reference deck changed")
         );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn search_streams_the_contract_limit_but_displays_only_five_hundred_rows() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let (bundle_id, root) = {
-            let bundle = app
-                .state
+            let bundle = harness
                 .model
                 .workspace
                 .content
@@ -1213,27 +1195,34 @@ mod tests {
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
-        app.state
+        harness
             .model
             .workspace
             .content
             .replace_project_source_bundle_file(bundle_id, &root, "gain ".repeat(600))
             .unwrap();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "gain".to_owned();
-        let search = app.state.code.code_workspace.source_search.clone().unwrap();
-        let results = source_search_results(&app, &search).unwrap();
+        let search = harness.state.code_workspace.source_search.clone().unwrap();
+        let results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .unwrap();
         assert_eq!(results.total_matches, 600);
         assert_eq!(results.matches.len(), SOURCE_SEARCH_RESULT_LIMIT);
         assert!(results.display_truncated);
@@ -1243,10 +1232,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn search_accepts_exactly_fifty_thousand_and_detects_one_more() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let (bundle_id, root) = {
-            let bundle = app
-                .state
+            let bundle = harness
                 .model
                 .workspace
                 .content
@@ -1255,7 +1243,7 @@ mod tests {
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1266,24 +1254,31 @@ mod tests {
             )
             .unwrap();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "scale_token".to_owned();
-        let exact = app.state.code.code_workspace.source_search.clone().unwrap();
-        let exact_results = source_search_results(&app, &exact).unwrap();
+        let exact = harness.state.code_workspace.source_search.clone().unwrap();
+        let exact_results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &exact,
+        )
+        .unwrap();
         assert_eq!(exact_results.total_matches, SOURCE_SEARCH_STREAM_LIMIT);
         assert!(!exact_results.truncated);
 
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1294,20 +1289,27 @@ mod tests {
             )
             .unwrap();
         open_source_search(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "scale_token".to_owned();
-        let over = app.state.code.code_workspace.source_search.clone().unwrap();
-        let over_results = source_search_results(&app, &over).unwrap();
+        let over = harness.state.code_workspace.source_search.clone().unwrap();
+        let over_results = source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &over,
+        )
+        .unwrap();
         assert_eq!(over_results.total_matches, SOURCE_SEARCH_STREAM_LIMIT);
         assert!(over_results.truncated);
     }
@@ -1315,25 +1317,19 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn active_search_command_routes_to_the_visible_code_document_kind() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.code.code_workspace.page =
+        let mut harness = harness();
+        harness.state.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-        open_active_source_search(&mut app.code_workspace_parts()).unwrap();
-        let search = app
-            .state
-            .code
-            .code_workspace
-            .source_search
-            .as_ref()
-            .unwrap();
+        open_active_source_search(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        let search = harness.state.code_workspace.source_search.as_ref().unwrap();
         assert_eq!(search.language, ProjectSourceLanguage::RSpiceAutomation);
         assert!(!search.active_path.is_empty());
 
-        app.state.code.code_workspace.source_search = None;
-        app.state.code.code_workspace.page =
+        harness.state.code_workspace.source_search = None;
+        harness.state.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        open_active_source_search(&mut app.code_workspace_parts()).unwrap();
-        assert!(app.state.code.netlist.find.open);
-        assert!(app.state.code.code_workspace.source_search.is_none());
+        open_active_source_search(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(harness.state.netlist.find.open);
+        assert!(harness.state.code_workspace.source_search.is_none());
     }
 }

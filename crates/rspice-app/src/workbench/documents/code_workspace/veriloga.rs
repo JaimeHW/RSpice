@@ -18,8 +18,6 @@ use crate::state::{
     ProjectSourceOwner, ProjectSourceRole, ViewType,
 };
 use crate::workbench::MessageId;
-#[cfg(test)]
-use crate::workbench::RSpiceApp;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
@@ -101,12 +99,6 @@ impl SelectedVerilogASource {
     ) -> bool {
         self.token(project_id) == token
     }
-}
-
-/// The tests' form of [`selected_veriloga_source_in`], over the whole app.
-#[cfg(test)]
-pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
-    selected_veriloga_source_in(&app.state.model)
 }
 
 /// The Verilog-A source of the cell view in front, with the module it
@@ -1046,6 +1038,10 @@ pub(crate) fn compile_project_bundle_virtual_for_provenance(
 mod tests {
     use super::*;
     use crate::state::{Cell, CellViewRef, Library, ProjectSourceDocument, View};
+    use crate::workbench::code::{
+        CodeFeature,
+        tests::{CodeHarness, harness},
+    };
     use rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt;
 
     #[test]
@@ -1060,20 +1056,19 @@ mod tests {
     /// A `behavioral/<cell>/veriloga` view binding `module`, owning a
     /// one-file bundle at `root` that holds `source`.
     fn add_module_view(
-        app: &mut RSpiceApp,
+        harness: &mut CodeHarness,
         cell_name: &str,
         root: &str,
         module: &str,
         source: &str,
     ) -> CellViewRef {
-        if app
-            .state
+        if harness
             .model
             .library_manager
             .get_library("behavioral")
             .is_none()
         {
-            app.state
+            harness
                 .model
                 .library_manager
                 .add_library(Library::new("behavioral"));
@@ -1084,8 +1079,7 @@ mod tests {
             .insert("veriloga.module".to_owned(), module.to_owned());
         view.metadata
             .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
-        let library = app
-            .state
+        let library = harness
             .model
             .library_manager
             .get_library_mut("behavioral")
@@ -1102,7 +1096,7 @@ mod tests {
             [],
         )
         .unwrap();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1114,18 +1108,18 @@ mod tests {
 
     /// A test app whose open Verilog-A view binds `module` over exactly
     /// `source`.
-    fn module_source_with(module: &str, source: &str) -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        app.state.open_project_session();
-        let reference = add_module_view(&mut app, "legacy", "legacy.va", module, source);
-        app.state
+    fn module_source_with(module: &str, source: &str) -> CodeHarness {
+        let mut harness = harness();
+        harness.open_project_session();
+        let reference = add_module_view(&mut harness, "legacy", "legacy.va", module, source);
+        harness
             .model
             .workspace
             .open_view(reference, ViewType::VerilogA);
-        app
+        harness
     }
 
-    fn portless_module() -> RSpiceApp {
+    fn portless_module() -> CodeHarness {
         module_source_with("legacy", "module legacy; endmodule\n")
     }
 
@@ -1134,14 +1128,16 @@ mod tests {
     /// holding it: the request is taken after the write, not before.
     #[test]
     fn a_compile_request_leaves_a_source_on_its_defaults_without_a_build_profile() {
-        let mut app = portless_module();
-        let before = selected_veriloga_source(&app).unwrap().bundle().revision();
+        let mut harness = portless_module();
+        let before = selected_veriloga_source_in(&harness.model)
+            .unwrap()
+            .bundle()
+            .revision();
 
-        request_veriloga_compile(&mut app.code_workspace_parts()).unwrap();
+        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
 
-        let request = app
+        let request = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .compile_request
@@ -1162,10 +1158,10 @@ mod tests {
     /// and the profile reads back as written.
     #[test]
     fn a_build_profile_is_written_over_the_document_the_bundle_holds() {
-        let mut app = portless_module();
-        request_veriloga_compile(&mut app.code_workspace_parts()).unwrap();
-        app.state.code.code_workspace.veriloga.compile_request = None;
-        let selected = selected_veriloga_source(&app).unwrap();
+        let mut harness = portless_module();
+        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        harness.state.code_workspace.veriloga.compile_request = None;
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let revision = selected.bundle().revision();
         let mut profile =
             super::super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())
@@ -1175,15 +1171,15 @@ mod tests {
 
         assert!(
             write_veriloga_build_profile(
-                &mut app.state.model,
-                &mut app.state.code.code_workspace,
+                &mut harness.model,
+                &mut harness.state.code_workspace,
                 &selected,
                 &profile,
             )
             .unwrap()
         );
 
-        let after = selected_veriloga_source(&app).unwrap();
+        let after = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(after.bundle().revision() > revision);
         assert_eq!(
             after
@@ -1197,8 +1193,8 @@ mod tests {
             super::super::veriloga_profile::resolve_veriloga_build_profile(after.bundle()).unwrap();
         assert_eq!(resolved.profile, profile);
         let stale = write_veriloga_build_profile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
             &selected,
             &profile,
         )
@@ -1208,10 +1204,10 @@ mod tests {
 
     #[test]
     fn qualification_history_is_append_only_without_changing_source_identity() {
-        let mut app = portless_module();
-        request_veriloga_compile(&mut app.code_workspace_parts()).unwrap();
-        let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.model.workspace.content.project.id());
+        let mut harness = portless_module();
+        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
+        let token = selected.token(harness.model.workspace.content.project.id());
         let revision = selected.bundle().revision();
         let closure_digest = selected.bundle().closure_digest();
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
@@ -1227,22 +1223,21 @@ mod tests {
         .unwrap();
 
         let first = record_veriloga_qualification(
-            &mut app.state.model,
+            &mut harness.model,
             token,
             Some(&report),
             receipt.diagnostics.as_slice(),
         )
         .unwrap();
         let second = record_veriloga_qualification(
-            &mut app.state.model,
+            &mut harness.model,
             token,
             Some(&report),
             receipt.diagnostics.as_slice(),
         )
         .unwrap();
 
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1256,9 +1251,9 @@ mod tests {
         bundle.validate().unwrap();
     }
 
-    fn add_cell_bundle(app: &mut RSpiceApp, cell_name: &str) -> CellViewRef {
+    fn add_cell_bundle(harness: &mut CodeHarness, cell_name: &str) -> CellViewRef {
         add_module_view(
-            app,
+            harness,
             cell_name,
             "shared.va",
             "shared_model",
@@ -1271,8 +1266,8 @@ mod tests {
     /// Verilog-A view open there is none, and with one open it is that view's.
     #[test]
     fn only_the_open_veriloga_view_selects_a_source() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
+        let mut harness = harness();
+        harness
             .model
             .workspace
             .content
@@ -1287,16 +1282,16 @@ mod tests {
             )
             .unwrap();
 
-        let error =
-            selected_veriloga_source(&app).expect_err("a project-wide bundle is not a selection");
+        let error = selected_veriloga_source_in(&harness.model)
+            .expect_err("a project-wide bundle is not a selection");
         assert!(error.contains("Open a Verilog-A cell view"), "{error}");
 
-        let reference = add_cell_bundle(&mut app, "owned");
-        app.state
+        let reference = add_cell_bundle(&mut harness, "owned");
+        harness
             .model
             .workspace
             .open_view(reference.clone(), ViewType::VerilogA);
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         assert_eq!(
             selected.bundle().owner(),
             &ProjectSourceOwner::cell_view(reference)
@@ -1308,13 +1303,13 @@ mod tests {
     /// goes to the import form and the open view's source is left as it was.
     #[test]
     fn a_dropped_source_goes_to_the_import_form_and_never_replaces_the_open_view() {
-        let mut app = portless_module();
-        let sources_before = app.state.model.workspace.content.project_sources.clone();
+        let mut harness = portless_module();
+        let sources_before = harness.model.workspace.content.project_sources.clone();
         let source = "module dropped(p, n); inout p, n; electrical p, n; endmodule\n";
 
         import_dropped_veriloga_sources(
-            &app.state.model,
-            &mut app.state.code.code_workspace.veriloga,
+            &harness.model,
+            &mut harness.state.code_workspace.veriloga,
             vec![PickedSource {
                 name: "dropped.va".to_owned(),
                 contents: source.to_owned(),
@@ -1324,12 +1319,11 @@ mod tests {
         .expect("drop import");
 
         assert_eq!(
-            app.state.model.workspace.content.project_sources,
+            harness.model.workspace.content.project_sources,
             sources_before
         );
-        let form = app
+        let form = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .import_form
@@ -1337,8 +1331,8 @@ mod tests {
             .expect("the drop opened the import form");
         assert_eq!(form.file_name, "dropped.va");
         assert!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .replace_review
@@ -1351,20 +1345,27 @@ mod tests {
     /// whose previous text stays in the revision history.
     #[test]
     fn a_source_replacement_waits_for_its_confirmation() {
-        let mut app = portless_module();
-        let selected = selected_veriloga_source(&app).unwrap();
+        let mut harness = portless_module();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let bundle_id = selected.bundle().id();
         let root = selected.document().logical_path().to_owned();
         let original = selected.document().content().to_owned();
         let replacement = "module legacy(p, n); inout p, n; electrical p, n; endmodule\n";
 
-        request_veriloga_source_replacement(&mut app.code_workspace_parts(), &root).unwrap();
-        assert!(app.state.code.code_workspace.veriloga.import_requested);
-        complete_veriloga_file_pick(&mut app.code_workspace_parts(), "next.va", replacement);
+        request_veriloga_source_replacement(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &root,
+        )
+        .unwrap();
+        assert!(harness.state.code_workspace.veriloga.import_requested);
+        complete_veriloga_file_pick(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            "next.va",
+            replacement,
+        );
 
-        let review = app
+        let review = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .replace_review
@@ -1372,8 +1373,8 @@ mod tests {
             .expect("the picked file waits for confirmation");
         assert_eq!(review.target.logical_path, root);
         assert!(review.restorable);
-        let content = |app: &RSpiceApp| {
-            app.state
+        let content = |harness: &CodeHarness| {
+            harness
                 .model
                 .workspace
                 .content
@@ -1385,17 +1386,17 @@ mod tests {
                 .to_owned()
         };
         assert_eq!(
-            content(&app),
+            content(&harness),
             original,
             "nothing is replaced before confirming"
         );
-        assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
+        assert!(harness.state.code_workspace.veriloga.import_form.is_none());
 
-        commit_veriloga_source_replacement(&mut app.code_workspace_parts()).unwrap();
+        commit_veriloga_source_replacement(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            .unwrap();
 
-        assert_eq!(content(&app), replacement);
-        let bundle = app
-            .state
+        assert_eq!(content(&harness), replacement);
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1411,10 +1412,10 @@ mod tests {
             "the replaced text stays restorable"
         );
 
-        let workbench = &mut app.state;
+        let workbench = &mut harness;
         assert!(
             workbench
-                .code
+                .state
                 .code_workspace
                 .source_edit_history
                 .step(
@@ -1424,7 +1425,7 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert_eq!(content(&app), original, "the replacement is one undo");
+        assert_eq!(content(&harness), original, "the replacement is one undo");
     }
 
     /// With no Verilog-A view in front, an imported file is read into the
@@ -1432,20 +1433,19 @@ mod tests {
     /// is committed, and there is no project-wide bundle to fill any more.
     #[test]
     fn a_root_import_with_no_veriloga_view_reads_the_file_into_the_import_form() {
-        let mut app = RSpiceApp::test_instance();
-        let sources_before = app.state.model.workspace.content.project_sources.clone();
+        let mut harness = harness();
+        let sources_before = harness.model.workspace.content.project_sources.clone();
         let source = "module actual_model(p, n); inout p, n; electrical p, n; endmodule\n";
 
-        app.state.code.code_workspace.veriloga.import_requested = true;
+        harness.state.code_workspace.veriloga.import_requested = true;
         complete_veriloga_file_pick(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             "behavioral/presentation_name.va",
             source,
         );
 
-        let form = app
+        let form = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .import_form
@@ -1460,21 +1460,25 @@ mod tests {
             }])
         );
         assert_eq!(
-            app.state.model.workspace.content.project_sources,
+            harness.model.workspace.content.project_sources,
             sources_before
         );
-        assert!(!app.state.code.code_workspace.veriloga.import_requested);
+        assert!(!harness.state.code_workspace.veriloga.import_requested);
     }
 
     #[test]
     fn a_source_replacement_rejects_a_bundle_changed_while_the_picker_is_open() {
-        let mut app = portless_module();
-        let selected = selected_veriloga_source(&app).unwrap();
+        let mut harness = portless_module();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let bundle_id = selected.bundle().id();
         let root = selected.document().logical_path().to_owned();
 
-        request_veriloga_source_replacement(&mut app.code_workspace_parts(), &root).unwrap();
-        app.state
+        request_veriloga_source_replacement(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &root,
+        )
+        .unwrap();
+        harness
             .model
             .workspace
             .content
@@ -1485,13 +1489,12 @@ mod tests {
             )
             .unwrap();
         complete_veriloga_file_pick(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             "stale_picker_result.va",
             "module stale_picker_result; endmodule\n",
         );
 
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1503,16 +1506,16 @@ mod tests {
             "module retained_after_picker_open; endmodule\n"
         );
         assert!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .replace_target
                 .is_none()
         );
         assert!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .replace_review
@@ -1523,14 +1526,14 @@ mod tests {
 
     #[test]
     fn root_edit_invalidates_bundle_validation_and_compile_evidence() {
-        let mut app = RSpiceApp::test_instance();
-        let reference = add_cell_bundle(&mut app, "editable");
-        app.state
+        let mut harness = harness();
+        let reference = add_cell_bundle(&mut harness, "editable");
+        harness
             .model
             .workspace
             .open_view(reference, ViewType::VerilogA);
-        let selected = selected_veriloga_source(&app).unwrap();
-        app.state
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
+        harness
             .model
             .workspace
             .content
@@ -1538,17 +1541,17 @@ mod tests {
             .mark_bundle_validated(selected.bundle().id())
             .unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.model.workspace.content.project.id(),
+            harness.model.workspace.content.project.id(),
             selected.bundle(),
             selected.selected_module(),
         )
         .unwrap();
-        app.state.code.code_workspace.veriloga.receipt = Some(receipt);
-        let before = selected.token(app.state.model.workspace.content.project.id());
+        harness.state.code_workspace.veriloga.receipt = Some(receipt);
+        let before = selected.token(harness.model.workspace.content.project.id());
 
         assert!(
             replace_selected_veriloga_file(
-                &mut app.code_workspace_parts(),
+                &mut CodeFeature::workspace_parts(&mut harness.cx()),
                 &selected,
                 "shared.va",
                 "module shared_model(p, n); inout p, n; electrical p, n; real changed; endmodule\n"
@@ -1557,28 +1560,28 @@ mod tests {
             .unwrap()
         );
 
-        let edited = selected_veriloga_source(&app).unwrap();
-        let after = edited.token(app.state.model.workspace.content.project.id());
+        let edited = selected_veriloga_source_in(&harness.model).unwrap();
+        let after = edited.token(harness.model.workspace.content.project.id());
         assert_eq!(after.bundle_id, before.bundle_id);
         assert!(after.revision > before.revision);
         assert_ne!(after.closure_digest, before.closure_digest);
         assert!(!edited.bundle().validation_is_current());
-        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
     #[test]
     fn a_multifile_bundle_compiles_with_its_views_module() {
-        let mut app = module_source_with(
+        let mut harness = module_source_with(
             "legacy",
             "module legacy(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
         );
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let bundle_id = selected.bundle().id();
         let root_path = selected.document().logical_path().to_owned();
         add_bundle_file(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
             bundle_id,
             &root_path,
             "support/constants.vams".to_owned(),
@@ -1586,7 +1589,7 @@ mod tests {
         )
         .unwrap();
 
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         assert_eq!(selected.selected_module(), Some("legacy"));
         match compile_selected_source(&selected) {
             VerilogACompileOutcome::Success(_) => {}
@@ -1598,13 +1601,13 @@ mod tests {
 
     #[test]
     fn a_compile_carrying_warnings_publishes_its_receipt_and_never_reads_as_failed() {
-        let mut app = module_source_with(
+        let mut harness = module_source_with(
             "legacy",
             "module legacy(p, n);\n  inout p, n; electrical p, n; parameter string label = \"x\";\n  analog begin\n    $display(\"%s\", label);\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n",
         );
 
-        let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.model.workspace.content.project.id());
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
+        let token = selected.token(harness.model.workspace.content.project.id());
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a discarded system task must not fail the compile")
         };
@@ -1635,7 +1638,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
@@ -1643,14 +1646,13 @@ mod tests {
         ));
 
         poll_veriloga_compile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
-            &mut app.state.workbench,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
+            &mut harness.wb,
         );
 
-        let published = app
+        let published = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .receipt
@@ -1664,16 +1666,16 @@ mod tests {
                 .any(|diagnostic| diagnostic.code() == "VA-SEM-NO-EFFECT-SYSTEM-TASK")
         );
         assert!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .last_failure
                 .is_empty()
         );
         assert!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .last_failure_token
@@ -1687,12 +1689,12 @@ mod tests {
         // so what still carries this code is an `endgenerate` with no region
         // open. What the test is about is unchanged: a parse refusal reaches
         // the editor with its compiler code, severity, and line.
-        let app = module_source_with(
+        let harness = module_source_with(
             "legacy",
             "module legacy(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
         );
 
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let VerilogACompileOutcome::Failure(diagnostics) = compile_selected_source(&selected)
         else {
             panic!("a region terminator with nothing to terminate")
@@ -1711,13 +1713,13 @@ mod tests {
     /// read.
     #[test]
     fn a_retained_variable_reaches_problems_as_a_warning_naming_its_first_read() {
-        let mut app = module_source_with(
+        let mut harness = module_source_with(
             "counter",
             "module counter(p, n);\n  inout p, n; electrical p, n;\n  real count;\n  analog begin\n    count = count + 1;\n    I(p, n) <+ count * V(p, n);\n  end\nendmodule\n",
         );
 
-        let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.model.workspace.content.project.id());
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
+        let token = selected.token(harness.model.workspace.content.project.id());
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a retained variable is legal Verilog-A and must not fail the compile")
         };
@@ -1748,22 +1750,21 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
             Default::default(),
         ));
         poll_veriloga_compile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
-            &mut app.state.workbench,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
+            &mut harness.wb,
         );
 
         // Problems lists every diagnostic of the published receipt.
-        let published = app
+        let published = harness
             .state
-            .code
             .code_workspace
             .veriloga
             .receipt
@@ -1783,16 +1784,13 @@ mod tests {
 
     #[test]
     fn completed_async_compile_cannot_cross_publish_between_cell_views() {
-        let mut app = RSpiceApp::test_instance();
-        let first = add_cell_bundle(&mut app, "first");
-        let second = add_cell_bundle(&mut app, "second");
-        app.state
-            .model
-            .workspace
-            .open_view(first, ViewType::VerilogA);
-        let first_selected = selected_veriloga_source(&app).unwrap();
+        let mut harness = harness();
+        let first = add_cell_bundle(&mut harness, "first");
+        let second = add_cell_bundle(&mut harness, "second");
+        harness.model.workspace.open_view(first, ViewType::VerilogA);
+        let first_selected = selected_veriloga_source_in(&harness.model).unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.model.workspace.content.project.id(),
+            harness.model.workspace.content.project.id(),
             first_selected.bundle(),
             first_selected.selected_module(),
         )
@@ -1803,44 +1801,44 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.receipt = None;
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.code_workspace.veriloga.receipt = None;
+        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
             Default::default(),
         ));
-        app.state
+        harness
             .model
             .workspace
             .open_view(second, ViewType::VerilogA);
 
         poll_veriloga_compile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
-            &mut app.state.workbench,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
+            &mut harness.wb,
         );
 
-        assert!(app.state.code.code_workspace.veriloga.pending.is_none());
-        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
-        let second_selected = selected_veriloga_source(&app).unwrap();
+        assert!(harness.state.code_workspace.veriloga.pending.is_none());
+        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        let second_selected = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(!second_selected.matches_token(
-            app.state.model.workspace.content.project.id(),
+            harness.model.workspace.content.project.id(),
             receipt.compilation.token()
         ));
     }
 
     #[test]
     fn completed_async_compile_cannot_publish_after_module_contract_changes() {
-        let mut app = RSpiceApp::test_instance();
-        let reference = add_cell_bundle(&mut app, "module_change");
-        app.state
+        let mut harness = harness();
+        let reference = add_cell_bundle(&mut harness, "module_change");
+        harness
             .model
             .workspace
             .open_view(reference.clone(), ViewType::VerilogA);
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.model.workspace.content.project.id(),
+            harness.model.workspace.content.project.id(),
             selected.bundle(),
             selected.selected_module(),
         )
@@ -1851,13 +1849,13 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
             Default::default(),
         ));
-        app.state
+        harness
             .model
             .library_manager
             .get_library_mut(&reference.library)
@@ -1868,16 +1866,16 @@ mod tests {
             .insert("veriloga.module".to_owned(), "different_model".to_owned());
 
         poll_veriloga_compile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
-            &mut app.state.workbench,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
+            &mut harness.wb,
         );
 
-        assert!(app.state.code.code_workspace.veriloga.pending.is_none());
-        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
-        let changed = selected_veriloga_source(&app).unwrap();
+        assert!(harness.state.code_workspace.veriloga.pending.is_none());
+        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        let changed = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(!changed.matches_token(
-            app.state.model.workspace.content.project.id(),
+            harness.model.workspace.content.project.id(),
             receipt.compilation.token()
         ));
         assert!(!changed.bundle().validation_is_current());
@@ -1889,11 +1887,11 @@ mod tests {
     #[test]
     fn the_published_receipt_names_the_selection_it_was_compiled_under() {
         use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
-        let mut app = module_source_with(
+        let mut harness = module_source_with(
             "held",
             "module held(p, n);\n  inout p, n; electrical p, n;\n  parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n  analog I(p, n) <+ g * V(p, n);\nendmodule\n",
         );
-        let selected = selected_veriloga_source(&app).unwrap();
+        let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let outcome = rspice_simulation::project_veriloga::compile_service::compile_source(
             selected.bundle(),
             selected.selected_module(),
@@ -1903,22 +1901,21 @@ mod tests {
         assert!(matches!(outcome, VerilogACompileOutcome::Success(_)));
         let (sender, receiver) = mpsc::channel();
         sender.send(outcome).unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
-            selected.token(app.state.model.workspace.content.project.id()),
+        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            selected.token(harness.model.workspace.content.project.id()),
             receiver,
             None,
             DigitalDelaySelect::Min,
         ));
 
         poll_veriloga_compile(
-            &mut app.state.model,
-            &mut app.state.code.code_workspace,
-            &mut app.state.workbench,
+            &mut harness.model,
+            &mut harness.state.code_workspace,
+            &mut harness.wb,
         );
 
-        let published = &app
+        let published = &harness
             .state
-            .code
             .code_workspace
             .veriloga
             .receipt

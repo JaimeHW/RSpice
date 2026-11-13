@@ -101,7 +101,16 @@ fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
         "{language:?} search binds the bundle the editor is showing"
     );
     assert_eq!(search.bundle_revision, bundle.revision().get());
-    assert!(code_workspace::source_search_results(&app, search).is_ok());
+    assert!(
+        code_workspace::source_search_results_in(
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.code.netlist,
+            &app.state.platform,
+            search
+        )
+        .is_ok()
+    );
 }
 
 /// An application on the page that edits a `language` source, and the owner

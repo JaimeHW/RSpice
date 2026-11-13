@@ -406,7 +406,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     );
 
     // The worker answers while Design is still the workspace on screen.
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
@@ -460,7 +460,7 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "top", "top.va", "top");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
             &mut app.code_workspace_parts(),
@@ -570,7 +570,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
         .clone()
         .expect("the click took the closure");
     // The reader types before the frame that starts the compile.
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
             &mut app.code_workspace_parts(),
@@ -590,7 +590,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
         .as_ref()
         .expect("the click's compile started")
         .token;
-    let edited = code_workspace::selected_veriloga_source(&app).unwrap();
+    let edited = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(started.closure_digest, clicked.bundle().closure_digest());
     assert_ne!(started.closure_digest, edited.bundle().closure_digest());
     wait_for_compile(&ctx, &mut app);
@@ -628,7 +628,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     open_in_design(&mut app.state, &reference);
     app.state.workbench.inspector_visible = true;
     let ctx = themed_context();
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
         &mut app.code_workspace_parts(),
         &selected,
@@ -646,7 +646,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     let veriloga = &app.state.code.code_workspace.veriloga;
     assert!(veriloga.receipt.is_none());
     assert!(!veriloga.last_failure.is_empty(), "the findings are kept");
-    let current = code_workspace::selected_veriloga_source(&app).unwrap();
+    let current = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         !code_workspace::veriloga_diagnostics(
             veriloga,
@@ -700,7 +700,7 @@ fn a_source_edit_marks_its_tab_dirty_and_saving_clears_it() {
     .expect("establish the saved baseline");
     assert!(!tab_is_dirty(&app, &reference));
 
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
             &mut app.code_workspace_parts(),

@@ -47,7 +47,7 @@ fn veriloga_view_holding(source: &str) -> RSpiceApp {
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
         &mut app.code_workspace_parts(),
         &selected,
@@ -156,7 +156,7 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
     assert!(save(&mut app).expect("the save is made"));
     assert!(app.state.code.veriloga_build_settings.is_none());
 
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let resolved = resolve_veriloga_build_profile(selected.bundle()).unwrap();
     assert_eq!(
         resolved.logical_path.as_deref(),
@@ -215,13 +215,13 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
 #[test]
 fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
     let mut app = veriloga_view_holding(TWO_MODULES);
-    let before = code_workspace::selected_veriloga_source(&app).unwrap();
+    let before = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(before.selected_module(), Some("gain"));
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
     assert!(save(&mut app).unwrap());
 
-    let saved = code_workspace::selected_veriloga_source(&app).unwrap();
+    let saved = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(saved.selected_module(), Some("gain_fast"));
     let profile = resolve_veriloga_build_profile(saved.bundle())
         .unwrap()
@@ -230,7 +230,7 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
 
     assert!(Command::Undo.is_enabled(&app));
     Command::Undo.execute(&mut app);
-    let undone = code_workspace::selected_veriloga_source(&app).unwrap();
+    let undone = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(
         undone.selected_module(),
         Some("gain"),
@@ -251,7 +251,7 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
 
     assert!(Command::Redo.is_enabled(&app));
     Command::Redo.execute(&mut app);
-    let redone = code_workspace::selected_veriloga_source(&app).unwrap();
+    let redone = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(redone.selected_module(), Some("gain_fast"));
     assert_eq!(
         redone.bundle().closure_digest(),
@@ -271,7 +271,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
     let schematic = app.state.model.workspace.content.active_view.clone();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
         &mut app.code_workspace_parts(),
         &selected,
@@ -328,7 +328,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
     assert!(save(&mut app).unwrap());
-    let saved = code_workspace::selected_veriloga_source(&app).unwrap();
+    let saved = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let edited = format!("{TWO_MODULES}// edited after the save\n");
     code_workspace::replace_selected_veriloga_file(
         &mut app.code_workspace_parts(),
@@ -337,11 +337,11 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
         edited,
     )
     .unwrap();
-    let later = code_workspace::selected_veriloga_source(&app).unwrap();
+    let later = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
 
     assert!(!app.state.model.can_undo_project_design());
     Command::Undo.execute(&mut app);
-    let after = code_workspace::selected_veriloga_source(&app).unwrap();
+    let after = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(
         after.bundle().closure_digest(),
         later.bundle().closure_digest()
@@ -363,7 +363,7 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
     );
     assert!(app.command_key_enabled(CodeCommand::VerilogABuildSettings.key()));
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
-    let before = code_workspace::selected_veriloga_source(&app).unwrap();
+    let before = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     draft(&mut app).generated_rust = true;
 
     let refusal = save(&mut app).expect_err("read-only refuses");
@@ -371,7 +371,7 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
         refusal,
         messages().text(MessageId::VerilogABuildSettingsReadOnly)
     );
-    let after = code_workspace::selected_veriloga_source(&app).unwrap();
+    let after = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(
         after.bundle().closure_digest(),
         before.bundle().closure_digest()
@@ -486,7 +486,7 @@ fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
 
     draft(&mut app).include_draft = "include".to_owned();
     assert!(save(&mut app).unwrap());
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let profile = resolve_veriloga_build_profile(selected.bundle())
         .unwrap()
         .profile;
@@ -535,7 +535,7 @@ fn save_and_compile_compiles_with_the_new_settings() {
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     wait_for_compile(&ctx, &mut app);
 
-    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let profile = resolve_veriloga_build_profile(selected.bundle())
         .unwrap()
         .profile;

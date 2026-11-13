@@ -15,7 +15,8 @@ const SHIFT: Modifiers = Modifiers {
 };
 
 fn file_row(user: &User) -> String {
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     selected.document().logical_path().to_owned()
 }
 

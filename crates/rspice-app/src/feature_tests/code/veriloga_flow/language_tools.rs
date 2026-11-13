@@ -30,7 +30,8 @@ pub(super) fn op_amp() -> User {
 }
 
 pub(super) fn source(user: &User) -> String {
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     selected
         .bundle()
@@ -47,7 +48,8 @@ pub(super) fn caret_after(user: &mut User, text: &str) {
 }
 
 fn caret_at(user: &mut User, index: usize) {
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let id = code_workspace::source_editor_id(
         crate::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),

@@ -62,7 +62,8 @@ fn rename_is_one_undo_across_the_module() {
     let mut user = op_amp();
     let original = source(&user);
     caret_after(&mut user, "vtarget = vslew");
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     let caret = original.find("vslew").expect("the name");
     code_workspace::open_language_tools_in_bundle(
@@ -99,7 +100,8 @@ fn rename_is_one_undo_across_the_module() {
 fn replace_in_files_is_one_undo_across_the_module() {
     let mut user = op_amp();
     let original = source(&user);
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     code_workspace::open_source_search_in_bundle(
         &mut user.app.code_workspace_parts(),
@@ -136,7 +138,7 @@ fn replace_in_files_is_one_undo_across_the_module() {
 fn replace_source_from_file_is_one_undo() {
     let mut user = op_amp();
     let original = source(&user);
-    let path = code_workspace::selected_veriloga_source(&user.app)
+    let path = code_workspace::selected_veriloga_source_in(&user.app.state.model)
         .expect("the open view")
         .document()
         .logical_path()
@@ -214,7 +216,7 @@ fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
     user.settle();
     assert!(!open_tab_dirty(&user, &view), "the save cleaned the tab");
     let attempts = |user: &User| {
-        code_workspace::selected_veriloga_source(&user.app)
+        code_workspace::selected_veriloga_source_in(&user.app.state.model)
             .expect("the open view")
             .bundle()
             .qualifications()
@@ -227,7 +229,8 @@ fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
     assert_eq!(attempts(&user), before + 1, "the attempt is kept");
     assert!(!open_tab_dirty(&user, &view), "a compile is not an edit");
     assert!(!active_document_is_dirty(&user.app.state));
-    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let selected =
+        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     assert!(
         selected
             .bundle()

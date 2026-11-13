@@ -552,7 +552,8 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
         "reached through navigation, not by writing the workspace"
     );
     let selected =
-        crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();
+        crate::workbench::documents::code_workspace::selected_veriloga_source_in(&app.state.model)
+            .unwrap();
     assert_eq!(selected.bundle().id(), bundle.id());
     assert_eq!(selected.selected_module(), Some("precision_amp"));
     assert!(selected.bundle().validation_is_current());

@@ -81,8 +81,6 @@ pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
     document_navigation,
 };
-#[cfg(test)]
-pub(crate) use source_search::source_search_results;
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
     open_active_source_search, open_source_search, open_source_search_in_bundle,
@@ -98,9 +96,7 @@ pub(crate) use veriloga::{
     writable_libraries, write_veriloga_build_profile,
 };
 #[cfg(test)]
-pub(crate) use veriloga::{
-    complete_veriloga_file_pick, complete_veriloga_files_pick, selected_veriloga_source,
-};
+pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 #[cfg(test)]
 pub(crate) use veriloga_inspector::veriloga_diagnostics;

@@ -524,8 +524,7 @@ fn results_list(
 mod tests {
     use super::*;
 
-    use crate::workbench::app::RSpiceApp;
-
+    use crate::workbench::code::{CodeFeature, tests::harness};
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     /// Every scope the picker offers must round-trip through its own label, or
@@ -561,14 +560,15 @@ mod tests {
     /// reachable only from tests. Drive the real entry points.
     #[test]
     fn a_bundle_search_finds_and_replaces_through_the_dialog_entry_points() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-        code_workspace::open_active_source_search(&mut app.code_workspace_parts())
-            .expect("the Automation page owns a searchable bundle");
+        let mut harness = harness();
+        harness.state.code_workspace.page = CodeWorkspacePage::Automation;
+        code_workspace::open_active_source_search(&mut CodeFeature::workspace_parts(
+            &mut harness.cx(),
+        ))
+        .expect("the Automation page owns a searchable bundle");
 
-        let search = app
+        let search = harness
             .state
-            .code
             .code_workspace
             .source_search
             .as_mut()
@@ -577,8 +577,14 @@ mod tests {
         search.replacement = "import".to_owned();
         let search = search.clone();
 
-        let found = code_workspace::source_search_results(&app, &search)
-            .expect("the exact closure is searchable");
+        let found = code_workspace::source_search_results_in(
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.state.netlist,
+            &harness.platform,
+            &search,
+        )
+        .expect("the exact closure is searchable");
         assert!(
             found.total_matches > 0,
             "the fixture Automation bundle imports something"

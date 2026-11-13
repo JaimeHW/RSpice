@@ -201,9 +201,10 @@ impl User {
     /// The one-based line and column of the caret the Verilog-A editor last
     /// reported.
     fn caret(&self) -> (usize, usize) {
-        let selected =
-            crate::workbench::documents::code_workspace::selected_veriloga_source(&self.app)
-                .expect("a Verilog-A view is open");
+        let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+            &self.app.state.model,
+        )
+        .expect("a Verilog-A view is open");
         let path = selected.document().logical_path().to_owned();
         let source = selected
             .bundle()
@@ -297,8 +298,10 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
         "Compiled opamp_bhv: 5 ports, 5 parameters, 1 advisory"
     );
     user.expect("Information at line 30, column 36: Denominator can reach zero");
-    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
-        .expect("the module is open");
+    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+        &user.app.state.model,
+    )
+    .expect("the module is open");
     assert_eq!(
         crate::workbench::documents::code_workspace::veriloga_compile_status(
             &user.app.state.code.code_workspace.veriloga,
@@ -370,11 +373,13 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
 
     // F8 steps on through the document's findings and wraps; Shift+F8 steps
     // back.
-    let path = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
-        .expect("a Verilog-A view is open")
-        .document()
-        .logical_path()
-        .to_owned();
+    let path = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+        &user.app.state.model,
+    )
+    .expect("a Verilog-A view is open")
+    .document()
+    .logical_path()
+    .to_owned();
     let located = failure.view(Some(&path)).located().len();
     user.key(egui::Key::F8, egui::Modifiers::NONE);
     assert_eq!(user.caret(), (26, 5));
@@ -411,11 +416,13 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
     user.settle();
     compile(&mut user);
-    let path = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
-        .expect("a Verilog-A view is open")
-        .document()
-        .logical_path()
-        .to_owned();
+    let path = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+        &user.app.state.model,
+    )
+    .expect("a Verilog-A view is open")
+    .document()
+    .logical_path()
+    .to_owned();
     let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
     let located = failure.view(Some(&path)).located();
     let count = located.len();
@@ -749,8 +756,10 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
         "the copy compiles: {:?}",
         veriloga.last_failure
     );
-    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
-        .expect("the copy is selected");
+    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+        &user.app.state.model,
+    )
+    .expect("the copy is selected");
     let profile =
         rspice_simulation::project_veriloga::build_profile::resolve_veriloga_build_profile(
             selected.bundle(),
