@@ -1890,7 +1890,9 @@ fn revision_history(
 }
 
 #[cfg(test)]
-pub(crate) mod tests;
+pub(crate) mod fixtures;
+#[cfg(test)]
+mod tests;
 
 /// Offscreen renders of the include search chain.
 #[cfg(test)]

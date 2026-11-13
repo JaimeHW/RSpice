@@ -1,6 +1,7 @@
 //! Source document dialog tests: include search roots, role labels, the lifecycle
 //! transactions, and the creation form a project with no deck opens.
 
+use super::fixtures::{english, facts_of};
 use super::*;
 use crate::state::{ProjectDescriptor, ProjectSourceOwner};
 use crate::workbench::code::{CodeFeature, tests::harness};
@@ -102,19 +103,6 @@ fn the_chain_decides_which_engine_entry_point_a_host_parse_takes() {
 
 /// Line endings are reported from the retained bytes. A whole-file rewrite
 /// normalizes a mixed document, so the dialog has to be able to say so.
-fn english() -> MessageCatalog {
-    MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
-}
-
-pub(crate) fn facts_of(
-    workspace: Workspace,
-    model: &Model,
-    code: &CodeWorkspaceRuntimeState,
-    platform: &PlatformState,
-) -> Option<DocumentFacts> {
-    document_facts(workspace, model, code, platform, english())
-}
-
 #[test]
 fn line_endings_are_measured_rather_than_assumed() {
     let english = english();
