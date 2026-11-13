@@ -634,13 +634,32 @@ pub fn resolve_cartesian_line_scene(
         }
         require_numeric_column(trace.id, x_column.key(), x_column.value_type())?;
         require_numeric_column(trace.id, y_column.key(), y_column.value_type())?;
-        if dataset.rows().is_empty() {
-            return Err(VisualizationRasterError::EmptyTrace(trace.id.get()));
-        }
         let mut points = Vec::new();
-        points
-            .try_reserve_exact(dataset.rows().len())
-            .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
+        if let Some(run) = dataset.run_source() {
+            // A run reference draws only from the samples a report copy of
+            // the document carries; the run store is not consulted here.
+            let samples = run
+                .select_one(&trace.row_predicates)
+                .ok()
+                .and_then(|series| run.figure_samples(series))
+                .ok_or(VisualizationRasterError::EmptyTrace(trace.id.get()))?;
+            points
+                .try_reserve_exact(samples.x().len())
+                .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
+            points.extend(
+                samples
+                    .x()
+                    .iter()
+                    .zip(samples.y())
+                    .map(|(&x, &y)| ResolvedRasterPoint { x, y }),
+            );
+        } else if dataset.rows().is_empty() {
+            return Err(VisualizationRasterError::EmptyTrace(trace.id.get()));
+        } else {
+            points
+                .try_reserve_exact(dataset.rows().len())
+                .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
+        }
         for row in dataset.rows() {
             if !predicate_indices
                 .iter()

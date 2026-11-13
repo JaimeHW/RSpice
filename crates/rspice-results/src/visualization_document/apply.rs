@@ -272,70 +272,18 @@ impl VisualizationDocument {
         }
         let (coordinate_key, display_signals) = {
             let dataset = self.dataset_for_binding(binding.dataset)?;
-            let column_index =
-                |key: &str| dataset.columns.iter().position(|column| column.key == key);
-            let analysis_identity = binding.analysis_id.to_string();
-            let analysis_id = column_index("analysis-id");
-            if let (Some(trace_index), Some(trace_name), Some(component), Some(x), Some(y)) = (
-                column_index("trace-index"),
-                column_index(TRACE_NAME_COLUMN),
-                column_index("component"),
-                column_index("x"),
-                column_index("y"),
-            ) && dataset.columns[trace_index].role == ColumnRole::Coordinate
-                && dataset.columns[trace_name].role == ColumnRole::Coordinate
-                && dataset.columns[component].role == ColumnRole::Coordinate
-                && dataset.columns[x].role == ColumnRole::Coordinate
-                && dataset.columns[y].role == ColumnRole::Signal
+            if let Some((signals, distinguishes_analyses)) =
+                long_form_display_signals(dataset, binding.analysis_id)
             {
-                let mut signals = Vec::new();
-                let mut seen_trace_indices = HashSet::new();
-                for row in &dataset.rows {
-                    if analysis_id.is_some_and(|analysis_id| {
-                        !matches!(
-                            row.values.get(analysis_id),
-                            Some(TypedValue::Text(value)) if value == &analysis_identity
-                        )
-                    }) {
-                        continue;
-                    }
-                    let (
-                        TypedValue::Integer(index),
-                        TypedValue::Text(name),
-                        TypedValue::Text(component_name),
-                    ) = (
-                        &row.values[trace_index],
-                        &row.values[trace_name],
-                        &row.values[component],
-                    )
-                    else {
-                        continue;
-                    };
-                    if component_name != "display" || !seen_trace_indices.insert(*index) {
-                        continue;
-                    }
-                    let mut row_predicates = vec![
-                        QueryCoordinate {
-                            column: "trace-index".to_owned(),
-                            value: TypedValue::Integer(*index),
-                        },
-                        QueryCoordinate {
-                            column: TRACE_NAME_COLUMN.to_owned(),
-                            value: TypedValue::Text(name.clone()),
-                        },
-                        QueryCoordinate {
-                            column: "component".to_owned(),
-                            value: TypedValue::Text("display".to_owned()),
-                        },
-                    ];
-                    if analysis_id.is_some() {
-                        row_predicates.push(QueryCoordinate {
-                            column: "analysis-id".to_owned(),
-                            value: TypedValue::Text(analysis_identity.clone()),
-                        });
-                    }
-                    signals.push(("y".to_owned(), name.clone(), row_predicates));
-                }
+                let analysis = distinguishes_analyses.then(|| binding.analysis_id.to_string());
+                let signals = signals
+                    .into_iter()
+                    .map(|(index, name)| {
+                        let predicates =
+                            display_signal_predicates(index, &name, analysis.as_deref());
+                        ("y".to_owned(), name, predicates)
+                    })
+                    .collect::<Vec<_>>();
                 ("x".to_owned(), signals)
             } else {
                 let mut coordinates = dataset
@@ -542,6 +490,23 @@ impl VisualizationDocument {
             }
             DocumentEdit::AttachDataset(dataset) => self.attach_dataset(dataset),
             DocumentEdit::MergeDatasetProjection(dataset) => self.merge_dataset_projection(dataset),
+            DocumentEdit::ArchiveDataset { binding, archive } => {
+                self.dataset_for_binding(binding)?;
+                self.datasets
+                    .iter_mut()
+                    .find(|dataset| dataset.binding == binding)
+                    .and_then(|dataset| dataset.run.as_mut())
+                    .ok_or_else(|| VisualizationError::InvalidValue {
+                        field: "run-source.archive",
+                        message: "only a dataset that references its run is archived".to_owned(),
+                    })?
+                    .set_archive(archive)
+            }
+            DocumentEdit::RepointDataset {
+                previous,
+                next,
+                analyses,
+            } => self.repoint_dataset(previous, next, &analyses),
             DocumentEdit::RetargetTrackedDataset {
                 previous,
                 next,
@@ -1164,6 +1129,17 @@ impl VisualizationDocument {
                 requested: projection.binding.content_digest,
             });
         }
+        match (existing.run.as_mut(), projection.run) {
+            (Some(run), Some(projected)) => return run.merge(projected),
+            (None, None) => {}
+            _ => {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.datasets",
+                    message: "a run reference and an embedded table cannot share one binding"
+                        .to_owned(),
+                });
+            }
+        }
         if existing.columns != projection.columns {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.datasets",
@@ -1263,116 +1239,140 @@ impl VisualizationDocument {
             });
         }
         self.attach_dataset(next)?;
+        self.rebind_consumers(
+            previous,
+            next_binding,
+            |_| Some(analysis_id),
+            "newer tracked",
+        )
+    }
 
-        let long_form_trace_predicates = {
-            let dataset = self.dataset_for_binding(next_binding)?;
-            let find = |key: &str| dataset.columns.iter().position(|column| column.key == key);
-            let analysis_identity = analysis_id.to_string();
-            let analysis_identity_column = find("analysis-id");
-            match (
-                find("trace-index"),
-                find(TRACE_NAME_COLUMN),
-                find("component"),
-                find("x"),
-                find("y"),
-            ) {
-                (Some(trace_index), Some(trace_name), Some(component), Some(_), Some(_)) => {
-                    let mut by_name = HashMap::<String, Vec<QueryCoordinate>>::new();
-                    let mut seen_indices = HashSet::new();
-                    for row in &dataset.rows {
-                        if analysis_identity_column.is_some_and(|analysis_id| {
-                            !matches!(
-                                row.values.get(analysis_id),
-                                Some(TypedValue::Text(value)) if value == &analysis_identity
-                            )
-                        }) {
-                            continue;
-                        }
-                        let (
-                            TypedValue::Integer(index),
-                            TypedValue::Text(name),
-                            TypedValue::Text(component_name),
-                        ) = (
-                            &row.values[trace_index],
-                            &row.values[trace_name],
-                            &row.values[component],
-                        )
-                        else {
-                            continue;
-                        };
-                        if component_name != "display" || !seen_indices.insert(*index) {
-                            continue;
-                        }
-                        if by_name.contains_key(name) {
-                            return Err(VisualizationError::InvalidValue {
-                                field: "trace.row-predicates",
-                                message: format!(
-                                    "the newer tracked dataset has more than one display trace named {name:?}"
-                                ),
-                            });
-                        }
-                        let mut row_predicates = vec![
-                            QueryCoordinate {
-                                column: "trace-index".to_owned(),
-                                value: TypedValue::Integer(*index),
-                            },
-                            QueryCoordinate {
-                                column: TRACE_NAME_COLUMN.to_owned(),
-                                value: TypedValue::Text(name.clone()),
-                            },
-                            QueryCoordinate {
-                                column: "component".to_owned(),
-                                value: TypedValue::Text("display".to_owned()),
-                            },
-                        ];
-                        if analysis_identity_column.is_some() {
-                            row_predicates.push(QueryCoordinate {
-                                column: "analysis-id".to_owned(),
-                                value: TypedValue::Text(analysis_identity.clone()),
-                            });
-                        }
-                        by_name.insert(name.clone(), row_predicates);
-                    }
-                    Some(by_name)
-                }
-                _ => None,
-            }
+    /// Read another retained run with the same signals in place of one this
+    /// document references, keeping every pane, trace and presentation
+    /// entity. The previous reference stays only while a comparison receipt
+    /// still names it.
+    fn repoint_dataset(
+        &mut self,
+        previous: DatasetBinding,
+        next: SourceDataset,
+        analyses: &[AnalysisRepoint],
+    ) -> Result<(), VisualizationError> {
+        self.dataset_for_binding(previous)?;
+        let next_binding = next.binding();
+        if next_binding.dataset_id == previous.dataset_id {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "a dataset is re-pointed at a different run".to_owned(),
+            });
+        }
+        if next.run.is_none() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "a dataset is re-pointed at a run reference".to_owned(),
+            });
+        }
+        if self
+            .datasets
+            .iter()
+            .any(|dataset| dataset.binding.dataset_id == next_binding.dataset_id)
+        {
+            self.merge_dataset_projection(next)?;
+        } else {
+            self.attach_dataset(next)?;
+        }
+        let mapped = |analysis: Option<AnalysisInstanceId>| {
+            let analysis = analysis?;
+            analyses
+                .iter()
+                .find(|mapping| mapping.previous == analysis)
+                .map(|mapping| mapping.next)
         };
+        self.rebind_consumers(previous, next_binding, mapped, "chosen")?;
+        if !self
+            .comparisons
+            .iter()
+            .any(|receipt| receipt.baseline == previous || receipt.candidate == previous)
+        {
+            self.datasets.retain(|dataset| dataset.binding != previous);
+        }
+        Ok(())
+    }
 
-        let mut rebound = 0usize;
-        for pane in &mut self.panes {
-            if let Some(binding) = pane.binding.as_mut()
+    /// Move every pane and trace that reads `previous` onto `next`, each
+    /// onto the analysis `analysis` maps its own to, and each trace onto the
+    /// display signal of the same name there.
+    fn rebind_consumers(
+        &mut self,
+        previous: DatasetBinding,
+        next: DatasetBinding,
+        analysis: impl Fn(Option<AnalysisInstanceId>) -> Option<AnalysisInstanceId>,
+        describe_next: &str,
+    ) -> Result<(), VisualizationError> {
+        let unmapped = |from: Option<AnalysisInstanceId>| {
+            VisualizationError::InvalidValue {
+            field: "visualization-document.datasets",
+            message: from.map_or_else(
+                || format!("a trace's analysis is unknown, so the {describe_next} run cannot stand in for it"),
+                |from| format!("the {describe_next} run has no analysis in place of {from}"),
+            ),
+        }
+        };
+        let mut panes = Vec::new();
+        for (index, pane) in self.panes.iter().enumerate() {
+            if let Some(binding) = pane.binding
                 && binding.dataset == previous
             {
-                binding.dataset = next_binding;
-                binding.analysis_id = analysis_id;
-                rebound = rebound.saturating_add(1);
+                let from = Some(binding.analysis_id);
+                let to = analysis(from).ok_or_else(|| unmapped(from))?;
+                panes.push((index, to));
             }
         }
-        for trace in &mut self.traces {
-            if trace.binding == previous {
-                if let Some(predicates) = &long_form_trace_predicates {
-                    // The vector the trace was provisioned from, not what it is
-                    // called: a reader who renames a trace has not repointed it
-                    // at another signal.
-                    let signal = trace.source_signal().unwrap_or(&trace.label).to_owned();
-                    trace.row_predicates = predicates.get(&signal).cloned().ok_or_else(|| {
+        let mut traces = Vec::new();
+        {
+            let dataset = self.dataset_for_binding(next)?;
+            let mut signals_by_analysis =
+                HashMap::<AnalysisInstanceId, (HashMap<String, Vec<QueryCoordinate>>, bool)>::new();
+            for (index, trace) in self.traces.iter().enumerate() {
+                if trace.binding != previous {
+                    continue;
+                }
+                let from = trace.source_analysis().or_else(|| {
+                    let mut bound = self
+                        .panes
+                        .iter()
+                        .filter_map(|pane| pane.binding)
+                        .filter(|binding| binding.dataset == previous)
+                        .map(|binding| binding.analysis_id);
+                    let first = bound.next()?;
+                    bound.all(|other| other == first).then_some(first)
+                });
+                let to = analysis(from).ok_or_else(|| unmapped(from))?;
+                if let std::collections::hash_map::Entry::Vacant(entry) =
+                    signals_by_analysis.entry(to)
+                {
+                    entry.insert(display_predicates_by_name(dataset, to, describe_next)?);
+                }
+                let (by_name, long_form) = &signals_by_analysis[&to];
+                let predicates = if *long_form {
+                    // The vector the trace was provisioned from, not what it
+                    // is called: a reader who renames a trace has not
+                    // repointed it at another signal.
+                    let signal = trace.source_signal().unwrap_or(&trace.label);
+                    Some(by_name.get(signal).cloned().ok_or_else(|| {
                         VisualizationError::InvalidValue {
                             field: "trace.row-predicates",
                             message: format!(
-                                "the newer tracked dataset has no exact display trace named \
-                                 {signal:?}"
+                                "the {describe_next} dataset has no exact display trace named {signal:?}"
                             ),
                         }
-                    })?;
-                    trace.signal_key = "y".to_owned();
-                    trace.coordinate_key = "x".to_owned();
-                }
-                trace.binding = next_binding;
-                rebound = rebound.saturating_add(1);
+                    })?)
+                } else {
+                    None
+                };
+                traces.push((index, predicates));
             }
         }
-        if rebound == 0 {
+        if panes.is_empty() && traces.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.datasets",
                 message: format!(
@@ -1380,6 +1380,21 @@ impl VisualizationDocument {
                     previous.dataset_id
                 ),
             });
+        }
+        for (index, to) in panes {
+            if let Some(binding) = self.panes[index].binding.as_mut() {
+                binding.dataset = next;
+                binding.analysis_id = to;
+            }
+        }
+        for (index, predicates) in traces {
+            let trace = &mut self.traces[index];
+            if let Some(predicates) = predicates {
+                trace.row_predicates = predicates;
+                trace.signal_key = "y".to_owned();
+                trace.coordinate_key = "x".to_owned();
+            }
+            trace.binding = next;
         }
         Ok(())
     }
@@ -2049,4 +2064,115 @@ impl VisualizationDocument {
         }
         Ok(())
     }
+}
+
+/// The display signals of one analysis a long-form table or a run reference
+/// holds, as (trace index, name) in source order, and whether the dataset
+/// tells its analyses apart. `None` when the dataset is not long-form.
+pub(super) fn long_form_display_signals(
+    dataset: &SourceDataset,
+    analysis_id: AnalysisInstanceId,
+) -> Option<(Vec<(i64, String)>, bool)> {
+    if let Some(run) = &dataset.run {
+        return Some((run.display_signals(analysis_id), true));
+    }
+    let column_index = |key: &str| dataset.columns.iter().position(|column| column.key == key);
+    let analysis_identity = analysis_id.to_string();
+    let analysis_column = column_index(ANALYSIS_ID_COLUMN);
+    let (Some(trace_index), Some(trace_name), Some(component), Some(x), Some(y)) = (
+        column_index(TRACE_INDEX_COLUMN),
+        column_index(TRACE_NAME_COLUMN),
+        column_index(COMPONENT_COLUMN),
+        column_index("x"),
+        column_index("y"),
+    ) else {
+        return None;
+    };
+    if dataset.columns[trace_index].role != ColumnRole::Coordinate
+        || dataset.columns[trace_name].role != ColumnRole::Coordinate
+        || dataset.columns[component].role != ColumnRole::Coordinate
+        || dataset.columns[x].role != ColumnRole::Coordinate
+        || dataset.columns[y].role != ColumnRole::Signal
+    {
+        return None;
+    }
+    let mut signals = Vec::new();
+    let mut seen_trace_indices = HashSet::new();
+    for row in &dataset.rows {
+        if analysis_column.is_some_and(|analysis_column| {
+            !matches!(
+                row.values.get(analysis_column),
+                Some(TypedValue::Text(value)) if value == &analysis_identity
+            )
+        }) {
+            continue;
+        }
+        let (TypedValue::Integer(index), TypedValue::Text(name), TypedValue::Text(component_name)) = (
+            &row.values[trace_index],
+            &row.values[trace_name],
+            &row.values[component],
+        ) else {
+            continue;
+        };
+        if component_name == SignalComponent::Display.key() && seen_trace_indices.insert(*index) {
+            signals.push((*index, name.clone()));
+        }
+    }
+    Some((signals, analysis_column.is_some()))
+}
+
+/// The exact predicates that select one display signal of a long-form source.
+pub(super) fn display_signal_predicates(
+    index: i64,
+    name: &str,
+    analysis: Option<&str>,
+) -> Vec<QueryCoordinate> {
+    let mut predicates = vec![
+        QueryCoordinate {
+            column: TRACE_INDEX_COLUMN.to_owned(),
+            value: TypedValue::Integer(index),
+        },
+        QueryCoordinate {
+            column: TRACE_NAME_COLUMN.to_owned(),
+            value: TypedValue::Text(name.to_owned()),
+        },
+        QueryCoordinate {
+            column: COMPONENT_COLUMN.to_owned(),
+            value: TypedValue::Text(SignalComponent::Display.key().to_owned()),
+        },
+    ];
+    if let Some(analysis) = analysis {
+        predicates.push(QueryCoordinate {
+            column: ANALYSIS_ID_COLUMN.to_owned(),
+            value: TypedValue::Text(analysis.to_owned()),
+        });
+    }
+    predicates
+}
+
+/// Each display signal of one analysis by name, refusing a name two signals
+/// share, and whether the dataset is long-form at all.
+fn display_predicates_by_name(
+    dataset: &SourceDataset,
+    analysis_id: AnalysisInstanceId,
+    describe: &str,
+) -> Result<(HashMap<String, Vec<QueryCoordinate>>, bool), VisualizationError> {
+    let Some((signals, distinguishes_analyses)) = long_form_display_signals(dataset, analysis_id)
+    else {
+        return Ok((HashMap::new(), false));
+    };
+    let analysis = distinguishes_analyses.then(|| analysis_id.to_string());
+    let mut by_name = HashMap::with_capacity(signals.len());
+    for (index, name) in signals {
+        let predicates = display_signal_predicates(index, &name, analysis.as_deref());
+        if by_name.insert(name.clone(), predicates).is_some() {
+            return Err(VisualizationError::InvalidValue {
+                field: "trace.row-predicates",
+                message: format!(
+                    "the {describe} dataset has more than one display trace named {name:?}"
+                ),
+            });
+        }
+    }
+    Ok((by_name, true))
 }

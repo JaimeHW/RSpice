@@ -73,6 +73,14 @@ pub struct NewPagePane {
     pub binding: Option<PaneDataBinding>,
 }
 
+/// One analysis a re-pointed document reads, and the analysis of the new run
+/// that stands in for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisRepoint {
+    pub previous: AnalysisInstanceId,
+    pub next: AnalysisInstanceId,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentEdit {
     SetTracking(ResultDocumentTracking),
@@ -90,6 +98,19 @@ pub enum DocumentEdit {
         previous: DatasetBinding,
         next: SourceDataset,
         analysis_id: AnalysisInstanceId,
+    },
+    /// Embed the referenced run's own record so the document stands alone.
+    ArchiveDataset {
+        binding: DatasetBinding,
+        archive: RunArchive,
+    },
+    /// Read another retained run with the same signals in place of one the
+    /// document references, mapping each analysis the document reads onto
+    /// one of the new run's.
+    RepointDataset {
+        previous: DatasetBinding,
+        next: SourceDataset,
+        analyses: Vec<AnalysisRepoint>,
     },
     AddPage {
         title: String,

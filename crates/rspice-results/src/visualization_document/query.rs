@@ -269,6 +269,20 @@ pub(super) fn trace_contains_exact_coordinate(
             actual: coordinate.value_type(),
         });
     }
+    if let Some(run) = &dataset.run {
+        // A run reference holds no samples, so the coordinate is checked here
+        // only against the samples a report copy carries. Otherwise the host
+        // that places it snaps it onto the run's samples, and the viewer reads
+        // it against the run.
+        let series = run.select_one(&trace.row_predicates)?;
+        return Ok(match (coordinate, run.figure_samples(series)) {
+            (TypedValue::Real(x), Some(samples)) => samples
+                .x()
+                .iter()
+                .any(|sample| sample.to_bits() == x.to_bits()),
+            _ => true,
+        });
+    }
     let predicates = trace
         .row_predicates
         .iter()
@@ -345,6 +359,10 @@ pub(super) fn validate_trace_row_predicates(
         }
         resolved.push((index, &predicate.value));
     }
+    if let Some(run) = &dataset.run {
+        run.select(predicates)?;
+        return Ok(());
+    }
     if !dataset.rows.iter().any(|row| {
         resolved
             .iter()
@@ -387,6 +405,13 @@ pub fn compare_source_datasets(
     candidate: &SourceDataset,
     request: &ComparisonRequest,
 ) -> Result<ComparisonReceipt, VisualizationError> {
+    if baseline.run.is_some() || candidate.run.is_some() {
+        return Err(VisualizationError::InvalidValue {
+            field: "comparison.source",
+            message: "a run reference holds no samples; compare the retained runs themselves"
+                .to_owned(),
+        });
+    }
     if request.baseline != baseline.binding || request.candidate != candidate.binding {
         return Err(VisualizationError::InvalidValue {
             field: "comparison.binding",

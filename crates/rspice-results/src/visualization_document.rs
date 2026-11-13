@@ -9,11 +9,13 @@ mod comparison;
 mod edits;
 mod family;
 mod query;
+mod run_source;
 
 pub use comparison::*;
 pub use edits::*;
 pub use family::*;
 pub use query::*;
+pub use run_source::*;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -23,7 +25,8 @@ use std::marker::PhantomData;
 use std::num::NonZeroU64;
 
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
 use crate::viewer_catalog::{ViewerArt, viewer_document};
@@ -32,15 +35,17 @@ use rspice_vocabulary::product::{
     RevisionError, SimulationPlanId,
 };
 
-/// Maximum immutable result projections retained by one visualization document.
-pub const MAX_VISUALIZATION_DATASETS: usize = 32;
-/// Maximum typed columns retained by one immutable result projection.
+/// Maximum datasets one visualization document reads. A run reference holds
+/// no samples, so this bounds the runs one document compares, not their size.
+pub const MAX_VISUALIZATION_DATASETS: usize = 256;
+/// Maximum typed columns of one embedded table.
 pub const MAX_SOURCE_COLUMNS: usize = 4_096;
-/// Maximum rows retained by one immutable result projection.
+/// Maximum rows of one embedded table. A run reference reads its samples from
+/// the run and is not bound by this.
 pub const MAX_SOURCE_ROWS: usize = 1_000_000;
-/// Maximum typed cells retained by one immutable result projection.
+/// Maximum typed cells of one embedded table.
 pub const MAX_SOURCE_CELLS_PER_DATASET: usize = 8_000_000;
-/// Maximum typed cells retained across one visualization document.
+/// Maximum typed cells across the embedded tables of one document.
 pub const MAX_SOURCE_CELLS_TOTAL: usize = 8_000_000;
 /// Maximum UTF-8 bytes retained by text-valued cells in one source dataset.
 pub const MAX_SOURCE_TEXT_BYTES_PER_DATASET: usize = 64 * 1024 * 1024;
@@ -819,19 +824,48 @@ impl<'de> Deserialize<'de> for BoundedSourceRows {
     }
 }
 
-/// An immutable snapshot of one persisted result dataset.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// One immutable result dataset a document reads.
+///
+/// A run reference names a retained run and reads its samples from the run
+/// store (see [`RunSource`]). An embedded table holds its typed rows in the
+/// document itself.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SourceDataset {
     binding: DatasetBinding,
     columns: Vec<SourceColumn>,
     rows: Vec<SourceRow>,
+    run: Option<RunSource>,
+}
+
+impl Serialize for SourceDataset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // A run reference's columns are fixed, so only its catalog is written.
+        if let Some(run) = &self.run {
+            let mut dataset = serializer.serialize_struct("SourceDataset", 2)?;
+            dataset.serialize_field("binding", &self.binding)?;
+            dataset.serialize_field("run", run)?;
+            return dataset.end();
+        }
+        let mut dataset = serializer.serialize_struct("SourceDataset", 3)?;
+        dataset.serialize_field("binding", &self.binding)?;
+        dataset.serialize_field("columns", &self.columns)?;
+        dataset.serialize_field("rows", &self.rows)?;
+        dataset.end()
+    }
 }
 
 #[derive(Deserialize)]
 struct SourceDatasetWire {
     binding: DatasetBinding,
-    columns: BoundedVec<SourceColumn, MAX_SOURCE_COLUMNS>,
-    rows: BoundedSourceRows,
+    #[serde(default)]
+    columns: Option<BoundedVec<SourceColumn, MAX_SOURCE_COLUMNS>>,
+    #[serde(default)]
+    rows: Option<BoundedSourceRows>,
+    #[serde(default)]
+    run: Option<RunSource>,
 }
 
 impl<'de> Deserialize<'de> for SourceDataset {
@@ -840,10 +874,24 @@ impl<'de> Deserialize<'de> for SourceDataset {
         D: Deserializer<'de>,
     {
         let wire = SourceDatasetWire::deserialize(deserializer)?;
-        let dataset = Self {
-            binding: wire.binding,
-            columns: wire.columns.into_inner(),
-            rows: wire.rows.0,
+        let dataset = match (wire.columns, wire.rows, wire.run) {
+            (Some(columns), Some(rows), None) => Self {
+                binding: wire.binding,
+                columns: columns.into_inner(),
+                rows: rows.0,
+                run: None,
+            },
+            (None, None, Some(run)) => Self {
+                binding: wire.binding,
+                columns: run_source_columns(),
+                rows: Vec::new(),
+                run: Some(run),
+            },
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "a dataset is either a run reference or a table of typed columns and rows",
+                ));
+            }
         };
         dataset.validate().map_err(serde::de::Error::custom)?;
         Ok(dataset)
@@ -860,6 +908,7 @@ impl SourceDataset {
             binding,
             columns,
             rows,
+            run: None,
         };
         dataset.validate()?;
         Ok(dataset)
@@ -881,6 +930,15 @@ impl SourceDataset {
     }
 
     fn validate(&self) -> Result<(), VisualizationError> {
+        if let Some(run) = &self.run {
+            if self.columns != run_source_columns() || !self.rows.is_empty() {
+                return Err(VisualizationError::InvalidValue {
+                    field: "source-dataset.run",
+                    message: "a run reference holds no rows of its own".to_owned(),
+                });
+            }
+            return run.validate();
+        }
         if self.columns.is_empty() || self.columns.len() > MAX_SOURCE_COLUMNS {
             return Err(VisualizationError::InvalidValue {
                 field: "source-dataset.columns",
@@ -1607,6 +1665,19 @@ impl Trace {
             (coordinate.column == TRACE_NAME_COLUMN).then_some(signal.as_str())
         })
     }
+
+    /// The analysis the trace was provisioned from, when its exact predicates
+    /// name one.
+    pub fn source_analysis(&self) -> Option<AnalysisInstanceId> {
+        self.row_predicates.iter().find_map(|coordinate| {
+            let TypedValue::Text(analysis) = &coordinate.value else {
+                return None;
+            };
+            (coordinate.column == ANALYSIS_ID_COLUMN)
+                .then(|| analysis.parse().ok())
+                .flatten()
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2105,6 +2176,16 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 .event_lane_orders
                 .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
         };
+        if document.schema_version < 11
+            && document
+                .datasets
+                .iter()
+                .any(|dataset| dataset.run.is_some())
+        {
+            return Err(serde::de::Error::custom(
+                "a dataset that references its run requires visualization schema 11",
+            ));
+        }
         if document.schema_version < 10 && !document.event_lane_orders.is_empty() {
             return Err(serde::de::Error::custom(
                 "an event-lane order requires visualization schema 10",
@@ -2169,7 +2250,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
-            7..=9 => document.schema_version = Self::SCHEMA_VERSION,
+            7..=10 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -2183,6 +2264,12 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
+    /// Schema 11 lets a dataset reference its retained run by identity and
+    /// content digest instead of holding a copy of every sample, and lets a
+    /// document embed that run's record when it is archived. A schema-10
+    /// document reads as one whose datasets are all embedded tables, which is
+    /// what it held.
+    ///
     /// Schema 10 records the order each pane draws its event lanes in. A
     /// schema-9 document reads as one that recorded no order, so its lanes
     /// keep the order they are shown in.
@@ -2201,7 +2288,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 10;
+    pub const SCHEMA_VERSION: u16 = 11;
 
     pub fn new(
         title: impl Into<String>,
@@ -2404,6 +2491,25 @@ impl VisualizationDocument {
     /// publication boundary for references that must identify one exact
     /// visualization revision rather than merely the underlying dataset.
     pub fn content_digest(&self) -> Result<ContentDigest, VisualizationError> {
+        // A report's copy carries the samples its figures draw. They are the
+        // referenced runs' own samples, which each binding's digest already
+        // authenticates, so the copy authenticates as the document it copies.
+        if self.datasets.iter().any(|dataset| {
+            dataset
+                .run
+                .as_ref()
+                .is_some_and(RunSource::carries_figure_samples)
+        }) {
+            let mut document = self.clone();
+            for run in document
+                .datasets
+                .iter_mut()
+                .filter_map(|dataset| dataset.run.as_mut())
+            {
+                run.set_figure_samples(Vec::new());
+            }
+            return document.content_digest();
+        }
         self.validate()?;
         let mut writer = Sha256Writer::default();
         serde_json::to_writer(&mut writer, self)
@@ -2625,5 +2731,7 @@ impl VisualizationDocument {
 
 #[cfg(test)]
 mod lane_tests;
+#[cfg(test)]
+mod run_source_tests;
 #[cfg(test)]
 mod tests;

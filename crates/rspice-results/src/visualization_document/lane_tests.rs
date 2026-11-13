@@ -358,7 +358,10 @@ fn an_event_lane_order_survives_a_save_and_reload() {
         .transact(document.revision(), vec![order(pane, lanes.clone())])
         .unwrap();
     let saved = serde_json::to_value(&document).unwrap();
-    assert_eq!(saved["schema_version"], serde_json::json!(10));
+    assert_eq!(
+        saved["schema_version"],
+        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
+    );
     assert_eq!(
         saved["event_lane_orders"][0]["lanes"][0],
         serde_json::json!({"kind": "bus", "name": "x1.step[3:0]"})
