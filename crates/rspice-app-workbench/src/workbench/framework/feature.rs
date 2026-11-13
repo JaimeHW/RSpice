@@ -137,6 +137,20 @@ pub trait CodePort {
         model: &Model,
         messages: crate::workbench::localization::MessageCatalog,
     ) -> Option<String>;
+    /// A Verilog-A source, read-only, in the editor well the code feature
+    /// draws: how another feature's page shows a source file it does not
+    /// edit, such as a built-in model's on the Library page. `id` names the
+    /// well in egui's memory. A port with no editor draws nothing.
+    fn read_only_veriloga_well(
+        &self,
+        ui: &mut egui::Ui,
+        id: (&'static str, u64),
+        source: &mut String,
+        revision: u64,
+        messages: crate::workbench::localization::MessageCatalog,
+    ) {
+        let _ = (ui, id, source, revision, messages);
+    }
 }
 
 /// What the cloud shows that another feature reads.

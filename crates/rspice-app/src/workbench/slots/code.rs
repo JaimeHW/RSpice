@@ -164,4 +164,30 @@ impl CodePort for CodeState {
             messages,
         )
     }
+
+    fn read_only_veriloga_well(
+        &self,
+        ui: &mut egui::Ui,
+        id: (&'static str, u64),
+        source: &mut String,
+        revision: u64,
+        messages: crate::workbench::MessageCatalog,
+    ) {
+        use crate::workbench::documents::code_workspace::{
+            CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
+        };
+
+        show_veriloga_document_versioned(
+            ui,
+            id,
+            source,
+            revision,
+            CodeEditorLanguage::VerilogA,
+            EditorFindings::Outdated,
+            None,
+            false,
+            messages,
+            &[],
+        );
+    }
 }

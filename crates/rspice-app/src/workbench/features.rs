@@ -34,34 +34,6 @@ use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::simulate::SimulateFeature;
 
-/// A Verilog-A source, read-only, in the editor well the code feature draws:
-/// how the Library page shows a file of a built-in model. The shell is what
-/// may put one feature's well on another's page.
-pub(in crate::workbench) fn read_only_veriloga_well(
-    ui: &mut egui::Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    source: &mut String,
-    revision: u64,
-    messages: crate::workbench::MessageCatalog,
-) {
-    use crate::workbench::documents::code_workspace::{
-        CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
-    };
-
-    show_veriloga_document_versioned(
-        ui,
-        id,
-        source,
-        revision,
-        CodeEditorLanguage::VerilogA,
-        EditorFindings::Outdated,
-        None,
-        false,
-        messages,
-        &[],
-    );
-}
-
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
 pub(crate) trait Registered: Feature {

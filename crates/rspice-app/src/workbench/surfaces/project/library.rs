@@ -160,7 +160,13 @@ fn builtin_source(
     height: f32,
 ) -> Option<LibraryIntent> {
     let messages = cx.wb.messages();
-    builtin_models::source_pane(ui, &mut cx.state.builtin_models, messages, height)
+    builtin_models::source_pane(
+        ui,
+        &mut cx.state.builtin_models,
+        cx.peers.code(),
+        messages,
+        height,
+    )
 }
 
 /// The built-in library's band under the columns.

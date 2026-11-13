@@ -12,7 +12,7 @@ use rspice_app_state::veriloga_library::{
 };
 
 use super::*;
-use crate::workbench::features::read_only_veriloga_well;
+use crate::workbench::framework::feature::CodePort;
 use crate::workbench::slots::BuiltinModelsBrowser;
 
 /// How much of the page the columns keep while a source is open below them.
@@ -331,6 +331,7 @@ pub(crate) fn detail(
 pub(super) fn source_pane(
     ui: &mut Ui,
     browser: &mut BuiltinModelsBrowser,
+    code: &dyn CodePort,
     messages: crate::workbench::MessageCatalog,
     height: f32,
 ) -> Option<LibraryIntent> {
@@ -375,7 +376,7 @@ pub(super) fn source_pane(
                     BuiltinModelsIntent::CloseSource,
                 ));
             }
-            read_only_veriloga_well(
+            code.read_only_veriloga_well(
                 ui,
                 ("workbench.project.library.builtin-source", revision),
                 &mut source,
