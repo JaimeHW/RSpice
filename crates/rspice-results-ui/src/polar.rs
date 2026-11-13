@@ -819,7 +819,7 @@ fn paint_canvas(
     paint_locus(&painter, locus, &place, c.traces[0]);
 
     if sheet.decade_marks {
-        paint_decade_marks(&painter, t, locus, &place, policy);
+        paint_decade_marks(&painter, t, locus, &place, centre, policy);
     }
 
     // Cursor flags, in the colours the shared cursor pair has on every plot.
@@ -1038,6 +1038,7 @@ fn paint_decade_marks(
     t: &Tokens,
     locus: &PolarLocus,
     place: &impl Fn(usize) -> Option<egui::Pos2>,
+    centre: egui::Pos2,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) {
     let finite = (0..locus.len()).filter(|index| locus.is_finite(*index));
@@ -1063,17 +1064,31 @@ fn paint_decade_marks(
         }
         let Some(point) = place(index) else { continue };
         painter.circle_filled(point, 2.5, t.color.canvas_text_dim);
-        // On a patch of the well, so a locus passing under the label does
-        // not strike it through.
-        let galley = painter.layout_no_wrap(
+        // The label sits on the far side of the mark from the chart's
+        // centre, off the locus the mark is on, and never cuts a curve. A
+        // mark at the centre has no far side; its label sits right and below.
+        let offset = point - centre;
+        let outward = if offset.length() > 12.0 {
+            offset.normalized()
+        } else {
+            egui::vec2(0.92, 0.39)
+        };
+        let side = |component: f32| {
+            if component > 0.38 {
+                egui::Align::Min
+            } else if component < -0.38 {
+                egui::Align::Max
+            } else {
+                egui::Align::Center
+            }
+        };
+        painter.text(
+            point + outward * 7.0,
+            egui::Align2([side(outward.x), side(outward.y)]),
             policy.format_frequency(frequency, 0),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.canvas_text_dim,
         );
-        let label =
-            egui::Rect::from_min_size(egui::pos2(point.x + 5.0, point.y + 2.0), galley.size());
-        painter.rect_filled(label.expand(1.5), 2.0, t.color.canvas_bg);
-        painter.galley(label.min, galley, t.color.canvas_text_dim);
     }
 }
 
