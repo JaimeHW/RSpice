@@ -4,6 +4,9 @@ use crate::{
     family_metadata::AnalysisResultFamilyMetadata, waveform::RetainedWaveform,
 };
 use std::collections::BTreeMap;
+
+pub mod two_port;
+
 /// Convert a physical reflection coefficient to (resistance, reactance) in ohms.
 /// The reference impedance must be the retained reference for that port.
 /// Returns `None` at the open-circuit singularity, using the viewer's existing
