@@ -287,6 +287,87 @@ fn an_xyce_level_504_card_runs_mextram_504_with_the_card_polarity() {
     );
 }
 
+/// A common-emitter stage, its base fed through 470 kOhm, for the
+/// `DEVICE VOLTLIM=0` checks against Xyce 7.10.
+#[cfg(any(
+    feature = "veriloga-model-bjt504va",
+    all(
+        feature = "veriloga-model-vbic13",
+        feature = "veriloga-model-vbic13-3t-et",
+        feature = "veriloga-model-vbic13-4t"
+    )
+))]
+fn voltlim_stage(card: &str) -> Netlist {
+    Netlist::parse(&format!(
+        "Generated BJT common emitter\nVCC vcc 0 5\nVBB vbb 0 5\nRC vcc c 1k\nRB vbb b 470k\n{card}\n.end\n"
+    ))
+    .expect("the common-emitter stage parses")
+}
+
+/// The stage's v(c) and v(b) in the Xyce dialect, with voltage limiting on
+/// or off.
+#[cfg(any(
+    feature = "veriloga-model-bjt504va",
+    all(
+        feature = "veriloga-model-vbic13",
+        feature = "veriloga-model-vbic13-3t-et",
+        feature = "veriloga-model-vbic13-4t"
+    )
+))]
+fn voltlim_stage_bias(card: &str, device_voltage_limiting: bool) -> [f64; 2] {
+    let result = Engine::new(SimulationConfig {
+        spice_dialect: rspice_core::engine::SpiceDialect::Xyce,
+        device_voltage_limiting,
+        ..SimulationConfig::default()
+    })
+    .run_dc_op(&voltlim_stage(card))
+    .unwrap_or_else(|err| panic!("{card} with VOLTLIM={device_voltage_limiting}: {err}"));
+    ["c", "b"].map(|node| result.try_voltage_named(node).expect("v(c) and v(b)"))
+}
+
+/// Each of RSpice's v(c) and v(b) with the option at 0 within 1e-5 of Xyce
+/// 7.10's, which stops its unlimited Newton a few microvolts from where it
+/// stops its limited one, and within 1e-5 V of RSpice's own limited solve.
+#[cfg(any(
+    feature = "veriloga-model-bjt504va",
+    all(
+        feature = "veriloga-model-vbic13",
+        feature = "veriloga-model-vbic13-3t-et",
+        feature = "veriloga-model-vbic13-4t"
+    )
+))]
+fn assert_voltlim_stage_matches(card: &str, xyce: [f64; 2]) {
+    let unlimited = voltlim_stage_bias(card, false);
+    let limited = voltlim_stage_bias(card, true);
+    for (index, node) in ["c", "b"].into_iter().enumerate() {
+        assert!(
+            (unlimited[index] - xyce[index]).abs() <= 1.0e-5 * xyce[index].abs(),
+            "{card}: v({node}) {} with VOLTLIM=0, Xyce 7.10 {}",
+            unlimited[index],
+            xyce[index]
+        );
+        assert!(
+            (unlimited[index] - limited[index]).abs() <= 1.0e-5,
+            "{card}: v({node}) {} unlimited, {} limited",
+            unlimited[index],
+            limited[index]
+        );
+    }
+}
+
+/// Xyce's `DEVICE VOLTLIM=0` turns off every `$limit` its Mextram 504
+/// evaluates (N_DEV_ADMSbjt504va.C:4623-4695): the stage solves to Xyce
+/// 7.10's operating point with the option at 0.
+#[cfg(feature = "veriloga-model-bjt504va")]
+#[test]
+fn an_xyce_level_504_card_solves_with_voltage_limiting_disabled() {
+    // Xyce 7.10, `.options device voltlim=0`, v(c) and v(b).
+    assert_voltlim_stage_matches(
+        "Q1 c b 0 0 qm\n.model qm NPN LEVEL=504",
+        [3.67748786, 0.828776069],
+    );
+}
+
 /// Xyce's PSP LEVELs reach the PSP releases it registers them for, and a
 /// PMOS card runs as a PMOS. PSP's defaults are not polarity-symmetric, so
 /// the default NMOS at +1 V and PMOS at -1 V draw different currents; each
@@ -566,6 +647,32 @@ mod xyce_vbic_generated {
                     );
                 }
             }
+        }
+    }
+
+    /// Xyce's `DEVICE VOLTLIM=0` turns off every `$limit` its VBIC 1.3
+    /// evaluates and the initJct seed (N_DEV_ADMSvbic13.C:3575, 3588): the
+    /// stage solves to Xyce 7.10's operating point with the option at 0 on
+    /// the three-terminal module, the one with a thermal node, and the
+    /// four-terminal one.
+    #[test]
+    fn generated_vbic_solves_with_voltage_limiting_disabled() {
+        // Xyce 7.10, `.options device voltlim=0`, v(c) and v(b).
+        for (card, xyce) in [
+            (
+                "Q1 c b 0 qm\n.model qm NPN LEVEL=11",
+                [4.10031844, 0.771500654],
+            ),
+            (
+                "Q1 c b 0 0 qm\n.model qm NPN LEVEL=11",
+                [4.10031859, 0.771501363],
+            ),
+            (
+                "Q1 c b 0 0 qm\n.model qm NPN LEVEL=12",
+                [4.10031843, 0.771500654],
+            ),
+        ] {
+            assert_voltlim_stage_matches(card, xyce);
         }
     }
 

@@ -733,8 +733,13 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // `Vdmos::set_junction_gmin` adds one: the junction GMIN reaches a VDMOS
 // through `CircuitData::set_semiconductor_junction_gmin` (`rspice-core`
 // circuit/nonlinear.rs), as it reaches every other junction. The census is
-// 1,699, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1699;
+// 1,699.
+// `BuiltinVerilogAInstance::set_voltage_limiting_enabled` adds one: `.options
+// device voltlim=0` reaches a generated instance through the builder
+// (`rspice-core` engine/builder/generated_model_routing.rs), as Xyce's
+// `voltageLimiterFlag` reaches its ADMS devices. The census is 1,700, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1700;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

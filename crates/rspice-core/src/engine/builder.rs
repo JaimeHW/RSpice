@@ -6968,6 +6968,7 @@ impl Engine {
                                 deferred_params,
                                 spice_dialect: self.config.spice_dialect,
                                 temperature: self.config.temperature,
+                                voltage_limiting: self.config.device_voltage_limiting,
                             },
                         )?
                     {
@@ -7550,6 +7551,7 @@ impl Engine {
                             deferred_params,
                             spice_dialect: self.config.spice_dialect,
                             temperature: self.config.temperature,
+                            voltage_limiting: self.config.device_voltage_limiting,
                         },
                     )? {
                         if !self.config.device_voltage_limiting {
@@ -7924,6 +7926,23 @@ impl Engine {
                         model_def,
                         foundation_model,
                     );
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    if try_route_generated_bjt_model(
+                        &mut circuit,
+                        netlist,
+                        element,
+                        model,
+                        model_def,
+                        GeneratedRoutingContext {
+                            instance_params,
+                            deferred_params,
+                            spice_dialect: self.config.spice_dialect,
+                            temperature: self.config.temperature,
+                            voltage_limiting: self.config.device_voltage_limiting,
+                        },
+                    )? {
+                        continue;
+                    }
                     if !self.config.device_voltage_limiting
                         && let Some(device_model) = model_def
                     {
@@ -7940,23 +7959,6 @@ impl Engine {
                                 bjt_level_descriptor(level)
                             )));
                         }
-                    }
-                    #[cfg(feature = "veriloga-builtins-base")]
-                    if try_route_generated_bjt_model(
-                        &mut circuit,
-                        netlist,
-                        element,
-                        model,
-                        model_def,
-                        GeneratedRoutingContext {
-                            instance_params,
-                            deferred_params,
-                            spice_dialect: self.config.spice_dialect,
-                            temperature: self.config.temperature,
-                        },
-                        self.config.device_voltage_limiting,
-                    )? {
-                        continue;
                     }
 
                     // A compact-model type the Verilog-A model program owns is
@@ -8294,6 +8296,7 @@ impl Engine {
                             deferred_params,
                             spice_dialect: self.config.spice_dialect,
                             temperature: self.config.temperature,
+                            voltage_limiting: self.config.device_voltage_limiting,
                         },
                     )? {
                         if !self.config.device_voltage_limiting {
@@ -10041,6 +10044,8 @@ impl Engine {
                             )?
                         {
                             device.set_temperature(self.config.temperature);
+                            device
+                                .set_voltage_limiting_enabled(self.config.device_voltage_limiting);
                             ground_reference::note_generated(&mut circuit, &device);
                             circuit.add_generated_veriloga_device(device);
                             continue;

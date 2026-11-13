@@ -65,14 +65,15 @@ impl GeneratedTarget {
 
 /// The parameter context a generated-model routing decision is made in: the
 /// instance overrides, the parameters whose expressions are still deferred,
-/// the dialect whose semantics apply, and the temperature the card is
-/// evaluated at.
+/// the dialect whose semantics apply, the temperature the card is evaluated
+/// at, and whether the deck's `DEVICE VOLTLIM` leaves `$limit` on.
 #[derive(Clone, Copy)]
 pub(super) struct GeneratedRoutingContext<'a> {
     pub instance_params: &'a [(String, f64)],
     pub deferred_params: &'a [(String, String)],
     pub spice_dialect: crate::config::SpiceDialect,
     pub temperature: f64,
+    pub voltage_limiting: bool,
 }
 
 /// Where a SPICE card goes on the generated route: the module, the nodes it
@@ -151,7 +152,6 @@ pub(super) fn generated_card_terminals(
             model,
             find_model_def(netlist, model),
             config.spice_dialect,
-            config.device_voltage_limiting,
         ),
         ElementKind::Mosfet {
             model,
@@ -275,15 +275,8 @@ pub(super) fn try_route_generated_bjt_model(
     model_name: &str,
     model_def: Option<&ModelDef>,
     context: GeneratedRoutingContext<'_>,
-    voltage_limiting_enabled: bool,
 ) -> Result<bool, SimulationError> {
-    match generated_bjt_route(
-        element,
-        model_name,
-        model_def,
-        context.spice_dialect,
-        voltage_limiting_enabled,
-    )? {
+    match generated_bjt_route(element, model_name, model_def, context.spice_dialect)? {
         Some(route) => route.build(circuit, netlist, element, context),
         None => Ok(false),
     }
@@ -294,18 +287,11 @@ fn generated_bjt_route<'a>(
     model_name: &str,
     model_def: Option<&'a ModelDef>,
     spice_dialect: crate::config::SpiceDialect,
-    voltage_limiting_enabled: bool,
 ) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
     let target = generated_bjt_target(model_name, model_def, element.nodes.len(), spice_dialect)?;
     let Some(target) = target else {
         return Ok(None);
     };
-    if !voltage_limiting_enabled {
-        return Err(SimulationError::Circuit(format!(
-            "DEVICE.VOLTLIM=0 is not implemented for generated BJT '{}' model '{}' family '{}'; its voltage limiting cannot yet be disabled",
-            element.name, model_name, target.model_name
-        )));
-    }
     if !target.is_available() {
         // A model type the Verilog-A program owns gets the routing-boundary
         // rejection that names its module and feature; a level-selected route
@@ -922,6 +908,7 @@ fn add_generated_instance(
         deferred_params,
         spice_dialect,
         temperature,
+        voltage_limiting,
     } = context;
     let keywords = generated_card_keywords(
         target,
@@ -967,6 +954,7 @@ fn add_generated_instance(
     else {
         return Ok(());
     };
+    device.set_voltage_limiting_enabled(voltage_limiting);
     device
         .set_terminal_current_aliases(generated_card_current_aliases(target, element))
         .map_err(SimulationError::Circuit)?;

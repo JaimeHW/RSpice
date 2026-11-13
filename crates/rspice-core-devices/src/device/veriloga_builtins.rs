@@ -164,6 +164,9 @@ pub struct BuiltinVerilogAInstance {
     terminal_current_aliases: &'static [GeneratedTerminalCurrentAlias],
     /// The deck marked this instance with the SPICE `OFF` keyword.
     initial_off: bool,
+    /// Xyce's `DEVICE VOLTLIM`: off, the model's `$limit` hands back its
+    /// argument in every Newton load.
+    voltage_limiting: bool,
     /// The `OFF` startup state still owns the next Newton evaluation.
     initial_off_seed_pending: bool,
     /// How many Newton evaluations the startup state has already served.
@@ -1405,6 +1408,7 @@ impl BuiltinVerilogAInstance {
             external_terminals,
             terminal_current_aliases: &[],
             initial_off: false,
+            voltage_limiting: true,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_anchor: None,
@@ -1525,6 +1529,17 @@ impl BuiltinVerilogAInstance {
     #[doc(hidden)]
     pub fn set_initially_off(&mut self, off: bool) {
         self.initial_off = off;
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: its `voltageLimiterFlag`
+    /// gates every `$limit` an ADMS-generated device evaluates, and VBIC
+    /// 1.3's initJct seed (N_DEV_ADMSbjt504va.C:4623; N_DEV_ADMSvbic13.C:
+    /// 3575, 3588). Off, a Newton load evaluates the model at the solver's
+    /// iterate.
+    #[inline]
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     /// True when the deck marked this instance `OFF`.
@@ -1672,11 +1687,12 @@ impl BuiltinVerilogAInstance {
     }
 
     /// Whether the model limits its own junction iterates through an active
-    /// `$limit`, as a SPICE device does with pnjlim.
+    /// `$limit`, as a SPICE device does with pnjlim: never with voltage
+    /// limiting off.
     #[inline]
     #[doc(hidden)]
     pub fn limits_newton_steps(&self) -> bool {
-        self.kind.limits_newton_steps()
+        self.voltage_limiting && self.kind.limits_newton_steps()
     }
 
     #[inline]
@@ -2134,7 +2150,8 @@ impl BuiltinVerilogAInstance {
             evaluation_mode,
         )
         .with_analysis_phase(self.analysis_phase)
-        .with_analog_task_recording(record_tasks);
+        .with_analog_task_recording(record_tasks)
+        .with_voltage_limiting(self.voltage_limiting);
         // A StaticDaeProbe is a discarded F(x)-B(t) observation used by the
         // OneStep history path. It must not replace any candidate produced by
         // the preceding complete transient evaluation, including ordinary
@@ -2940,6 +2957,7 @@ pub fn instantiate_builtin_scoped(
         external_terminals,
         terminal_current_aliases: &[],
         initial_off: false,
+        voltage_limiting: true,
         initial_off_seed_pending: true,
         initial_off_seed_evaluations: 0,
         initial_off_seed_anchor: None,
@@ -3783,6 +3801,29 @@ mod tests {
             .expect("VBIC13 is registered"),
         );
         assert!(!devices.newton_loads_repeat());
+    }
+
+    /// With voltage limiting off, VBIC13's `$limit` hands back its argument,
+    /// so its Newton loads repeat at a candidate as a probe's do.
+    #[cfg(feature = "veriloga-model-vbic13")]
+    #[test]
+    fn an_unlimited_generated_instance_lets_newton_loads_repeat() {
+        let mut circuit = TestTopology::default();
+        let mut instance = instantiate_builtin(
+            "VBIC13",
+            "q1",
+            &["c".to_string(), "b".to_string(), "0".to_string()],
+            &[],
+            &crate::netlist::ParamContext::new(),
+            &mut circuit,
+        )
+        .expect("generated VBIC13 instantiates")
+        .expect("VBIC13 is registered");
+        instance.set_voltage_limiting_enabled(false);
+        assert!(!instance.limits_newton_steps());
+        let mut devices = BuiltinVerilogADevices::new();
+        devices.add(instance);
+        assert!(devices.newton_loads_repeat());
     }
 
     #[cfg(feature = "veriloga-model-vbic13")]

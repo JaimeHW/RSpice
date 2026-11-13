@@ -1082,6 +1082,9 @@ pub struct GeneratedEvalContext<'a> {
     simparams: GeneratedSimulationParameters,
     evaluation_mode: GeneratedEvaluationMode,
     record_analog_tasks: bool,
+    /// Xyce's `DEVICE VOLTLIM`: off, `$limit` hands back its argument in a
+    /// Newton load too.
+    voltage_limiting: bool,
     evaluation_error: std::cell::Cell<Option<GeneratedEvaluationError>>,
 }
 
@@ -1166,6 +1169,7 @@ impl<'a> GeneratedEvalContext<'a> {
             simparams,
             evaluation_mode,
             record_analog_tasks: matches!(evaluation_mode, GeneratedEvaluationMode::NewtonLimited),
+            voltage_limiting: true,
             evaluation_error: std::cell::Cell::new(None),
         }
     }
@@ -1184,7 +1188,8 @@ impl<'a> GeneratedEvalContext<'a> {
 
     #[inline]
     pub fn limiting_enabled(&self) -> bool {
-        matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
+        self.voltage_limiting
+            && matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
     }
 
     /// Whether stateful model evaluation, including event controls, is enabled.
@@ -1299,6 +1304,15 @@ impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn with_analog_task_recording(mut self, enabled: bool) -> Self {
         self.record_analog_tasks = enabled;
+        self
+    }
+
+    /// Turn `$limit` off in a Newton load, as Xyce's `DEVICE VOLTLIM=0`
+    /// does, leaving the load's analog tasks and every other Newton
+    /// behaviour as they are.
+    #[inline]
+    pub fn with_voltage_limiting(mut self, enabled: bool) -> Self {
+        self.voltage_limiting = enabled;
         self
     }
 
@@ -3990,9 +4004,11 @@ mod fixed_lane_tests {
         }
         let newton = GeneratedEvalContext::new(&[0.0], 300.15, 1);
         assert!(newton.analog_tasks_enabled() && newton.limiting_enabled());
-        let numerical_probe = newton.with_analog_task_recording(false);
+        let numerical_probe = newton.clone().with_analog_task_recording(false);
         assert!(!numerical_probe.analog_tasks_enabled());
         assert!(numerical_probe.limiting_enabled());
+        let unlimited = newton.with_voltage_limiting(false);
+        assert!(unlimited.analog_tasks_enabled() && !unlimited.limiting_enabled());
     }
 
     #[test]
