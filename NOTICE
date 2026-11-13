@@ -17,20 +17,22 @@ ngspice's LGPL components (src/maths/KLU, src/frontend/numparam, tclspice),
 its GPL component (src/xspice/icm/table), or its MPL component (src/osdi).
 
 Derived components include:
-  - BSIM3SOI DD/FD/PD MOSFET models (crates/rspice-core/src/device/mosfet/b3soi/)
+  - BSIM3SOI DD/FD/PD MOSFET models
+    (crates/rspice-core-devices/src/device/mosfet/b3soi/)
     ported from ngspice src/spicelib/devices/bsim3soi_dd, bsim3soi_fd,
     bsim3soi_pd — Copyright 1990, 1999 Regents of the University of California.
     Authors: Samuel Fung, Dennis Sinitsky, Stephen Tang, Weidong Liu, Pin Su,
     and others.
-  - Native BSIM4 v4.8 MOSFET model (crates/rspice-core/src/device/mosfet/bsim4v8/)
+  - Native BSIM4 v4.8 MOSFET model
+    (crates/rspice-core-devices/src/device/mosfet/bsim4v8/)
     ported from ngspice src/spicelib/devices/bsim4, which carries the UC
     Berkeley BSIM4 / Educational Community License notices described in
     section 2 below.
   - Coupled and lossy transmission-line convolution runtimes (CPL, TXL)
-    (crates/rspice-core/src/device/cpl_native.rs,
-    crates/rspice-core/src/device/transmission_line/txl.rs) ported from
-    ngspice src/spicelib/devices/cpl and txl — Copyright 1992 Regents of the
-    University of California. Author: Charles Hough.
+    (crates/rspice-core-devices/src/device/cpl_native.rs,
+    crates/rspice-core-devices/src/device/transmission_line/txl.rs)
+    ported from ngspice src/spicelib/devices/cpl and txl — Copyright 1992
+    Regents of the University of California. Author: Charles Hough.
   - LTRA lossy-line, JFET/MESFET/HFET, BJT/VBIC, and legacy MOS equation and
     algorithm portions modeled on ngspice src/spicelib/devices (ltra, jfet,
     mesa, hfet1, bjt, vbic, mos1/mos2/mos6, devsup.c) and transient analysis

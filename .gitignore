@@ -16,11 +16,6 @@ target/
 *.swp
 *.swo
 
-# Node (for Tauri web frontend)
-node_modules/
-dist/
-.vite/
-
 # Separately versioned local prototypes
 /mockups/
 
@@ -52,15 +47,11 @@ Thumbs.db
 *.pyc
 __pycache__/
 /*.out
-*.osdi
 *.zip
 # The browser Python runtime ships its standard library as a zip. It is an
 # execution asset that the runtime manifest digests and CI verifies, not a
 # build output, and the browser cannot start Python without it.
 !crates/rspice-app/web/python/pyodide-*/python_stdlib.zip
-/rtlinv_*.csv
-/rtlinv_*.json
-/rtlinv_*.cir
 /diagnostics/
 /design/
 /docs/
@@ -70,9 +61,6 @@ __pycache__/
 /tmp/
 .agent/
 .worktrees/
-/_site
-/_site-*/
-/_site-source/
 /.codex-candidates/
 /.qualification-worktrees/
 /_codex_perf_tmp/
