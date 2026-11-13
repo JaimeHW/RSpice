@@ -134,7 +134,7 @@ impl SimulateCommand {
             Self::AddAnalysis => CommandKey::new("add-analysis"),
             Self::Options => CommandKey::new("solver"),
             Self::Page(SimulationPage::Analyses) => ids::SIMULATION_ANALYSES,
-            Self::Page(SimulationPage::Excitations) => CommandKey::new("simulation-excitations"),
+            Self::Page(SimulationPage::Excitations) => ids::SIMULATION_EXCITATIONS,
             Self::Page(SimulationPage::Variables) => CommandKey::new("simulation-variables"),
             Self::Page(SimulationPage::Outputs) => CommandKey::new("simulation-outputs"),
             Self::Page(SimulationPage::Specifications) => {

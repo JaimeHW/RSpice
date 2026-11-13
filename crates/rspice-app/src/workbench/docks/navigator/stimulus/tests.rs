@@ -60,8 +60,10 @@ fn browser(app: &mut RSpiceApp) -> Vec<String> {
 }
 
 /// Everything the inspector announces for this state.
-fn inspector(state: &mut AppState) -> Vec<String> {
-    announced(INSPECTOR, |ui| inspector_dock::show(ui, state))
+fn inspector(app: &mut RSpiceApp) -> Vec<String> {
+    announced(INSPECTOR, |ui| {
+        inspector_dock::show(ui, &mut app.design_cx())
+    })
 }
 
 /// Whether the console holds a user line containing `fragment`.
@@ -461,7 +463,7 @@ fn the_inspector_cards_every_adopter_in_the_design() {
     app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
     adopt(&mut app.state, 2, "V2", "bridge_cal_step");
-    let published = inspector(&mut app.state);
+    let published = inspector(&mut app);
 
     assert!(
         published.contains(&"Adopters, 2".to_owned()),
@@ -490,7 +492,7 @@ fn the_inspector_cards_every_adopter_in_the_design() {
 fn the_inspector_says_the_definition_is_unused_when_nothing_has_adopted_it() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    let published = inspector(&mut app.state);
+    let published = inspector(&mut app);
 
     assert!(
         published.contains(&"Adopters, 0".to_owned()),
@@ -521,7 +523,7 @@ fn the_inspector_drops_the_family_reference_and_the_edit_impact_block() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
-    let published = inspector(&mut app.state);
+    let published = inspector(&mut app);
 
     for absent in [
         "Engine contract",
@@ -553,7 +555,7 @@ fn the_inspector_paints_nothing_with_no_definition_selected() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     app.state.design.selected_stimulus_definition = None;
-    assert!(inspector(&mut app.state).is_empty());
+    assert!(inspector(&mut app).is_empty());
 }
 
 /// The purpose writes through the draft, so it is undoable and dirties the

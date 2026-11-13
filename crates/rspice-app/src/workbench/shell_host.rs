@@ -344,7 +344,12 @@ impl Host for RSpiceApp {
                         features::show_inspector::<SimulateFeature>(app, ui);
                         app.after_contribution();
                     }
-                    Workspace::Stimulus => stimulus::show(ui, &mut app.state),
+                    // The stimulus inspector's verbs into another workspace are
+                    // answered once it has drawn.
+                    Workspace::Stimulus => {
+                        stimulus::show(ui, &mut features::cx(app));
+                        app.after_contribution();
+                    }
                     Workspace::Results => {
                         features::show_inspector::<ResultsFeature>(app, ui);
                         app.after_contribution();

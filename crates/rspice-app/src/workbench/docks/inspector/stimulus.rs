@@ -19,13 +19,15 @@
 use egui::{Sense, Ui};
 
 use crate::simulation::placed_sources::SourceConsumer;
-use crate::state::SimulationPage;
 use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, StimulusAdopter};
-use crate::workbench::state::{PURPOSE_FIELD, Workspace};
-use crate::workbench::{AppState, MessageId};
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::state::PURPOSE_FIELD;
 
 use super::super::super::design_system::{
     card_well, elide_text, panel_bleed, property_row, property_row_input_with_hint,
@@ -74,10 +76,10 @@ enum Verb {
     CommitPurpose(String),
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
-    let library = &state.model.workspace.content.stimulus_library;
-    let Some(definition) = state
-        .design
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let library = &cx.model.workspace.content.stimulus_library;
+    let Some(definition) = cx
+        .state
         .selected_stimulus_definition
         .as_deref()
         .and_then(|name| library.get(name))
@@ -89,27 +91,27 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
 
-    let adopters = stimulus_actions::design_adopters(&state.model, definition.name());
+    let adopters = stimulus_actions::design_adopters(cx.model, definition.name());
     let mut verbs = Vec::new();
-    adopters_section(ui, state, &adopters, &definition, &mut verbs);
-    if consumers_section(ui, state, &adopters) {
+    adopters_section(ui, cx, &adopters, &definition, &mut verbs);
+    if consumers_section(ui, cx, &adopters) {
         verbs.push(Verb::OpenPlanReaders);
     }
-    definition_section(ui, state, &definition, &mut verbs);
+    definition_section(ui, cx, &definition, &mut verbs);
     for verb in verbs {
-        apply(state, &adopters, verb);
+        apply(cx, &adopters, verb);
     }
 }
 
 /// Who in the design is carrying a copy, and the verbs on each of them.
 fn adopters_section(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     adopters: &[StimulusAdopter],
     definition: &StimulusDefinition,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     section_header(
         ui,
         &messages.text(MessageId::StimulusAdoptersSection),
@@ -123,7 +125,7 @@ fn adopters_section(
         if index > 0 {
             adopter_rule(ui);
         }
-        adopter_entry(ui, state, adopter, definition, index, verbs);
+        adopter_entry(ui, cx, adopter, definition, index, verbs);
     }
 }
 
@@ -155,13 +157,13 @@ fn adopter_rule(ui: &mut Ui) {
 /// cards rather than as a section of the inspector.
 fn adopter_entry(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     adopter: &StimulusAdopter,
     definition: &StimulusDefinition,
     index: usize,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let palette = Tokens::get(ui.ctx()).color;
     // The chip is the decision to re-adopt: an instance in step with the
     // library states nothing, and a drift is a fact rather than a tone — the
@@ -243,7 +245,7 @@ fn adopter_entry(
         adopter.source.card.as_deref().map_err(String::as_str),
         0.0,
     );
-    adopter_verbs(ui, state, adopter, definition, index, verbs);
+    adopter_verbs(ui, cx, adopter, definition, index, verbs);
 }
 
 /// The verbs on one adopter, under the card they act on.
@@ -261,13 +263,13 @@ fn adopter_entry(
 /// happened to share that id.
 fn adopter_verbs(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     adopter: &StimulusAdopter,
     definition: &StimulusDefinition,
     index: usize,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     ui.add_space(ACTION_GAP_Y);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = ACTION_GAP;
@@ -303,8 +305,12 @@ fn adopter_verbs(
 /// A row opens the plan page that lists these readings, which is the route the
 /// Studio's own Excitations rail takes — this dock states which analyses read a
 /// definition, and the plan is where one is changed.
-fn consumers_section(ui: &mut Ui, state: &AppState, adopters: &[StimulusAdopter]) -> bool {
-    let messages = state.workbench.messages();
+fn consumers_section(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    adopters: &[StimulusAdopter],
+) -> bool {
+    let messages = cx.wb.messages();
     let rows: Vec<(&str, &SourceConsumer)> = adopters
         .iter()
         .flat_map(|adopter| {
@@ -353,12 +359,12 @@ fn consumers_section(ui: &mut Ui, state: &AppState, adopters: &[StimulusAdopter]
 /// The record's own bookkeeping, and the one field of it a reader edits here.
 fn definition_section(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     definition: &StimulusDefinition,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.workbench.messages();
-    let editor = &state.design.stimulus_editor;
+    let messages = cx.wb.messages();
+    let editor = &cx.state.stimulus_editor;
     let dirty = editor.is_dirty(definition.name());
     // No name in the header's metadata: the browser's selected row and the
     // stage's own title both name the definition this panel is about.
@@ -453,17 +459,18 @@ fn action(ui: &mut Ui, label: &str) -> bool {
 }
 
 /// Carry out one thing the reader asked for.
-fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
-    let name = state
-        .design
+fn apply(cx: &mut Cx<'_, DesignFeature>, adopters: &[StimulusAdopter], verb: Verb) {
+    let name = cx
+        .state
         .selected_stimulus_definition
         .clone()
         .unwrap_or_default();
     match verb {
         Verb::Reveal(index) => {
             if let Some(adopter) = adopters.get(index) {
-                crate::workbench::app::actions::reveal::placed_instance(
-                    state,
+                crate::workbench::app::actions::reveal::placed_instance_in(
+                    cx.model,
+                    cx.wb,
                     adopter.source.occurrence.as_ref(),
                     adopter.source.component_id,
                 );
@@ -471,35 +478,38 @@ fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
         }
         Verb::Properties(index) => {
             if let Some(adopter) = adopters.get(index) {
-                crate::workbench::app::open_property_editor(state, adopter.source.component_id);
+                crate::workbench::app::actions::property_edit::open_property_editor_in(
+                    &mut cx.state.property_form_parts(),
+                    cx.model,
+                    cx.wb,
+                    adopter.source.component_id,
+                );
             }
         }
         Verb::Readopt(index) => {
             if let Some(adopter) = adopters.get(index) {
                 stimulus_actions::readopt_adopter(
-                    &mut state.model,
-                    &mut state.workbench,
+                    cx.model,
+                    cx.wb,
                     adopter.source.component_id,
                     &name,
                 );
             }
         }
-        Verb::OpenPlanReaders => {
-            state.simulate.simulation_page = SimulationPage::Excitations;
-            state.workbench.activate(Workspace::Simulate);
-        }
+        // The Excitations page command sets the page and opens the Simulate
+        // workspace, once the inspector has drawn.
+        Verb::OpenPlanReaders => cx.execute(ids::SIMULATION_EXCITATIONS),
         Verb::TypePurpose(text) => {
-            state
-                .design
+            cx.state
                 .stimulus_editor
                 .set_field_text(&name, PURPOSE_FIELD, text);
         }
         Verb::CommitPurpose(text) => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus_actions::edit_field(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 PURPOSE_FIELD,
                 &text,
             );

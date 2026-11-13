@@ -373,6 +373,7 @@ pub mod ids {
         SHEET_PROPERTIES = "page-setup";
         SHOW_IN_NETLIST = "show-in-netlist";
         SIMULATION_ANALYSES = "simulation-analyses";
+        SIMULATION_EXCITATIONS = "simulation-excitations";
         SIMULATE_WORKSPACE = "simulate";
         STIMULUS_WORKSPACE = "stimulus";
         STOP_SIMULATION = "stop-run";
