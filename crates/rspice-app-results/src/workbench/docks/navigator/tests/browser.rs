@@ -265,3 +265,30 @@ fn a_net_on_the_lanes_is_a_ticked_row() {
     // The band counts it, so a set saves it and a drag carries it.
     assert!(find(&nodes, "1 ticked").is_some(), "{:?}", labels(&nodes));
 }
+
+/// A run that records no source revision to compare with the design, as a
+/// netlist the reader ran or a file they imported does, heads its dataset
+/// row with its name and count alone. "Unresolved" stated a relationship the
+/// reader could neither see nor do anything about.
+#[test]
+fn a_dataset_without_a_source_revision_heads_its_row_with_its_name_alone() {
+    let mut host = hierarchical_run();
+    let run = host.model.simulation.active_run_mut().expect("a run");
+    run.mark_running().expect("the run starts");
+    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+        .expect("the run finishes");
+    let run_label = run.label.clone();
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        find(&nodes, &format!("{run_label}, 6 quantities, expanded")).is_some(),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        nodes.iter().all(|node| !node.label.contains("unresolved")),
+        "{:?}",
+        labels(&nodes)
+    );
+}

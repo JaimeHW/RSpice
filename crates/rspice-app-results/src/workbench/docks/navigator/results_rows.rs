@@ -1779,12 +1779,18 @@ fn result_browser_analysis_head(
         egui::Sense::click(),
     );
     response.widget_info(|| {
+        // A head with nothing to say about its data states only its name.
+        let domain = if domain.is_empty() {
+            String::new()
+        } else {
+            format!("{domain}, ")
+        };
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
             format!(
-                "{label}, {domain}, {count} quantities, {}",
+                "{label}, {domain}{count} quantities, {}",
                 if expanded { "expanded" } else { "collapsed" }
             ),
         )

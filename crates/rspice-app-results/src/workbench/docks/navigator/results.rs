@@ -1127,13 +1127,19 @@ pub struct ResultAnalysisDataState {
     pub note: &'static str,
 }
 
-/// A dataset row's state word, only when the data is not current: a current
-/// dataset is the normal case and its row says nothing about it.
+/// A dataset row's state word, only when it asks something of the reader: a
+/// current dataset is the normal case and its row says nothing about it.
+///
+/// Nor does an unresolved one. "Unresolved" means the run records no source
+/// revision to compare with the design: it came from a netlist the reader
+/// ran, a file they imported, or a session from before runs recorded one.
+/// The results are exact and nothing about them can be brought up to date
+/// from here, so the word asked a question the reader had no way to answer.
+/// It stays searchable, as every state word does.
 pub(super) fn data_state_meta(state: ResultAnalysisDataState) -> &'static str {
-    if state.word == "current" {
-        ""
-    } else {
-        state.word
+    match state.word {
+        "current" | "unresolved" => "",
+        word => word,
     }
 }
 
