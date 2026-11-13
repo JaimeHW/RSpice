@@ -292,3 +292,79 @@ fn a_dataset_without_a_source_revision_heads_its_row_with_its_name_alone() {
         labels(&nodes)
     );
 }
+
+/// The nodes the simulator generated for a device stay out of the tree until
+/// the reader asks for them, as SimVision's and EZwave's browsers keep
+/// theirs: the kind list closes with "Show internal nodes", and turning it on
+/// lists them where they belong.
+#[test]
+fn internal_nodes_wait_behind_the_kind_lists_switch() {
+    let mut host = ResultsTestHost::default();
+    let trace = |name: &str| RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            trace("V(out)"),
+            trace("V(xldo.fb)"),
+            trace("V(xldo.mp.__gint)"),
+            trace("I(xldo.mp.__rg)"),
+            trace("V(xldo.mp.d)"),
+        ]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let mut browser = Browser::new(host);
+    for instance in ["xldo", "xldo.mp"] {
+        super::super::results::set_result_browser_instance_expanded(
+            &browser.ctx,
+            analysis,
+            instance,
+            true,
+        );
+    }
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        nodes.iter().all(|node| !node.label.contains("__")),
+        "{:?}",
+        labels(&nodes)
+    );
+    // The instance counts what it lists; nothing reads as filtered away.
+    assert!(
+        find(&nodes, "xldo.mp, instance, 1 quantity, expanded").is_some(),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(find(&nodes, "Signals, 3").is_some(), "{:?}", labels(&nodes));
+
+    let kind = find(&nodes, "Quantity kind")
+        .expect("the kind list")
+        .rect
+        .center();
+    let nodes = browser.click(kind);
+    let switch = find(&nodes, "Show internal nodes")
+        .expect("the kind list closes with the switch")
+        .rect
+        .center();
+    browser.click(switch);
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        find(&nodes, "xldo.mp, instance, 3 quantities, expanded").is_some(),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(find(&nodes, "Signals, 5").is_some(), "{:?}", labels(&nodes));
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.starts_with("V(xldo.mp.__gint)")),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.starts_with("I(xldo.mp.__rg)")),
+        "{:?}",
+        labels(&nodes)
+    );
+}

@@ -94,7 +94,9 @@ pub fn select_with_disabled_response(
         width,
         false,
         disabled,
+        None,
     )
+    .0
 }
 
 pub fn select_with_response(
@@ -114,7 +116,9 @@ pub fn select_with_response(
         width,
         false,
         &[],
+        None,
     )
+    .0
 }
 
 /// Mockup-authored engineering-field select. Field values and options use the
@@ -137,11 +141,50 @@ pub fn select_mono_with_response(
         width,
         true,
         &[],
+        None,
     )
+    .0
+}
+
+/// One switch at the foot of a select's list, under a rule: a setting that
+/// widens every choice above it rather than being one more of them, such as a
+/// signal browser showing its internal nodes whatever kind it lists.
+#[derive(Debug, Clone, Copy)]
+pub struct SelectSwitch<'a> {
+    pub label: &'a str,
+    pub on: bool,
+}
+
+/// [`select`] whose list ends with `switch`. Returns the picked index, and
+/// whether the switch was flipped this frame. Flipping it leaves the list
+/// open, so the reader sees the tick land and the view behind it change;
+/// picking a choice closes it as any select does.
+pub fn select_with_switch(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    switch: SelectSwitch<'_>,
+    width: f32,
+) -> (Option<usize>, bool) {
+    let (output, switched) = select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        false,
+        &[],
+        Some(switch),
+    );
+    (output.picked, switched)
 }
 
 // The caller independently supplies the control identity, content, style,
-// width and unavailable choices. Keep the existing rendering contract.
+// width, unavailable choices and the list's closing switch. Keep the existing
+// rendering contract.
 #[expect(clippy::too_many_arguments)]
 fn select_with_font(
     ui: &mut Ui,
@@ -152,7 +195,8 @@ fn select_with_font(
     width: f32,
     mono: bool,
     disabled: &[(usize, &'static str)],
-) -> SelectOutput {
+    switch: Option<SelectSwitch<'_>>,
+) -> (SelectOutput, bool) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let value_font = if mono {
@@ -219,6 +263,7 @@ fn select_with_font(
     }
 
     let mut picked = keyboard_selection(ui, &response, popup_id, selected, options, disabled);
+    let mut switched = false;
     let popup_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_value(selected);
@@ -234,7 +279,13 @@ fn select_with_font(
         .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
         .align(egui::RectAlign::BOTTOM_START)
         .width(response.rect.width())
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        // A list with a switch stays open while the switch is flipped, so a
+        // pick closes it by hand below.
+        .close_behavior(if switch.is_some() {
+            egui::PopupCloseBehavior::CloseOnClickOutside
+        } else {
+            egui::PopupCloseBehavior::CloseOnClick
+        })
         .show(|ui| {
             ui.set_min_width(ui.available_width());
             ui.set_min_width(width.max(rect.width()));
@@ -324,8 +375,37 @@ fn select_with_font(
                     node.set_role(egui::accesskit::Role::ListBox);
                     node.set_label(accessible_label);
                 });
+            if let Some(switch) = switch {
+                // Under a rule and outside the scrolling choices, so it is at
+                // the list's foot however long the list is.
+                let rule = ui.cursor().top() + 3.5;
+                ui.add_space(7.0);
+                ui.painter()
+                    .hline(ui.max_rect().x_range(), rule, Stroke::new(1.0, c.border));
+                let row_height = t.metrics.ctl_h.max(24.0);
+                let mut on = switch.on;
+                let flipped = ui
+                    .allocate_ui_with_layout(
+                        vec2(ui.available_width(), row_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.add_space(VALUE_INSET);
+                            // In the list's own type and ink: a muted label
+                            // beside an empty box reads as unavailable.
+                            let label = egui::RichText::new(switch.label)
+                                .font(value_font.clone())
+                                .color(c.text);
+                            ui.checkbox(&mut on, label).changed()
+                        },
+                    )
+                    .inner;
+                switched |= flipped;
+            }
         });
-    SelectOutput { picked, response }
+    if picked.is_some() && switch.is_some() {
+        egui::Popup::close_id(ui.ctx(), popup_id);
+    }
+    (SelectOutput { picked, response }, switched)
 }
 
 fn keyboard_selection(

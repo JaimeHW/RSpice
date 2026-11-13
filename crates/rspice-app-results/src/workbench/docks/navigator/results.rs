@@ -34,7 +34,8 @@ use super::results_rows::{
 };
 use super::results_sets::signal_sets_menu;
 use super::results_tree::{
-    BrowserQuery, InstanceNode, SignalKind, TreeItem, build_tree, split_hierarchy,
+    BrowserQuery, InstanceNode, SignalKind, TreeItem, build_tree, is_generated_node,
+    split_hierarchy,
 };
 use rspice_app_workbench::workbench::docks::navigator::muted;
 use rspice_app_workbench::workbench::docks::navigator::{
@@ -98,6 +99,9 @@ pub(in crate::workbench) fn results(
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
         .unwrap_or_default();
+    // Internal nodes stay behind the kind list's switch whatever tab is open:
+    // they are hidden from the browser, not filtered out of one listing.
+    let show_internal = results_browser_shows_internal(ui.ctx());
     let stored_producer_facet = ui.ctx().data(|data| {
         data.get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
             .flatten()
@@ -236,6 +240,9 @@ pub(in crate::workbench) fn results(
                         .waveforms
                         .iter()
                         .enumerate()
+                        .filter(|(_, waveform)| {
+                            show_internal || !is_generated_node(&waveform.name)
+                        })
                         .filter(|(_, waveform)| {
                             // The unit the signal actually reads in decides
                             // its kind. Treating "not a current" as a voltage
@@ -405,7 +412,19 @@ pub(in crate::workbench) fn results(
                             analysis.analysis_type,
                             analysis.waveforms.first(),
                         ),
-                        total_signals: analysis.waveforms.len() + total_artifacts,
+                        // Hidden internal nodes are not part of what the
+                        // browser lists, so the head does not count them as
+                        // filtered away.
+                        total_signals: analysis.waveforms.len() + total_artifacts
+                            - if show_internal {
+                                0
+                            } else {
+                                analysis
+                                    .waveforms
+                                    .iter()
+                                    .filter(|waveform| is_generated_node(&waveform.name))
+                                    .count()
+                            },
                         data_state: result_analysis_data_state(
                             source_currentness,
                             completeness_class,
@@ -517,7 +536,15 @@ pub(in crate::workbench) fn results(
                     run.analyses
                         .iter()
                         .map(|analysis| {
-                            analysis.waveforms.len()
+                            // Hidden internal nodes are not loaded into the
+                            // browser, so they do not read as filtered out.
+                            analysis
+                                .waveforms
+                                .iter()
+                                .filter(|waveform| {
+                                    show_internal || !is_generated_node(&waveform.name)
+                                })
+                                .count()
                                 + retained_result_artifacts(
                                     analysis,
                                     AnalysisPresentationKey::new(run.dataset_id, analysis),
@@ -1372,18 +1399,7 @@ fn results_browser_toolbar(
             if result_browser_facets_stack(row_width) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = GUTTER;
-                    if let Some(picked) = crate::ui::widgets::select(
-                        ui,
-                        "workbench.results.browser-kind",
-                        "Quantity kind",
-                        kind.label(),
-                        &kind_options,
-                        row_width,
-                    ) {
-                        let kind_now = ResultsBrowserKind::ALL[picked];
-                        ui.ctx()
-                            .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
-                    }
+                    results_browser_kind_control(ui, kind, &kind_options, row_width);
                     results_browser_layout_control(ui, layout, row_width);
                 });
             } else {
@@ -1392,18 +1408,7 @@ fn results_browser_toolbar(
                 let pair_width = row_width - GUTTER;
                 let kind_width = (pair_width * 0.554).max(48.0);
                 let layout_width = (pair_width - kind_width).max(48.0);
-                if let Some(picked) = crate::ui::widgets::select(
-                    ui,
-                    "workbench.results.browser-kind",
-                    "Quantity kind",
-                    kind.label(),
-                    &kind_options,
-                    kind_width,
-                ) {
-                    let kind_now = ResultsBrowserKind::ALL[picked];
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
-                }
+                results_browser_kind_control(ui, kind, &kind_options, kind_width);
                 ui.add_space(GUTTER);
                 results_browser_layout_control(ui, layout, layout_width);
             }
@@ -1476,8 +1481,53 @@ fn results_browser_layout_control(ui: &mut Ui, layout: ResultsBrowserLayout, wid
     }
 }
 
+/// The kind list, closing with the switch that shows internal nodes: as in
+/// SimVision's and EZwave's browsers, the nodes the simulator generated for
+/// its devices stay out of the tree until the reader asks for them.
+fn results_browser_kind_control(
+    ui: &mut Ui,
+    kind: ResultsBrowserKind,
+    options: &[String],
+    width: f32,
+) {
+    let show_internal = results_browser_shows_internal(ui.ctx());
+    let (picked, switched) = crate::ui::widgets::select_with_switch(
+        ui,
+        "workbench.results.browser-kind",
+        "Quantity kind",
+        kind.label(),
+        options,
+        crate::ui::widgets::SelectSwitch {
+            label: "Show internal nodes",
+            on: show_internal,
+        },
+        width,
+    );
+    if let Some(picked) = picked {
+        let kind_now = ResultsBrowserKind::ALL[picked];
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
+    }
+    if switched {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(results_browser_internal_id(), !show_internal);
+        });
+    }
+}
+
 fn results_browser_kind_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-kind-facet")
+}
+
+fn results_browser_internal_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-internal-nodes")
+}
+
+/// Whether the browser lists the nodes the simulator generated. They are
+/// hidden until the reader turns them on.
+pub(super) fn results_browser_shows_internal(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(results_browser_internal_id()))
+        .unwrap_or(false)
 }
 
 fn results_browser_layout_id() -> egui::Id {

@@ -218,6 +218,13 @@ fn write_the_browser_pictures() {
     }
     review.write(&directory, "browser-tree", vec![egui::Event::PointerGone]);
 
+    // The kind list open, with the switch that shows the simulator's
+    // internal nodes, off.
+    let kinds = review.find("Quantity kind").center();
+    review.click(kinds);
+    review.write(&directory, "browser-kinds", vec![egui::Event::PointerGone]);
+    review.click(kinds);
+
     // The feedback node selected: the Inspector's swatch beside the strip
     // that drew its curve.
     review.host.results.results.session.selected_trace =

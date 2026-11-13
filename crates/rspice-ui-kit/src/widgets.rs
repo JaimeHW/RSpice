@@ -72,7 +72,10 @@ pub use pane::{
 pub use searchable_select::{SelectGroup, searchable_select};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
-pub use select::{select_mono_with_response, select_with_disabled, select_with_response};
+pub use select::{
+    SelectSwitch, select_mono_with_response, select_with_disabled, select_with_response,
+    select_with_switch,
+};
 pub use status_mark::{
     PROBLEM_MARK_ADVANCE, PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, Problem, StatusMark, busy_mark,
     paint_problem_mark, paint_status_mark, problem_line,

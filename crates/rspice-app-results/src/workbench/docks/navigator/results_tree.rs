@@ -265,6 +265,42 @@ pub(super) fn split_hierarchy(name: &str) -> HierarchicalName {
     }
 }
 
+/// Whether `name` is a node the simulator made for itself rather than one the
+/// design names: a device's internal node, such as a MOSFET's gate behind its
+/// gate resistance (`xldo.MP.__gint`), or the branch of a resistor the
+/// simulator inserted (`I(xldo.MP.__rg)`).
+///
+/// Nothing in a result marks a node as generated, so the name decides it. The
+/// engine names every node and element it generates `<instance>.__<role>`
+/// (`__dint`, `__sint`, `__gint`, `__body.internal`, `__rd`, `__rg`), and a
+/// Verilog-A module's own unknowns that the compiler named begin `__` too
+/// (`is_compiler_owned_name` in the engine's builder). A design's own net can
+/// not take that form without its author choosing it, so any segment of the
+/// hierarchical path that begins `__` marks the whole quantity generated.
+pub(super) fn is_generated_node(name: &str) -> bool {
+    let path = hierarchical_path(name);
+    if path.starts_with('@') {
+        return false;
+    }
+    let mut depth = 0_usize;
+    let mut segment_start = true;
+    let mut chars = path.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth = depth.saturating_sub(1),
+            '.' | ':' if depth == 0 => {
+                segment_start = true;
+                continue;
+            }
+            '_' if segment_start && depth == 0 && chars.peek() == Some(&'_') => return true,
+            _ => {}
+        }
+        segment_start = false;
+    }
+    false
+}
+
 /// What kind of quantity a browser row is, by the mark its row wears.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SignalKind {

@@ -1,7 +1,8 @@
 //! Hierarchical names, the glob, and the instance tree they build.
 
 use super::super::results_tree::{
-    BrowserQuery, SignalKind, TreeItem, build_tree, hierarchical_path, split_hierarchy,
+    BrowserQuery, SignalKind, TreeItem, build_tree, hierarchical_path, is_generated_node,
+    split_hierarchy,
 };
 
 #[test]
@@ -23,6 +24,34 @@ fn a_hierarchical_name_splits_at_its_instances() {
     assert_eq!(split.leaf, "bits[7:0]");
     assert_eq!(hierarchical_path("D(xsar.q)"), "xsar.q");
     assert_eq!(hierarchical_path("V(a,b)"), "V(a,b)");
+}
+
+/// A node the simulator generated has a path segment beginning `__`, as the
+/// engine names a device's internal nodes and inserted elements; a design's
+/// own names, and a double underscore inside a segment, are not generated.
+#[test]
+fn a_generated_node_is_named_by_a_segment_the_engine_prefixes() {
+    for generated in [
+        "V(xldo.MP.__gint)",
+        "I(xldo.MP.__rg)",
+        "V(m1.__body.internal)",
+        "x1:__dint",
+        "V(__int1)",
+    ] {
+        assert!(is_generated_node(generated), "{generated}");
+    }
+    for design in [
+        "V(xldo.FB)",
+        "V(out)",
+        "I(X1.V1)",
+        "D(xtb.ok__event_0)",
+        "V(a_b)",
+        "V(__a,b)",
+        "@m1[__id]",
+        "xsar.bits[7:0]",
+    ] {
+        assert!(!is_generated_node(design), "{design}");
+    }
 }
 
 #[test]
