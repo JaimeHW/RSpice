@@ -28,7 +28,9 @@ pub struct AnalysisExecutionEnvironment {
 /// 46: sealed code-model data files travel with the request.
 /// 47: a sealed Verilog-A runtime names the min:typ:max selection it was
 ///     compiled under when that is not `typ`.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 47;
+/// 48: a transient names the Monte Carlo trial or `.STEP` point it solves and
+///     the checkpoint time it resumes from.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 48;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.
