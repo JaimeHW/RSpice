@@ -42,6 +42,7 @@ impl ResultFingerprintCache {
             fields.log_y_panes,
             fields.expression_groups,
             fields.marker_history,
+            fields.signal_sets,
         ))?;
         let mut cache = self.0.borrow_mut();
         if let Some(held) = cache.as_ref()
@@ -87,6 +88,7 @@ fn full_digest(
         log_y_panes,
         expression_groups,
         marker_history,
+        signal_sets,
     } = fields;
     let results = results.without_run_logs();
     let result_fields = (
@@ -98,9 +100,15 @@ fn full_digest(
         expression_groups,
     );
     // Preserve the published six-element digest and its allocation extension.
-    match marker_history {
+    let digest = match marker_history {
         Some(highest) => super::digest(&("result-marker-allocation-v1", result_fields, highest)),
         None => super::digest(&result_fields),
+    }?;
+    // Signal sets extend it the same way, and only when a project has any.
+    if signal_sets.is_empty() {
+        Ok(digest)
+    } else {
+        super::digest(&("result-signal-sets-v1", digest, signal_sets))
     }
 }
 

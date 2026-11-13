@@ -562,6 +562,29 @@ fn default_visible() -> bool {
     true
 }
 
+/// A named set of signals the reader saved, to put back on the plot in one
+/// step. Members are named rather than bound to one run, so a set outlives
+/// the run it was saved from and applies to whichever run is active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalSet {
+    pub name: String,
+    pub members: Vec<SignalSetMember>,
+}
+
+/// One signal of a [`SignalSet`]: the kind of analysis it was saved from,
+/// since `V(out)` of a transient and of an AC analysis are different signals,
+/// and the name the browser lists it under.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SignalSetMember {
+    pub analysis: crate::analysis_type::AnalysisType,
+    /// A retained waveform's name, or a typed artifact's canonical name.
+    pub name: String,
+    /// Whether `name` is an artifact's canonical name (an event net's or a
+    /// bus's row) rather than a waveform's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub artifact: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultExpressionGroup {
     pub analysis: AnalysisPresentationKey,
@@ -602,6 +625,13 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub expression_groups: Vec<ResultExpressionGroup>,
+    /// The reader's saved signal sets, in the order the browser lists them.
+    #[serde(
+        default,
+        rename = "result_signal_sets",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub signal_sets: Vec<SignalSet>,
 }
 
 fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
@@ -618,6 +648,9 @@ pub struct ResultFingerprintFields<'a> {
     pub log_y_panes: &'a [WavePanePresentationKey],
     pub expression_groups: &'a [ResultExpressionGroup],
     pub marker_history: Option<u32>,
+    /// Digested as an extension only when there are any, so a project
+    /// without sets keeps the digest it always had.
+    pub signal_sets: &'a [SignalSet],
 }
 
 /// Pane choices are a set, but project files and content fingerprints encode
@@ -727,12 +760,14 @@ impl ResultPresentation {
             marker_id_high_water: _,
             log_y_panes,
             expression_groups,
+            signal_sets,
         } = self;
         Ok(ResultFingerprintFields {
             markers,
             log_y_panes,
             expression_groups,
             marker_history: self.marker_allocation_history()?,
+            signal_sets,
         })
     }
 }

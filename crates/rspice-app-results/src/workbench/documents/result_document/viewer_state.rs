@@ -317,6 +317,7 @@ impl ResultsState {
             marker_id_high_water: Some(self.session.marker_id_high_water()),
             log_y_panes: self.project_log_y_panes(simulation),
             expression_groups: self.project_expression_groups(simulation),
+            signal_sets: self.signal_sets.clone(),
         }
     }
 

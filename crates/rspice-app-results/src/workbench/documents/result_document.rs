@@ -35,6 +35,7 @@ mod pz;
 mod retained_memo;
 mod scatter;
 mod sensitivity;
+pub(crate) mod signal_sets;
 pub mod smith;
 mod soa;
 pub mod specs;
@@ -1058,10 +1059,12 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
         marker_id_high_water,
         log_y_panes,
         expression_groups,
+        signal_sets,
     } = presentation;
     restore_markers(state, markers, marker_id_high_water);
     restore_log_y_panes(state, log_y_panes);
     restore_expression_groups(state, expression_groups);
+    state.results.signal_sets = signal_sets::sanitize_signal_sets(signal_sets);
 }
 
 /// Restore the markers a project retained, dropping any whose analysis is not
@@ -1422,6 +1425,9 @@ pub struct ResultsState {
     /// event markers, until the application takes it and opens that file at
     /// that line. One-shot and transient.
     pub source_request: Option<rspice_results_ui::waves::logic::SourceLine>,
+    /// The reader's named signal sets. They belong to the project, not the
+    /// session: saved with it and restored when it opens.
+    pub signal_sets: Vec<rspice_results::result_presentation::SignalSet>,
     /// Explicit runtime boundary reported by the operation that owns it.
     /// Source-derived states such as stale, partial, and corrupted are never
     /// stored here; the operational classifier recomputes those from exact
