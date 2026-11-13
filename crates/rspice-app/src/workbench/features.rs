@@ -512,6 +512,19 @@ pub(super) fn show_navigator<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::
     }
 }
 
+/// [`show_navigator`], in a context holding the dispatcher's answers for the
+/// commands `F` reads when `reads(app)` says the section reads them, as
+/// [`cx_with_foreign_answers`] takes them.
+pub(super) fn show_navigator_reading<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) {
+    if let Some(navigator) = F::registry().navigator_section() {
+        (navigator.show)(&mut cx_with_foreign_answers::<F>(app, reads), ui);
+    }
+}
+
 /// Draw `F`'s split projection in the split's `ui`. The caller answers what
 /// it raised straight after.
 pub(super) fn show_split<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {
@@ -551,6 +564,15 @@ pub(super) fn show_toolbar<F: Registered>(
 pub(super) fn commit_inspector<F: Registered>(app: &mut RSpiceApp, ctx: &egui::Context) {
     if let Some(inspector) = F::registry().inspector_section() {
         (inspector.commit_pending_edit)(&mut cx::<F>(app), ctx);
+    }
+}
+
+/// The design feature's context for a test that draws one of its sections
+/// outside the shell, holding every answer the feature reads.
+#[cfg(test)]
+impl RSpiceApp {
+    pub(crate) fn design_cx(&mut self) -> Cx<'_, DesignFeature> {
+        cx_with_foreign_answers::<DesignFeature>(self, |_| true)
     }
 }
 

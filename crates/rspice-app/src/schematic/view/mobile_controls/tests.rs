@@ -267,25 +267,27 @@ fn strip_cx(app: &mut RSpiceApp) -> Cx<'_, DesignFeature> {
 }
 
 /// Every button's command the strip asks the dispatcher about is one the
-/// design feature declares it reads; Cancel's is offered while an operation
-/// is live, and the two latches run no command.
+/// design feature declares it reads, in the strip's order and ahead of the
+/// navigator's Show in netlist; Cancel's is offered while an operation is
+/// live, and the two latches run no command.
 #[test]
 fn the_strip_asks_only_the_answers_the_design_feature_reads() {
-    for action in [
+    let asked = [
         MobileCanvasAction::Rotate,
         MobileCanvasAction::Mirror,
         MobileCanvasAction::Undo,
         MobileCanvasAction::Redo,
         MobileCanvasAction::Fit,
-    ] {
-        let key = product_command(action).expect("a command button");
-        assert!(ASKED_COMMANDS.contains(&key), "{action:?}");
-    }
-    assert!(!ASKED_COMMANDS.contains(&Command::Cancel.key()));
+    ]
+    .map(|action| product_command(action).expect("a command button"));
+    let foreign =
+        <DesignFeature as crate::workbench::framework::feature::Feature>::FOREIGN_AVAILABILITY;
+    assert_eq!(&foreign[..asked.len()], &asked);
     assert_eq!(
-        <DesignFeature as crate::workbench::framework::feature::Feature>::FOREIGN_AVAILABILITY,
-        ASKED_COMMANDS
+        &foreign[asked.len()..],
+        &[crate::workbench::framework::command_registry::ids::SHOW_IN_NETLIST]
     );
+    assert!(!foreign.contains(&Command::Cancel.key()));
 }
 
 /// G-12: a landscape iPad is 1180 pt wide, so the old 620 px breakpoint

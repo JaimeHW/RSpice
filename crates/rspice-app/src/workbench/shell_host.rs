@@ -251,7 +251,8 @@ impl Host for RSpiceApp {
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
-                use crate::workbench::design::navigator::{self as design, symbol};
+                use crate::workbench::design::DesignFeature;
+                use crate::workbench::design::navigator as design;
                 use crate::workbench::docks::navigator::stimulus;
 
                 match workspace {
@@ -261,15 +262,6 @@ impl Host for RSpiceApp {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
                     }
-                    // A symbol cellview is a design document with its own
-                    // structure: an ordered pin contract instead of a
-                    // hierarchy of instances.
-                    Workspace::Design
-                        if app.state.model.workspace.content.active_view_type()
-                            == ViewType::Symbol =>
-                    {
-                        symbol::show(ui, app);
-                    }
                     Workspace::Design
                         if app.state.model.workspace.content.active_view_type()
                             == ViewType::VerilogA =>
@@ -277,10 +269,15 @@ impl Host for RSpiceApp {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
                     }
-                    // A hand-off the navigator raised into another
-                    // workspace is answered once it has drawn.
+                    // The design feature draws a schematic's navigator or a
+                    // symbol's, holding Show in netlist's answer while a
+                    // row's menu may draw. A hand-off the navigator raised
+                    // into another workspace is answered once it has drawn.
                     Workspace::Design => {
-                        design::show(ui, app);
+                        let ctx = ui.ctx().clone();
+                        features::show_navigator_reading::<DesignFeature>(app, ui, |_| {
+                            design::row_menu_may_show(&ctx)
+                        });
                         app.after_contribution();
                     }
                     Workspace::Results => {

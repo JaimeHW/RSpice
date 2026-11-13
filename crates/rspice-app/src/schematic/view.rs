@@ -74,7 +74,6 @@ pub(crate) use self::interaction::{
     ensure_probe_visible_with_feedback, ensure_retained_probe_visible_with_feedback,
     toggle_probe_with_feedback,
 };
-pub(crate) use self::mobile_controls::ASKED_COMMANDS as TOUCH_STRIP_ASKED_COMMANDS;
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::parts::{
     CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts,

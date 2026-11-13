@@ -11,24 +11,29 @@ use crate::state::{
     SymbolElectricalType, SymbolPin, SymbolPinSide, SymbolShape,
 };
 use crate::ui::widgets::TreeRow;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::workspace::symbol_document::{
+    active_symbol_ports, load_active_symbol_editor_metadata, record_symbol_edit,
+    store_active_symbol_editor_bundle,
+};
+use crate::workbench::design::{DesignFeature, own_command_available};
 use crate::workbench::docks::navigator::empty_navigator_row;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::slots::DesignState;
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
-pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let ports = app.state.active_symbol_ports();
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let ports = active_symbol_ports(cx.model);
     // A document that will not load says why. The navigator must not invent
     // a structure for one it cannot read.
-    let mut document = match app.state.model.load_active_symbol_document() {
+    let mut document = match cx.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(reason) => {
             empty_navigator_row(ui, &format!("Symbol file is corrupt: {reason}"));
             return;
         }
     };
-    let metadata = match app.state.load_active_symbol_editor_metadata(&document) {
+    let metadata = match load_active_symbol_editor_metadata(cx.model, &document) {
         Ok(metadata) => metadata,
         Err(reason) => {
             empty_navigator_row(ui, &format!("Symbol layout data is corrupt: {reason}"));
@@ -42,9 +47,9 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.symbol.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            pins_section(ui, app, &mut document, &metadata, &ports);
-            body_section(ui, &mut app.state.design, &document);
-            attributes_section(ui, &mut app.state.design, &metadata);
+            pins_section(ui, cx, &mut document, &metadata, &ports);
+            body_section(ui, cx.state, &document);
+            attributes_section(ui, cx.state, &metadata);
         });
 }
 
@@ -52,7 +57,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// shown rather than implied.
 fn pins_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     document: &mut SymbolDocument,
     metadata: &SymbolEditorMetadata,
     ports: &[PortSpec],
@@ -76,7 +81,7 @@ fn pins_section(
         ui.add_space(8.0);
         let width = (ui.available_width() - 8.0).max(1.0);
         if ui
-            .add_enabled_ui(!app.state.active_view_read_only(), |ui| {
+            .add_enabled_ui(!cx.model.active_view_read_only(), |ui| {
                 super::super::super::design_system::labeled_icon_button(
                     ui,
                     WorkbenchIcon::Add,
@@ -97,13 +102,16 @@ fn pins_section(
                     0,
                 ),
             );
-            app.state.record_symbol_edit(&before);
-            match app
-                .state
-                .store_active_symbol_editor_bundle(document, metadata)
-            {
-                Ok(()) => app.state.design.symbol.editor.select_pin(name),
-                Err(error) => app.state.prompt(error),
+            record_symbol_edit(&mut cx.state.symbol, cx.model, &before);
+            match store_active_symbol_editor_bundle(
+                &mut cx.state.symbol,
+                cx.model,
+                cx.wb,
+                document,
+                metadata,
+            ) {
+                Ok(()) => cx.state.symbol.editor.select_pin(name),
+                Err(error) => cx.wb.prompt(error),
             }
         }
     });
@@ -111,12 +119,11 @@ fn pins_section(
     // it belongs beside the list it rewrites, not in a menu two surfaces
     // away. It is offered only when there is an interface to reconcile with.
     let contract_command =
-        crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract.key();
-    if app.command_availability(contract_command).is_available() {
-        let source = app
-            .state
+        crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract;
+    if own_command_available(cx, contract_command) {
+        let source = cx
             .model
-            .symbol_contract_source(&app.state.model.workspace.content.active_view);
+            .symbol_contract_source(&cx.model.workspace.content.active_view);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             let width = (ui.available_width() - 8.0).max(1.0);
@@ -129,12 +136,10 @@ fn pins_section(
             )
             .clicked()
             {
-                app.execute_command_key(contract_command);
-                // The command rewrote the stored view; the rows below must
-                // list what it produced rather than the pins it replaced.
-                if let Ok(refreshed) = app.state.model.load_active_symbol_document() {
-                    *document = refreshed;
-                }
+                // The command runs once the navigator has drawn, so the
+                // rows list the pins it produced from the next frame,
+                // which the click's own input repaints at once.
+                cx.execute(contract_command.key());
             }
         });
     }
@@ -153,15 +158,7 @@ fn pins_section(
             .indent(1)
             .meta(&meta)
             .problem(problem)
-            .selected(
-                app.state
-                    .design
-                    .symbol
-                    .editor
-                    .selection
-                    .pins
-                    .contains(&pin.name),
-            )
+            .selected(cx.state.symbol.editor.selection.pins.contains(&pin.name))
             .show(ui);
         if row.response.clicked() {
             select = Some(pin.name.clone());
@@ -181,7 +178,7 @@ fn pins_section(
             .show(ui);
     }
     if let Some(name) = select {
-        app.state.design.symbol.editor.select_pin(name);
+        cx.state.symbol.editor.select_pin(name);
     }
 }
 

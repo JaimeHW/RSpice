@@ -355,6 +355,7 @@ impl AppState {
     }
 
     /// [`hierarchy_master_for_component`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn hierarchy_master_for_component(
         &self,
         component_id: u64,
@@ -371,6 +372,7 @@ impl AppState {
     }
 
     /// [`NavigationParts::open_selected_instance_master`] for the session.
+    #[cfg(test)]
     pub(crate) fn open_selected_instance_master(&mut self) {
         self.navigation().open_selected_instance_master();
     }

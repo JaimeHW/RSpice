@@ -30,8 +30,9 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::slots::DesignState;
 use crate::workbench::slots::RunsState;
 use crate::workbench::state::WorkbenchSession;
@@ -890,21 +891,20 @@ pub(super) fn occurrence_band_count(
 }
 
 /// The Occurrences group: the design root and everything unfolded below it.
-pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = normalized(app.state.workbench.navigator_filter());
-    let Some(projection) =
-        resolved_projection(ui, &app.state.model, DesignNavigatorSection::Occurrences)
+pub(super) fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let query = normalized(cx.wb.navigator_filter());
+    let Some(projection) = resolved_projection(ui, cx.model, DesignNavigatorSection::Occurrences)
     else {
         return;
     };
-    let workspace = app.state.workbench.workspace;
-    let mut tree = std::mem::take(app.state.workbench.navigator_trees.for_workspace(workspace));
-    reveal_canvas_selection(&app.state.model, &mut tree);
+    let workspace = cx.wb.workspace;
+    let mut tree = std::mem::take(cx.wb.navigator_trees.for_workspace(workspace));
+    reveal_canvas_selection(cx.model, &mut tree);
     let rows = occurrence_rows(
         &TreeSource {
             projection: projection.as_ref(),
-            sheets: &app.state.model.workspace.content.design_management,
-            libraries: &app.state.model.library_manager,
+            sheets: &cx.model.workspace.content.design_management,
+            libraries: &cx.model.library_manager,
             query: query.as_str(),
         },
         &tree,
@@ -916,11 +916,11 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         DesignNavigatorSection::Occurrences,
         &occurrences.to_string(),
     ) {
-        *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
+        *cx.wb.navigator_trees.for_workspace(workspace) = tree;
         return;
     }
     if rows.is_empty() {
-        *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
+        *cx.wb.navigator_trees.for_workspace(workspace) = tree;
         empty_navigator_row(
             ui,
             if query.is_empty() {
@@ -932,7 +932,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
 
-    let active = app.state.model.workspace.content.occurrence_path();
+    let active = cx.model.workspace.content.occurrence_path();
     let scroll_to = tree.take_scroll_to();
     let mut descend = None;
     let mut enter_sheet = None;
@@ -979,7 +979,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     tree.select(row.path.clone());
                     descend = Some(row.path.clone());
                 }
-                occurrence_context_menu(&response.row, app, row);
+                occurrence_context_menu(&response.row, cx, row);
                 Some(response.row)
             }
             DesignTreeRow::Sheet {
@@ -1026,29 +1026,16 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
             response.scroll_to_me(Some(Align::Center));
         }
     }
-    *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
+    *cx.wb.navigator_trees.for_workspace(workspace) = tree;
 
     if let Some((occurrence, sheet)) = enter_sheet {
-        open_occurrence(
-            &mut app.state.design,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            &app.state.runs,
-            &occurrence,
-        );
-        let state = &mut app.state;
-        let outcome = state
+        open_occurrence(cx.state, cx.model, cx.wb, cx.runs, &occurrence);
+        let outcome = cx
             .model
-            .activate_sheet(sheet, state.design.interaction.drag.let_go());
-        let _ = state.workbench.report(outcome);
+            .activate_sheet(sheet, cx.state.interaction.drag.let_go());
+        let _ = cx.wb.report(outcome);
     } else if let Some(path) = descend {
-        open_occurrence(
-            &mut app.state.design,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            &app.state.runs,
-            &path,
-        );
+        open_occurrence(cx.state, cx.model, cx.wb, cx.runs, &path);
     }
 }
 
@@ -1080,12 +1067,15 @@ fn resolved_projection(
 /// Those commands act on a selected object in the sheet on screen, so the menu
 /// is offered exactly where there is one: on a child of the occurrence being
 /// edited. A row deeper in the tree names an instance none of them can reach.
-fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &OccurrenceRow) {
-    if row.path.parent().as_ref() != Some(&app.state.model.workspace.content.occurrence_path()) {
+fn occurrence_context_menu(
+    response: &Response,
+    cx: &mut Cx<'_, DesignFeature>,
+    row: &OccurrenceRow,
+) {
+    if row.path.parent().as_ref() != Some(&cx.model.workspace.content.occurrence_path()) {
         return;
     }
-    let Some(object) = app
-        .state
+    let Some(object) = cx
         .model
         .schematic
         .document()
@@ -1100,7 +1090,7 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
     else {
         return;
     };
-    navigator_object_context_menu(response, app, object);
+    navigator_object_context_menu(response, cx, object);
 }
 
 /// Point the tree at the instance the canvas has selected.

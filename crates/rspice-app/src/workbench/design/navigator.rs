@@ -24,9 +24,10 @@ use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::state::{PortDirection, SavedOutputKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
+use crate::workbench::design::{DesignFeature, own_command_available};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::slots::DesignState;
 use crate::workbench::slots::RunsState;
@@ -284,12 +285,12 @@ fn panel_tabs_content_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    tabs(ui, &mut app.state.design);
-    if app.state.design.component_shelf_shown() {
-        shelf::component_shelf(ui, app);
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    tabs(ui, cx.state);
+    if cx.state.component_shelf_shown() {
+        shelf::component_shelf(ui, cx);
     } else {
-        navigator(ui, app);
+        navigator(ui, cx);
     }
 }
 
@@ -420,14 +421,14 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
     desired.map(|width| width * scale)
 }
 
-fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    let enter_rows = navigator_search(ui, &mut app.state.workbench);
-    let (occurrence, master, can_ascend) = navigator_path(&app.state.model.workspace);
+fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let enter_rows = navigator_search(ui, cx.wb);
+    let (occurrence, master, can_ascend) = navigator_path(&cx.model.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
     // A cell view with one sheet has nothing to scope, so the control is
     // absent there rather than offered with a single meaningful position.
-    let scope = sheet_visibility::multi_sheet_catalog(&app.state)
+    let scope = sheet_visibility::multi_sheet_catalog(&*cx.model)
         .map(|_| sheet_visibility::sheet_scope(ui.ctx()));
     let mut chosen_scope = None;
     // At the design root the line reads "/ · lib/cell", which is the document
@@ -480,7 +481,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         sheet_visibility::set_sheet_scope(ui.ctx(), chosen);
     }
     if ascend {
-        app.execute_command_key(DesignCommand::AscendHierarchy.key());
+        cx.execute(DesignCommand::AscendHierarchy.key());
     }
 
     rail::open(ui.ctx());
@@ -489,24 +490,20 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.design.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            find_matches::find_matches_section(ui, &mut app.state.design, &mut app.state.model);
+            find_matches::find_matches_section(ui, cx.state, cx.model);
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {
                 match section {
-                    DesignNavigatorSection::Masters => hierarchy_tree::masters_section(
-                        ui,
-                        &mut app.state.design,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        &app.state.runs,
-                    ),
-                    DesignNavigatorSection::Occurrences => {
-                        hierarchy_tree::occurrences_section(ui, app);
+                    DesignNavigatorSection::Masters => {
+                        hierarchy_tree::masters_section(ui, cx.state, cx.model, cx.wb, cx.runs)
                     }
-                    DesignNavigatorSection::Ports => port_section(ui, app),
-                    DesignNavigatorSection::RfPorts => rf_port_section(ui, app),
-                    DesignNavigatorSection::Nets => net_section(ui, app),
-                    DesignNavigatorSection::Excitations => excitation_section(ui, app),
-                    DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
+                    DesignNavigatorSection::Occurrences => {
+                        hierarchy_tree::occurrences_section(ui, cx);
+                    }
+                    DesignNavigatorSection::Ports => port_section(ui, cx),
+                    DesignNavigatorSection::RfPorts => rf_port_section(ui, cx),
+                    DesignNavigatorSection::Nets => net_section(ui, cx),
+                    DesignNavigatorSection::Excitations => excitation_section(ui, cx),
+                    DesignNavigatorSection::NamedSignals => named_signal_section(ui, cx),
                 }
             }
             // Inside the scroll area and below the last row: the traversal
@@ -518,12 +515,8 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     // every row above was laid out against the position the tree held when the
     // frame began.
     if let Some(node) = folded {
-        let workspace = app.state.workbench.workspace;
-        app.state
-            .workbench
-            .navigator_trees
-            .for_workspace(workspace)
-            .toggle(node);
+        let workspace = cx.wb.workspace;
+        cx.wb.navigator_trees.for_workspace(workspace).toggle(node);
     }
 }
 
@@ -610,16 +603,16 @@ fn net_is_in_scope(model: &Model, scope: SheetScope, net: &DesignNet) -> bool {
         .any(|id| sheet_visibility::object_is_in_scope(model, scope, id))
 }
 
-fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
+fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
+    let query = normalized(cx.wb.navigator_filter());
     // The rail lists the nets the configured design has. When that design
     // does not resolve, the reason takes the list's place: a rail populated
     // from the editor buffer would offer conductors the run has no name for.
-    let projection = match app.state.model.workspace.design_projection(
-        &app.state.model.library_manager,
-        &app.state.model.workspace.content.active_view,
-        &app.state.model.schematic,
+    let projection = match cx.model.workspace.design_projection(
+        &cx.model.library_manager,
+        &cx.model.workspace.content.active_view,
+        &cx.model.schematic,
     ) {
         Ok(projection) => projection,
         Err(error) => {
@@ -630,12 +623,12 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     let nets = rspice_design::connectivity::summary::projection_nets(
-        app.state.model.library_manager.catalog(),
+        cx.model.library_manager.catalog(),
         &projection,
-        &app.state.model.workspace.content.active_view.key(),
+        &cx.model.workspace.content.active_view.key(),
     )
     .iter()
-    .filter(|net| net_is_in_scope(&app.state.model, scope, net))
+    .filter(|net| net_is_in_scope(cx.model, scope, net))
     .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
     .cloned()
     .collect::<Vec<_>>();
@@ -651,13 +644,12 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     for net in nets {
-        let position = net_anchor(&app.state.model, &net);
-        let selected = if navigator_net_selection_matches(&app.state.model, &net) {
+        let position = net_anchor(cx.model, &net);
+        let selected = if navigator_net_selection_matches(cx.model, &net) {
             true
         } else if net.wire_ids.is_empty() {
             net.terminals.iter().any(|terminal| {
-                app.state
-                    .model
+                cx.model
                     .schematic
                     .session
                     .editor
@@ -666,8 +658,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             })
         } else {
             net.wire_ids.iter().copied().collect::<HashSet<_>>()
-                == app
-                    .state
+                == cx
                     .model
                     .schematic
                     .session
@@ -695,11 +686,11 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             1,
         );
         if response.clicked() {
-            select_navigator_design_net(&mut app.state.model, &net, position);
+            select_navigator_design_net(cx.model, &net, position);
         }
         navigator_object_context_menu(
             &response,
-            app,
+            cx,
             NavigatorObject::Net {
                 name: net.name,
                 wire_ids: net.wire_ids,
@@ -864,10 +855,10 @@ fn port_rows(model: &Model, scope: SheetScope, query: &str) -> Vec<PortRow> {
     rows
 }
 
-fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
+fn port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
-    let ports = port_rows(&app.state.model, scope, &query);
+    let query = normalized(cx.wb.navigator_filter());
+    let ports = port_rows(cx.model, scope, &query);
     if !navigator_section_header(ui, DesignNavigatorSection::Ports, &ports.len().to_string()) {
         return;
     }
@@ -896,8 +887,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 mono: true,
                 meta: Some(meta.as_str()),
                 alert: port.duplicated,
-                selected: app
-                    .state
+                selected: cx
                     .model
                     .schematic
                     .session
@@ -909,25 +899,18 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .row
         .on_hover_text(port.tooltip());
         if response.clicked() {
-            app.state
-                .model
+            cx.model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(port.component_id);
-            app.state
-                .model
-                .schematic
-                .session
-                .editor
-                .net_highlight
-                .clear();
-            app.state.model.schematic.session.editor.center_request = Some(port.position);
+            cx.model.schematic.session.editor.net_highlight.clear();
+            cx.model.schematic.session.editor.center_request = Some(port.position);
         }
         navigator_object_context_menu(
             &response,
-            app,
+            cx,
             NavigatorObject::Component {
                 id: port.component_id,
                 label: port.spec.name,
@@ -1123,8 +1106,8 @@ fn descend_to_placed(
 /// design, and the scope control and the filter narrow what is *shown* rather
 /// than what exists. A rail that asked the filtered list would vanish the
 /// moment a reader typed a query that missed it.
-fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let ports = whole_design_rf_ports(&app.state.model);
+fn rf_port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let ports = whole_design_rf_ports(cx.model);
     if ports.is_empty() {
         return;
     }
@@ -1134,16 +1117,11 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // un-claim it.
     let collisions = crate::simulation::placed_sources::duplicate_port_numbers(&ports);
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
+    let query = normalized(cx.wb.navigator_filter());
     let listed = ports
         .into_iter()
         .filter(|port| {
-            derived_row_is_in_scope(
-                &app.state.model,
-                scope,
-                port.occurrence.as_ref(),
-                port.component_id,
-            )
+            derived_row_is_in_scope(cx.model, scope, port.occurrence.as_ref(), port.component_id)
         })
         .filter(|port| {
             let number = port.port_number.to_string();
@@ -1184,7 +1162,7 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     for port in listed {
         let collides = collisions.contains(&port.port_number);
         let meta = rf_port_meta(&port);
-        let elsewhere = row_is_elsewhere(&app.state.model, port.occurrence.as_ref());
+        let elsewhere = row_is_elsewhere(cx.model, port.occurrence.as_ref());
         let response = occurrence_object_row(
             ui,
             OccurrenceObjectRow {
@@ -1198,8 +1176,7 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 meta: meta.as_str(),
                 alert: collides,
                 selected: elsewhere.is_none()
-                    && app
-                        .state
+                    && cx
                         .model
                         .schematic
                         .session
@@ -1215,34 +1192,23 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             continue;
         }
-        match placed_object(&app.state.model, port.component_id, &port.reference) {
+        match placed_object(cx.model, port.component_id, &port.reference) {
             Some(object) => {
                 if response.clicked() {
-                    select_navigator_object(
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        &object,
-                    );
+                    select_navigator_object(cx.model, cx.wb, &object);
                 }
-                navigator_object_context_menu(&response, app, object);
+                navigator_object_context_menu(&response, cx, object);
             }
             None => {
                 if response.clicked() {
-                    app.state
-                        .model
+                    cx.model
                         .schematic
                         .session
                         .editor
                         .selection
                         .select_only_component(port.component_id);
-                    app.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .net_highlight
-                        .clear();
-                    app.state.model.schematic.session.editor.center_request = None;
+                    cx.model.schematic.session.editor.net_highlight.clear();
+                    cx.model.schematic.session.editor.center_request = None;
                 }
             }
         }
@@ -1252,10 +1218,10 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // replaces.
     if let Some((occurrence, component_id)) = descend {
         descend_to_placed(
-            &mut app.state.design,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            &app.state.runs,
+            cx.state,
+            cx.model,
+            cx.wb,
+            cx.runs,
             &occurrence,
             component_id,
         );
@@ -1364,14 +1330,14 @@ fn rf_port_tooltip(
 /// or find it was the one rail whose rows answered to the pointer alone. The
 /// menu is offered only on the rows of the occurrence being edited, exactly as
 /// the hierarchy tree offers it only where its commands can act.
-fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
+fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
-    let sources = whole_design_sources(&app.state.model)
+    let query = normalized(cx.wb.navigator_filter());
+    let sources = whole_design_sources(cx.model)
         .into_iter()
         .filter(|source| {
             derived_row_is_in_scope(
-                &app.state.model,
+                cx.model,
                 scope,
                 source.occurrence.as_ref(),
                 source.component_id,
@@ -1420,7 +1386,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             source.quantity(),
             source.summary()
         );
-        let elsewhere = row_is_elsewhere(&app.state.model, source.occurrence.as_ref());
+        let elsewhere = row_is_elsewhere(cx.model, source.occurrence.as_ref());
         let response = occurrence_object_row(
             ui,
             OccurrenceObjectRow {
@@ -1430,8 +1396,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 meta: meta.as_str(),
                 alert: false,
                 selected: elsewhere.is_none()
-                    && app
-                        .state
+                    && cx
                         .model
                         .schematic
                         .session
@@ -1447,34 +1412,23 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             continue;
         }
-        match placed_object(&app.state.model, source.component_id, &source.reference) {
+        match placed_object(cx.model, source.component_id, &source.reference) {
             Some(object) => {
                 if response.clicked() {
-                    select_navigator_object(
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        &object,
-                    );
+                    select_navigator_object(cx.model, cx.wb, &object);
                 }
-                navigator_object_context_menu(&response, app, object);
+                navigator_object_context_menu(&response, cx, object);
             }
             None => {
                 if response.clicked() {
-                    app.state
-                        .model
+                    cx.model
                         .schematic
                         .session
                         .editor
                         .selection
                         .select_only_component(source.component_id);
-                    app.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .net_highlight
-                        .clear();
-                    app.state.model.schematic.session.editor.center_request = None;
+                    cx.model.schematic.session.editor.net_highlight.clear();
+                    cx.model.schematic.session.editor.center_request = None;
                 }
             }
         }
@@ -1483,10 +1437,10 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // [`rf_port_section`].
     if let Some((occurrence, component_id)) = descend {
         descend_to_placed(
-            &mut app.state.design,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            &app.state.runs,
+            cx.state,
+            cx.model,
+            cx.wb,
+            cx.runs,
             &occurrence,
             component_id,
         );
@@ -1564,17 +1518,16 @@ fn excitation_tooltip(
 /// carried each of them twice in one rail -- once under Excitations with its
 /// reader count, and once here saying only "source". The second listing said
 /// strictly less than the first.
-fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = normalized(app.state.workbench.navigator_filter());
+fn named_signal_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let query = normalized(cx.wb.navigator_filter());
     // A saved output belongs to the run plan rather than to a sheet, so the
     // sheet scope has nothing to say about it and it is listed either way.
-    let probes = app
-        .state
+    let probes = cx
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| cx.model.workspace.content.plan_data(plan.id()))
         .map(|payload| {
             payload
                 .saved_outputs
@@ -1614,11 +1567,11 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         let response =
             nav_row_indented_mono_response(ui, WorkbenchIcon::ArrowLeft, &name, false, None, 1);
         if response.clicked() {
-            reveal_probe_expression(&mut app.state.model, &mut app.state.workbench, &expression);
+            reveal_probe_expression(cx.model, cx.wb, &expression);
         }
         navigator_object_context_menu(
             &response,
-            app,
+            cx,
             NavigatorObject::SavedOutput { name, expression },
         );
     }
@@ -1870,30 +1823,54 @@ fn navigator_net_selection_matches(model: &Model, net: &DesignNet) -> bool {
         }
 }
 
+/// Whether the navigator may draw a row's menu this pass: one is open, or
+/// this pass's input opens one (a secondary click, a touch held past a
+/// click, or Shift+F10 on the focused row). Only a row's menu reads the
+/// dispatcher's answer for Show in netlist, so the shell takes the answers
+/// for the navigator's context only then.
+pub(in crate::workbench) fn row_menu_may_show(ctx: &egui::Context) -> bool {
+    if egui::Popup::is_any_open(ctx) {
+        return true;
+    }
+    let max_click_duration = ctx.options(|options| options.input_options.max_click_duration);
+    ctx.input(|input| {
+        let held = input.any_touches()
+            && input.pointer.primary_down()
+            && input
+                .pointer
+                .press_start_time()
+                .is_some_and(|start| input.time - start > max_click_duration);
+        input.pointer.secondary_clicked() || held || input.key_pressed(Key::F10)
+    })
+}
+
 fn navigator_object_context_menu(
     response: &Response,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     object: NavigatorObject,
 ) {
     let (popup, keyboard_open) = row_context_menu(response);
     if response.secondary_clicked() || keyboard_open {
-        select_navigator_object(&mut app.state.model, &mut app.state.workbench, &object);
+        select_navigator_object(cx.model, cx.wb, &object);
     }
     popup.show(|ui| {
         // No caption and no summary: the reader right-clicked the row the
         // menu is about, and it is still under the pointer.
         if ui.button("Open").clicked() {
-            select_navigator_object(&mut app.state.model, &mut app.state.workbench, &object);
+            select_navigator_object(cx.model, cx.wb, &object);
             match &object {
                 NavigatorObject::Component { id, .. }
-                    if app.state.hierarchy_master_for_component(*id).is_some() =>
+                    if crate::workbench::app::hierarchy_master_for_component(cx.model, *id)
+                        .is_some() =>
                 {
-                    app.state.open_selected_instance_master();
+                    cx.state
+                        .navigation_parts(cx.model, cx.wb, cx.runs)
+                        .open_selected_instance_master();
                 }
                 NavigatorObject::Component { .. }
-                    if app.command_key_enabled(DesignCommand::ObjectProperties.key()) =>
+                    if own_command_available(cx, DesignCommand::ObjectProperties) =>
                 {
-                    app.execute_command_key(DesignCommand::ObjectProperties.key());
+                    cx.execute(DesignCommand::ObjectProperties.key());
                 }
                 NavigatorObject::Net { .. }
                 | NavigatorObject::SavedOutput { .. }
@@ -1902,40 +1879,36 @@ fn navigator_object_context_menu(
             ui.close();
         }
         let properties = ui.add_enabled(
-            app.command_key_enabled(DesignCommand::ObjectProperties.key()),
+            own_command_available(cx, DesignCommand::ObjectProperties),
             egui::Button::new("Properties…"),
         );
         if properties.clicked() {
-            app.execute_command_key(DesignCommand::ObjectProperties.key());
+            cx.execute(DesignCommand::ObjectProperties.key());
             ui.close();
         }
         let rename = ui.add_enabled(
-            app.command_key_enabled(DesignCommand::RenameSelection.key()),
+            own_command_available(cx, DesignCommand::RenameSelection),
             egui::Button::new("Rename…"),
         );
         if rename.clicked() {
-            app.execute_command_key(DesignCommand::RenameSelection.key());
+            cx.execute(DesignCommand::RenameSelection.key());
             ui.close();
         }
         // Only an instance emits a deck card, so the row that is not one
         // never offers the jump rather than offering a permanently dead one.
         if matches!(object, NavigatorObject::Component { .. }) {
             let show_in_netlist = ui.add_enabled(
-                app.command_key_enabled(ids::SHOW_IN_NETLIST),
+                cx.foreign_available(ids::SHOW_IN_NETLIST),
                 egui::Button::new("Show in netlist"),
             );
             if show_in_netlist.clicked() {
-                app.execute_command_key(ids::SHOW_IN_NETLIST);
+                cx.execute(ids::SHOW_IN_NETLIST);
                 ui.close();
             }
         }
         ui.separator();
         if ui.button(format!("Filter by {}", object.name())).clicked() {
-            find_navigator_object_references(
-                &mut app.state.design,
-                &mut app.state.workbench,
-                &object,
-            );
+            find_navigator_object_references(cx.state, cx.wb, &object);
             ui.close();
         }
     });

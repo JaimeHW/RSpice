@@ -21,19 +21,9 @@ use super::parts::{
 };
 use super::shelf_drag::PlacementTransform;
 
-/// The commands whose dispatcher answers the strip draws its buttons by:
-/// every button's command but Cancel's, which is offered while an operation
-/// is live. The design feature reads them through its context.
-pub(crate) const ASKED_COMMANDS: &[CommandKey] = &[
-    DesignCommand::RotateSelection.key(),
-    DesignCommand::MirrorSelectionHorizontal.key(),
-    Command::Undo.key(),
-    Command::Redo.key(),
-    Command::ZoomFit.key(),
-];
-
 /// Draw the strip in the design feature's context, which holds the
-/// dispatcher's answers for [`ASKED_COMMANDS`] and the modal facts. A
+/// dispatcher's answers for every button's command but Cancel's, which is
+/// offered while an operation is live, and the modal facts. A
 /// command a button runs is raised through the context, and the shell runs
 /// it once the surface has drawn.
 pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, content_rect: Rect) {

@@ -17,6 +17,7 @@ use super::hierarchy_tree::{DesignTreeRow, OccurrenceState};
 use super::shelf::*;
 use super::*;
 use crate::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 
@@ -172,14 +173,14 @@ fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
     crate::ui::Theme::default().apply(&ctx);
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::AllSheets);
-    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
+    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.design_cx()));
     assert!(
         every_sheet.contains("VIN") && every_sheet.contains("VBIAS"),
         "the default scope lists the whole cell view: {every_sheet}"
     );
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::ActiveSheet);
-    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
+    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.design_cx()));
     assert!(
         this_sheet.contains("VIN"),
         "an object on the active sheet is kept: {this_sheet}"
@@ -199,7 +200,7 @@ fn the_sheet_scope_control_is_offered_only_above_one_sheet() {
     crate::ui::Theme::default().apply(&ctx);
 
     let mut single = RSpiceApp::test_instance();
-    let one_sheet = painted_panel(&ctx, |ui| navigator(ui, &mut single));
+    let one_sheet = painted_panel(&ctx, |ui| navigator(ui, &mut single.design_cx()));
     assert!(
         !one_sheet.contains(SheetScope::ActiveSheet.label())
             && !one_sheet.contains(SheetScope::AllSheets.label()),
@@ -207,7 +208,7 @@ fn the_sheet_scope_control_is_offered_only_above_one_sheet() {
     );
 
     let mut multi = two_sheet_named_signals();
-    let two_sheets = painted_panel(&ctx, |ui| navigator(ui, &mut multi));
+    let two_sheets = painted_panel(&ctx, |ui| navigator(ui, &mut multi.design_cx()));
     assert!(
         two_sheets.contains(SheetScope::ActiveSheet.label())
             && two_sheets.contains(SheetScope::AllSheets.label()),
@@ -228,7 +229,7 @@ fn moving_the_sheet_scope_never_touches_the_project() {
 
     for scope in SheetScope::OPTIONS {
         sheet_visibility::set_sheet_scope(&ctx, scope);
-        let _ = painted_panel(&ctx, |ui| navigator(ui, &mut app));
+        let _ = painted_panel(&ctx, |ui| navigator(ui, &mut app.design_cx()));
     }
 
     assert_eq!(
@@ -663,7 +664,7 @@ fn navigator_tree_expansion_survives_a_re_render_and_is_per_workspace() {
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     ui.set_width(260.0);
-                    hierarchy_tree::occurrences_section(ui, &mut app);
+                    hierarchy_tree::occurrences_section(ui, &mut app.design_cx());
                 });
         }))
     };
@@ -1037,7 +1038,7 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.set_width(260.0);
-                net_section(ui, &mut app);
+                net_section(ui, &mut app.design_cx());
             });
     }));
     assert!(
@@ -1052,7 +1053,7 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.set_width(260.0);
-                net_section(ui, &mut app);
+                net_section(ui, &mut app.design_cx());
             });
     }));
     assert!(
@@ -1107,7 +1108,7 @@ fn a_net_row_announces_the_meta_column_it_paints() {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.set_width(260.0);
-                net_section(ui, &mut app);
+                net_section(ui, &mut app.design_cx());
             });
     });
     let announced = output
@@ -1308,7 +1309,7 @@ impl NavigatorPanel {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        navigator(ui, app);
+                        navigator(ui, &mut app.design_cx());
                     });
                 // Read once the panel has had the press: what is still in the
                 // input is what the panel left for the canvas behind it.
@@ -2114,7 +2115,7 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        navigator(ui, &mut app);
+                        navigator(ui, &mut app.design_cx());
                     });
             },
         )
@@ -2161,5 +2162,178 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
         app.state.workbench.navigator_filter(),
         "ALPHA",
         "and the menu acts on the row the keyboard was on"
+    );
+}
+
+/// One frame's input for the navigator alone, in a dock every rail fits in.
+#[cfg(not(target_arch = "wasm32"))]
+fn navigator_input(events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(260.0, 1600.0),
+        )),
+        events,
+        ..egui::RawInput::default()
+    }
+}
+
+/// How long egui asks the host to wait before the frame after `output`.
+#[cfg(not(target_arch = "wasm32"))]
+fn repaint_delay(output: &egui::FullOutput) -> std::time::Duration {
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .expect("the root viewport answers")
+        .repaint_delay
+}
+
+/// Return to parent runs once the navigator has drawn, as the shell answers
+/// what a feature raised, so the click's own frame still draws the
+/// occurrence it leaves. The click is input, and egui asks for the frame
+/// after any input at once; that frame draws the parent.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_parent_a_path_click_ascends_to_draws_on_the_frame_the_click_repaints() {
+    let mut app = recursive_design();
+    app.state.workbench.workspace = Workspace::Design;
+    let instance = InstancePath::root()
+        .child("XA")
+        .expect("the fixture instance is nameable");
+    hierarchy_tree::open_occurrence(
+        &mut app.state.design,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.runs,
+        &instance,
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    // As the shell draws it: the navigator in the design feature's context,
+    // then what it raised answered.
+    let frame = |app: &mut RSpiceApp, events| {
+        ctx.run_ui(navigator_input(events), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    navigator(ui, &mut app.design_cx());
+                });
+            app.after_contribution();
+        })
+    };
+    let _ = frame(&mut app, Vec::new());
+    let settled = frame(&mut app, Vec::new());
+    let at = run_rect(&painted_runs(&settled), "/XA")
+        .expect("below the root the path row names the occurrence")
+        .center();
+
+    let clicked = frame(&mut app, click_events(at));
+    assert_eq!(
+        app.state.model.workspace.content.occurrence_path(),
+        InstancePath::root(),
+        "the ascent ran once the navigator had drawn"
+    );
+    assert!(
+        run_rect(&painted_runs(&clicked), "/XA").is_some(),
+        "the click's own frame drew before the ascent ran"
+    );
+    assert_eq!(
+        repaint_delay(&clicked),
+        std::time::Duration::ZERO,
+        "the click's input asks for the next frame at once"
+    );
+
+    let next = frame(&mut app, Vec::new());
+    assert!(
+        run_rect(&painted_runs(&next), "/XA").is_none(),
+        "the next frame draws the parent, where no path row names an occurrence"
+    );
+}
+
+/// Update pins from contract runs once the navigator has drawn, so the
+/// click's own frame still lists the port without a pin. The click is
+/// input, and egui asks for the frame after any input at once; that frame
+/// lists the pin the command placed.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_pins_a_contract_update_places_are_listed_on_the_frame_the_click_repaints() {
+    use crate::state::{Cell, Library, Point, View, ViewType};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    let mut library = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    amp.add_view(View::new("symbol", ViewType::Symbol));
+    library.add_cell(amp);
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+    let mut schematic = SchematicState::default();
+    let port = schematic.add_component(ComponentType::Port, Point::origin());
+    schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == port)
+        .expect("port exists")
+        .value = "IN".to_owned();
+    app.state.model.workspace.insert_schematic_editor(
+        CellViewRef::new("work", "amp", "schematic").key(),
+        schematic,
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    // As the shell draws it: the navigator in the design feature's context,
+    // then what it raised answered.
+    let frame = |app: &mut RSpiceApp, events| {
+        ctx.run_ui(navigator_input(events), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    symbol::show(ui, &mut app.design_cx());
+                });
+            app.after_contribution();
+        })
+    };
+    let _ = frame(&mut app, Vec::new());
+    let settled = frame(&mut app, Vec::new());
+    let runs = painted_runs(&settled);
+    assert!(
+        run_rect(&runs, "no pin").is_some() && run_rect(&runs, "1. IN").is_none(),
+        "the declared port has no pin yet"
+    );
+    let at = runs
+        .iter()
+        .find(|(run, _, _)| run.starts_with("Update pins from"))
+        .map(|(_, rect, _)| rect.center())
+        .expect("a symbol with an interface offers the update beside its pins");
+
+    let clicked = frame(&mut app, click_events(at));
+    assert!(
+        app.state
+            .model
+            .load_active_symbol_document()
+            .expect("document loads")
+            .pin("IN")
+            .is_some(),
+        "the update ran once the navigator had drawn"
+    );
+    assert!(
+        run_rect(&painted_runs(&clicked), "1. IN").is_none(),
+        "the click's own frame drew before the update ran"
+    );
+    assert_eq!(
+        repaint_delay(&clicked),
+        std::time::Duration::ZERO,
+        "the click's input asks for the next frame at once"
+    );
+
+    let next = frame(&mut app, Vec::new());
+    assert!(
+        run_rect(&painted_runs(&next), "1. IN").is_some(),
+        "the next frame lists the pin the update placed"
     );
 }

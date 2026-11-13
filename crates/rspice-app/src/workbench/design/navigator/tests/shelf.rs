@@ -170,7 +170,11 @@ fn palette_placement_cancels_every_unfinished_conductor_route() {
         .start_bus(crate::state::Point::new(2, 3), None)
         .unwrap();
 
-    arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
+    arm_primitive(
+        &mut app.design_cx(),
+        ComponentType::Resistor,
+        &egui::Context::default(),
+    );
 
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
@@ -184,7 +188,13 @@ fn palette_placement_cancels_every_unfinished_conductor_route() {
 fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
     let mut app = RSpiceApp::test_instance();
 
-    arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
+    arm_primitive(
+        &mut app.design_cx(),
+        ComponentType::Port,
+        &egui::Context::default(),
+    );
+    // The shell runs what the shelf raised once the navigator has drawn.
+    app.after_contribution();
 
     assert!(app.state.design.pin_port.open);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
@@ -1093,7 +1103,7 @@ impl ShelfHarness {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        component_shelf(ui, app);
+                        component_shelf(ui, &mut app.design_cx());
                     });
             },
         )

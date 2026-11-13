@@ -731,7 +731,10 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     (
         "navigator",
         &["Workspace::Design => {\
-           design::show(ui, app);\
+           let ctx = ui.ctx().clone();\
+           features::show_navigator_reading::<DesignFeature>(app, ui, |_| {\
+           design::row_menu_may_show(&ctx)\
+           });\
            app.after_contribution();\
            }\
            Workspace::Results => {\

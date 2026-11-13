@@ -84,6 +84,7 @@ impl AppState {
     }
 
     /// [`store_active_symbol_editor_bundle`] for the session.
+    #[cfg(test)]
     pub(crate) fn store_active_symbol_editor_bundle(
         &mut self,
         document: &SymbolDocument,

@@ -81,10 +81,11 @@ use crate::workbench::app::{
     turn_floating_paste,
 };
 use crate::workbench::app_state::SlotFacts;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::{DialogKey, Modality};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureNavigator, FeatureRegistry, FeatureSurface,
+    NoHandles, Reads, held_back,
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
@@ -99,9 +100,18 @@ impl Feature for DesignFeature {
     type Session = WorkbenchSession;
     type Handles = NoHandles;
     /// The canvas's touch strip offers Rotate, Mirror, Undo, Redo and Fit as
-    /// the dispatcher answers them, its guards included.
-    const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] =
-        crate::schematic::view::TOUCH_STRIP_ASKED_COMMANDS;
+    /// the dispatcher answers them, its guards included (Cancel, its other
+    /// command button, is offered while an operation is live), and the
+    /// navigator's row menu offers Show in netlist as the dispatcher answers
+    /// that.
+    const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] = &[
+        DesignCommand::RotateSelection.key(),
+        DesignCommand::MirrorSelectionHorizontal.key(),
+        ids::UNDO,
+        ids::REDO,
+        ids::ZOOM_FIT,
+        ids::SHOW_IN_NETLIST,
+    ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<DesignCommand>();
@@ -111,7 +121,56 @@ impl Feature for DesignFeature {
         registry.surface(FeatureSurface {
             show: surface::show_surface,
         });
+        registry.navigator(FeatureNavigator {
+            show: show_navigator,
+        });
     }
+}
+
+/// Draw the navigator of the design document in front: a symbol's pins,
+/// body and label anchors, or a schematic's hierarchy and shelf.
+fn show_navigator(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui) {
+    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        navigator::symbol::show(ui, cx);
+    } else {
+        navigator::show(ui, cx);
+    }
+}
+
+/// Whether the design command `command` can run here, and why not, as the
+/// dispatcher answers it: hidden where the command is not offered, then the
+/// shell's own guards, then the command's own answer, all read from what
+/// `cx` holds as it is asked.
+pub(in crate::workbench) fn own_command_availability(
+    cx: &Cx<'_, DesignFeature>,
+    command: DesignCommand,
+) -> CommandAvailability {
+    let reads = Reads::new(
+        &*cx.state,
+        &*cx.own,
+        &*cx.model,
+        &*cx.wb,
+        &*cx.platform,
+        &*cx.runs,
+        cx.peers.results(),
+        cx.commands,
+    );
+    if !command.offered(&reads) {
+        return CommandAvailability::Hidden;
+    }
+    if let Some(reason) = held_back(command.spec().flags, &*cx.platform) {
+        return CommandAvailability::Disabled(reason);
+    }
+    command.availability(&reads)
+}
+
+/// Whether the design command `command` would run if raised now: a design
+/// command runs exactly when it is available.
+pub(in crate::workbench) fn own_command_available(
+    cx: &Cx<'_, DesignFeature>,
+    command: DesignCommand,
+) -> bool {
+    own_command_availability(cx, command).is_available()
 }
 
 impl CommandSet for DesignCommand {
