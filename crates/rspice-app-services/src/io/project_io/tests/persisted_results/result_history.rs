@@ -806,7 +806,9 @@ fn project_load_rejects_a_descriptor_without_its_identity_or_schema() {
         let error = load_project_text(&missing.to_string(), None)
             .expect_err("a descriptor cannot lose a required field");
         assert!(
-            error.to_string().contains(&format!("missing field `{field}`")),
+            error
+                .to_string()
+                .contains(&format!("missing field `{field}`")),
             "{error}"
         );
 

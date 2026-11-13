@@ -770,10 +770,7 @@ fn capture_group_from_draft(
         let scope = if scope.is_empty() {
             None
         } else {
-            Some(
-                crate::state::InstancePath::parse(scope)
-                    .map_err(|error| error.to_string())?,
-            )
+            Some(crate::state::InstancePath::parse(scope).map_err(|error| error.to_string())?)
         };
         let kind = row
             .kind

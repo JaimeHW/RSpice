@@ -196,8 +196,8 @@ fn scoped_calculator_dc_probes_resolve_every_member() {
 
 #[test]
 fn root_scope_spellings_resolve_the_same_voltage() {
-    let outputs = ["V(in)", "V(/in)"]
-        .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let outputs =
+        ["V(in)", "V(/in)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
     let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
     run.validate_provenance().unwrap();
     for index in 0..outputs.len() {
@@ -564,8 +564,7 @@ fn formal_port_probes_bind_to_the_instantiating_nodes() {
 
 #[test]
 fn scoped_canonical_ground_uses_the_owning_analysis_axis() {
-    let outputs =
-        ["V(/0)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let outputs = ["V(/0)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
     let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
     for index in 0..outputs.len() {
         check_value(&run, index, 0.0);

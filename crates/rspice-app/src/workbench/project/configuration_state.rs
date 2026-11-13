@@ -639,8 +639,7 @@ pub(crate) fn set_cell_view(
 }
 
 fn fold(path: &str) -> String {
-    InstancePath::parse(path)
-        .map_or_else(|_| path.to_ascii_lowercase(), |parsed| parsed.fold_key())
+    InstancePath::parse(path).map_or_else(|_| path.to_ascii_lowercase(), |parsed| parsed.fold_key())
 }
 
 /// Whether `selection` is what runs use today.
@@ -661,8 +660,7 @@ pub(crate) fn instance_binding<'a>(
 ) -> Option<&'a ConfigurationSetOverride> {
     let key = InstancePath::parse(path).ok()?.fold_key();
     definition.overrides.iter().find(|binding| {
-        InstancePath::parse(&binding.instance_path)
-            .is_ok_and(|exact| exact.fold_key() == key)
+        InstancePath::parse(&binding.instance_path).is_ok_and(|exact| exact.fold_key() == key)
     })
 }
 
@@ -704,8 +702,7 @@ pub(crate) fn set_instance_view(
     };
     let key = parsed.fold_key();
     let existing = definition.overrides.iter().position(|binding| {
-        InstancePath::parse(&binding.instance_path)
-            .is_ok_and(|exact| exact.fold_key() == key)
+        InstancePath::parse(&binding.instance_path).is_ok_and(|exact| exact.fold_key() == key)
     });
     match (view, existing) {
         (None, Some(index)) => {
@@ -739,9 +736,7 @@ pub(crate) fn apply_binding_change(
     inherited: &[String],
     change: BindingChange,
 ) {
-    let exact_key = InstancePath::parse(path)
-        .ok()
-        .map(|exact| exact.fold_key());
+    let exact_key = InstancePath::parse(path).ok().map(|exact| exact.fold_key());
     let position = definition.overrides.iter().position(|binding| {
         binding.instance_path.eq_ignore_ascii_case(path)
             || exact_key.as_ref().is_some_and(|key| {

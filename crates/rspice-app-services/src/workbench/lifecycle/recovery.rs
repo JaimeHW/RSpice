@@ -309,8 +309,7 @@ fn discover_candidate(
                                         .to_owned(),
                                 ),
                                 SourceSnapshotRelation::Unrecorded => Some(
-                                    "Checkpoint has no recorded saved-source identity"
-                                        .to_owned(),
+                                    "Checkpoint has no recorded saved-source identity".to_owned(),
                                 ),
                             },
                         },

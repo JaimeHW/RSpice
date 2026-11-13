@@ -1191,8 +1191,7 @@ mod tests {
             "\"/*/X1\""
         );
         assert_eq!(
-            serde_json::from_str::<InstancePathPattern>("\"/*/X1\"")
-                .expect("pattern loads"),
+            serde_json::from_str::<InstancePathPattern>("\"/*/X1\"").expect("pattern loads"),
             pattern
         );
         assert!(serde_json::from_str::<InstancePathPattern>("\"/**\"").is_err());
