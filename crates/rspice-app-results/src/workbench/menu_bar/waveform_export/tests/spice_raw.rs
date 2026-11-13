@@ -161,3 +161,169 @@ fn an_operating_point_is_refused_before_the_file_picker() {
         "{message}"
     );
 }
+
+/// A transient with two analog traces and event histories: `q1`
+/// drawn as a lane through its visible `D(q1)` column, `q0` and the real node
+/// `level` kept only as event history, and the bus `q` over both bits.
+fn mixed_transient() -> AnalysisResult {
+    use crate::state::{
+        DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+        DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+    };
+    let digital = |node: &str, points: &[(f64, u8)]| DigitalEventTraceEvidence {
+        node_name: node.to_owned(),
+        points: points
+            .iter()
+            .map(|&(time_s, value_code)| DigitalEventPointEvidence { time_s, value_code })
+            .collect(),
+    };
+    AnalysisResult::new(1, AnalysisType::Transient, "Mixed")
+        .with_waveforms(vec![
+            waveform("V(a)", vec![0.0, 1e-9], vec![0.0, 1.8]),
+            waveform("D(q1)", vec![0.0, 1e-9], vec![0.0, 1.0]),
+            waveform("V(b)", vec![0.0, 1e-9], vec![0.25, 0.5]),
+        ])
+        .with_result_payload(AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
+            voltage_impulses: None,
+            digital_traces: vec![
+                digital("q1", &[(0.0, 0), (5e-10, 1)]),
+                digital("q0", &[(0.0, 1), (7e-10, 0)]),
+            ],
+            real_traces: vec![RealEventTraceEvidence {
+                node_name: "level".to_owned(),
+                points: vec![RealEventPointEvidence {
+                    time_s: 2e-10,
+                    value: 0.75,
+                }],
+            }],
+            digital_buses: vec![DigitalBusEvidence {
+                name: "q".to_owned(),
+                msb: 1,
+                lsb: 0,
+                members: vec!["q1".to_owned(), "q0".to_owned()],
+                source: DigitalBusSourceEvidence::Engine,
+            }],
+        })
+}
+
+/// The rawfile follows the form's signal choice for traces and event lanes
+/// alike: "Plotted" writes the visible traces and the lanes on the plot, "All"
+/// every trace and every event node with its bus. Each file imports back into
+/// RSpice as one transient carrying exactly the event histories it wrote.
+#[test]
+fn a_rawfile_follows_the_signal_choice_and_reimports_with_its_event_lanes() {
+    use crate::workbench::workflows::result_import_workflow::{
+        commit_result_import_draft, stage_imported_result_dataset,
+    };
+    for (signals, traces, digital, real, buses) in [
+        (
+            ExportedSignals::Plotted,
+            &["V(a)", "D(q1)"][..],
+            &["q1"][..],
+            &[][..],
+            &[][..],
+        ),
+        (
+            ExportedSignals::All,
+            &["V(a)", "D(q1)", "V(b)"][..],
+            &["q1", "q0"][..],
+            &["level"][..],
+            &["q"][..],
+        ),
+    ] {
+        let mut state = state_with_typed_result(mixed_transient());
+        // The reader hides V(b).
+        crate::workbench::documents::result_document::toggle_visibility(
+            &mut state.results_parts(),
+            0,
+            2,
+        );
+        state
+            .model
+            .preferences
+            .set_choice(
+                crate::workbench::ChoicePreference::EngineeringExport,
+                RAW_BINARY,
+            )
+            .unwrap();
+        let io = MockExportWorkflowIo::default();
+        let choice = DatasetExportChoice {
+            signals,
+            ..DatasetExportChoice::default()
+        };
+        action_export_dataset_with_io(&mut state.results_parts(), &io, &choice);
+        let bytes = {
+            let files = io.byte_files.borrow();
+            assert_eq!(files.len(), 1, "{signals:?}: {}", last_log_message(&state));
+            files[0].1.clone()
+        };
+
+        stage_imported_result_dataset(&mut state.results_parts(), "waveforms.raw", &bytes)
+            .unwrap_or_else(|error| panic!("{signals:?}: {error}"));
+        assert!(state.results.result_import.plots.is_none(), "one analysis");
+        commit_result_import_draft(&mut state.results_parts()).unwrap();
+        let run = state
+            .model
+            .simulation
+            .active_run()
+            .expect("the import is shown");
+        assert_eq!(run.label, "Imported · waveforms.raw");
+        let [analysis] = run.analyses.as_slice() else {
+            panic!("{signals:?}: one analysis, got {}", run.analyses.len());
+        };
+        assert_eq!(analysis.analysis_type, AnalysisType::Transient);
+        let names = analysis
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, traces, "{signals:?}");
+        let Some(AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            digital_buses,
+            ..
+        }) = &analysis.result_payload
+        else {
+            panic!("{signals:?}: the event lanes import as event history");
+        };
+        let digital_names = digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .collect::<Vec<_>>();
+        let real_names = real_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .collect::<Vec<_>>();
+        let bus_names = digital_buses
+            .iter()
+            .map(|bus| bus.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                digital_names.as_slice(),
+                real_names.as_slice(),
+                bus_names.as_slice()
+            ),
+            (digital, real, buses),
+            "{signals:?}"
+        );
+        // The histories come back change for change, strength and all.
+        let original = mixed_transient();
+        let Some(AnalysisResultPayload::TransientEvents {
+            digital_traces: written,
+            ..
+        }) = &original.result_payload
+        else {
+            unreachable!()
+        };
+        for trace in digital_traces {
+            let source = written
+                .iter()
+                .find(|source| source.node_name == trace.node_name)
+                .unwrap();
+            assert_eq!(trace.points, source.points, "{}", trace.node_name);
+        }
+    }
+}
