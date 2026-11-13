@@ -10,9 +10,9 @@ use super::*;
 use crate::state::stimulus_library::draft::DefinitionDraft;
 use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, ComponentType, Point};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::stimulus as stimulus_verbs;
 use crate::workbench::state::PURPOSE_FIELD;
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::super::inspector::stimulus as inspector_dock;
 
@@ -55,8 +55,8 @@ fn announced(size: egui::Vec2, mut pass: impl FnMut(&mut egui::Ui)) -> Vec<Strin
 }
 
 /// Everything the browser announces for this state.
-fn browser(state: &mut AppState) -> Vec<String> {
-    announced(NAVIGATOR, |ui| show(ui, state))
+fn browser(app: &mut RSpiceApp) -> Vec<String> {
+    announced(NAVIGATOR, |ui| show(ui, &mut app.design_cx()))
 }
 
 /// Everything the inspector announces for this state.
@@ -106,7 +106,7 @@ fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
 fn definitions_are_grouped_under_the_family_they_realize() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
 
     for family in ["SIN", "PULSE", "PWL", "EXP", "AM", "SFFM", "PAT", "TRNOISE"] {
         assert!(
@@ -138,7 +138,7 @@ fn a_row_announces_its_meta_beside_its_name() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
 
     assert!(
         published
@@ -167,9 +167,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     assert!(
-        !browser(&mut app.state)
-            .iter()
-            .any(|run| run.contains("draft")),
+        !browser(&mut app).iter().any(|run| run.contains("draft")),
         "a clean library announced a draft"
     );
 
@@ -188,7 +186,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
         .draft_for(&saved)
         .edit(|working| working.params = "va=4m freq=2k".to_owned());
     assert!(
-        browser(&mut app.state)
+        browser(&mut app)
             .iter()
             .any(|run| run.contains("sensor_diff_1k") && run.contains("draft not applied")),
         "an unapplied draft was not announced"
@@ -211,7 +209,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
         .draft_for(&ramp)
         .edit(|working| working.params = "td=-1n".to_owned());
     assert!(
-        browser(&mut app.state)
+        browser(&mut app)
             .iter()
             .any(|run| run.contains("vdd_ramp_1ms") && run.contains("draft refused")),
         "a refused draft read the same as an ordinary one"
@@ -227,7 +225,7 @@ fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
     adopt(&mut app.state, 2, "V2", "vdd_operate");
 
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
     for option in ["All 14", "In use 2", "Unused 12"] {
         assert!(
             published.iter().any(|run| run == option),
@@ -236,7 +234,7 @@ fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
     }
 
     app.state.design.stimulus_browser.scope = StimulusScope::Adopted;
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
     assert!(
         published
             .iter()
@@ -263,14 +261,14 @@ fn a_filter_shows_its_matches_expanded_even_where_the_group_was_folded() {
         .for_workspace(Workspace::Stimulus)
         .toggle(folded_node(StimulusFamily::Am));
     assert!(
-        !browser(&mut app.state)
+        !browser(&mut app)
             .iter()
             .any(|run| run.starts_with("emi_am_150k")),
         "a folded group still listed its definitions"
     );
 
     app.state.workbench.set_navigator_filter("emi");
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
     assert!(
         published.iter().any(|run| run.starts_with("emi_am_150k")),
         "the filter's match stayed folded: {published:?}"
@@ -282,7 +280,7 @@ fn a_filter_shows_its_matches_expanded_even_where_the_group_was_folded() {
 #[test]
 fn an_unauthored_library_and_a_filter_that_matched_nothing_read_differently() {
     let mut empty = RSpiceApp::test_instance();
-    let published = browser(&mut empty.state);
+    let published = browser(&mut empty);
     assert!(published.contains(&"This project has no stimulus definitions".to_owned()));
     assert!(published.contains(&"New definition".to_owned()));
 
@@ -292,7 +290,7 @@ fn an_unauthored_library_and_a_filter_that_matched_nothing_read_differently() {
         .state
         .workbench
         .set_navigator_filter("nothing_matches_this");
-    let published = browser(&mut filtered.state);
+    let published = browser(&mut filtered);
     assert!(published.contains(&"No definition matches this filter".to_owned()));
     assert!(published.contains(&"Clear filters".to_owned()));
     assert!(!published.contains(&"This project has no stimulus definitions".to_owned()));
@@ -311,7 +309,7 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
     adopt(&mut app.state, 2, "V2", "bridge_cal_step");
 
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
     assert!(
         published.iter().any(|run| run == "In use 1"),
         "the scope strip counts definitions: {published:?}"
@@ -349,7 +347,7 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
         .content
         .stimulus_library
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
-    let published = browser(&mut app.state);
+    let published = browser(&mut app);
     assert!(
         published
             .iter()
@@ -367,15 +365,15 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
 fn the_minis_are_evaluated_once_across_two_frames() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    let _ = browser(&mut app.state);
+    let _ = browser(&mut app);
     let after_first = app.state.design.stimulus_browser.evaluations();
     assert_eq!(
         after_first, 14,
         "every fixture definition should have been evaluated exactly once"
     );
 
-    let _ = browser(&mut app.state);
-    let _ = browser(&mut app.state);
+    let _ = browser(&mut app);
+    let _ = browser(&mut app);
     assert_eq!(
         app.state.design.stimulus_browser.evaluations(),
         after_first,
@@ -401,7 +399,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
         .content
         .stimulus_library
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
-    let _ = browser(&mut app.state);
+    let _ = browser(&mut app);
     assert_eq!(
         app.state.design.stimulus_browser.evaluations(),
         after_first + 1,
@@ -417,7 +415,7 @@ fn a_family_with_no_waveform_at_this_boundary_holds_its_refusal_rather_than_a_cu
 
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    let _ = browser(&mut app.state);
+    let _ = browser(&mut app);
     let browser_state = &app.state.design.stimulus_browser;
 
     let sine = browser_state

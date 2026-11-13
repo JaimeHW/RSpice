@@ -289,7 +289,7 @@ impl Host for RSpiceApp {
                         features::show_navigator::<SimulateFeature>(app, ui);
                         app.after_contribution();
                     }
-                    Workspace::Stimulus => stimulus::show(ui, &mut app.state),
+                    Workspace::Stimulus => stimulus::show(ui, &mut features::cx(app)),
                     Workspace::Verify => features::show_navigator::<SimulateFeature>(app, ui),
                     Workspace::Models => features::show_navigator::<ModelsFeature>(app, ui),
                 }

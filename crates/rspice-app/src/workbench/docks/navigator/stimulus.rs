@@ -38,9 +38,11 @@ use crate::state::stimulus_library::definition::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{ViewOption, view_switch};
+use crate::workbench::MessageId;
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, AdopterTally};
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::{NavigatorTreeNode, Workspace};
-use crate::workbench::{AppState, MessageId};
 use browser_state::{StimulusBrowserState, StimulusScope};
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, labeled_icon_button};
@@ -79,26 +81,25 @@ struct Row<'a> {
     curve: &'a Result<WaveformTrace, String>,
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.model.workspace.content.stimulus_library.is_empty() {
-        show_empty(ui, state);
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    if cx.model.workspace.content.stimulus_library.is_empty() {
+        show_empty(ui, cx);
         return;
     }
     // The minis are lifted out of the workbench for the length of the frame so
     // the rows can borrow them: a row that cloned its curve would copy
     // sixty-four samples per definition per frame to draw a picture the cache
     // is already holding.
-    let mut browser = std::mem::take(&mut state.design.stimulus_browser);
-    let timing =
-        crate::workbench::app::actions::property_edit::stimulus_preview_timing(&state.model);
-    browser.minis(&state.model.workspace.content.stimulus_library, timing);
-    let tally = stimulus_actions::design_adopter_tally(&state.model);
-    let counts = scope_counts(state, &tally);
+    let mut browser = std::mem::take(&mut cx.state.stimulus_browser);
+    let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(cx.model);
+    browser.minis(&cx.model.workspace.content.stimulus_library, timing);
+    let tally = stimulus_actions::design_adopter_tally(cx.model);
+    let counts = scope_counts(cx, &tally);
     let mut scope = browser.scope;
     let mut chosen = None;
     let mut folded = None;
 
-    let report = footer_report(state, &counts);
+    let report = footer_report(cx, &counts);
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let scope_rect =
@@ -120,11 +121,11 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
         scope = scope_strip(ui, scope, &counts);
     });
     {
-        let groups = groups(state, &browser, scope, &tally);
-        let selected = state.design.selected_stimulus_definition.clone();
+        let groups = groups(cx, &browser, scope, &tally);
+        let selected = cx.state.selected_stimulus_definition.clone();
         in_band(ui, tree_rect, |ui| {
             if groups.is_empty() {
-                no_match(ui, state, &mut scope);
+                no_match(ui, cx, &mut scope);
                 return;
             }
             ScrollArea::vertical()
@@ -156,16 +157,15 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     }
 
     browser.scope = scope;
-    state.design.stimulus_browser = browser;
+    cx.state.stimulus_browser = browser;
     if let Some(family) = folded {
-        state
-            .workbench
+        cx.wb
             .navigator_trees
             .for_workspace(Workspace::Stimulus)
             .toggle(folded_node(family));
     }
     if let Some(name) = chosen {
-        state.design.selected_stimulus_definition = Some(name);
+        cx.state.selected_stimulus_definition = Some(name);
     }
 }
 
@@ -186,16 +186,16 @@ struct ScopeCounts {
     advisories: usize,
 }
 
-fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
+fn scope_counts(cx: &Cx<'_, DesignFeature>, tally: &Tally) -> ScopeCounts {
     let mut counts = ScopeCounts {
-        all: state.model.workspace.content.stimulus_library.len(),
+        all: cx.model.workspace.content.stimulus_library.len(),
         adopted: 0,
         unadopted: 0,
         total: AdopterTally::default(),
         errors: 0,
         advisories: 0,
     };
-    for definition in state.model.workspace.content.stimulus_library.definitions() {
+    for definition in cx.model.workspace.content.stimulus_library.definitions() {
         let held = tally.get(definition.name());
         let adopters = held.map_or(0, |held| held.adopters);
         if adopters > 0 {
@@ -205,14 +205,13 @@ fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
         }
         counts.total.adopters += adopters;
         counts.total.behind += held.map_or(0, |held| held.behind);
-        let record = live_record(state, definition);
+        let record = live_record(cx, definition);
         if crate::simulation::stimulus_realize::definition_card_text(&record, DETACHED_NETS)
             .is_err()
         {
             counts.errors += 1;
         }
-        for finding in stimulus_actions::contract_findings(&state.design.property_registry, &record)
-        {
+        for finding in stimulus_actions::contract_findings(&cx.state.property_registry, &record) {
             if finding.strength == ContractStrength::Refusal {
                 counts.errors += 1;
             } else {
@@ -226,9 +225,8 @@ fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
 /// The record a row states facts about: the draft when one is open, so the
 /// browser's dot, the footer's tally and the instrument's audit strip are all
 /// looking at the same unapplied edit.
-fn live_record(state: &AppState, definition: &StimulusDefinition) -> StimulusDefinition {
-    state
-        .design
+fn live_record(cx: &Cx<'_, DesignFeature>, definition: &StimulusDefinition) -> StimulusDefinition {
+    cx.state
         .stimulus_editor
         .draft(definition.name())
         .map_or_else(|| definition.clone(), |draft| draft.working().clone())
@@ -240,16 +238,16 @@ fn live_record(state: &AppState, definition: &StimulusDefinition) -> StimulusDef
 /// group: a reader narrowing a library to one name should not be handed eleven
 /// empty headings to scroll past.
 fn groups<'a>(
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     browser: &'a StimulusBrowserState,
     scope: StimulusScope,
     tally: &Tally,
 ) -> Vec<Group<'a>> {
-    let query = state.workbench.navigator_filter().trim().to_lowercase();
+    let query = cx.wb.navigator_filter().trim().to_lowercase();
     StimulusFamily::ALL
         .into_iter()
         .filter_map(|family| {
-            let rows: Vec<Row<'a>> = state
+            let rows: Vec<Row<'a>> = cx
                 .model
                 .workspace
                 .content
@@ -265,7 +263,7 @@ fn groups<'a>(
                     if !matches(definition, held, &query) {
                         return None;
                     }
-                    Some(row(state, browser, definition, held))
+                    Some(row(cx, browser, definition, held))
                 })
                 .collect();
             if rows.is_empty() {
@@ -277,8 +275,8 @@ fn groups<'a>(
                 // it leaves standing is open: a reader who typed a name and was
                 // shown a closed heading would read it as no match at all.
                 expanded: !query.is_empty()
-                    || !state
-                        .workbench
+                    || !cx
+                        .wb
                         .navigator_trees
                         .holds(Workspace::Stimulus, &folded_node(family)),
                 rows,
@@ -307,18 +305,18 @@ fn matches(definition: &StimulusDefinition, tally: Option<&AdopterTally>, query:
 
 /// One definition's row.
 fn row<'a>(
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     browser: &'a StimulusBrowserState,
     definition: &StimulusDefinition,
     tally: Option<&AdopterTally>,
 ) -> Row<'a> {
-    let dirty = state.design.stimulus_editor.is_dirty(definition.name());
+    let dirty = cx.state.stimulus_editor.is_dirty(definition.name());
     Row {
         name: definition.name().to_owned(),
         gap: crate::properties::source_preview::MiniGap::of(definition),
         meta: meta_line(definition, tally),
         dirty,
-        refused: dirty && draft_is_refused(state, definition),
+        refused: dirty && draft_is_refused(cx, definition),
         curve: browser
             .mini(definition.name(), definition.revision())
             .unwrap_or(&source_preview::NO_MINI),
@@ -330,10 +328,10 @@ fn row<'a>(
 /// Asked only of a definition that has one. The engine contract over a saved
 /// revision is what the footer's tally states; a per-row dot in error tone is
 /// about work in progress, which is the only thing a press can still fix here.
-fn draft_is_refused(state: &AppState, definition: &StimulusDefinition) -> bool {
-    let record = live_record(state, definition);
+fn draft_is_refused(cx: &Cx<'_, DesignFeature>, definition: &StimulusDefinition) -> bool {
+    let record = live_record(cx, definition);
     crate::simulation::stimulus_realize::definition_card_text(&record, DETACHED_NETS).is_err()
-        || stimulus_actions::contract_findings(&state.design.property_registry, &record)
+        || stimulus_actions::contract_findings(&cx.state.property_registry, &record)
             .iter()
             .any(|finding| finding.strength == ContractStrength::Refusal)
 }
@@ -412,8 +410,8 @@ fn scope_strip(ui: &mut Ui, scope: StimulusScope, counts: &ScopeCounts) -> Stimu
 /// raised: the two states a reader has to act on. Every placed source in
 /// step and a clean audit is the normal state, and a permanent band spelling
 /// it "no adopters · 0 E · 0 W" reported the absence of a problem.
-fn footer_report(state: &AppState, counts: &ScopeCounts) -> Option<(String, Problem)> {
-    let messages = state.workbench.messages();
+fn footer_report(cx: &Cx<'_, DesignFeature>, counts: &ScopeCounts) -> Option<(String, Problem)> {
+    let messages = cx.wb.messages();
     let behind = (counts.total.behind > 0).then(|| {
         messages.format(
             if counts.total.behind == 1 {
@@ -483,8 +481,8 @@ fn footer(ui: &mut Ui, report: &(String, Problem)) {
 }
 
 /// A library nobody has authored into, and the one verb that resolves it.
-fn show_empty(ui: &mut Ui, state: &mut AppState) {
-    let messages = state.workbench.messages();
+fn show_empty(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let messages = cx.wb.messages();
     empty_navigator_row(ui, &messages.text(MessageId::StimulusBrowserEmpty));
     let label = messages.text(MessageId::StimulusNewDefinition);
     let mut create = false;
@@ -494,18 +492,18 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
     });
     if create {
         stimulus_actions::new_definition(
-            &mut state.design.selected_stimulus_definition,
-            &mut state.design.stimulus_editor,
-            &mut state.model,
-            &mut state.workbench,
+            &mut cx.state.selected_stimulus_definition,
+            &mut cx.state.stimulus_editor,
+            cx.model,
+            cx.wb,
         );
     }
 }
 
 /// A filter and a scope that between them left nothing, and the one press that
 /// undoes both.
-fn no_match(ui: &mut Ui, state: &mut AppState, scope: &mut StimulusScope) {
-    let messages = state.workbench.messages();
+fn no_match(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, scope: &mut StimulusScope) {
+    let messages = cx.wb.messages();
     empty_navigator_row(ui, &messages.text(MessageId::StimulusBrowserNoMatch));
     let label = messages.text(MessageId::StimulusBrowserClearFilters);
     let mut cleared = false;
@@ -514,7 +512,7 @@ fn no_match(ui: &mut Ui, state: &mut AppState, scope: &mut StimulusScope) {
         cleared |= labeled_icon_button(ui, WorkbenchIcon::Close, &label, false, 150.0).clicked();
     });
     if cleared {
-        state.workbench.clear_navigator_filter();
+        cx.wb.clear_navigator_filter();
         *scope = StimulusScope::All;
     }
 }
