@@ -226,7 +226,7 @@ pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHie
     match request {
         DescendHierarchy::EditSymbolInPlace => {
             state.design.descend_hierarchy.close();
-            state.edit_selected_symbol_in_place();
+            state.navigation().edit_selected_symbol_in_place();
         }
         DescendHierarchy::Open {
             edit_mode,
@@ -596,7 +596,8 @@ mod tests {
             CellViewRef::new("hierarchy_test", "afe_core", "symbol")
         );
         assert_eq!(
-            state.symbol_in_place().map(|session| &session.parent),
+            crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+                .map(|session| &session.parent),
             Some(&parent),
             "the symbol is edited on the sheet, not descended into"
         );

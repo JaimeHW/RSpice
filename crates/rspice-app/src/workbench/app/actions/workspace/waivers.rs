@@ -4,67 +4,10 @@
 //! the reader stores its own through its editor. Either way the run gate's
 //! report is dropped and every published finding is stated again.
 
-use crate::workbench::app_state::waivers::{StoredWaiverEdit, StoredWaivers, WaiverTarget};
-use crate::workbench::app_state::{AppState, Model, SlotFacts};
+use crate::workbench::app_state::waivers::StoredWaivers;
+use crate::workbench::app_state::{Model, SlotFacts};
 
-use super::symbol_document::{record_symbol_edit, run_active_symbol_pin_checks};
-
-impl AppState {
-    /// [`restate_waived_findings`] for the session.
-    #[cfg(test)]
-    pub(crate) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
-        let facts = self.slot_facts();
-        restate_waived_findings(&mut self.model, facts, before)
-    }
-
-    /// Waive the finding at `target` for `reason`, as an edit of the document
-    /// that stores it, and state every published finding again.
-    // Application half of a model operation; it becomes a request.
-    pub(crate) fn waive_finding(
-        &mut self,
-        target: &WaiverTarget,
-        reason: &str,
-    ) -> Result<(), String> {
-        let edit = StoredWaiverEdit::waive(target, reason)?;
-        self.edit_waivers(&target.cell_view, edit)
-    }
-
-    /// Remove the waiver stored at `target`, as an edit of the document that
-    /// stores it, and state every published finding again.
-    // Application half of a model operation; it becomes a request.
-    pub(crate) fn remove_finding_waiver(&mut self, target: &WaiverTarget) -> Result<(), String> {
-        self.edit_waivers(&target.cell_view, StoredWaiverEdit::remove(target))
-    }
-
-    fn edit_waivers(
-        &mut self,
-        cell_view: &crate::state::CellViewRef,
-        edit: StoredWaiverEdit,
-    ) -> Result<(), String> {
-        if let Some(edit) = self.model.edit_held_waivers(cell_view, edit)? {
-            self.edit_active_symbol_waivers(edit)?;
-            // The pin checks read the symbol document, waivers and all,
-            // so they are asked again rather than left stale.
-            let facts = self.slot_facts();
-            run_active_symbol_pin_checks(&mut self.model, facts);
-        }
-        self.runs.preflight.invalidate();
-        self.restate_design_checks();
-        Ok(())
-    }
-
-    fn edit_active_symbol_waivers(&mut self, edit: StoredWaiverEdit) -> Result<(), String> {
-        let before = self.model.load_active_symbol_document()?;
-        let mut document = before.clone();
-        edit.apply(&mut document.waivers)?;
-        if document == before {
-            return Ok(());
-        }
-        self.store_active_symbol_document(&document)?;
-        record_symbol_edit(&mut self.design.symbol, &self.model, &before);
-        Ok(())
-    }
-}
+use super::symbol_document::run_active_symbol_pin_checks;
 
 /// State the findings again where a history step changed the waivers
 /// stored as they were in `before`. Returns whether a schematic's

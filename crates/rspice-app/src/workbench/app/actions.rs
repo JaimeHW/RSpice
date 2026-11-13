@@ -8,7 +8,7 @@
 
 pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
-mod hierarchy_net_highlight;
+pub(in crate::workbench) mod hierarchy_net_highlight;
 pub(in crate::workbench) mod property_edit;
 pub(in crate::workbench) mod reveal;
 #[cfg(test)]

@@ -199,7 +199,13 @@ impl Fixture {
             self.app.state.model.workspace.content.active_view,
             self.symbol
         );
-        assert!(self.app.state.symbol_in_place().is_some());
+        assert!(
+            crate::workbench::app::in_place_session(
+                &self.app.state.design.symbol.in_place,
+                &self.app.state.model
+            )
+            .is_some()
+        );
         self.frame(vec![]);
     }
 
@@ -263,15 +269,20 @@ impl Fixture {
     }
 
     fn leaving(&self) -> bool {
-        self.app
-            .state
-            .symbol_in_place()
-            .is_some_and(|session| session.leaving.is_some())
+        crate::workbench::app::in_place_session(
+            &self.app.state.design.symbol.in_place,
+            &self.app.state.model,
+        )
+        .is_some_and(|session| session.leaving.is_some())
     }
 
     fn on_parent(&self) -> bool {
         self.app.state.model.workspace.content.active_view == self.parent
-            && self.app.state.symbol_in_place().is_none()
+            && crate::workbench::app::in_place_session(
+                &self.app.state.design.symbol.in_place,
+                &self.app.state.model,
+            )
+            .is_none()
     }
 }
 
@@ -504,12 +515,23 @@ fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
     assert!(fixture.leaving(), "Escape with an edit asks");
     fixture.key(egui::Key::Escape);
     assert!(!fixture.leaving(), "Escape in the question cancels it");
-    assert!(fixture.app.state.symbol_in_place().is_some(), "and stays");
+    assert!(
+        crate::workbench::app::in_place_session(
+            &fixture.app.state.design.symbol.in_place,
+            &fixture.app.state.model
+        )
+        .is_some(),
+        "and stays"
+    );
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, 20)));
 
     fixture.key(egui::Key::Escape);
     assert!(fixture.leaving());
-    fixture.app.state.discard_and_leave_symbol_in_place();
+    fixture
+        .app
+        .state
+        .navigation()
+        .discard_and_leave_symbol_in_place();
     assert!(fixture.on_parent(), "Discard leaves");
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, -10)));
 }
@@ -525,7 +547,11 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
     let mut fixture = Fixture::new(&[(Point::new(100, 80), Rotation::R0, false)]);
     fixture.enter(0);
     let view = |fixture: &Fixture| {
-        let session = fixture.app.state.symbol_in_place().unwrap();
+        let session = crate::workbench::app::in_place_session(
+            &fixture.app.state.design.symbol.in_place,
+            &fixture.app.state.model,
+        )
+        .unwrap();
         (session.zoom, session.pan)
     };
     let entered = view(&fixture);
@@ -536,7 +562,13 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
 
     fixture.app.state.workbench.activate(Workspace::Simulate);
     assert_eq!(fixture.app.state.workbench.workspace, Workspace::Simulate);
-    assert!(fixture.app.state.symbol_in_place().is_some());
+    assert!(
+        crate::workbench::app::in_place_session(
+            &fixture.app.state.design.symbol.in_place,
+            &fixture.app.state.model
+        )
+        .is_some()
+    );
     assert_eq!(
         Command::ZoomPrevious.availability(&fixture.app),
         CommandAvailability::Disabled("open a schematic or symbol"),

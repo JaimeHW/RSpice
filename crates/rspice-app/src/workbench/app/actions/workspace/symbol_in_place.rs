@@ -9,7 +9,7 @@
 mod tests;
 
 use crate::state::{CellViewRef, ComponentType, ViewType};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 use super::symbol_document::{
@@ -284,43 +284,20 @@ pub(crate) fn in_place_bounds(
     ))
 }
 
-impl AppState {
-    /// [`in_place_session`] for the session's model.
-    pub(crate) fn symbol_in_place(&self) -> Option<&SymbolInPlace> {
-        in_place_session(&self.design.symbol.in_place, &self.model)
-    }
-
-    /// [`NavigationParts::edit_selected_symbol_in_place`] for the session.
-    pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
-        self.navigation().edit_selected_symbol_in_place()
-    }
-
-    /// Whether Esc has nothing of the canvas's own to cancel first, so it
-    /// leaves the in-place edit instead.
-    pub(crate) fn symbol_in_place_canvas_idle(&self) -> bool {
-        let editor = &self.design.symbol.editor;
-        self.symbol_in_place().is_some()
-            && editor.tool == crate::workbench::SymbolTool::Select
-            && editor.pending_polyline.is_empty()
-            && editor.shape_start.is_none()
-            && editor.marquee_start.is_none()
-            && editor.dragging_pin.is_none()
-            && editor.dragging_shape.is_none()
-            && editor.dragging_label.is_none()
-            && editor.dragging_group.is_none()
-            && !editor.dragging_origin
-    }
-
-    /// [`NavigationParts::request_symbol_in_place_exit`] for the session.
-    pub(crate) fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
-        self.navigation().request_symbol_in_place_exit(exit);
-    }
-
-    /// [`NavigationParts::discard_and_leave_symbol_in_place`] for the session.
-    #[cfg(test)]
-    pub(crate) fn discard_and_leave_symbol_in_place(&mut self) {
-        self.navigation().discard_and_leave_symbol_in_place();
-    }
+/// Whether Esc has nothing of the symbol canvas's own to cancel first, so
+/// it leaves the in-place edit instead.
+pub(crate) fn symbol_in_place_canvas_idle(symbol: &SymbolUiState, model: &Model) -> bool {
+    let editor = &symbol.editor;
+    in_place_session(&symbol.in_place, model).is_some()
+        && editor.tool == crate::workbench::SymbolTool::Select
+        && editor.pending_polyline.is_empty()
+        && editor.shape_start.is_none()
+        && editor.marquee_start.is_none()
+        && editor.dragging_pin.is_none()
+        && editor.dragging_shape.is_none()
+        && editor.dragging_label.is_none()
+        && editor.dragging_group.is_none()
+        && !editor.dragging_origin
 }
 
 /// Walk the open symbol's history back to the in-place baseline, then store

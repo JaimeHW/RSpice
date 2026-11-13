@@ -7,7 +7,9 @@
 use rspice_design::drc::DrcResult;
 
 use super::AppState;
+use super::waivers::StoredWaivers;
 use crate::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
+use crate::workbench::app::actions::hierarchy_net_highlight::light_net_named;
 use crate::workbench::app::actions::workspace::design_checks::check_active_cellview;
 use crate::workbench::app::actions::workspace::history::{
     activate_history_document, redo_project_design, undo_project_design,
@@ -17,6 +19,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
     redo_active_symbol_document, refuse_unsavable_active_symbol, store_active_symbol_editor_bundle,
     undo_active_symbol_document,
 };
+use crate::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use crate::workbench::state::InlineEditAuthority;
 
 impl AppState {
@@ -105,5 +108,16 @@ impl AppState {
     /// [`redo_active_symbol_document`] for the session.
     pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
         redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
+    }
+
+    /// [`restate_waived_findings`] for the session.
+    pub(crate) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
+        let facts = self.slot_facts();
+        restate_waived_findings(&mut self.model, facts, before)
+    }
+
+    /// [`light_net_named`] for the session's model.
+    pub(crate) fn light_net_named(&mut self, name: &str) -> bool {
+        light_net_named(&mut self.model, name)
     }
 }

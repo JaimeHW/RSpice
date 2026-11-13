@@ -387,10 +387,15 @@ impl Command {
                 );
             }
             Self::Cancel => {
-                if active_symbol_editor(app) && app.state.symbol_in_place_canvas_idle() {
+                if active_symbol_editor(app)
+                    && super::app::actions::workspace::symbol_in_place::symbol_in_place_canvas_idle(
+                        &app.state.design.symbol,
+                        &app.state.model,
+                    )
+                {
                     // Nothing on the canvas to cancel: Escape leaves the
                     // in-place edit, as Return does.
-                    app.state.request_symbol_in_place_exit(
+                    app.state.navigation().request_symbol_in_place_exit(
                         super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
                     );
                 } else if active_symbol_editor(app) {

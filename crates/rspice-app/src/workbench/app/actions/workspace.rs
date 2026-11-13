@@ -10,7 +10,7 @@ pub(in crate::workbench) mod history;
 mod navigation;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;
-mod waivers;
+pub(in crate::workbench) mod waivers;
 
 use crate::diagnostics::LogAnchor;
 use crate::state::{CellViewRef, ComponentType, RetainedSimulationState, SchematicState, ViewType};

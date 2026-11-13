@@ -18,7 +18,7 @@ use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 use crate::state::SchematicNetHighlighting;
 use crate::workbench::app::actions::workspace::NavigationParts;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 
 /// What a step between occurrences carries.
 pub(crate) enum NetCarry {
@@ -28,14 +28,6 @@ pub(crate) enum NetCarry {
     Ascend,
     /// Nothing: a jump of several levels, or a new root.
     Nothing,
-}
-
-impl AppState {
-    /// [`light_net_named`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn light_net_named(&mut self, name: &str) -> bool {
-        light_net_named(&mut self.model, name)
-    }
 }
 
 impl NavigationParts<'_> {
