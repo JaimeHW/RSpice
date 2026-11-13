@@ -4,30 +4,13 @@
 
 use super::*;
 use rspice_schematic_editor::view::navigation::{
-    SCHEMATIC_ZOOM_MAX, SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request, zoom_floor,
+    SCHEMATIC_ZOOM_MAX, ZoomRequest, apply_zoom_request, zoom_floor,
 };
 
 impl SchematicState {
     // =========================================================================
     // Viewport Management
     // =========================================================================
-
-    /// Zoom to fit all schematic content in the viewport.
-    ///
-    /// Sets zoom and pan so all components and wires are visible with comfortable margins.
-    ///
-    /// Parameters:
-    /// - `viewport_width`: Width of the schematic canvas in pixels
-    /// - `viewport_height`: Height of the schematic canvas in pixels
-    pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
-        // Calculate bounding box of all content (in schematic pixel coordinates)
-        self.zoom_to_fit_bounds(
-            self.content_bounds(),
-            viewport_width,
-            viewport_height,
-            SCHEMATIC_ZOOM_MIN,
-        );
-    }
 
     /// The lowest zoom this canvas offers for the sheet `paper` frames: 25 %,
     /// or the zoom that fits the whole sheet when that is lower.
@@ -168,7 +151,7 @@ impl SchematicState {
 
     /// Pan so `target` (schematic pixel coordinates) sits at the viewport
     /// center, keeping the current zoom. Same screen mapping as
-    /// `zoom_to_fit`: screen = bounds.min + pan + schematic * zoom.
+    /// `zoom_to_fit_bounds`: screen = bounds.min + pan + schematic * zoom.
     pub fn center_view_on(&mut self, target: Point, viewport_width: f64, viewport_height: f64) {
         self.session.editor.pan = (
             viewport_width / 2.0 - f64::from(target.x) * self.session.editor.zoom,
@@ -294,7 +277,7 @@ mod tests {
             1200.0,
             800.0,
             24.0,
-            super::SCHEMATIC_ZOOM_MIN,
+            rspice_schematic_editor::view::navigation::SCHEMATIC_ZOOM_MIN,
         );
 
         let left = state.session.editor.pan.0 + -140.0 * state.session.editor.zoom;

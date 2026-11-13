@@ -7,7 +7,6 @@ pub use rspice_results::engineering_table::*;
 use crate::state::{ComponentType, SchematicState};
 
 pub const ACTIVE_SCHEMATIC_GRID_ID: &str = "active-schematic-objects";
-pub const VIRTUALIZATION_OVERSCAN: usize = 24;
 
 pub fn active_schematic_dataset(schematic: &SchematicState) -> EngineeringDataset {
     let columns = [
