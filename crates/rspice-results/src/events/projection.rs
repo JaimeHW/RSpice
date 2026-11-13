@@ -163,6 +163,14 @@ pub fn bus_word(codes: &[Option<u8>], radix: BusRadix) -> BusWord {
             text: hex_word(&resolved),
             fallback: None,
         },
+        BusRadix::Octal => BusWord {
+            text: octal_word(&resolved),
+            fallback: None,
+        },
+        BusRadix::Ascii => BusWord {
+            text: ascii_word(&resolved),
+            fallback: None,
+        },
         BusRadix::Unsigned | BusRadix::Signed => {
             if resolved.len() > MAX_DECIMAL_BUS_BITS {
                 return BusWord {
@@ -217,6 +225,59 @@ fn hex_word(bits: &[bool]) -> String {
     for digit in digits.iter().rev() {
         text.push(char::from_digit(u32::from(*digit), 16).unwrap_or('?'));
     }
+    text
+}
+
+/// The digits of a fully resolved word, declared MSB first, in groups of
+/// `bits` from the least significant bit, most significant group first.
+/// A width that is not a multiple of the group leaves the leading group short.
+fn grouped(bits: &[bool], size: usize) -> Vec<u8> {
+    let mut groups: Vec<u8> = bits
+        .rchunks(size)
+        .map(|group| {
+            group
+                .iter()
+                .fold(0_u8, |value, bit| (value << 1) | u8::from(*bit))
+        })
+        .collect();
+    groups.reverse();
+    groups
+}
+
+/// The octal spelling of a fully resolved word.
+fn octal_word(bits: &[bool]) -> String {
+    let mut text = String::from("0o");
+    for digit in grouped(bits, 3) {
+        text.push(char::from_digit(u32::from(digit), 8).unwrap_or('?'));
+    }
+    text
+}
+
+/// The ASCII spelling of a fully resolved word, quoted: eight bits to a
+/// character from the least significant bit, as a Verilog string holds them.
+///
+/// A string narrower than its variable is padded on the left with zero bytes,
+/// so leading NULs are the padding and are not shown; a word that is all
+/// zero reads as one NUL. A byte that is no printable character, and the
+/// quote and backslash, are written as escapes, so every word reads back to
+/// exactly one value.
+fn ascii_word(bits: &[bool]) -> String {
+    let bytes = grouped(bits, 8);
+    let first = bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(bytes.len().saturating_sub(1));
+    let mut text = String::from("\"");
+    for byte in &bytes[first..] {
+        match byte {
+            b'"' => text.push_str("\\\""),
+            b'\\' => text.push_str("\\\\"),
+            0 => text.push_str("\\0"),
+            0x20..=0x7e => text.push(char::from(*byte)),
+            _ => text.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    text.push('"');
     text
 }
 
@@ -954,6 +1015,40 @@ mod tests {
         assert_eq!(word.text, "0x1ffffffffffffffff");
         assert_eq!(bus_word(&ones, BusRadix::Hex).fallback, None);
         assert_eq!(bus_word(&ones, BusRadix::Binary).text, "1".repeat(65));
+    }
+
+    fn codes(bits: &str) -> Vec<Option<u8>> {
+        bits.chars().map(|bit| Some(u8::from(bit == '1'))).collect()
+    }
+
+    #[test]
+    fn octal_groups_three_bits_from_the_least_significant() {
+        assert_eq!(bus_word(&codes("1111"), BusRadix::Octal).text, "0o17");
+        assert_eq!(bus_word(&codes("101110"), BusRadix::Octal).text, "0o56");
+        assert_eq!(bus_word(&codes("0"), BusRadix::Octal).text, "0o0");
+        // Wider than a machine integer, still exact.
+        let wide = bus_word(&[Some(1_u8); 66], BusRadix::Octal);
+        assert_eq!((wide.text.len(), wide.fallback), (24, None));
+        let unknown = bus_word(&[Some(1), Some(2), Some(0)], BusRadix::Octal);
+        assert_eq!(unknown.text, "1x0");
+        assert_eq!(unknown.fallback, Some(UNRESOLVED_BITS_FALLBACK));
+    }
+
+    #[test]
+    fn ascii_reads_eight_bits_to_a_character_and_escapes_the_rest() {
+        let text = |bits: String| bus_word(&codes(&bits), BusRadix::Ascii).text;
+        let bytes =
+            |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:08b}")).collect() };
+        assert_eq!(text(bytes(b"OK")), "\"OK\"");
+        // Leading NULs are a string's left padding.
+        assert_eq!(text(bytes(b"\0\0Hi")), "\"Hi\"");
+        assert_eq!(text(bytes(&[0, 0])), "\"\\0\"");
+        assert_eq!(
+            text(bytes(&[b'a', 0x07, b'"', b'\\'])),
+            "\"a\\x07\\\"\\\\\""
+        );
+        // A width that is not whole bytes pads the leading character.
+        assert_eq!(text("1000001".to_owned()), "\"A\"");
     }
 
     #[test]

@@ -153,7 +153,11 @@ pub fn value_column_chars(specs: &[LaneSpec]) -> usize {
                 let decimal = |bits: u32| 2_f64.powi(bits as i32).log10().ceil() as usize;
                 let word = match view.radix {
                     BusRadix::Binary => width,
+                    BusRadix::Octal => 2 + width.div_ceil(3),
                     BusRadix::Hex => 2 + width.div_ceil(4),
+                    // Quoted, and a byte that is no printable character is
+                    // an escape of four.
+                    BusRadix::Ascii => 2 + 4 * width.div_ceil(8),
                     BusRadix::Unsigned => decimal(width as u32),
                     BusRadix::Signed => 1 + decimal(width.saturating_sub(1) as u32),
                 };

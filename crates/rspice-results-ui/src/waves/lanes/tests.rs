@@ -326,3 +326,40 @@ fn the_cursor_table_reads_logic_and_bus_lanes_at_both_cursors() {
         .collect();
     assert_eq!(cells, [("clk", "1", "0"), ("q[1:0]", "01", "10")]);
 }
+
+#[test]
+fn the_cursor_reads_a_bus_in_octal_and_ascii() {
+    let model = model(&["D(clk)", "D(q[1])", "D(q[0])"]);
+    for (radix, a, b) in [
+        (BusRadix::Octal, "0o1", "0o2"),
+        (BusRadix::Ascii, "\"\\x01\"", "\"\\x02\""),
+    ] {
+        let layout = EventLaneLayout {
+            buses: [(
+                "q[1:0]".to_owned(),
+                BusView {
+                    radix,
+                    expanded: false,
+                },
+            )]
+            .into(),
+            ..EventLaneLayout::default()
+        };
+        let specs = lane_specs(&model, Some(&layout));
+        let rows = lane_readout_rows(
+            &model,
+            &specs,
+            &vec![None; specs.len()],
+            CursorPair {
+                a: Some(10.0 * NS),
+                b: Some(30.0 * NS),
+            },
+            4,
+        );
+        assert_eq!(
+            (rows[1].a.as_str(), rows[1].b.as_str()),
+            (a, b),
+            "{radix:?}"
+        );
+    }
+}

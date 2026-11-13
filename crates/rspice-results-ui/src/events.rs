@@ -604,22 +604,22 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
         toggled_bus,
     }
 }
-const BUS_RADIX_OPTIONS: [&str; 4] = ["BIN", "HEX", "DEC", "±DEC"];
+const BUS_RADIX_OPTIONS: [&str; 6] = [
+    BusRadix::ALL[0].short_label(),
+    BusRadix::ALL[1].short_label(),
+    BusRadix::ALL[2].short_label(),
+    BusRadix::ALL[3].short_label(),
+    BusRadix::ALL[4].short_label(),
+    BusRadix::ALL[5].short_label(),
+];
 fn bus_radix_index(radix: BusRadix) -> usize {
-    match radix {
-        BusRadix::Binary => 0,
-        BusRadix::Hex => 1,
-        BusRadix::Unsigned => 2,
-        BusRadix::Signed => 3,
-    }
+    BusRadix::ALL
+        .iter()
+        .position(|candidate| *candidate == radix)
+        .unwrap_or(0)
 }
 fn bus_radix_from_index(index: usize) -> BusRadix {
-    match index {
-        1 => BusRadix::Hex,
-        2 => BusRadix::Unsigned,
-        3 => BusRadix::Signed,
-        _ => BusRadix::Binary,
-    }
+    BusRadix::ALL.get(index).copied().unwrap_or_default()
 }
 pub fn domain_bar(ui: &mut Ui, radix: &mut BusRadix) {
     let mut index = bus_radix_index(*radix);

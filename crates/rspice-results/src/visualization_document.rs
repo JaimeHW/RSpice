@@ -1509,25 +1509,53 @@ pub enum TraceLaneKind {
 ///
 /// Binary is the VCD spelling — one character per member, declared MSB first,
 /// with `x` for unknown and `z` for high impedance — and is the only one that
-/// can spell every word a run can produce. The other three denote an integer,
-/// which a word with an unknown or high-impedance bit does not have.
+/// can spell every word a run can produce. The others read the word's bits
+/// as a number or as characters, which a word with an unknown or
+/// high-impedance bit does not have.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BusRadix {
     #[default]
     Binary,
+    Octal,
     Hex,
     Unsigned,
     Signed,
+    /// Eight bits to a character, as a Verilog string holds them.
+    Ascii,
 }
 
 impl BusRadix {
+    /// Every radix, in the order a menu offers them.
+    pub const ALL: [Self; 6] = [
+        Self::Binary,
+        Self::Octal,
+        Self::Hex,
+        Self::Unsigned,
+        Self::Signed,
+        Self::Ascii,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Binary => "binary",
+            Self::Octal => "octal",
             Self::Hex => "hexadecimal",
             Self::Unsigned => "unsigned decimal",
             Self::Signed => "signed decimal",
+            Self::Ascii => "ASCII",
+        }
+    }
+
+    /// The radix's short name, as a radix menu or tag prints it.
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::Binary => "BIN",
+            Self::Octal => "OCT",
+            Self::Hex => "HEX",
+            Self::Unsigned => "DEC",
+            Self::Signed => "±DEC",
+            Self::Ascii => "ASCII",
         }
     }
 }

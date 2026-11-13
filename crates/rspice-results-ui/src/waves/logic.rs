@@ -43,11 +43,13 @@ const MEMBER_INDENT: f32 = 12.0;
 const GUTTER_PAD: f32 = 4.0;
 
 /// The radixes a bus can be read in, in menu order, with their short names.
-pub const BUS_RADIXES: [(BusRadix, &str); 4] = [
-    (BusRadix::Binary, "BIN"),
-    (BusRadix::Hex, "HEX"),
-    (BusRadix::Unsigned, "DEC"),
-    (BusRadix::Signed, "±DEC"),
+pub const BUS_RADIXES: [(BusRadix, &str); 6] = [
+    (BusRadix::Binary, BusRadix::Binary.short_label()),
+    (BusRadix::Octal, BusRadix::Octal.short_label()),
+    (BusRadix::Hex, BusRadix::Hex.short_label()),
+    (BusRadix::Unsigned, BusRadix::Unsigned.short_label()),
+    (BusRadix::Signed, BusRadix::Signed.short_label()),
+    (BusRadix::Ascii, BusRadix::Ascii.short_label()),
 ];
 
 /// One row of the lane stack.

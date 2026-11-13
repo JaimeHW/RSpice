@@ -102,9 +102,11 @@ fn the_bus_word_from_fifty_to_seventy_nanoseconds_is_three_in_every_radix() {
     assert_eq!(bus.times()[index + 1], 70.0 * NS, "segment [50n, 70n)");
     for (radix, spelled) in [
         (BusRadix::Binary, "0011"),
+        (BusRadix::Octal, "0o03"),
         (BusRadix::Hex, "0x3"),
         (BusRadix::Unsigned, "3"),
         (BusRadix::Signed, "3"),
+        (BusRadix::Ascii, "\"\\x03\""),
     ] {
         let word = bus.spell(index, radix).unwrap();
         assert_eq!(word.text(), spelled, "{radix:?}");
