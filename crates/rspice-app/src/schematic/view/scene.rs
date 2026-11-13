@@ -124,13 +124,7 @@ pub(super) fn draw_scene(
     let probe_statuses = probe_visual_statuses(state);
     let probe_status =
         |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
-    let selected_trace_expression = || {
-        state
-            .results
-            .results
-            .valid_selected_trace(&state.model.simulation)
-            .map(|trace| trace.source_name())
-    };
+    let selected_trace_expression = || state.selected_trace().map(|trace| trace.source_name());
     scene::draw_content(
         painter,
         available,
@@ -594,7 +588,7 @@ fn transient_annotation_time(
 /// points either side; with the instant.
 fn transient_operating_point(state: &CanvasFacts<'_>) -> Option<(crate::state::DcOpResult, f64)> {
     let analysis = annotated_transient(state.model)?;
-    let (time, _) = transient_annotation_time(analysis, state.results.results.session.cursors.a)?;
+    let (time, _) = transient_annotation_time(analysis, state.results.cursors().a)?;
     let mut dc_op = crate::state::DcOpResult::default();
     for trace in &analysis.waveforms {
         let (values, unit) = if wrapped_signal_name(&trace.name, 'V').is_some() {

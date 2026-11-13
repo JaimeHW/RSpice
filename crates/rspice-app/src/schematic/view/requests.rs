@@ -2,9 +2,13 @@
 
 use super::parts::CanvasParts;
 use crate::workbench::{
+    ResultViewer,
     app::{delete_schematic_selection, hierarchy_master_for_component},
-    app_state::Model,
+    app_state::{AppState, Model},
+    documents::result_document::open_specification_editor,
+    framework::requests::{Drain, Request},
 };
+use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
@@ -64,4 +68,71 @@ pub(super) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorR
             }
         }
     }
+}
+
+/// What the canvas asks of the results workspace. The shell answers it with
+/// [`answer_surface_request`] once the design surface has drawn, in the
+/// frame the reader asked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DesignSurfaceRequest {
+    /// Show the operating-point viewer with its device filter set to
+    /// `device`, which is empty when the selected report does not hold the
+    /// clicked device.
+    ShowOperatingPoint { device: String },
+    /// Open the project's specification editor, for a requirement link.
+    OpenSpecificationEditor,
+}
+
+impl Request for DesignSurfaceRequest {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// The trace a probe selected, for the results workspace to select. It is
+/// a request of its own, so no surface request raised later in the frame
+/// replaces it. While it waits, the canvas's facts read it before the
+/// results workspace's selection, so the frame of the click paints the
+/// probe it selected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SelectProbedTrace(pub(crate) SelectedResultTrace);
+
+impl Request for SelectProbedTrace {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Carry out what the canvas asked of the results workspace, as the canvas
+/// once did in place.
+pub(crate) fn answer_surface_request(state: &mut AppState, request: DesignSurfaceRequest) {
+    match request {
+        DesignSurfaceRequest::ShowOperatingPoint { device } => {
+            let session = &mut state.results.results.session;
+            session.op_filter = device;
+            session.viewer = ResultViewer::Op;
+        }
+        DesignSurfaceRequest::OpenSpecificationEditor => {
+            open_specification_editor(&mut state.results_parts());
+        }
+    }
+}
+
+/// Select the trace a probe selected.
+pub(crate) fn select_probed_trace(state: &mut AppState, probed: SelectProbedTrace) {
+    let SelectProbedTrace(trace) = probed;
+    state.results.results.session.selected_trace = Some(trace);
+}
+
+/// Answer what the canvas raised, as the shell does once the surface has
+/// drawn.
+#[cfg(test)]
+pub(crate) fn answer_surface_requests(state: &mut AppState) {
+    use crate::workbench::framework::requests::drain;
+    drain(
+        state,
+        |state| &mut state.workbench.outbox,
+        select_probed_trace,
+    );
+    drain(
+        state,
+        |state| &mut state.workbench.outbox,
+        answer_surface_request,
+    );
 }

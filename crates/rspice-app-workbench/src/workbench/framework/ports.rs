@@ -16,6 +16,7 @@ use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::fft::{FftInputOptions, FftState};
 use rspice_results_ui::histogram::HistogramState;
 use rspice_results_ui::presentation::PlotView;
+use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_results_ui::session::MarkerView;
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
@@ -173,6 +174,9 @@ pub trait ResultsPort {
     ) -> bool;
     /// The markers the strip of `analysis` shows, quick ones first.
     fn strip_markers(&self, analysis: AnalysisPresentationKey) -> Vec<MarkerView<'_>>;
+    /// The trace the reader selected, while the model's active run still
+    /// holds it.
+    fn selected_trace(&self, model: &Model) -> Option<&SelectedResultTrace>;
     /// Where the reader's A and B cursors stand.
     fn cursors(&self) -> CursorPair;
     /// How the FFT viewer is set up.

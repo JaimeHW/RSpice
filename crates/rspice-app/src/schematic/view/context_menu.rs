@@ -14,7 +14,6 @@ use crate::workbench::app_state::ContextTarget;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
-    ResultViewer,
     app::{
         StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
         delete_schematic_selection, duplicate_schematic_selection_at,
@@ -31,6 +30,7 @@ use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::parts::{CanvasFacts, CanvasParts};
+use super::requests::DesignSurfaceRequest;
 use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
 use super::sheet_visibility::retain_selection_on_active_sheet_in;
 use super::viewport::Viewport;
@@ -1744,20 +1744,25 @@ fn open_operating_point(state: &mut CanvasParts<'_>) {
         state.model.simulation.select_analysis(index);
     }
     // The device under the pointer is what this hop is about. The Op inspector
-    // reads one device-name selection — its docbar filter — so the hop writes
-    // that, exactly as the reverse direction writes the schematic selection.
+    // reads one device-name selection — its docbar filter — so the hop asks
+    // for that, exactly as the reverse direction writes the schematic
+    // selection. The results workspace writes it, with its viewer, once the
+    // surface has drawn.
     //
-    // Written unconditionally, including as an empty filter: a device the
+    // Asked unconditionally, including as an empty filter: a device the
     // selected report does not hold used to leave the *previous* device's
     // filter in place, so the hop opened on some other instance's row and read
     // as if it had worked.
-    state.results.results.session.op_filter = clicked
+    let device = clicked
         .filter(|name| {
             target
                 .is_some_and(|index| analysis_reports_device(&state.facts(), index, name.as_str()))
         })
         .unwrap_or_default();
-    state.results.results.session.viewer = ResultViewer::Op;
+    state
+        .workbench
+        .outbox
+        .push(DesignSurfaceRequest::ShowOperatingPoint { device });
     state.workbench.activate(Workspace::Results);
 }
 

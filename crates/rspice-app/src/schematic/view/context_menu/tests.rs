@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::schematic::view::schematic_symbol_context;
+use crate::workbench::ResultViewer;
 use crate::workbench::results::commands::ResultsCommand;
 use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
 
@@ -73,6 +74,7 @@ fn follow(state: &mut AppState, follow_up: Option<MenuFollowUp>) {
 
 fn open_operating_point(state: &mut AppState) {
     super::open_operating_point(&mut canvas_parts(state));
+    super::super::requests::answer_surface_requests(state);
 }
 
 fn select_pointer_target(

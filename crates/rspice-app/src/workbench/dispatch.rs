@@ -16,6 +16,9 @@
 //! out of the registry for the one container that holds its key; no menu,
 //! shortcut profile or Repeat reaches one of those.
 
+use crate::schematic::view::{
+    DesignSurfaceRequest, SelectProbedTrace, answer_surface_request, select_probed_trace,
+};
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
@@ -184,8 +187,11 @@ impl RSpiceApp {
     /// Answer what a feature's call raised for straight after it: first the
     /// netlist editor's commit, undo and redo, which the editor once made
     /// while the page drew, so everything else the frame raised is answered
-    /// over the committed deck; then the
-    /// commands it ran next and what it said once they had run, the print
+    /// over the committed deck; then what the schematic canvas asked of the
+    /// results workspace (the probed trace, the operating-point hop and the
+    /// specification editor), which the canvas once wrote in place, so every
+    /// later answer reads the results workspace as the canvas left it; then
+    /// the commands it ran next and what it said once they had run, the print
     /// workflow it asked for, the snap that follows a new schematic grid, the
     /// shortcut resolver's reset when a shortcut library was put in use, the
     /// open waveform view starting again from changed defaults, the dataset
@@ -205,6 +211,16 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, request: NetlistEditorRequest| answer_netlist_editor_request(app, request),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, probed: SelectProbedTrace| select_probed_trace(&mut app.state, probed),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: DesignSurfaceRequest| answer_surface_request(&mut app.state, request),
         );
         requests::drain(
             self,

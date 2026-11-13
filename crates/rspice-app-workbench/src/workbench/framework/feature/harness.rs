@@ -23,6 +23,7 @@ use rspice_results::visualization_document::{PageId, PaneId};
 use rspice_results_ui::fft::FftState;
 use rspice_results_ui::histogram::HistogramState;
 use rspice_results_ui::presentation::PlotView;
+use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_results_ui::session::MarkerView;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_ui_kit::plot::CursorPair;
@@ -291,6 +292,10 @@ impl ResultsPort for NullPorts {
 
     fn strip_markers(&self, _analysis: AnalysisPresentationKey) -> Vec<MarkerView<'_>> {
         Vec::new()
+    }
+
+    fn selected_trace(&self, _model: &Model) -> Option<&SelectedResultTrace> {
+        None
     }
 
     fn cursors(&self) -> CursorPair {

@@ -1,8 +1,10 @@
 //! What the schematic canvas reads and writes while it takes a gesture.
 //!
 //! The canvas answers a pointer or key over the design feature's state, the
-//! model, the session, the runs whose preflight a probe invalidates, and the
-//! results workspace that a probe and a requirement link write into. Whether
+//! model, the session and the runs whose preflight a probe invalidates. It
+//! reads the results workspace. What a probe, the operating-point hop or a
+//! requirement link asks of that workspace waits in the session's outbox
+//! until the shell answers it, once the surface has drawn. Whether
 //! a modal dialog was open is lent as it stood when the parts were taken: the
 //! canvas opens nothing modal before it reads either fact.
 //!
@@ -28,28 +30,29 @@ use crate::workbench::{
         veriloga_master_of_component, veriloga_source_for_component,
     },
     app_state::{AppState, DragType, Model, model_design_view},
-    commands::vocabulary::command_registry,
-    documents::result_document::ResultsParts,
-    slots::{DesignState, PlatformState, ResultsState, RunsState},
+    framework::ports::ResultsPort,
+    slots::{DesignState, RunsState},
     state::WorkbenchSession,
 };
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 use rspice_design::symbol::publication::SymbolSaveCheck;
+use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 use rspice_schematic_editor::view::design_view::DesignView;
 use rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag;
 
-/// The design slot, the model, the session, the runs, the results slot and
-/// the platform state the canvas reads and writes, beside the two modal
-/// facts it reads.
+use super::requests::SelectProbedTrace;
+
+/// The design slot, the model, the session and the runs the canvas reads
+/// and writes, beside the results workspace and the two modal facts it
+/// reads.
 pub(crate) struct CanvasParts<'a> {
     pub(crate) design: &'a mut DesignState,
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
-    pub(crate) results: &'a mut ResultsState,
-    pub(crate) platform: &'a PlatformState,
+    pub(crate) results: &'a dyn ResultsPort,
     application_modal: bool,
     dialog_modal: bool,
 }
@@ -64,8 +67,7 @@ pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
         model: &mut state.model,
         workbench: &mut state.workbench,
         runs: &mut state.runs,
-        results: &mut state.results,
-        platform: &state.platform,
+        results: &*state.results,
         application_modal,
         dialog_modal,
     }
@@ -79,14 +81,15 @@ impl AsRef<Model> for CanvasParts<'_> {
 
 /// What the canvas's answers and its paint read: the design slot, the
 /// model, the runs (whose slot facts say which check results are current)
-/// and the results slot (the selected trace and the cursor a transient is
-/// annotated at).
+/// and the results workspace (the selected trace and the cursor a transient
+/// is annotated at), with the trace a probe selected that waits for it.
 #[derive(Clone, Copy)]
 pub(crate) struct CanvasFacts<'a> {
     pub(crate) design: &'a DesignState,
     pub(crate) model: &'a Model,
     pub(crate) runs: &'a RunsState,
-    pub(crate) results: &'a ResultsState,
+    pub(crate) results: &'a dyn ResultsPort,
+    probed_trace: Option<&'a SelectedResultTrace>,
 }
 
 /// The canvas's facts from the application's state.
@@ -95,8 +98,18 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
         design: &state.design,
         model: &state.model,
         runs: &state.runs,
-        results: &state.results,
+        results: &*state.results,
+        probed_trace: probed_trace(&state.workbench),
     }
+}
+
+/// The trace a probe selected that waits in `workbench`'s outbox for the
+/// results workspace to select it.
+fn probed_trace(workbench: &WorkbenchSession) -> Option<&SelectedResultTrace> {
+    workbench
+        .outbox
+        .peek::<SelectProbedTrace>()
+        .map(|SelectProbedTrace(trace)| trace)
 }
 
 impl AsRef<Model> for CanvasFacts<'_> {
@@ -106,6 +119,19 @@ impl AsRef<Model> for CanvasFacts<'_> {
 }
 
 impl<'a> CanvasFacts<'a> {
+    /// The selected trace, while the model's active run still holds it. A
+    /// trace a probe selected that still waits for the results workspace
+    /// comes first, as it would once the workspace has selected it.
+    pub(crate) fn selected_trace(&self) -> Option<&'a SelectedResultTrace> {
+        match self.probed_trace {
+            Some(probed) => {
+                let run = self.model.simulation.active_run()?;
+                probed.resolve(run).map(|_| probed)
+            }
+            None => self.results.selected_trace(self.model),
+        }
+    }
+
     pub(crate) fn schematic_edit_read_only(&self) -> bool {
         self.model.schematic_edit_read_only()
     }
@@ -177,6 +203,7 @@ impl CanvasParts<'_> {
             model: self.model,
             runs: self.runs,
             results: self.results,
+            probed_trace: probed_trace(self.workbench),
         }
     }
 
@@ -353,17 +380,6 @@ impl CanvasParts<'_> {
         self.design
             .navigation_parts(self.model, self.workbench, self.runs)
             .symbol_in_place_save_cancelled();
-    }
-
-    /// The parts the results workspace's commands write.
-    pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
-        self.results.parts(
-            self.model,
-            self.workbench,
-            self.platform,
-            &mut self.runs.preflight,
-            command_registry(),
-        )
     }
 
     /// Land the floating copy where it sits now.

@@ -2062,6 +2062,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         32,
         &ctx
     ));
+    crate::schematic::view::requests::answer_surface_requests(&mut state);
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Results

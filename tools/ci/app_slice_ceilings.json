@@ -1,7 +1,6 @@
 {
   "feature->feature": {
     "design->code": 18,
-    "design->results": 1,
     "project->code": 1,
     "project->design": 9
   },

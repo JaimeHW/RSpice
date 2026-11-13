@@ -24,6 +24,7 @@ use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::parts::CanvasParts;
+use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
     finish_wire_on_active_sheet, retain_selection_on_active_sheet_in, with_active_wire_topology_in,
@@ -408,9 +409,16 @@ fn activate_requirement_link(
         }
         Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
             let reference = reference.to_owned();
-            crate::workbench::documents::result_document::open_specification_editor(
-                &mut state.results_parts(),
-            );
+            // The results workspace opens its editor once the surface has
+            // drawn. The workspace itself opens now, so the rest of the
+            // frame reads the route it read when the editor opened here.
+            state
+                .workbench
+                .outbox
+                .push(DesignSurfaceRequest::OpenSpecificationEditor);
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Results);
             state.prompt(format!(
                 "Opened project specifications for requirement {reference}."
             ));
@@ -1135,7 +1143,7 @@ fn select_materialized_probe_trace(state: &mut CanvasParts<'_>, probe_name: &str
         })
     };
     if let Some(selected) = selected {
-        state.results.results.session.selected_trace = Some(selected);
+        state.workbench.outbox.push(SelectProbedTrace(selected));
     }
 }
 

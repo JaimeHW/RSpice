@@ -258,6 +258,13 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         self.results.session.strip_markers(analysis).collect()
     }
 
+    fn selected_trace(
+        &self,
+        model: &crate::workbench::app_state::Model,
+    ) -> Option<&rspice_results_ui::selection::SelectedResultTrace> {
+        self.results.valid_selected_trace(&model.simulation)
+    }
+
     fn cursors(&self) -> rspice_ui_kit::plot::CursorPair {
         self.results.session.cursors
     }

@@ -106,8 +106,8 @@ impl Outbox {
         self.waiting.retain(|waiting| waiting.drain != drain);
     }
 
-    /// The waiting `R`, left where it is.
-    #[cfg(any(test, feature = "test-support"))]
+    /// The waiting `R`, left where it is: a contribution reads a request it
+    /// raised earlier in the same frame, before the drain answers it.
     pub fn peek<R: Request>(&self) -> Option<&R> {
         self.waiting
             .iter()
