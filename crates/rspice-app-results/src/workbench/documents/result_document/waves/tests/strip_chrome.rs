@@ -588,3 +588,40 @@ fn trials_on_their_own_grids_have_a_continuous_envelope() {
         "the envelope fills the plot: {fill} vertices"
     );
 }
+
+/// The trial the pointer is on strokes at the active run's width over its
+/// siblings, which step back to an overlay's weight; a pointer on none of
+/// them leaves every trial as it was.
+#[test]
+fn the_trial_under_the_pointer_is_highlighted_over_its_siblings() {
+    let mut state = three_trials();
+    let ctx = themed_context(crate::ui::Theme::default());
+    settled(&ctx, &mut state);
+    let hue = state.results.results.models.last_built().expect("models")[0].traces[0].signal_color;
+    let (mut highlighted, mut plain) = (0, 0);
+    for y in (60..(FRAME.y as i32 - 60)).step_by(4) {
+        let pointer = egui::pos2(600.0, y as f32);
+        let output = well_frame(&ctx, &mut state, vec![egui::Event::PointerMoved(pointer)]);
+        let (mut strokes, _) = trial_strokes(&output, hue);
+        strokes.sort_by(|left, right| left.0.total_cmp(&right.0));
+        match strokes.as_slice() {
+            [(_, false), (_, false), (width, true)] => {
+                assert!(
+                    *width > 1.0,
+                    "a trial is stroked at 1 pt and lifted past it: {width}"
+                );
+                highlighted += 1;
+            }
+            [(_, true), (_, true), (_, true)] => plain += 1,
+            other => panic!("a pointer at {y} drew the trials as {other:?}"),
+        }
+    }
+    assert!(
+        highlighted >= 3,
+        "each trial was highlighted in turn: {highlighted}"
+    );
+    assert!(
+        plain > highlighted,
+        "a pointer between trials highlights none: {plain}"
+    );
+}

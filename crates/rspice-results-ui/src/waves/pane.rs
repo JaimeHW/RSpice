@@ -373,6 +373,10 @@ fn paint_family_bands(
     }
 }
 
+/// How near the pointer, in points, a family member's stroke must pass for
+/// the member to be highlighted.
+const HIGHLIGHT_REACH: f32 = 8.0;
+
 /// Display inputs resolved by the host for one unit-scoped pane.
 pub struct PanePlot<'a> {
     pub x_range: (f64, f64),
@@ -528,7 +532,10 @@ pub fn show_plot<'a>(
         })
         .filter(|members| members.len() >= 2)
         .collect();
-    if !families.is_empty() || !enveloped.is_empty() {
+    let family_in_pane = pane_traces
+        .iter()
+        .any(|(_, trace)| trace.family_group_ordinal.is_some());
+    if !families.is_empty() || !enveloped.is_empty() || family_in_pane {
         let plot_rect = plot::plot_rect(ui, &spec);
         // The renderer's own column bucketing, so a band is quantized as its
         // members' envelopes would have been.
@@ -612,6 +619,51 @@ pub fn show_plot<'a>(
             }
             bands.push((band(members), members[0].1.signal_color));
         }
+        // The member of a family the pointer is on is the one the reader is
+        // reading: it strokes over its siblings at the active run's width and
+        // the readout names it first.
+        if let Some(position) = pointer.filter(|_| highlighted.is_empty()) {
+            let members: Vec<(usize, &StripTrace)> = pane_traces
+                .iter()
+                .copied()
+                .filter(|(index, trace)| {
+                    trace.visible
+                        && !trace.overlay
+                        && trace.family_group_ordinal.is_some()
+                        && !banded.contains(index)
+                })
+                .collect();
+            let x = spec.x_scale.denormalize(
+                f64::from((position.x - plot_rect.left()) / plot_rect.width()),
+                spec.x.min,
+                spec.x.max,
+            );
+            let nearest = nearest_drawn_trace(
+                &members,
+                x,
+                Some(position.y),
+                plot_rect,
+                y_scale,
+                (spec.y.min, spec.y.max),
+                interpolation,
+            )
+            .filter(|nearest| {
+                // Only a member the pointer is on: a pointer anywhere else in
+                // the plot is placing a cursor or reading the axis.
+                let value =
+                    sample_at_with_shape(&nearest.x, &nearest.y, &nearest.shape, x, interpolation);
+                let y = plot_rect.bottom()
+                    - (y_scale.normalize(value, spec.y.min, spec.y.max) as f32)
+                        * plot_rect.height();
+                (y - position.y).abs() <= HIGHLIGHT_REACH
+            });
+            highlighted.extend(
+                members
+                    .iter()
+                    .filter(|(_, trace)| nearest.is_some_and(|near| std::ptr::eq(near, *trace)))
+                    .map(|(index, _)| *index),
+            );
+        }
         let (band_scale, band_range) = (spec.y_scale, (spec.y.min, spec.y.max));
         spec.underlay = Some(Box::new(move |painter, mapper| {
             paint_family_bands(painter, mapper.rect, &bands, band_scale, band_range);
@@ -621,13 +673,41 @@ pub fn show_plot<'a>(
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
+    // A highlighted member is stroked last, over everything it was among.
     let draw_order = pane_traces
         .iter()
         .filter(|(_, trace)| trace.overlay)
-        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay))
+        .chain(
+            pane_traces
+                .iter()
+                .filter(|(index, trace)| !trace.overlay && !highlighted.contains(index)),
+        )
+        .chain(
+            pane_traces
+                .iter()
+                .filter(|(index, trace)| !trace.overlay && highlighted.contains(index)),
+        )
         .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
-    for (_, trace) in draw_order {
-        let color = if trace.overlay {
+    let highlighted_members: Vec<&StripTrace> = highlighted
+        .iter()
+        .filter(|index| !banded.contains(*index))
+        .filter_map(|index| model.traces.get(*index))
+        .collect();
+    // A member of the family a highlighted member belongs to.
+    let sibling_of_highlight = |trace: &StripTrace| {
+        trace.family_group_ordinal.is_some()
+            && highlighted_members
+                .iter()
+                .any(|member| same_family(member, trace))
+    };
+    for (index, trace) in draw_order {
+        // While one member of a family that is stroked member by member is
+        // highlighted, its siblings step back to an overlay's weight: members
+        // of one quantity share its hue, and a wider stroke alone is lost
+        // among them.
+        let lifted = highlighted.contains(index) && !banded.contains(index);
+        let sibling = !lifted && sibling_of_highlight(trace);
+        let color = if trace.overlay || sibling {
             trace.color.gamma_multiply(0.40)
         } else {
             trace.color
@@ -649,6 +729,9 @@ pub fn show_plot<'a>(
         if trace.overlay {
             plot_trace = plot_trace.width(input.trace_width * SECONDARY_TRACE_RATIO);
         }
+        if lifted {
+            plot_trace = plot_trace.width(input.trace_width);
+        }
         spec.traces.push(plot_trace);
     }
     for expr in exprs {
@@ -661,15 +744,19 @@ pub fn show_plot<'a>(
         ));
     }
 
-    // A banded family reads out the member the reader points at, not the
-    // first six of its members.
+    // A family reads out the member the reader points at, not the first six
+    // of its members.
     let readout_traces: Vec<&StripTrace> = highlighted
         .iter()
         .filter_map(|index| model.traces.get(*index))
         .chain(
             pane_traces
                 .iter()
-                .filter(|(index, _)| !banded.contains(index))
+                .filter(|(index, trace)| {
+                    !banded.contains(index)
+                        && !highlighted.contains(index)
+                        && !sibling_of_highlight(trace)
+                })
                 .map(|(_, trace)| *trace),
         )
         .take(6)
