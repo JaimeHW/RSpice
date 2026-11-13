@@ -1,15 +1,13 @@
 //! Shared rendering primitives for the restored mockup's compact engineering
 //! review dialogs.
 //!
-//! These dialogs intentionally use one exact geometry contract: a 35 point
-//! purpose strip, a 230 point split review body, and a 260 point resolved
-//! context pane inside the common 760 point transaction shell. Keeping that
-//! contract here prevents independently implemented workflows from drifting
-//! in spacing, typography, or validation treatment.
+//! These dialogs intentionally use one exact geometry contract: a 230 point
+//! split review body and a 260 point resolved context pane inside the common
+//! 760 point transaction shell. Keeping that contract here prevents
+//! independently implemented workflows from drifting in spacing, typography,
+//! or validation treatment.
 
-use egui::{
-    Align, Align2, Frame, Layout, Margin, Response, Sense, Stroke, TextEdit, Ui, Vec2, vec2,
-};
+use egui::{Response, Sense, TextEdit, Ui, Vec2, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -35,58 +33,6 @@ pub fn fitted_select_width<S: AsRef<str>>(ui: &Ui, options: &[S]) -> f32 {
         })
         .fold(0.0_f32, f32::max);
     (widest + 8.0 + 24.0).ceil()
-}
-
-pub const PURPOSE_HEIGHT: f32 = 35.0;
-
-pub fn purpose_line(ui: &mut Ui, description: &str) {
-    let t = Tokens::get(ui.ctx());
-    let response = Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(12, 0))
-        .show(ui, |ui| {
-            let width = ui.available_width();
-            ui.allocate_ui_with_layout(
-                vec2(width, PURPOSE_HEIGHT),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.set_min_size(vec2(width, PURPOSE_HEIGHT));
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    let (icon_rect, icon_response) =
-                        ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                    ui.painter().circle_stroke(
-                        icon_rect.center(),
-                        5.0,
-                        Stroke::new(1.0, t.color.text_faint),
-                    );
-                    ui.painter().text(
-                        icon_rect.center() + vec2(0.0, -0.25),
-                        Align2::CENTER_CENTER,
-                        "i",
-                        theme::mono(tokens::FS_0, FontWeight::Medium),
-                        t.color.text_faint,
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(description)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        )
-                        .wrap(),
-                    );
-                    ui.ctx().accesskit_node_builder(icon_response.id, |node| {
-                        node.set_label("Workflow purpose");
-                        node.set_description(description);
-                    });
-                },
-            );
-        });
-    paint_dashed_hline(
-        ui,
-        response.response.rect.x_range(),
-        response.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
 }
 
 /// A problem stated on its own line inside a dialog body: the mark that owns
@@ -226,15 +172,5 @@ pub fn configure_field_validation(
             egui::Stroke::new(1.0, t.color.err),
             egui::StrokeKind::Inside,
         );
-    }
-}
-
-fn paint_dashed_hline(ui: &Ui, range: egui::Rangef, y: f32, stroke: Stroke) {
-    let mut x = range.min;
-    while x < range.max {
-        let end = (x + 3.0).min(range.max);
-        ui.painter()
-            .line_segment([egui::pos2(x, y), egui::pos2(end, y)], stroke);
-        x += 6.0;
     }
 }

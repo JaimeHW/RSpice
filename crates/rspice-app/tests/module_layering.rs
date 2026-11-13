@@ -1617,7 +1617,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::table",
     "rspice-app-simulate/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
     "rspice-app-simulate/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
-    "rspice-app-workbench/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",
