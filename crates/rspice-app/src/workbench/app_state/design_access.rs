@@ -18,6 +18,7 @@ use crate::workbench::app::actions::workspace::{
     commit_pending_inspector_edit, new_schematic_document, restore_active_schematic_from_workspace,
     sync_active_schematic,
 };
+use crate::workbench::app::actions::{apply_symbol_edit_request, pending_symbol_polyline_request};
 
 impl AppState {
     /// [`new_schematic_document`] for the session.
@@ -169,5 +170,26 @@ impl AppState {
         self.store_active_symbol_document(&document)?;
         record_symbol_edit(&mut self.design.symbol, &self.model, &before);
         Ok(())
+    }
+
+    /// Finish the symbol canvas's open polyline as one edit, or let it go
+    /// when it has fewer than two points or the symbol is read-only. The
+    /// application modal is asked last, after the canvas is bound.
+    pub(crate) fn finish_pending_symbol_polyline(&mut self) {
+        let Some(request) = pending_symbol_polyline_request(
+            &mut self.design.symbol,
+            &self.model,
+            &mut self.workbench,
+        ) else {
+            return;
+        };
+        let modal_open = self.application_modal_open();
+        apply_symbol_edit_request(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            modal_open,
+            request,
+        );
     }
 }

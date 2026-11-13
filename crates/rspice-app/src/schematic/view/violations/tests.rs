@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, NetLabel, Point, View, ViewType};
+use crate::workbench::app_state::AppState;
 use rspice_design::drc::DrcViolationType;
 
 /// One source of the loop [`draw_source_loop`] draws.

@@ -6,6 +6,7 @@ use crate::state::{
     SymbolShape, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
@@ -249,8 +250,10 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
             &app.state.model,
             &mut app.state.workbench,
         );
-        let request = edit_request(
-            &app.state,
+        let request = symbol_edit_request(
+            &app.state.design.symbol,
+            &app.state.model,
+            &app.state.workbench,
             SymbolEditAction::Paste {
                 clipboard: app.state.design.symbol.editor.clipboard.clone(),
                 target: Point::new(100, 100),
@@ -280,7 +283,14 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
         }
         let selection = app.state.design.symbol.editor.effective_selection();
         let clipboard = app.state.design.symbol.editor.clipboard.clone();
-        apply_edit_request(&mut app.state, request);
+        let modal_open = app.state.application_modal_open();
+        apply_symbol_edit_request(
+            &mut app.state.design.symbol,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            modal_open,
+            request,
+        );
         assert_eq!(
             app.state.model.load_active_symbol_document().unwrap(),
             before,
@@ -334,8 +344,10 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
     bind_canvas_source(&mut app.state.design.symbol.editor, source);
     app.state.design.symbol.editor.tool = SymbolTool::Polygon;
     app.state.design.symbol.editor.pending_polyline = points.clone();
-    let pending = edit_request(
-        &app.state,
+    let pending = symbol_edit_request(
+        &app.state.design.symbol,
+        &app.state.model,
+        &app.state.workbench,
         SymbolEditAction::FinishPolyline {
             points: points.clone(),
         },
@@ -344,7 +356,14 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
         .open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-    apply_edit_request(&mut app.state, pending);
+    let modal_open = app.state.application_modal_open();
+    apply_symbol_edit_request(
+        &mut app.state.design.symbol,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        modal_open,
+        pending,
+    );
     assert_eq!(
         app.state.model.load_active_symbol_document().unwrap(),
         before

@@ -401,7 +401,7 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     // The symbol canvas's one interaction in flight is an
                     // open polyline; Escape keeps what has been drawn.
-                    super::app::actions::finish_pending_symbol_polyline(&mut app.state);
+                    app.state.finish_pending_symbol_polyline();
                     rspice_schematic_editor::symbol_editor::commands::finish_cancel(
                         &mut app.state.design.symbol.editor,
                     );

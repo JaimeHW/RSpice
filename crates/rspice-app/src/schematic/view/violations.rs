@@ -8,7 +8,7 @@
 
 use egui::Painter;
 
-use crate::workbench::app_state::{AppState, Model, model_location_anchor};
+use crate::workbench::app_state::{Model, model_location_anchor};
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
@@ -22,12 +22,12 @@ pub(crate) mod tests;
 /// Where one finding location in the drawing in front of the reader points,
 /// when it points anywhere.
 ///
-/// Every surface that offers "go to this finding" resolves through here or
-/// through [`location_anchor_in`] — the canvas badges, the console's
-/// per-finding rows, the validated-save report, which carries a location
-/// rather than a whole violation, and the published rule findings. One
-/// resolver keeps them from sending the author to three different places for
-/// one location.
+/// Every surface that offers "go to this finding" resolves through here or,
+/// for a finding in another cell view, through [`model_location_anchor`] —
+/// the canvas badges, the console's per-finding rows, the validated-save
+/// report, which carries a location rather than a whole violation, and the
+/// published rule findings. One resolver keeps them from sending the author
+/// to three different places for one location.
 pub(crate) fn location_anchor(
     model: &Model,
     review_markers: SchematicReviewMarkerVisibility,
@@ -37,26 +37,6 @@ pub(crate) fn location_anchor(
         model,
         review_markers,
         &model.workspace.content.active_schematic_reference(),
-        location,
-    )
-}
-
-/// Where one finding location in `cell_view` points, when it points anywhere.
-///
-/// The drawing in front of the reader is asked through its live editor, and
-/// any other cell view through the working copy the workspace holds for it,
-/// so a finding about a view that is not open still says where it is. The
-/// anchor carries the view and the sheet the object is drawn on, and
-/// following it opens that view and brings that sheet forward first.
-pub(crate) fn location_anchor_in(
-    state: &AppState,
-    cell_view: &crate::state::CellViewRef,
-    location: &DrcLocation,
-) -> Option<crate::diagnostics::LogAnchor> {
-    model_location_anchor(
-        &state.model,
-        state.design.schematic_visibility.review_markers,
-        cell_view,
         location,
     )
 }

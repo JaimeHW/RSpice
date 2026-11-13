@@ -1,7 +1,6 @@
 //! App authority, history and publication for symbol editor commands.
 
 use crate::state::Point;
-use crate::workbench::AppState;
 use crate::workbench::app::actions::workspace::deny_read_only_edit;
 use crate::workbench::app::actions::workspace::symbol_document::{
     SymbolUiState, load_active_symbol_editor_metadata, record_symbol_edit,
@@ -19,21 +18,28 @@ use rspice_schematic_editor::symbol_editor::session::{
     SymbolClipboard, SymbolSelection, SymbolTool,
 };
 
-/// Finish the symbol canvas's open polyline, or let it go when it has fewer
-/// than two points or the symbol is read-only.
-pub(crate) fn finish_pending_symbol_polyline(state: &mut AppState) {
+/// The request that finishes the symbol canvas's open polyline, once the
+/// canvas is bound to the document in front. With fewer than two points, or
+/// on a read-only symbol, the polyline is let go and there is none.
+pub(crate) fn pending_symbol_polyline_request(
+    symbol: &mut SymbolUiState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+) -> Option<SymbolEditRequest> {
     // A command can arrive after navigation and before the new canvas has rendered.
-    let source = symbol_editor_request_source(&state.model, &state.workbench);
-    bind_canvas_source(&mut state.design.symbol.editor, source);
-    if state.design.symbol.editor.pending_polyline.len() < 2
-        || deny_read_only_edit(&state.model, &mut state.workbench)
-    {
-        state.design.symbol.editor.pending_polyline.clear();
-        return;
+    let source = symbol_editor_request_source(model, wb);
+    bind_canvas_source(&mut symbol.editor, source);
+    if symbol.editor.pending_polyline.len() < 2 || deny_read_only_edit(model, wb) {
+        symbol.editor.pending_polyline.clear();
+        return None;
     }
-    let points = state.design.symbol.editor.pending_polyline.clone();
-    let request = edit_request(state, SymbolEditAction::FinishPolyline { points });
-    apply_edit_request(state, request);
+    let points = symbol.editor.pending_polyline.clone();
+    Some(symbol_edit_request(
+        symbol,
+        model,
+        wb,
+        SymbolEditAction::FinishPolyline { points },
+    ))
 }
 
 /// Arm `tool` on the symbol canvas. A pin starts from the document in front,
@@ -202,11 +208,6 @@ pub(crate) fn delete_selected_symbol_item(
     apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
-/// [`symbol_edit_request`] over the session.
-fn edit_request(state: &AppState, action: SymbolEditAction) -> SymbolEditRequest {
-    symbol_edit_request(&state.design.symbol, &state.model, &state.workbench, action)
-}
-
 fn symbol_edit_request(
     symbol: &SymbolUiState,
     model: &Model,
@@ -221,19 +222,10 @@ fn symbol_edit_request(
     }
 }
 
-/// [`apply_symbol_edit_request`] over the session, asking its modal gate.
-fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
-    let modal_open = state.application_modal_open();
-    apply_symbol_edit_request(
-        &mut state.design.symbol,
-        &mut state.model,
-        &mut state.workbench,
-        modal_open,
-        request,
-    );
-}
-
-fn apply_symbol_edit_request(
+/// Apply `request` unless it is a paste of a clipboard the canvas no longer
+/// holds. `modal_open` is whether anything holding the application modal is
+/// open, which refuses it.
+pub(crate) fn apply_symbol_edit_request(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,

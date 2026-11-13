@@ -307,8 +307,11 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 },
             };
             app.state.open_workspace_view(cell_view.clone());
-            match crate::schematic::view::violations::location_anchor_in(
-                &app.state, &cell_view, &location,
+            match crate::workbench::app_state::model_location_anchor(
+                &app.state.model,
+                app.state.design.schematic_visibility.review_markers,
+                &cell_view,
+                &location,
             ) {
                 Some(anchor) => app.state.jump_to_log_anchor(anchor),
                 None => app.state.prompt(format!(
