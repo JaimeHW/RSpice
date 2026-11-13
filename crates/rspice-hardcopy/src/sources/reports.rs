@@ -32,15 +32,16 @@ pub fn resolve_report_source(
         .document
         .revision_record(source.document.id(), source.document.revision())
         .ok_or_else(|| HardcopySourceError::UnretainedReportRevision(source.document.revision()))?;
-    if record.snapshot().pages().is_empty() {
+    // Validation proved the document is the source its current revision
+    // record's digest names.
+    let pages = source.document.pages();
+    if pages.is_empty() {
         return Err(HardcopySourceError::EmptyContent);
     }
     let mut authenticated_references = Vec::new();
     let mut figure_blocks = Vec::new();
     let mut contains_linked_reference = false;
-    for block in record
-        .snapshot()
-        .pages()
+    for block in pages
         .iter()
         .flat_map(|page| page.sections())
         .flat_map(|section| section.blocks())
@@ -137,8 +138,8 @@ pub fn resolve_report_source(
             sizing: figure.sizing,
         });
     }
-    let page_count = i64::try_from(record.snapshot().pages().len())
-        .map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+    let page_count =
+        i64::try_from(pages.len()).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
     let height = REPORT_PAGE_HEIGHT_UM
         .checked_mul(page_count)
         .and_then(|value| {
@@ -160,7 +161,7 @@ pub fn resolve_report_source(
         HardcopyDocumentKind::Report,
         source.scope,
         HardcopySemanticDocument::Report(SemanticReport {
-            pages: record.snapshot().pages().to_vec(),
+            pages: pages.to_vec(),
             authenticated_references,
             figures,
         }),

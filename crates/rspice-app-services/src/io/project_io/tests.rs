@@ -552,20 +552,6 @@ fn project_file_round_trips_project_owned_report_documents() {
     assert_eq!(restored.file.workspace.report_documents, vec![report]);
     let restored_report = &restored.file.workspace.report_documents[0];
     assert_eq!(restored_report.revision_history().records().len(), 3);
-    assert_eq!(
-        restored_report
-            .reconstruct_revision(restored_report.id(), ObjectRevision::INITIAL)
-            .expect("initial report source is reconstructable")
-            .title(),
-        "Verification report"
-    );
-    assert!(
-        restored_report
-            .reconstruct_revision(restored_report.id(), ObjectRevision::INITIAL)
-            .expect("initial report source is reconstructable")
-            .pages()
-            .is_empty()
-    );
     assert!(!restored.file.workspace.report_documents_dirty);
 }
 

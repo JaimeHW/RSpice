@@ -800,7 +800,6 @@ impl ReportDocument {
         let mut revision_identities = HashSet::with_capacity(records.len());
         let mut prior_revision_identity = None;
         let mut prior_record_digest = None;
-        let mut aggregate_snapshot_bytes = 0_u64;
         for (index, record) in records.iter().enumerate() {
             let expected_revision = ObjectRevision::new(
                 baseline_revision
@@ -817,21 +816,10 @@ impl ReportDocument {
                 || record.prior_revision_identity != prior_revision_identity
                 || record.prior_record_digest != prior_record_digest
                 || !revision_identities.insert(record.revision_identity)
-                || record.snapshot.document_id != self.id
-                || record.snapshot.revision != record.revision
             {
                 return Err(invalid_revision_history());
             }
 
-            ReportDocumentContentView::from_snapshot(&record.snapshot).validate()?;
-
-            let (snapshot_digest, snapshot_serialized_bytes) =
-                report_snapshot_digest_and_size(&record.snapshot)?;
-            aggregate_snapshot_bytes = aggregate_snapshot_bytes
-                .checked_add(snapshot_serialized_bytes)
-                .ok_or(ReportError::CapacityExceeded(
-                    "report source revision snapshot bytes",
-                ))?;
             let record_digest = report_revision_record_digest(
                 record.revision_identity,
                 record.document_id,
@@ -842,14 +830,9 @@ impl ReportDocument {
                 record.timestamp_unix_ms,
                 &record.actor,
                 &record.revision_note,
-                snapshot_serialized_bytes,
-                snapshot_digest,
+                record.snapshot_digest,
             )?;
-            if snapshot_serialized_bytes != record.snapshot_serialized_bytes
-                || aggregate_snapshot_bytes > MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES
-                || snapshot_digest != record.snapshot_digest
-                || record_digest != record.record_digest
-            {
+            if record_digest != record.record_digest {
                 return Err(invalid_revision_history());
             }
 
@@ -857,27 +840,23 @@ impl ReportDocument {
                 if record.timestamp_unix_ms != 0 {
                     return Err(invalid_revision_history());
                 }
-            } else if record.snapshot.receipts.last().is_none_or(|receipt| {
-                receipt.committed_document_revision != record.revision
-                    || receipt.timestamp_unix_ms != record.timestamp_unix_ms
-            }) {
+            } else if self
+                .receipts
+                .iter()
+                .find(|receipt| receipt.committed_document_revision == record.revision)
+                .is_none_or(|receipt| receipt.timestamp_unix_ms != record.timestamp_unix_ms)
+            {
                 return Err(invalid_revision_history());
             }
 
             prior_revision_identity = Some(record.revision_identity);
             prior_record_digest = Some(record.record_digest);
         }
-        if records.last().is_none_or(|record| {
-            let snapshot = &record.snapshot;
-            snapshot.document_id != self.id
-                || snapshot.revision != self.revision
-                || snapshot.title != self.title
-                || snapshot.template != self.template
-                || snapshot.pages != self.pages
-                || snapshot.receipts != self.receipts
-                || snapshot.tombstones != self.tombstones
-                || snapshot.legacy_origin_entities != self.legacy_origin_entities
-        }) {
+        let current_digest = report_snapshot_digest(&self.current_snapshot())?;
+        if records
+            .last()
+            .is_none_or(|record| record.snapshot_digest != current_digest)
+        {
             return Err(invalid_revision_history());
         }
         Ok(())

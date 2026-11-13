@@ -1333,7 +1333,7 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
 }
 
 #[test]
-fn revision_history_reconstructs_complete_source_at_every_native_revision() {
+fn revision_history_chains_every_native_revision() {
     let mut document = ReportDocument::new("Verification report").unwrap();
     let initial_id = document.revision_history().records()[0].revision_identity();
     document
@@ -1385,24 +1385,7 @@ fn revision_history_reconstructs_complete_source_at_every_native_revision() {
         "Add governed report summary page"
     );
     assert_eq!(records[1].timestamp_unix_ms(), 101);
-    assert!(records[1].snapshot_serialized_bytes() > 0);
     assert_ne!(records[1].snapshot_digest(), records[2].snapshot_digest());
-
-    let initial = document
-        .reconstruct_revision(document.id(), ObjectRevision::INITIAL)
-        .unwrap();
-    assert_eq!(initial.title(), "Verification report");
-    assert!(initial.pages().is_empty());
-    assert!(initial.receipts().is_empty());
-    assert_eq!(initial.revision_history().records().len(), 1);
-
-    let revision_two = document
-        .reconstruct_revision(document.id(), ObjectRevision::new(2).unwrap())
-        .unwrap();
-    assert_eq!(revision_two.title(), "Verification report");
-    assert_eq!(revision_two.pages().len(), 1);
-    assert_eq!(revision_two.receipts().len(), 1);
-    assert_eq!(revision_two.revision_history().records().len(), 2);
 
     let wrong_document = ResultDocumentId::new();
     assert!(
@@ -1410,10 +1393,6 @@ fn revision_history_reconstructs_complete_source_at_every_native_revision() {
             .revision_record(wrong_document, ObjectRevision::INITIAL)
             .is_none()
     );
-    assert!(matches!(
-        document.reconstruct_revision(wrong_document, ObjectRevision::INITIAL),
-        Err(ReportError::RevisionNotRetained { .. })
-    ));
 
     let encoded = serde_json::to_vec(&document).unwrap();
     let restored: ReportDocument = serde_json::from_slice(&encoded).unwrap();
@@ -1425,7 +1404,7 @@ fn revision_history_reconstructs_complete_source_at_every_native_revision() {
 }
 
 #[test]
-fn revision_history_deserialization_fails_closed_on_snapshot_or_chain_tampering() {
+fn revision_history_deserialization_fails_closed_on_source_or_chain_tampering() {
     let mut document = ReportDocument::new("Audit report").unwrap();
     document
         .transact(
@@ -1438,10 +1417,14 @@ fn revision_history_deserialization_fails_closed_on_snapshot_or_chain_tampering(
         .unwrap();
     let value = serde_json::to_value(&document).unwrap();
 
-    let mut changed_snapshot = value.clone();
-    changed_snapshot["revision_history"]["records"][1]["snapshot"]["title"] =
-        serde_json::json!("Tampered report");
-    assert!(serde_json::from_value::<ReportDocument>(changed_snapshot).is_err());
+    let mut changed_source = value.clone();
+    changed_source["title"] = serde_json::json!("Tampered report");
+    assert!(serde_json::from_value::<ReportDocument>(changed_source).is_err());
+
+    let mut changed_digest = value.clone();
+    changed_digest["revision_history"]["records"][0]["snapshot_digest"] =
+        serde_json::json!(digest(0x5a));
+    assert!(serde_json::from_value::<ReportDocument>(changed_digest).is_err());
 
     let mut changed_actor = value.clone();
     changed_actor["revision_history"]["records"][1]["actor"] = serde_json::json!("other-actor");
@@ -1456,11 +1439,6 @@ fn revision_history_deserialization_fails_closed_on_snapshot_or_chain_tampering(
     broken_chain["revision_history"]["records"][1]["prior_revision_identity"] =
         serde_json::json!(ReportRevisionId::new());
     assert!(serde_json::from_value::<ReportDocument>(broken_chain).is_err());
-
-    let mut false_size = value.clone();
-    false_size["revision_history"]["records"][1]["snapshot_serialized_bytes"] =
-        serde_json::json!(1);
-    assert!(serde_json::from_value::<ReportDocument>(false_size).is_err());
 
     let mut unknown_current_field = value.clone();
     unknown_current_field["future_history_contract"] = serde_json::json!({"version": 4});
@@ -1511,13 +1489,6 @@ fn schema_two_migration_retains_an_explicit_current_source_baseline() {
     assert_eq!(
         migrated.revision_history().records()[0].revision(),
         migrated.revision()
-    );
-    assert_eq!(
-        migrated
-            .reconstruct_revision(migrated.id(), migrated.revision())
-            .unwrap()
-            .pages(),
-        expected_pages
     );
 
     migrated
@@ -1651,7 +1622,7 @@ fn schema_four_migration_rejects_mislabeled_disabled_blocks() {
 }
 
 #[test]
-fn publication_policy_is_revisioned_and_reconstructable() {
+fn publication_policy_is_revisioned() {
     let mut document = ReportDocument::new("Publication policy").unwrap();
     let initial_revision = document.revision();
     let output_formats = ReportOutputFormats {
@@ -1685,19 +1656,11 @@ fn publication_policy_is_revisioned_and_reconstructable() {
 
     assert_eq!(document.output_formats(), output_formats);
     assert_eq!(document.publication_profile(), publication_profile);
-    let prior = document
-        .reconstruct_revision(document.id(), initial_revision)
-        .unwrap();
-    assert_eq!(prior.output_formats(), ReportOutputFormats::default());
-    assert_eq!(
-        prior.publication_profile(),
-        ReportPublicationProfile::default()
-    );
-    let current = document
-        .reconstruct_revision(document.id(), document.revision())
-        .unwrap();
-    assert_eq!(current.output_formats(), output_formats);
-    assert_eq!(current.publication_profile(), publication_profile);
+    let records = document.revision_history().records();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].revision(), initial_revision);
+    assert_eq!(records[1].revision(), document.revision());
+    assert_ne!(records[0].snapshot_digest(), records[1].snapshot_digest());
 }
 
 #[test]
@@ -1845,41 +1808,10 @@ fn schema_six_migration_rejects_linked_figure_without_inventing_a_locator() {
     for page in &mut document.pages {
         clear_figure_locators(page);
     }
-    for record in &mut document.revision_history.records {
-        for page in &mut record.snapshot.pages {
-            clear_figure_locators(page);
-        }
-    }
 
     assert!(matches!(
         document.migrate(),
         Err(ReportError::UnsafeLegacyMigration { version: 6 })
-    ));
-}
-
-#[test]
-fn revision_history_snapshot_capacity_uses_checked_aggregate_bytes() {
-    assert!(
-        validate_revision_history_snapshot_capacity([
-            MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES / 2,
-            MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES / 2,
-        ])
-        .is_ok()
-    );
-    assert!(matches!(
-        validate_revision_history_snapshot_capacity([
-            MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES,
-            1,
-        ]),
-        Err(ReportError::CapacityExceeded(
-            "report source revision snapshot bytes"
-        ))
-    ));
-    assert!(matches!(
-        validate_revision_history_snapshot_capacity([u64::MAX, 1]),
-        Err(ReportError::CapacityExceeded(
-            "report source revision snapshot bytes"
-        ))
     ));
 }
 
@@ -1891,9 +1823,10 @@ fn streaming_snapshot_digest_matches_canonical_json_bytes() {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice-report-source-snapshot-v1\0");
     hasher.update(&canonical);
-    let (digest, serialized_bytes) = report_snapshot_digest_and_size(&snapshot).unwrap();
-    assert_eq!(serialized_bytes, canonical.len() as u64);
-    assert_eq!(digest, ContentDigest::from_bytes(hasher.finalize().into()));
+    assert_eq!(
+        report_snapshot_digest(&snapshot).unwrap(),
+        ContentDigest::from_bytes(hasher.finalize().into())
+    );
 }
 
 #[test]
