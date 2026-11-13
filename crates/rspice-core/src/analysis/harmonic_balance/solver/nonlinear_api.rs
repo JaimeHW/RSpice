@@ -96,6 +96,7 @@ impl HbSolver {
     }
 
     /// Add a diode for Newton iteration
+    #[cfg(test)]
     pub fn add_diode(&mut self, anode: usize, cathode: usize, is: Value, n: Value) {
         self.add_nonlinear_device(NonlinearDeviceInstance::diode(anode, cathode, is, n));
     }

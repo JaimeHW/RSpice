@@ -1416,6 +1416,7 @@ impl TransientResultCompressed {
     }
 
     /// Interpolate a retained branch-current waveform by canonical name.
+    #[cfg(test)]
     pub fn interpolate_branch_current_named(&self, name: &str, time: Value) -> Option<Value> {
         self.interpolate_channel(self.branch_current_channel(name)?, time)
     }
@@ -1431,6 +1432,7 @@ impl TransientResultCompressed {
     }
 
     /// Interpolate a retained device operating-point waveform.
+    #[cfg(test)]
     pub fn interpolate_device_op_named(
         &self,
         device_name: &str,
@@ -1446,6 +1448,7 @@ impl TransientResultCompressed {
     }
 
     /// Interpolate a retained typed device-store waveform by canonical name.
+    #[cfg(test)]
     pub fn interpolate_store_named(&self, name: &str, time: Value) -> Option<Value> {
         self.interpolate_channel(self.store_channel(name)?, time)
     }

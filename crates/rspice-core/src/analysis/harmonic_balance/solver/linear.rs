@@ -519,7 +519,6 @@ impl HbSolver {
     /// Add a single conductance stamp at position (node_i, node_j)
     ///
     /// This is a low-level method that adds a single Y-matrix entry.
-    /// For a resistor between two nodes, use `add_resistor` instead.
     pub fn add_conductance(&mut self, node_i: usize, node_j: usize, g: Value) {
         self.add_conductance_with_small_signal(node_i, node_j, g, g);
     }
@@ -547,6 +546,7 @@ impl HbSolver {
     /// - Y(j,i) -= G
     ///
     /// Ground is represented by a node index >= num_nodes (effectively ignored).
+    #[cfg(test)]
     pub fn add_resistor(&mut self, node_i: usize, node_j: usize, r: Value) {
         if r.abs() < 1e-30 {
             return; // Avoid division by zero
@@ -575,6 +575,7 @@ impl HbSolver {
     /// In frequency domain, inductor admittance is Y_L = 1/(jωL).
     /// At DC (ω=0), inductor is short circuit (infinite admittance) - handled specially.
     /// At harmonic k: Y_L(k) = 1/(j * k * ω₀ * L) = -j/(k * ω₀ * L)
+    #[cfg(test)]
     pub fn add_inductance(&mut self, node_i: usize, node_j: usize, l: Value) {
         self.l_matrix.push((node_i, node_j, l));
     }
@@ -583,6 +584,7 @@ impl HbSolver {
     ///
     /// Proper MNA treatment: voltage sources require branch current variables
     /// to enforce voltage constraint without Norton approximation.
+    #[cfg(test)]
     pub fn add_voltage_source_branch(
         &mut self,
         node_pos: usize,
@@ -1506,6 +1508,7 @@ impl HbSolver {
     /// convert with a factor 1/2 at this boundary; DC passes through.
     /// Stamping the full amplitude as the coefficient made every nonlinear
     /// device see twice the true voltage swing.
+    #[cfg(test)]
     pub fn set_harmonic_source(
         &mut self,
         node: usize,
@@ -1521,7 +1524,9 @@ impl HbSolver {
 
     /// Add AC source contribution at an arbitrary harmonic for a node.
     ///
-    /// Same amplitude-to-coefficient conversion as `set_harmonic_source`.
+    /// `magnitude` is the physical source amplitude. The solver stores
+    /// Fourier coefficients internally, so harmonics k >= 1 convert with a
+    /// factor 1/2 at this boundary; DC passes through.
     pub fn add_harmonic_source(
         &mut self,
         node: usize,
@@ -1630,7 +1635,7 @@ impl HbSolver {
     /// Source value entering the branch KVL constraint at one harmonic, in
     /// the solver's internal Fourier-coefficient convention: stored AC
     /// entries are physical amplitudes, so harmonics k >= 1 convert with a
-    /// factor 1/2 (see `set_harmonic_source`).
+    /// factor 1/2 (see `add_harmonic_source`).
     pub(crate) fn voltage_source_value_at_harmonic(
         branch: &VoltageSourceBranch,
         harmonic: usize,

@@ -462,6 +462,7 @@ impl Resistors {
 
     /// Advance every self-consistent thermal resistor after an accepted
     /// transient solution and refresh the next-step conductances.
+    #[cfg(test)]
     pub fn advance_thermal_states(
         &mut self,
         solution: &[Value],

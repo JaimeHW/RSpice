@@ -418,6 +418,7 @@ impl Sensitivity {
     }
 
     /// Get sensitivity in percent per percent
+    #[cfg(test)]
     pub fn percent_per_percent(&self) -> SensitivityValue<Value> {
         // If dy/y = S * dp/p, then a one-percent parameter change produces
         // S percent output change. The numeric percent-per-percent value is

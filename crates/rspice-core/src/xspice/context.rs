@@ -1511,6 +1511,7 @@ impl CmContext {
     }
 
     /// Set per-element event times for a digital input vector.
+    #[cfg(test)]
     pub fn set_input_digital_vector_event_times(&mut self, name: &str, times: Vec<Option<Value>>) {
         match self.input_vector_event_times.get_mut(name) {
             Some(existing) => {
@@ -1590,6 +1591,7 @@ impl CmContext {
     }
 
     /// Get previous analog output value
+    #[cfg(test)]
     pub fn output_prev(&self, name: &str) -> Value {
         self.outputs
             .get(name)
@@ -1626,6 +1628,7 @@ impl CmContext {
     }
 
     /// Get previous analog vector output values.
+    #[cfg(test)]
     pub fn output_vector_prev(&self, name: &str) -> Vec<Value> {
         self.outputs
             .get(name)
@@ -1640,6 +1643,7 @@ impl CmContext {
     }
 
     /// Get one previous analog vector output value without cloning the full vector.
+    #[cfg(test)]
     pub fn output_vector_prev_value(&self, name: &str, index: usize) -> Value {
         match self.outputs.get(name) {
             Some(OutputValue::AnalogVector(values)) => values
@@ -1660,6 +1664,7 @@ impl CmContext {
     }
 
     /// Get digital vector output values.
+    #[cfg(test)]
     pub fn output_digital_vector(&self, name: &str) -> Vec<DigitalValue> {
         self.outputs
             .get(name)
@@ -1680,6 +1685,7 @@ impl CmContext {
     }
 
     /// Get one digital vector output element without cloning the full vector.
+    #[cfg(test)]
     pub fn output_digital_vector_value(&self, name: &str, index: usize) -> Option<DigitalValue> {
         match self.outputs.get(name) {
             Some(OutputValue::DigitalVector(values)) => values.get(index).copied(),
@@ -1700,6 +1706,7 @@ impl CmContext {
     }
 
     /// Get analog vector output partial derivatives.
+    #[cfg(test)]
     pub fn partial_vector(&self, name: &str) -> Vec<Value> {
         self.outputs
             .get(name)
@@ -1791,6 +1798,7 @@ impl CmContext {
     }
 
     /// Set analog vector output values with zero direct partials.
+    #[cfg(test)]
     pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) -> CmResult<()> {
         self.set_output_vector_from_slice(name, &values)
     }
@@ -1860,6 +1868,7 @@ impl CmContext {
     }
 
     /// Set analog vector output values and per-element direct partials.
+    #[cfg(test)]
     pub fn set_output_vector_with_partials(
         &mut self,
         name: &str,
@@ -2084,6 +2093,7 @@ impl CmContext {
     }
 
     /// Set digital vector output value (schedules one event per connected bit).
+    #[cfg(test)]
     pub fn set_output_digital_vector(
         &mut self,
         name: &str,
@@ -2188,6 +2198,7 @@ impl CmContext {
     }
 
     /// Set real vector output value (schedules one event per connected element).
+    #[cfg(test)]
     pub fn set_output_real_vector(&mut self, name: &str, values: Vec<Value>, delay: Value) {
         match self.outputs.get_mut(name) {
             Some(OutputValue::RealVector(existing)) => {
@@ -2452,6 +2463,7 @@ impl CmContext {
     }
 
     /// Drain pending absolute transient breakpoint requests.
+    #[cfg(test)]
     pub fn take_requested_breakpoints(&mut self) -> Vec<Value> {
         self.requested_edge_completions.clear();
         std::mem::take(&mut self.requested_breakpoints)
@@ -2497,12 +2509,14 @@ impl CmContext {
     }
 
     /// Get complex parameter
+    #[cfg(test)]
     pub fn complex_param(&self, name: &str) -> Option<Complex64> {
         let key = Self::canonical_param_lookup_key(name);
         self.setup.complex_params.get(key.as_ref()).copied()
     }
 
     /// Get complex parameter with default
+    #[cfg(test)]
     pub fn complex_param_or(&self, name: &str, default: Complex64) -> Complex64 {
         let key = Self::canonical_param_lookup_key(name);
         self.setup
@@ -2537,6 +2551,7 @@ impl CmContext {
     }
 
     /// Get complex-vector parameter
+    #[cfg(test)]
     pub fn complex_vector_param(&self, name: &str) -> Option<&[Complex64]> {
         let key = Self::canonical_param_lookup_key(name);
         self.setup
@@ -2974,6 +2989,7 @@ impl CmContext {
     }
 
     /// Return the first recorded sample at or after `time`.
+    #[cfg(test)]
     pub fn transient_history_at_or_after(&self, key: &str, time: Value) -> Option<Vec<Value>> {
         self.transient_history_values_at_or_after(key, time)
             .map(<[Value]>::to_vec)

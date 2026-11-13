@@ -46,6 +46,7 @@ impl Engine {
     }
 
     /// Clear retained compiler findings, allowing a new run to report them again.
+    #[cfg(test)]
     pub fn clear_compiler_diagnostics(&self) {
         let mut retained = self
             .compiler_diagnostics

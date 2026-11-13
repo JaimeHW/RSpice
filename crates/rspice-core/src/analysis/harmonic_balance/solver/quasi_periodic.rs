@@ -170,6 +170,7 @@ impl HbSolver {
         clippy::too_many_arguments,
         reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
     )]
+    #[cfg(test)]
     pub fn solve_quasi_periodic_ac_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -345,6 +346,7 @@ impl HbSolver {
         clippy::too_many_arguments,
         reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
     )]
+    #[cfg(test)]
     pub fn visit_quasi_periodic_noise_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,

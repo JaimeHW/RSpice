@@ -352,6 +352,7 @@ fn pwl_waveform_cache_entry_bytes(
 macro_rules! shared_source_methods {
     () => {
         /// Set transient context used to resolve waveform defaults.
+        #[cfg(test)]
         pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
             self.set_transient_context_with_dialect(
                 tstep,

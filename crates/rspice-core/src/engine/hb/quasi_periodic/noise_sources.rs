@@ -102,6 +102,7 @@ impl Engine {
     /// Physical source evidence for the exact retained QPSS producer. This
     /// authenticates the orbit; numerical projection still requires QPNOISE's
     /// adjoint solve, and this catalog alone is not an output noise result.
+    #[cfg(test)]
     pub fn qpss_noise_sources_with_abort(
         &self,
         netlist: &Netlist,

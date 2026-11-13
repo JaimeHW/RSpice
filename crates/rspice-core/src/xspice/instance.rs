@@ -3883,6 +3883,7 @@ impl XspiceInstance {
     }
 
     /// Get analog vector contributions (conductance, current/value) for stamping.
+    #[cfg(test)]
     pub fn get_analog_vector_contributions(&self, port_idx: usize) -> Option<Vec<(Value, Value)>> {
         if !self.has_analog_vector_contributions(port_idx) {
             return None;

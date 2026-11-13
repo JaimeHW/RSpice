@@ -28,6 +28,7 @@ impl XyceTestRunner {
     }
 
     /// Discover simulator regression decks under `Netlists`.
+    #[cfg(test)]
     pub fn discover_netlist_tests(&self) -> Vec<XyceDeck> {
         self.discover_tests()
             .into_iter()

@@ -893,6 +893,7 @@ impl DeckPlan {
     /// style identity a deck run would give it. This is the sanctioned way to
     /// get one: [`AnalysisInstanceId`] has no public constructor precisely so
     /// that no frontend can invent an ordinal scheme of its own.
+    #[cfg(test)]
     pub fn for_direct_analyses(kind: AnalysisKind, count: usize) -> Result<Self, DeckPlanError> {
         if kind == AnalysisKind::ImplicitOp {
             return Err(DeckPlanError::ExplicitImplicitOp);

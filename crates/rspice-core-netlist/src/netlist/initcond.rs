@@ -8,7 +8,9 @@ use super::{
     NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
     map_abort_parse_error, parser, poll_parse_abort, poll_parse_text,
 };
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
+#[cfg(test)]
+use crate::abort_signal::NoAbort;
 
 /// Maximum accepted size of one external `.INITCOND` data source.
 ///
@@ -58,6 +60,7 @@ impl DeviceInitialConditionSourceProvider for IncludeProcessor {
 
 impl Netlist {
     /// Resolve `.INITCOND FILE` through a caller-supplied source provider.
+    #[cfg(test)]
     pub fn resolve_device_initial_condition_source(
         &mut self,
         provider: &dyn DeviceInitialConditionSourceProvider,

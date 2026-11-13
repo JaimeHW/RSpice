@@ -3707,6 +3707,7 @@ impl StepSweep {
     /// truncated grid. It is a resource bound, not semantic validation:
     /// frontends must still reject invalid sweep specifications according to
     /// their dialect and user-facing diagnostics policy.
+    #[cfg(test)]
     pub fn values_bounded(
         &self,
         max_values: usize,
