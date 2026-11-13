@@ -113,8 +113,6 @@ pub enum FactorizationRequest {
     /// factor on every call; reuse-pivot matrices reuse factors for
     /// bit-identical values and refactor changed values.
     Automatic,
-    /// Run numeric factorization for this solve even when values are unchanged.
-    Factorize,
     /// Reuse the existing numeric factors without consulting current values.
     /// This mirrors Xyce's `reuse_factors=true` contract; callers must ensure
     /// the matrix represented by the factors is still the intended matrix.

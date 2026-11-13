@@ -5866,32 +5866,6 @@ impl ComplexMatrix {
         Ok(())
     }
 
-    /// Checked imaginary add for callers that want an immediate structural error.
-    #[inline]
-    pub fn try_add_imag(
-        &mut self,
-        row: usize,
-        col: usize,
-        value: Value,
-    ) -> Result<(), SolverError> {
-        let idx = match find_csc_offset(&self.csc, row, col) {
-            Some(idx) => idx,
-            None => {
-                let missing = missing_matrix_position("ComplexMatrix::try_add_imag", row, col);
-                self.stamping_error
-                    .get_or_insert(MatrixStampError::MissingPosition(missing));
-                return Err(missing.into_solver_error());
-            }
-        };
-        let combined = self.values[idx].im + value;
-        if !value.is_finite() || !combined.is_finite() {
-            return Err(SolverError::Overflow);
-        }
-        self.values[idx].im = combined;
-        self.factorization_valid = false;
-        Ok(())
-    }
-
     #[inline]
     fn record_missing_position(&mut self, method: &'static str, row: usize, col: usize) {
         self.stamping_error.get_or_insert_with(|| {
