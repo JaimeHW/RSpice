@@ -17,7 +17,9 @@ use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ViewType,
 };
-use crate::workbench::{MessageId, RSpiceApp};
+use crate::workbench::MessageId;
+#[cfg(test)]
+use crate::workbench::RSpiceApp;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
@@ -101,11 +103,14 @@ impl SelectedVerilogASource {
     }
 }
 
+/// The tests' form of [`selected_veriloga_source_in`], over the whole app.
+#[cfg(test)]
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
     selected_veriloga_source_in(&app.state.model)
 }
 
-/// [`selected_veriloga_source`], read from the model alone.
+/// The Verilog-A source of the cell view in front, with the module it
+/// selects, read from the model.
 pub(crate) fn selected_veriloga_source_in(model: &Model) -> Result<SelectedVerilogASource, String> {
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
     let owner = model
@@ -293,22 +298,33 @@ pub(crate) fn replace_selected_veriloga_file(
     logical_path: &str,
     contents: String,
 ) -> Result<bool, String> {
-    let current = selected_veriloga_source_in(parts.model)?;
-    let project_id = parts.model.workspace.content.project.id();
+    replace_selected_veriloga_file_in(parts.model, parts.code, expected, logical_path, contents)
+}
+
+/// [`replace_selected_veriloga_file`], over the model and the Code
+/// workspace's runtime state alone.
+pub(crate) fn replace_selected_veriloga_file_in(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    expected: &SelectedVerilogASource,
+    logical_path: &str,
+    contents: String,
+) -> Result<bool, String> {
+    let current = selected_veriloga_source_in(model)?;
+    let project_id = model.workspace.content.project.id();
     if !current.matches_token(project_id, expected.token(project_id)) {
         return Err(
             "The active Verilog-A source changed before this edit could be committed.".to_owned(),
         );
     }
-    let changed = parts
-        .model
+    let changed = model
         .workspace
         .content
         .project_sources
         .replace_bundle_file_content(current.bundle().id(), logical_path, contents)
         .map_err(|error| error.to_string())?;
     if changed {
-        invalidate_veriloga_evidence(parts, current.bundle().id());
+        invalidate_veriloga_evidence_in(model, code, current.bundle().id());
     }
     Ok(changed)
 }
@@ -343,16 +359,19 @@ pub(crate) fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Re
 /// holds, as any edit of a source file is made, or as a new profile document
 /// when it holds none yet. Returns whether anything changed.
 pub(crate) fn write_veriloga_build_profile(
-    parts: &mut CodeWorkspaceParts<'_>,
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
     expected: &SelectedVerilogASource,
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<bool, String> {
     let current = super::veriloga_profile::resolve_veriloga_build_profile(expected.bundle())?;
     match current.logical_path {
-        Some(path) => replace_selected_veriloga_file(parts, expected, &path, profile.to_toml()?),
+        Some(path) => {
+            replace_selected_veriloga_file_in(model, code, expected, &path, profile.to_toml()?)
+        }
         None => {
-            let project_id = parts.model.workspace.content.project.id();
-            if !selected_veriloga_source_in(parts.model)?
+            let project_id = model.workspace.content.project.id();
+            if !selected_veriloga_source_in(model)?
                 .matches_token(project_id, expected.token(project_id))
             {
                 return Err(
@@ -360,7 +379,7 @@ pub(crate) fn write_veriloga_build_profile(
                         .to_owned(),
                 );
             }
-            add_build_profile_document(parts, expected, profile).map(|_| true)
+            add_build_profile_document(model, code, expected, profile).map(|_| true)
         }
     }
 }
@@ -368,7 +387,8 @@ pub(crate) fn write_veriloga_build_profile(
 /// Add `profile` to `selected`'s bundle as its build-profile document, at the
 /// first free path under `.rspice/`. Returns the path it was written at.
 fn add_build_profile_document(
-    parts: &mut CodeWorkspaceParts<'_>,
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
     selected: &SelectedVerilogASource,
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<String, String> {
@@ -385,8 +405,7 @@ fn add_build_profile_document(
         .ok_or_else(|| "Could not allocate a portable Verilog-A build-profile path.".to_owned())?;
     let file =
         ProjectSourceFile::try_new(&path, profile.to_toml()?).map_err(|error| error.to_string())?;
-    parts
-        .model
+    model
         .workspace
         .content
         .add_project_source_bundle_file_with_role(
@@ -396,7 +415,7 @@ fn add_build_profile_document(
             ProjectSourceRole::VerilogABuildProfile,
         )
         .map_err(|error| error.to_string())?;
-    invalidate_veriloga_evidence(parts, selected.bundle().id());
+    invalidate_veriloga_evidence_in(model, code, selected.bundle().id());
     Ok(path)
 }
 
@@ -1155,8 +1174,13 @@ mod tests {
         profile.targets.generated_rust = true;
 
         assert!(
-            write_veriloga_build_profile(&mut app.code_workspace_parts(), &selected, &profile)
-                .unwrap()
+            write_veriloga_build_profile(
+                &mut app.state.model,
+                &mut app.state.code.code_workspace,
+                &selected,
+                &profile,
+            )
+            .unwrap()
         );
 
         let after = selected_veriloga_source(&app).unwrap();
@@ -1172,9 +1196,13 @@ mod tests {
         let resolved =
             super::super::veriloga_profile::resolve_veriloga_build_profile(after.bundle()).unwrap();
         assert_eq!(resolved.profile, profile);
-        let stale =
-            write_veriloga_build_profile(&mut app.code_workspace_parts(), &selected, &profile)
-                .expect_err("a write is bound to the closure it was made against");
+        let stale = write_veriloga_build_profile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &selected,
+            &profile,
+        )
+        .expect_err("a write is bound to the closure it was made against");
         assert!(stale.contains("changed"), "{stale}");
     }
 

@@ -26,6 +26,17 @@ const TWO_MODULES: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;
 /// A module whose conductance only the build profile can supply.
 const NEEDS_A_DEFINE: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real g = `GAIN_VALUE;\n  analog I(p, n) <+ g * V(p, n);\nendmodule\n";
 
+/// Save the open form, as the shell's arm does.
+fn save(app: &mut RSpiceApp) -> Result<bool, String> {
+    let state = &mut app.state;
+    save_veriloga_build_settings(
+        &mut state.model,
+        &mut state.code.code_workspace,
+        &mut state.code.veriloga_build_settings,
+        state.workbench.messages(),
+    )
+}
+
 fn messages() -> crate::workbench::MessageCatalog {
     crate::workbench::MessageCatalog::new(UiTextLocale::EnglishUnitedStates)
 }
@@ -142,7 +153,7 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
     form.checks.convergence = false;
     form.checks.portability = false;
 
-    assert!(save_veriloga_build_settings(&mut app).expect("the save is made"));
+    assert!(save(&mut app).expect("the save is made"));
     assert!(app.state.code.veriloga_build_settings.is_none());
 
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
@@ -208,7 +219,7 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
     assert_eq!(before.selected_module(), Some("gain"));
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
-    assert!(save_veriloga_build_settings(&mut app).unwrap());
+    assert!(save(&mut app).unwrap());
 
     let saved = code_workspace::selected_veriloga_source(&app).unwrap();
     assert_eq!(saved.selected_module(), Some("gain_fast"));
@@ -270,7 +281,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
     .unwrap();
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
-    assert!(save_veriloga_build_settings(&mut app).unwrap());
+    assert!(save(&mut app).unwrap());
     compile_and_publish(&mut app);
     open_in_design(&mut app.state, &schematic);
     assert_eq!(
@@ -316,7 +327,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
-    assert!(save_veriloga_build_settings(&mut app).unwrap());
+    assert!(save(&mut app).unwrap());
     let saved = code_workspace::selected_veriloga_source(&app).unwrap();
     let edited = format!("{TWO_MODULES}// edited after the save\n");
     code_workspace::replace_selected_veriloga_file(
@@ -355,7 +366,7 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
     let before = code_workspace::selected_veriloga_source(&app).unwrap();
     draft(&mut app).generated_rust = true;
 
-    let refusal = save_veriloga_build_settings(&mut app).expect_err("read-only refuses");
+    let refusal = save(&mut app).expect_err("read-only refuses");
     assert_eq!(
         refusal,
         messages().text(MessageId::VerilogABuildSettingsReadOnly)
@@ -471,13 +482,10 @@ fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
         )
         .is_some_and(egui::accesskit::Node::is_disabled)
     );
-    assert_eq!(
-        save_veriloga_build_settings(&mut app).expect_err("held"),
-        refusal
-    );
+    assert_eq!(save(&mut app).expect_err("held"), refusal);
 
     draft(&mut app).include_draft = "include".to_owned();
-    assert!(save_veriloga_build_settings(&mut app).unwrap());
+    assert!(save(&mut app).unwrap());
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     let profile = resolve_veriloga_build_profile(selected.bundle())
         .unwrap()

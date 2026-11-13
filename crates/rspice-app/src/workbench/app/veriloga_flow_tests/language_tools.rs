@@ -276,8 +276,12 @@ fn find_references_is_a_list_the_keyboard_walks_and_enter_opens_at_the_column() 
     caret_after(&mut user, "parameter real gb");
     let logged = user.app.state.model.log_buffer.entries().count();
 
-    crate::workbench::app::navigate_active_source(&mut user.app, CodeCommand::FindReferences)
-        .expect("the caret is on a name");
+    crate::workbench::app::navigate_source_bundle(
+        &mut user.app.code_workspace_parts(),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        CodeCommand::FindReferences,
+    )
+    .expect("the caret is on a name");
     user.settle();
 
     assert_eq!(

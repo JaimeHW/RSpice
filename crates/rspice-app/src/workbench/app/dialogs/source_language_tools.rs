@@ -24,109 +24,77 @@
 use egui::{Context, Id};
 
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::CodeCommand;
-use crate::workbench::documents::code_workspace::{self, CodeWorkspaceRuntimeState};
+use crate::workbench::documents::code_workspace::{
+    self, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
+};
 
 const RENAME_TITLE: &str = "Rename symbol";
 const RENAME_PRIMARY: &str = "Rename";
 const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 
 /// Go to definition, Find references and Rename symbol from the caret of the
-/// source editor on screen.
-///
-/// A netlist answers through its own language service. Verilog-A and
-/// Automation answer through the project source index.
-pub(crate) fn navigate_active_source(
-    app: &mut RSpiceApp,
+/// source editor on screen, in the `language` bundle it shows, through the
+/// project source index. A netlist answers through its own language service
+/// instead, which the shell asks.
+pub(crate) fn navigate_source_bundle(
+    parts: &mut CodeWorkspaceParts<'_>,
+    language: crate::state::ProjectSourceLanguage,
     command: CodeCommand,
 ) -> Result<(), String> {
-    use crate::workbench::documents::netlist_document::language as netlist;
-
-    let Some(language) = code_workspace::active_source_language(
-        app.state.workbench.workspace,
-        &app.state.model.workspace,
-        app.state.code.code_workspace.page,
-    ) else {
-        let message = match command {
-            CodeCommand::GoToDefinition => {
-                Some(netlist::go_to_definition_at_cursor(&mut app.state)?)
-            }
-            CodeCommand::FindReferences => {
-                Some(netlist::find_references_at_cursor(&mut app.state)?)
-            }
-            CodeCommand::RenameSymbol => {
-                netlist::begin_rename_at_cursor(&mut app.state)?;
-                None
-            }
-            _ => None,
-        };
-        if let Some(message) = message {
-            app.state.prompt(message);
-        }
-        return Ok(());
-    };
-    let bundle_id = app
-        .state
+    let bundle_id = parts
         .model
         .workspace
         .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
-    let logical_path = code_workspace::active_bundle_path(
-        &app.state.model.workspace,
-        &app.state.code.code_workspace,
-        language,
-    )
-    .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
+    let logical_path =
+        code_workspace::active_bundle_path(&parts.model.workspace, parts.code, language)
+            .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     // The caret the editor last reported for this document.
-    let caret = app
-        .state
+    let caret = parts
         .code
-        .code_workspace
         .source_carets
         .get(&(bundle_id, logical_path.clone()))
         .copied()
         .unwrap_or(0);
     // Built from the exact closure on screen. Rename keeps it as the form's
     // state; the other two borrow it and leave an open form as they found it.
-    let previous = app.state.code.code_workspace.language_tools.take();
+    let previous = parts.code.language_tools.take();
     if let Err(error) = code_workspace::open_language_tools_in_bundle(
-        &mut app.code_workspace_parts(),
+        parts,
         language,
         bundle_id,
         &logical_path,
         caret,
     ) {
-        app.state.code.code_workspace.language_tools = previous;
+        parts.code.language_tools = previous;
         return Err(error);
     }
-    let caret_name = app
-        .state
+    let caret_name = parts
         .code
-        .code_workspace
         .language_tools
         .as_ref()
         .map(|tools| tools.query.clone())
         .unwrap_or_default();
     if command == CodeCommand::RenameSymbol {
         if caret_name.is_empty() {
-            app.state.code.code_workspace.language_tools = previous;
+            parts.code.language_tools = previous;
             return Err("Place the caret on a name to rename it.".to_owned());
         }
-        if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
+        if let Some(tools) = parts.code.language_tools.as_mut() {
             tools.replacement = caret_name;
         }
         return Ok(());
     }
-    let tools = std::mem::replace(&mut app.state.code.code_workspace.language_tools, previous)
+    let tools = std::mem::replace(&mut parts.code.language_tools, previous)
         .ok_or_else(|| "The source index could not be built.".to_owned())?;
     if command == CodeCommand::FindReferences {
         if caret_name.is_empty() {
             return Err("Place the caret on a name to find its references.".to_owned());
         }
-        list_references(app, &tools.index, &logical_path, caret, &caret_name);
+        list_references(parts, &tools.index, &logical_path, caret, &caret_name);
         return Ok(());
     }
     if caret_name.is_empty() {
@@ -139,21 +107,19 @@ pub(crate) fn navigate_active_source(
     if !crate::state::project_source_paths_equal(&definition.logical_path, &logical_path) {
         match language {
             crate::state::ProjectSourceLanguage::VerilogA => {
-                app.state.code.code_workspace.veriloga.selected_file =
-                    Some(code_workspace::VerilogAFileSelection {
-                        bundle_id,
-                        logical_path: definition.logical_path.clone(),
-                    });
+                parts.code.veriloga.selected_file = Some(code_workspace::VerilogAFileSelection {
+                    bundle_id,
+                    logical_path: definition.logical_path.clone(),
+                });
             }
             crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-                app.state.code.code_workspace.automation.selected_file =
-                    Some(definition.logical_path.clone());
+                parts.code.automation.selected_file = Some(definition.logical_path.clone());
             }
         }
     }
     // The page hands this to the editor it draws next, which is the
     // definition's file.
-    app.state.workbench.outbox.push(
+    parts.wb.outbox.push(
         crate::workbench::framework::requests::SourceEditorRequest::RevealLine(definition.line),
     );
     Ok(())
@@ -162,7 +128,7 @@ pub(crate) fn navigate_active_source(
 /// Find references: one row per occurrence on the References page of the
 /// bottom dock, the page brought forward, and the count on the status bar.
 fn list_references(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     index: &code_workspace::LanguageServiceIndex,
     logical_path: &str,
     caret: usize,
@@ -183,8 +149,7 @@ fn list_references(
             text: reference.line_preview.clone(),
         })
         .collect::<Vec<_>>();
-    let revision = app
-        .state
+    let revision = parts
         .model
         .workspace
         .content
@@ -192,8 +157,8 @@ fn list_references(
         .get_bundle(index.bundle_id)
         .map_or(0, |bundle| bundle.revision().get());
     if !rows.is_empty() {
-        app.state
-            .workbench
+        parts
+            .wb
             .show_references(crate::workbench::state::SourceReferences::new(
                 name.to_owned(),
                 index.bundle_id,
@@ -201,7 +166,7 @@ fn list_references(
                 rows,
             ));
     }
-    app.state.prompt(match references.len() {
+    parts.wb.prompt(match references.len() {
         0 => format!("No references to {name} in this source bundle."),
         count => format!(
             "{count} reference{} to {name} in {files} file{}.",
@@ -319,6 +284,7 @@ pub(in crate::workbench) fn render_rename_symbol_form(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
 
     /// `resolve_veriloga_compile` was written to gate the compile command and
     /// never attached to it, so the button stayed enabled while a compile was

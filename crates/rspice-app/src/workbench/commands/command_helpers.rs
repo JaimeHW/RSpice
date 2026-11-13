@@ -342,7 +342,10 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::VerilogABuildSettings => {
             activate_workspace(app, Workspace::Design);
-            if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
+            if let Err(error) = crate::workbench::app::open_veriloga_build_settings(
+                &app.state.model,
+                &mut app.state.code.veriloga_build_settings,
+            ) {
                 app.state.prompt(error);
             }
         }
@@ -363,8 +366,12 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             }
         }
         CodeRequest::SaveVerilogABuildSettings { compile } => {
+            let state = &mut app.state;
             match crate::workbench::app::dialogs::veriloga_build_settings::save_veriloga_build_settings(
-                app,
+                &mut state.model,
+                &mut state.code.code_workspace,
+                &mut state.code.veriloga_build_settings,
+                state.workbench.messages(),
             ) {
                 Ok(_) if compile => {
                     if let Err(error) =
@@ -734,10 +741,49 @@ fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRe
 
 /// Go to definition, Find references or Rename symbol from the caret of the
 /// source editor on screen, saying why not when it cannot.
+/// Go to definition, Find references and Rename symbol from the caret of the
+/// source editor on screen. Verilog-A and Automation answer through the
+/// project source index, over the code workspace's parts; a netlist answers
+/// through its own language service.
 fn navigate_active_source(app: &mut RSpiceApp, command: CodeCommand) {
-    if let Err(error) = crate::workbench::app::navigate_active_source(app, command) {
+    let language = crate::workbench::documents::code_workspace::active_source_language(
+        app.state.workbench.workspace,
+        &app.state.model.workspace,
+        app.state.code.code_workspace.page,
+    );
+    let result = match language {
+        Some(language) => crate::workbench::app::navigate_source_bundle(
+            &mut app.code_workspace_parts(),
+            language,
+            command,
+        ),
+        None => navigate_netlist(&mut app.state, command),
+    };
+    if let Err(error) = result {
         app.state.prompt(error);
     }
+}
+
+/// Go to definition, Find references and Rename symbol from the caret of the
+/// netlist editor, through the deck's own language service. Held in the
+/// shell until that service runs over the code feature's parts: its answers
+/// take the whole application state today.
+fn navigate_netlist(state: &mut AppState, command: CodeCommand) -> Result<(), String> {
+    use crate::workbench::documents::netlist_document::language as netlist;
+
+    let message = match command {
+        CodeCommand::GoToDefinition => Some(netlist::go_to_definition_at_cursor(state)?),
+        CodeCommand::FindReferences => Some(netlist::find_references_at_cursor(state)?),
+        CodeCommand::RenameSymbol => {
+            netlist::begin_rename_at_cursor(state)?;
+            None
+        }
+        _ => None,
+    };
+    if let Some(message) = message {
+        state.prompt(message);
+    }
+    Ok(())
 }
 
 /// Carry out what the project feature handed over, as the feature did in

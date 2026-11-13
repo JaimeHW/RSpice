@@ -192,8 +192,11 @@ fn open_veriloga_build_settings_alone(dialogs: &mut AppState) {
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
-    crate::workbench::app::dialogs::veriloga_build_settings::open_veriloga_build_settings(&mut app)
-        .expect("Build settings opens on a Verilog-A view");
+    crate::workbench::app::dialogs::veriloga_build_settings::open_veriloga_build_settings(
+        &app.state.model,
+        &mut app.state.code.veriloga_build_settings,
+    )
+    .expect("Build settings opens on a Verilog-A view");
     dialogs.code.veriloga_build_settings = app.state.code.veriloga_build_settings.take();
 }
 

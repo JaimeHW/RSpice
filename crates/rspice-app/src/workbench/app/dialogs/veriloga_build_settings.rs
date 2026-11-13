@@ -32,12 +32,13 @@ use rspice_simulation::project_veriloga::build_profile::{
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::{ProjectSourceLanguage, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{
     Model, PlatformState, VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding,
 };
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::documents::code_workspace::{self, SelectedVerilogASource};
+use crate::workbench::documents::code_workspace::{
+    self, CodeWorkspaceRuntimeState, SelectedVerilogASource,
+};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// The label column, as wide as "If a target fails" needs. Every row starts
@@ -261,8 +262,11 @@ pub(crate) fn veriloga_build_settings_available(model: &Model, platform: &Platfo
 }
 
 /// Open Build settings on the profile of the Verilog-A view in front.
-pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), String> {
-    let source = code_workspace::selected_veriloga_source(app)?;
+pub(crate) fn open_veriloga_build_settings(
+    model: &Model,
+    form: &mut Option<VerilogABuildSettingsDraft>,
+) -> Result<(), String> {
+    let source = code_workspace::selected_veriloga_source_in(model)?;
     let resolved = resolve_veriloga_build_profile(source.bundle())?;
     let profile = resolved.profile;
     // A source that does not parse yet still has settings to edit; its entry
@@ -280,7 +284,7 @@ pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), St
     if !entry_module.is_empty() && !modules.contains(&entry_module) {
         modules.insert(0, entry_module.clone());
     }
-    app.state.code.veriloga_build_settings = Some(VerilogABuildSettingsDraft {
+    *form = Some(VerilogABuildSettingsDraft {
         modules,
         entry_module,
         generated_rust: profile.targets.generated_rust,
@@ -315,46 +319,39 @@ pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), St
 /// Refused, with the form left open, on a read-only project, for an entry a
 /// list's field still holds that the list refuses, for a profile the build
 /// refuses, and for a source that moved since the form opened.
-pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, String> {
-    let messages = app.state.workbench.messages();
-    if app.state.model.safe_mode.project_read_only() {
+pub(crate) fn save_veriloga_build_settings(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    form: &mut Option<VerilogABuildSettingsDraft>,
+    messages: MessageCatalog,
+) -> Result<bool, String> {
+    if model.safe_mode.project_read_only() {
         return Err(messages.text(MessageId::VerilogABuildSettingsReadOnly));
     }
-    let draft = app
-        .state
-        .code
-        .veriloga_build_settings
+    let draft = form
         .clone()
         .ok_or_else(|| "Build settings is not open.".to_owned())?;
     let profile = draft.profile(&messages)?;
     profile.to_toml()?;
-    let rebind = module_rebind(app, &draft)?;
+    let rebind = module_rebind(model, &draft)?;
     let bundle = draft.source.bundle().id();
     let before_revision = draft.source.bundle().revision();
-    code_workspace::write_veriloga_build_profile(
-        &mut app.code_workspace_parts(),
-        &draft.source,
-        &profile,
-    )?;
-    let after_revision = app
-        .state
-        .model
+    code_workspace::write_veriloga_build_profile(model, code, &draft.source, &profile)?;
+    let after_revision = model
         .workspace
         .content
         .project_sources
         .get_bundle(bundle)
         .map_or(before_revision, |bundle| bundle.revision());
-    let binding = rebind.and_then(|rebind| rebind.apply(app));
+    let binding = rebind.and_then(|rebind| rebind.apply(model));
     let changed = after_revision != before_revision || binding.is_some();
-    app.state
-        .model
-        .record_veriloga_build_settings(VerilogABuildSettingsHistoryEntry {
-            bundle,
-            before_revision,
-            after_revision,
-            binding,
-        });
-    app.state.code.veriloga_build_settings = None;
+    model.record_veriloga_build_settings(VerilogABuildSettingsHistoryEntry {
+        bundle,
+        before_revision,
+        after_revision,
+        binding,
+    });
+    *form = None;
     Ok(changed)
 }
 
@@ -368,7 +365,7 @@ struct ModuleRebind {
 /// What the chosen entry module asks of the view's binding, checked before
 /// anything is written so a save is never half made.
 fn module_rebind(
-    app: &RSpiceApp,
+    model: &Model,
     draft: &VerilogABuildSettingsDraft,
 ) -> Result<Option<ModuleRebind>, String> {
     let bound = draft.source.selected_module();
@@ -376,9 +373,7 @@ fn module_rebind(
         return Ok(None);
     }
     let reference = draft.source.view();
-    let library = app
-        .state
-        .model
+    let library = model
         .library_manager
         .get_library(&reference.library)
         .ok_or_else(|| format!("Library '{}' no longer exists.", reference.library))?;
@@ -398,10 +393,8 @@ fn module_rebind(
 impl ModuleRebind {
     /// Bind the view to the module. Returns the binding on each side, or
     /// `None` when the view is gone.
-    fn apply(self, app: &mut RSpiceApp) -> Option<VerilogAModuleBinding> {
-        let mut metadata = app
-            .state
-            .model
+    fn apply(self, model: &mut Model) -> Option<VerilogAModuleBinding> {
+        let mut metadata = model
             .library_manager
             .get_library(&self.reference.library)
             .and_then(|library| library.get_cell(&self.reference.cell))
@@ -409,17 +402,15 @@ impl ModuleRebind {
             .map(|view| view.metadata.clone())?;
         let before = metadata.insert(MODULE_KEY.to_owned(), self.module.clone());
         {
-            let mut edit = app
-                .state
-                .model
+            let mut edit = model
                 .library_manager
                 .edit_library(&self.reference.library)?;
             edit.replace_view_metadata(&self.reference.cell, &self.reference.view, metadata);
             edit.mark_view_modified(&self.reference.cell, &self.reference.view);
         }
-        app.state.model.workspace.content.project_metadata_dirty = true;
+        model.workspace.content.project_metadata_dirty = true;
         if self.reference.library == VERILOGA_LIBRARY_NAME {
-            persist_global_veriloga_library(&mut app.state.model);
+            persist_global_veriloga_library(model);
         }
         Some(VerilogAModuleBinding {
             view: self.reference,

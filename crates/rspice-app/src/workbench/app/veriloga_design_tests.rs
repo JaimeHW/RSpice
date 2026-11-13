@@ -250,7 +250,12 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_active_source(&mut app, CodeCommand::RenameSymbol).expect("the caret is on g");
+    super::navigate_source_bundle(
+        &mut app.code_workspace_parts(),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        CodeCommand::RenameSymbol,
+    )
+    .expect("the caret is on g");
     let form = app
         .state
         .code
@@ -313,8 +318,12 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_active_source(&mut app, CodeCommand::FindReferences)
-        .expect("the caret is on g");
+    super::navigate_source_bundle(
+        &mut app.code_workspace_parts(),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        CodeCommand::FindReferences,
+    )
+    .expect("the caret is on g");
 
     assert!(app.state.code.code_workspace.language_tools.is_none());
     assert_eq!(

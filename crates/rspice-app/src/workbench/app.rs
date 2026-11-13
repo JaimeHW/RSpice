@@ -131,7 +131,7 @@ pub(crate) use dialogs::source_document::{
     source_document_dialog_is_available,
 };
 
-pub(crate) use dialogs::source_language_tools::navigate_active_source;
+pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
 
 pub(crate) use dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, open_veriloga_build_settings, veriloga_build_settings_available,
