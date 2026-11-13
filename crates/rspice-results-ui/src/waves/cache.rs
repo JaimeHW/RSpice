@@ -150,11 +150,15 @@ impl ModelsCache {
 /// Apply quick-view presentation overrides after constructing the immutable
 /// dataset projection. Family visibility remains the more specific gate, so
 /// revealing a source never accidentally reveals a hidden family member.
+///
+/// With the reader's visibility known, each curve then takes its place in
+/// the canvas `palette`'s cycle (see [`rank_palette_slots`]).
 pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
     models: &mut [StripModel],
     active_run: Option<&SimulationRun<A>>,
     overrides: &HashMap<SourceWaveformPresentationKey, bool>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
+    palette: &[egui::Color32],
 ) {
     let Some(run) = active_run else {
         return;
@@ -163,21 +167,25 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
         let Some(analysis) = run.analyses.get(model.analysis_index).map(AsRef::as_ref) else {
             continue;
         };
+        let mut source_visible = Vec::with_capacity(model.traces.len());
         for trace in &mut model.traces {
             let Some(waveform) = analysis.waveforms.get(trace.waveform_index) else {
                 trace.visible = false;
+                source_visible.push(false);
                 continue;
             };
             let key = SourceWaveformPresentationKey::new(
                 model.analysis_key,
                 trace.source_waveform_name.clone(),
             );
-            let source_visible = overrides.get(&key).copied().unwrap_or(waveform.visible);
-            trace.visible = source_visible
+            let shown = overrides.get(&key).copied().unwrap_or(waveform.visible);
+            source_visible.push(shown);
+            trace.visible = shown
                 && trace
                     .family_visibility_key
                     .is_none_or(|key| !hidden_family_traces.contains(&key));
         }
+        rank_palette_slots(model, analysis, &source_visible, palette);
         for lane in &mut model.lane_traces {
             let key = SourceWaveformPresentationKey::new(
                 model.analysis_key,
@@ -189,6 +197,97 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 .and_then(|index| analysis.waveforms.get(index))
                 .is_some_and(|waveform| waveform.visible);
             lane.visible = overrides.get(&key).copied().unwrap_or(dataset_default);
+        }
+    }
+}
+
+/// Give each curve of `model` its place in the palette's cycle, and the hue
+/// of that place unless its waveform stores a colour of its own.
+///
+/// The curves the dataset plots rank first, in column order, and keep that
+/// rank whatever the reader hides, so hiding one recolours none of the
+/// others. A curve the reader adds takes the next place after them, as a
+/// waveform viewer gives a newly plotted signal the next free colour, so
+/// the curves on the strip take distinct hues before any repeats one with a
+/// dash. A real and an imaginary part rank apart; a family's members share
+/// their source's place; an overlay run's curve takes the place of the
+/// active run's curve it is merged with. `source_visible` is each trace's
+/// source visibility with the reader's overrides applied.
+fn rank_palette_slots(
+    model: &mut StripModel,
+    analysis: &AnalysisResult<RetainedTrace>,
+    source_visible: &[bool],
+    palette: &[egui::Color32],
+) {
+    use super::TraceKind;
+    if palette.is_empty() {
+        return;
+    }
+    let ranked = |trace: &super::StripTrace| trace.palette_slot.is_some() && !trace.overlay;
+    let mut sources: Vec<((usize, TraceKind), bool, bool)> = Vec::new();
+    for (trace, shown) in model.traces.iter().zip(source_visible) {
+        if !ranked(trace) {
+            continue;
+        }
+        let key = (trace.waveform_index, trace.kind);
+        let dataset = analysis
+            .waveforms
+            .get(trace.waveform_index)
+            .is_some_and(|waveform| waveform.visible);
+        match sources.iter_mut().find(|(source, ..)| *source == key) {
+            Some((_, _, any_shown)) => *any_shown |= *shown,
+            None => sources.push((key, dataset, *shown)),
+        }
+    }
+    let plotted = sources.iter().filter(|(_, dataset, _)| *dataset).count();
+    let added = sources
+        .iter()
+        .filter(|(_, dataset, shown)| !dataset && *shown)
+        .count();
+    let (mut plotted_rank, mut added_rank, mut spare_rank) = (0, plotted, plotted + added);
+    let slots: Vec<((usize, TraceKind), usize)> = sources
+        .iter()
+        .map(|(key, dataset, shown)| {
+            let counter = if *dataset {
+                &mut plotted_rank
+            } else if *shown {
+                &mut added_rank
+            } else {
+                &mut spare_rank
+            };
+            *counter += 1;
+            (*key, *counter - 1)
+        })
+        .collect();
+    let mut merged = HashMap::new();
+    for trace in model.traces.iter_mut().filter(|trace| ranked(trace)) {
+        let key = (trace.waveform_index, trace.kind);
+        let Some(&(_, slot)) = slots.iter().find(|(source, _)| *source == key) else {
+            continue;
+        };
+        let hue = palette[slot % palette.len()];
+        let stored = analysis
+            .waveforms
+            .get(trace.waveform_index)
+            .filter(|_| trace.kind != TraceKind::Imaginary)
+            .map_or("", |waveform| waveform.color.as_str());
+        trace.palette_slot = Some(slot);
+        trace.signal_color = crate::presentation::trace_color(stored, hue);
+        trace.color = trace.family_style.map_or(trace.signal_color, |style| {
+            super::projection::family_color(style, trace.signal_color)
+        });
+        merged.insert(
+            (trace.source_waveform_name.clone(), trace.name.clone()),
+            (slot, trace.signal_color, trace.color),
+        );
+    }
+    for trace in model.traces.iter_mut().filter(|trace| trace.overlay) {
+        if let Some(&(slot, signal_color, color)) =
+            merged.get(&(trace.source_waveform_name.clone(), trace.name.clone()))
+        {
+            trace.palette_slot = Some(slot);
+            trace.signal_color = signal_color;
+            trace.color = color;
         }
     }
 }

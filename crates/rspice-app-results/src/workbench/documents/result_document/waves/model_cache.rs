@@ -48,6 +48,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 simulation.active_run().map(AsRef::as_ref),
                 visibility,
                 projection.hidden_family_traces,
+                &t.color.traces,
             );
             built
         },

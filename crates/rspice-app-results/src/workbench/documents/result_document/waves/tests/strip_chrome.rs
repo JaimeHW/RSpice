@@ -3,7 +3,9 @@
 //! preferences allow, the trace palette and the cursors, the gutter's
 //! columns, a pane with nothing plotted, and the hidden-trace control.
 
-use super::lanes::{FRAME, REVIEW_NODES, cursor_lines, review_strip, strip, verticals, well};
+use super::lanes::{
+    FRAME, REVIEW_NODES, REVIEW_PLOTTED, cursor_lines, review_strip, strip, verticals, well,
+};
 use super::*;
 use rspice_ui_kit::EngineeringCanvasTheme;
 use rspice_ui_kit::palette::perceptual_distance;
@@ -161,6 +163,8 @@ fn eight_hues_are_drawn_and_cursor_b_is_none_of_them() {
                 waveform.visible = REVIEW_NODES.contains(&waveform.name.as_str());
             }
         }
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
         let output = settled(&ctx, &mut state);
         let tokens = Tokens::get(&ctx);
         let hues = stroked_hues(&output, &tokens.color.traces);
@@ -188,6 +192,22 @@ fn eight_hues_are_drawn_and_cursor_b_is_none_of_them() {
         );
         let models = strip(&mut state);
         let model = &models[0];
+        let look =
+            |trace: &StripTrace| rspice_results_ui::waves::pane::SwatchStyle::of(trace).look(false);
+        // No two plotted curves share a hue and a dash, however far apart
+        // their columns sit in the dataset.
+        let plotted: Vec<&StripTrace> = model.traces.iter().filter(|trace| trace.visible).collect();
+        assert_eq!(plotted.len(), REVIEW_NODES.len(), "{canvas_theme:?}");
+        for (index, trace) in plotted.iter().enumerate() {
+            for other in &plotted[index + 1..] {
+                assert!(
+                    trace.color != other.color || look(trace).dash != look(other).dash,
+                    "{canvas_theme:?}: {} and {} draw alike",
+                    trace.name,
+                    other.name
+                );
+            }
+        }
         let slot = |slot: usize| {
             model
                 .traces
@@ -202,8 +222,6 @@ fn eight_hues_are_drawn_and_cursor_b_is_none_of_them() {
             .filter(|trace| trace.palette_slot.is_some_and(|slot| slot >= 8))
             .min_by_key(|trace| trace.palette_slot)
             .expect("ten nodes reach past the eighth slot");
-        let look =
-            |trace: &StripTrace| rspice_results_ui::waves::pane::SwatchStyle::of(trace).look(false);
         assert_ne!(
             look(first).dash,
             look(ninth).dash,
@@ -314,4 +332,49 @@ fn hidden_traces_are_collected_and_can_be_shown_again() {
             .any(|trace| trace.name == "B4" && trace.visible),
         "ticking a hidden trace plots it"
     );
+}
+
+/// A curve the reader adds takes the next hue after the seven the dataset
+/// plots, as a waveform viewer gives a newly plotted signal the next free
+/// colour, and hiding a plotted curve recolours none of the others.
+#[test]
+fn a_curve_the_reader_adds_takes_the_next_free_hue() {
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    let mut state = review_strip(true);
+    let before = strip(&mut state);
+    let model = &before[0];
+    let current = model
+        .traces
+        .iter()
+        .find(|trace| trace.source_waveform_name.starts_with("I("))
+        .expect("the review keeps its currents")
+        .source_waveform_name
+        .clone();
+    let shown =
+        |name: &str| SourceWaveformPresentationKey::new(model.analysis_key, name.to_owned());
+    let palette = Tokens::default().color.traces;
+    let session = &mut state.results.results.session;
+    session.waveform_visibility.insert(shown(&current), true);
+    session.waveform_visibility.insert(shown("TOP"), false);
+    let after = strip(&mut state);
+    let trace = |models: &[StripModel], name: &str| {
+        models[0]
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name == name)
+            .map(|trace| (trace.palette_slot, trace.color))
+            .unwrap_or_else(|| panic!("{name} is a curve of the strip"))
+    };
+    assert_eq!(
+        trace(&after, &current),
+        (Some(7), palette[7]),
+        "the eighth curve takes the eighth hue"
+    );
+    for name in REVIEW_PLOTTED {
+        assert_eq!(
+            trace(&after, name),
+            trace(&before, name),
+            "{name} kept its hue when TOP was hidden and {current} was added"
+        );
+    }
 }

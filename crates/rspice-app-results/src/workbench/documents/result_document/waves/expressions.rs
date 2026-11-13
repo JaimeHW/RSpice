@@ -421,6 +421,7 @@ pub(crate) fn copy_cursor_text(
         parts.model.simulation.active_run().map(AsRef::as_ref),
         &waveform_visibility,
         &hidden_family_traces,
+        &Tokens::default().color.traces,
     );
     // Same order as the cached path: the extent is a memo of the traces the
     // strip draws, and the overrides above decide which those are.

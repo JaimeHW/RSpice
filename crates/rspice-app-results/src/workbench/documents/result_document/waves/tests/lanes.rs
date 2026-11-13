@@ -639,6 +639,10 @@ pub(super) fn review_strip(lanes: bool) -> ResultsTestHost {
             waveform.visible = REVIEW_PLOTTED.contains(&waveform.name.as_str());
         }
     }
+    // The analog host projected the strip before its columns were cut down;
+    // a new generation makes the projection read the review's own dataset.
+    state.model.simulation.view.data_version =
+        state.model.simulation.view.data_version.wrapping_add(1);
     place_cursors(
         &mut state,
         Some(samp[1].0),

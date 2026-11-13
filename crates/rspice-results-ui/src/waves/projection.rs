@@ -479,6 +479,18 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         let mut traces = Vec::new();
         let event_lanes = event_lanes_of(derived, analysis_key, analysis);
         let mut lane_traces = Vec::new();
+        // A trace's place in the palette's cycle is its rank among the curves
+        // the dataset plots, and then among the ones a reader may add, never
+        // its column number: two plotted curves eight columns apart took one
+        // hue and one marker. Ranking by the dataset's own visibility, not
+        // the reader's, means hiding a curve recolours none of the others.
+        let dataset_plotted = analysis
+            .waveforms
+            .iter()
+            .filter(|waveform| waveform.visible)
+            .count();
+        let mut plotted_rank = 0;
+        let mut added_rank = 0;
         let selection_key = sample_selection
             .map(SourceSampleSelection::fingerprint)
             .unwrap_or_default()
@@ -501,17 +513,24 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             {
                 continue;
             }
-            let color = waveform_color(waveform, waveform_index, tokens);
-            // Every trace has its place in the cycle, whoever chose its
-            // colour, so its curve and its legend swatch agree.
-            let palette_slot = Some(waveform_index);
-            if let Some(lane) = event_lanes
-                .as_deref()
-                .and_then(|lanes| lane_trace(lanes, waveform, waveform_index, color))
-            {
+            if let Some(lane) = event_lanes.as_deref().and_then(|lanes| {
+                let color = waveform_color(waveform, waveform_index, tokens);
+                lane_trace(lanes, waveform, waveform_index, color)
+            }) {
                 lane_traces.push(lane);
                 continue;
             }
+            let slot = if waveform.visible {
+                plotted_rank += 1;
+                plotted_rank - 1
+            } else {
+                added_rank += 1;
+                dataset_plotted + added_rank - 1
+            };
+            let color = waveform_color(waveform, slot, tokens);
+            // Every trace has its place in the cycle, whoever chose its
+            // colour, so its curve and its legend swatch agree.
+            let palette_slot = Some(slot);
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
             let is_time_complex_phase = analysis.analysis_type.is_time_domain()
@@ -534,8 +553,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         (
                             TraceKind::Imaginary,
                             format!("im({})", complex.source_name),
-                            tokens.color.traces[(waveform_index + 1) % tokens.color.traces.len()],
-                            Some(waveform_index + 1),
+                            tokens.color.traces[(slot + 1) % tokens.color.traces.len()],
+                            Some(slot + 1),
                             &complex.imag,
                         ),
                     ] {
