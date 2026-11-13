@@ -290,6 +290,39 @@ fn each_grid_mode_draws_exactly_its_circles() {
     assert!(distance(z_ink, y_ink) > 30, "{z_ink:?} vs {y_ink:?}");
 }
 
+/// The chart is read on its own grid, as a printed one is: no Cartesian axis
+/// line runs up the left of the disc or along its bottom. The plot kit drew
+/// both, in the frame ink, around every Smith chart.
+#[test]
+fn no_axis_line_frames_the_disc() {
+    let (canvas, rect) = render_chart(
+        &[hidden_trace()],
+        false,
+        &SmithSheetState::default(),
+        None,
+        None,
+    );
+    let frame = raster_tokens().color.border_strong;
+    let left = egui::Rect::from_min_max(
+        egui::pos2(rect.left() - 2.0, rect.top()),
+        egui::pos2(rect.left() + 2.0, rect.bottom()),
+    );
+    let bottom = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.bottom() - 2.0),
+        egui::pos2(rect.right(), rect.bottom() + 2.0),
+    );
+    for (side, band) in [("left", left), ("bottom", bottom)] {
+        let inked = canvas
+            .pixels_in(band)
+            .filter(|pixel| distance(*pixel, frame) < 24)
+            .count();
+        assert_eq!(
+            inked, 0,
+            "{inked} pixels drawn along the {side} of the chart"
+        );
+    }
+}
+
 fn amplifier() -> TwoPortFigures {
     let polar = |m: f64, a: f64| Complex64::from_polar(m, a.to_radians());
     TwoPortFigures {

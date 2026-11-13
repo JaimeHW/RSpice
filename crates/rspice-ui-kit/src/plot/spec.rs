@@ -465,6 +465,10 @@ pub struct PlotSpec<'a> {
     /// Whether this plot owns labeled X-axis chrome. Unit-scoped waveform
     /// panes disable it and render one shared X strip beneath the stack.
     pub x_axis_chrome: bool,
+    /// Whether the left and bottom axis lines are drawn. A chart read on its
+    /// own grid (a Smith chart, a polar disc) has no Cartesian axes for them
+    /// to stand for.
+    pub frame: bool,
 }
 
 impl<'a> PlotSpec<'a> {
@@ -489,7 +493,15 @@ impl<'a> PlotSpec<'a> {
             left_margin: 56.0,
             right_margin: None,
             x_axis_chrome: true,
+            frame: true,
         }
+    }
+
+    /// Draw no left or bottom axis line: the chart carries its own grid.
+    #[must_use]
+    pub fn without_frame(mut self) -> Self {
+        self.frame = false;
+        self
     }
 
     /// Set the screen-reader name for this engineering graphic.

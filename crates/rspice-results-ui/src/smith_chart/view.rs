@@ -736,9 +736,10 @@ pub fn show(
     )
     .accessible_name("Smith chart")
     .accessible_detail(&accessible_detail)
-    .without_x_axis_chrome();
+    .without_x_axis_chrome()
+    .without_frame();
     // The chart is read on its own grid, as a printed Smith chart is: no
-    // Cartesian ticks, units or tick gutter around the disc.
+    // Cartesian ticks, units, axis lines or tick gutter around the disc.
     spec.x.ticks.clear();
     spec.y.ticks.clear();
     spec.x.unit.clear();

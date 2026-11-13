@@ -925,8 +925,10 @@ pub fn show(
     }
 
     // ---- frame + axis units
-    painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
-    painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
+    if spec.frame {
+        painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
+        painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
+    }
     if let Some(galley) = y_chrome {
         painter.galley(
             pos2(
