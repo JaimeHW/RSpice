@@ -100,8 +100,8 @@ pub(super) enum ColumnTrack {
     Elastic(f32),
 }
 
-pub(crate) struct TableColumn {
-    pub(crate) heading: &'static str,
+pub struct TableColumn {
+    pub heading: &'static str,
     pub(super) track: ColumnTrack,
 }
 
@@ -130,7 +130,7 @@ pub(super) fn table_minimum_width(columns: &[TableColumn]) -> f32 {
 
 /// The narrowest outer width this column set can be painted in as a flush
 /// table, which spends its edge on [`FLUSH_PAD`] rather than on a box.
-pub(crate) fn flush_table_minimum_width(columns: &[TableColumn]) -> f32 {
+pub fn flush_table_minimum_width(columns: &[TableColumn]) -> f32 {
     table_minimum_width(columns) - 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER) + 2.0 * FLUSH_PAD
 }
 
@@ -889,9 +889,9 @@ pub(super) enum SplitColumn {
 
 /// The tracks the split resolved for one available width.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct SplitGeometry {
+pub struct SplitGeometry {
     /// Whether the columns are stacked rather than side by side.
-    pub(crate) stacked: bool,
+    pub stacked: bool,
     /// Width handed to the records column.
     pub(super) records: f32,
     /// Width handed to the aside.
@@ -905,7 +905,7 @@ pub(crate) struct SplitGeometry {
 /// minimum is the caller's, which is how the breakpoint stays a property of
 /// what the records column actually contains instead of a number authored
 /// beside it and left to drift.
-pub(crate) fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometry {
+pub fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometry {
     // The split runs edge to edge inside a flush dialog body and carries only a
     // closing rule, so unlike a boxed surface it loses nothing to side borders.
     // Its columns are flush too: each one's content owns its own inset, which is

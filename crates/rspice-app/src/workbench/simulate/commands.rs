@@ -17,7 +17,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the simulate feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimulateCommand {
+pub enum SimulateCommand {
     /// Run the active plan.
     Run,
     /// Stop the active run.
@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 22] = [
+    pub const ALL: [Self; 22] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -121,10 +121,10 @@ impl SimulateCommand {
     /// The commands that run but are not listed: none. Parameter tuning,
     /// which once opened only from the instance it tunes, is listed in
     /// Verify and the palette like the other pages.
-    pub(crate) const UNLISTED: [Self; 0] = [];
+    pub const UNLISTED: [Self; 0] = [];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::Run => ids::RUN_SIMULATION,
             Self::Stop => ids::STOP_SIMULATION,
@@ -155,7 +155,7 @@ impl SimulateCommand {
 
     /// The command `key` names, listed or not; `None` for a key the feature
     /// does not declare.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL
             .into_iter()
             .chain(Self::UNLISTED)
@@ -168,7 +168,7 @@ impl SimulateCommand {
     /// no project either. Everything else needs an open project. Running,
     /// checking and the pages commit a pending inspector edit before they
     /// act.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let commits = palette.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);

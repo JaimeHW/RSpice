@@ -108,7 +108,7 @@ struct ComposedPoint {
 /// Not a cache: it is built at the page entry, holds no key, and does not
 /// survive the frame. A route cannot serve a reader a space the plan no longer
 /// declares.
-pub(crate) struct RunSetFrame {
+pub struct RunSetFrame {
     /// The composed space, before any exclusion — the point table's own rows.
     /// `None` where the declaration does not expand exactly, which the table
     /// reports on its own terms.
@@ -116,11 +116,11 @@ pub(crate) struct RunSetFrame {
     /// Which points each enabled analysis visits, against the retained half.
     participation: super::participation::PlanParticipation,
     workload: Result<super::workload::PlanWorkload, String>,
-    pub(crate) validation: RunSetValidation,
+    pub validation: RunSetValidation,
 }
 
 impl RunSetFrame {
-    pub(crate) fn resolve(model: &Model) -> Self {
+    pub fn resolve(model: &Model) -> Self {
         let state = &model.sim_setup.run_set;
         // The one expansion. `run_set::retained` subtracts the exclusions from
         // this list rather than composing a second one.
@@ -1450,7 +1450,7 @@ fn point_table(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, frame: &RunSetFram
 /// Only the metadata's presence is checked, not the expanded manifest: this
 /// runs every frame the page draws, and expanding a thousand-trial Monte Carlo
 /// family to answer "is there one" would be a per-frame cost paid for nothing.
-pub(crate) fn family_target(model: &Model) -> Result<usize, &'static str> {
+pub fn family_target(model: &Model) -> Result<usize, &'static str> {
     let run = super::output_evidence::selected_plan_dataset(model).ok_or_else(|| {
         if model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so its family does not describe \
@@ -1489,7 +1489,7 @@ pub(crate) fn family_target(model: &Model) -> Result<usize, &'static str> {
 /// rather than made into a clause that fails to compile — and if nothing is
 /// left, the hop refuses instead of landing on the whole family and calling
 /// that the point.
-pub(crate) fn open_point_in_family(
+pub fn open_point_in_family(
     cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     coordinates: &[(String, String, String)],
@@ -1518,7 +1518,7 @@ pub(crate) fn open_point_in_family(
 }
 
 /// Compile one point into the family view's filter, or say why it cannot be.
-pub(crate) fn family_query_for_point(
+pub fn family_query_for_point(
     cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     coordinates: &[(String, String, String)],
@@ -1811,7 +1811,7 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
 /// the plan total is still priced at the whole matrix, so the two numbers do
 /// not add up on purpose — and a table whose arithmetic does not close without
 /// saying why is a table a reader has to distrust.
-pub(crate) fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option<String> {
+pub fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option<String> {
     let mut note = String::new();
     if composed > drawn {
         note.push_str(&format!(
@@ -1849,7 +1849,7 @@ pub(crate) fn point_table_note(composed: usize, drawn: usize, refused: usize) ->
 /// [`super::participation::reconcile_selections`]. The pre-edit space is kept
 /// so a refusal restores it exactly: the space and the selections that address
 /// it move together or not at all.
-pub(crate) fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
+pub fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
     let previewing = matches!(action, RunSetAction::Preview);
     let before = cx.model.sim_setup.run_set.clone();
     let kinds = enabled_analysis_kinds(cx.model);
@@ -1953,7 +1953,7 @@ fn enabled_analysis_kinds(model: &Model) -> Vec<AnalysisKind> {
 /// same sum read at two altitudes rather than two derivations of one queue: a
 /// table whose rows did not add up to the number the budget is checked against
 /// would be the more convincing of the two and the wrong one.
-pub(crate) fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, String> {
+pub fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, String> {
     super::workload::PlanWorkload::resolve(model)?
         .total_tasks()
         .map(Some)
@@ -1980,7 +1980,7 @@ pub(crate) fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, Stri
 /// the two resolutions done for a caller that is not drawing a frame. Not a
 /// second answer — a second way of asking for the one below.
 #[cfg(test)]
-pub(crate) fn worst_point_task_cost(model: &Model) -> Option<usize> {
+pub fn worst_point_task_cost(model: &Model) -> Option<usize> {
     let participation = super::participation::PlanParticipation::resolve(model);
     let workload = super::workload::PlanWorkload::resolve_with(model, &participation).ok()?;
     worst_point_task_cost_of(&participation, &workload)
@@ -2005,7 +2005,7 @@ fn worst_point_task_cost_of(
 /// prices the workload once at its entry and hands it to
 /// [`plan_run_set_validation_from`], which is the one that runs on a frame.
 #[cfg(test)]
-pub(crate) fn plan_run_set_validation(model: &Model) -> RunSetValidation {
+pub fn plan_run_set_validation(model: &Model) -> RunSetValidation {
     plan_run_set_validation_from(model, &super::workload::PlanWorkload::resolve(model))
 }
 

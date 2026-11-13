@@ -61,7 +61,7 @@ impl SpecificationEvidenceFilter {
     }
 }
 
-pub(in crate::workbench) const fn default_analysis_index() -> usize {
+pub const fn default_analysis_index() -> usize {
     rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.legacy_index()
 }
 

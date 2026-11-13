@@ -287,7 +287,7 @@ pub(super) type InsertAnalysisResult = Result<
 ///
 /// `None` is every refusal, each of which has already stated itself: a plan
 /// that does not resolve, an insert the plan rejected.
-pub(crate) fn insert_analysis_instance(
+pub fn insert_analysis_instance(
     cx: &mut Cx<'_, SimulateFeature>,
     kind: AnalysisKind,
 ) -> Option<AnalysisInstanceId> {
@@ -363,7 +363,7 @@ pub(crate) fn insert_analysis_instance(
     }
 }
 
-pub(crate) fn apply_analysis_action(
+pub fn apply_analysis_action(
     cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     action: AnalysisAction,
@@ -640,7 +640,7 @@ fn analysis_display_name(model: &Model, id: AnalysisInstanceId) -> String {
 ///
 /// Anything else is removed at once, because a confirmation with nothing behind
 /// it only teaches the reader to click through the ones that matter.
-pub(crate) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+pub fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
     let dependents = analyses_depending_on(cx.model, id);
     if !dependents.is_empty() {
         let label = analysis_display_name(cx.model, id);
@@ -677,7 +677,7 @@ pub(crate) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: Ana
 ///
 /// Called once per frame from the surface, so the modal records an answer
 /// rather than reaching into the plan itself.
-pub(crate) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>) {
+pub fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(id) = cx.state.plan_removal_review.take_confirmed_analysis() {
         commit_analysis_removal(cx, id);
     }
@@ -692,7 +692,7 @@ pub(crate) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>)
 /// Takes the state rather than the application. Answering a notice moves what
 /// is on screen and touches nothing else, and a handler holding the whole
 /// application could mutate every subsystem to do it.
-pub(crate) fn apply_requested_blocker_reveal(state: &mut SimulateState) {
+pub fn apply_requested_blocker_reveal(state: &mut SimulateState) {
     if let Some(blocker) = state.plan_removal_refusal.take_reveal_target() {
         super::advanced_options::reveal_in_analyses(state, blocker);
     }
@@ -854,7 +854,7 @@ pub(super) const fn availability_label(kind: AnalysisKind) -> &'static str {
     kind.availability().label()
 }
 
-pub(crate) const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
+pub const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
     kind.category().label
 }
 

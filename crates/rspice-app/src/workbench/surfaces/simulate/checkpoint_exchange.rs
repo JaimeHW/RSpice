@@ -43,7 +43,7 @@ const KIND: FileKind = FileKind {
     subject: "The Monte Carlo checkpoint",
     fallback_name: "Monte Carlo checkpoint",
 };
-pub(crate) fn import_id() -> egui::Id {
+pub fn import_id() -> egui::Id {
     egui::Id::new("simulation.mc.import")
 }
 fn export_id() -> egui::Id {
@@ -70,7 +70,7 @@ impl Owner {
     }
 }
 
-pub(crate) fn begin_import(ctx: &egui::Context, model: &mut Model) {
+pub fn begin_import(ctx: &egui::Context, model: &mut Model) {
     match file_exchange::open_file(ctx, import_id(), KIND, checkpoint_file::size_limit()) {
         Ok(()) => {
             ctx.data_mut(|data| {
@@ -81,7 +81,7 @@ pub(crate) fn begin_import(ctx: &egui::Context, model: &mut Model) {
     }
 }
 
-pub(crate) fn begin_export(
+pub fn begin_export(
     ctx: &egui::Context,
     model: &mut Model,
     checkpoint: &MonteCarloCheckpointEvidence,
@@ -107,7 +107,7 @@ pub(crate) fn begin_export(
 struct Inspection {
     owner: Owner,
     label: String,
-    checkpoint: MonteCarloCheckpointEvidence,
+    pub checkpoint: MonteCarloCheckpointEvidence,
     summary: std::sync::Arc<rspice_results::monte_carlo_checkpoint::CheckpointInspection>,
 }
 pub(super) fn inspect(
@@ -140,7 +140,7 @@ pub(super) fn inspect(
 
 /// Hosted every frame, even when the user closes the analysis editor or changes
 /// workspace. Taking stale picker results releases their bounded mailbox.
-pub(crate) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+pub fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(outcome) = file_exchange::take_opened(ctx, import_id()) {
         let owner = ctx.data_mut(|data| {
             let owner = data.get_temp::<Owner>(owner_id());

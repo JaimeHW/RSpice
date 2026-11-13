@@ -24,7 +24,7 @@ use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::request_run_set;
 
 /// The run tier's host over a simulate command's context.
-pub(crate) struct RunView<'v, 'a> {
+pub struct RunView<'v, 'a> {
     model: &'v mut Model,
     runs: &'v mut RunsState,
     wb: &'v mut WorkbenchSession,
@@ -34,7 +34,7 @@ pub(crate) struct RunView<'v, 'a> {
 }
 
 /// The run tier's host over `cx`, and beside it the run controller it drives.
-pub(crate) fn run_host<'v, 'a>(
+pub fn run_host<'v, 'a>(
     cx: &'v mut Cx<'a, SimulateFeature>,
 ) -> (RunView<'v, 'a>, &'v mut SimulationController) {
     let host = RunView {
@@ -155,7 +155,7 @@ impl RunHost for RunView<'_, '_> {
 /// starts: its own copy of the model, of what code and design stated then,
 /// and of the results workspace. What the run tier tells it reaches only
 /// those copies; what it would tell the reader, nobody sees.
-pub(crate) struct FrozenRun {
+pub struct FrozenRun {
     model: Model,
     // RunHost needs the runs; a campaign never reads them.
     runs: RunsState,

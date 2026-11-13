@@ -24,7 +24,7 @@ use commands::SimulateCommand;
 pub(in crate::workbench) use run_host::run_host;
 
 /// The simulate feature.
-pub(crate) struct SimulateFeature;
+pub struct SimulateFeature;
 
 impl Feature for SimulateFeature {
     type State = SimulateState;
@@ -64,19 +64,13 @@ impl Feature for SimulateFeature {
 impl SimulateFeature {
     /// Draw the review of a staged plan removal that orphans something,
     /// while one is staged.
-    pub(in crate::workbench) fn render_plan_removal_review(
-        cx: &mut Cx<'_, Self>,
-        ctx: &egui::Context,
-    ) {
+    pub fn render_plan_removal_review(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
         cx.state.plan_removal_review.process(ctx);
     }
 
     /// Draw the statement of a plan removal the plan refused, while one
     /// stands.
-    pub(in crate::workbench) fn render_plan_removal_refusal(
-        cx: &mut Cx<'_, Self>,
-        ctx: &egui::Context,
-    ) {
+    pub fn render_plan_removal_refusal(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
         cx.state.plan_removal_refusal.process(ctx);
     }
 }
@@ -210,14 +204,14 @@ pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature
 /// gesture on the status bar when the outcome is new.
 ///
 /// [`Model::record_plan_refusal`]: crate::workbench::app_state::Model::record_plan_refusal
-pub(crate) fn record_plan_refusal(cx: &mut Cx<'_, SimulateFeature>, message: impl Into<String>) {
+pub fn record_plan_refusal(cx: &mut Cx<'_, SimulateFeature>, message: impl Into<String>) {
     if let Some(prompt) = cx.model.record_plan_refusal(message) {
         cx.wb.prompt(prompt);
     }
 }
 
 /// Select analysis instance `instance` on the Analyses page, or none.
-pub(in crate::workbench) fn select_analysis_instance(
+pub fn select_analysis_instance(
     state: &mut SimulateState,
     instance: Option<crate::product::AnalysisInstanceId>,
 ) {
@@ -233,13 +227,13 @@ fn open_jobs_manager(wb: &mut WorkbenchSession) {
 }
 
 /// Whether the run history is in front, on its own route.
-pub(in crate::workbench) fn jobs_manager_open(wb: &WorkbenchSession) -> bool {
+pub fn jobs_manager_open(wb: &WorkbenchSession) -> bool {
     wb.current_route().surface_id() == SurfaceId::JobsManager
 }
 
 /// Leave the run history for the route it was opened from, or for the
 /// workspace's own surface where nothing opened it.
-pub(in crate::workbench) fn close_jobs_manager(wb: &mut WorkbenchSession) {
+pub fn close_jobs_manager(wb: &mut WorkbenchSession) {
     if wb.navigate_back(RouteTransitionSource::User).is_some() {
         return;
     }

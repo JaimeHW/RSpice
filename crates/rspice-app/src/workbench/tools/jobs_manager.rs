@@ -328,7 +328,7 @@ impl SimulateFeature {
     /// on the Netlist workspace is that page's deck rather than the active
     /// plan, so it is enabled by the dispatcher's answer and raises the
     /// command itself.
-    pub(in crate::workbench) fn render_jobs_manager(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
+    pub fn render_jobs_manager(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
         if !jobs_manager_open(cx.wb) {
             return;
         }
@@ -438,7 +438,7 @@ impl SimulateFeature {
 /// The stable run identity is what the history rows carry, so it is resolved
 /// against the retained history here rather than assumed to still be there —
 /// pruning runs while this dialog is open is legal.
-pub(crate) fn open_run_in_results(cx: &mut Cx<'_, SimulateFeature>, run_id: RunId) {
+pub fn open_run_in_results(cx: &mut Cx<'_, SimulateFeature>, run_id: RunId) {
     let Some(index) = cx
         .model
         .simulation

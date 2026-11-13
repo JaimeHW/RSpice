@@ -23,15 +23,15 @@ use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use crate::workbench::design_system::{property_row_input, property_row_wrapped};
 
 /// The package's compatibility contract, and the only version this build reads.
-pub(crate) const SIMULATION_PLAN_PACKAGE_VERSION: u16 = 1;
-pub(crate) const SIMULATION_PLAN_PACKAGE_FORMAT: &str = "rspice.simulation-plan";
+pub const SIMULATION_PLAN_PACKAGE_VERSION: u16 = 1;
+pub const SIMULATION_PLAN_PACKAGE_FORMAT: &str = "rspice.simulation-plan";
 
 /// The authored extension for a package on disk, and the label the chooser
 /// files it under.
 ///
 /// The contents are JSON, and the import filter accepts `json` as well so a
 /// package saved or received under the generic extension still opens.
-pub(crate) const PACKAGE_EXTENSION: &str = "rspice-plan";
+pub const PACKAGE_EXTENSION: &str = "rspice-plan";
 const PACKAGE_JSON_EXTENSION: &str = "json";
 const PACKAGE_FILTER_LABEL: &str = "RSpice simulation-plan package";
 
@@ -41,7 +41,7 @@ const PACKAGE_FILTER_LABEL: &str = "RSpice simulation-plan package";
 /// durable publication stages a sidecar beside it, so a plan name long enough to
 /// be legal here can produce a sidecar path that is not. The cap is on what this
 /// route suggests, never on what the reader then types.
-pub(crate) const PACKAGE_STEM_LIMIT: usize = 64;
+pub const PACKAGE_STEM_LIMIT: usize = 64;
 
 /// The largest package this route will read.
 ///
@@ -55,11 +55,11 @@ const MAX_PACKAGE_BYTES: usize = 4 * 1024 * 1024;
 /// with that field named instead of imported with it silently missing.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct PortableSimulationPlanPackage {
+pub struct PortableSimulationPlanPackage {
     format: String,
     version: u16,
     plan: crate::workbench::app_state::SimulationPlanImportDocument,
-    pub(crate) payload: crate::state::SimulationPlanPayload,
+    pub payload: crate::state::SimulationPlanPayload,
 }
 
 /// What the package carries, what it does not, and what it is not.
@@ -354,7 +354,7 @@ fn import(
 }
 
 /// The envelope, as both directions state it: the contract, then the size.
-pub(crate) fn envelope_label(bytes: usize) -> String {
+pub fn envelope_label(bytes: usize) -> String {
     format!(
         "{SIMULATION_PLAN_PACKAGE_FORMAT} · version {SIMULATION_PLAN_PACKAGE_VERSION} · {}",
         rspice_simulation_contract::run_set::format_bytes(bytes as u64)
@@ -367,7 +367,7 @@ pub(crate) fn envelope_label(bytes: usize) -> String {
 /// list into governed definitions exactly when the governed list is empty. A
 /// count taken off either field alone would state zero for one of the two shapes
 /// a package can legitimately have.
-pub(crate) fn specification_count(payload: &crate::state::SimulationPlanPayload) -> usize {
+pub fn specification_count(payload: &crate::state::SimulationPlanPayload) -> usize {
     if payload.specification_definitions.is_empty() {
         payload.specs.len()
     } else {
@@ -381,7 +381,7 @@ pub(crate) fn specification_count(payload: &crate::state::SimulationPlanPayload)
 /// [`commit_import_simulation_plan`] admits with it, so a package the preview
 /// shows as sound cannot be refused by the commit on envelope grounds, and one
 /// the preview refuses is refused there with the identical sentence.
-pub(crate) fn inspect_package(json: &str) -> Result<PortableSimulationPlanPackage, String> {
+pub fn inspect_package(json: &str) -> Result<PortableSimulationPlanPackage, String> {
     let package: PortableSimulationPlanPackage = serde_json::from_str(json)
         .map_err(|error| format!("Simulation-plan package JSON is invalid: {error}"))?;
     if package.format != SIMULATION_PLAN_PACKAGE_FORMAT {
@@ -404,7 +404,7 @@ pub(crate) fn inspect_package(json: &str) -> Result<PortableSimulationPlanPackag
 /// Derived from the plan's own name so a catalog of exports is readable on disk,
 /// reduced to characters every file system accepts, and capped at
 /// [`PACKAGE_STEM_LIMIT`].
-pub(crate) fn package_file_name(selected: Option<&PlanCatalogRecord>) -> String {
+pub fn package_file_name(selected: Option<&PlanCatalogRecord>) -> String {
     let source = selected.map_or("simulation plan", |record| record.name.as_str());
     let mut stem = String::new();
     for character in source.chars() {
@@ -681,7 +681,7 @@ fn poll_chosen_package(ctx: &egui::Context, draft: &mut SimulationPlanManagerDra
 #[cfg(not(target_arch = "wasm32"))]
 fn poll_chosen_package(_ctx: &egui::Context, _draft: &mut SimulationPlanManagerDraft) {}
 
-pub(crate) fn export_simulation_plan_package(
+pub fn export_simulation_plan_package(
     model: &Model,
     id: SimulationPlanId,
 ) -> Result<String, String> {
@@ -704,7 +704,7 @@ pub(crate) fn export_simulation_plan_package(
     .map_err(|error| format!("Could not serialize simulation plan {id}: {error}"))
 }
 
-pub(crate) fn commit_import_simulation_plan(
+pub fn commit_import_simulation_plan(
     cx: &mut Cx<'_, SimulateFeature>,
     json: &str,
     name: &str,

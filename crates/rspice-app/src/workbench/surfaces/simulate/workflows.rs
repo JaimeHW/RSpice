@@ -518,7 +518,7 @@ const INHERIT_CHOICE: &str = "Per output";
 /// Lives here rather than on the draft because the draft is deliberately
 /// ignorant of the capture-group types: it holds indices and text, and this is
 /// the one place that knows what those index into.
-pub(crate) fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
+pub fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
     // Every rule, in authored order, because that order is the group's own
     // precedence and resolution reads all of them. A ruleless group opens on
     // one empty row so the form has somewhere to type the first rule; an empty
@@ -892,7 +892,7 @@ fn claim_preview_sentence(matched: usize, rules: usize) -> String {
     )
 }
 
-pub(crate) fn commit_capture_group(
+pub fn commit_capture_group(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &CaptureGroupDraft,
 ) -> Result<String, String> {
@@ -971,7 +971,7 @@ pub(super) fn validate_clone_plan_draft(
     Ok(())
 }
 
-pub(crate) fn commit_clone_plan(
+pub fn commit_clone_plan(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &ClonePlanDraft,
 ) -> Result<String, String> {
@@ -1641,7 +1641,7 @@ pub(super) fn saved_output_storage_summary(
     }
 }
 
-pub(crate) fn finish_workflow_choice<D>(
+pub fn finish_workflow_choice<D>(
     cx: &mut Cx<'_, SimulateFeature>,
     choice: DialogChoice,
     mut draft: D,
@@ -1669,7 +1669,7 @@ pub(crate) fn finish_workflow_choice<D>(
     }
 }
 
-pub(crate) trait WorkflowDraft {
+pub trait WorkflowDraft {
     fn set_error(&mut self, error: String);
 }
 

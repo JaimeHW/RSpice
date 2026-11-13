@@ -6,15 +6,14 @@ use crate::workbench::framework::feature::SimulatePort;
 
 /// What the simulate feature keeps between frames.
 #[derive(Debug, Clone)]
-pub(crate) struct SimulateState {
+pub struct SimulateState {
     /// Destructive review for removing one record from the analysis plan —
     /// an analysis, a design variable, a saved output or a capture group —
     /// raised only where removal orphans something.
-    pub(crate) plan_removal_review: crate::workbench::app::dialogs::plan_removal::PlanRemovalReview,
+    pub plan_removal_review: crate::workbench::app::dialogs::plan_removal::PlanRemovalReview,
     /// Why a removal the plan will not perform was refused before it was
     /// staged. The review above asks; this one only states.
-    pub(crate) plan_removal_refusal:
-        crate::workbench::app::dialogs::plan_removal::PlanRemovalRefusal,
+    pub plan_removal_refusal: crate::workbench::app::dialogs::plan_removal::PlanRemovalRefusal,
 
     pub verification_page: crate::state::VerificationPage,
     /// Selected Simulation Studio setup route.

@@ -293,7 +293,7 @@ fn prepare_component_tuning(
 /// This function writes only runtime proposal state. The schematic and active
 /// plan remain byte-for-byte authoritative until the existing review dialog
 /// commits the complete transaction.
-pub(crate) fn stage_component_tuning(
+pub fn stage_component_tuning(
     model: &Model,
     session: &mut VerificationSessionState,
     component_id: u64,

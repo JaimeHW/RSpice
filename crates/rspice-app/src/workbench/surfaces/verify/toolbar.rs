@@ -18,7 +18,7 @@ use crate::workbench::design_system::elide_text;
 use super::table::TABLE_EDGE_INSET;
 
 /// Height of the toolbar row: a control and its padding above and below.
-pub(crate) const TOOLBAR_H: f32 = 36.0;
+pub const TOOLBAR_H: f32 = 36.0;
 /// Height of the line a summary drops to when the row cannot hold it.
 const SUMMARY_LINE_H: f32 = 22.0;
 /// Space between the title, the run selector and the summary.
@@ -37,7 +37,7 @@ pub(super) const EMPTY_LINE_H: f32 = 40.0;
 
 /// The toolbar's one summary line.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Summary {
+pub struct Summary {
     pub(super) text: String,
     pub(super) problem: Option<Problem>,
 }
@@ -51,7 +51,7 @@ impl Summary {
     }
 
     /// A summary that reports something failing, behind the failure mark.
-    pub(crate) fn failing(text: impl Into<String>) -> Self {
+    pub fn failing(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             problem: Some(Problem::Failure),

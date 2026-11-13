@@ -22,11 +22,7 @@ use super::{SimulateFeature, invalidate_preflight};
 
 /// Draw the trailing group: the run controls, then the plan chip and the PVT
 /// chip where `layout` has room for them.
-pub(in crate::workbench) fn show_trailing(
-    cx: &mut Cx<'_, SimulateFeature>,
-    ui: &mut egui::Ui,
-    layout: LayoutSpec,
-) {
+pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     let controls = run_control_parts(cx, ui);
     if let Some(key) = run_controls(ui, &controls, layout) {
         cx.execute(key);
@@ -130,7 +126,7 @@ fn unavailable_reason(
 /// Make (`process`, `temperature_celsius`) the reference PVT, as a change to
 /// the active plan's configuration with its receipt. Returns whether it
 /// changed anything; why the plan refused it is the error.
-pub(crate) fn commit_reference_pvt(
+pub fn commit_reference_pvt(
     cx: &mut Cx<'_, SimulateFeature>,
     process: crate::product::ProcessCorner,
     temperature_celsius: f64,

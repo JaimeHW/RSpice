@@ -482,7 +482,7 @@ fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {
 /// until the datasets do. The Results workspace owns the memoized answer,
 /// keyed by data version and analysis; this asks that owner rather than
 /// keeping a second verdict of its own.
-pub(crate) fn latest_validated_analysis<'m>(
+pub fn latest_validated_analysis<'m>(
     model: &'m Model,
     results: &dyn ResultsPort,
     analysis_type: crate::state::AnalysisType,
@@ -615,10 +615,7 @@ impl SimulateFeature {
     /// Stage placed instance `component_id`'s Value in the parameter tuner.
     /// Returns whether it staged; a refusal is stated on the Tuning page and
     /// on the status bar.
-    pub(in crate::workbench) fn stage_component_tuning(
-        cx: &mut Cx<'_, Self>,
-        component_id: u64,
-    ) -> bool {
+    pub fn stage_component_tuning(cx: &mut Cx<'_, Self>, component_id: u64) -> bool {
         let Err(error) = tuning_staging::stage_component_tuning(
             cx.model,
             &mut cx.state.verification,

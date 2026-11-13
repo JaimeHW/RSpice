@@ -19,11 +19,7 @@ use super::{
     toolbar_text_command,
 };
 
-pub(in crate::workbench) fn simulation_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn simulation_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
         app,
@@ -42,11 +38,7 @@ pub(in crate::workbench) fn simulation_tools(
     );
 }
 
-pub(in crate::workbench) fn verification_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn verification_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
         app,
@@ -457,7 +449,7 @@ pub(in crate::workbench) fn pvt_selector(
     chosen
 }
 
-pub(crate) fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
+pub fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
     (viewport_height - 72.0).clamp(row_height * 3.0, 484.0)
 }
 

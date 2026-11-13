@@ -12,14 +12,14 @@ use super::*;
 
 /// One evaluated check, as the table states it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SoaRow {
-    pub(crate) device: String,
+pub struct SoaRow {
+    pub device: String,
     pub(super) check: &'static str,
     pub(super) observed: f64,
     pub(super) limit: f64,
     pub(super) unit: String,
     pub(super) when_s: f64,
-    pub(crate) verdict: Verdict,
+    pub verdict: Verdict,
 }
 
 impl SoaRow {
@@ -30,7 +30,7 @@ impl SoaRow {
 }
 
 /// The run's evaluated checks, worst first.
-pub(crate) fn soa_rows(evaluations: &[crate::state::SoaEvaluationEvidence]) -> Vec<SoaRow> {
+pub fn soa_rows(evaluations: &[crate::state::SoaEvaluationEvidence]) -> Vec<SoaRow> {
     let mut rows = evaluations
         .iter()
         .map(|evaluation| SoaRow {
@@ -62,7 +62,7 @@ pub(crate) fn soa_rows(evaluations: &[crate::state::SoaEvaluationEvidence]) -> V
 
 /// The toolbar's line: the violations and the devices they are on, or the
 /// checks near their limit. A clean run says nothing.
-pub(crate) fn soa_summary(rows: &[SoaRow]) -> Option<Summary> {
+pub fn soa_summary(rows: &[SoaRow]) -> Option<Summary> {
     let violations = rows
         .iter()
         .filter(|row| row.verdict == Verdict::Fail)
@@ -101,7 +101,7 @@ enum SoaAction {
     Edit,
 }
 
-pub(crate) fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+pub fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
             analysis.analysis_type == crate::state::AnalysisType::Soa && verified_analysis(analysis)

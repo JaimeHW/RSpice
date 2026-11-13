@@ -32,7 +32,7 @@ use crate::workbench::state::SimulationPlanManagerMode;
 /// James's real viewport. Display scaling makes the usable area smaller than
 /// a naive test window, and the product rule is that a dialog fits without
 /// scrolling — so this, not a comfortable size, is what fit means here.
-pub(crate) const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
+pub const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
 
 /// The three viewports every route is gated at.
 ///
@@ -42,7 +42,7 @@ pub(crate) const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
 /// portrait shape a global command can open this dialog into. The names are the
 /// ones the contract tests' two browse gates already use for the same three
 /// shapes.
-pub(crate) const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
+pub const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
     ("desktop", REAL_VIEWPORT),
     ("full-viewport landscape", egui::Vec2::new(820.0, 640.0)),
     ("portrait", egui::Vec2::new(560.0, 900.0)),
@@ -50,7 +50,7 @@ pub(crate) const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
 
 /// Every route the manager dispatches to, in dispatch order; the contract
 /// tests' `route_position` keeps it complete.
-pub(crate) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
+pub const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
     SimulationPlanManagerMode::Browse,
     SimulationPlanManagerMode::Create,
     SimulationPlanManagerMode::Rename,
@@ -63,7 +63,7 @@ pub(crate) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
 
 /// Every source file of the plan manager, which the elision gate reads to tell
 /// a string the module wrote with an ellipsis from one elided to fit.
-pub(crate) const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
+pub const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
     ("plan_manager.rs", include_str!("../plan_manager.rs")),
     ("tests.rs", include_str!("tests.rs")),
     ("campaign.rs", include_str!("campaign.rs")),
@@ -76,7 +76,7 @@ pub(crate) const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
 ];
 
 /// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
-pub(crate) const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
+pub const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
     "971e9114163e82e3cbdc847975376905a9c5f06ad38933eb6df9e990ccc6cbe8",
     "300542b8ae0754d63447c64af248b4f2818dc440ab10acfe904583f08ac5600d",
     "3ec5bb9630edcfcff1f457791762b797e36e192b98f6d8ca162ccb7b093ef800",
@@ -108,7 +108,7 @@ pub(crate) const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
 /// Taken from `Debug` rather than authored beside the enum, so a renamed
 /// variant renames its renders instead of leaving a file named after a mode
 /// that no longer exists.
-pub(crate) fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
+pub fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
     format!(
         "plan-manager-{}-{}",
         format!("{mode:?}").to_ascii_lowercase(),
@@ -116,7 +116,7 @@ pub(crate) fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> Stri
     )
 }
 
-pub(crate) fn baseline_cases()
+pub fn baseline_cases()
 -> impl Iterator<Item = (usize, SimulationPlanManagerMode, &'static str, Vec2)> {
     EVERY_ROUTE
         .into_iter()

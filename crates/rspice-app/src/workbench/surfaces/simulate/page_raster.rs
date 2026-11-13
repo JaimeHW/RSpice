@@ -7,13 +7,13 @@
 use crate::state::SimulationPage;
 
 #[derive(Clone, Copy)]
-pub(crate) struct StudioBaseline {
-    pub(crate) name: &'static str,
-    pub(crate) page: SimulationPage,
-    pub(crate) fingerprint: &'static str,
+pub struct StudioBaseline {
+    pub name: &'static str,
+    pub page: SimulationPage,
+    pub fingerprint: &'static str,
 }
 
-pub(crate) const STUDIO_BASELINES: [StudioBaseline; 9] = [
+pub const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,

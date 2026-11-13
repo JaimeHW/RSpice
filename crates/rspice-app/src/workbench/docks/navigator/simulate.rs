@@ -16,10 +16,10 @@ use crate::workbench::simulate::commands::SimulateCommand;
 
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.
-pub(crate) const NAV_PROPERTY_PADDING_X: f32 = 10.0;
+pub const NAV_PROPERTY_PADDING_X: f32 = 10.0;
 /// Gutter between a property row's label column and its value column, from the
 /// mockup's `.form-grid { gap: 6px 11px; }` column gap.
-pub(crate) const NAV_PROPERTY_COLUMN_GAP: f32 = 11.0;
+pub const NAV_PROPERTY_COLUMN_GAP: f32 = 11.0;
 /// The share of a property row its label column may claim before it elides.
 ///
 /// The mockup lays this card out as a `.form-grid` — `minmax(110px, 0.8fr)`

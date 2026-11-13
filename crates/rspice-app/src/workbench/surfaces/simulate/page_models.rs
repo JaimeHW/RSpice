@@ -445,7 +445,7 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     }
 }
 
-pub(crate) enum ModelBindingAction {
+pub enum ModelBindingAction {
     SetCorner {
         index: usize,
         corner: Option<String>,
@@ -470,10 +470,7 @@ fn corner_options(model: &Model, library: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn apply_model_binding_action(
-    cx: &mut Cx<'_, SimulateFeature>,
-    action: ModelBindingAction,
-) {
+pub fn apply_model_binding_action(cx: &mut Cx<'_, SimulateFeature>, action: ModelBindingAction) {
     let mut candidate = cx.model.sim_setup.clone();
     let detail = match action {
         ModelBindingAction::SetCorner { index, corner } => {
@@ -547,16 +544,16 @@ fn record_binding_refusal(cx: &mut Cx<'_, SimulateFeature>, error: &str) {
 /// different definition count, a different passing total, and findings
 /// against models the catalog recorded as clean.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ModelGate<'a> {
-    pub(crate) library: &'a str,
-    pub(crate) model: &'a str,
-    pub(crate) vectors: usize,
-    pub(crate) evidenced_vectors: usize,
-    pub(crate) passing_vectors: usize,
-    pub(crate) open_dispositions: usize,
+pub struct ModelGate<'a> {
+    pub library: &'a str,
+    pub model: &'a str,
+    pub vectors: usize,
+    pub evidenced_vectors: usize,
+    pub passing_vectors: usize,
+    pub open_dispositions: usize,
     /// The workspace could not read this model's gate at all.
-    pub(crate) unreadable: bool,
-    pub(crate) gate: QualificationGate,
+    pub unreadable: bool,
+    pub gate: QualificationGate,
 }
 
 impl<'a> From<&'a ModelGateFact> for ModelGate<'a> {
@@ -644,33 +641,33 @@ impl ModelGate<'_> {
 
 /// A model the gate has something to say about.
 #[derive(Debug, Clone)]
-pub(crate) struct GateFinding {
+pub struct GateFinding {
     /// Severity, so the rows the card has room for are the ones that matter.
     rank: u8,
-    pub(crate) model: String,
-    pub(crate) finding: String,
-    pub(crate) state: &'static str,
-    pub(crate) tone: Tone,
+    pub model: String,
+    pub finding: String,
+    pub state: &'static str,
+    pub tone: Tone,
 }
 
 /// The release gate, summed over the closure.
 #[derive(Debug, Default)]
-pub(crate) struct GateReading {
-    pub(crate) models: usize,
+pub struct GateReading {
+    pub models: usize,
     /// Vectors a *readable* gate records as passing.
-    pub(crate) passing: usize,
+    pub passing: usize,
     /// Every vector the closure's qualification suites declare.
-    pub(crate) vectors: usize,
-    pub(crate) open_dispositions: usize,
+    pub vectors: usize,
+    pub open_dispositions: usize,
     /// Models whose gate could not be read.
-    pub(crate) unreadable: usize,
+    pub unreadable: usize,
     /// Models the source-owned gate does not govern at all.
     ///
     /// Counted rather than skipped: a closure of nothing but engine-owned
     /// cards has no findings, and "no findings" said about no subjects is how
     /// the card would come to sign off a release on an empty gate.
-    pub(crate) engine_owned: usize,
-    pub(crate) findings: Vec<GateFinding>,
+    pub engine_owned: usize,
+    pub findings: Vec<GateFinding>,
 }
 
 /// Sum the gate across the closure.
@@ -680,7 +677,7 @@ pub(crate) struct GateReading {
 /// the outcomes recorded against a source identity that no longer validates —
 /// reports a clean release on evidence nobody can open, and a gate that fails
 /// open is worse than no gate.
-pub(crate) fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) -> GateReading {
+pub fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) -> GateReading {
     let mut reading = GateReading::default();
     for model in models {
         reading.models += 1;
@@ -708,7 +705,7 @@ pub(crate) fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) 
 
 /// The card's status line: open dispositions, and whether any gate was
 /// unreadable at all. A clear gate states nothing.
-pub(crate) fn gate_status(reading: &GateReading) -> Option<(String, Tone)> {
+pub fn gate_status(reading: &GateReading) -> Option<(String, Tone)> {
     if reading.models == 0 {
         return Some(("no models to gate".to_owned(), Tone::Neutral));
     }

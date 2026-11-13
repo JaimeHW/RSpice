@@ -29,7 +29,7 @@ use rspice_simulation_contract::analysis_kind::AnalysisKind;
 use super::tuning::sync_tuning_session;
 use super::verification_yield_results;
 
-pub(crate) const PAGE_WIDTH: f32 = 1100.0;
+pub const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
 
 /// Rects the Verify widgets published this pass, by what they are.
@@ -59,12 +59,12 @@ fn take_probes(ctx: &egui::Context) -> Vec<(String, Rect)> {
 
 /// Where one page's elements landed on its last pass.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PageGeometry {
+pub struct PageGeometry {
     probes: Vec<(String, Rect)>,
 }
 
 impl PageGeometry {
-    pub(crate) fn all(&self, key: &str) -> Vec<Rect> {
+    pub fn all(&self, key: &str) -> Vec<Rect> {
         self.probes
             .iter()
             .filter(|(name, _)| name == key)
@@ -72,12 +72,12 @@ impl PageGeometry {
             .collect()
     }
 
-    pub(crate) fn one(&self, key: &str) -> Option<Rect> {
+    pub fn one(&self, key: &str) -> Option<Rect> {
         self.all(key).into_iter().next()
     }
 
     /// Every right-aligned table column's distinct right edges, by column.
-    pub(crate) fn right_edges(&self) -> Vec<(String, Vec<f32>)> {
+    pub fn right_edges(&self) -> Vec<(String, Vec<f32>)> {
         let mut columns: Vec<(String, Vec<f32>)> = Vec::new();
         for (name, rect) in &self.probes {
             if !name.starts_with("table.right.") {
@@ -95,7 +95,7 @@ impl PageGeometry {
 
     /// Every element whose words start left of the panel inset or end past
     /// the page's right inset.
-    pub(crate) fn outside_insets(&self, width: f32) -> Vec<String> {
+    pub fn outside_insets(&self, width: f32) -> Vec<String> {
         self.probes
             .iter()
             .filter(|(name, _)| {
@@ -110,7 +110,7 @@ impl PageGeometry {
 }
 
 /// The review-size screen, with `events` arriving on it.
-pub(crate) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
+pub fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -123,7 +123,7 @@ pub(crate) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
 
 /// One pass of `page` over `input` in an unframed central panel, and where
 /// its widgets put things on it.
-pub(crate) fn page_pass(
+pub fn page_pass(
     ctx: &egui::Context,
     input: egui::RawInput,
     mut page: impl FnMut(&mut egui::Ui),
@@ -141,7 +141,7 @@ pub(crate) fn page_pass(
 /// What a Verify page is drawn over: the host opens the Verify workspace on
 /// a page and draws the surface. The drivers below measure; a stage only
 /// adapts the two steps to its host.
-pub(crate) trait VerifyStage {
+pub trait VerifyStage {
     /// Open the Verify workspace on `page`.
     fn open(&mut self, page: VerificationPage);
     /// Draw the Verify surface into `ui`.
@@ -161,7 +161,7 @@ impl VerifyStage for FeatureHarness<SimulateFeature> {
 
 /// Lay one page out at the review size and read back where it put things,
 /// without rasterizing it.
-pub(crate) fn page_geometry(mut stage: impl VerifyStage, page: VerificationPage) -> PageGeometry {
+pub fn page_geometry(mut stage: impl VerifyStage, page: VerificationPage) -> PageGeometry {
     stage.open(page);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -194,7 +194,7 @@ fn attributed_to(
 
 /// A run of `plan_id`, sealed by a prepared receipt whose one task produced
 /// `analysis`.
-pub(crate) fn sealed_run(
+pub fn sealed_run(
     run_number: u64,
     plan_id: crate::product::SimulationPlanId,
     source_instance_id: AnalysisInstanceId,
@@ -332,7 +332,7 @@ fn gain_campaign(samples: Vec<f64>) -> AnalysisResult {
 
 /// The Monte Carlo fixture's seeding: forty trials of the plan's Monte Carlo
 /// analysis and its 40 dB gain floor, judged as the frame judges them.
-pub(crate) fn seed_monte_carlo(model: &mut Model) {
+pub fn seed_monte_carlo(model: &mut Model) {
     let plan = model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -380,7 +380,7 @@ pub(super) const FIXTURE_CORNERS: [(&str, f64, f64); 7] = [
 
 /// The corner fixture's seeding: its run is the model's one run, and the
 /// limits its outputs are judged by.
-pub(crate) fn seed_corner(model: &mut Model) {
+pub fn seed_corner(model: &mut Model) {
     let outputs: [(&str, [f64; 7]); 4] = [
         ("gain", [42.3, 39.4, 42.6, 43.0, 44.2, 42.4, 42.9]),
         (
@@ -475,7 +475,7 @@ pub(super) fn set_limits(model: &mut Model, specs: Vec<SpecEntry>) {
 
 /// An SOA run of five checks on four devices: two violations, one check near
 /// its limit, two clean. The run is the model's one run.
-pub(crate) fn seed_soa(model: &mut Model) {
+pub fn seed_soa(model: &mut Model) {
     use crate::state::{
         SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
         SoaViolationSeverityEvidence,
@@ -596,7 +596,7 @@ pub(crate) fn seed_soa(model: &mut Model) {
 }
 
 /// The optimization fixture's seeding: its run is the model's one run.
-pub(crate) fn seed_optimization(model: &mut Model) {
+pub fn seed_optimization(model: &mut Model) {
     let iterations = (0..24).map(f64::from).collect::<Vec<_>>();
     let cost = iterations
         .iter()
@@ -632,7 +632,7 @@ pub(crate) fn seed_optimization(model: &mut Model) {
     );
 }
 
-pub(crate) fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
+pub fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
     let plan_id = model
         .sim_setup
         .stable_analysis_plan()
@@ -661,7 +661,7 @@ pub(crate) fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVa
     id
 }
 
-pub(crate) fn stage_literal_tuning_binding(
+pub fn stage_literal_tuning_binding(
     cx: &mut Cx<'_, SimulateFeature>,
     component_id: u64,
     variable_name: &str,
@@ -714,8 +714,6 @@ pub(crate) fn stage_literal_tuning_binding(
     variable_id
 }
 
-pub(crate) fn fixture_yield_results(
-    model: &Model,
-) -> Vec<rspice_results::yield_analysis::YieldResult> {
+pub fn fixture_yield_results(model: &Model) -> Vec<rspice_results::yield_analysis::YieldResult> {
     verification_yield_results(model).to_vec()
 }

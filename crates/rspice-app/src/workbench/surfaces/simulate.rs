@@ -29,7 +29,7 @@ use lifecycle::*;
 use plan_issue_wording::*;
 use workflows::*;
 
-pub(in crate::workbench) use pages::reads_foreign_answers;
+pub use pages::reads_foreign_answers;
 
 use std::collections::HashSet;
 
@@ -118,7 +118,7 @@ const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
 /// The action column: as wide as its longest line, "Add another · 9 in plan",
 /// set on one line.
 const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 160.0;
-pub(crate) const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
+pub const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
     "Core analyses",
     "Transfer & linearization",
     "RF & periodic solvers",
@@ -273,7 +273,7 @@ struct AnalysisCatalogRowLayout {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum AnalysisAction {
+pub enum AnalysisAction {
     Clone,
     Earlier(usize),
     Later(usize),
@@ -301,7 +301,7 @@ enum StackAction {
 /// offers is taken here for the same reason. Both land before the shell
 /// takes the dispatcher's answers the surface reads, so those answers are
 /// taken on the plan and the route it draws.
-pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
+pub fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
     apply_confirmed_analysis_removal(cx);
     lifecycle::apply_requested_blocker_reveal(cx.state);
     if let Err(error) = resolve_active_analysis_instance(cx.model, cx.state) {
@@ -310,7 +310,7 @@ pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
 }
 
 /// Draw the surface [`prepare`] readied.
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         // The track this surface is laid out in, with the scrollbar's gutter
@@ -402,7 +402,7 @@ impl SimulateFeature {
     /// took every keyboard shortcut in the application with it and left no
     /// painted modal to press Escape on. A host that runs once a frame wherever
     /// the reader is standing cannot arm an overlay that no pass draws.
-    pub(crate) fn render_workflow_dialogs(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
+    pub fn render_workflow_dialogs(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
         checkpoint_exchange::poll(ctx, cx);
         transient_checkpoint_exchange::poll(ctx, cx);
         simulation_workflow_dialog(ctx, cx);
@@ -519,7 +519,7 @@ fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool 
         && surface_width >= analysis_split_min_width(viewport_width)
 }
 
-pub(crate) fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
+pub fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
     let usable = (available - 1.0).max(1.0);
     let (left_fraction, left_min, right_min) = analysis_column_constraints(viewport_width);
     let left = (usable * left_fraction)
@@ -2008,7 +2008,7 @@ struct ContractDatasets<'a> {
 /// Takes the two things it needs rather than the whole application: it has no
 /// business reaching the schematic, the workspace or the documents, and saying
 /// so in the signature is what keeps that true.
-pub(crate) fn plan_statement_for(
+pub fn plan_statement_for(
     model: &mut Model,
     controller: &SimulationController,
     draft: &AnalysisDraft,
@@ -2037,7 +2037,7 @@ const STATEMENT_ROUND_TRIP_TOLERANCE: f64 = 1e-12;
 /// same number keeps the digits as written. Integers below a million stay as
 /// written too: those are counts (`.ac dec 10`, `.mc 1000`) as often as
 /// quantities, and a count respelled `1k` reads as a quantity.
-pub(crate) fn engineering_statement(statement: &str) -> String {
+pub fn engineering_statement(statement: &str) -> String {
     statement
         .split(' ')
         .map(|token| match token.split_once('=') {

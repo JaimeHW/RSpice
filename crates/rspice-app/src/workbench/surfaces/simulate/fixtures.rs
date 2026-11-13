@@ -11,7 +11,7 @@ use crate::workbench::state::{DesignVariableImportDraft, SimulationWorkflowDialo
 use super::variable_import::import_draft_for_sheet;
 
 /// The active plan's identity, for tests that seed plan-owned records.
-pub(crate) fn plan_id(model: &Model) -> crate::product::SimulationPlanId {
+pub fn plan_id(model: &Model) -> crate::product::SimulationPlanId {
     model
         .sim_setup
         .stable_analysis_plan()
@@ -21,7 +21,7 @@ pub(crate) fn plan_id(model: &Model) -> crate::product::SimulationPlanId {
 
 /// Seed one plan with two outputs in different scopes and a group over the
 /// first, and hand back the group's identity.
-pub(crate) fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
+pub fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
     use crate::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
         SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
@@ -57,7 +57,7 @@ pub(crate) fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGr
         .expect("the plan accepts the group")
 }
 
-pub(crate) fn plan(model: &Model) -> SimulationPlanId {
+pub fn plan(model: &Model) -> SimulationPlanId {
     model
         .sim_setup
         .stable_analysis_plan()
@@ -66,7 +66,7 @@ pub(crate) fn plan(model: &Model) -> SimulationPlanId {
 }
 
 /// Drive the real entry point and hand back the draft it opened on.
-pub(crate) fn open(
+pub fn open(
     model: &Model,
     simulate: &mut SimulateState,
     plan_id: SimulationPlanId,

@@ -117,7 +117,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// Fails closed on an unresolvable workload — every analysis at every declared
 /// point — and returns the reason so the page can say the forecast is a
 /// ceiling rather than an estimate.
-pub(crate) fn capture_workload(model: &Model) -> (CaptureWorkload, Option<String>) {
+pub fn capture_workload(model: &Model) -> (CaptureWorkload, Option<String>) {
     let matrix = u64::try_from(model.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
     match super::workload::PlanWorkload::resolve(model) {
         Ok(workload) => {

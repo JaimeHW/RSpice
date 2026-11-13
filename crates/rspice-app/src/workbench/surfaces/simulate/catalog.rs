@@ -262,7 +262,7 @@ pub(super) fn analysis_catalog_window(
 /// says what may be typed, the name says which control the reader is on. egui
 /// publishes `hint_text` as a placeholder, so a field with only a hint
 /// announces no name at all.
-pub(crate) const ANALYSIS_CATALOG_SEARCH_LABEL: &str = "Search the analysis catalogue";
+pub const ANALYSIS_CATALOG_SEARCH_LABEL: &str = "Search the analysis catalogue";
 
 pub(super) fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdit<'_> {
     egui::TextEdit::singleline(query)
@@ -302,7 +302,7 @@ fn analysis_catalog_row_space(ui: &Ui) -> f32 {
 /// stacked row spend the width the split was meant to buy and hand back a
 /// taller list, so the second column is worth taking only when both columns
 /// clear that breakpoint.
-pub(crate) const ANALYSIS_CATALOG_COLUMN_MIN_WIDTH: f32 = TITLE_ACTION_STACK_BREAKPOINT;
+pub const ANALYSIS_CATALOG_COLUMN_MIN_WIDTH: f32 = TITLE_ACTION_STACK_BREAKPOINT;
 
 /// How many columns of rows fit in `row_space` points.
 ///

@@ -40,7 +40,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 /// whatever now holds that position. The analysis stack is the exception only
 /// because an analysis instance is identified plan-wide already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlanRemovalTarget {
+pub enum PlanRemovalTarget {
     Analysis(crate::product::AnalysisInstanceId),
     Variable {
         plan: crate::product::SimulationPlanId,
@@ -74,7 +74,7 @@ pub(crate) enum PlanRemovalTone {
 /// explain, which is what keeps a review of a cheap removal from reading like
 /// a review of an expensive one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PlanRemovalConsequence {
+pub struct PlanRemovalConsequence {
     pub(crate) fact: String,
     pub(crate) value: String,
     pub(crate) note: Option<(PlanRemovalTone, String)>,
@@ -109,20 +109,20 @@ impl PlanRemovalConsequence {
 /// why the four registries share one review instead of three of them
 /// committing on the first click.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PlanRemovalReview {
-    pub(crate) target: Option<PlanRemovalTarget>,
+pub struct PlanRemovalReview {
+    pub target: Option<PlanRemovalTarget>,
     /// What removal takes with it, resolved when the review opened.
     pub(crate) label: String,
     pub(crate) consequences: Vec<PlanRemovalConsequence>,
     /// Set by the dialog when the reader confirms. The page that owns the
     /// registry performs the removal itself on its next frame, so the modal
     /// never reaches across into another surface's transactions.
-    pub(crate) confirmed: bool,
+    pub confirmed: bool,
 }
 
 impl PlanRemovalReview {
     /// Stage a review for one record.
-    pub(crate) fn open(
+    pub fn open(
         &mut self,
         target: PlanRemovalTarget,
         label: String,
@@ -137,7 +137,7 @@ impl PlanRemovalReview {
     }
 
     /// The analysis the reader confirmed removing, taken exactly once.
-    pub(crate) fn take_confirmed_analysis(&mut self) -> Option<crate::product::AnalysisInstanceId> {
+    pub fn take_confirmed_analysis(&mut self) -> Option<crate::product::AnalysisInstanceId> {
         self.take_confirmed(|target| match target {
             PlanRemovalTarget::Analysis(id) => Some(id),
             _ => None,
@@ -145,7 +145,7 @@ impl PlanRemovalReview {
     }
 
     /// The design variable the reader confirmed removing from `plan`.
-    pub(crate) fn take_confirmed_variable(
+    pub fn take_confirmed_variable(
         &mut self,
         plan: crate::product::SimulationPlanId,
     ) -> Option<crate::product::DesignVariableId> {
@@ -167,7 +167,7 @@ impl PlanRemovalReview {
     }
 
     /// The capture group the reader confirmed removing from `plan`.
-    pub(crate) fn take_confirmed_capture_group(
+    pub fn take_confirmed_capture_group(
         &mut self,
         plan: crate::product::SimulationPlanId,
     ) -> Option<crate::product::CaptureGroupId> {
@@ -189,7 +189,7 @@ impl PlanRemovalReview {
         Some(taken)
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -207,16 +207,16 @@ impl PlanRemovalReview {
 /// substitutes for the other: the name is what the reader knows the analysis
 /// by, and the id is what the hop to it needs.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PlanRemovalRefusal {
-    pub(crate) analysis: Option<crate::product::AnalysisInstanceId>,
+pub struct PlanRemovalRefusal {
+    pub analysis: Option<crate::product::AnalysisInstanceId>,
     /// The analysis the reader asked to remove, by the name it shows under.
-    pub(crate) label: String,
+    pub label: String,
     /// Every analysis bound to it, in plan order.
-    pub(crate) blockers: Vec<(crate::product::AnalysisInstanceId, String)>,
+    pub blockers: Vec<(crate::product::AnalysisInstanceId, String)>,
     /// Set by the dialog when the reader asks to be shown the first blocker.
     /// The surface that owns the plan performs the hop on its next frame, so
     /// the modal never navigates another surface itself.
-    pub(crate) reveal: bool,
+    pub reveal: bool,
 }
 
 impl PlanRemovalRefusal {

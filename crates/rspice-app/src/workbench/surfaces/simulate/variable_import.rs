@@ -307,7 +307,7 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// Reading a sheet changes nothing, so this takes the application immutably and
 /// hands back what the dialog should show. The caller decides that the dialog
 /// opens; this only decides what is in it.
-pub(crate) fn import_draft_for_sheet(
+pub fn import_draft_for_sheet(
     model: &Model,
     simulate: &SimulateState,
     plan_id: SimulationPlanId,

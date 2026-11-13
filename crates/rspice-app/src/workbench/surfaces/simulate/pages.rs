@@ -30,7 +30,7 @@ const CHIP_HEIGHT: f32 = 22.0;
 /// the Analyses route's heading states why the split stage will not open,
 /// and the Specifications page Results' reason for not opening a limit's
 /// evidence, which it reads only once the plan's dataset exists.
-pub(in crate::workbench) fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
+pub fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
     match page {
         SimulationPage::Analyses => true,
         SimulationPage::Specifications => {
@@ -243,7 +243,7 @@ const CONTRACT_GAP: f32 = 12.0;
 /// walked: that walk traverses the configured hierarchy, and paying it on
 /// every frame of every setup route to learn "no preflight yet" would be the
 /// header charging the whole design for a fact the state already holds.
-pub(crate) fn preflight_currency(model: &Model, runs: &RunsState) -> PreflightCurrency {
+pub fn preflight_currency(model: &Model, runs: &RunsState) -> PreflightCurrency {
     if runs.preflight.report.is_none() {
         return PreflightCurrency::Absent;
     }
