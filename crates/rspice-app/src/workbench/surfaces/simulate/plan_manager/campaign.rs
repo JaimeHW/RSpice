@@ -589,7 +589,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_member_table_fits_the_body_at_every_gated_viewport() {
-        for (arrangement, screen) in super::super::tests::GATED_VIEWPORTS {
+        for (arrangement, screen) in super::super::raster::GATED_VIEWPORTS {
             let body = measured_campaign_body_width(screen);
             let minimum = kit::table_minimum_width(&MEMBER_COLUMNS);
             assert!(

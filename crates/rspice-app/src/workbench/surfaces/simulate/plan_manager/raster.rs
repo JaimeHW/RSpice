@@ -7,12 +7,12 @@
 //! dependence on the wasm build.
 //!
 //! Every route at every gated viewport — the same eight modes and the same
-//! three shapes the contract tests gate, taken from
-//! [`tests::GATED_VIEWPORTS`](super::tests::GATED_VIEWPORTS) rather than
-//! restated, so a render is of the arrangement that was actually asserted
-//! about. Each canvas is exactly its viewport: the product rule is that the
-//! whole surface fits without scrolling, and a taller canvas would let a
-//! surface that overflows the reader's screen look complete here.
+//! three shapes the contract tests gate, held here as [`EVERY_ROUTE`] and
+//! [`GATED_VIEWPORTS`] and read by both rather than restated, so a render is
+//! of the arrangement that was actually asserted about. Each canvas is
+//! exactly its viewport: the product rule is that the whole surface fits
+//! without scrolling, and a taller canvas would let a surface that overflows
+//! the reader's screen look complete here.
 //!
 //! Read the renders for layout, not for wording — the rasterizer samples the
 //! font atlas without filtering, and its own header says what that costs. A
@@ -28,6 +28,52 @@
 use egui::Vec2;
 
 use crate::workbench::state::SimulationPlanManagerMode;
+
+/// James's real viewport. Display scaling makes the usable area smaller than
+/// a naive test window, and the product rule is that a dialog fits without
+/// scrolling — so this, not a comfortable size, is what fit means here.
+pub(crate) const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
+
+/// The three viewports every route is gated at.
+///
+/// 1024x640 is the real desktop one — display scaling makes the usable area
+/// smaller than a comfortable test window. 820 is where `WideWorkflow` stops
+/// being a fixed-width panel and becomes the whole viewport, and 560x900 is the
+/// portrait shape a global command can open this dialog into. The names are the
+/// ones the contract tests' two browse gates already use for the same three
+/// shapes.
+pub(crate) const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
+    ("desktop", REAL_VIEWPORT),
+    ("full-viewport landscape", egui::Vec2::new(820.0, 640.0)),
+    ("portrait", egui::Vec2::new(560.0, 900.0)),
+];
+
+/// Every route the manager dispatches to, in dispatch order; the contract
+/// tests' `route_position` keeps it complete.
+pub(crate) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
+    SimulationPlanManagerMode::Browse,
+    SimulationPlanManagerMode::Create,
+    SimulationPlanManagerMode::Rename,
+    SimulationPlanManagerMode::ConfirmArchive,
+    SimulationPlanManagerMode::Compare,
+    SimulationPlanManagerMode::Export,
+    SimulationPlanManagerMode::Import,
+    SimulationPlanManagerMode::Campaign,
+];
+
+/// Every source file of the plan manager, which the elision gate reads to tell
+/// a string the module wrote with an ellipsis from one elided to fit.
+pub(crate) const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
+    ("plan_manager.rs", include_str!("../plan_manager.rs")),
+    ("tests.rs", include_str!("tests.rs")),
+    ("campaign.rs", include_str!("campaign.rs")),
+    ("compare.rs", include_str!("compare.rs")),
+    ("create.rs", include_str!("create.rs")),
+    ("exchange.rs", include_str!("exchange.rs")),
+    ("kit.rs", include_str!("kit.rs")),
+    ("lifecycle.rs", include_str!("lifecycle.rs")),
+    ("records.rs", include_str!("records.rs")),
+];
 
 /// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
 pub(crate) const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
@@ -72,10 +118,10 @@ pub(crate) fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> Stri
 
 pub(crate) fn baseline_cases()
 -> impl Iterator<Item = (usize, SimulationPlanManagerMode, &'static str, Vec2)> {
-    super::tests::EVERY_ROUTE
+    EVERY_ROUTE
         .into_iter()
         .flat_map(|mode| {
-            super::tests::GATED_VIEWPORTS
+            GATED_VIEWPORTS
                 .into_iter()
                 .map(move |(viewport, screen)| (mode, viewport, screen))
         })
@@ -87,7 +133,7 @@ pub(crate) fn baseline_cases()
 fn plan_manager_visual_baselines_cover_the_route_viewport_product_and_are_unique() {
     assert_eq!(
         PLAN_MANAGER_FINGERPRINTS.len(),
-        super::tests::EVERY_ROUTE.len() * super::tests::GATED_VIEWPORTS.len(),
+        EVERY_ROUTE.len() * GATED_VIEWPORTS.len(),
         "the visual baseline table must cover every route at every gated viewport"
     );
     let names = baseline_cases()

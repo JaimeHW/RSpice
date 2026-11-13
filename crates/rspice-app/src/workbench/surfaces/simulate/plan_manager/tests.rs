@@ -6,31 +6,13 @@
 //! and is the convention the rest of the crate already uses.
 
 #[cfg(not(target_arch = "wasm32"))]
+use super::raster::EVERY_ROUTE;
+#[cfg(not(target_arch = "wasm32"))]
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::product::ProcessCorner;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::simulate::test_host::SimulateTestHost;
-
-/// James's real viewport. Display scaling makes the usable area smaller than
-/// a naive test window, and the product rule is that a dialog fits without
-/// scrolling — so this, not a comfortable size, is what fit means here.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
-
-/// The three viewports every route is gated at.
-///
-/// 1024x640 is the real desktop one — display scaling makes the usable area
-/// smaller than a comfortable test window. 820 is where `WideWorkflow` stops
-/// being a fixed-width panel and becomes the whole viewport, and 560x900 is the
-/// portrait shape a global command can open this dialog into. The names are the
-/// ones the two browse gates above already use for the same three shapes.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
-    ("desktop", REAL_VIEWPORT),
-    ("full-viewport landscape", egui::Vec2::new(820.0, 640.0)),
-    ("portrait", egui::Vec2::new(560.0, 900.0)),
-];
 
 /// Creating a plan installs the configuration its route committed, rather than
 /// leaving the defaults `create_plan` mints.
@@ -239,24 +221,6 @@ fn a_comparison_diffs_the_two_plans_its_route_picked() {
 }
 
 // ---------------------------------------------------------------------------
-// Every route, held to the same four claims
-// ---------------------------------------------------------------------------
-
-/// Every route the manager dispatches to, in dispatch order; [`route_position`]
-/// keeps it complete.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
-    SimulationPlanManagerMode::Browse,
-    SimulationPlanManagerMode::Create,
-    SimulationPlanManagerMode::Rename,
-    SimulationPlanManagerMode::ConfirmArchive,
-    SimulationPlanManagerMode::Compare,
-    SimulationPlanManagerMode::Export,
-    SimulationPlanManagerMode::Import,
-    SimulationPlanManagerMode::Campaign,
-];
-
-// ---------------------------------------------------------------------------
 // Route coverage
 // ---------------------------------------------------------------------------
 
@@ -290,22 +254,3 @@ fn every_route_is_listed_at_its_own_position() {
         );
     }
 }
-
-/// Every source file of the plan manager, which the elision gate reads to tell
-/// a string the module wrote with an ellipsis from one elided to fit.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
-    ("plan_manager.rs", include_str!("../plan_manager.rs")),
-    ("tests.rs", include_str!("tests.rs")),
-    ("campaign.rs", include_str!("campaign.rs")),
-    ("compare.rs", include_str!("compare.rs")),
-    ("create.rs", include_str!("create.rs")),
-    ("exchange.rs", include_str!("exchange.rs")),
-    ("kit.rs", include_str!("kit.rs")),
-    ("lifecycle.rs", include_str!("lifecycle.rs")),
-    ("records.rs", include_str!("records.rs")),
-];
-
-// ---------------------------------------------------------------------------
-// Elision gates for the routes that do not gate themselves
-// ---------------------------------------------------------------------------
