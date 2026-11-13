@@ -6,24 +6,6 @@ use rspice_results::{
     family_metadata::AnalysisResultFamilyMetadata, waveform::RetainedWaveform,
 };
 
-pub const fn is_curve_viewer(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-            | ResultViewer::Fft
-            | ResultViewer::HarmonicBalance
-            | ResultViewer::PhaseNoise
-            | ResultViewer::Eye
-            | ResultViewer::Hist
-            | ResultViewer::Nyquist
-            | ResultViewer::Smith
-            | ResultViewer::Polar
-    )
-}
-
 /// Resolve report tables without consulting application or viewer state.
 pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
     viewer: ResultViewer,

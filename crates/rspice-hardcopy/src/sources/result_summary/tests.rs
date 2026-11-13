@@ -16,14 +16,6 @@ fn viewer_partition_covers_every_results_family() {
         ResultViewer::Nyquist,
         ResultViewer::Smith,
     ];
-    let summary_viewers = [
-        ResultViewer::Op,
-        ResultViewer::Contribution,
-        ResultViewer::TransferFunction,
-        ResultViewer::Specs,
-        ResultViewer::PoleZero,
-    ];
-    assert!(curve_viewers.into_iter().all(is_curve_viewer));
     let analysis: AnalysisResult =
         AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0);
     // Noise supports both a spectrum and a ranked summary.
@@ -37,11 +29,6 @@ fn viewer_partition_covers_every_results_family() {
             Err(HardcopySourceError::UnsupportedVisualizationViewer(_))
         ));
     }
-    assert!(
-        summary_viewers
-            .into_iter()
-            .all(|viewer| !is_curve_viewer(viewer))
-    );
 }
 
 #[test]

@@ -50,7 +50,7 @@ pub use result_documents::{
     resolve_results_specs_source, results_manifest_identity, results_specs_identity,
     results_stack_identity,
 };
-pub use result_summary::{is_curve_viewer, semantic_result_summary};
+pub use result_summary::semantic_result_summary;
 pub use result_view::{
     QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,
     RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
