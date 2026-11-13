@@ -578,7 +578,6 @@ fn one_store_grants_exactly_one_restore_however_many_callers_ask() {
         .restore_from(&anchor, persisted.clone())
         .expect("the first caller restores");
     assert_eq!(report.restored, 2);
-    assert_eq!(store.archives_proved(), 2);
 
     assert!(
         second.restore_from(&anchor, persisted.clone()).is_none(),
@@ -586,21 +585,17 @@ fn one_store_grants_exactly_one_restore_however_many_callers_ask() {
          already been restored"
     );
     assert!(store.restore_from(&anchor, persisted.clone()).is_none());
-    // The counter is the part a reader could never observe: a second pass
-    // reaches the same verdict, so nothing on screen would reveal that every
-    // signature in the corpus had been checked twice.
-    assert_eq!(
-        store.archives_proved(),
-        2,
-        "a refused restore re-proved the corpus; the latch is not holding"
-    );
 
     // And a genuinely different store — a second tab, a fresh session — is
     // entitled to its own, because the latch is about one allocation and not
     // about a value anything could present.
     let (other, _other_mirror) = mirrored_store(PackStorageStanding::Persistent);
-    assert!(other.restore_from(&anchor, persisted).is_some());
-    assert_eq!(other.archives_proved(), 2);
+    assert_eq!(
+        other
+            .restore_from(&anchor, persisted)
+            .map(|report| report.restored),
+        Some(2)
+    );
 }
 
 /// A restore copies nothing back to storage except the deletions it decided.

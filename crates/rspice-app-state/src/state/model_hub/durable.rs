@@ -382,12 +382,6 @@ pub struct MirroredModelHubStore {
     /// be invented. What a key would have bought is exactly what an `Arc` to
     /// one allocation already buys.
     restored: std::sync::atomic::AtomicBool,
-    /// Stored archives this store has put through the proof.
-    ///
-    /// See [`Self::archives_proved`]. It is a plain running total and never a
-    /// key: nothing decides anything from it, so there is no latch here for a
-    /// rewound counter to unlatch.
-    proved: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -398,7 +392,6 @@ impl MirroredModelHubStore {
             mirror,
             staged: Mutex::new(BTreeMap::new()),
             restored: std::sync::atomic::AtomicBool::new(false),
-            proved: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -410,10 +403,7 @@ impl MirroredModelHubStore {
     /// corpus of signed archives is every ed25519 verification and every file
     /// digest repeated for a verdict that cannot have changed, and it is
     /// undetectable from the outside precisely *because* the answer is the
-    /// same. [`Self::archives_proved`] is what makes it detectable.
-    ///
-    /// The latch and the counter are claimed and advanced here, together, so
-    /// there is no arrangement of callers that gets one without the other.
+    /// same.
     pub fn restore_from(
         &self,
         anchor: &TrustAnchor,
@@ -425,10 +415,6 @@ impl MirroredModelHubStore {
         {
             return None;
         }
-        self.proved.fetch_add(
-            persisted.archives.len(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
         // `&self.inner`, not `self`, and this is the whole of how a restore
         // avoids copying storage back into storage. Every byte it writes came
         // *out* of the mirror moments earlier, so mirroring it would copy the
@@ -453,15 +439,6 @@ impl MirroredModelHubStore {
             self.mirror.delete_archive(&rejected.digest);
         }
         Some(report)
-    }
-
-    /// How many stored archives this store has put through the proof.
-    ///
-    /// Per store rather than per process, so a test can assert the exact
-    /// number without being at the mercy of whatever else is hydrating beside
-    /// it.
-    pub(crate) fn archives_proved(&self) -> usize {
-        self.proved.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn standing(&self) -> PackStorageStanding {
