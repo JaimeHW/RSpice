@@ -970,7 +970,7 @@ pub fn show(
     let inside = ui.painter_at(plot_rect.expand(1.0));
     let tick_font = theme::mono(10.0, FontWeight::Regular);
     let grid = Stroke::new(1.0, c.canvas_grid);
-    let frame = Stroke::new(1.0, c.border_strong);
+    let frame = Stroke::new(1.0, c.canvas_frame);
 
     // ---- bands (under everything)
     for band in &spec.bands {

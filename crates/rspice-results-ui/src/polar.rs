@@ -744,7 +744,7 @@ fn paint_canvas(
             centre,
             radius * fraction as f32,
             if emphasized {
-                egui::Stroke::new(1.4, c.border_strong)
+                egui::Stroke::new(1.4, c.canvas_frame)
             } else {
                 grid
             },
@@ -765,7 +765,7 @@ fn paint_canvas(
         painter.circle_stroke(
             centre,
             radius * fraction as f32,
-            egui::Stroke::new(1.4, c.border_strong),
+            egui::Stroke::new(1.4, c.canvas_frame),
         );
     }
 

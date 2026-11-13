@@ -147,6 +147,143 @@ fn every_run_of_text_reads_off_its_ground_in_every_theme() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// Every stroke `output` paints on the canvas, with its ink: on a canvas
+/// fill, and not on an interface surface laid over it (a tag, a menu), whose
+/// outline and rules belong to that surface.
+fn canvas_strokes(
+    ctx: &egui::Context,
+    output: &egui::FullOutput,
+) -> Vec<(egui::Rect, egui::Color32)> {
+    struct Walk {
+        canvas: egui::Color32,
+        surface_fills: [egui::Color32; 5],
+        grounds: Vec<egui::Rect>,
+        surfaces: Vec<egui::Rect>,
+        strokes: Vec<(egui::Rect, egui::Color32)>,
+    }
+    fn walk(shape: &egui::Shape, into: &mut Walk) {
+        let rect = shape.visual_bounding_rect();
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+            egui::Shape::Rect(fill) if fill.fill == into.canvas => into.grounds.push(fill.rect),
+            egui::Shape::Rect(fill) if into.surface_fills.contains(&fill.fill) => {
+                into.surfaces.push(fill.rect);
+            }
+            egui::Shape::Rect(outline) if outline.fill.a() == 0 && outline.stroke.width > 0.0 => {
+                into.strokes.push((rect, outline.stroke.color));
+            }
+            egui::Shape::LineSegment { stroke, .. } => into.strokes.push((rect, stroke.color)),
+            egui::Shape::Circle(circle) if circle.fill.a() == 0 && circle.stroke.width > 0.0 => {
+                into.strokes.push((rect, circle.stroke.color));
+            }
+            egui::Shape::Path(path) if path.fill.a() == 0 && path.stroke.width > 0.0 => {
+                if let egui::epaint::ColorMode::Solid(color) = path.stroke.color {
+                    into.strokes.push((rect, color));
+                }
+            }
+            _ => {}
+        }
+    }
+    let c = Tokens::get(ctx).color;
+    let mut found = Walk {
+        canvas: c.canvas_bg,
+        surface_fills: [
+            c.bg_app,
+            c.bg_panel,
+            c.bg_panel_2,
+            c.bg_inset,
+            c.bg_elevated,
+        ],
+        grounds: Vec::new(),
+        surfaces: Vec::new(),
+        strokes: Vec::new(),
+    };
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    let within = |outer: &egui::Rect, inner: &egui::Rect| outer.expand(1.0).contains_rect(*inner);
+    // A surface counts only where it lies on a canvas: the panel a canvas
+    // sits in is not laid over it.
+    let surfaces: Vec<_> = found
+        .surfaces
+        .iter()
+        .filter(|surface| found.grounds.iter().any(|ground| within(ground, surface)))
+        .collect();
+    found
+        .strokes
+        .into_iter()
+        .filter(|(rect, _)| {
+            found.grounds.iter().any(|ground| within(ground, rect))
+                && !surfaces.iter().any(|surface| within(surface, rect))
+        })
+        .collect()
+}
+
+/// A strip of a volts pane over an amps pane, both plotted.
+fn two_panes() -> ResultsTestHost {
+    let time: Vec<f64> = (0..64).map(|index| f64::from(index) * 1.0e-6).collect();
+    let wave =
+        |scale: f64| -> Vec<f64> { time.iter().map(|t| scale * (t * 2.0e5).sin()).collect() };
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time.clone(), wave(1.0), "#fff"),
+            RetainedTrace::new("I(R1)", time.clone(), wave(1.0e-3), "#fff"),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state
+}
+
+/// The marks the strip draws on its canvas take the canvas theme's inks in
+/// all four theme combinations: each pane's frame is the canvas's own strong
+/// border, and no frame, grid line or seam is drawn in an interface border
+/// grey. A light interface drew the frames in its own light grey, which
+/// glared on the dark canvas, and a dark one drew them in a grey that
+/// vanished into paper.
+#[test]
+fn the_strips_marks_take_the_canvas_inks_in_every_theme() {
+    let mut failures = Vec::new();
+    for mode in [Mode::Dark, Mode::Light] {
+        for canvas_theme in EngineeringCanvasTheme::ALL {
+            let ctx = themed_context(crate::ui::Theme {
+                mode,
+                canvas_theme,
+                ..crate::ui::Theme::default()
+            });
+            let mut state = two_panes();
+            let output = settled(&ctx, &mut state);
+            let c = Tokens::get(&ctx).color;
+            let strokes = canvas_strokes(&ctx, &output);
+            let frames = strokes
+                .iter()
+                .filter(|(_, ink)| *ink == c.canvas_frame)
+                .count();
+            if frames < 2 {
+                failures.push(format!(
+                    "{mode:?}/{canvas_theme:?}: {frames} frame lines in the canvas frame ink"
+                ));
+            }
+            let canvas_inks = [c.canvas_frame, c.canvas_grid];
+            for (rect, ink) in strokes {
+                if let Some((name, _)) = [("border", c.border), ("strong border", c.border_strong)]
+                    .into_iter()
+                    .find(|(_, interface)| *interface == ink && !canvas_inks.contains(&ink))
+                {
+                    failures.push(format!(
+                        "{mode:?}/{canvas_theme:?}: a mark in the interface's {name} at {:?}",
+                        rect.min
+                    ));
+                }
+            }
+        }
+    }
+    failures.dedup();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// Ten nodes on one pane draw in all eight hues, each 0.09 apart, and the
 /// ninth and tenth repeat a hue in a dash of their own. Cursor B is drawn,
 /// across the lanes and the pane, in a colour none of those curves has.
@@ -255,7 +392,7 @@ fn the_gutter_aligns_lanes_and_panes_at_two_widths() {
                 pane.x
             );
         }
-        let frame = Tokens::get(&ctx).color.border_strong;
+        let frame = Tokens::get(&ctx).color.canvas_frame;
         let plot_left = lines
             .iter()
             .filter(|line| line.color == frame && line.bottom - line.top > 40.0)

@@ -302,7 +302,7 @@ fn no_axis_line_frames_the_disc() {
         None,
         None,
     );
-    let frame = raster_tokens().color.border_strong;
+    let frame = raster_tokens().color.canvas_frame;
     let left = egui::Rect::from_min_max(
         egui::pos2(rect.left() - 2.0, rect.top()),
         egui::pos2(rect.left() + 2.0, rect.bottom()),

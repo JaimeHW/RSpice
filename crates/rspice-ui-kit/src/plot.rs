@@ -6,7 +6,7 @@
 //! readout, and A/B measurement cursors.
 //!
 //! Design contract:
-//! - grid lines in `canvas_grid`, frame in `border_strong`, ticks in
+//! - grid lines in `canvas_grid`, frame in `canvas_frame`, ticks in
 //!   `text_dim` 10 px mono, axis units in `text_dim` mono at the axis ends
 //! - traces are 1.8 pt (1.4 pt thin), dashed for secondary quantities
 //! - numbers never float over traces — they live in marker tags, the hover

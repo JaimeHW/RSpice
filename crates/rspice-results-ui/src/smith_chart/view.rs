@@ -335,7 +335,7 @@ impl ChartInks {
             } else {
                 c.canvas_text_faint
             },
-            boundary: c.border_strong,
+            boundary: c.canvas_frame,
             label: c.canvas_text_faint,
             gain: c.traces[4],
             stability: c.traces[5],

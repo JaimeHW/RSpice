@@ -288,6 +288,7 @@ impl Theme {
 fn apply_engineering_canvas_palette(tokens: &mut Tokens, canvas: Palette) {
     tokens.color.canvas_bg = canvas.canvas_bg;
     tokens.color.canvas_grid = canvas.canvas_grid;
+    tokens.color.canvas_frame = canvas.canvas_frame;
     tokens.color.wire = canvas.wire;
     tokens.color.symbol = canvas.symbol;
     tokens.color.net_label = canvas.net_label;
@@ -830,6 +831,28 @@ mod tests {
             palettes.push((format!("{name} contrast"), high_contrast(inks)));
         }
         palettes
+    }
+
+    /// The marks that bound a plot on a canvas — its frame, a unit circle, a
+    /// Smith chart's rim — take the canvas theme's own strong border whatever
+    /// the interface mode beside it: a light interface over the dark canvas
+    /// drew the frame in its own light grey, which glares there.
+    #[test]
+    fn a_canvas_frame_is_the_canvas_themes_own() {
+        for mode in [Mode::Dark, Mode::Light] {
+            for canvas_theme in EngineeringCanvasTheme::ALL {
+                let theme = Theme {
+                    mode,
+                    canvas_theme,
+                    ..Theme::default()
+                };
+                assert_eq!(
+                    theme.tokens().color.canvas_frame,
+                    canvas_theme.palette().border_strong,
+                    "{theme:?}"
+                );
+            }
+        }
     }
 
     /// Text painted on a canvas reads off that canvas whatever the interface

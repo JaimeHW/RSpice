@@ -56,6 +56,11 @@ pub struct Palette {
     pub canvas_bg: Color32,
     /// Canvas grid dots / plot gridlines.
     pub canvas_grid: Color32,
+    /// The marks that bound or scale a plot on a canvas: its frame line, a
+    /// polar chart's unit circle, a Smith chart's rim. The canvas theme's own
+    /// strong border, so a frame drawn on a dark canvas beside a light
+    /// interface is as quiet as it is under a dark one.
+    pub canvas_frame: Color32,
     /// Schematic wire stroke.
     pub wire: Color32,
     /// Schematic device symbol stroke.
@@ -296,6 +301,7 @@ pub const fn high_contrast(inks: ContrastInks) -> Palette {
         info: ground.info,
         canvas_bg: inks.window,
         canvas_grid: blend(inks.window, inks.window_text, 40),
+        canvas_frame: inks.window_text,
         wire: inks.link,
         symbol: inks.window_text,
         net_label: inks.window_text,
@@ -366,6 +372,7 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     info: Color32::from_rgb(0x7c, 0xb8, 0xe8),
     canvas_bg: Color32::from_rgb(7, 12, 16),
     canvas_grid: Color32::from_rgb(28, 35, 39),
+    canvas_frame: Color32::from_rgb(68, 76, 80),
     // Dark enough that the yellow selection stands 3:1 above it.
     wire: Color32::from_rgb(68, 140, 96),
     symbol: Color32::from_rgb(203, 210, 215),
@@ -438,6 +445,7 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     info: Color32::from_rgb(0x3d, 0x72, 0xa8),
     canvas_bg: Color32::from_rgb(251, 253, 254),
     canvas_grid: Color32::from_rgb(224, 227, 229),
+    canvas_frame: Color32::from_rgb(166, 172, 175),
     // Dark enough that the azure selection, which has to sit in the 0.21 to
     // 0.29 luminance band on paper, still stands 3:1 off it.
     wire: Color32::from_rgb(78, 52, 0),
