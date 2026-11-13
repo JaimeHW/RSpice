@@ -331,7 +331,11 @@ pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, 
     let rebind = module_rebind(app, &draft)?;
     let bundle = draft.source.bundle().id();
     let before_revision = draft.source.bundle().revision();
-    code_workspace::write_veriloga_build_profile(app, &draft.source, &profile)?;
+    code_workspace::write_veriloga_build_profile(
+        &mut app.code_workspace_parts(),
+        &draft.source,
+        &profile,
+    )?;
     let after_revision = app
         .state
         .model

@@ -45,8 +45,10 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
                 return;
             }
         };
-        let active_path =
-            crate::workbench::documents::code_workspace::active_veriloga_file_path(app, &selected);
+        let active_path = crate::workbench::documents::code_workspace::active_veriloga_file_path(
+            &app.code_workspace_parts(),
+            &selected,
+        );
         // A built-in header the navigator opened is read in this same well,
         // in place of the file, and never edited.
         let header = crate::workbench::documents::code_workspace::viewed_veriloga_header(
@@ -342,7 +344,7 @@ fn source_editor(
             );
             if editable && interaction.changed {
                 match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
-                    app,
+                    &mut app.code_workspace_parts(),
                     selected,
                     active_path,
                     source.clone(),
@@ -388,7 +390,8 @@ fn source_editor(
             step,
         ) {
             Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
-                app, bundle_id,
+                &mut app.code_workspace_parts(),
+                bundle_id,
             ),
             Ok(false) => {}
             Err(error) => app.state.prompt(error),

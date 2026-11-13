@@ -14,6 +14,7 @@ use crate::state::{
     LibraryManager, MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceFile,
     ProjectSourceId, ProjectSourceLanguage,
 };
+use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::CodeWorkspaceRuntimeState;
@@ -21,10 +22,7 @@ use super::super::page::{VerilogAImportTarget, VerilogAWorkbenchState};
 use super::super::{
     VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
-use super::{
-    RSpiceApp, invalidate_veriloga_evidence, invalidate_veriloga_evidence_in,
-    selected_veriloga_source,
-};
+use super::{invalidate_veriloga_evidence, invalidate_veriloga_evidence_in};
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 #[cfg(target_arch = "wasm32")]
@@ -378,21 +376,25 @@ pub(crate) fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchSta
 /// What the picker delivers when a file is chosen, for tests that cannot
 /// open a native picker.
 #[cfg(test)]
-pub(crate) fn complete_veriloga_file_pick(app: &mut RSpiceApp, file_name: &str, contents: &str) {
-    complete_veriloga_files_pick(app, &[(file_name, contents)], None);
+pub(crate) fn complete_veriloga_file_pick(
+    parts: &mut CodeWorkspaceParts<'_>,
+    file_name: &str,
+    contents: &str,
+) {
+    complete_veriloga_files_pick(parts, &[(file_name, contents)], None);
 }
 
 /// What the picker delivers when files are chosen from `folder`.
 #[cfg(test)]
 pub(crate) fn complete_veriloga_files_pick(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     files: &[(&str, &str)],
     folder: Option<&Path>,
 ) {
     apply_import(
-        &mut app.state.model,
-        &mut app.state.code.code_workspace,
-        &mut app.state.workbench,
+        parts.model,
+        parts.code,
+        parts.wb,
         files
             .iter()
             .map(|(name, contents)| PickedSource {
@@ -524,66 +526,66 @@ fn replacement_keeps_previous_text(
 /// Opens the picker bound to that exact file; the replacement itself waits
 /// for the confirmation the picked file opens.
 pub(crate) fn request_veriloga_source_replacement(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     logical_path: &str,
 ) -> Result<(), String> {
-    if let Some(reason) = super::super::source_file_mutation_block_reason(
-        &app.code_workspace_parts(),
-        ProjectSourceLanguage::VerilogA,
-    ) {
+    if let Some(reason) =
+        super::super::source_file_mutation_block_reason(parts, ProjectSourceLanguage::VerilogA)
+    {
         return Err(reason.to_owned());
     }
-    if app.state.code.code_workspace.veriloga.import_requested {
+    if parts.code.veriloga.import_requested {
         return Err("A Verilog-A/AMS file is already being chosen.".to_owned());
     }
-    let selected = selected_veriloga_source(app)?;
-    if !super::super::source_bundle_document_is_editable(
-        app,
+    let selected = super::selected_veriloga_source_in(parts.model)?;
+    if !crate::workbench::documents::code_workspace::source_bundle_document_is_editable_in(
+        parts.model,
+        parts.code,
+        parts.platform,
         ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         logical_path,
     ) {
         return Err(format!("{logical_path} cannot be edited."));
     }
-    app.state.code.code_workspace.veriloga.replace_target = Some(VerilogAReplaceTarget {
-        project_id: app.state.model.workspace.content.project.id(),
-        view: app.state.model.workspace.content.active_view.clone(),
+    parts.code.veriloga.replace_target = Some(VerilogAReplaceTarget {
+        project_id: parts.model.workspace.content.project.id(),
+        view: parts.model.workspace.content.active_view.clone(),
         bundle_id: selected.bundle().id(),
         bundle_revision: selected.bundle().revision().get(),
         closure_digest: selected.bundle().closure_digest(),
         logical_path: logical_path.to_owned(),
     });
-    app.state.code.code_workspace.veriloga.import_target = None;
-    app.state.code.code_workspace.veriloga.import_requested = true;
+    parts.code.veriloga.import_target = None;
+    parts.code.veriloga.import_requested = true;
     Ok(())
 }
 
 /// Replace the file a confirmed review names with the picked file, when that
 /// file is still exactly what the editor showed.
-pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<(), String> {
-    let review = app
-        .state
+pub(crate) fn commit_veriloga_source_replacement(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<(), String> {
+    let review = parts
         .code
-        .code_workspace
         .veriloga
         .replace_review
         .take()
         .ok_or_else(|| "No source replacement is waiting for confirmation.".to_owned())?;
-    if current_replace_bundle(&app.state.model, &review.target).is_none() {
+    if current_replace_bundle(parts.model, &review.target).is_none() {
         return Err(format!(
             "{} changed after the replacement was chosen; nothing was replaced.",
             review.target.logical_path
         ));
     }
-    let workbench = &mut app.state;
-    let changed = workbench.code.code_workspace.source_edit_history.replace(
-        &mut workbench.model.workspace.content,
+    let changed = parts.code.source_edit_history.replace(
+        &mut parts.model.workspace.content,
         review.target.bundle_id,
         vec![(review.target.logical_path.clone(), review.contents)],
     )? > 0;
     if changed {
-        invalidate_veriloga_evidence(app, review.target.bundle_id);
-        app.state.record(
+        invalidate_veriloga_evidence(parts, review.target.bundle_id);
+        parts.model.record(
             LogSeverity::Info,
             LogSource::Studio,
             format!(
@@ -592,7 +594,7 @@ pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<
             ),
         );
     } else {
-        app.state.prompt(format!(
+        parts.wb.prompt(format!(
             "{} already holds the text of {}.",
             review.target.logical_path, review.file_name
         ));

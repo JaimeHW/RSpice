@@ -142,10 +142,17 @@ fn replace_source_from_file_is_one_undo() {
         .logical_path()
         .to_owned();
     let replacement = original.replace("vslew", "limited");
-    code_workspace::request_veriloga_source_replacement(&mut user.app, &path)
-        .expect("the source can be replaced");
-    code_workspace::complete_veriloga_file_pick(&mut user.app, "next.va", &replacement);
-    code_workspace::commit_veriloga_source_replacement(&mut user.app)
+    code_workspace::request_veriloga_source_replacement(
+        &mut user.app.code_workspace_parts(),
+        &path,
+    )
+    .expect("the source can be replaced");
+    code_workspace::complete_veriloga_file_pick(
+        &mut user.app.code_workspace_parts(),
+        "next.va",
+        &replacement,
+    );
+    code_workspace::commit_veriloga_source_replacement(&mut user.app.code_workspace_parts())
         .expect("the file replaces it");
     user.settle();
     assert_eq!(source(&user), replacement);

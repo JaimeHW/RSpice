@@ -677,7 +677,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let edited = TWO_TOP_MODULES.replace("/ 1k", "/ 2k");
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app,
+            &mut app.code_workspace_parts(),
             &selected,
             "pair.va",
             edited.clone()
@@ -798,7 +798,11 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
 
     app.execute_command_key(CodeCommand::ImportVerilogA.key());
     assert!(app.state.code.code_workspace.veriloga.import_requested);
-    code_workspace::complete_veriloga_file_pick(&mut app, "pair.va", TWO_TOP_MODULES);
+    code_workspace::complete_veriloga_file_pick(
+        &mut app.code_workspace_parts(),
+        "pair.va",
+        TWO_TOP_MODULES,
+    );
 
     let form = app
         .state
@@ -899,7 +903,11 @@ fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
         !app.state.code.code_workspace.source_document_dialog,
         "the picker and the confirmation take over from the dialog"
     );
-    code_workspace::complete_veriloga_file_pick(app, "replacement.va", REPLACEMENT);
+    code_workspace::complete_veriloga_file_pick(
+        &mut app.code_workspace_parts(),
+        "replacement.va",
+        REPLACEMENT,
+    );
     assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
 }
 

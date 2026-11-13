@@ -563,7 +563,7 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app,
+            &mut app.code_workspace_parts(),
             &selected,
             "top.va",
             "module top(p, n);\n  inout p, n;\n  electrical p, n;\n  half xu(p, n);\nendmodule\n"
@@ -673,7 +673,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app,
+            &mut app.code_workspace_parts(),
             &selected,
             "model.va",
             module_source("gain", "  real unused;\n"),
@@ -730,7 +730,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     let ctx = themed_context();
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     code_workspace::replace_selected_veriloga_file(
-        &mut app,
+        &mut app.code_workspace_parts(),
         &selected,
         "model.va",
         module_source("gain", "  real broken = ;\n"),
@@ -803,7 +803,7 @@ fn a_source_edit_marks_its_tab_dirty_and_saving_clears_it() {
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app,
+            &mut app.code_workspace_parts(),
             &selected,
             "model.va",
             module_source("gain", "  real unused;\n"),

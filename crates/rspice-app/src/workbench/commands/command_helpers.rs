@@ -335,7 +335,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             // The closure is taken now, at the click; the frame loop
             // starts the compile on its next pass. Nothing is asked.
             if let Err(error) =
-                crate::workbench::documents::code_workspace::request_veriloga_compile(app)
+                crate::workbench::documents::code_workspace::request_veriloga_compile(&mut app.code_workspace_parts())
             {
                 app.state.prompt(error);
             }
@@ -368,7 +368,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             ) {
                 Ok(_) if compile => {
                     if let Err(error) =
-                        crate::workbench::documents::code_workspace::request_veriloga_compile(app)
+                        crate::workbench::documents::code_workspace::request_veriloga_compile(&mut app.code_workspace_parts())
                     {
                         app.state.prompt(error);
                     }
@@ -383,7 +383,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::ReplaceVerilogASource => {
             if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(app)
+                crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(&mut app.code_workspace_parts())
             {
                 app.state.record(
                     crate::diagnostics::LogSeverity::Error,

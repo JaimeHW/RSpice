@@ -111,7 +111,11 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     let sources = app.state.model.workspace.content.project_sources.clone();
 
     app.execute_command_key(CodeCommand::ImportVerilogA.key());
-    code_workspace::complete_veriloga_files_pick(&mut app, &[("gainer.va", ROOT)], Some(&folder));
+    code_workspace::complete_veriloga_files_pick(
+        &mut app.code_workspace_parts(),
+        &[("gainer.va", ROOT)],
+        Some(&folder),
+    );
 
     let listed = form(&app)
         .closure
@@ -148,7 +152,11 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     click(&ctx, &mut app, "Locate…");
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     assert_eq!(form(&app).locating.as_deref(), Some("body.inc"));
-    code_workspace::complete_veriloga_file_pick(&mut app, "body_from_elsewhere.inc", BODY);
+    code_workspace::complete_veriloga_file_pick(
+        &mut app.code_workspace_parts(),
+        "body_from_elsewhere.inc",
+        BODY,
+    );
 
     let located = form(&app);
     assert_eq!(located.closure.missing().count(), 0);
@@ -224,7 +232,7 @@ fn add_files_on_the_files_rail_adds_the_picked_files_beside_the_open_file() {
     click(&ctx, &mut app, "Add files…");
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_files_pick(
-        &mut app,
+        &mut app.code_workspace_parts(),
         &[("a.inc", "// a\n"), ("b.vh", "// b\n")],
         None,
     );

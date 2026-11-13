@@ -597,8 +597,10 @@ impl RSpiceApp {
                 Report::Console,
             ),
             LifecycleAction::ReplaceFromFile => {
-                let outcome =
-                    code_workspace::request_veriloga_source_replacement(self, logical_path);
+                let outcome = code_workspace::request_veriloga_source_replacement(
+                    &mut self.code_workspace_parts(),
+                    logical_path,
+                );
                 if outcome.is_ok() {
                     // The picker and then the replacement's own confirmation
                     // take over; this dialog would only sit behind them.
