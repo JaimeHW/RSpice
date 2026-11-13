@@ -186,10 +186,7 @@ fn show_missing_document(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, owner: &Cell
                         canvas.model.record(
                             LogSeverity::Info,
                             LogSource::Studio,
-                            format!(
-                                "Initialized {} from the signed project PDK.",
-                                owner.display_path()
-                            ),
+                            format!("Initialized {} from the project PDK.", owner.display_path()),
                         );
                     }
                     Err(error) => canvas.prompt(error),
@@ -231,7 +228,7 @@ fn resolve_display_contract(
             .eq_ignore_ascii_case(technology.package_id())
     {
         return Err(format!(
-            "{} is not bound to the project's validated signed PDK",
+            "{} is not bound to the project's validated PDK",
             document.owner().display_path()
         ));
     }
@@ -241,10 +238,10 @@ fn resolve_display_contract(
         .active_for_package(package.metadata());
     let (profile_label, selection_rgba, entries) = active.map_or_else(
         || {
-            let defaults = crate::state::pdk_config::PdkDisplayProfileDraft::signed_defaults(
+            let defaults = crate::state::pdk_config::PdkDisplayProfileDraft::package_defaults(
                 package.metadata(),
-                "signed-default",
-                "Signed package defaults",
+                "package-default",
+                "PDK package defaults",
             );
             (defaults.label, defaults.selection_rgba, defaults.entries)
         },
@@ -311,7 +308,7 @@ fn show_toolbar(
                 let active_label = session
                     .active_layer
                     .as_ref()
-                    .map_or("No signed layer".to_owned(), |layer| {
+                    .map_or("No PDK layer".to_owned(), |layer| {
                         format!("{}/{}", layer.layer, layer.purpose)
                     });
                 let layer_picker =
@@ -374,7 +371,7 @@ fn show_canvas(
         node.set_role(egui::accesskit::Role::Region);
         node.set_label("Physical layout canvas");
         node.set_description(
-            "Interactive signed-technology layout canvas. Use Select or Rectangle from the toolbar.",
+            "Interactive PDK layout canvas. Use Select or Rectangle from the toolbar.",
         );
     });
     response.widget_info(|| {

@@ -1390,7 +1390,7 @@ pub(crate) fn report_opened_project(
             LogSeverity::Warning,
             LogSource::Studio,
             format!(
-                "Simulation is blocked for this project: {error}. Attach a trusted, signed PDK \
+                "Simulation is blocked for this project: {error}. Attach a validated PDK \
                  revision under Project \u{00b7} Dependencies."
             ),
         );

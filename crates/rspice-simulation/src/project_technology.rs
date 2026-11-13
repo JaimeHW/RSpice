@@ -46,19 +46,19 @@ impl ProjectTechnologyInputs<'_> {
             .project
             .technology_binding()
             .expect("validated project technology has an exact binding");
-        let signed_pin = project_binding
-            .signed_package()
-            .expect("validated project technology has an exact signed package");
+        let pdk_pin = project_binding
+            .pdk_package()
+            .expect("validated project technology has an exact PDK package");
         let package_binding = rspice_model_library::pdk::contracts::PdkTechnologyBinding {
-            package_id: signed_pin.package_id().to_owned(),
-            revision: signed_pin.revision().to_owned(),
-            manifest_digest: signed_pin.manifest_digest(),
+            package_id: pdk_pin.package_id().to_owned(),
+            revision: pdk_pin.revision().to_owned(),
+            manifest_digest: pdk_pin.manifest_digest(),
         };
         let sealed_pdk = self
             .registry
-            .seal_model_sources_for_binding(&package_binding, signed_pin.archive_digest())
+            .seal_model_sources_for_binding(&package_binding, pdk_pin.archive_digest())
             .map_err(|error| {
-                format!("Signed PDK model sources cannot be sealed for project execution: {error}")
+                format!("PDK model sources cannot be sealed for project execution: {error}")
             })?;
         crate::model_sources::seal_plan_execution_sources(
             self.models,

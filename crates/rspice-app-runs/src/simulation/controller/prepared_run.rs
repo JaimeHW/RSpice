@@ -46,7 +46,7 @@ use rspice_simulation::output_contract::selection::{
 #[cfg(test)]
 use rspice_simulation::project_veriloga::preparation::prepared_configuration_veriloga_runtimes;
 use rspice_simulation::project_veriloga::preparation::{
-    prepared_model_library_veriloga_runtimes, prepared_signed_pdk_veriloga_runtimes,
+    prepared_model_library_veriloga_runtimes, prepared_pdk_veriloga_runtimes,
 };
 
 /// Let the deck find the data files its sources name.
@@ -609,7 +609,7 @@ impl SimulationController {
                 &generated_source,
                 &model_cards,
             );
-        let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+        let external_veriloga_runtimes = prepared_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(
                 &sealed_models,
                 model.sim_setup.reference_pvt.process,

@@ -96,7 +96,7 @@ struct CallbackReceiptPayload<'a> {
 
 impl PdkCallbackExecutionReceipt {
     /// Calculate and validate the digest of retained receipt data.
-    /// Signed-package validation and execution remain the host's responsibility.
+    /// Package validation and execution remain the host's responsibility.
     pub fn with_validated_digest(mut self) -> Result<Self, PdkCallbackError> {
         self.receipt_digest = self.calculate_digest()?;
         self.validate()?;
@@ -163,7 +163,7 @@ impl PdkCallbackExecutionReceipt {
     }
 }
 
-/// Project-owned evidence for one exact signed callback invocation.
+/// Project-owned evidence for one exact PDK callback invocation.
 ///
 /// The embedded execution receipt proves the sandbox/package boundary. This
 /// outer receipt additionally binds the canonical input payload, active plan,
@@ -284,19 +284,19 @@ pub enum PdkCallbackError {
     ProjectTransaction(String),
     #[error("invalid PDK callback input: {0}")]
     InvalidInput(String),
-    #[error("signed PDK callback '{0}' is not declared")]
+    #[error("PDK callback '{0}' is not declared")]
     CallbackNotFound(String),
-    #[error("signed PDK callback module is invalid: {0}")]
+    #[error("PDK callback module is invalid: {0}")]
     InvalidModule(String),
-    #[error("signed PDK callback capability violation: {0}")]
+    #[error("PDK callback capability violation: {0}")]
     CapabilityViolation(String),
-    #[error("signed PDK callback could not be instantiated: {0}")]
+    #[error("PDK callback could not be instantiated: {0}")]
     Instantiation(String),
-    #[error("signed PDK callback execution failed: {0}")]
+    #[error("PDK callback execution failed: {0}")]
     Execution(String),
-    #[error("signed PDK callback returned status {0}")]
+    #[error("PDK callback returned status {0}")]
     GuestStatus(i32),
-    #[error("signed PDK callback host contract was violated: {0}")]
+    #[error("PDK callback host contract was violated: {0}")]
     HostViolation(String),
     #[error("invalid PDK callback receipt: {0}")]
     InvalidReceipt(String),

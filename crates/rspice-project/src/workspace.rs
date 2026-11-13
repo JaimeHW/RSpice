@@ -108,7 +108,7 @@ pub struct ProjectWorkspace {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     physical_layout_documents:
         BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
-    /// Project-owned, append-only evidence for exact signed-PDK callback
+    /// Project-owned, append-only evidence for exact PDK callback
     /// executions. Each entry retains canonical inputs, derived metadata,
     /// package/runtime provenance, active-plan identity, and project revision
     /// authority; callback output is never accepted as ambient mutable state.

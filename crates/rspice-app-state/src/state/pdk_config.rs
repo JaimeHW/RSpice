@@ -48,18 +48,18 @@ pub use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
 pub use rspice_simulation::pdk::PdkTechnologyRegistry;
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation::pdk::test_fixtures::{
-    fixture_archive as signed_technology_test_fixture,
-    fixture_archive_with_models as signed_technology_test_fixture_with_models,
-    fixture_archive_with_symbols as signed_symbol_technology_test_fixture,
-    fixture_archive_with_veriloga as signed_veriloga_technology_test_fixture,
-    fixture_archive_with_veriloga_source as signed_veriloga_source_test_fixture,
+    fixture_archive as pdk_technology_test_fixture,
+    fixture_archive_with_models as pdk_technology_test_fixture_with_models,
+    fixture_archive_with_symbols as pdk_symbol_technology_test_fixture,
+    fixture_archive_with_veriloga as pdk_veriloga_technology_test_fixture,
+    fixture_archive_with_veriloga_source as pdk_veriloga_source_test_fixture,
 };
 pub use rspice_simulation::pdk::{
     PdkConfig, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
 };
 pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(any(test, feature = "test-support"))]
-pub use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
+pub use technology_diff::tests::fixture_revision_archives as pdk_technology_diff_test_fixture;
 pub use technology_diff::{
     PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
     PdkTechnologyDiffKind, PdkTechnologyMigrationEvidence, PdkTechnologyRevisionDiff,

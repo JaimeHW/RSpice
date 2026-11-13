@@ -1,4 +1,4 @@
-//! Determine whether the authored plan and physical layouts require a signed technology.
+//! Determine whether the authored plan and physical layouts require a PDK technology.
 
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
@@ -11,7 +11,7 @@ pub enum TechnologyDemandReason {
     NonTtReference(ProcessCorner),
     /// The global Simulation Studio Run Set resolves non-typical sections.
     GlobalRunSetSections { sections: Vec<ProcessCorner> },
-    /// Physical layout is authored against the signed PDK's layer stack, so it
+    /// Physical layout is authored against the PDK's layer stack, so it
     /// needs the pin whatever the plan's process sections are.
     PhysicalLayout { documents: Vec<String> },
 }
@@ -39,8 +39,7 @@ impl TechnologyDemandReason {
                 section_noun(sections.len())
             ),
             Self::PhysicalLayout { .. } => {
-                "An attached project technology whose signed PDK owns the layout layer stack"
-                    .to_owned()
+                "An attached project technology whose PDK owns the layout layer stack".to_owned()
             }
         }
     }
@@ -57,9 +56,9 @@ impl TechnologyDemandReason {
                 section_noun(sections.len())
             ),
             Self::PhysicalLayout { documents } => match documents.as_slice() {
-                [single] => format!("physical layout '{single}' requires a signed technology"),
+                [single] => format!("physical layout '{single}' requires a PDK technology"),
                 _ => format!(
-                    "physical layouts {} require a signed technology",
+                    "physical layouts {} require a PDK technology",
                     quoted_list(documents)
                 ),
             },

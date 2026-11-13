@@ -1,11 +1,11 @@
 //! Model-provider authority for the frozen design hierarchy.
 //!
 //! Checks retained instance bindings against project catalog decisions and
-//! resolves signed package authority only when a referenced provider needs it.
+//! resolves PDK package authority only when a referenced provider needs it.
 
 use std::path::Path;
 
-use crate::pdk::{ValidatedPdkTechnologyPackage, project_signed_technology_package};
+use crate::pdk::{ValidatedPdkTechnologyPackage, project_pdk_package};
 use crate::preparation::{PreparationError, PreparationStage};
 use rspice_design::library::LibraryCatalog;
 use rspice_model_library::ProjectTechnologyBinding;
@@ -97,8 +97,8 @@ pub fn validate_projected_model_binding_authority(
             if providers.is_empty() {
                 if let (Some(binding), Some(selected_library)) =
                     (model_bound_cell, selected_library.as_deref())
-                    && selected_library.starts_with("signed-pdk:")
-                    && signed_pdk_symbol_binding_matches(
+                    && selected_library.starts_with("pdk:")
+                    && pdk_symbol_binding_matches(
                         technology_binding,
                         packages,
                         selected_library,
@@ -193,7 +193,7 @@ pub fn validate_projected_model_binding_authority(
     Ok(())
 }
 
-fn signed_pdk_symbol_binding_matches(
+fn pdk_symbol_binding_matches(
     technology_binding: Option<&ProjectTechnologyBinding>,
     packages: &[ValidatedPdkTechnologyPackage],
     provider_library: &str,
@@ -203,17 +203,17 @@ fn signed_pdk_symbol_binding_matches(
     let Some(source_path) = source_path else {
         return Ok(false);
     };
-    let package = project_signed_technology_package(packages, technology_binding)
+    let package = project_pdk_package(packages, technology_binding)
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
-                format!("Signed technology symbol authority is unavailable: {error}"),
+                format!("PDK technology symbol authority is unavailable: {error}"),
             )
         })?
         .ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
-                "A signed-PDK symbol is bound but the project has no signed technology package",
+                "A PDK symbol is bound but the project has no PDK technology package",
             )
         })?;
     Ok(package.symbol_definitions().iter().any(|symbol| {

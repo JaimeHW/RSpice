@@ -1,7 +1,7 @@
 //! Versioned PDK display profiles.
 //!
 //! Display profiles are presentation overlays. They are bound to one exact
-//! signed technology manifest and cannot alter layer identity, purpose,
+//! PDK technology manifest and cannot alter layer identity, purpose,
 //! connectivity, stream mapping, or any other technology semantic.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -70,7 +70,7 @@ pub struct PdkDisplayProfileDraft {
 
 impl PdkDisplayProfileDraft {
     #[must_use]
-    pub fn signed_defaults(
+    pub fn package_defaults(
         package: &PdkTechnologyPackageMetadata,
         profile_id: impl Into<String>,
         label: impl Into<String>,

@@ -96,7 +96,7 @@ pub(super) fn technology_candidates(model: &Model) -> TechnologyCandidateCatalog
     catalog
 }
 
-fn signed_package_key(package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage) -> String {
+fn pdk_package_key(package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage) -> String {
     let manifest = package.manifest();
     format!(
         "{}@{}#{}",
@@ -106,9 +106,7 @@ fn signed_package_key(package: &crate::state::pdk_config::ValidatedPdkTechnology
     )
 }
 
-fn signed_package_label(
-    package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
-) -> String {
+fn pdk_package_label(package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage) -> String {
     let manifest = package.manifest();
     let targets = manifest
         .compatibility
@@ -159,8 +157,8 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
         .content
         .project
         .technology_binding()
-        .and_then(ProjectTechnologyBinding::signed_package);
-    let selected_signed_package = current_pin
+        .and_then(ProjectTechnologyBinding::pdk_package);
+    let selected_pdk_package = current_pin
         .and_then(|pin| {
             packages
                 .iter()
@@ -171,19 +169,19 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
                         && package.manifest_digest() == pin.manifest_digest()
                         && package.archive_digest() == pin.archive_digest()
                 })
-                .map(signed_package_key)
+                .map(pdk_package_key)
         })
         .or_else(|| {
             cx.model
                 .pdk_config
                 .technology_registry
                 .active_package()
-                .map(signed_package_key)
+                .map(pdk_package_key)
         })
-        .or_else(|| packages.first().map(signed_package_key));
+        .or_else(|| packages.first().map(pdk_package_key));
     cx.state
         .technology_attachment
-        .open(selected_library, selected_signed_package);
+        .open(selected_library, selected_pdk_package);
 }
 
 pub(in crate::workbench) fn show_technology_attachment_dialog(
@@ -220,15 +218,15 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
     let selected_package_is_current = cx
         .state
         .technology_attachment
-        .selected_signed_package
+        .selected_pdk_package
         .as_deref()
         .is_some_and(|selected| {
             packages
                 .iter()
-                .any(|package| signed_package_key(package) == selected)
+                .any(|package| pdk_package_key(package) == selected)
         });
     if !selected_package_is_current {
-        cx.state.technology_attachment.selected_signed_package = cx
+        cx.state.technology_attachment.selected_pdk_package = cx
             .model
             .pdk_config
             .technology_registry
@@ -236,10 +234,10 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
             .filter(|active| {
                 packages
                     .iter()
-                    .any(|package| signed_package_key(package) == signed_package_key(active))
+                    .any(|package| pdk_package_key(package) == pdk_package_key(active))
             })
             .or_else(|| packages.first())
-            .map(signed_package_key);
+            .map(pdk_package_key);
     }
 
     let selected_name = cx.state.technology_attachment.selected_library.clone();
@@ -256,24 +254,17 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
         .and_then(|index| options.get(index))
         .map(String::as_str)
         .unwrap_or("No model library can be attached");
-    let selected_package_key = cx
-        .state
-        .technology_attachment
-        .selected_signed_package
-        .clone();
+    let selected_package_key = cx.state.technology_attachment.selected_pdk_package.clone();
     let selected_package_index = selected_package_key.as_deref().and_then(|key| {
         packages
             .iter()
-            .position(|package| signed_package_key(package) == key)
+            .position(|package| pdk_package_key(package) == key)
     });
-    let package_options = packages
-        .iter()
-        .map(signed_package_label)
-        .collect::<Vec<_>>();
+    let package_options = packages.iter().map(pdk_package_label).collect::<Vec<_>>();
     let selected_package_label = selected_package_index
         .and_then(|index| package_options.get(index))
         .map(String::as_str)
-        .unwrap_or("No trusted signed PDK package");
+        .unwrap_or("No validated PDK package");
     let package_runtime_error = selected_package_index
         .and_then(|index| packages.get(index))
         .and_then(|package| package.runtime_compatibility().err());
@@ -284,7 +275,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
             candidate
                 .binding
                 .clone()
-                .with_signed_package_metadata(package.metadata())
+                .with_pdk_package_metadata(package.metadata())
                 .and_then(|binding| {
                     cx.model
                         .pdk_config
@@ -303,7 +294,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
     let selected_package = selected_package_index.and_then(|index| packages.get(index));
     let migration_preview =
         cx.model
-            .project_signed_technology_package()
+            .project_pdk_package()
             .and_then(|baseline| match (baseline, selected_package) {
                 (Some(baseline), Some(candidate))
                     if baseline.binding() != candidate.binding()
@@ -345,7 +336,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                         )
                     } else if diff.has_breaking_changes() {
                         Some(format!(
-                            "This revision changes {} breaking signed contract(s). Create and validate a dedicated migration branch before replacing the project pin.",
+                            "This revision changes {} breaking PDK contract(s). Create and validate a dedicated migration branch before replacing the project pin.",
                             diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
                         ))
                     } else {
@@ -380,7 +371,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
     let mut create_migration_copy = false;
     let choice = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
     .description(
-        "Choose a model library and one trusted signed PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
+        "Choose a model library and one validated PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
     )
     .size(DialogSize::Transaction)
     .ghost("Cancel")
@@ -402,18 +393,18 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "Signed PDK package");
+        technology_dialog_label(ui, "PDK package");
         if let Some(index) = select(
             ui,
-            "project-signed-technology-package",
-            "Trusted signed PDK package",
+            "project-pdk-package",
+            "Validated PDK package",
             selected_package_label,
             &package_options,
             ui.available_width(),
         ) {
             cx.state
                 .technology_attachment
-                .selected_signed_package = Some(signed_package_key(&packages[index]));
+                .selected_pdk_package = Some(pdk_package_key(&packages[index]));
             cx.state.technology_attachment.migration_reviewed = false;
             cx.state.technology_attachment.validation_error = None;
         }
@@ -467,11 +458,11 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                         .and_then(|index| packages.get(index))
                         .map(|package| {
                             format!(
-                                "{} signed technology layers",
+                                "{} PDK technology layers",
                                 package.manifest().layers.len()
                             )
                         })
-                        .unwrap_or_else(|| "No signed layer catalog selected".to_owned()),
+                        .unwrap_or_else(|| "No PDK layer catalog selected".to_owned()),
                 );
                 property_row(
                     ui,
@@ -518,7 +509,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                 );
                 property_row(
                     ui,
-                    "Signed diff",
+                    "Revision diff",
                     &format!(
                         "{} breaking · {} review · {} informational",
                         diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking),
@@ -574,7 +565,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                         !checkpoint_pending,
                         egui::Checkbox::new(
                             &mut cx.state.technology_attachment.migration_reviewed,
-                            "I reviewed the signed revision diff and approve this non-breaking replacement",
+                            "I reviewed the PDK revision diff and approve this non-breaking replacement",
                         ),
                     );
                     muted(
@@ -628,7 +619,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
             ui.add_space(8.0);
             technology_error(
                 ui,
-                &format!("Selected signed PDK cannot be attached: {error}"),
+                &format!("Selected PDK cannot be attached: {error}"),
             );
         }
         if let Some(error) = validation_error.as_deref() {
@@ -648,7 +639,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
             let result = selected_binding
                 .clone()
                 .ok_or_else(|| {
-                    "Select a model library that can be attached and a trusted signed PDK package"
+                    "Select a model library that can be attached and a validated PDK package"
                         .to_owned()
                 })
                 .and_then(|binding| {
@@ -962,7 +953,7 @@ pub(super) fn verify_pinned_technology_contract(
         .pdk_config
         .technology_registry
         .validate_project_binding(binding)
-        .map_err(|error| format!("Signed PDK contract is unavailable: {error}"))
+        .map_err(|error| format!("PDK contract is unavailable: {error}"))
 }
 
 fn validate_migration_evidence_for_binding(
@@ -970,10 +961,10 @@ fn validate_migration_evidence_for_binding(
     binding: &ProjectTechnologyBinding,
     evidence: Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
-    let baseline = model.project_signed_technology_package()?;
+    let baseline = model.project_pdk_package()?;
     let candidate_pin = binding
-        .signed_package()
-        .ok_or_else(|| "The candidate binding has no signed PDK package pin.".to_owned())?;
+        .pdk_package()
+        .ok_or_else(|| "The candidate binding has no PDK package pin.".to_owned())?;
     let candidate = model
         .pdk_config
         .technology_registry
@@ -988,7 +979,7 @@ fn validate_migration_evidence_for_binding(
                 && package.manifest_digest() == candidate_pin.manifest_digest()
                 && package.archive_digest() == candidate_pin.archive_digest()
         })
-        .ok_or_else(|| "Candidate signed PDK no longer matches the trusted archive.".to_owned())?;
+        .ok_or_else(|| "Candidate PDK no longer matches the validated archive.".to_owned())?;
     let Some(baseline) = baseline else {
         if evidence.is_some() {
             return Err(
@@ -1002,7 +993,7 @@ fn validate_migration_evidence_for_binding(
     {
         if evidence.is_some() {
             return Err(
-                "The project already uses this signed package; there is no migration to review."
+                "The project already uses this PDK package; there is no migration to review."
                     .to_owned(),
             );
         }
@@ -1012,7 +1003,7 @@ fn validate_migration_evidence_for_binding(
         baseline.metadata(),
         candidate.metadata(),
     )
-    .map_err(|error| format!("Signed revision comparison failed: {error}"))?;
+    .map_err(|error| format!("Revision comparison failed: {error}"))?;
     if !diff.same_package_lineage {
         return Err(
             "Cross-technology replacement requires an independent migration copy; direct replacement is prohibited."
@@ -1021,16 +1012,15 @@ fn validate_migration_evidence_for_binding(
     }
     if diff.has_breaking_changes() {
         return Err(format!(
-            "The signed revision changes {} breaking contract(s); direct replacement is prohibited until those objects are explicitly remapped in an independent migration copy.",
+            "The PDK revision changes {} breaking contract(s); direct replacement is prohibited until those objects are explicitly remapped in an independent migration copy.",
             diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
         ));
     }
-    let evidence = evidence.ok_or_else(|| {
-        "Replacing a signed PDK revision requires a reviewed comparison.".to_owned()
-    })?;
+    let evidence = evidence
+        .ok_or_else(|| "Replacing a PDK revision requires a reviewed comparison.".to_owned())?;
     if !evidence.matches_diff(&diff) {
         return Err(
-            "The reviewed comparison no longer matches the trusted baseline and candidate packages."
+            "The reviewed comparison no longer matches the validated baseline and candidate packages."
                 .to_owned(),
         );
     }
@@ -1082,7 +1072,7 @@ pub(super) fn technology_unavailable_message(ui: &mut Ui) {
 /// nothing at all once they are met.
 pub(super) fn technology_missing_inputs(
     has_model_candidate: bool,
-    has_signed_package: bool,
+    has_pdk_package: bool,
     contract_ready: bool,
     authority_ready: bool,
 ) -> Vec<&'static str> {
@@ -1090,8 +1080,8 @@ pub(super) fn technology_missing_inputs(
     if !has_model_candidate {
         missing.push("a model library");
     }
-    if !has_signed_package {
-        missing.push("a trusted signed PDK revision");
+    if !has_pdk_package {
+        missing.push("a validated PDK revision");
     }
     if !authority_ready {
         missing.push("actor, authority and reason");
@@ -1106,13 +1096,13 @@ pub(super) fn technology_missing_inputs(
 pub(super) fn technology_binding_gates(
     ui: &mut Ui,
     has_model_candidate: bool,
-    has_signed_package: bool,
+    has_pdk_package: bool,
     contract_ready: bool,
     authority_ready: bool,
 ) {
     let missing = technology_missing_inputs(
         has_model_candidate,
-        has_signed_package,
+        has_pdk_package,
         contract_ready,
         authority_ready,
     );

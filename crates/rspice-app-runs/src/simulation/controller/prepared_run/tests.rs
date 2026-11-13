@@ -224,12 +224,12 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
 }
 
 #[test]
-fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
+fn prepared_project_run_materializes_exact_pdk_reference_models() {
     let state = runnable_state();
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect("project run seals signed PDK model sources");
+            .expect("project run seals PDK model sources");
     controller
         .retain_prepared_from(&state, snapshot)
         .expect("authorize exact project snapshot");
@@ -244,16 +244,16 @@ fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
 }
 
 #[test]
-fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths() {
+fn receipt_backed_manual_project_deck_uses_pdk_models_without_host_paths() {
     let mut state = RunTestHost::default();
     state.provision_test_project_technology_contract();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source =
-        Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
+        Some("PDK project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect("governed manual project deck seals signed PDK sources");
+            .expect("governed manual project deck seals PDK sources");
     controller
         .retain_prepared_from(&state, snapshot)
         .expect("authorize exact governed manual deck");
@@ -268,22 +268,22 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
 }
 
 #[test]
-fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_paths() {
+fn governed_manual_deck_dispatches_pdk_veriloga_runtime_without_host_paths() {
     let mut state = RunTestHost::default();
     state.provision_test_project_veriloga_technology_contract();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source =
-        Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        Some("PDK Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect("governed manual deck prepares the signed Verilog-A runtime");
+            .expect("governed manual deck prepares the PDK Verilog-A runtime");
     controller
         .retain_prepared_from(&state, snapshot)
-        .expect("authorize exact signed Verilog-A snapshot");
+        .expect("authorize exact PDK Verilog-A snapshot");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
-        .expect("freeze signed Verilog-A dispatch");
+        .expect("freeze PDK Verilog-A dispatch");
     let executable = dispatch.executable_netlist();
     assert!(executable.contains(".veriloga \"__rspice_pdk__/"));
     assert!(executable.contains(" pdk_resistor_model"));
@@ -1567,7 +1567,7 @@ fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
             &state,
             SimulationRunIntent::SimulateRunSet,
         )
-        .expect("project run seals signed PDK model sources");
+        .expect("project run seals PDK model sources");
         controller
             .retain_prepared_from(&state, snapshot)
             .expect("authorize exact project snapshot");
@@ -1623,7 +1623,7 @@ fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_l
     assert!(with_technology.executable_netlist().contains("demo180"));
     assert!(
         metadata.model_identity_count < with_technology.metadata().model_identity_count,
-        "the signed PDK identity must not reach a run set prepared without a technology"
+        "the PDK identity must not reach a run set prepared without a technology"
     );
 }
 

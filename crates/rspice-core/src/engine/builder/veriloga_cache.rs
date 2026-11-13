@@ -3394,7 +3394,7 @@ pub fn register_precompiled_veriloga_runtime_with_dependencies(
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 pub struct ProjectVerilogARuntimeRegistration {
-    /// Normalized project- or signed-PDK-scoped virtual source identity.
+    /// Normalized project- or PDK-scoped virtual source identity.
     pub source_key: PathBuf,
     /// Additional netlist model aliases claimed by this artifact.
     pub aliases: Vec<String>,

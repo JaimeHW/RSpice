@@ -110,7 +110,7 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
 }
 
 #[test]
-fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
+fn pdk_technology_symbol_variant_is_authored_in_one_project_revision() {
     let mut state = harness();
     state
         .model
@@ -122,7 +122,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
     let initial_revision = state.model.workspace.content.project.revision();
     let package_digest = state
         .model
-        .project_signed_technology_package()
+        .project_pdk_package()
         .expect("exact package resolves")
         .expect("project has package")
         .archive_digest();
@@ -138,7 +138,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
     )
     .expect("variant commits");
 
-    assert!(receipt.contains("signed technology symbol 'demo180/nmos_demo'"));
+    assert!(receipt.contains("PDK technology symbol 'demo180/nmos_demo'"));
     assert_eq!(
         render.model.workspace.content.project.revision().get(),
         initial_revision.get() + 1
@@ -160,8 +160,8 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .netlist
         .model
         .as_ref()
-        .expect("signed model binding");
-    assert_eq!(model.library, "signed-pdk:demo-models-tt");
+        .expect("PDK model binding");
+    assert_eq!(model.library, "pdk:demo-models-tt");
     assert!(
         model
             .source_path

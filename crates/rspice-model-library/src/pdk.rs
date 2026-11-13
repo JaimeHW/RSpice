@@ -59,11 +59,11 @@ pub enum PdkTechnologyError {
         declared: ContentDigest,
         actual: ContentDigest,
     },
-    #[error("signed PDK model-source materialization failed: {0}")]
+    #[error("PDK model-source materialization failed: {0}")]
     ModelMaterialization(String),
     #[error("forbidden callback capability: {0}")]
     ForbiddenCapability(String),
-    #[error("signed PDK callback validation failed: {0}")]
+    #[error("PDK callback validation failed: {0}")]
     CallbackValidation(String),
     #[error("immutable technology revision conflict: {0}")]
     ImmutableRevision(String),

@@ -25,8 +25,8 @@ winit, wgpu and rfd in its closure.
 | `corner`, `binding`, `corner_expansion` | `ProcessCorner` and section bindings; `CornerModelBinding`, materialized cards bound to a corner; `RetainedClosure`, the one rule for whether a run can expand a corner from the retained closure |
 | `resolution`, `execution` | `ModelResolutionRecord` provider decisions and `SimulationPlanModelBinding`, a plan's ordered library bindings; `ModelExecutionPlan`, the immutable, content-addressed model namespace of one nominal run, which refuses a contested name instead of falling back to the first definition |
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
-| `technology_binding` | `ProjectTechnologyBinding` and `ProjectSignedTechnologyPin`: a project's model-source attachment and its exact signed-package pin |
-| `pdk` | Signed-PDK archive, manifest and callback contracts; `authenticate_archive`; callback receipts, technology-revision diffs, display profiles, library search paths and authoring drafts |
+| `technology_binding` | `ProjectTechnologyBinding` and `ProjectPdkPackagePin`: a project's model-source attachment and its exact PDK package pin |
+| `pdk` | PDK archive, manifest and callback contracts; `verify_archive_contents`; callback receipts, technology-revision diffs, display profiles, library search paths and authoring drafts |
 | `qualification`, `correlation`, `validation` | Model qualification and release evidence (golden vectors, desktop and WebAssembly parity, fail-closed promotion); versioned measurement-correlation datasets, alignment, metrics and reviewer evidence; `ModelValidationReceipt` and its integrity digest |
 | `symbol` | Model-bound symbol definitions, parameter forms and retained graphics, stored under the `rspice.symbol.*` metadata keys |
 | `facts` | `ClosureFacts`: facts about a model closure that more than one surface reports, derived in one place |
@@ -51,13 +51,13 @@ winit, wgpu and rfd in its closure.
 - `ModelExecutionPlan::try_new(process, selected_library_corners,
   materialized, records)` for one run's model namespace.
 - `model_library_source_digest(&library)` for a library's source identity.
-- `pdk::package::authenticate_archive(&archive)` for a PDK archive.
+- `pdk::package::verify_archive_contents(&archive)` for a PDK archive.
 
-## Signed PDK archive
+## PDK archive
 
-A publisher ships one JSON `SignedPdkTechnologyArchive`: `schema_version`
+A publisher ships one JSON `PdkTechnologyArchive`: `schema_version`
 (`PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION`), `manifest_base64`,
-and `files`, each a `path` and `content_base64`. In `authenticate_archive`,
+and `files`, each a `path` and `content_base64`. In `verify_archive_contents`,
 every artifact the manifest declares must be present with its declared size and
 SHA-256, paths are unique without regard to case, and an undeclared file is
 refused. Manifest schemas from `MINIMUM_PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION`

@@ -53,7 +53,7 @@ pub const MODEL_HUB: Schema = Schema {
 };
 
 /// The PDK configuration: a generation head per configuration path, its
-/// metadata, and each signed archive under its own digest.
+/// metadata, and each PDK archive under its own digest.
 pub const PDK_CONFIG: Schema = Schema {
     database: "rspice-pdk-config",
     version: 1,

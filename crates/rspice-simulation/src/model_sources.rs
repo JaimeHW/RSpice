@@ -53,7 +53,7 @@ pub struct SealedModelLibraryVerilogARoot {
 }
 
 /// Exact model-library bytes and AHDL roots authenticated by one run seal.
-/// Signed-PDK artifacts are intentionally excluded; they have their own
+/// PDK artifacts are intentionally excluded; they have their own
 /// manifest-governed authority and compiler path.
 #[derive(Debug, Clone)]
 pub struct SealedModelLibraryVerilogAAuthority {
@@ -122,14 +122,14 @@ const fn pdk_model_process(
 }
 
 impl SealedModelExecutionSources {
-    /// Merge an authenticated signed PDK closure into this source snapshot.
+    /// Merge an authenticated PDK closure into this source snapshot.
     pub fn with_pdk_model_sources(
         mut self,
         pdk: crate::pdk::SealedPdkModelSources,
     ) -> Result<Self, String> {
         let pdk = pdk.into_parts();
         if self.pdk_identity.is_some() {
-            return Err("A sealed model snapshot already contains a signed PDK binding".to_owned());
+            return Err("A sealed model snapshot already contains a PDK binding".to_owned());
         }
 
         let mut sources_by_key = self
@@ -145,7 +145,7 @@ impl SealedModelExecutionSources {
                 }
                 std::collections::btree_map::Entry::Occupied(entry) if entry.get().1 != source => {
                     return Err(format!(
-                        "Signed PDK source '{}' conflicts with an authenticated model-library source",
+                        "PDK source '{}' conflicts with an authenticated model-library source",
                         path.display()
                     ));
                 }
@@ -174,7 +174,7 @@ impl SealedModelExecutionSources {
                         != portable_path_key(&edge.target) =>
                 {
                     return Err(format!(
-                        "Signed PDK and model libraries disagree on dependency '{}' in '{}'",
+                        "PDK and model libraries disagree on dependency '{}' in '{}'",
                         edge.requested_path,
                         edge.owner.display()
                     ));
@@ -196,7 +196,7 @@ impl SealedModelExecutionSources {
             self.sources.clone(),
             self.edges.clone(),
         )
-        .map_err(|error| format!("Failed to merge signed PDK model sources: {error}"))?;
+        .map_err(|error| format!("Failed to merge PDK model sources: {error}"))?;
         self.pdk_process_bindings = pdk.process_bindings;
         self.pdk_veriloga_artifacts = pdk.veriloga_artifacts;
         self.pdk_veriloga_bindings = pdk.veriloga_bindings;
@@ -204,13 +204,13 @@ impl SealedModelExecutionSources {
         Ok(self)
     }
 
-    /// Exact signed package identity participating in this model snapshot.
+    /// Exact PDK package identity participating in this model snapshot.
     #[must_use]
     pub fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
         self.pdk_identity.as_ref().map(|(binding, archive_digest)| {
             (
                 format!(
-                    "signed-pdk:{}@{}:manifest:{}",
+                    "pdk:{}@{}:manifest:{}",
                     binding.package_id, binding.revision, binding.manifest_digest
                 ),
                 *archive_digest,
@@ -370,7 +370,7 @@ impl SealedModelExecutionSources {
     /// Freeze the exact model namespace for the nominal/reference run.
     ///
     /// An explicit per-library selection is authoritative for that library.
-    /// The reference process supplies the conventional fallback and the signed
+    /// The reference process supplies the conventional fallback and the
     /// PDK process contract. Process sweeps deliberately use
     /// [`Self::corner_model_bindings`] instead, because every sweep point owns
     /// its explicit process independently of the nominal selection.
@@ -541,7 +541,7 @@ impl SealedModelExecutionSources {
                         .pdk_identity
                         .as_ref()
                         .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
-                        .unwrap_or_else(|| "signed PDK".to_owned());
+                        .unwrap_or_else(|| "PDK".to_owned());
                     return Err(format!(
                         "{package} does not supply an explicit {} model-source contract",
                         process.short_name()
@@ -556,7 +556,7 @@ impl SealedModelExecutionSources {
                         .process_sealed_root(&source.root_path, source.section.as_deref())
                         .map_err(|error| {
                             format!(
-                                "Failed to materialize signed PDK {} source '{}' from '{}': {error}",
+                                "Failed to materialize PDK {} source '{}' from '{}': {error}",
                                 process.short_name(),
                                 source.source_id,
                                 source.artifact_path
@@ -584,7 +584,7 @@ impl SealedModelExecutionSources {
                             section: source.section.clone(),
                             materialized_model_cards,
                         },
-                        format!("signed-pdk:{}", source.source_id),
+                        format!("pdk:{}", source.source_id),
                         source.artifact_digest,
                         false,
                     )?;
@@ -1085,7 +1085,7 @@ where
         sources: authenticated_sources,
         edges,
         libraries: sealed_libraries,
-        // A signed PDK contributes its bindings through
+        // A PDK contributes its bindings through
         // `with_pdk_model_sources` after sealing; a project with no PDK pin
         // seals with none.
         pdk_process_bindings: Vec::new(),

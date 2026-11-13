@@ -111,7 +111,7 @@ pub struct Model {
     /// Whether a project is open, as model code reads it. Only the lifecycle
     /// writes it, in the call that opens or closes the project.
     pub project_open: crate::state::ProjectOpenFact,
-    /// PDK model paths plus signed technology packages, trust roots, exact
+    /// PDK model paths plus PDK technology packages, exact
     /// active binding, and administrative receipts.
     pub pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)

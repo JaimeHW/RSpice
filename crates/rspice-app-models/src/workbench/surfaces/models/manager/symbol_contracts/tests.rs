@@ -513,9 +513,9 @@ fn the_registry_states_a_verdict_per_symbol_rather_than_one_for_the_library() {
 }
 
 #[test]
-fn a_bound_signed_package_is_grouped_under_its_own_band() {
+fn a_bound_pdk_package_is_grouped_under_its_own_band() {
     // The only shape that draws a band, built the way the product builds it:
-    // a publisher-signed technology archive installed into the registry and
+    // a PDK technology archive installed into the registry and
     // pinned by the project, not a hand-assembled row.
     let ctx = egui::Context::default();
     let mut state = harness();
@@ -529,7 +529,7 @@ fn a_bound_signed_package_is_grouped_under_its_own_band() {
     assert_eq!(project, 4, "the seeded project library contributes four");
     assert!(
         rows.len() > project,
-        "the signed package contributes symbols of its own"
+        "the PDK package contributes symbols of its own"
     );
     assert!(
         rows[..project]
@@ -537,7 +537,7 @@ fn a_bound_signed_package_is_grouped_under_its_own_band() {
             .all(|row| row.corpus() == SymbolCorpus::Project)
             && rows[project..]
                 .iter()
-                .all(|row| row.corpus() == SymbolCorpus::SignedTechnology),
+                .all(|row| row.corpus() == SymbolCorpus::PdkTechnology),
         "grouping has to be one contiguous split, or the band is a header over \
          a mixture"
     );
@@ -567,9 +567,9 @@ fn a_project_only_registry_has_no_group_band_to_draw() {
 
 #[test]
 fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
-    // Assembled directly: the signed half of the registry comes from a
-    // publisher-signed package, and what is being checked here is the ordering
-    // and the band, neither of which the package's signature participates in.
+    // Assembled directly: the PDK half of the registry comes from a
+    // PDK package, and what is being checked here is the ordering
+    // and the band, neither of which the package decides.
     let project = |cell: &str| SymbolRow {
         reference: CellViewRef::new("project_symbols", cell, "symbol"),
         authority: SymbolRowAuthority::DesignLibrary { read_only: false },
@@ -583,7 +583,7 @@ fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
     };
     let technology = |cell: &str| SymbolRow {
         reference: CellViewRef::new("demo180", cell, "symbol"),
-        authority: SymbolRowAuthority::SignedTechnology {
+        authority: SymbolRowAuthority::PdkTechnology {
             technology_name: "DEMO180".to_owned(),
             revision: "2.3.1".to_owned(),
             manifest_digest: crate::product::ContentDigest::from_bytes([7; 32]),

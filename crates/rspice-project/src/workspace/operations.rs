@@ -292,7 +292,7 @@ impl ProjectWorkspace {
         if self.physical_layout_documents().is_empty() {
             return Ok(());
         }
-        let pin = binding.signed_package();
+        let pin = binding.pdk_package();
         for document in self.physical_layout_documents().values() {
             let technology = document.technology();
             let matches = pin.is_some_and(|pin| {

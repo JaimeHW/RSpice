@@ -70,7 +70,7 @@ pub struct PdkTechnologyRevisionDiff {
 
 pub const PDK_TECHNOLOGY_MIGRATION_EVIDENCE_SCHEMA_VERSION: u16 = 1;
 
-/// Compact, immutable proof of the exact signed-revision comparison reviewed
+/// Compact, immutable proof of the exact PDK revision comparison reviewed
 /// before a project technology replacement. The full diff is reproducible
 /// from the retained content-addressed packages; the project receipt retains
 /// its digest and impact cardinalities without copying megabytes of manifest
@@ -407,7 +407,7 @@ impl PdkTechnologyRevisionDiff {
             push_change(
                 &mut entries,
                 PdkTechnologyDiffArea::Artifact,
-                "signed archive digest",
+                "PDK archive digest",
                 PdkTechnologyDiffKind::Changed,
                 PdkTechnologyDiffImpact::ReviewRequired,
                 Some(canonical_json(&baseline.archive_digest())?),

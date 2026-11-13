@@ -3,7 +3,7 @@
 //! The Models & PDKs workspace (the project's models, the installed packs and
 //! the RSpice library, the Model Hub's shelf and releases, corners and bins),
 //! the device-model editor and its qualification, measurement correlation,
-//! unsigned PDK authoring and the PDK settings, together with the feature's
+//! PDK authoring and the PDK settings, together with the feature's
 //! commands, its state slot and its registration. It works on the shared
 //! model in `rspice-app-state`, uses the platform services of
 //! `rspice-app-services` and the run tier of `rspice-app-runs`, and registers

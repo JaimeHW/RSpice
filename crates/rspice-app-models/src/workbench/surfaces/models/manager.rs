@@ -1590,8 +1590,8 @@ fn author_technology_symbol_variant(
     }
     let package = app
         .model
-        .project_signed_technology_package()?
-        .ok_or_else(|| "This project has no signed technology package.".to_owned())?;
+        .project_pdk_package()?
+        .ok_or_else(|| "This project has no PDK technology package.".to_owned())?;
     if !package
         .manifest()
         .package_id
@@ -1608,7 +1608,7 @@ fn author_technology_symbol_variant(
         .find(|definition| definition.identity.cell.eq_ignore_ascii_case(source_cell))
         .cloned()
         .ok_or_else(|| {
-            format!("Signed technology symbol '{package_id}/{source_cell}' no longer resolves.")
+            format!("PDK technology symbol '{package_id}/{source_cell}' no longer resolves.")
         })?;
     let target = app
         .model
@@ -1620,7 +1620,7 @@ fn author_technology_symbol_variant(
     }
     if target.get_cell(target_cell).is_some() {
         return Err(format!(
-            "Target cell '{target_library}/{target_cell}' already exists. Choose a new project cell so the signed source is never overwritten implicitly."
+            "Target cell '{target_library}/{target_cell}' already exists. Choose a new project cell so the PDK source is never overwritten implicitly."
         ));
     }
 
@@ -1632,7 +1632,7 @@ fn author_technology_symbol_variant(
         uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_OID,
             format!(
-                "rspice:signed-pdk-symbol-variant:{}:{}:{target_library}/{target_cell}",
+                "rspice:pdk-symbol-variant:{}:{}:{target_library}/{target_cell}",
                 package.archive_digest(),
                 variant.identity.binding_id
             )
@@ -1644,9 +1644,9 @@ fn author_technology_symbol_variant(
     variant.generated_views.symbol = true;
     variant.generated_views.parameter_form = true;
     variant.generated_views.simulation_test_fixture = false;
-    variant.validate().map_err(|error| {
-        format!("Signed technology symbol cannot seed a project variant: {error}")
-    })?;
+    variant
+        .validate()
+        .map_err(|error| format!("PDK technology symbol cannot seed a project variant: {error}"))?;
 
     let mut candidate = app.model.library_manager.clone();
     let plan = crate::state::prepare_symbol_construction(
@@ -1666,12 +1666,12 @@ fn author_technology_symbol_variant(
         candidate,
         target_library,
         target_cell,
-        format!("author project variant of signed symbol {package_id}/{source_cell}"),
+        format!("author project variant of PDK symbol {package_id}/{source_cell}"),
     )?;
     app.state.models_view.selected_symbol =
         Some(format!("{target_library}\u{1f}{target_cell}\u{1f}symbol"));
     Ok(format!(
-        "Authored '{target_library}/{target_cell}' from signed technology symbol '{package_id}/{source_cell}' at project revision {}.",
+        "Authored '{target_library}/{target_cell}' from PDK technology symbol '{package_id}/{source_cell}' at project revision {}.",
         revision.get()
     ))
 }

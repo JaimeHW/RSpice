@@ -27,7 +27,7 @@ pub fn fixture_archive() -> (Vec<u8>, PdkAdministrativeAuthority) {
     )
 }
 
-/// The same signed package, with `model_bytes` as its model library. Every
+/// The same PDK package, with `model_bytes` as its model library. Every
 /// process reads the section of its own name, so the library must declare
 /// `.lib TT` through `.lib FS`.
 pub fn fixture_archive_with_models(model_bytes: Vec<u8>) -> (Vec<u8>, PdkAdministrativeAuthority) {
@@ -159,7 +159,7 @@ pub fn fixture_archive_with_models(model_bytes: Vec<u8>) -> (Vec<u8>, PdkAdminis
         ],
     };
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
-    let archive = SignedPdkTechnologyArchive {
+    let archive = PdkTechnologyArchive {
         schema_version: PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION,
         manifest_base64: STANDARD.encode(&manifest_bytes),
         files: vec![
@@ -197,7 +197,7 @@ endmodule
 
 pub fn fixture_archive_with_veriloga_source(root: &[u8]) -> (Vec<u8>, PdkAdministrativeAuthority) {
     let (bytes, authority) = fixture_archive();
-    let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+    let mut archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
     let dependency = b"`define PDK_RESISTANCE 250.0\n".to_vec();
@@ -227,14 +227,12 @@ pub fn fixture_archive_with_veriloga_source(root: &[u8]) -> (Vec<u8>, PdkAdminis
     (serde_json::to_vec(&archive).unwrap(), authority)
 }
 
-pub fn fixture_signed_symbol(
+pub fn fixture_pdk_symbol(
     manifest: &PdkTechnologyManifest,
 ) -> rspice_model_library::symbol::ModelBoundSymbolDefinition {
-    let mut model = rspice_model_library::symbol::SymbolModelReference::new(
-        "signed-pdk:demo-models-tt",
-        "nmos_demo",
-    )
-    .with_source_path("models/demo.lib");
+    let mut model =
+        rspice_model_library::symbol::SymbolModelReference::new("pdk:demo-models-tt", "nmos_demo")
+            .with_source_path("models/demo.lib");
     model.section = Some("TT".to_owned());
     model.revision = Some(manifest.revision.clone());
     let pins = [
@@ -264,7 +262,7 @@ pub fn fixture_signed_symbol(
             &manifest.package_id,
             "nmos_demo",
             1,
-            "signed-pdk:demo180/nmos_demo",
+            "pdk:demo180/nmos_demo",
         ),
         rspice_model_library::symbol::SymbolSourceContract::model(model.clone(), ports),
         pins,
@@ -285,10 +283,10 @@ pub fn fixture_signed_symbol(
 
 pub fn fixture_archive_with_symbols() -> (Vec<u8>, PdkAdministrativeAuthority) {
     let (bytes, authority) = fixture_archive();
-    let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+    let mut archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
-    manifest.symbol_definitions = vec![fixture_signed_symbol(&manifest)];
+    manifest.symbol_definitions = vec![fixture_pdk_symbol(&manifest)];
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
     (serde_json::to_vec(&archive).unwrap(), authority)

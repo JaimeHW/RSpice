@@ -49,7 +49,7 @@ pub(super) enum SymbolRowAuthority {
     DesignLibrary {
         read_only: bool,
     },
-    SignedTechnology {
+    PdkTechnology {
         technology_name: String,
         revision: String,
         manifest_digest: crate::product::ContentDigest,
@@ -99,27 +99,27 @@ impl SymbolStatus {
 /// Which of the two corpora a row belongs to.
 ///
 /// The registry browses both: the project's own symbol libraries, which it may
-/// write, and the signed technology package's, which it may not. They are one
+/// write, and the PDK technology package's, which it may not. They are one
 /// table because a reader compares across them, and grouped within it because
 /// the difference decides whether any action on the row is available at all.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(super) enum SymbolCorpus {
     Project,
-    SignedTechnology,
+    PdkTechnology,
 }
 
 impl SymbolRow {
     pub(super) fn read_only(&self) -> bool {
         match &self.authority {
             SymbolRowAuthority::DesignLibrary { read_only } => *read_only,
-            SymbolRowAuthority::SignedTechnology { .. } => true,
+            SymbolRowAuthority::PdkTechnology { .. } => true,
         }
     }
 
     pub(super) fn corpus(&self) -> SymbolCorpus {
         match &self.authority {
             SymbolRowAuthority::DesignLibrary { .. } => SymbolCorpus::Project,
-            SymbolRowAuthority::SignedTechnology { .. } => SymbolCorpus::SignedTechnology,
+            SymbolRowAuthority::PdkTechnology { .. } => SymbolCorpus::PdkTechnology,
         }
     }
 }
@@ -161,7 +161,7 @@ struct SymbolViewSite<'a> {
 
 pub(super) fn symbol_rows(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
     let mut rows = design_library_rows(ui, app);
-    if let Ok(Some(package)) = app.model.project_signed_technology_package() {
+    if let Ok(Some(package)) = app.model.project_pdk_package() {
         for definition in package.symbol_definitions() {
             let pins = definition
                 .pins
@@ -173,14 +173,14 @@ pub(super) fn symbol_rows(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<Symbol
                 .model
                 .as_ref()
                 .map(|model| format!("{}/{}", model.library, model.model))
-                .unwrap_or_else(|| "invalid signed binding".to_owned());
+                .unwrap_or_else(|| "invalid PDK binding".to_owned());
             rows.push(SymbolRow {
                 reference: CellViewRef::new(
                     &definition.identity.library,
                     &definition.identity.cell,
                     "symbol",
                 ),
-                authority: SymbolRowAuthority::SignedTechnology {
+                authority: SymbolRowAuthority::PdkTechnology {
                     technology_name: package.manifest().technology_name.clone(),
                     revision: package.manifest().revision.clone(),
                     manifest_digest: package.manifest_digest(),
@@ -233,14 +233,14 @@ pub(super) fn project_row_count(rows: &[SymbolRow]) -> usize {
 ///
 /// It names the technology, the revision the project pinned, how many symbols
 /// it contributes and that none of them may be edited here — every fact taken
-/// from the signed manifest the rows under it were read from.
+/// from the PDK manifest the rows under it were read from.
 pub(super) fn technology_group_band(rows: &[SymbolRow]) -> Option<String> {
     let project = project_row_count(rows);
     let technology = rows.len() - project;
     if project == 0 || technology == 0 {
         return None;
     }
-    let SymbolRowAuthority::SignedTechnology {
+    let SymbolRowAuthority::PdkTechnology {
         technology_name,
         revision,
         ..

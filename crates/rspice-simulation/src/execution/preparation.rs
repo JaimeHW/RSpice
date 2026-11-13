@@ -29,7 +29,7 @@ use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
     deck_delay_select, deck_external_cells, prepared_configuration_veriloga_runtimes,
     prepared_corner_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
-    prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
+    prepared_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
     rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
@@ -380,7 +380,7 @@ where
         &model_library_veriloga_runtimes,
         corner_processes,
     )?;
-    let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+    let external_veriloga_runtimes = prepared_pdk_veriloga_runtimes(&sealed_models)?
         .try_merge(model_library_veriloga_runtimes)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let generated = crate::netlist_gen::generate_netlist_hierarchical_with_variables(
@@ -505,7 +505,7 @@ where
         })
         .collect::<Vec<_>>();
     append_model_execution_plan_identity(&model_execution_plan, &mut model_identities);
-    append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
+    append_pdk_model_identity(&sealed_models, &mut model_identities);
     append_corner_model_identities(
         tasks.iter().map(PreparedTask::queued_analysis),
         &mut model_identities,
@@ -710,7 +710,7 @@ fn expand_manual_deck<R, A>(
         &composed,
         &model_cards,
     );
-    let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+    let external_veriloga_runtimes = prepared_pdk_veriloga_runtimes(&sealed_models)?
         .try_merge(prepared_model_library_veriloga_runtimes(
             &sealed_models,
             inputs.analysis.sim_setup.reference_pvt.process,
@@ -910,7 +910,7 @@ pub fn build_prepared_manual_deck<R, A>(
     if let Some(plan) = model_execution_plan.as_ref() {
         append_model_execution_plan_identity(plan, &mut model_identities);
     }
-    append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
+    append_pdk_model_identity(&sealed_models, &mut model_identities);
     append_corner_model_identities(
         tasks.iter().map(PreparedTask::queued_analysis),
         &mut model_identities,
@@ -1156,7 +1156,7 @@ fn append_corner_model_identities<'a>(
     }
 }
 
-fn append_signed_pdk_model_identity(
+fn append_pdk_model_identity(
     sealed_sources: &crate::model_sources::SealedModelExecutionSources,
     identities: &mut Vec<ModelSourceIdentity>,
 ) {

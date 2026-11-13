@@ -1,4 +1,4 @@
-//! Portable signed-PDK archive, process, physical-technology and callback descriptors.
+//! Portable PDK archive, process, physical-technology and callback descriptors.
 //!
 //! These retained declarations do not grant installation or execution authority.
 
@@ -33,7 +33,7 @@ pub const PDK_CALLBACK_ABI_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SignedPdkTechnologyArchive {
+pub struct PdkTechnologyArchive {
     pub schema_version: u32,
     pub manifest_base64: String,
     pub files: Vec<PdkTechnologyArchiveFile>,
@@ -137,7 +137,7 @@ pub struct PdkModelProcessContract {
     pub required_domains: Vec<PdkModelDomain>,
 }
 
-/// One executable Verilog-A runtime selected from the signed package.
+/// One executable Verilog-A runtime selected from the PDK package.
 ///
 /// The root and every recursively included document must be artifacts typed as
 /// [`PdkTechnologyArtifactKind::VerilogASource`] in the same archive. The

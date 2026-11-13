@@ -65,7 +65,7 @@ pub(super) fn add_operating_point(state: &mut AppState) {
 }
 
 /// The CMOS inverter example, its transistors bound to `nch` and `pch` of a
-/// signed technology whose model library is `models`, run over the process
+/// PDK technology whose model library is `models`, run over the process
 /// sections alone, with an operating point.
 pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

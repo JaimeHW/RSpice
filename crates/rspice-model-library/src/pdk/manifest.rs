@@ -1,4 +1,4 @@
-//! Signed PDK manifest schema and cross-reference validation.
+//! PDK manifest schema and cross-reference validation.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,13 +25,13 @@ pub struct PdkTechnologyManifest {
     /// contract; an artifact label alone never grants simulator authority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_sources: Vec<PdkModelProcessContract>,
-    /// Exact Verilog-A roots compiled from signed, package-contained source
+    /// Exact Verilog-A roots compiled from package-contained source
     /// closures. An artifact typed as Verilog-A source is never executable
     /// unless one of these contracts selects its module and netlist alias.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub veriloga_sources: Vec<PdkVerilogASourceContract>,
     /// Read-only symbol, pin, netlist, and typed parameter-form contracts
-    /// supplied by this exact signed technology revision.
+    /// supplied by this exact PDK technology revision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub symbol_definitions: Vec<crate::symbol::ModelBoundSymbolDefinition>,
     pub layers: Vec<PdkTechnologyLayer>,
@@ -546,7 +546,7 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
 
     if manifest.schema_version < 4 && !manifest.symbol_definitions.is_empty() {
         return Err(PdkTechnologyError::InvalidField(
-            "signed symbol definitions require manifest schema 4 or newer".to_owned(),
+            "PDK symbol definitions require manifest schema 4 or newer".to_owned(),
         ));
     }
     if manifest.symbol_definitions.len() > MAX_PDK_SYMBOL_DEFINITIONS {
@@ -566,7 +566,7 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
             symbol_providers_by_artifact
                 .entry(source.artifact_path.to_ascii_lowercase())
                 .or_default()
-                .insert(format!("signed-pdk:{}", source.source_id));
+                .insert(format!("pdk:{}", source.source_id));
         }
     }
     let mut symbol_identities = BTreeSet::new();
@@ -603,7 +603,7 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
         }
         if model.implementation_view != crate::symbol::SymbolImplementationView::Spice {
             return Err(PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] must bind a signed SPICE model source; use veriloga_sources for Verilog-A authority"
+                "manifest.symbol_definitions[{index}] must bind a PDK SPICE model source; use veriloga_sources for Verilog-A authority"
             )));
         }
         let source_path = model.source_path.as_deref().ok_or_else(|| {
@@ -634,7 +634,7 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
             .any(|provider| provider.eq_ignore_ascii_case(&model.library))
         {
             return Err(PdkTechnologyError::InvalidReference(format!(
-                "manifest.symbol_definitions[{index}] model library '{}' must name one signed provider for '{}': {}",
+                "manifest.symbol_definitions[{index}] model library '{}' must name one PDK provider for '{}': {}",
                 model.library,
                 source_path,
                 providers.iter().cloned().collect::<Vec<_>>().join(", ")
@@ -642,12 +642,12 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
         }
         if model.revision.as_deref() != Some(manifest.revision.as_str()) {
             return Err(PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] model revision must equal signed package revision '{}'",
+                "manifest.symbol_definitions[{index}] model revision must equal PDK package revision '{}'",
                 manifest.revision
             )));
         }
         let mut executable = definition.clone();
-        let virtual_source = signed_model_virtual_root("manifest-validation")
+        let virtual_source = pdk_model_virtual_root("manifest-validation")
             .join(package_path_to_host_path(source_path))
             .to_string_lossy()
             .into_owned();
@@ -677,7 +677,7 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
         && (!manifest.veriloga_sources.is_empty() || veriloga_artifact_count > 0)
     {
         return Err(PdkTechnologyError::InvalidField(
-            "signed Verilog-A artifacts require manifest schema 2 or newer".to_owned(),
+            "PDK Verilog-A artifacts require manifest schema 2 or newer".to_owned(),
         ));
     }
     if manifest.veriloga_sources.len() > MAX_PDK_VERILOGA_SOURCE_CONTRACTS {
@@ -1156,7 +1156,7 @@ pub fn package_path_to_host_path(path: &str) -> PathBuf {
     path.split('/').collect()
 }
 
-pub fn signed_model_virtual_root(identity: &str) -> PathBuf {
+pub fn pdk_model_virtual_root(identity: &str) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         PathBuf::from(format!(r"C:\rspice-pdk\model-sources\{identity}"))

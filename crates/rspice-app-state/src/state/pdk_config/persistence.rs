@@ -349,11 +349,11 @@ fn prepare_browser_pdk_snapshot(
             serde_json::to_vec(&archive)
                 .map_err(|error| ConfigError::Serialize(error.to_string()))?,
             MAX_PDK_ARCHIVE_BYTES,
-            &format!("signed PDK archive {}", index + 1),
+            &format!("PDK archive {}", index + 1),
         )?;
         if !identities.insert(blob.reference.digest) {
             return Err(ConfigError::Serialize(format!(
-                "signed PDK archive digest {} appears more than once",
+                "PDK archive digest {} appears more than once",
                 blob.reference.digest
             )));
         }
@@ -488,11 +488,7 @@ fn restore_browser_pdk_snapshot(
         .zip(archive_bytes.into_iter())
         .enumerate()
     {
-        validate_browser_blob(
-            reference,
-            &bytes,
-            &format!("signed PDK archive {}", index + 1),
-        )?;
+        validate_browser_blob(reference, &bytes, &format!("PDK archive {}", index + 1))?;
         archives.push(
             serde_json::from_slice(&bytes)
                 .map_err(|error| ConfigError::Parse(error.to_string()))?,
@@ -519,9 +515,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn browser_snapshot_separates_signed_archives_and_round_trips_exact_state() {
+    fn browser_snapshot_separates_pdk_archives_and_round_trips_exact_state() {
         let path = PathBuf::from("/rspice/browser/pdk_config.json");
-        let (archive_bytes, authority) = super::signed_technology_test_fixture();
+        let (archive_bytes, authority) = super::pdk_technology_test_fixture();
         let mut config = PdkConfig::default();
         config
             .technology_registry
@@ -579,7 +575,7 @@ mod tests {
     #[test]
     fn browser_snapshot_rejects_tampered_archive_readback() {
         let path = PathBuf::from("/rspice/browser/tamper.json");
-        let (archive_bytes, authority) = super::signed_technology_test_fixture();
+        let (archive_bytes, authority) = super::pdk_technology_test_fixture();
         let mut config = PdkConfig::default();
         config
             .technology_registry
@@ -739,7 +735,7 @@ mod tests {
     fn display_profile_revisions_round_trip_and_rebind_only_after_package_revalidation() {
         let root = unique_temp_dir("display-profile");
         let path = root.join(CONFIG_FILE_NAME);
-        let (bytes, authority) = super::signed_technology_test_fixture();
+        let (bytes, authority) = super::pdk_technology_test_fixture();
         let mut config = PdkConfig::default();
         config
             .technology_registry
@@ -750,7 +746,7 @@ mod tests {
             .display_profile_registry
             .publish_and_activate(
                 package.metadata(),
-                PdkDisplayProfileDraft::signed_defaults(
+                PdkDisplayProfileDraft::package_defaults(
                     package.metadata(),
                     "layout-dark",
                     "Layout dark",

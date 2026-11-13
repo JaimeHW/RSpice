@@ -1,6 +1,6 @@
 //! The Models & PDKs workspace's session state: the catalog's facets, sort
 //! and selections, what the last model operation concluded, and the
-//! unsigned PDK draft kept for recovery.
+//! unPDK draft kept for recovery.
 //!
 //! None of it is engineering data. Models, sources, symbols and PDK records
 //! stay in the project's model library and the PDK configuration; this is
@@ -773,7 +773,7 @@ impl PackReleaseConfirmation {
     ///
     /// The signed catalog is preferred because it is the only source that
     /// knows the download size; an installed release whose catalog entry has
-    /// since been withdrawn is still described, from its own signed manifest,
+    /// since been withdrawn is still described, from its own PDK manifest,
     /// so a part already on this machine never becomes undescribable.
     #[must_use]
     pub fn for_release(

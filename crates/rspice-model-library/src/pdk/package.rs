@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use super::contracts::*;
 use super::manifest::{
-    PdkTechnologyManifest, package_path_to_host_path, signed_model_virtual_root, validate_manifest,
+    PdkTechnologyManifest, package_path_to_host_path, pdk_model_virtual_root, validate_manifest,
     validate_package_path,
 };
 use super::{PdkTechnologyError, content_digest};
@@ -51,7 +51,7 @@ impl PdkTechnologyPackageMetadata {
         &self.artifact_digests
     }
 
-    /// Signed technology symbols materialized against this archive's exact
+    /// PDK technology symbols materialized against this archive's exact
     /// content-addressed model-source paths.
     #[must_use]
     pub fn symbol_definitions(&self) -> &[crate::symbol::ModelBoundSymbolDefinition] {
@@ -70,8 +70,8 @@ impl PdkTechnologyPackageMetadata {
 
 /// Validate the exact manifest and every declared artifact, preserving their
 /// normalized archive identity. Runtime validation remains the installer's duty.
-pub fn authenticate_archive(
-    archive: &SignedPdkTechnologyArchive,
+pub fn verify_archive_contents(
+    archive: &PdkTechnologyArchive,
 ) -> Result<PdkTechnologyPackageMetadata, PdkTechnologyError> {
     if archive.schema_version != PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION {
         return Err(PdkTechnologyError::UnsupportedSchema {
@@ -157,7 +157,7 @@ pub fn authenticate_archive(
         &serde_json::to_vec(archive)
             .map_err(|error| PdkTechnologyError::Serialization(error.to_string()))?,
     );
-    let symbol_definitions = materialize_signed_symbol_definitions(&manifest, archive_digest)?;
+    let symbol_definitions = materialize_pdk_symbol_definitions(&manifest, archive_digest)?;
     let package = PdkTechnologyPackageMetadata {
         manifest,
         manifest_digest: content_digest(&manifest_bytes),
@@ -173,11 +173,11 @@ pub fn authenticate_archive(
     Ok(package)
 }
 
-fn materialize_signed_symbol_definitions(
+fn materialize_pdk_symbol_definitions(
     manifest: &PdkTechnologyManifest,
     archive_digest: ContentDigest,
 ) -> Result<Vec<crate::symbol::ModelBoundSymbolDefinition>, PdkTechnologyError> {
-    let virtual_root = signed_model_virtual_root(&archive_digest.to_string());
+    let virtual_root = pdk_model_virtual_root(&archive_digest.to_string());
     let mut definitions = Vec::with_capacity(manifest.symbol_definitions.len());
     for (index, signed) in manifest.symbol_definitions.iter().enumerate() {
         let mut definition = signed.clone();
@@ -209,7 +209,7 @@ fn materialize_signed_symbol_definitions(
             .source_path = Some(source_path);
         definition.validate().map_err(|error| {
             PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] is invalid after signed source materialization: {error}"
+                "manifest.symbol_definitions[{index}] is invalid after PDK source materialization: {error}"
             ))
         })?;
         definitions.push(definition);

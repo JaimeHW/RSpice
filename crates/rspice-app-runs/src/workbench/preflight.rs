@@ -761,10 +761,10 @@ fn collect(state: &impl RunHost) -> PreflightReport {
                 .validate_project_binding(binding)
             {
                 blockers.push(PreflightIssue {
-                    check: "Project signed PDK".to_owned(),
+                    check: "Project PDK".to_owned(),
                     observed: error.to_string(),
                     required:
-                        "The attached package revision must keep a trusted signature and stay compatible with this runtime"
+                        "The attached package revision must stay validated and compatible with this runtime"
                             .to_owned(),
                     remediation: PreflightRemediation::ProjectTechnology,
                 });

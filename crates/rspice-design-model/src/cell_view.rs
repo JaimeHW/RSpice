@@ -1,5 +1,5 @@
 //! Library/cell/view document identity and workspace name contract.
-//! Signed-package canonical keys have a separate normalization policy.
+//! PDK package canonical keys have a separate normalization policy.
 
 use serde::{Deserialize, Serialize};
 

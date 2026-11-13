@@ -17,7 +17,7 @@ pub(in crate::workbench) mod new_project;
 pub(crate) struct TechnologyAttachmentDialogState {
     pub(crate) open: bool,
     pub(crate) selected_library: Option<String>,
-    pub(crate) selected_signed_package: Option<String>,
+    pub(crate) selected_pdk_package: Option<String>,
     pub(crate) actor_id: String,
     pub(crate) authority_id: String,
     pub(crate) reason: String,
@@ -51,12 +51,12 @@ impl TechnologyAttachmentDialogState {
     pub(crate) fn open(
         &mut self,
         selected_library: Option<String>,
-        selected_signed_package: Option<String>,
+        selected_pdk_package: Option<String>,
     ) {
         *self = Self {
             open: true,
             selected_library,
-            selected_signed_package,
+            selected_pdk_package,
             actor_id: String::new(),
             authority_id: String::new(),
             reason: String::new(),

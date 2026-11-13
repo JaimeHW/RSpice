@@ -19,7 +19,7 @@ pub mod monte_carlo;
 pub mod pvt;
 pub mod saved_outputs;
 
-/// The divider on the signed test technology, its design check current and
+/// The divider on the test PDK technology, its design check current and
 /// clean.
 pub fn state_with_current_clean_drc() -> RunTestHost {
     let mut state = RunTestHost::default();

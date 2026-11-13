@@ -1,7 +1,7 @@
 //! Specialist Models & PDKs page: symbols.
 //!
 //! Two corpora in one registry — the project's own symbol libraries and the
-//! signed technology package's — with the selected symbol's executable
+//! PDK technology package's — with the selected symbol's executable
 //! contract beside them: its pins against the provider's ports, the instance
 //! line it emits token by token, where it is placed, and what revision of it
 //! is saved.
@@ -552,7 +552,7 @@ fn symbol_detail(
                             .monospace()
                             .font(theme::mono(tokens::FS_1, FontWeight::SemiBold)),
                         );
-                        if let SymbolRowAuthority::SignedTechnology {
+                        if let SymbolRowAuthority::PdkTechnology {
                             technology_name,
                             revision,
                             ..
@@ -560,7 +560,7 @@ fn symbol_detail(
                         {
                             ui.label(
                                 RichText::new(format!(
-                                    "{technology_name} {revision} · signed · read-only"
+                                    "{technology_name} {revision} · PDK · read-only"
                                 ))
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                 .color(t.color.text_faint),
@@ -581,13 +581,13 @@ fn symbol_detail(
                         {
                             if matches!(
                                 &row.authority,
-                                SymbolRowAuthority::SignedTechnology { .. }
+                                SymbolRowAuthority::PdkTechnology { .. }
                             ) {
                                 open_author_symbol_variant_dialog(app, &row);
                             } else if row.read_only() {
                                 receipt(
                                     app,
-                                    Err("This read-only design library is not a signed technology overlay and cannot be varied here.".to_owned()),
+                                    Err("This read-only design library is not a PDK technology overlay and cannot be varied here.".to_owned()),
                                 );
                             } else {
                                 app.wb
@@ -622,7 +622,7 @@ fn symbol_detail(
                     }
                 });
             }
-            if let SymbolRowAuthority::SignedTechnology {
+            if let SymbolRowAuthority::PdkTechnology {
                 technology_name,
                 revision,
                 manifest_digest,
@@ -630,13 +630,13 @@ fn symbol_detail(
             } = &row.authority
             {
                 card(ui, |ui| {
-                    card_title(ui, "Signed technology authority", Some(technology_name));
+                    card_title(ui, "PDK technology authority", Some(technology_name));
                     property(ui, "Revision", revision, "project pin");
                     property(
                         ui,
                         "Manifest",
                         &short_digest(&manifest_digest.to_string()),
-                        "publisher-signed",
+                        "PDK-owned",
                     );
                     property(
                         ui,
@@ -925,8 +925,8 @@ fn provenance_card(ui: &mut Ui, row: &SymbolRow, project_count: usize, technolog
     card(ui, |ui| {
         card_title(ui, "Provenance", Some(row.status.label()));
         match (&row.authority, &row.definition) {
-            (SymbolRowAuthority::SignedTechnology { revision, .. }, _) => {
-                property(ui, "Saved revision", revision, "signed manifest");
+            (SymbolRowAuthority::PdkTechnology { revision, .. }, _) => {
+                property(ui, "Saved revision", revision, "PDK manifest");
             }
             (_, Some(definition)) => {
                 property(
@@ -952,9 +952,9 @@ fn provenance_card(ui: &mut Ui, row: &SymbolRow, project_count: usize, technolog
             }
         }
         match &row.authority {
-            SymbolRowAuthority::SignedTechnology {
+            SymbolRowAuthority::PdkTechnology {
                 technology_name, ..
-            } => property(ui, "Owner", technology_name, "signed technology package"),
+            } => property(ui, "Owner", technology_name, "PDK technology package"),
             SymbolRowAuthority::DesignLibrary { read_only } => property(
                 ui,
                 "Owner",
@@ -967,8 +967,8 @@ fn provenance_card(ui: &mut Ui, row: &SymbolRow, project_count: usize, technolog
             ),
         }
         let (editable, why) = match &row.authority {
-            SymbolRowAuthority::SignedTechnology { .. } => {
-                ("no", "publisher-signed · author a project variant to edit")
+            SymbolRowAuthority::PdkTechnology { .. } => {
+                ("no", "PDK-owned · author a project variant to edit")
             }
             SymbolRowAuthority::DesignLibrary { read_only: true } => {
                 ("no", "the owning design library is read-only")

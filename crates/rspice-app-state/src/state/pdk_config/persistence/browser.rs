@@ -1,6 +1,6 @@
 //! Asynchronous browser persistence for PDK configuration.
 //!
-//! Large signed archives never pass through synchronous Web Storage. A small
+//! Large PDK archives never pass through synchronous Web Storage. A small
 //! generation head and content-addressed metadata/archive blobs are committed
 //! through IndexedDB, with exact readback before success is reported.
 
@@ -103,7 +103,7 @@ async fn save_prepared_browser_pdk_snapshot(
         ensure_indexed_db_blob(
             &browser_archive_key(archive.reference.digest),
             &archive.bytes,
-            "signed PDK archive",
+            "PDK archive",
         )
         .await?;
     }
@@ -167,7 +167,7 @@ async fn required_new_storage_bytes(
     for archive in &prepared.archives {
         let key = browser_archive_key(archive.reference.digest);
         required = required
-            .checked_add(required_blob_bytes(&key, &archive.bytes, "signed PDK archive").await?)
+            .checked_add(required_blob_bytes(&key, &archive.bytes, "PDK archive").await?)
             .ok_or_else(|| {
                 ConfigError::Serialize("browser PDK storage estimate overflowed".to_owned())
             })?;
@@ -196,10 +196,8 @@ async fn load_snapshot_from_head(
     let metadata = indexed_db_get_bytes(&metadata_key, "PDK configuration metadata").await?;
     let mut archives = Vec::with_capacity(head.archives.len());
     for archive in &head.archives {
-        archives.push(
-            indexed_db_get_bytes(&browser_archive_key(archive.digest), "signed PDK archive")
-                .await?,
-        );
+        archives
+            .push(indexed_db_get_bytes(&browser_archive_key(archive.digest), "PDK archive").await?);
     }
     restore_browser_pdk_snapshot(path, head_bytes, &metadata, archives)
 }

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     PdkTechnologyError,
     contracts::{
-        PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION, PdkTechnologyArchiveFile, PdkTechnologyBinding,
-        SignedPdkTechnologyArchive,
+        PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION, PdkTechnologyArchive, PdkTechnologyArchiveFile,
+        PdkTechnologyBinding,
     },
     manifest::{PdkTechnologyManifest, validate_manifest},
     package::PdkTechnologyPackageMetadata,
@@ -39,7 +39,7 @@ pub struct PdkTechnologyDraft {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UnsignedPdkTechnologyAuthoringBundle {
+pub struct PdkTechnologyAuthoringBundle {
     pub schema_version: u32,
     pub draft_id: String,
     pub baseline: PdkTechnologyDraftBaseline,
@@ -65,7 +65,7 @@ impl PdkTechnologyDraft {
         }
     }
 
-    /// Change the candidate revision and keep revision-bound signed symbol
+    /// Change the candidate revision and keep revision-bound PDK symbol
     /// model references internally consistent.
     pub fn set_revision(&mut self, revision: String) {
         self.manifest.revision.clone_from(&revision);
@@ -101,7 +101,7 @@ impl PdkTechnologyDraft {
             || self.baseline.archive_digest != baseline.archive_digest()
         {
             return Err(PdkTechnologyError::InvalidReference(
-                "technology draft baseline no longer resolves to the exact trusted source package"
+                "technology draft baseline no longer resolves to the exact validated source package"
                     .to_owned(),
             ));
         }
@@ -130,7 +130,7 @@ impl PdkTechnologyDraft {
         }
         if self.manifest.artifacts != baseline.manifest().artifacts {
             return Err(PdkTechnologyError::InvalidReference(
-                "this authoring workflow cannot change source-package artifact identity; import a separately built signed package when rule or model bytes change"
+                "this authoring workflow cannot change source-package artifact identity; import a separately built PDK package when rule or model bytes change"
                     .to_owned(),
             ));
         }
@@ -140,10 +140,10 @@ impl PdkTechnologyDraft {
     pub fn authoring_bundle(
         &self,
         baseline: &PdkTechnologyPackageMetadata,
-        source_archive: &SignedPdkTechnologyArchive,
-    ) -> Result<UnsignedPdkTechnologyAuthoringBundle, PdkTechnologyError> {
+        source_archive: &PdkTechnologyArchive,
+    ) -> Result<PdkTechnologyAuthoringBundle, PdkTechnologyError> {
         self.validate_candidate(baseline)?;
-        Ok(UnsignedPdkTechnologyAuthoringBundle {
+        Ok(PdkTechnologyAuthoringBundle {
             schema_version: PDK_TECHNOLOGY_AUTHORING_BUNDLE_SCHEMA_VERSION,
             draft_id: self.draft_id.clone(),
             baseline: self.baseline.clone(),

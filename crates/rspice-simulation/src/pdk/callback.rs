@@ -1,7 +1,7 @@
-//! Capability-gated execution of callbacks retained in signed PDK archives.
+//! Capability-gated execution of callbacks retained in PDK archives.
 //!
 //! The guest receives no WASI, clock, entropy, filesystem, environment, or
-//! network imports. Its entire authority is the intersection of the signed
+//! network imports. Its entire authority is the intersection of the
 //! callback contract and the fixed `rspice` ABI implemented below. Execution
 //! is deterministic, fuel-metered, memory-bounded, and tied to exact package,
 //! artifact, input, output, and target identities in a verifiable receipt.
@@ -29,8 +29,8 @@ use rspice_vocabulary::product::ContentDigest;
 
 use rspice_model_library::pdk::contracts::{
     MAX_PDK_ARTIFACT_BYTES, MAX_PDK_CALLBACK_ARTIFACT_BYTES, MAX_PDK_TOTAL_ARTIFACT_BYTES,
-    PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkCallbackContract, PdkTechnologyArtifact,
-    SignedPdkTechnologyArchive, current_execution_target,
+    PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkCallbackContract, PdkTechnologyArchive,
+    PdkTechnologyArtifact, current_execution_target,
 };
 
 use super::package::ValidatedPdkTechnologyPackage;
@@ -62,8 +62,8 @@ struct CallbackHostState {
     fault: Option<String>,
 }
 
-pub(super) fn validate_signed_callbacks(
-    archive: &SignedPdkTechnologyArchive,
+pub(super) fn validate_package_callbacks(
+    archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
 ) -> Result<(), String> {
     let package_files = seal_archive_files(archive, package).map_err(|error| error.to_string())?;
@@ -76,8 +76,8 @@ pub(super) fn validate_signed_callbacks(
     Ok(())
 }
 
-pub(super) fn execute_signed_callback(
-    archive: &SignedPdkTechnologyArchive,
+pub(super) fn execute_package_callback(
+    archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
     callback_id: &str,
     input: &PdkCallbackExecutionInput,
@@ -88,7 +88,7 @@ pub(super) fn execute_signed_callback(
     if content_digest(&archive_bytes) != package.archive_digest() {
         return Err(PdkCallbackError::Technology(
             PdkTechnologyError::NotRuntimeValidated(
-                "callback archive bytes no longer match the trusted archive digest".to_owned(),
+                "callback archive bytes no longer match the validated archive digest".to_owned(),
             ),
         ));
     }
@@ -122,14 +122,14 @@ pub(super) fn execute_signed_callback(
 }
 
 fn seal_archive_files(
-    archive: &SignedPdkTechnologyArchive,
+    archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
 ) -> Result<BTreeMap<String, Vec<u8>>, PdkCallbackError> {
     let archive_bytes = serde_json::to_vec(archive)
         .map_err(|error| PdkCallbackError::Serialization(error.to_string()))?;
     if content_digest(&archive_bytes) != package.archive_digest() {
         return Err(PdkTechnologyError::NotRuntimeValidated(
-            "callback archive bytes do not match the trusted archive identity".to_owned(),
+            "callback archive bytes do not match the validated archive identity".to_owned(),
         )
         .into());
     }
@@ -287,7 +287,7 @@ fn validate_module_contract(
             })?;
         if !capabilities.contains(&required) {
             return Err(PdkCallbackError::CapabilityViolation(format!(
-                "import {}/{} requires signed capability {:?}",
+                "import {}/{} requires undeclared capability {:?}",
                 import.module(),
                 import.name(),
                 required

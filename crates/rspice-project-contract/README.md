@@ -18,7 +18,7 @@ eframe, winit, wgpu and rfd in its closure.
 - **`descriptor`**: `ProjectDescriptor`, with the stable `ProjectId`, logical
   revision, name, root library and top cell, include search paths, the RSpice
   Cloud publication binding and the technology binding
-  (`ProjectTechnologyBinding` and `ProjectSignedTechnologyPin`, re-exported
+  (`ProjectTechnologyBinding` and `ProjectPdkPackagePin`, re-exported
   from `rspice-model-library`). Its hash-chained audit trails include
   `ProjectTechnologyChangeReceipt`, the record of an audited technology
   attach or replace, committed only with checkpoint evidence for the exact
@@ -46,7 +46,7 @@ eframe, winit, wgpu and rfd in its closure.
 - The project file, its migration and its save lifecycle belong to
   [`rspice-project`](../rspice-project), which re-exports this crate.
 - Libraries, cells, views and their mutations belong to
-  [`rspice-design`](../rspice-design); the technology binding and signed-PDK
+  [`rspice-design`](../rspice-design); the technology binding and PDK
   pin types to [`rspice-model-library`](../rspice-model-library).
 
 ## Entry points

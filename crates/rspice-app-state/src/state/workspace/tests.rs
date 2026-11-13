@@ -1657,9 +1657,9 @@ fn returning_to_generated_output_is_saved_as_a_project_change() {
 }
 
 #[test]
-fn signed_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
+fn pdk_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
     let (baseline_bytes, candidate_bytes, authority) =
-        crate::state::pdk_config::signed_technology_diff_test_fixture();
+        crate::state::pdk_config::pdk_technology_diff_test_fixture();
     let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(&baseline_bytes, &authority, "install baseline")
@@ -1685,17 +1685,17 @@ fn signed_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
     let evidence = crate::state::pdk_config::PdkTechnologyMigrationEvidence::from_diff(&diff)
         .expect("migration evidence");
     let baseline_binding = technology_binding_fixture()
-        .with_signed_package_metadata(baseline.metadata())
+        .with_pdk_package_metadata(baseline.metadata())
         .expect("baseline binding");
     let candidate_binding = technology_binding_fixture()
-        .with_signed_package_metadata(candidate.metadata())
+        .with_pdk_package_metadata(candidate.metadata())
         .expect("candidate binding");
     let context = |revision, digest_byte| {
         ProjectTechnologyChangeContext::new(
             ProjectTechnologyChangeAuthority::new(
                 "engineer.james",
                 "project-technology-admin",
-                "Review exact signed PDK revision transition",
+                "Review exact PDK revision transition",
             )
             .unwrap(),
             Uuid::new_v4(),
@@ -2428,7 +2428,7 @@ fn technology_binding_fixture() -> ProjectTechnologyBinding {
         "source_edges": [],
         "model_count": 14,
         "process_sections": ["ff", "ss", "tt"],
-        "signed_package": null,
+        "pdk_package": null,
     }))
     .expect("technology binding fixture")
 }

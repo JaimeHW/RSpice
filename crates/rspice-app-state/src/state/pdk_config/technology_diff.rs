@@ -1,4 +1,4 @@
-//! Signed-PDK revision comparisons as the application states them, and
+//! PDK revision comparisons as the application states them, and
 //! their integration tests.
 
 pub use rspice_model_library::pdk::diff::*;
@@ -39,11 +39,11 @@ pub mod tests {
     use rspice_model_library::pdk::PdkAdministrativeAuthority;
     #[cfg(test)]
     use rspice_model_library::pdk::contracts::PdkExecutionTarget;
-    use rspice_model_library::pdk::contracts::SignedPdkTechnologyArchive;
+    use rspice_model_library::pdk::contracts::PdkTechnologyArchive;
     use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
     use rspice_simulation::pdk::test_fixtures::fixture_archive;
     #[cfg(test)]
-    use rspice_simulation::pdk::test_fixtures::fixture_signed_symbol;
+    use rspice_simulation::pdk::test_fixtures::fixture_pdk_symbol;
     #[cfg(test)]
     use rspice_simulation::pdk::{ValidatedPdkTechnologyPackage, validate_archive_bytes};
 
@@ -70,7 +70,7 @@ pub mod tests {
         archive_bytes: &[u8],
         mutate: impl FnOnce(&mut PdkTechnologyManifest),
     ) -> Vec<u8> {
-        let mut archive: SignedPdkTechnologyArchive =
+        let mut archive: PdkTechnologyArchive =
             serde_json::from_slice(archive_bytes).expect("archive fixture");
         let manifest_bytes = STANDARD
             .decode(&archive.manifest_base64)
@@ -170,9 +170,9 @@ pub mod tests {
     }
 
     #[test]
-    fn signed_symbol_contract_addition_is_breaking() {
+    fn pdk_symbol_contract_addition_is_breaking() {
         let (baseline, candidate) = pair(|manifest| {
-            let definition = fixture_signed_symbol(manifest);
+            let definition = fixture_pdk_symbol(manifest);
             manifest.symbol_definitions.push(definition);
         });
         let diff = PdkTechnologyRevisionDiff::between(baseline.metadata(), candidate.metadata())

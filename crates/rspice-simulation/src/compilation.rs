@@ -1,4 +1,4 @@
-//! Compilation policy shared by project, model-library and signed-PDK sources.
+//! Compilation policy shared by project, model-library and PDK sources.
 //!
 //! Source owners validate executable closures before a simulation is prepared.
 //! Validation and execution share this policy and retain the same digital plan.

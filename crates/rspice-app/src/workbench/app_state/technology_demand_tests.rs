@@ -1,4 +1,4 @@
-//! Project and plan integration for signed-technology demand and preflight messages.
+//! Project and plan integration for PDK technology demand and preflight messages.
 
 use crate::product::AnalysisInstanceId;
 use crate::product::ProcessCorner;
@@ -197,25 +197,25 @@ fn a_corner_without_a_process_axis_does_not_restate_the_reference_section() {
     );
 }
 
-/// Attaching a layout document needs an exact signed pin, which is what
+/// Attaching a layout document needs an exact PDK pin, which is what
 /// this reason reports the absence of; the cells it renders are stated
 /// directly instead.
 #[test]
-fn a_physical_layout_names_itself_and_the_signed_stack() {
+fn a_physical_layout_names_itself_and_the_pdk_stack() {
     let reason = TechnologyDemandReason::PhysicalLayout {
         documents: vec!["top".to_owned()],
     };
     assert_eq!(
         reason.observed(),
-        "Physical layout 'top' requires a signed technology"
+        "Physical layout 'top' requires a PDK technology"
     );
     let required = reason.required();
-    assert!(required.contains("signed PDK"), "{required}");
+    assert!(required.contains("PDK"), "{required}");
     let several = TechnologyDemandReason::PhysicalLayout {
         documents: vec!["top".to_owned(), "pads".to_owned()],
     };
     assert_eq!(
         several.observed(),
-        "Physical layouts 'top', 'pads' require a signed technology"
+        "Physical layouts 'top', 'pads' require a PDK technology"
     );
 }

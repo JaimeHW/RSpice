@@ -85,7 +85,7 @@ endmodule
 
 /// Compile one fixture source and seal it exactly as a project source is
 /// sealed. `try_from_virtual_compilation` is the constructor both the
-/// project and the signed-PDK paths reach, so a fixture that seals here
+/// project and the PDK paths reach, so a fixture that seals here
 /// seals in production.
 fn seal_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARuntime {
     let bundle = rspice_veriloga::VirtualSourceBundle::new(

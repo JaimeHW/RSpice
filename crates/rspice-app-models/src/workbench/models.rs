@@ -1,5 +1,5 @@
 //! The models feature: the Models & PDKs workspace, the device-model editor,
-//! measurement correlation and unsigned PDK authoring.
+//! measurement correlation and PDK authoring.
 //!
 //! What the workspace keeps between frames is declared here, beneath the
 //! session aggregate that holds the models slot and the wire that persists

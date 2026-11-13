@@ -1,4 +1,4 @@
-//! Portable model-source attachment and exact signed-package pin contracts.
+//! Portable model-source attachment and exact PDK package pin contracts.
 
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 
 /// Persisted schema for an exact project-owned technology binding.
 pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
-pub const PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION: u16 = 1;
+pub const PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION: u16 = 1;
 
-/// Persisted, content-addressed project pin to one signed PDK package.
+/// Persisted, content-addressed project pin to one PDK package.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProjectSignedTechnologyPin {
+pub struct ProjectPdkPackagePin {
     schema_version: u16,
     package_id: String,
     revision: String,
@@ -24,7 +24,7 @@ pub struct ProjectSignedTechnologyPin {
     execution_targets: Vec<crate::pdk::contracts::PdkExecutionTarget>,
 }
 
-impl ProjectSignedTechnologyPin {
+impl ProjectPdkPackagePin {
     pub fn from_package_metadata(
         package: &crate::pdk::package::PdkTechnologyPackageMetadata,
     ) -> Result<Self, TechnologyBindingError> {
@@ -32,7 +32,7 @@ impl ProjectSignedTechnologyPin {
         let mut execution_targets = manifest.compatibility.targets.clone();
         execution_targets.sort();
         let pin = Self {
-            schema_version: PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+            schema_version: PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION,
             package_id: manifest.package_id.clone(),
             revision: manifest.revision.clone(),
             manifest_digest: package.manifest_digest(),
@@ -48,37 +48,34 @@ impl ProjectSignedTechnologyPin {
     }
 
     pub fn validate(&self) -> Result<(), TechnologyBindingError> {
-        if self.schema_version != PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION {
-            return Err(TechnologyBindingError::UnsupportedSignedPackageSchema {
+        if self.schema_version != PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION {
+            return Err(TechnologyBindingError::UnsupportedPdkPackageSchema {
                 found: self.schema_version,
-                supported: PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+                supported: PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION,
             });
         }
         for (field, value) in [
-            ("signed_package.package_id", self.package_id.as_str()),
-            ("signed_package.revision", self.revision.as_str()),
-            (
-                "signed_package.technology_name",
-                self.technology_name.as_str(),
-            ),
-            ("signed_package.publisher_id", self.publisher_id.as_str()),
-            ("signed_package.stack_name", self.stack_name.as_str()),
+            ("pdk_package.package_id", self.package_id.as_str()),
+            ("pdk_package.revision", self.revision.as_str()),
+            ("pdk_package.technology_name", self.technology_name.as_str()),
+            ("pdk_package.publisher_id", self.publisher_id.as_str()),
+            ("pdk_package.stack_name", self.stack_name.as_str()),
         ] {
             validate_technology_text(field, value)?;
         }
         if self.process_node_nm == 0 {
-            return Err(TechnologyBindingError::InvalidSignedPackage(
+            return Err(TechnologyBindingError::InvalidPdkPackage(
                 "process node must be greater than zero".to_owned(),
             ));
         }
         if self.execution_targets.is_empty() {
-            return Err(TechnologyBindingError::InvalidSignedPackage(
+            return Err(TechnologyBindingError::InvalidPdkPackage(
                 "at least one execution target is required".to_owned(),
             ));
         }
         for index in 1..self.execution_targets.len() {
             if self.execution_targets[index - 1] >= self.execution_targets[index] {
-                return Err(TechnologyBindingError::InvalidSignedPackage(
+                return Err(TechnologyBindingError::InvalidPdkPackage(
                     "execution targets must be strictly sorted and unique".to_owned(),
                 ));
             }
@@ -133,8 +130,8 @@ impl ProjectSignedTechnologyPin {
 }
 
 /// Exact project-owned attachment to a content-pinned model technology and an
-/// optional immutable signed PDK package revision. Runtime use requires the
-/// signed pin to resolve against the currently trusted registry.
+/// optional immutable PDK package revision. Runtime use requires the
+/// PDK pin to resolve against the currently validated registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTechnologyBinding {
@@ -153,7 +150,7 @@ pub struct ProjectTechnologyBinding {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     process_sections: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    signed_package: Option<ProjectSignedTechnologyPin>,
+    pdk_package: Option<ProjectPdkPackagePin>,
 }
 
 impl ProjectTechnologyBinding {
@@ -185,7 +182,7 @@ impl ProjectTechnologyBinding {
             source_edges: library.source_edges.clone(),
             model_count: library.models.len(),
             process_sections,
-            signed_package: None,
+            pdk_package: None,
         };
         binding.validate()?;
         Ok(binding)
@@ -267,7 +264,7 @@ impl ProjectTechnologyBinding {
                 return Err(TechnologyBindingError::UnsortedProcessSections);
             }
         }
-        if let Some(pin) = &self.signed_package {
+        if let Some(pin) = &self.pdk_package {
             pin.validate()?;
         }
         Ok(())
@@ -284,8 +281,8 @@ impl ProjectTechnologyBinding {
             label.push_str(" · ");
             label.push_str(node);
         }
-        if let Some(pin) = &self.signed_package {
-            label.push_str(" · signed ");
+        if let Some(pin) = &self.pdk_package {
+            label.push_str(" · PDK ");
             label.push_str(&pin.display_label());
         }
         label
@@ -336,11 +333,11 @@ impl ProjectTechnologyBinding {
     ) -> Result<(), TechnologyBindingError> {
         let mut observed = Self::from_model_library(library)?;
         // The live model catalog can prove only its own authenticated source
-        // closure. The signed PDK pin is independently resolved against the
-        // trusted technology registry, so carry the accepted pin across this
+        // closure. The PDK pin is independently resolved against the
+        // validated technology registry, so carry the accepted pin across this
         // comparison instead of treating its deliberate absence from
         // `from_model_library` as catalog drift.
-        observed.signed_package = self.signed_package.clone();
+        observed.pdk_package = self.pdk_package.clone();
         if &observed != self {
             return Err(TechnologyBindingError::CatalogDrift {
                 library: self.model_library.clone(),
@@ -360,15 +357,15 @@ impl ProjectTechnologyBinding {
     }
 
     #[must_use]
-    pub fn signed_package(&self) -> Option<&ProjectSignedTechnologyPin> {
-        self.signed_package.as_ref()
+    pub fn pdk_package(&self) -> Option<&ProjectPdkPackagePin> {
+        self.pdk_package.as_ref()
     }
 
-    pub fn with_signed_package_metadata(
+    pub fn with_pdk_package_metadata(
         mut self,
         package: &crate::pdk::package::PdkTechnologyPackageMetadata,
     ) -> Result<Self, TechnologyBindingError> {
-        self.signed_package = Some(ProjectSignedTechnologyPin::from_package_metadata(package)?);
+        self.pdk_package = Some(ProjectPdkPackagePin::from_package_metadata(package)?);
         self.validate()?;
         Ok(self)
     }
@@ -467,22 +464,22 @@ pub enum TechnologyBindingError {
         "attached model library '{library}' no longer matches the accepted technology contract"
     )]
     CatalogDrift { library: String },
-    #[error("signed technology pin schema {found} is unsupported; this build supports {supported}")]
-    UnsupportedSignedPackageSchema { found: u16, supported: u16 },
-    #[error("signed technology package pin is invalid: {0}")]
-    InvalidSignedPackage(String),
-    #[error("project technology binding has no signed PDK package pin")]
-    MissingSignedPackage,
-    #[error("signed PDK package '{package_id}' revision '{revision}' is not currently trusted")]
-    SignedPackageUnavailable {
+    #[error("PDK technology pin schema {found} is unsupported; this build supports {supported}")]
+    UnsupportedPdkPackageSchema { found: u16, supported: u16 },
+    #[error("PDK technology package pin is invalid: {0}")]
+    InvalidPdkPackage(String),
+    #[error("project technology binding has no PDK package pin")]
+    MissingPdkPackage,
+    #[error("PDK package '{package_id}' revision '{revision}' is not currently validated")]
+    PdkPackageUnavailable {
         package_id: String,
         revision: String,
     },
-    #[error("signed PDK package '{package_id}' revision '{revision}' metadata has drifted")]
-    SignedPackageMetadataDrift {
+    #[error("PDK package '{package_id}' revision '{revision}' metadata has drifted")]
+    PdkPackageMetadataDrift {
         package_id: String,
         revision: String,
     },
-    #[error("signed PDK package is incompatible with this runtime: {0}")]
-    SignedPackageRuntime(String),
+    #[error("PDK package is incompatible with this runtime: {0}")]
+    PdkPackageRuntime(String),
 }

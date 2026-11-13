@@ -459,11 +459,11 @@ impl ProjectFile {
         view_index: &ValidatedLibraryIndex,
     ) -> Result<(), ProjectIoError> {
         let mut hierarchy = HashMap::<String, Vec<String>>::new();
-        let signed_pin = self
+        let pdk_pin = self
             .workspace
             .project
             .technology_binding()
-            .and_then(crate::ProjectTechnologyBinding::signed_package);
+            .and_then(crate::ProjectTechnologyBinding::pdk_package);
         for (key, document) in self.workspace.physical_layout_documents() {
             let mut masters = Vec::with_capacity(document.instances().len());
             let owner = view_index.get_exact(key).ok_or_else(|| {
@@ -476,20 +476,20 @@ impl ProjectFile {
                     "workspace.physical_layout_documents[{key}] must be owned by that exact Layout view"
                 )));
             }
-            let signed_pin = signed_pin.ok_or_else(|| {
+            let pdk_pin = pdk_pin.ok_or_else(|| {
                 ProjectIoError::InvalidData(format!(
-                    "workspace.physical_layout_documents[{key}] requires an exact signed project PDK pin"
+                    "workspace.physical_layout_documents[{key}] requires an exact project PDK pin"
                 ))
             })?;
             let technology = document.technology();
-            if technology.package_id() != signed_pin.package_id()
-                || technology.revision() != signed_pin.revision()
-                || technology.manifest_digest() != signed_pin.manifest_digest()
-                || technology.archive_digest() != signed_pin.archive_digest()
-                || technology.stack_id() != signed_pin.stack_name()
+            if technology.package_id() != pdk_pin.package_id()
+                || technology.revision() != pdk_pin.revision()
+                || technology.manifest_digest() != pdk_pin.manifest_digest()
+                || technology.archive_digest() != pdk_pin.archive_digest()
+                || technology.stack_id() != pdk_pin.stack_name()
             {
                 return Err(ProjectIoError::InvalidData(format!(
-                    "workspace.physical_layout_documents[{key}] technology binding does not match the project's exact signed PDK pin"
+                    "workspace.physical_layout_documents[{key}] technology binding does not match the project's exact PDK pin"
                 )));
             }
             for (instance_id, instance) in document.instances() {

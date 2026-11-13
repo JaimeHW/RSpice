@@ -991,7 +991,7 @@ fn validate_current_model_execution_plan(
     let mut veriloga_count = 0_usize;
     if let Some((package, archive_digest, artifacts, bindings)) = sealed.pdk_veriloga_authority() {
         for binding in bindings {
-            rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
+            rspice_simulation::veriloga::compile_pdk_source_runtime(
                 package,
                 archive_digest,
                 artifacts,
@@ -1003,7 +1003,7 @@ fn validate_current_model_execution_plan(
             code: "VERILOGA_RUNTIME_COMPILED".to_owned(),
             severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
             message: format!(
-                "Compiled and validated {veriloga_count} Verilog-A runtime bindings from the signed PDK."
+                "Compiled and validated {veriloga_count} Verilog-A runtime bindings from the PDK."
             ),
         });
     }
@@ -1012,9 +1012,11 @@ fn validate_current_model_execution_plan(
         .map(|(_, archive_digest)| archive_digest);
     if pdk_archive_digest.is_some() {
         findings.push(crate::state::model_library::ModelValidationFinding {
-            code: "SIGNED_PDK_TRUST_VERIFIED".to_owned(),
+            code: "PDK_PACKAGE_VERIFIED".to_owned(),
             severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
-            message: "The project's pinned signed PDK archive, platform contract, and trust chain were verified.".to_owned(),
+            message:
+                "The project's pinned PDK archive digests and platform contract were verified."
+                    .to_owned(),
         });
     }
     let receipt = app

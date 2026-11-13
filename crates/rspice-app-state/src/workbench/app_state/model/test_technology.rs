@@ -1,4 +1,4 @@
-//! Signed technology a test provisions into the model.
+//! PDK technology a test provisions into the model.
 //!
 //! For tests whose subject requires a successful governed simulation. Tests
 //! for missing, stale, or tampered authority must not call these
@@ -10,32 +10,32 @@ use super::Model;
 use crate::state::pdk_config::PdkAdministrativeAuthority;
 
 impl Model {
-    /// Provision one fully authenticated model-source and signed-PDK contract
+    /// Provision one fully authenticated model-source and PDK contract
     /// for tests whose subject requires a successful governed simulation.
     pub fn provision_test_project_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_technology_test_fixture(),
+            crate::state::pdk_config::pdk_technology_test_fixture(),
         );
     }
 
-    /// The same contract, with `models` as the signed package's model library.
+    /// The same contract, with `models` as the PDK package's model library.
     pub fn provision_test_project_technology_with_models(&mut self, models: Vec<u8>) {
         self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_technology_test_fixture_with_models(models),
+            crate::state::pdk_config::pdk_technology_test_fixture_with_models(models),
         );
     }
 
-    /// The same contract, with the signed package's Verilog-A technology.
+    /// The same contract, with the PDK package's Verilog-A technology.
     pub fn provision_test_project_veriloga_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_veriloga_technology_test_fixture(),
+            crate::state::pdk_config::pdk_veriloga_technology_test_fixture(),
         );
     }
 
-    /// The same contract, with the signed package's symbol technology.
+    /// The same contract, with the PDK package's symbol technology.
     pub fn provision_test_project_symbol_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_symbol_technology_test_fixture(),
+            crate::state::pdk_config::pdk_symbol_technology_test_fixture(),
         );
     }
 
@@ -50,7 +50,7 @@ impl Model {
                 &administrative_authority,
                 "Install deterministic test technology",
             )
-            .expect("signed test technology installs");
+            .expect("test PDK technology installs");
         let package = self.pdk_config.technology_registry.validated_packages()[0].clone();
 
         let library_name = self
@@ -66,12 +66,12 @@ impl Model {
             .get_library(&library_name)
             .expect("imported test model remains in the catalog");
         let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
-            .and_then(|binding| binding.with_signed_package_metadata(package.metadata()))
-            .expect("model and signed package form one exact test binding");
+            .and_then(|binding| binding.with_pdk_package_metadata(package.metadata()))
+            .expect("model and PDK package form one exact test binding");
         let authority = crate::state::ProjectTechnologyChangeAuthority::new(
             "simulation-test@rspice.invalid",
             "test:governed-simulation",
-            "Provision deterministic signed simulation authority",
+            "Provision deterministic PDK simulation authority",
         )
         .expect("test authority is valid");
         let context = crate::state::ProjectTechnologyChangeContext::new(

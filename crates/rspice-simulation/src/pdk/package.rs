@@ -2,11 +2,10 @@
 
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{
-    PdkTechnologyManifest, package_path_to_host_path, signed_model_virtual_root,
-    validate_package_path,
+    PdkTechnologyManifest, package_path_to_host_path, pdk_model_virtual_root, validate_package_path,
 };
 use rspice_model_library::pdk::package::{
-    PdkTechnologyPackageMetadata, authenticate_archive, decode_bounded,
+    PdkTechnologyPackageMetadata, decode_bounded, verify_archive_contents,
 };
 use rspice_model_library::pdk::{PdkTechnologyError, content_digest};
 use rspice_vocabulary::product::ContentDigest;
@@ -50,7 +49,7 @@ impl ValidatedPdkTechnologyPackage {
         self.0.artifact_digests()
     }
 
-    /// Signed technology symbols materialized against this archive's exact
+    /// PDK technology symbols materialized against this archive's exact
     /// content-addressed model-source paths.
     #[must_use]
     pub fn symbol_definitions(
@@ -71,7 +70,7 @@ impl ValidatedPdkTechnologyPackage {
     /// Recheck and compile this package's exact archived source closure.
     pub fn seal_model_sources(
         &self,
-        archive: &SignedPdkTechnologyArchive,
+        archive: &PdkTechnologyArchive,
     ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
         seal_pdk_model_sources(archive, self)
     }
@@ -79,19 +78,19 @@ impl ValidatedPdkTechnologyPackage {
     /// Execute the selected callback against the exact validated archive.
     pub fn execute_callback(
         &self,
-        archive: &SignedPdkTechnologyArchive,
+        archive: &PdkTechnologyArchive,
         callback_id: &str,
         input: &rspice_model_library::pdk::callback::PdkCallbackExecutionInput,
     ) -> Result<
         rspice_model_library::pdk::callback::PdkCallbackExecutionReceipt,
         rspice_model_library::pdk::callback::PdkCallbackError,
     > {
-        super::callback::execute_signed_callback(archive, self, callback_id, input)
+        super::callback::execute_package_callback(archive, self, callback_id, input)
     }
 }
 
 /// Runtime-only, exact source closure produced from one currently trusted
-/// signed package. Every path is a content-addressed virtual identity; no
+/// PDK package. Every path is a content-addressed virtual identity; no
 /// worker or browser execution path reopens a host file.
 #[derive(Debug, Clone)]
 pub struct SealedPdkModelSources(PdkModelSourceParts);
@@ -140,7 +139,7 @@ pub struct SealedPdkVerilogAArtifact {
     pub digest: ContentDigest,
 }
 
-/// One signed manifest contract whose dependency closure compiled while the
+/// One PDK manifest contract whose dependency closure compiled while the
 /// package was validated. Execution recompiles these exact retained bytes and
 /// checks the resulting runtime at the ordinary prepared-run boundary.
 #[derive(Debug, Clone)]
@@ -154,35 +153,35 @@ pub struct SealedPdkVerilogABinding {
 
 pub fn validate_archive_bytes(
     bytes: &[u8],
-) -> Result<(SignedPdkTechnologyArchive, ValidatedPdkTechnologyPackage), PdkTechnologyError> {
+) -> Result<(PdkTechnologyArchive, ValidatedPdkTechnologyPackage), PdkTechnologyError> {
     if bytes.len() > MAX_PDK_ARCHIVE_BYTES {
         return Err(PdkTechnologyError::ArchiveTooLarge {
             actual: bytes.len(),
             maximum: MAX_PDK_ARCHIVE_BYTES,
         });
     }
-    let archive: SignedPdkTechnologyArchive = serde_json::from_slice(bytes)
+    let archive: PdkTechnologyArchive = serde_json::from_slice(bytes)
         .map_err(|error| PdkTechnologyError::ArchiveParse(error.to_string()))?;
     let package = validate_archive(&archive)?;
     Ok((archive, package))
 }
 
 pub fn validate_archive(
-    archive: &SignedPdkTechnologyArchive,
+    archive: &PdkTechnologyArchive,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
-    let package = ValidatedPdkTechnologyPackage(authenticate_archive(archive)?);
-    super::callback::validate_signed_callbacks(archive, &package)
+    let package = ValidatedPdkTechnologyPackage(verify_archive_contents(archive)?);
+    super::callback::validate_package_callbacks(archive, &package)
         .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a
     // deferred simulation-time best effort. This proves section existence,
     // package-relative dependency closure, source encoding, and reachability
-    // using the exact decoded artifact bytes covered by the signed manifest.
+    // using the exact decoded artifact bytes covered by the PDK manifest.
     let _ = seal_pdk_model_sources(archive, &package)?;
     Ok(package)
 }
 
 fn seal_pdk_model_sources(
-    archive: &SignedPdkTechnologyArchive,
+    archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
 ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
     let binding = package.binding();
@@ -220,7 +219,7 @@ fn seal_pdk_model_sources(
         .iter()
         .map(|file| (file.path.to_ascii_lowercase(), file))
         .collect::<BTreeMap<_, _>>();
-    let virtual_root = signed_model_virtual_root(&package.archive_digest().to_string());
+    let virtual_root = pdk_model_virtual_root(&package.archive_digest().to_string());
     let mut virtual_paths = BTreeMap::<String, PathBuf>::new();
     let mut sources = Vec::<(PathBuf, String)>::with_capacity(model_artifacts.len());
     for (key, artifact) in &model_artifacts {
@@ -280,7 +279,7 @@ fn seal_pdk_model_sources(
             let target_key = target_artifact_path.to_ascii_lowercase();
             let target = virtual_paths.get(&target_key).ok_or_else(|| {
                 PdkTechnologyError::ModelMaterialization(format!(
-                    "model artifact '{}' references '{}' which is not a signed model artifact in this package",
+                    "model artifact '{}' references '{}' which is not a PDK model artifact in this package",
                     owner_artifact.path, requested_path
                 ))
             })?;
@@ -303,7 +302,7 @@ fn seal_pdk_model_sources(
     )
     .map_err(|error| {
         PdkTechnologyError::ModelMaterialization(format!(
-            "signed model-source bundle is invalid: {error}"
+            "PDK model-source bundle is invalid: {error}"
         ))
     })?;
 
@@ -354,7 +353,7 @@ fn seal_pdk_model_sources(
                     })
                     .ok_or_else(|| {
                         PdkTechnologyError::ModelMaterialization(format!(
-                            "resolved dependency '{}' escaped the signed package closure",
+                            "resolved dependency '{}' escaped the PDK package closure",
                             dependency.resolved_path().display()
                         ))
                     })?;
@@ -389,7 +388,7 @@ fn seal_pdk_model_sources(
         .collect::<Vec<_>>();
     if !unreachable.is_empty() {
         return Err(PdkTechnologyError::ModelMaterialization(format!(
-            "signed model artifacts are unreachable from every declared process contract: {}",
+            "PDK model artifacts are unreachable from every declared process contract: {}",
             unreachable.join(", ")
         )));
     }
@@ -455,7 +454,7 @@ fn resolve_package_dependency(
             ".." => {
                 if components.pop().is_none() {
                     return Err(PdkTechnologyError::ModelMaterialization(format!(
-                        "model artifact '{owner_artifact_path}' dependency '{requested_path}' escapes the signed package root"
+                        "model artifact '{owner_artifact_path}' dependency '{requested_path}' escapes the PDK package root"
                     )));
                 }
             }

@@ -1204,11 +1204,7 @@ fn export_body(
                             if !available {
                                 ui.colored_label(
                                     Tokens::get(ui.ctx()).color.warn,
-                                    if unavailable(preset) {
-                                        "Unavailable dependency"
-                                    } else {
-                                        "Publisher-signed distribution only"
-                                    },
+                                    "Unavailable dependency",
                                 );
                             }
                         });

@@ -139,7 +139,7 @@ impl Model {
             .clone();
         if document.technology() != &exact_technology {
             return Err(format!(
-                "Layout owner '{}' is bound to a different signed technology than the project",
+                "Layout owner '{}' is bound to a different PDK technology than the project",
                 owner.display_path()
             ));
         }
@@ -170,7 +170,7 @@ impl Model {
                 .contains(&(layer.to_ascii_lowercase(), purpose.to_ascii_lowercase()))
             {
                 return Err(format!(
-                    "Physical-layout edit failed: {kind} {id} uses layer/purpose '{layer}/{purpose}', which the project's signed PDK does not define"
+                    "Physical-layout edit failed: {kind} {id} uses layer/purpose '{layer}/{purpose}', which the project's PDK does not define"
                 ));
             }
         }

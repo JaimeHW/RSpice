@@ -5,7 +5,7 @@ netlisting, exact source and model preparation, immutable run snapshots with
 one-use dispatch authorization, the engine adapters for each analysis family,
 run scheduling with progress, cancellation and live transient delivery, and
 conversion of engine completions into retained evidence. It also validates
-signed PDKs before a caller publishes an installation, and compiles project
+PDKs before a caller publishes an installation, and compiles project
 Verilog-A sources. Controllers in `rspice-app` dispatch sealed requests into
 it; the browser runs the same code in the `rspice-worker` module worker, and
 the CLI's `rspice study` and the mixed-signal conformance corpus drive its
@@ -29,8 +29,8 @@ closure.
 | `results`, `result_conversion` | `SimulationResult` and its projections; conversion of an engine completion into exact retained `rspice-results` evidence |
 | `transient_checkpoint`, `monte_carlo_checkpoint` | Authenticated transient continuation and Monte Carlo checkpoint requests, with bounded delivery of the latest snapshot |
 | `manual_deck`, `study_document` | Running a hand-written deck with the analyses it declares; `StudyDocument`, the versioned JSON study the CLI reads |
-| `model_sources`, `model_import`, `compilation`, `veriloga`, `project_veriloga` | Authentication and materialization of model-source snapshots; compiler preparation for model imports; the compilation policy shared by project, model-library and signed-PDK sources; sealed Verilog-A/AMS artifacts and their engine registration; project Verilog-A compilation with typed failures |
-| `pdk`, `project_technology` | Signed-PDK import, runtime validation, executable source sealing and bounded callback execution (`PdkTechnologyRegistry`); project technology validation against the descriptor and model catalog |
+| `model_sources`, `model_import`, `compilation`, `veriloga`, `project_veriloga` | Authentication and materialization of model-source snapshots; compiler preparation for model imports; the compilation policy shared by project, model-library and PDK sources; sealed Verilog-A/AMS artifacts and their engine registration; project Verilog-A compilation with typed failures |
+| `pdk`, `project_technology` | PDK import, runtime validation, executable source sealing and bounded callback execution (`PdkTechnologyRegistry`); project technology validation against the descriptor and model catalog |
 
 ## Boundaries
 

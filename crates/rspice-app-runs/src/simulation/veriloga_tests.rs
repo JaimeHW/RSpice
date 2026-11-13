@@ -5,7 +5,7 @@ use rspice_simulation::netlist_preparation::{
 };
 use rspice_simulation::project_veriloga::{build_profile, compile_model_library_source_runtimes};
 #[cfg(test)]
-use rspice_simulation::veriloga::compile_signed_pdk_source_runtime;
+use rspice_simulation::veriloga::compile_pdk_source_runtime;
 use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
 #[cfg(test)]

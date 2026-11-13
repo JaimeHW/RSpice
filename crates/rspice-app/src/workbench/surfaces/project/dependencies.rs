@@ -292,11 +292,11 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     }
     if let Some(pin) = binding
         .as_ref()
-        .and_then(crate::state::ProjectTechnologyBinding::signed_package)
+        .and_then(crate::state::ProjectTechnologyBinding::pdk_package)
     {
         property_row(
             ui,
-            "Signed package",
+            "PDK package",
             &format!(
                 "{} \u{00b7} {} \u{00b7} {} nm \u{00b7} {}",
                 pin.package_id(),
@@ -316,7 +316,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             ),
         );
     } else {
-        property_row_toned(ui, "Signed package", "Not attached", t.color.text_faint);
+        property_row_toned(ui, "PDK package", "Not attached", t.color.text_faint);
     }
     let libraries = cx.model.model_library_manager.library_count();
     let models = cx.model.model_library_manager.total_model_count();

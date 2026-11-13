@@ -203,9 +203,7 @@ impl ModelLibraryManager {
             );
         }
         if receipt.pdk_archive_digest != pdk_archive_digest {
-            return Err(
-                "Model-validation receipt is stale after the signed PDK changed.".to_owned(),
-            );
+            return Err("Model-validation receipt is stale after the PDK changed.".to_owned());
         }
         if receipt.execution_schema_version != execution_schema_version
             || receipt.engine_version != env!("CARGO_PKG_VERSION")

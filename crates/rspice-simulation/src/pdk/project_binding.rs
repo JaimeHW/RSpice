@@ -1,22 +1,22 @@
-//! Resolve exact signed project pins against the retained validated runtime packages.
+//! Resolve exact project PDK pins against the retained validated runtime packages.
 
 use super::ValidatedPdkTechnologyPackage;
 use rspice_model_library::{
-    ProjectSignedTechnologyPin, ProjectTechnologyBinding, TechnologyBindingError,
+    ProjectPdkPackagePin, ProjectTechnologyBinding, TechnologyBindingError,
 };
 
-pub fn project_signed_technology_package<'a>(
+pub fn project_pdk_package<'a>(
     packages: &'a [ValidatedPdkTechnologyPackage],
     binding: Option<&ProjectTechnologyBinding>,
 ) -> Result<Option<&'a ValidatedPdkTechnologyPackage>, String> {
     let Some(binding) = binding else {
         return Ok(None);
     };
-    let Some(pin) = binding.signed_package() else {
-        return Err("Project technology binding has no signed package pin.".to_owned());
+    let Some(pin) = binding.pdk_package() else {
+        return Err("Project technology binding has no PDK package pin.".to_owned());
     };
     validate_project_binding(packages, binding)
-        .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
+        .map_err(|error| format!("PDK project binding is unavailable: {error}"))?;
     packages
         .iter()
         .find(|package| {
@@ -30,7 +30,7 @@ pub fn project_signed_technology_package<'a>(
         })
         .map(Some)
         .ok_or_else(|| {
-            "The project's exact signed PDK package is not present in the current trusted runtime catalog."
+            "The project's exact PDK package is not present in the current trusted runtime catalog."
                 .to_owned()
         })
 }
@@ -40,14 +40,14 @@ pub fn validate_project_binding(
     binding: &ProjectTechnologyBinding,
 ) -> Result<(), TechnologyBindingError> {
     let pin = binding
-        .signed_package()
-        .ok_or(TechnologyBindingError::MissingSignedPackage)?;
+        .pdk_package()
+        .ok_or(TechnologyBindingError::MissingPdkPackage)?;
     validate_project_pin(packages, pin)
 }
 
 pub fn validate_project_pin(
     packages: &[ValidatedPdkTechnologyPackage],
-    pin: &ProjectSignedTechnologyPin,
+    pin: &ProjectPdkPackagePin,
 ) -> Result<(), TechnologyBindingError> {
     pin.validate()?;
     let package = packages
@@ -61,23 +61,23 @@ pub fn validate_project_pin(
                 && package.manifest_digest() == pin.manifest_digest()
                 && package.archive_digest() == pin.archive_digest()
         })
-        .ok_or_else(|| TechnologyBindingError::SignedPackageUnavailable {
+        .ok_or_else(|| TechnologyBindingError::PdkPackageUnavailable {
             package_id: pin.package_id().to_owned(),
             revision: pin.revision().to_owned(),
         })?;
-    let observed = ProjectSignedTechnologyPin::from_package_metadata(package.metadata())?;
+    let observed = ProjectPdkPackagePin::from_package_metadata(package.metadata())?;
     if &observed != pin {
-        return Err(TechnologyBindingError::SignedPackageMetadataDrift {
+        return Err(TechnologyBindingError::PdkPackageMetadataDrift {
             package_id: pin.package_id().to_owned(),
             revision: pin.revision().to_owned(),
         });
     }
     package
         .runtime_compatibility()
-        .map_err(TechnologyBindingError::SignedPackageRuntime)
+        .map_err(TechnologyBindingError::PdkPackageRuntime)
 }
 
-/// Check the live model catalog, signed runtime package and physical layouts for a project binding.
+/// Check the live model catalog, runtime PDK package and physical layouts for a project binding.
 pub fn validate_project_technology_inputs(
     binding: &ProjectTechnologyBinding,
     models: &rspice_model_library::ModelCatalog,
@@ -89,26 +89,26 @@ pub fn validate_project_technology_inputs(
 ) -> Result<(), String> {
     models.validate_attached_technology(Some(binding))?;
     validate_project_binding(packages, binding)
-        .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
-    let signed_pin = binding
-        .signed_package()
-        .expect("validated project technology has an exact signed package");
+        .map_err(|error| format!("PDK project binding is unavailable: {error}"))?;
+    let pdk_pin = binding
+        .pdk_package()
+        .expect("validated project technology has an exact PDK package");
     let package = packages
         .iter()
         .find(|package| {
             let manifest = package.manifest();
             manifest
                 .package_id
-                .eq_ignore_ascii_case(signed_pin.package_id())
-                && manifest.revision == signed_pin.revision()
-                && package.manifest_digest() == signed_pin.manifest_digest()
-                && package.archive_digest() == signed_pin.archive_digest()
+                .eq_ignore_ascii_case(pdk_pin.package_id())
+                && manifest.revision == pdk_pin.revision()
+                && package.manifest_digest() == pdk_pin.manifest_digest()
+                && package.archive_digest() == pdk_pin.archive_digest()
         })
-        .expect("validated signed project pin resolves to an exact package");
+        .expect("validated project PDK pin resolves to an exact package");
     let manifest = package.manifest();
     let database_unit =
         rspice_vocabulary::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
-            .map_err(|error| format!("Signed project PDK database unit is invalid: {error}"))?;
+            .map_err(|error| format!("Project PDK database unit is invalid: {error}"))?;
     let expected_layout_technology =
         rspice_design::physical_layout::LayoutTechnologyBinding::try_new(
             manifest.package_id.clone(),
@@ -119,7 +119,7 @@ pub fn validate_project_technology_inputs(
             manifest.stack_name.clone(),
             database_unit,
         )
-        .map_err(|error| format!("Signed project PDK layout authority is invalid: {error}"))?;
+        .map_err(|error| format!("Project PDK layout authority is invalid: {error}"))?;
     let allowed_layer_purposes = manifest
         .layers
         .iter()
@@ -138,7 +138,7 @@ pub fn validate_project_technology_inputs(
             .map_err(|error| format!("Physical layout '{key}' is invalid: {error}"))?;
         if document.technology() != &expected_layout_technology {
             return Err(format!(
-                "Physical layout '{key}' is bound to a different signed technology than the project"
+                "Physical layout '{key}' is bound to a different PDK technology than the project"
             ));
         }
         for (kind, id, layer, purpose) in document
@@ -165,7 +165,7 @@ pub fn validate_project_technology_inputs(
                 .contains(&(layer.to_ascii_lowercase(), purpose.to_ascii_lowercase()))
             {
                 return Err(format!(
-                    "Physical layout '{key}' {kind} {id} uses layer/purpose '{layer}/{purpose}' outside the exact signed project PDK"
+                    "Physical layout '{key}' {kind} {id} uses layer/purpose '{layer}/{purpose}' outside the exact project PDK"
                 ));
             }
         }
@@ -174,11 +174,11 @@ pub fn validate_project_technology_inputs(
 }
 
 impl super::PdkTechnologyRegistry {
-    pub fn project_signed_technology_package(
+    pub fn project_pdk_package(
         &self,
         binding: Option<&ProjectTechnologyBinding>,
     ) -> Result<Option<&ValidatedPdkTechnologyPackage>, String> {
-        super::project_signed_technology_package(self.validated_packages(), binding)
+        super::project_pdk_package(self.validated_packages(), binding)
     }
 
     pub fn validate_project_binding(

@@ -215,7 +215,7 @@ fn prepared_project_veriloga_runtime(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
-pub fn prepared_signed_pdk_veriloga_runtimes(
+pub fn prepared_pdk_veriloga_runtimes(
     sealed_models: &crate::model_sources::SealedModelExecutionSources,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some((package, archive_digest, artifacts, bindings)) =
@@ -226,13 +226,8 @@ pub fn prepared_signed_pdk_veriloga_runtimes(
     let runtimes = bindings
         .iter()
         .map(|binding| {
-            crate::veriloga::compile_signed_pdk_source_runtime(
-                package,
-                archive_digest,
-                artifacts,
-                binding,
-            )
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+            crate::veriloga::compile_pdk_source_runtime(package, archive_digest, artifacts, binding)
+                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
     crate::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)

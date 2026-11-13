@@ -266,7 +266,7 @@ pub trait SimulatePort {
 /// authoring holds unsaved work, the model it has selected, and each model's
 /// release gate.
 pub trait ModelsPort {
-    /// Whether the model editor or unsigned PDK authoring holds changes not
+    /// Whether the model editor or PDK authoring holds changes not
     /// yet saved.
     fn has_unsaved_authoring_changes(&self) -> bool;
     /// Whether the model editor's open candidate holds changes not yet saved.

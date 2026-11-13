@@ -18,7 +18,7 @@ fn publication_is_immutable_versioned_and_exactly_package_bound() {
     let (package, authority) = fixture();
     let mut registry = PdkDisplayProfileRegistry::default();
     let mut draft =
-        PdkDisplayProfileDraft::signed_defaults(package.metadata(), "layout-dark", "Layout dark");
+        PdkDisplayProfileDraft::package_defaults(package.metadata(), "layout-dark", "Layout dark");
     let first = registry
         .publish_and_activate(
             package.metadata(),
@@ -55,7 +55,7 @@ fn incomplete_or_foreign_layer_contract_fails_closed() {
     let (package, authority) = fixture();
     let mut registry = PdkDisplayProfileRegistry::default();
     let mut missing =
-        PdkDisplayProfileDraft::signed_defaults(package.metadata(), "layout-dark", "Layout dark");
+        PdkDisplayProfileDraft::package_defaults(package.metadata(), "layout-dark", "Layout dark");
     missing.entries.pop();
     assert!(matches!(
         registry.publish_and_activate(package.metadata(), missing, &authority, "missing row"),
@@ -63,7 +63,7 @@ fn incomplete_or_foreign_layer_contract_fails_closed() {
     ));
 
     let mut foreign =
-        PdkDisplayProfileDraft::signed_defaults(package.metadata(), "layout-dark", "Layout dark");
+        PdkDisplayProfileDraft::package_defaults(package.metadata(), "layout-dark", "Layout dark");
     foreign.entries[0].layer = "unknown".to_owned();
     assert!(matches!(
         registry.publish_and_activate(package.metadata(), foreign, &authority, "foreign row"),
@@ -81,7 +81,7 @@ fn unavailable_project_and_organization_scopes_fail_closed() {
         PdkDisplayProfileScope::Project,
         PdkDisplayProfileScope::Organization,
     ] {
-        let mut draft = PdkDisplayProfileDraft::signed_defaults(
+        let mut draft = PdkDisplayProfileDraft::package_defaults(
             package.metadata(),
             "layout-dark",
             "Layout dark",
@@ -106,7 +106,7 @@ fn rollback_requires_exact_previously_active_revision() {
     let (package, authority) = fixture();
     let mut registry = PdkDisplayProfileRegistry::default();
     let mut draft =
-        PdkDisplayProfileDraft::signed_defaults(package.metadata(), "layout-dark", "Layout dark");
+        PdkDisplayProfileDraft::package_defaults(package.metadata(), "layout-dark", "Layout dark");
     registry
         .publish_and_activate(
             package.metadata(),
@@ -146,7 +146,7 @@ fn tampered_revision_or_receipt_is_rejected() {
     registry
         .publish_and_activate(
             package.metadata(),
-            PdkDisplayProfileDraft::signed_defaults(
+            PdkDisplayProfileDraft::package_defaults(
                 package.metadata(),
                 "layout-dark",
                 "Layout dark",

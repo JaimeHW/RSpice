@@ -1,4 +1,4 @@
-//! Signed, content-addressed PDK technology-package administration.
+//! Content-addressed PDK technology-package administration.
 //!
 //! A configured model search path is not a technology package.  This module
 //! keeps those concepts separate and gives the PDK administration surface a
@@ -83,7 +83,7 @@ impl PdkTechnologyAuditReceipt {
     }
 }
 
-/// Persisted signed archives and administrative history.  `validated_packages`
+/// Persisted PDK archives and administrative history.  `validated_packages`
 /// is intentionally runtime-only: loading serialized state cannot restore
 /// validation.  Call `revalidate_installed` before any package can be
 /// activated or consumed.
@@ -91,7 +91,7 @@ impl PdkTechnologyAuditReceipt {
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyRegistry {
     #[serde(default)]
-    archives: Vec<SignedPdkTechnologyArchive>,
+    archives: Vec<PdkTechnologyArchive>,
     #[serde(default)]
     active: Option<PdkTechnologyBinding>,
     #[serde(default)]
@@ -109,26 +109,26 @@ impl PdkTechnologyRegistry {
     }
 
     #[must_use]
-    pub fn archives(&self) -> &[SignedPdkTechnologyArchive] {
+    pub fn archives(&self) -> &[PdkTechnologyArchive] {
         &self.archives
     }
 
-    /// Remove the signed archive payloads from a persistence clone while
+    /// Remove the PDK archive payloads from a persistence clone while
     /// retaining its bindings and audit history. Browser persistence stores
     /// these potentially large immutable payloads in a content-addressed
     /// object store instead of embedding them in one configuration record.
-    pub fn take_archives_for_browser_persistence(&mut self) -> Vec<SignedPdkTechnologyArchive> {
+    pub fn take_archives_for_browser_persistence(&mut self) -> Vec<PdkTechnologyArchive> {
         self.validated_packages.clear();
         self.validation_errors.clear();
         std::mem::take(&mut self.archives)
     }
 
-    /// Reattach exact signed archive payloads loaded from the browser object
+    /// Reattach exact PDK archive payloads loaded from the browser object
     /// store. This deliberately restores no runtime validation; the caller
     /// must run `revalidate_installed`.
     pub fn restore_archives_from_browser_persistence(
         &mut self,
-        archives: Vec<SignedPdkTechnologyArchive>,
+        archives: Vec<PdkTechnologyArchive>,
     ) -> Result<(), PdkTechnologyError> {
         if !self.archives.is_empty() {
             return Err(PdkTechnologyError::AuditCorrupted(
@@ -179,7 +179,7 @@ impl PdkTechnologyRegistry {
         })
     }
 
-    /// Seal the exact signed model-source closure named by a project pin.
+    /// Seal the exact PDK model-source closure named by a project pin.
     ///
     /// The project binding, manifest digest, archive digest, decoded artifact
     /// bytes, package-relative dependency graph, and process-section contract
@@ -351,7 +351,7 @@ impl PdkTechnologyRegistry {
             })
         }) {
             return Err(PdkTechnologyError::ImmutableRevision(format!(
-                "{} {} is already installed; signed revisions are immutable",
+                "{} {} is already installed; PDK revisions are immutable",
                 binding.package_id, binding.revision
             )));
         }
@@ -401,7 +401,7 @@ impl PdkTechnologyRegistry {
                     .find(|package| package.binding() == receipt.target)
                 else {
                     errors.push(format!(
-                        "receipt[{index}] references package {} {} that is not installed with its exact signed manifest",
+                        "receipt[{index}] references package {} {} that is not installed with its exact PDK manifest",
                         receipt.target.package_id, receipt.target.revision
                     ));
                     continue;
@@ -680,7 +680,7 @@ impl PdkTechnologyRegistry {
 }
 
 fn archive_identity(
-    archive: &SignedPdkTechnologyArchive,
+    archive: &PdkTechnologyArchive,
 ) -> Result<PdkTechnologyBinding, PdkTechnologyError> {
     let bytes = decode_bounded(
         "manifest_base64",

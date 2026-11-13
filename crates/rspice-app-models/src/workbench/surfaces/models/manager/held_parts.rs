@@ -67,7 +67,7 @@ pub(super) struct ShelfRow {
     pub(super) hit: PackModelHit,
     pub(super) origin: PartOrigin,
     /// The publisher's one line about this part, when the row came from a
-    /// signed manifest that carries one.
+    /// PDK manifest that carries one.
     pub(super) description: Option<String>,
     /// The headline specifications that manifest publishes, verbatim and with
     /// their units. Empty for every row whose definition did not come from one.
@@ -343,7 +343,7 @@ fn installed_row(pack: &InstalledPack, part: &rspice_pack::Part) -> ShelfRow {
             version: pack.version().to_owned(),
         },
         in_project: false,
-        // The one half of the shelf whose rows come from a signed manifest,
+        // The one half of the shelf whose rows come from a PDK manifest,
         // and therefore the one that can answer a spec column at all.
         description: part.description.clone(),
         specs: part.specs.clone(),

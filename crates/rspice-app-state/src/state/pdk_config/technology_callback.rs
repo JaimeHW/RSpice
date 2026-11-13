@@ -1,6 +1,6 @@
 //! Persisted callback contracts and application integration coverage.
 //!
-//! The simulation service owns execution of signed callbacks; project and
+//! The simulation service owns execution of PDK callbacks; project and
 //! registry transactions consume the canonical portable evidence records.
 
 pub use rspice_model_library::pdk::callback::{
@@ -17,7 +17,7 @@ mod tests {
     use rspice_model_library::pdk::content_digest;
     use rspice_model_library::pdk::contracts::PdkTechnologyBinding;
     use rspice_model_library::pdk::contracts::{
-        PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, SignedPdkTechnologyArchive,
+        PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkTechnologyArchive,
     };
     use std::collections::BTreeMap;
 
@@ -26,7 +26,7 @@ mod tests {
         capabilities: Vec<PdkCallbackCapability>,
     ) -> (Vec<u8>, PdkAdministrativeAuthority) {
         let (bytes, authority) = rspice_simulation::pdk::test_fixtures::fixture_archive();
-        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
         let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         let callback_bytes = wat::parse_str(wat_source).unwrap();
@@ -65,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_callback_executes_with_capabilities_and_verifiable_provenance() {
+    fn pdk_callback_executes_with_capabilities_and_verifiable_provenance() {
         let wat = r#"(module
             (import "rspice" "project_parameter_len" (func $len (param i32 i32) (result i32)))
             (import "rspice" "project_parameter_read" (func $read (param i32 i32 i32 i32) (result i32)))
@@ -131,21 +131,21 @@ mod tests {
     }
 
     #[test]
-    fn callback_import_without_signed_capability_is_rejected_at_install() {
+    fn callback_import_without_a_declared_capability_is_rejected_at_install() {
         let wat = r#"(module
             (import "rspice" "project_parameter_len" (func (param i32 i32) (result i32)))
             (memory (export "memory") 1 1)
             (func (export "derive") (result i32) i32.const 0))"#;
         let (bytes, authority) = callback_archive(wat, Vec::new());
-        let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
-        rspice_model_library::pdk::package::authenticate_archive(&archive)
+        let archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        rspice_model_library::pdk::package::verify_archive_contents(&archive)
             .expect("archive bytes are authentic");
         let mut registry = PdkTechnologyRegistry::default();
         let before = registry.clone();
         let error = registry
             .install_archive_bytes(&bytes, &authority, "Reject unauthorized import")
             .unwrap_err();
-        assert!(error.to_string().contains("requires signed capability"));
+        assert!(error.to_string().contains("requires undeclared capability"));
         assert!(registry.archives().is_empty());
         assert_eq!(
             registry, before,
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn callback_reads_only_exact_signed_package_bytes() {
+    fn callback_reads_only_exact_package_bytes() {
         let wat = r#"(module
             (import "rspice" "package_file_len" (func $len (param i32 i32) (result i32)))
             (import "rspice" "package_file_read" (func $read (param i32 i32 i32 i32) (result i32)))
@@ -219,7 +219,7 @@ mod tests {
                 (func (export "derive") (result i32) i32.const 0))"#,
             Vec::new(),
         );
-        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
         let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         manifest.schema_version = 2;

@@ -32,14 +32,14 @@ pub struct PdkConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_database_unit: Option<rspice_vocabulary::quantity::LayoutDatabaseUnit>,
 
-    /// Signed technology-package revisions, exact active binding, and
+    /// PDK technology-package revisions, exact active binding, and
     /// append-only administrative receipts. Persisted archives regain no
     /// runtime authority until revalidated.
     #[serde(default)]
     pub technology_registry: PdkTechnologyRegistry,
 
     /// Personal-device display overlays. Every immutable revision is bound to
-    /// an exact signed technology manifest and has its own hash-chained audit.
+    /// an exact PDK technology manifest and has its own hash-chained audit.
     /// Project and organization scopes remain fail-closed until their
     /// repository and policy authorities exist.
     #[serde(default)]

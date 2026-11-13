@@ -881,21 +881,17 @@ fn project_runtime() -> crate::veriloga::PreparedVerilogARuntime {
     compilation.prepare_runtime(project_id, &bundle).unwrap()
 }
 
-fn signed_pdk_runtime() -> crate::veriloga::PreparedVerilogARuntime {
+fn pdk_package_runtime() -> crate::veriloga::PreparedVerilogARuntime {
     let (archive, authority) = crate::pdk::test_fixtures::fixture_archive_with_veriloga();
     let mut registry = crate::pdk::PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(
-            &archive,
-            &authority,
-            "Prepare signed PDK runtime snapshot fixture",
-        )
+        .install_archive_bytes(&archive, &authority, "Prepare PDK runtime snapshot fixture")
         .unwrap();
     let package = registry.validated_packages()[0].clone();
     let sealed = registry
         .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
         .unwrap();
-    crate::veriloga::compile_signed_pdk_source_runtime(
+    crate::veriloga::compile_pdk_source_runtime(
         &sealed.as_parts().binding,
         sealed.as_parts().archive_digest,
         &sealed.as_parts().veriloga_artifacts,
@@ -997,22 +993,22 @@ fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
 }
 
 #[test]
-fn snapshot_binds_signed_pdk_veriloga_runtime_and_archive_provenance() {
-    let runtime = signed_pdk_runtime();
+fn snapshot_binds_pdk_veriloga_runtime_and_archive_provenance() {
+    let runtime = pdk_package_runtime();
     assert!(
         runtime
             .provenance_label()
-            .starts_with("signed-pdk-veriloga:__rspice_pdk__/")
+            .starts_with("pdk-veriloga:__rspice_pdk__/")
     );
     let directive = crate::netlist_preparation::project_veriloga_directive(
         runtime.source_key(),
         runtime.netlist_alias(),
     );
     let mut prepared = parts();
-    prepared.executable_netlist = format!("signed PDK runtime\n{directive}\n.op\n.end\n");
+    prepared.executable_netlist = format!("PDK runtime\n{directive}\n.op\n.end\n");
     prepared.project_veriloga_runtimes =
         crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
-    let snapshot = PreparedRunSnapshot::new(prepared).expect("signed runtime snapshot validates");
+    let snapshot = PreparedRunSnapshot::new(prepared).expect("PDK runtime snapshot validates");
     assert_eq!(snapshot.metadata().model_identity_count, 1);
 }
 

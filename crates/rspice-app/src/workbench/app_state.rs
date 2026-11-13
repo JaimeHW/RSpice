@@ -641,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_layout_initialization_uses_exact_signed_project_dbu_and_persists() {
+    fn physical_layout_initialization_uses_exact_project_dbu_and_persists() {
         let mut state = AppState::default();
         state.provision_test_project_technology_contract();
         let owner = crate::state::CellViewRef::new("user", "top", "layout");
@@ -659,7 +659,7 @@ mod tests {
         let revision = state
             .model
             .initialize_physical_layout_document(owner.clone())
-            .expect("initialize exact signed-PDK physical layout");
+            .expect("initialize exact PDK physical layout");
         let document = state
             .model
             .workspace
@@ -711,7 +711,7 @@ mod tests {
         let start = state
             .model
             .initialize_physical_layout_document(owner.clone())
-            .expect("initialize exact signed-PDK physical layout");
+            .expect("initialize exact PDK physical layout");
         state
             .model
             .library_manager
@@ -754,7 +754,7 @@ mod tests {
                     },
                 }],
             )
-            .expect("signed layer/purpose edit commits");
+            .expect("PDK layer/purpose edit commits");
         assert_eq!(committed, start.next().unwrap());
         assert!(
             state
@@ -812,9 +812,9 @@ mod tests {
                     },
                 }],
             )
-            .expect_err("layer outside exact signed PDK must fail closed");
+            .expect_err("layer outside exact PDK must fail closed");
         assert!(
-            error.contains("which the project's signed PDK does not define"),
+            error.contains("which the project's PDK does not define"),
             "{error}"
         );
         let unchanged = state
@@ -859,7 +859,7 @@ mod tests {
             .validate_project_technology_contract()
             .expect_err("project authority must reject imported package-foreign layers");
         assert!(
-            imported_error.contains("outside the exact signed project PDK"),
+            imported_error.contains("outside the exact project PDK"),
             "{imported_error}"
         );
     }

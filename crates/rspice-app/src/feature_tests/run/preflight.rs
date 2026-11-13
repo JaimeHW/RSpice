@@ -466,7 +466,7 @@ fn an_unaudited_technology_binding_blocks_on_reattachment_without_faking_drift()
     );
     assert!(
         !report.blockers.iter().any(|issue| {
-            issue.check == "Project model technology" || issue.check == "Project signed PDK"
+            issue.check == "Project model technology" || issue.check == "Project PDK"
         }),
         "the retained binding still resolves exactly: {:?}",
         report.blockers
@@ -484,7 +484,7 @@ fn a_valid_attached_technology_reports_no_technology_row_at_all() {
         !report.blockers.iter().any(|issue| {
             issue.check == "Project technology contract"
                 || issue.check == "Project model technology"
-                || issue.check == "Project signed PDK"
+                || issue.check == "Project PDK"
         }),
         "a valid contract is silent: {:?}",
         report.blockers

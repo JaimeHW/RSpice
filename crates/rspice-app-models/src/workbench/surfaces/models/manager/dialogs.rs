@@ -290,7 +290,7 @@ pub(super) fn render_dialog(
                 .collect::<Vec<_>>();
             let choice = Dialog::new("Author technology-symbol variant", "Author project variant")
             .description(format!(
-                "Copy the signed contract of {package_id}/{source_cell} into a writable project \
+                "Copy the PDK contract of {package_id}/{source_cell} into a writable project \
                  cell."
             ))
             .size(DialogSize::Transaction)
@@ -299,9 +299,9 @@ pub(super) fn render_dialog(
             .ghost("Cancel")
             .show_with_initial_body_focus(ui.ctx(), |ui| {
                 ui.label(
-                    "RSpice will copy the signed pin, netlist, and form definitions into one writable project cell. The signed implementation binding stays read-only.",
+                    "RSpice will copy the PDK pin, netlist, and form definitions into one writable project cell. The PDK implementation binding stays read-only.",
                 );
-                property(ui, "Source", &format!("{package_id}/{source_cell}"), "signed PDK");
+                property(ui, "Source", &format!("{package_id}/{source_cell}"), "PDK");
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label("Target library");

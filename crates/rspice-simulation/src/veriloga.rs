@@ -68,7 +68,7 @@ impl From<PreparedRuntimeError> for String {
 }
 
 /// Immutable, worker-transferable Verilog-A runtime bound to one exact sealed
-/// source identity. Project sources and signed PDK sources use disjoint,
+/// source identity. Project sources and PDK sources use disjoint,
 /// content-addressed virtual namespaces, so ambient files can never satisfy a
 /// prepared directive accidentally.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -208,7 +208,7 @@ impl PreparedVerilogARuntime {
         Ok(runtime)
     }
 
-    fn try_from_signed_pdk_compilation(
+    fn try_from_pdk_compilation(
         package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
         archive_digest: rspice_vocabulary::product::ContentDigest,
         binding: &crate::pdk::SealedPdkVerilogABinding,
@@ -361,7 +361,7 @@ impl<'a> PreparedVerilogASourceBinding<'a> {
     }
     pub fn provenance_label(&self) -> String {
         let authority = if self.source_key.starts_with("__rspice_pdk__/") {
-            "signed-pdk-veriloga"
+            "pdk-veriloga"
         } else if self.source_key.starts_with("__rspice_model_library__/") {
             "model-library-veriloga"
         } else {
@@ -570,7 +570,7 @@ impl PreparedVerilogARuntimeSet {
     }
 }
 
-pub fn compile_signed_pdk_source_runtime(
+pub fn compile_pdk_source_runtime(
     package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
     archive_digest: rspice_vocabulary::product::ContentDigest,
     artifacts: &[crate::pdk::SealedPdkVerilogAArtifact],
@@ -578,7 +578,7 @@ pub fn compile_signed_pdk_source_runtime(
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     if artifacts.is_empty() {
         return Err(PreparedRuntimeError::SourceIdentity(format!(
-            "Signed PDK Verilog-A source '{}' has no authenticated artifacts",
+            "PDK Verilog-A source '{}' has no authenticated artifacts",
             binding.source_id
         )));
     }
@@ -590,7 +590,7 @@ pub fn compile_signed_pdk_source_runtime(
         );
         if actual != artifact.digest {
             return Err(PreparedRuntimeError::SourceIdentity(format!(
-                "Signed PDK Verilog-A artifact '{}' no longer matches digest {}",
+                "PDK Verilog-A artifact '{}' no longer matches digest {}",
                 artifact.path, artifact.digest
             )));
         }
@@ -602,7 +602,7 @@ pub fn compile_signed_pdk_source_runtime(
                 || artifact.digest != binding.root_artifact_digest
             {
                 return Err(PreparedRuntimeError::SourceIdentity(format!(
-                    "Signed PDK Verilog-A root '{}' no longer matches its exact manifest identity",
+                    "PDK Verilog-A root '{}' no longer matches its exact manifest identity",
                     binding.root_artifact_path
                 )));
             }
@@ -615,14 +615,14 @@ pub fn compile_signed_pdk_source_runtime(
     }
     if !root_seen {
         return Err(PreparedRuntimeError::SourceIdentity(format!(
-            "Signed PDK Verilog-A root '{}' is absent from the authenticated closure",
+            "PDK Verilog-A root '{}' is absent from the authenticated closure",
             binding.root_artifact_path
         )));
     }
     let bundle = rspice_veriloga::VirtualSourceBundle::new(&binding.root_artifact_path, files)
         .map_err(|error| {
             PreparedRuntimeError::SourceBundle(format!(
-                "Signed PDK Verilog-A bundle '{}' is invalid: {error}",
+                "PDK Verilog-A bundle '{}' is invalid: {error}",
                 binding.source_id
             ))
         })?;
@@ -630,11 +630,11 @@ pub fn compile_signed_pdk_source_runtime(
         .compile_virtual_runtime(&bundle, &binding.module_name, pdk_virtual_compile_limits())
         .map_err(|error| {
             PreparedRuntimeError::Compile(format!(
-                "Could not compile signed PDK Verilog-A source '{}' module '{}': {error}",
+                "Could not compile PDK Verilog-A source '{}' module '{}': {error}",
                 binding.source_id, binding.module_name
             ))
         })?;
-    PreparedVerilogARuntime::try_from_signed_pdk_compilation(
+    PreparedVerilogARuntime::try_from_pdk_compilation(
         package,
         archive_digest,
         binding,

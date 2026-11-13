@@ -1,12 +1,12 @@
-//! Authenticate and compile the exact Verilog-A closure of a signed PDK.
+//! Authenticate and compile the exact Verilog-A closure of a PDK.
 //!
 //! Every declared source must be reachable from a runtime contract, and its
-//! bytes must still match the signed artifact before compilation or sealing.
+//! bytes must still match the declared artifact before compilation or sealing.
 
 use super::*;
 
 pub(super) fn seal_pdk_veriloga_sources(
-    archive: &SignedPdkTechnologyArchive,
+    archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
 ) -> Result<
     (
@@ -106,7 +106,7 @@ pub(super) fn seal_pdk_veriloga_sources(
         )
         .map_err(|error| {
             PdkTechnologyError::ModelMaterialization(format!(
-                "signed Verilog-A source bundle for '{}' is invalid: {error}",
+                "PDK Verilog-A source bundle for '{}' is invalid: {error}",
                 contract.source_id
             ))
         })?;
@@ -116,7 +116,7 @@ pub(super) fn seal_pdk_veriloga_sources(
         .compile_virtual_runtime(&bundle, &contract.module_name, limits)
         .map_err(|error| {
             PdkTechnologyError::ModelMaterialization(format!(
-                "signed Verilog-A source '{}' module '{}' could not be compiled: {error}",
+                "PDK Verilog-A source '{}' module '{}' could not be compiled: {error}",
                 contract.source_id, contract.module_name
             ))
         })?;
@@ -153,7 +153,7 @@ pub(super) fn seal_pdk_veriloga_sources(
         .collect::<Vec<_>>();
     if !unreachable.is_empty() {
         return Err(PdkTechnologyError::ModelMaterialization(format!(
-            "signed Verilog-A artifacts are unreachable from every declared runtime contract: {}",
+            "PDK Verilog-A artifacts are unreachable from every declared runtime contract: {}",
             unreachable.join(", ")
         )));
     }

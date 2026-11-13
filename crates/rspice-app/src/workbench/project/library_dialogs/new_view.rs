@@ -376,7 +376,7 @@ fn create_layout_cell_view(
         Ok(technology) => technology,
         Err(error) => {
             cx.state.new_view_error = Some(format!(
-                "A Layout view requires the project's validated, signed PDK: {error}"
+                "A Layout view requires the project's validated PDK: {error}"
             ));
             return false;
         }
@@ -1178,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn creating_layout_view_atomically_retains_exact_signed_pdk_document_and_opens_it() {
+    fn creating_layout_view_atomically_retains_exact_pdk_document_and_opens_it() {
         let mut app = RSpiceApp::test_instance();
         app.state.provision_test_project_technology_contract();
         let mut library = Library::new("layout_designs");
@@ -1228,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn creating_layout_view_without_exact_signed_project_pdk_is_transactional() {
+    fn creating_layout_view_without_exact_project_pdk_is_transactional() {
         let mut app = RSpiceApp::test_instance();
         let mut library = Library::new("layout_designs");
         library.add_cell(Cell::new("precision_amp"));
@@ -1269,7 +1269,7 @@ mod tests {
                 .project
                 .new_view_error
                 .as_deref()
-                .is_some_and(|error| error.contains("validated, signed PDK"))
+                .is_some_and(|error| error.contains("validated PDK"))
         );
     }
 
@@ -1555,7 +1555,7 @@ mod tests {
     }
 
     /// A cell of its own in an editable library, with New View open on it
-    /// to create a `view_type` view named `name`, under the project's signed
+    /// to create a `view_type` view named `name`, under the project's
     /// PDK when that is a Layout view.
     fn creating(view_type: ViewType, name: &str) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();

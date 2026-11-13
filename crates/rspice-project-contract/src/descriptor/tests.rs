@@ -16,7 +16,7 @@ fn technology_binding_fixture() -> ProjectTechnologyBinding {
         "source_edges": [],
         "model_count": 14,
         "process_sections": ["ff", "ss", "tt"],
-        "signed_package": null,
+        "pdk_package": null,
     }))
     .expect("technology binding fixture deserializes")
 }
@@ -198,11 +198,11 @@ fn project_copy_has_independent_identity_without_rebinding_source() {
 }
 
 #[test]
-fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_binding() {
+fn pdk_package_pin_is_strictly_validated_and_round_trips_with_the_project_binding() {
     let binding = technology_binding_fixture();
     let mut value = serde_json::to_value(&binding).expect("binding serializes");
-    value["signed_package"] = serde_json::json!({
-        "schema_version": PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+    value["pdk_package"] = serde_json::json!({
+        "schema_version": PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION,
         "package_id": "demo180",
         "revision": "2.3.1",
         "manifest_digest": rspice_vocabulary::product::ContentDigest::from_bytes([0x11; 32]),
@@ -214,8 +214,8 @@ fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_
         "execution_targets": ["desktop", "web-assembly", "mobile"]
     });
     let restored: ProjectTechnologyBinding =
-        serde_json::from_value(value.clone()).expect("strict signed pin deserializes");
-    restored.validate().expect("signed binding validates");
+        serde_json::from_value(value.clone()).expect("strict PDK pin deserializes");
+    restored.validate().expect("PDK binding validates");
     assert_eq!(
         serde_json::from_str::<ProjectTechnologyBinding>(
             &serde_json::to_string(&restored).expect("binding serializes")
@@ -224,12 +224,12 @@ fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_
         restored
     );
 
-    value["signed_package"]["execution_targets"] = serde_json::json!(["desktop", "desktop"]);
+    value["pdk_package"]["execution_targets"] = serde_json::json!(["desktop", "desktop"]);
     let duplicate_targets: ProjectTechnologyBinding =
         serde_json::from_value(value).expect("shape deserializes");
     assert!(matches!(
         duplicate_targets.validate(),
-        Err(TechnologyBindingError::InvalidSignedPackage(_))
+        Err(TechnologyBindingError::InvalidPdkPackage(_))
     ));
 }
 

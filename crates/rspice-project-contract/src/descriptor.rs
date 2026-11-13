@@ -1,15 +1,15 @@
 //! The project's own identity: its descriptor and its technology binding.
 //!
-//! A binding pins the model-source closure and, when a signed PDK is attached,
-//! the exact trusted package revision and content digests. Remote entitlement
+//! A binding pins the model-source closure and, when a PDK is attached,
+//! the exact validated package revision and content digests. Remote entitlement
 //! receipts remain a provider concern and are never inferred from local state.
 
 use crate::library_publication::ProjectLibraryPublicationReceipt;
 use rspice_design::library::ProjectLibraryMutation;
 use rspice_design_model::cell_view::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 pub use rspice_model_library::{
-    PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-    ProjectSignedTechnologyPin, ProjectTechnologyBinding, TechnologyBindingError,
+    PROJECT_PDK_PACKAGE_PIN_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+    ProjectPdkPackagePin, ProjectTechnologyBinding, TechnologyBindingError,
 };
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId, RevisionError};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
@@ -469,7 +469,7 @@ fn technology_binding_digest(
 fn migration_endpoint_matches_project_pin(
     endpoint: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
     archive_digest: ContentDigest,
-    pin: &ProjectSignedTechnologyPin,
+    pin: &ProjectPdkPackagePin,
 ) -> bool {
     endpoint.package_id.eq_ignore_ascii_case(pin.package_id())
         && endpoint.revision == pin.revision()
@@ -904,7 +904,7 @@ impl ProjectDescriptor {
         self.validate()
             .map_err(|error| format!("Project technology metadata is invalid: {error}"))?;
         let binding = self.technology_binding().ok_or_else(|| {
-            "Project has no exact authenticated model-source and signed PDK binding".to_owned()
+            "Project has no exact authenticated model-source and PDK binding".to_owned()
         })?;
         if self.technology_change_audit().is_empty() {
             return Err(
@@ -1180,13 +1180,13 @@ impl ProjectDescriptor {
         let before_pin = self
             .technology_binding
             .as_ref()
-            .and_then(ProjectTechnologyBinding::signed_package);
-        let after_pin = binding.signed_package();
-        let signed_revision_changed = before_pin != after_pin;
+            .and_then(ProjectTechnologyBinding::pdk_package);
+        let after_pin = binding.pdk_package();
+        let pin_revision_changed = before_pin != after_pin;
         match (
             before_pin,
             after_pin,
-            signed_revision_changed,
+            pin_revision_changed,
             context.migration_evidence.as_ref(),
         ) {
             (Some(before), Some(after), true, Some(evidence)) => {
@@ -1213,7 +1213,7 @@ impl ProjectDescriptor {
             }
             (_, _, false, Some(_)) | (None, _, _, Some(_)) => {
                 return Err(ProjectDescriptorError::InvalidTechnologyMigrationEvidence(
-                    "migration evidence was supplied for a transition without a prior differing signed revision"
+                    "migration evidence was supplied for a transition without a prior differing PDK revision"
                         .to_owned(),
                 ));
             }
@@ -1553,7 +1553,7 @@ pub enum ProjectDescriptorError {
     #[error("technology changes require an audited checkpoint-backed transaction")]
     TechnologyAuditRequired,
     #[error(
-        "technology change conflicts with physical layout {owner}; migrate or remove that layout before changing its exact signed PDK pin"
+        "technology change conflicts with physical layout {owner}; migrate or remove that layout before changing its exact PDK pin"
     )]
     TechnologyConflictsWithPhysicalLayout { owner: String },
     #[error("technology change is identical to the current project binding")]
@@ -1564,7 +1564,7 @@ pub enum ProjectDescriptorError {
     TechnologyCheckpointRevision { checkpoint: u64, current: u64 },
     #[error("technology checkpoint evidence is invalid: {0}")]
     InvalidTechnologyCheckpoint(String),
-    #[error("replacing a signed PDK revision requires exact reviewed migration evidence")]
+    #[error("replacing a PDK revision requires exact reviewed migration evidence")]
     MissingTechnologyMigrationEvidence,
     #[error("technology migration evidence is invalid: {0}")]
     InvalidTechnologyMigrationEvidence(String),

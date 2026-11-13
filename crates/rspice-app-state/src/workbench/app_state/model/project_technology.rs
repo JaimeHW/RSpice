@@ -9,7 +9,7 @@ use super::Model;
 
 impl Model {
     /// The reference-process cards a run of the active plan reads: the
-    /// libraries the plan binds, joined by the signed package while the
+    /// libraries the plan binds, joined by the PDK package while the
     /// project's technology is in effect. A technology failing its own
     /// contract has its own finding, so that failure answers nothing here.
     pub fn run_reference_model_cards(&self) -> Result<Vec<String>, String> {
@@ -33,7 +33,7 @@ impl Model {
             .validate_project_technology_contract()
     }
 
-    /// Resolve the exact signed project pin into the physical-layout unit and
+    /// Resolve the exact project PDK pin into the physical-layout unit and
     /// stack authority a new or imported Layout document must retain.
     pub fn exact_project_layout_technology_binding(
         &self,
@@ -42,7 +42,7 @@ impl Model {
         let manifest = package.manifest();
         let database_unit =
             crate::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
-                .map_err(|error| format!("Signed project PDK database unit is invalid: {error}"))?;
+                .map_err(|error| format!("Project PDK database unit is invalid: {error}"))?;
         crate::state::LayoutTechnologyBinding::try_new(
             manifest.package_id.clone(),
             manifest.revision.clone(),
@@ -52,20 +52,20 @@ impl Model {
             manifest.stack_name.clone(),
             database_unit,
         )
-        .map_err(|error| format!("Signed project PDK layout authority is invalid: {error}"))
+        .map_err(|error| format!("Project PDK layout authority is invalid: {error}"))
     }
 
     /// Resolve only the currently validated package selected by the exact
-    /// signed project pin. Administrative activation is deliberately ignored.
+    /// project PDK pin. Administrative activation is deliberately ignored.
     pub fn exact_project_pdk_package(&self) -> Result<&ValidatedPdkTechnologyPackage, String> {
         self.validate_project_technology_contract()?;
-        let signed_pin = self
+        let pdk_pin = self
             .workspace
             .content
             .project
             .technology_binding()
-            .and_then(crate::state::ProjectTechnologyBinding::signed_package)
-            .expect("validated project technology has an exact signed package");
+            .and_then(crate::state::ProjectTechnologyBinding::pdk_package)
+            .expect("validated project technology has an exact PDK package");
         self.pdk_config
             .technology_registry
             .validated_packages()
@@ -74,27 +74,25 @@ impl Model {
                 let manifest = package.manifest();
                 manifest
                     .package_id
-                    .eq_ignore_ascii_case(signed_pin.package_id())
-                    && manifest.revision == signed_pin.revision()
-                    && package.manifest_digest() == signed_pin.manifest_digest()
-                    && package.archive_digest() == signed_pin.archive_digest()
+                    .eq_ignore_ascii_case(pdk_pin.package_id())
+                    && manifest.revision == pdk_pin.revision()
+                    && package.manifest_digest() == pdk_pin.manifest_digest()
+                    && package.archive_digest() == pdk_pin.archive_digest()
             })
             .ok_or_else(|| {
-                "The signed PDK package the project is pinned to is no longer available".to_owned()
+                "The PDK package the project is pinned to is no longer available".to_owned()
             })
     }
 
-    /// Resolve the exact currently trusted signed package pinned by this
+    /// Resolve the exact currently validated PDK package pinned by this
     /// project for read-only workspace overlays.
-    pub fn project_signed_technology_package(
-        &self,
-    ) -> Result<Option<&ValidatedPdkTechnologyPackage>, String> {
+    pub fn project_pdk_package(&self) -> Result<Option<&ValidatedPdkTechnologyPackage>, String> {
         self.pdk_config
             .technology_registry
-            .project_signed_technology_package(self.workspace.content.project.technology_binding())
+            .project_pdk_package(self.workspace.content.project.technology_binding())
     }
 
-    /// Execute one signed PDK callback for the exact package pinned by the
+    /// Execute one PDK callback for the exact package pinned by the
     /// project and commit its evidence as one project revision transaction.
     ///
     /// Inputs are the validated active simulation-plan variables normalized to
@@ -131,13 +129,13 @@ impl Model {
             .project
             .technology_binding()
             .expect("validated project technology has an exact binding");
-        let signed_pin = project_binding
-            .signed_package()
-            .expect("validated project technology has an exact signed package");
+        let pdk_pin = project_binding
+            .pdk_package()
+            .expect("validated project technology has an exact PDK package");
         let package_binding = crate::state::pdk_config::PdkTechnologyBinding {
-            package_id: signed_pin.package_id().to_owned(),
-            revision: signed_pin.revision().to_owned(),
-            manifest_digest: signed_pin.manifest_digest(),
+            package_id: pdk_pin.package_id().to_owned(),
+            revision: pdk_pin.revision().to_owned(),
+            manifest_digest: pdk_pin.manifest_digest(),
         };
         let plan = self.sim_setup.stable_analysis_plan().map_err(|error| {
             format!("Project callback requires an authoritative active simulation plan: {error}")
@@ -173,11 +171,11 @@ impl Model {
             .technology_registry
             .execute_callback_for_binding(
                 &package_binding,
-                signed_pin.archive_digest(),
+                pdk_pin.archive_digest(),
                 callback_id,
                 &input,
             )
-            .map_err(|error| format!("Signed PDK callback execution was rejected: {error}"))?;
+            .map_err(|error| format!("PDK callback execution was rejected: {error}"))?;
         let receipt = self
             .workspace
             .content
@@ -189,7 +187,7 @@ impl Model {
                 input,
                 execution,
             )
-            .map_err(|error| format!("Signed PDK callback result was not recorded: {error}"))?;
+            .map_err(|error| format!("PDK callback result was not recorded: {error}"))?;
 
         self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
