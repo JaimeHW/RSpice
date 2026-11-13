@@ -354,11 +354,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         // 42 of them one ulp earlier or later, every grid point within
         // 6.5e-21 s of where it was, and QDIV and OUT within 1.6e-14 V and
         // 8.1e-13 V point for point.
-        Pinned::Whole(Fingerprint {
+        //
+        // Re-measured on Linux x64 when the transient stopped carrying a
+        // nodal floor: the same 1760 points, grid 0x1b27_94c5_580c_3f52 ->
+        // 0xeb89_2010_5782_1df1. This deck's grid already differed on macOS
+        // ARM64 before that change, so the value is the one CI's Linux jobs
+        // measure, and it pins the point count and grid alone: the voltage
+        // hash is a pin per platform.
+        Pinned::Grid {
             points: 1760,
-            grid_hash: 0x1b27_94c5_580c_3f52,
-            volt_hash: 0xda44_3766_4b2b_a734,
-        }),
+            grid_hash: 0xeb89_2010_5782_1df1,
+        },
     ),
     (
         "an_activation_inside_the_breakpoint_merge_tolerance_is_delivered",
