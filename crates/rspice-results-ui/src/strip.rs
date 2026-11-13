@@ -200,6 +200,7 @@ pub struct StripHeader<'a> {
     removable: std::ops::Range<usize>,
     pane_actions: bool,
     incomplete: Option<&'a str>,
+    id_salt: egui::Id,
 }
 
 impl<'a> StripHeader<'a> {
@@ -216,7 +217,18 @@ impl<'a> StripHeader<'a> {
             removable: usize::MAX..usize::MAX,
             pane_actions: true,
             incomplete: None,
+            id_salt: egui::Id::new(kind),
         }
+    }
+
+    /// Name this header among the others its parent draws: the analysis a
+    /// strip shows, say. The legend keeps its own scroll position, and two
+    /// headers drawn side by side in one parent with the same name would share
+    /// it. A header that is the only one in its parent can keep the default,
+    /// its kind tag.
+    pub fn id_salt(mut self, salt: impl std::hash::Hash + std::fmt::Debug) -> Self {
+        self.id_salt = egui::Id::new(salt);
+        self
     }
 
     /// Mark this strip's evidence as less than a complete run, with the
@@ -426,7 +438,7 @@ impl<'a> StripHeader<'a> {
         );
         legend_ui.set_clip_rect(legend_rect);
         egui::ScrollArea::horizontal()
-            .id_salt(legend_ui.id().with("strip.legend"))
+            .id_salt(self.id_salt.with("strip.legend"))
             .max_width(layout.legend.width)
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -736,5 +748,52 @@ mod tests {
         assert_eq!(base, 22.0);
         assert_eq!(close, 45.0);
         assert_eq!(zoomed, 82.0);
+    }
+
+    /// Two strips drawn one above the other in one parent, as a pane's stack
+    /// draws two analyses, keep their legends' scroll positions apart. Named
+    /// after its parent alone, each legend took the same ID as the other, egui
+    /// merged their scrolling and painted its clash warning over both.
+    #[test]
+    fn two_strips_in_one_parent_scroll_their_legends_apart() {
+        const SIZE: egui::Vec2 = vec2(640.0, 120.0);
+        let chips = [LegendChip {
+            name: "V(out)",
+            color: egui::Color32::from_rgb(0x4c, 0x9a, 0xff),
+            on: true,
+        }];
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(
+                ctx.run_ui(rspice_ui_kit::raster::display_input(SIZE, 1.0), |ui| {
+                    for analysis in ["tran", "ac"] {
+                        ui.allocate_ui_with_layout(
+                            vec2(SIZE.x, 40.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                StripHeader::new("TRAN", "", &chips)
+                                    .id_salt(analysis)
+                                    .show(ui);
+                            },
+                        );
+                    }
+                }),
+            );
+        }
+        let output = output.expect("a frame ran");
+        let texts = rspice_ui_kit::raster::text_contrasts(&ctx, SIZE, &output);
+        assert_eq!(
+            texts.iter().filter(|text| text.text == "V(out)").count(),
+            2,
+            "both legends are drawn"
+        );
+        let clashes: Vec<&str> = texts
+            .iter()
+            .map(|text| text.text.as_str())
+            .filter(|text| text.contains(" use of "))
+            .collect();
+        assert!(clashes.is_empty(), "egui reports an ID clash: {clashes:?}");
     }
 }

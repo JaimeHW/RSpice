@@ -492,6 +492,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             .session()
                             .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
+                            .id_salt(model.analysis_key)
                             .incomplete(model.incomplete)
                             .maximized(maximized)
                             .closable(pane_chrome && !maximized && n > 1)
