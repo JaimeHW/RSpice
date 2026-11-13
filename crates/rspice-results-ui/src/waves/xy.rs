@@ -316,6 +316,9 @@ const SECONDARY_RATIO: f32 = 1.4 / 1.8;
 
 /// One curve as the pane draws it.
 struct Curve {
+    /// The strip trace the curve draws, which places it in its family; an
+    /// expression has none.
+    trace: Option<usize>,
     name: String,
     color: egui::Color32,
     palette_slot: Option<usize>,
@@ -503,6 +506,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         };
         let range = window(&data, window_range);
         curves.push(Curve {
+            trace: Some(index),
             name: trace.name.clone(),
             color: trace.color,
             palette_slot: trace
@@ -532,6 +536,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         };
         let range = window(&data, window_range);
         curves.push(Curve {
+            trace: None,
             name: expr.label.clone(),
             color: expr.color,
             palette_slot: None,
@@ -612,11 +617,100 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         spec = spec.with_log_y();
     }
     spec.minor_grid = host.session().show_minor_grid;
-    for curve in curves
+    // The hover readout reads the point nearest the pointer, on screen.
+    let plot_rect = plot::plot_rect(ui, &spec);
+    let to_screen = |x: f64, y: f64| {
+        egui::pos2(
+            plot_rect.left() + (XScale::Linear.normalize(x, x0, x1) as f32) * plot_rect.width(),
+            plot_rect.bottom() - (y_scale.normalize(y, y0, y1) as f32) * plot_rect.height(),
+        )
+    };
+    let pointer = ui
+        .input(|input| input.pointer.hover_pos())
+        .filter(|position| plot_rect.contains(*position) && ui.rect_contains_pointer(plot_rect));
+    let nearest = pointer.and_then(|position| {
+        let mut best: Option<(usize, usize, f32)> = None;
+        for (index, curve) in curves.iter().enumerate() {
+            let stride = (curve.range.len() / 20_000).max(1);
+            for sample in (0..curve.range.len()).step_by(stride) {
+                let distance = to_screen(curve.x()[sample], curve.y()[sample]).distance(position);
+                if distance.is_finite() && best.is_none_or(|(.., held)| distance < held) {
+                    best = Some((index, sample, distance));
+                }
+            }
+        }
+        best.filter(|(.., distance)| *distance <= 24.0)
+            .map(|(curve, sample, _)| (curve, sample))
+    });
+    // A family too large to stroke member by member is drawn as the band it
+    // occupies, with the member the reader points at stroked over it, as the
+    // panes drawn against the sweep draw it.
+    let family_members: Vec<(usize, &StripTrace)> = curves
         .iter()
-        .filter(|curve| curve.overlay)
-        .chain(curves.iter().filter(|curve| !curve.overlay))
-    {
+        .enumerate()
+        .filter_map(|(index, curve)| Some((index, model.traces.get(curve.trace?)?)))
+        .collect();
+    let families = super::pane::family_bands(&family_members);
+    let mut banded = std::collections::HashSet::new();
+    if !families.is_empty() {
+        let view = plot::TraceView {
+            x0,
+            x1,
+            y0,
+            y1,
+            x_scale: XScale::Linear,
+            y_scale,
+            columns: (plot_rect.width().ceil().max(0.0) as usize).next_multiple_of(64),
+            rows: 0,
+        };
+        let mut bands = Vec::with_capacity(families.len());
+        for family in &families {
+            let identity = stable_hash(
+                &family
+                    .members
+                    .iter()
+                    .map(|(index, _)| {
+                        let curve = &curves[*index];
+                        (curve.cache_key, curve.range.start, curve.range.end)
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let members: Vec<plot::BandMember<'_>> = family
+                .members
+                .iter()
+                .map(|(index, _)| plot::BandMember {
+                    x: curves[*index].x(),
+                    y: curves[*index].y(),
+                    parametric: true,
+                    shape: None,
+                })
+                .collect();
+            let color = family.members[0].1.signal_color;
+            bands.push((
+                host.session_mut().cache.band(identity, &members, view),
+                if family.overlay {
+                    color.gamma_multiply(0.40)
+                } else {
+                    color
+                },
+            ));
+            banded.extend(family.members.iter().map(|(index, _)| *index));
+        }
+        let band_range = (y0, y1);
+        spec.underlay = Some(Box::new(move |painter, mapper| {
+            super::pane::paint_family_bands(painter, mapper.rect, &bands, y_scale, band_range);
+        }));
+    }
+    let highlighted = nearest
+        .map(|(index, _)| index)
+        .filter(|index| !curves[*index].overlay);
+    let stroked = |index: usize| !banded.contains(&index) || highlighted == Some(index);
+    let order: Vec<usize> = (0..curves.len())
+        .filter(|index| curves[*index].overlay)
+        .chain((0..curves.len()).filter(|index| !curves[*index].overlay))
+        .filter(|index| stroked(*index))
+        .collect();
+    for curve in order.iter().map(|index| &curves[*index]) {
         let color = if curve.overlay {
             curve.color.gamma_multiply(0.40)
         } else {
@@ -667,7 +761,12 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     ] {
         let Some(at) = position else { continue };
         let mut tagged = false;
-        for curve in &curves {
+        for curve in curves
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| stroked(*index))
+            .map(|(_, curve)| curve)
+        {
             let Some((x, y)) = point_at(curve, at, interpolation) else {
                 continue;
             };
@@ -687,31 +786,6 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         }
     }
 
-    // The hover readout reads the point nearest the pointer, on screen.
-    let plot_rect = plot::plot_rect(ui, &spec);
-    let to_screen = |x: f64, y: f64| {
-        egui::pos2(
-            plot_rect.left() + (XScale::Linear.normalize(x, x0, x1) as f32) * plot_rect.width(),
-            plot_rect.bottom() - (y_scale.normalize(y, y0, y1) as f32) * plot_rect.height(),
-        )
-    };
-    let pointer = ui
-        .input(|input| input.pointer.hover_pos())
-        .filter(|position| plot_rect.contains(*position) && ui.rect_contains_pointer(plot_rect));
-    let nearest = pointer.and_then(|position| {
-        let mut best: Option<(usize, usize, f32)> = None;
-        for (index, curve) in curves.iter().enumerate() {
-            let stride = (curve.range.len() / 20_000).max(1);
-            for sample in (0..curve.range.len()).step_by(stride) {
-                let distance = to_screen(curve.x()[sample], curve.y()[sample]).distance(position);
-                if distance.is_finite() && best.is_none_or(|(.., held)| distance < held) {
-                    best = Some((index, sample, distance));
-                }
-            }
-        }
-        best.filter(|(.., distance)| *distance <= 24.0)
-            .map(|(curve, sample, _)| (curve, sample))
-    });
     let readout_rows: Vec<(String, String)> = nearest
         .map(|(index, sample)| {
             let curve = &curves[index];
@@ -770,7 +844,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     // Sparse arrowheads along each curve, and its start filled and its end
     // hollow, as the polar locus marks its sweep.
     let painter = ui.painter().with_clip_rect(response.plot_rect);
-    for curve in &curves {
+    for curve in order.iter().map(|index| &curves[*index]) {
         let color = if curve.overlay {
             curve.color.gamma_multiply(0.40)
         } else {

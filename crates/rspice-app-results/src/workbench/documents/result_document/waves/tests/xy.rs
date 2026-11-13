@@ -208,6 +208,50 @@ fn a_lissajous_figure_carries_arrows_the_way_time_runs() {
     }
 }
 
+/// A family drawn against a signal follows the family-only band rule: past
+/// 64 members its loops fold into the one band they occupy, and no member
+/// is stroked with its arrows while the reader points at none; at 50 every
+/// member is stroked and carries its own.
+#[test]
+fn a_large_family_drawn_against_a_signal_is_drawn_as_its_band() {
+    let draw = |members: usize| {
+        let mut state = super::frame_cost::family_of_signals(members, 200, &["V(in)", "V(out)"]);
+        // The workspace picks the viewer a corner family is read in.
+        crate::workbench::documents::result_document::prepare_viewer_state(
+            &mut state.results_parts(),
+        );
+        draw_against(&mut state, "V(in)");
+        let color = super::lanes::strip(&mut state)[0]
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name == "V(out)")
+            .expect("the family plots V(out)")
+            .color;
+        let ctx = theme_context();
+        let before = state.results.results.session.cache.work();
+        frame(&ctx, &mut state, Vec::new());
+        let rebuilds = state
+            .results
+            .results
+            .session
+            .cache
+            .work()
+            .since(before)
+            .rebuilds;
+        let arrows = arrowheads(&frame(&ctx, &mut state, Vec::new()), color).len();
+        (rebuilds, arrows)
+    };
+    let (rebuilds, arrows) = draw(100);
+    assert!(
+        rebuilds <= 2,
+        "a hundred loops fold into one band, not {rebuilds} strokes"
+    );
+    assert_eq!(arrows, 0, "no member of the band is stroked");
+    let (rebuilds, arrows) = draw(50);
+    assert!(rebuilds >= 50, "fifty loops are each stroked: {rebuilds}");
+    assert!(arrows >= 50, "each of fifty loops carries arrows: {arrows}");
+}
+
 /// Cursor A at a quarter period stands where sin(ωt) = 1: its tag reads the
 /// instant, V(a) = 1 V and V(b) = sin(π/2 + π/3) = 500 mV, the closed form.
 #[test]

@@ -70,11 +70,21 @@ fn transient_in_units(traces: usize, samples: usize, units: &[&str]) -> ResultsT
 /// Each member has its own gain and phase, as [`crowded_transient`]'s curves
 /// do, so the members overlap the way a real family's do.
 fn family_of(members: usize, samples: usize) -> ResultsTestHost {
+    family_of_signals(members, samples, &["V(out)"])
+}
+
+/// [`family_of`] answering every one of `signals`, each a quarter period
+/// behind the one before it, so any two of them trace a loop.
+pub(super) fn family_of_signals(
+    members: usize,
+    samples: usize,
+    signals: &[&str],
+) -> ResultsTestHost {
     let step = 20.0 / samples as f64;
     let rows = members * samples;
-    let (mut x, mut y, mut temperatures) = (
+    let (mut x, mut ys, mut temperatures) = (
         Vec::with_capacity(rows),
-        Vec::with_capacity(rows),
+        vec![Vec::with_capacity(rows); signals.len()],
         Vec::with_capacity(rows),
     );
     for member in 0..members {
@@ -83,7 +93,10 @@ fn family_of(members: usize, samples: usize) -> ResultsTestHost {
         let phase = 0.4 * spread;
         for index in 0..samples {
             x.push(index as f64 * 1.0e-3);
-            y.push(gain * (index as f64).mul_add(step, phase).sin());
+            for (lag, y) in ys.iter_mut().enumerate() {
+                let behind = lag as f64 * std::f64::consts::FRAC_PI_2;
+                y.push(gain * (index as f64).mul_add(step, phase - behind).sin());
+            }
             temperatures.push(member as f64);
         }
     }
@@ -91,9 +104,15 @@ fn family_of(members: usize, samples: usize) -> ResultsTestHost {
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Corner, "PVT")
-            .with_waveforms(vec![
-                RetainedTrace::new("V(out)", x.clone(), y, "#00aaff").with_unit("V"),
-            ])
+            .with_waveforms(
+                signals
+                    .iter()
+                    .zip(ys)
+                    .map(|(name, y)| {
+                        RetainedTrace::new(*name, x.clone(), y, "#00aaff").with_unit("V")
+                    })
+                    .collect(),
+            )
             .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
                 member_measurements: Vec::new(),
                 x_values: x,

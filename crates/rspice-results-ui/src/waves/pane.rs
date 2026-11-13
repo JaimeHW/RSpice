@@ -314,13 +314,13 @@ const SECONDARY_TRACE_RATIO: f32 = 1.4 / 1.8;
 /// every frame: five hundred Monte Carlo trials were 6.6 million vertices and
 /// 80 ms a frame to tessellate before a single one of them could be told
 /// apart. Sixty-four curves still stroke inside one 60 Hz frame on a laptop.
-const FAMILY_BAND_MEMBERS: usize = 64;
+pub(crate) const FAMILY_BAND_MEMBERS: usize = 64;
 
 /// The members of one family in a pane, when there are too many to stroke one
 /// by one.
-struct FamilyBand<'a> {
-    members: Vec<(usize, &'a StripTrace)>,
-    overlay: bool,
+pub(crate) struct FamilyBand<'a> {
+    pub(crate) members: Vec<(usize, &'a StripTrace)>,
+    pub(crate) overlay: bool,
 }
 
 /// Whether two curves are members of one family: the same quantity of the
@@ -341,7 +341,7 @@ fn same_family(member: &StripTrace, trace: &StripTrace) -> bool {
 /// one band however many share a pane: a band says its members are one
 /// quantity spread by what varied between them, which is false of unrelated
 /// node voltages, so they are always stroked one by one.
-fn family_bands<'a>(pane_traces: &[(usize, &'a StripTrace)]) -> Vec<FamilyBand<'a>> {
+pub(crate) fn family_bands<'a>(pane_traces: &[(usize, &'a StripTrace)]) -> Vec<FamilyBand<'a>> {
     let mut families: Vec<FamilyBand<'a>> = Vec::new();
     for &(index, trace) in pane_traces {
         if trace.family_group_ordinal.is_none() {
@@ -364,7 +364,7 @@ fn family_bands<'a>(pane_traces: &[(usize, &'a StripTrace)]) -> Vec<FamilyBand<'
 
 /// Paint each family's band under the curves, through the same projection the
 /// renderer strokes curves with.
-fn paint_family_bands(
+pub(crate) fn paint_family_bands(
     painter: &egui::Painter,
     rect: egui::Rect,
     bands: &[(Arc<[[f64; 2]]>, egui::Color32)],
