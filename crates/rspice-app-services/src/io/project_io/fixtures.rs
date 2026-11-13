@@ -64,9 +64,9 @@ pub fn seal_prepared_run(
 
 pub fn project_with_execution_context() -> ProjectSnapshot {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
-    let ac = AnalysisKind::Ac.legacy_index();
-    let noise = AnalysisKind::Noise.legacy_index();
-    let transient = AnalysisKind::Transient.legacy_index();
+    let ac = AnalysisKind::Ac.singleton_index();
+    let noise = AnalysisKind::Noise.singleton_index();
+    let transient = AnalysisKind::Transient.singleton_index();
 
     let mut design_libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
@@ -128,12 +128,37 @@ pub fn project_with_execution_context() -> ProjectSnapshot {
     model_library.add_model(model);
     model_manager.add_library(model_library);
 
-    // Exercise the deterministic singleton-to-instance migration while
-    // retaining every legacy fixture edit above.
-    setup.analysis_plan = None;
-    setup
-        .migrate_legacy_analysis_plan(workspace.content.project.id())
-        .expect("legacy execution fixture migrates at the load boundary");
+    // The plan carries the singleton edits above: the enabled analyses in
+    // their authored order, then every other kind disabled.
+    let plan_id = setup
+        .stable_analysis_plan()
+        .expect("a new setup has a plan")
+        .id();
+    let revision = ObjectRevision::INITIAL;
+    let authored = [noise, transient, ac];
+    let instances = authored
+        .into_iter()
+        .chain((0..AnalysisKind::ALL.len()).filter(|index| !authored.contains(index)))
+        .map(|index| {
+            let kind = AnalysisKind::from_singleton_index(index).expect("every index names a kind");
+            rspice_simulation_contract::plan_model::AnalysisInstance::supplied(
+                crate::product::AnalysisInstanceId::new(),
+                kind,
+                setup.legacy_analysis_draft(kind),
+                setup.enabled.contains(&index),
+                Vec::new(),
+                revision,
+                revision,
+            )
+            .expect("fixture instance is valid")
+        })
+        .collect();
+    let mut plan = rspice_simulation_contract::plan_model::SimulationPlan::from_ordered_instances(
+        plan_id, revision, instances,
+    )
+    .expect("fixture plan is valid");
+    plan.prepare_after_restore();
+    setup.analysis_plan = Some(plan);
     let execution_context = crate::io::capture_execution_context(&setup, &model_manager)
         .expect("execution fixture validates");
     ProjectSnapshot::new_with_execution_context(

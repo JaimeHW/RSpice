@@ -4,11 +4,9 @@ use std::collections::HashMap;
 
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::product::{AnalysisInstanceId, DesignVariableId, ObjectRevision};
-use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
 use crate::design_variable_quantity::{DesignVariableQuantity, parse_design_quantity};
-use crate::saved_output::{deserialize_or_migrate_identity, missing_identity_sentinel};
 use rspice_vocabulary::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
@@ -93,10 +91,11 @@ impl DesignVariableOverridePolicy {
 }
 
 /// Persisted, typed simulation-plan parameter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DesignVariable {
     pub id: DesignVariableId,
+    #[serde(default)]
     pub revision: ObjectRevision,
     pub name: String,
     pub expression: String,
@@ -288,66 +287,6 @@ impl DesignVariable {
                 .ok_or(*analysis_id)?;
         }
         Ok(cloned)
-    }
-}
-
-const LEGACY_DESIGN_VARIABLE_ID_NAMESPACE: Uuid =
-    Uuid::from_u128(0x3c56_6c65_03dc_5e65_b66c_a4d4_86dc_8d53);
-
-impl<'de> Deserialize<'de> for DesignVariable {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            #[serde(default = "missing_identity_sentinel")]
-            id: serde_json::Value,
-            #[serde(default)]
-            revision: ObjectRevision,
-            name: String,
-            expression: String,
-            quantity: DesignVariableQuantity,
-            scope: DesignVariableScope,
-            #[serde(default)]
-            description: String,
-            #[serde(default)]
-            allowed_range: Option<DesignVariableRange>,
-            sweep_eligibility: DesignVariableSweepEligibility,
-            override_policy: DesignVariableOverridePolicy,
-        }
-
-        let wire = Wire::deserialize(deserializer)?;
-        let identity = serde_json::to_vec(&(
-            &wire.name,
-            &wire.expression,
-            wire.quantity,
-            &wire.scope,
-            &wire.description,
-            &wire.allowed_range,
-            wire.sweep_eligibility,
-            wire.override_policy,
-        ))
-        .map_err(D::Error::custom)?;
-        let id = deserialize_or_migrate_identity::<DesignVariableId, D::Error>(
-            wire.id,
-            LEGACY_DESIGN_VARIABLE_ID_NAMESPACE,
-            &identity,
-            DesignVariableId::from_namespace,
-        )?;
-        Ok(Self {
-            id,
-            revision: wire.revision,
-            name: wire.name,
-            expression: wire.expression,
-            quantity: wire.quantity,
-            scope: wire.scope,
-            description: wire.description,
-            allowed_range: wire.allowed_range,
-            sweep_eligibility: wire.sweep_eligibility,
-            override_policy: wire.override_policy,
-        })
     }
 }
 

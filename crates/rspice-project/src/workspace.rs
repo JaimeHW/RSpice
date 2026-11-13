@@ -22,7 +22,6 @@ use rspice_vocabulary::product::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use uuid::Uuid;
 mod annotation_restore;
 pub use annotation_restore::PreparedAnnotation;
 mod catalog;
@@ -82,14 +81,12 @@ pub struct ProjectWorkspace {
     pub open_views: Vec<OpenCellView>,
     /// Masters on the active document's occurrence, outermost first — a
     /// runtime projection of `open_views[active].occurrence`, never the place
-    /// it is stored. Deserialized so a save written before documents owned
-    /// their occurrence can be folded onto the document it described, and
-    /// never serialized back.
-    #[serde(default, skip_serializing)]
+    /// it is stored.
+    #[serde(skip)]
     pub hierarchy_stack: Vec<CellViewRef>,
     /// Instance names on the same occurrence, aligned with
     /// `hierarchy_stack[1..]`, and a projection for the same reason.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub hierarchy_instances: Vec<String>,
     pub schematic_buffers: HashMap<String, rspice_design::schematic::owned::Schematic>,
     /// Measurement specifications for the results specs matrix. Project

@@ -6,7 +6,7 @@ use rspice_vocabulary::product::AnalysisInstanceId;
 fn new_setup() -> SimulationSetupDocument {
     SimulationSetupDocument {
         analysis_plan: Some(SimulationPlan::new()),
-        run_set: crate::legacy_plan_migration::default_global_run_set(),
+        run_set: crate::run_set::RunSetState::reference_only(),
         ..SimulationSetupDocument::default()
     }
 }

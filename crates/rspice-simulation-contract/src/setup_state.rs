@@ -1,14 +1,13 @@
 //! Portable setup restoration and compatibility state around the saved document.
 //!
-//! The document remains the only serialized authority. Legacy projections are
-//! retained for migration and consumers that still require singleton drafts.
+//! The document remains the only serialized authority. Singleton projections
+//! are rebuilt from it for consumers that still read singleton drafts.
 
 mod legacy_projection;
 #[cfg(test)]
 mod tests;
 
-use crate::drafts::{AcSetup, DcSetup, TranSetup};
-use crate::legacy_plan_migration::{NoiseSetup, default_global_run_set};
+use crate::drafts::{AcSetup, DcSetup, NoiseSetup, TranSetup};
 use crate::plan_catalog::{
     SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
     SimulationPlanImportDocument,
@@ -82,8 +81,6 @@ pub struct SimulationSetup {
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
     pub listed: BTreeSet<usize>,
-    /// One-shot evidence retained when a legacy run-set declaration is superseded.
-    pub legacy_run_set_notes: Vec<String>,
 }
 
 impl std::ops::Deref for SimulationSetup {
@@ -108,85 +105,13 @@ impl serde::Serialize for SimulationSetup {
 
 impl<'de> serde::Deserialize<'de> for SimulationSetup {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let read = <crate::setup_document::legacy_read::LegacySimulationSetupRead as serde::Deserialize>::deserialize(deserializer)?;
-        let crate::setup_document::legacy_read::LegacySimulationSetupRead {
-            reference_pvt,
-            run_set,
-            model_bindings,
-            save_policy,
-            active_plan_name,
-            active_plan_lineage,
-            inactive_plans,
-            analysis_plan,
-            options,
-            enabled,
-            analysis_order,
-            tran,
-            ac,
-            disto_f2_over_f1,
-            dc,
-            noise,
-            op,
-            pz,
-            sens,
-            mc,
-            pss,
-            stb,
-            temp,
-            hb,
-            sp,
-            pac,
-            pnoise,
-            pxf,
-            pstb,
-            xf,
-            corner,
-            envelope,
-            fourier,
-            optimization,
-            soa,
-            listed,
-        } = read;
+        let document =
+            <crate::setup_document::SimulationSetupDocument as serde::Deserialize>::deserialize(
+                deserializer,
+            )?;
         Ok(Self {
-            document: crate::setup_document::SimulationSetupDocument {
-                reference_pvt,
-                run_set,
-                model_bindings,
-                save_policy,
-                active_plan_name,
-                active_plan_lineage,
-                inactive_plans,
-                analysis_plan,
-                options,
-            },
-            enabled,
-            analysis_order,
-            tran,
-            ac,
-            disto_f2_over_f1,
-            dc,
-            noise,
-            op,
-            pz,
-            sens,
-            mc,
-            pss,
-            stb,
-            temp,
-            hb,
-            sp,
-            pac,
-            pnoise,
-            pxf,
-            pstb,
-            xf,
-            corner,
-            envelope,
-            fourier,
-            optimization,
-            soa,
-            listed,
-            legacy_run_set_notes: Vec::new(),
+            document,
+            ..Self::default()
         })
     }
 }
@@ -198,16 +123,16 @@ impl SimulationSetup {
     pub fn new() -> Self {
         let mut setup = Self::default();
         setup.document.analysis_plan = Some(crate::plan_model::SimulationPlan::new());
-        setup.document.run_set = default_global_run_set();
+        setup.document.run_set = crate::run_set::RunSetState::reference_only();
         setup
             .set_reference_pvt(rspice_vocabulary::product::ProcessCorner::TT, 27.0)
             .expect("the built-in reference PVT point is valid");
         setup
             .enabled
-            .insert(crate::analysis_kind::AnalysisKind::Transient.legacy_index());
+            .insert(crate::analysis_kind::AnalysisKind::Transient.singleton_index());
         setup
             .analysis_order
-            .push(crate::analysis_kind::AnalysisKind::Transient.legacy_index());
+            .push(crate::analysis_kind::AnalysisKind::Transient.singleton_index());
         setup
     }
 

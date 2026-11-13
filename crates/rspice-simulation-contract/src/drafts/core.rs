@@ -185,3 +185,30 @@ pub struct DistoDraft {
     /// Empty or `auto` selects single-tone harmonic distortion.
     pub f2_over_f1: String,
 }
+
+/// The singleton noise projection of the active plan's noise analysis.
+#[derive(Debug, Clone)]
+pub struct NoiseSetup {
+    /// Output node.
+    pub output: String,
+    /// Reference node (0 = ground).
+    pub reference: String,
+    /// Input source.
+    pub input: String,
+    /// Start frequency.
+    pub fstart: String,
+    /// Stop frequency.
+    pub fstop: String,
+}
+
+impl Default for NoiseSetup {
+    fn default() -> Self {
+        Self {
+            output: "out".to_owned(),
+            reference: "0".to_owned(),
+            input: "V1".to_owned(),
+            fstart: "1".to_owned(),
+            fstop: "100Meg".to_owned(),
+        }
+    }
+}

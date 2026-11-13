@@ -22,7 +22,7 @@ impl SimSetupState {
         {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
-        projection.validation_error(draft.legacy_index())
+        projection.validation_error(draft.singleton_index())
     }
 
     /// Render the existing concise summary from one exact instance draft.
@@ -36,6 +36,6 @@ impl SimSetupState {
         {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
-        projection.summary(draft.legacy_index())
+        projection.summary(draft.singleton_index())
     }
 }

@@ -319,7 +319,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
         let execution_warnings = match de.execution_context {
-            Some(context) => match crate::io::restore_execution_context(*context, project_id) {
+            Some(context) => match crate::io::restore_execution_context(*context) {
                 Ok((simulation_plan, model_library_manager, warnings)) => {
                     state.model.sim_setup = simulation_plan;
                     state.model.model_library_manager = model_library_manager;

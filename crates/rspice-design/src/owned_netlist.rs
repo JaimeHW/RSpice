@@ -326,7 +326,6 @@ pub struct OwnedNetlistDescriptor {
     /// Stable project identity for this top-level deck. This identity follows
     /// the deck across logical rename/move operations and remains distinct when
     /// a deck is duplicated.
-    #[serde(default)]
     pub deck_id: Uuid,
     pub artifact_name: String,
     pub strategy: OwnedNetlistEditStrategy,

@@ -1302,7 +1302,7 @@ pub(super) fn rollback_project_library_publication(
     let project_id = artifact.file.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) =
         match artifact.file.execution_context.take() {
-            Some(context) => crate::io::restore_execution_context(context, project_id).map_err(|error| {
+            Some(context) => crate::io::restore_execution_context(context).map_err(|error| {
                 format!("project library rollback execution context is invalid: {error}")
             })?,
             None => (

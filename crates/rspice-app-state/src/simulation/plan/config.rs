@@ -239,9 +239,9 @@ mod tests {
         for (index, kind) in AnalysisKind::ALL.into_iter().enumerate() {
             let draft = AnalysisDraft::for_kind(kind);
             assert_eq!(draft.kind(), kind);
-            assert_eq!(draft.legacy_index(), index);
+            assert_eq!(draft.singleton_index(), index);
             assert_eq!(
-                AnalysisKind::from_legacy_index(index)
+                AnalysisKind::from_singleton_index(index)
                     .map(AnalysisDraft::for_kind)
                     .expect("known index")
                     .kind(),
@@ -250,7 +250,7 @@ mod tests {
             let value = serde_json::to_value(&draft).expect("draft serializes");
             assert_eq!(value["kind"], kind.stable_id());
         }
-        assert!(AnalysisKind::from_legacy_index(AnalysisKind::ALL.len()).is_none());
+        assert!(AnalysisKind::from_singleton_index(AnalysisKind::ALL.len()).is_none());
     }
 
     #[test]

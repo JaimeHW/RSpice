@@ -387,11 +387,10 @@ impl super::WorkspaceSession {
                 active_view_type,
             ));
         }
-        // Restore paths that never run project migration — session restore —
-        // reach the occurrence model only here. On a live workspace this is an
-        // identity, because the projection already mirrors the active
-        // document.
-        content.adopt_breadcrumb_for_active_document();
+        // Session restore reaches the occurrence model only here. On a live
+        // workspace this is an identity, because the projection already
+        // mirrors the active document.
+        content.restore_occurrences();
 
         if is_schematic_like(active_view_type) {
             let key = content.active_key();
@@ -560,48 +559,6 @@ mod tests {
                 .all(|open| open.reference.cell != "gone" && open.reference.cell != "child"),
             "a document whose root is gone has no occurrence left, so it closes"
         );
-    }
-
-    #[test]
-    fn a_legacy_breadcrumb_migrates_onto_the_document_it_described() {
-        let mut workspace = ProjectWorkspace::default();
-        let root = workspace.content.active_view.clone();
-        workspace.open_view(master("afe"), ViewType::Schematic);
-        workspace.content.hierarchy_stack = vec![root.clone(), master("afe")];
-        workspace.content.hierarchy_instances = vec!["XAFE".to_owned()];
-
-        assert!(workspace.content.migrate_document_occurrences().is_none());
-        assert_eq!(workspace.content.occurrence_path().to_string(), "/XAFE");
-        assert_eq!(workspace.content.active_view, master("afe"));
-        assert_eq!(
-            workspace
-                .content
-                .active_occurrence()
-                .map(|occurrence| &occurrence.root),
-            Some(&root)
-        );
-    }
-
-    #[test]
-    fn disagreeing_legacy_arrays_keep_the_shorter_prefix_and_warn() {
-        let mut workspace = ProjectWorkspace::default();
-        let root = workspace.content.active_view.clone();
-        workspace.open_view(master("afe"), ViewType::Schematic);
-        workspace.open_view(master("bias"), ViewType::Schematic);
-        workspace.content.hierarchy_stack = vec![root, master("afe"), master("bias")];
-        workspace.content.hierarchy_instances = vec!["XAFE".to_owned()];
-
-        let warning = workspace
-            .content
-            .migrate_document_occurrences()
-            .expect("a breadcrumb that cannot be spelled owes the reader a warning");
-        assert!(warning.contains("1 level"), "{warning}");
-        assert_eq!(
-            workspace.content.occurrence_path().to_string(),
-            "/XAFE",
-            "the level with no instance name is dropped, never invented"
-        );
-        assert_eq!(workspace.content.active_view, master("afe"));
     }
 
     /// A crossing contract and a hand-placed connector must produce the same

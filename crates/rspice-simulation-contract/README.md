@@ -20,7 +20,7 @@ vocabulary.
 | Module | Contents |
 | :--- | :--- |
 | `analysis_kind` | `AnalysisKind`: `ALL` and `MANIFEST_ORDER`, the stable serialized IDs (`stable_id`, `from_stable_id`), labels, categories, availability and prerequisites |
-| `setup_document`, `setup_state`, `legacy_plan_migration` | `SimulationSetupDocument`, the plan state a project saves, and `SimulationSetup`, which restores it together with the compatibility projections older consumers read; deterministic migration of schema-3 singleton plans |
+| `setup_document`, `setup_state` | `SimulationSetupDocument`, the plan state a project saves, and `SimulationSetup`, which restores it together with the singleton projections older consumers read |
 | `plan_model`, `plan_catalog`, `plan_dependency`, `plan_payload`, `plan_diagnostics`, `analysis_lifecycle`, `analysis_run_at` | `SimulationPlan`, the revisioned plan of analysis instances with typed dependencies, lifecycle receipts and per-instance run-space participation; named plans and clone lineage; per-plan payloads; what a plan refuses and reports |
 | `analysis_draft`, `drafts` and the `*_draft` modules | `AnalysisDraft`, the persisted draft of one analysis instance, over the draft modules behind it (`drafts` for AC, DC, transient, noise, distortion, FFT, DC mismatch and transient noise, then `op_draft`, `pss_draft`, `hb_draft`, `mc_draft`, `soa_draft` and the rest) |
 | `analysis_spec`, `analysis_spec_values`, `analysis_run_type`, `config` | `AnalysisSpec`, the portable typed specification of one analysis in a multi-run job, and the validation that refuses one the engine cannot execute; `AnalysisConfig`, typed fields, validation and card generation for the classic SPICE analyses |

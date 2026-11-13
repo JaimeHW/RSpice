@@ -45,7 +45,7 @@ pub type AcDraft = AcSetup;
 /// Drafts intentionally retain strings rather than parsed engine values so a
 /// project can round-trip an in-progress edit without silently rewriting it.
 /// The enum tag is the stable analysis ID; legacy numeric indices are resolved
-/// through [`AnalysisKind::from_legacy_index`] before a draft is constructed.
+/// through [`AnalysisKind::from_singleton_index`] before a draft is constructed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "draft")]
 pub enum AnalysisDraft {
@@ -373,10 +373,10 @@ impl AnalysisDraft {
         }
     }
 
-    /// Current singleton-model index, for deterministic migration only.
+    /// This draft's kind's singleton index.
     #[must_use]
-    pub const fn legacy_index(&self) -> usize {
-        self.kind().legacy_index()
+    pub const fn singleton_index(&self) -> usize {
+        self.kind().singleton_index()
     }
 
     /// Restore runtime-only lazy initialization sentinels after deserialization.

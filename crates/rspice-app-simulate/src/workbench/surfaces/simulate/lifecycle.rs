@@ -18,13 +18,13 @@ pub(super) fn resolve_active_analysis_instance(
     state: &mut SimulateState,
 ) -> Result<(), String> {
     let current = state.active_analysis_instance;
-    let legacy_index = state.active_analysis;
+    let index = state.active_analysis;
     let resolved = {
         let plan = model.sim_setup.stable_analysis_plan()?;
         match current {
             Some(id) if plan.instance(id).is_some() => Some(id),
             Some(_) => plan.instances().first().map(|instance| instance.id()),
-            None => AnalysisKind::from_legacy_index(legacy_index)
+            None => AnalysisKind::from_singleton_index(index)
                 .and_then(|kind| {
                     plan.instances()
                         .iter()

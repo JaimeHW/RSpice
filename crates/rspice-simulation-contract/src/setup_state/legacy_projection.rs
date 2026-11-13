@@ -1,14 +1,13 @@
-//! Exact migration and singleton projections for portable simulation setup.
+//! Singleton projections for portable simulation setup.
 
 use super::SimulationSetup;
 use crate::analysis_draft::AnalysisDraft;
 use crate::analysis_kind::AnalysisKind;
-use crate::drafts::{DistoDraft, NoiseDraft};
-use crate::legacy_plan_migration::NoiseSetup;
+use crate::drafts::{DistoDraft, NoiseDraft, NoiseSetup};
 use crate::plan_model::{
     AnalysisInstance, FrozenAnalysisInstance, FrozenSimulationPlan, SimulationPlan,
 };
-use rspice_vocabulary::product::{AnalysisInstanceId, ProjectId};
+use rspice_vocabulary::product::AnalysisInstanceId;
 use std::collections::HashSet;
 
 impl SimulationSetup {
@@ -35,68 +34,7 @@ impl SimulationSetup {
             .any(|instance| instance.kind() == kind)
     }
 
-    /// Fold every pre-unification Corner run space into the plan-global one.
-    ///
-    /// Both shapes a project can carry one in are handled: the schema-3
-    /// singleton corner state, and the Corner drafts of a stable analysis plan.
-    /// The singleton goes first, because a schema-3 project has no plan yet and
-    /// its corner state is the only declaration it has.
-    ///
-    /// Where the plan-global set is empty the legacy space becomes it, so a
-    /// project keeps running the space it was saved with. Where both declare a
-    /// space and they differ, the plan-global one wins — it is the one the Run
-    /// Set page edits and every other analysis already crosses — and the
-    /// declaration that lost is written to [`SimulationSetup::legacy_run_set_notes`]
-    /// rather than vanishing.
-    fn adopt_legacy_corner_run_sets(&mut self) {
-        let mut notes = Vec::new();
-
-        if let Some(note) = self
-            .corner
-            .adopt_legacy_run_set(&mut self.document.run_set)
-            .dropped_declaration_note()
-        {
-            notes.push(note);
-        }
-        if let Some(plan) = &mut self.document.analysis_plan {
-            for (shown_as, migration) in
-                plan.adopt_legacy_corner_run_sets(&mut self.document.run_set)
-            {
-                if let Some(note) = migration.dropped_declaration_note() {
-                    notes.push(format!("{shown_as}: {note}"));
-                }
-            }
-        }
-
-        self.legacy_run_set_notes = notes;
-    }
-
-    /// Deterministically migrate the schema-3 singleton layout into stable,
-    /// project-scoped analysis identities. Replaying the same legacy project
-    /// bytes produces the same plan and instance IDs.
-    pub fn migrate_legacy_analysis_plan(&mut self, project_id: ProjectId) -> Result<bool, String> {
-        // A project saved before the run space had one owner carries a second
-        // declaration inside its Corner drafts. Fold it in here, on the one
-        // path every load takes, so the space a plan runs is settled before
-        // anything validates, edits or executes against it.
-        self.adopt_legacy_corner_run_sets();
-        if let Some(plan) = &mut self.analysis_plan {
-            plan.prepare_after_restore();
-            return Ok(false);
-        }
-
-        let plan = crate::legacy_plan_migration::migrate_schema3_analysis_plan(
-            project_id,
-            &self.enabled,
-            &self.listed,
-            &self.analysis_order,
-            |kind| self.legacy_analysis_draft(kind),
-        )?;
-        self.analysis_plan = Some(plan);
-        Ok(true)
-    }
-
-    /// Stable plan access used by preflight and presentation after migration.
+    /// Stable plan access used by preflight and presentation.
     pub fn stable_analysis_plan(&self) -> Result<&SimulationPlan, String> {
         self.analysis_plan.as_ref().ok_or_else(|| {
             "simulation plan has not been migrated to stable analysis-instance identity".to_owned()
@@ -130,7 +68,7 @@ impl SimulationSetup {
         self.analysis_order.clear();
         self.listed.clear();
         for (enabled, draft) in &drafts {
-            let index = draft.legacy_index();
+            let index = draft.singleton_index();
             self.listed.insert(index);
             if *enabled {
                 self.enabled.insert(index);
@@ -390,8 +328,8 @@ impl SimulationSetup {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
         projection.enabled.clear();
-        projection.enabled.insert(instance.kind().legacy_index());
-        projection.analysis_order = vec![instance.kind().legacy_index()];
+        projection.enabled.insert(instance.kind().singleton_index());
+        projection.analysis_order = vec![instance.kind().singleton_index()];
         Ok(projection)
     }
 }

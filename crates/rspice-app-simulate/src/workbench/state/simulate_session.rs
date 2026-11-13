@@ -62,7 +62,7 @@ impl SpecificationEvidenceFilter {
 }
 
 pub const fn default_analysis_index() -> usize {
-    rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.legacy_index()
+    rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.singleton_index()
 }
 
 /// Immutable regression comparison receipt retained only for the active

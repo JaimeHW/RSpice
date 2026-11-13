@@ -920,7 +920,6 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
         .expect("draft syntax is validated by run preflight, not project loading");
     let (plan, _, _) = crate::io::restore_execution_context(
         loaded.file.execution_context.expect("context retained"),
-        loaded.file.workspace.project.id(),
     )
     .expect("context enters application state");
 
@@ -1956,7 +1955,6 @@ mod document_occurrence;
 mod executed_deck;
 mod failure_attribution;
 mod hierarchy_map;
-mod hierarchy_reference;
 mod instance_masters;
 mod migration;
 mod model_source_receipt;

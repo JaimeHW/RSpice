@@ -1,13 +1,10 @@
 //! Stable persisted simulation setup document.
 //!
-//! Only these nine plan fields are written to new projects. Schema-3 singleton
-//! drafts are read by the dedicated legacy adapter and retained in portable
-//! setup compatibility state until projected into the stable analysis plan.
+//! Only these nine plan fields are written to a project, and only they are read
+//! back.
 
 mod catalog;
-pub mod legacy_read;
 
-use crate::legacy_plan_migration::default_global_run_set;
 use crate::output_policy::SimulationSavePolicy;
 use crate::plan_catalog::StoredSimulationPlan;
 use crate::plan_model::SimulationPlan;
@@ -25,7 +22,6 @@ pub struct SimulationSetupDocument {
     /// This is deliberately independent of the legacy Corner analysis draft:
     /// the Run Set page configures where the whole plan executes, while a
     /// Corner analysis remains an analysis instance with its own base mode.
-    #[serde(default = "default_global_run_set")]
     pub run_set: RunSetState,
     /// Ordered, content-pinned model libraries consumed by this plan.
     /// Absence is an explicit empty closure; execution never falls back to

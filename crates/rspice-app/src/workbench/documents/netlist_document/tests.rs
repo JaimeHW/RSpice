@@ -1707,24 +1707,6 @@ fn top_deck_lifecycle_rejects_a_stale_document_revision() {
     );
 }
 
-#[test]
-fn legacy_top_deck_identity_migration_is_deterministic() {
-    let mut first = owned_dependency_state().model.workspace;
-    first.content.netlist_descriptor.as_mut().unwrap().deck_id = uuid::Uuid::nil();
-    let mut second = first.clone();
-
-    first.content.migrate_owned_netlist_deck_ids();
-    second.content.migrate_owned_netlist_deck_ids();
-
-    let first_id = first.content.netlist_descriptor.as_ref().unwrap().deck_id;
-    assert!(!first_id.is_nil());
-    assert_eq!(
-        first_id,
-        second.content.netlist_descriptor.as_ref().unwrap().deck_id
-    );
-    first.content.validate_simulation_configuration().unwrap();
-}
-
 /// The deck a run consumed is not the deck in the editor: opening the snapshot
 /// must project the sealed bytes, and the working source must survive intact.
 #[test]

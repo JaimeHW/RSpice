@@ -257,8 +257,9 @@ impl AnalysisKind {
         }
     }
 
-    /// Legacy singleton configuration index. This is migration metadata only.
-    pub const fn legacy_index(self) -> usize {
+    /// Index of this kind in [`Self::ALL`], which the singleton setup
+    /// projection and the analysis pickers use.
+    pub const fn singleton_index(self) -> usize {
         match self {
             Self::OperatingPoint => 0,
             Self::Transient => 1,
@@ -715,8 +716,8 @@ impl AnalysisKind {
         }
     }
 
-    /// Resolve a legacy singleton index without inventing a fallback kind.
-    pub const fn from_legacy_index(index: usize) -> Option<Self> {
+    /// Resolve a singleton index without inventing a fallback kind.
+    pub const fn from_singleton_index(index: usize) -> Option<Self> {
         if index < Self::ALL.len() {
             Some(Self::ALL[index])
         } else {
@@ -794,8 +795,8 @@ mod tests {
     fn stable_ids_indices_and_serde_are_bijective() {
         let mut ids = std::collections::HashSet::new();
         for (index, kind) in AnalysisKind::ALL.into_iter().enumerate() {
-            assert_eq!(kind.legacy_index(), index);
-            assert_eq!(AnalysisKind::from_legacy_index(index), Some(kind));
+            assert_eq!(kind.singleton_index(), index);
+            assert_eq!(AnalysisKind::from_singleton_index(index), Some(kind));
             assert_eq!(AnalysisKind::from_stable_id(kind.stable_id()), Some(kind));
             assert!(ids.insert(kind.stable_id()));
             assert_eq!(
@@ -804,7 +805,7 @@ mod tests {
             );
         }
         assert_eq!(ids.len(), AnalysisKind::ALL.len());
-        assert_eq!(AnalysisKind::from_legacy_index(35), None);
+        assert_eq!(AnalysisKind::from_singleton_index(35), None);
         assert_eq!(AnalysisKind::from_stable_id("AC"), None);
         assert_eq!(AnalysisKind::from_stable_id("reliability"), None);
         assert!(serde_json::from_str::<AnalysisKind>(r#""reliability""#).is_err());

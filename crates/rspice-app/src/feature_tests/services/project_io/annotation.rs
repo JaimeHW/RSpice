@@ -442,11 +442,9 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
 }
 
 fn annotation_session(project: &ProjectSnapshot) -> AppState {
-    let (sim_setup, model_library_manager, _) = crate::io::restore_execution_context(
-        project.file.execution_context.clone().unwrap(),
-        project.file.workspace.project.id(),
-    )
-    .unwrap();
+    let (sim_setup, model_library_manager, _) =
+        crate::io::restore_execution_context(project.file.execution_context.clone().unwrap())
+            .unwrap();
     let workspace = ProjectWorkspace::from_parts(
         project.file.workspace.clone(),
         project.workspace_session.clone(),

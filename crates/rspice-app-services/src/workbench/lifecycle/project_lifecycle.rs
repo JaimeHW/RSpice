@@ -1639,9 +1639,8 @@ pub fn revert_document_model(
                     "accepted project has no model catalog".to_owned(),
                 )
             })?;
-            let (_, manager, warnings) =
-                crate::io::restore_execution_context(context, baseline_project_id)
-                    .map_err(ProjectLifecycleError::InvalidState)?;
+            let (_, manager, warnings) = crate::io::restore_execution_context(context)
+                .map_err(ProjectLifecycleError::InvalidState)?;
             state.model.model_library_manager = manager;
             for warning in warnings {
                 state

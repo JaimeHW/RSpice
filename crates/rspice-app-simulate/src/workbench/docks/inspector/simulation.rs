@@ -102,7 +102,7 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, inspector: &mut SimulateInspec
         .stable_analysis_plan()
         .ok()
         .and_then(|plan| {
-            let legacy_kind = crate::simulation::plan::AnalysisKind::from_legacy_index(
+            let legacy_kind = crate::simulation::plan::AnalysisKind::from_singleton_index(
                 *inspector.active_analysis,
             );
             plan.instances()
@@ -130,7 +130,7 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, inspector: &mut SimulateInspec
         return false;
     };
     *inspector.active_analysis_instance = Some(id);
-    *inspector.active_analysis = kind.legacy_index();
+    *inspector.active_analysis = kind.singleton_index();
 
     let validation_error = inspector
         .model

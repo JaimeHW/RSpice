@@ -88,7 +88,7 @@ impl SimulationPlan {
                     .push(AnalysisDependency::new(prerequisite, target));
                 instance
                     .dependencies
-                    .sort_by_key(|dependency| dependency.prerequisite().legacy_index());
+                    .sort_by_key(|dependency| dependency.prerequisite().singleton_index());
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -401,7 +401,7 @@ impl SimulationPlan {
                 instance.dependencies.push(dependency);
                 instance
                     .dependencies
-                    .sort_by_key(|dependency| dependency.prerequisite().legacy_index());
+                    .sort_by_key(|dependency| dependency.prerequisite().singleton_index());
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft

@@ -527,7 +527,7 @@ fn request_analysis_run(
         invalidate_plan_bound_preflight(cx);
     }
     if let Some((kind, id)) = selected {
-        cx.state.active_analysis = kind.legacy_index();
+        cx.state.active_analysis = kind.singleton_index();
         cx.state.active_analysis_instance = Some(id);
     }
     {
@@ -571,7 +571,7 @@ fn open_analysis_configuration(
         cx.model.sim_setup = setup;
         invalidate_plan_bound_preflight(cx);
     }
-    cx.state.active_analysis = kind.legacy_index();
+    cx.state.active_analysis = kind.singleton_index();
     cx.state.active_analysis_instance = Some(id);
     cx.wb.activate(super::super::state::Workspace::Simulate);
     Ok(())

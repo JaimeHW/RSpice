@@ -55,17 +55,25 @@ fn current_schema_rejects_every_retired_singleton_analysis_field() {
             .expect("baseline context validates");
     let baseline = serde_json::to_value(context).expect("context serializes");
 
-    for field in RETIRED_SINGLETON_ANALYSIS_FIELDS {
+    for field in [
+        "enabled",
+        "analysis_order",
+        "tran",
+        "ac",
+        "noise",
+        "corner",
+        "listed",
+    ] {
         let mut value = baseline.clone();
         value["simulation_plan"]
             .as_object_mut()
             .expect("simulation plan is an object")
-            .insert((*field).to_owned(), serde_json::Value::Null);
+            .insert(field.to_owned(), serde_json::Value::Null);
         let error = serde_json::from_value::<ProjectExecutionContext>(value)
             .expect_err("current schema must reject retired singleton input")
             .to_string();
         assert!(
-            error.contains(&format!("retired singleton field `{field}`")),
+            error.contains(&format!("unknown field `{field}`")),
             "{error}"
         );
     }

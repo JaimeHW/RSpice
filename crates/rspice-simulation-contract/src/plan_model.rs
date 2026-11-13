@@ -1114,34 +1114,6 @@ impl SimulationPlan {
         self.restore_study_solver_options();
     }
 
-    /// Fold every restored Corner draft's pre-unification run space into the
-    /// plan's one declaration, reporting each instance that carried one.
-    ///
-    /// Restore-time migration, deliberately not an `edit`: adopting a second
-    /// declaration is not an authored change, so it moves no revision and
-    /// leaves no lifecycle receipt. Instances are named the way every other
-    /// refusal and receipt names them — the shown name, with the identity
-    /// beside it — because a reader told that "a corner analysis" lost its run
-    /// space cannot tell which one when the plan holds two.
-    pub fn adopt_legacy_corner_run_sets(
-        &mut self,
-        global: &mut crate::run_set::RunSetState,
-    ) -> Vec<(String, crate::corner_draft::CornerRunSetMigration)> {
-        use crate::corner_draft::CornerRunSetMigration;
-
-        let mut migrations = Vec::new();
-        for instance in &mut self.instances {
-            let shown_as = format!("{} ({})", instance.display_name(), instance.id);
-            if let AnalysisDraft::Corner(corner) = &mut instance.draft {
-                match corner.adopt_legacy_run_set(global) {
-                    CornerRunSetMigration::Nothing => {}
-                    migration => migrations.push((shown_as, migration)),
-                }
-            }
-        }
-        migrations
-    }
-
     /// All deterministic validation diagnostics, including unresolved required
     /// prerequisites that are legal while a plan is being assembled.
     #[must_use]
@@ -2099,7 +2071,7 @@ impl SimulationPlan {
             .enumerate()
             .map(|(index, instance)| {
                 let mut dependencies = instance.dependencies.clone();
-                dependencies.sort_by_key(|dependency| dependency.prerequisite().legacy_index());
+                dependencies.sort_by_key(|dependency| dependency.prerequisite().singleton_index());
                 FrozenAnalysisInstance {
                     order: index + 1,
                     id: instance.id,

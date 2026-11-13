@@ -1,4 +1,4 @@
-//! Per-document occurrences, navigation projections and legacy migration.
+//! Per-document occurrences and navigation projections.
 
 use super::*;
 use rspice_design::occurrence::{DocumentOccurrence, OccurrencePrune};
@@ -209,80 +209,12 @@ impl ProjectWorkspace {
         self.project_active_occurrence();
     }
 
-    /// The occurrence a session-global breadcrumb spells, and how many of its
-    /// levels it could not name. Zipping stops at the shorter of the two
-    /// vectors, because a missing instance name cannot be invented.
-    fn breadcrumb_occurrence(&self) -> Option<(DocumentOccurrence, usize)> {
-        let root = self.hierarchy_stack.first().cloned()?;
-        let mut occurrence = DocumentOccurrence::rooted(root);
-        for (master, instance) in self
-            .hierarchy_stack
-            .iter()
-            .skip(1)
-            .zip(&self.hierarchy_instances)
-        {
-            occurrence.descend(instance.clone(), master.clone());
-        }
-        let unnamed = self.hierarchy_stack.len() - occurrence.depth();
-        Some((occurrence, unnamed))
-    }
-
-    /// Adopt a breadcrumb that describes the document already in front.
-    ///
-    /// Restore paths that never run project migration reach the occurrence
-    /// model here, and so does every schematic restore, so this must never
-    /// re-target which document is active: the breadcrumb records where a
-    /// session had navigated, not which document a caller just opened. A
-    /// breadcrumb that ends anywhere else is dropped in favour of the
-    /// projection.
-    pub fn adopt_breadcrumb_for_active_document(&mut self) {
+    /// Root any unrooted document and refresh the breadcrumb projection from
+    /// the active document. Restoring a document never re-targets which one
+    /// is active.
+    pub fn restore_occurrences(&mut self) {
         self.root_unrooted_occurrences();
-        match self.breadcrumb_occurrence() {
-            Some((occurrence, _)) if occurrence.terminal_master() == &self.active_view => {
-                self.set_active_occurrence(occurrence);
-            }
-            _ => self.project_active_occurrence(),
-        }
-    }
-
-    /// Fold a save's session-global breadcrumb onto the document it described.
-    ///
-    /// Every document is first rooted at its own reference, then the active
-    /// one adopts the breadcrumb. A save whose two vectors disagree keeps only
-    /// the prefix both spell, and adopts it only if it ends at a document that
-    /// is actually open — an occurrence that named a master no tab shows would
-    /// address a different instance than the document on screen. Returns the
-    /// load warning that repair owes the reader.
-    pub fn migrate_document_occurrences(&mut self) -> Option<String> {
-        self.root_unrooted_occurrences();
-        let Some((occurrence, unnamed)) = self.breadcrumb_occurrence() else {
-            self.project_active_occurrence();
-            return None;
-        };
-        let terminal = occurrence.terminal_master().clone();
-        let adopted = self
-            .open_views
-            .iter()
-            .any(|open| open.reference == terminal);
-
-        if !adopted {
-            self.project_active_occurrence();
-            return Some(format!(
-                "This project's saved hierarchy breadcrumb ended at {}, which no open document \
-                 shows; the active document was restored at its own root instead.",
-                terminal.display_path()
-            ));
-        }
-
-        self.active_view = terminal;
-        self.set_active_occurrence(occurrence);
-        (unnamed > 0).then(|| {
-            format!(
-                "This project's saved hierarchy breadcrumb named {unnamed} level(s) it carried no \
-                 instance name for; the occurrence was kept at {} rather than guessing them.",
-                self.occurrence_path()
-            )
-        })
+        self.project_active_occurrence();
     }
 
     pub fn close_view(&mut self, reference: &CellViewRef) {

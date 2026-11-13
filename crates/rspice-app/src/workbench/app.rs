@@ -459,11 +459,6 @@ impl RSpiceApp {
             .results
             .start_waveform_viewer_session(&state.model.preferences);
         state.workbench.window_session.normalize_after_restore();
-        state
-            .model
-            .workspace
-            .content
-            .migrate_owned_netlist_deck_ids();
 
         state
             .shortcut_library_parts()

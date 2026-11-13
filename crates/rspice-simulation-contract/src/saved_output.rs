@@ -8,9 +8,7 @@
 use rspice_vocabulary::text_validation::{validate_bounded_text, validate_parameter_name};
 use std::collections::HashMap;
 
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize};
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
 use rspice_results::calculator::parser::Parser;
 use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
@@ -56,17 +54,20 @@ impl SavedOutputCompatibility {
 }
 
 /// Persisted waveform/data contract owned by the simulation plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedOutput {
     pub id: SavedOutputId,
+    #[serde(default)]
     pub revision: ObjectRevision,
+    #[serde(default)]
     pub origin: SavedOutputOrigin,
+    #[serde(default)]
     pub display_intent: SavedOutputDisplayIntent,
     pub kind: SavedOutputKind,
     pub name: String,
     pub source_expression: String,
-    #[serde(skip_serializing_if = "ComplexExpressionPolicy::is_legacy")]
+    #[serde(default, skip_serializing_if = "ComplexExpressionPolicy::is_legacy")]
     pub complex_policy: ComplexExpressionPolicy,
     pub compatible_analyses: SavedOutputCompatibility,
     pub save_policy: SavedOutputPolicy,
@@ -177,98 +178,6 @@ impl SavedOutput {
     }
 }
 
-const LEGACY_SAVED_OUTPUT_ID_NAMESPACE: Uuid =
-    Uuid::from_u128(0x75b5_6a7e_614a_5b71_b2dc_32cb_7624_1038);
-
-impl<'de> Deserialize<'de> for SavedOutput {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            #[serde(default = "missing_identity_sentinel")]
-            id: serde_json::Value,
-            #[serde(default)]
-            revision: ObjectRevision,
-            #[serde(default)]
-            origin: SavedOutputOrigin,
-            #[serde(default)]
-            display_intent: SavedOutputDisplayIntent,
-            kind: SavedOutputKind,
-            name: String,
-            source_expression: String,
-            #[serde(default)]
-            complex_policy: ComplexExpressionPolicy,
-            compatible_analyses: SavedOutputCompatibility,
-            save_policy: SavedOutputPolicy,
-            stored_precision: SavedOutputPrecision,
-            streaming: SavedOutputStreaming,
-        }
-
-        let wire = Wire::deserialize(deserializer)?;
-        let mut identity = serde_json::to_vec(&(
-            wire.kind,
-            &wire.name,
-            &wire.source_expression,
-            &wire.compatible_analyses,
-            wire.save_policy,
-            wire.stored_precision,
-            wire.streaming,
-        ))
-        .map_err(D::Error::custom)?;
-        if !wire.complex_policy.is_legacy() {
-            identity.extend_from_slice(b"\0complex-policy/rectangular-v1");
-        }
-        let id = deserialize_or_migrate_identity::<SavedOutputId, D::Error>(
-            wire.id,
-            LEGACY_SAVED_OUTPUT_ID_NAMESPACE,
-            &identity,
-            SavedOutputId::from_namespace,
-        )?;
-        Ok(Self {
-            id,
-            revision: wire.revision,
-            origin: wire.origin,
-            display_intent: wire.display_intent,
-            kind: wire.kind,
-            name: wire.name,
-            source_expression: wire.source_expression,
-            complex_policy: wire.complex_policy,
-            compatible_analyses: wire.compatible_analyses,
-            save_policy: wire.save_policy,
-            stored_precision: wire.stored_precision,
-            streaming: wire.streaming,
-        })
-    }
-}
-
-const MISSING_IDENTITY_SENTINEL: &str = "__rspice_missing_stable_identity__";
-
-pub fn missing_identity_sentinel() -> serde_json::Value {
-    serde_json::Value::String(MISSING_IDENTITY_SENTINEL.to_owned())
-}
-
-pub fn deserialize_or_migrate_identity<I, E>(
-    value: serde_json::Value,
-    namespace: Uuid,
-    identity: &[u8],
-    migrate: fn(Uuid, &[u8]) -> I,
-) -> Result<I, E>
-where
-    I: serde::de::DeserializeOwned,
-    E: serde::de::Error,
-{
-    if value == missing_identity_sentinel() {
-        Ok(migrate(namespace, identity))
-    } else if value.is_null() {
-        Err(E::custom("stable identity must not be null"))
-    } else {
-        serde_json::from_value(value).map_err(E::custom)
-    }
-}
-
 fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> Result<(), String> {
     let expression = expression.trim();
     match kind {
@@ -321,16 +230,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn complex_policy_preserves_legacy_wire_format_and_identity() {
+    fn complex_policy_keeps_its_wire_format() {
         let raw = raw_output("V(out)").unwrap();
         let mut json = serde_json::to_value(&raw).unwrap();
         json["kind"] = "derived_expression".into();
-        json.as_object_mut().unwrap().remove("id");
         assert!(json.get("complex_policy").is_none());
         let first: SavedOutput = serde_json::from_value(json.clone()).unwrap();
-        let second: SavedOutput = serde_json::from_value(json.clone()).unwrap();
         assert!(first.complex_policy.is_legacy());
-        assert_eq!(first.id, second.id);
         assert!(
             serde_json::to_value(&first)
                 .unwrap()
@@ -339,10 +245,6 @@ mod tests {
         );
         json["complex_policy"] = "rectangular".into();
         let current: SavedOutput = serde_json::from_value(json.clone()).unwrap();
-        assert_ne!(
-            first.id, current.id,
-            "different recipes cannot migrate to one identity"
-        );
         assert_eq!(current.complex_policy, ComplexExpressionPolicy::Rectangular);
         for invalid in [serde_json::Value::Null, "future_interpretation".into()] {
             json["complex_policy"] = invalid;
@@ -439,6 +341,7 @@ mod tests {
     #[test]
     fn loading_a_project_keeps_the_expression_the_project_stored() {
         let stored = r#"{
+            "id": "6f1c2a4e-3b7d-4c59-9e21-8a0f5d3b7c11",
             "kind": "raw_voltage_or_current",
             "name": "probe",
             "source_expression": "V(top.x1.n)",
@@ -447,7 +350,7 @@ mod tests {
             "stored_precision": "full_source_precision",
             "streaming": "store_only"
         }"#;
-        let output: SavedOutput = serde_json::from_str(stored).expect("legacy output loads");
+        let output: SavedOutput = serde_json::from_str(stored).expect("a stored output loads");
         assert_eq!(
             output.source_expression, "V(top.x1.n)",
             "a read resolves the target; it does not rewrite what the project persisted"

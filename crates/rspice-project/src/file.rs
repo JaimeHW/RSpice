@@ -12,7 +12,7 @@ use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 use rspice_vocabulary::hierarchy_path::{InstancePath, InstancePathPattern, PatternSegment};
 use rspice_vocabulary::product::{
-    AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision, ProjectId, SimulationPlanId,
+    AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision, SimulationPlanId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -1398,9 +1398,6 @@ fn project_view_requires_schematic_buffer(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
 }
 
-const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
-    uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
-
 /// The tag a persisted receipt task must carry for a plan analysis of `kind`.
 ///
 /// Derived from the canonical tag table, not restated: this check exists to
@@ -1494,7 +1491,6 @@ impl From<std::io::Error> for ProjectIoError {
 /// files from causing unbounded allocation while retaining ample headroom for
 /// large retained result histories.
 pub const MAX_PROJECT_FILE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_LEGACY_PROJECT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn serialize_project_file(project: &ProjectFile) -> Result<String, ProjectIoError> {
     project.validate()?;
@@ -1526,32 +1522,9 @@ pub fn decode_project_text(
     source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
 ) -> Result<DecodedProject, ProjectIoError> {
     validate_project_text_size(contents.len())?;
-    let load_route = project_text_load_route(contents)?;
-    let mut project: ProjectFile = match load_route {
-        ProjectTextLoadRoute::Direct => serde_json::from_str(contents)
-            .map_err(|error| ProjectIoError::ParseError(error.to_string()))?,
-        ProjectTextLoadRoute::LegacyProjectIdInjection => {
-            validate_legacy_project_text_size(contents.len())?;
-            let mut value: serde_json::Value = serde_json::from_str(contents)
-                .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
-            if let Some(descriptor) = value
-                .get_mut("workspace")
-                .and_then(|workspace| workspace.get_mut("project"))
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                let legacy_id =
-                    ProjectId::from_namespace(LEGACY_PROJECT_ID_NAMESPACE, contents.as_bytes());
-                descriptor.insert(
-                    "id".to_owned(),
-                    serde_json::Value::String(legacy_id.to_string()),
-                );
-            }
-            serde_json::from_value(value)
-                .map_err(|error| ProjectIoError::ParseError(error.to_string()))?
-        }
-    };
+    let mut project: ProjectFile = serde_json::from_str(contents)
+        .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
     let project_id = project.workspace.project.id();
-    project.workspace.migrate_owned_netlist_deck_ids();
     let mut load_repairs = Vec::new();
     let repaired_markers = project
         .result_presentation
@@ -1562,7 +1535,7 @@ pub fn decode_project_text(
             "Assigned distinct IDs to {repaired_markers} result marker(s) with duplicate IDs; all annotation positions, labels, and dataset bindings were preserved."
         ));
     }
-    load_repairs.extend(project.workspace.migrate_document_occurrences());
+    project.workspace.restore_occurrences();
     let unresolved_generated_bindings: usize = project
         .workspace
         .schematic_buffers
@@ -1575,8 +1548,8 @@ pub fn decode_project_text(
         ));
     }
     if let Some(context) = &mut project.execution_context {
-        context.migrate_to_current(project_id).map_err(|error| {
-            ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
+        context.prepare_after_restore().map_err(|error| {
+            ProjectIoError::InvalidData(format!("execution context restore failed: {error}"))
         })?;
         if let Some(plan) = &context.simulation_plan.analysis_plan {
             project.workspace.migrate_active_plan_data(plan.id());
@@ -1643,63 +1616,10 @@ pub fn decode_project_text(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProjectTextLoadRoute {
-    Direct,
-    LegacyProjectIdInjection,
-}
-
-#[derive(Deserialize, Default)]
-struct ProjectTextLoadProbe {
-    #[serde(default)]
-    workspace: PersistedField<ProjectTextWorkspaceProbe>,
-}
-
-#[derive(Deserialize, Default)]
-struct ProjectTextWorkspaceProbe {
-    #[serde(default)]
-    project: PersistedField<ProjectTextDescriptorProbe>,
-}
-
-#[derive(Deserialize, Default)]
-struct ProjectTextDescriptorProbe {
-    #[serde(default)]
-    schema_version: PersistedField<serde::de::IgnoredAny>,
-    #[serde(default)]
-    id: PersistedField<serde::de::IgnoredAny>,
-}
-
-fn project_text_load_route(contents: &str) -> Result<ProjectTextLoadRoute, ProjectIoError> {
-    let probe: ProjectTextLoadProbe = serde_json::from_str(contents)
-        .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
-    let legacy = probe
-        .workspace
-        .as_ref()
-        .and_then(|workspace| workspace.project.as_ref())
-        .is_some_and(|descriptor| {
-            descriptor.schema_version.is_missing() && descriptor.id.is_missing()
-        });
-    Ok(if legacy {
-        ProjectTextLoadRoute::LegacyProjectIdInjection
-    } else {
-        ProjectTextLoadRoute::Direct
-    })
-}
-
 fn validate_project_text_size(byte_len: usize) -> Result<(), ProjectIoError> {
     if byte_len as u64 > MAX_PROJECT_FILE_BYTES {
         return Err(ProjectIoError::InvalidData(format!(
             "project text is {} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes",
-            byte_len
-        )));
-    }
-    Ok(())
-}
-
-fn validate_legacy_project_text_size(byte_len: usize) -> Result<(), ProjectIoError> {
-    if byte_len as u64 > MAX_LEGACY_PROJECT_FILE_BYTES {
-        return Err(ProjectIoError::InvalidData(format!(
-            "legacy project text is {} bytes; migration requiring identity injection is limited to {MAX_LEGACY_PROJECT_FILE_BYTES} bytes",
             byte_len
         )));
     }

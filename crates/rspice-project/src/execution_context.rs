@@ -23,129 +23,21 @@ use rspice_model_library::{
     is_portable_absolute_path, subcircuit_interface_key,
 };
 use rspice_simulation_contract::setup_state::SimulationSetup;
-use rspice_vocabulary::product::{ContentDigest, ProjectId};
+use rspice_vocabulary::product::ContentDigest;
 
 pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 18;
-const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
-const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
-const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
-const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
-const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
-const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
-const RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION: u32 = 6;
-const MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 7;
-const MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION: u32 = 8;
-const MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION: u32 = 9;
-const MODEL_BIN_AUDIT_SCHEMA_VERSION: u32 = 10;
-const TYPED_CORNER_DOMAIN_SCHEMA_VERSION: u32 = 11;
-const RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 12;
-const EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION: u32 = 13;
-const RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION: u32 = 14;
-const AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION: u32 = 15;
-const SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION: u32 = 16;
-const EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION: u32 = 17;
-const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
-    "enabled",
-    "analysis_order",
-    "tran",
-    "ac",
-    "disto_f2_over_f1",
-    "dc",
-    "noise",
-    "op",
-    "pz",
-    "sens",
-    "mc",
-    "pss",
-    "stb",
-    "temp",
-    "hb",
-    "sp",
-    "pac",
-    "pnoise",
-    "pxf",
-    "pstb",
-    "xf",
-    "corner",
-    "envelope",
-    "fourier",
-    "optimization",
-    "soa",
-    "listed",
-];
-
-fn legacy_execution_context_schema_version() -> u32 {
-    LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION
-}
 
 /// Versioned, project-owned inputs required to reproduce a simulation plan.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectExecutionContext {
     pub schema_version: u32,
     pub simulation_plan: SimulationSetup,
     pub model_libraries: Vec<ProjectModelLibrary>,
+    #[serde(default)]
     pub model_resolution_records: Vec<ModelResolutionRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_validation_receipt: Option<ModelValidationReceipt>,
-}
-
-impl<'de> Deserialize<'de> for ProjectExecutionContext {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct PersistedExecutionContext {
-            #[serde(default = "legacy_execution_context_schema_version")]
-            schema_version: u32,
-            simulation_plan: serde_json::Value,
-            model_libraries: Vec<ProjectModelLibrary>,
-            #[serde(default)]
-            model_resolution_records: Vec<ModelResolutionRecord>,
-            #[serde(default)]
-            model_validation_receipt: Option<ModelValidationReceipt>,
-            /// Retired with the local Models workspace. The field is still
-            /// accepted, and discarded, so a project written by a build that
-            /// carried the ledger still loads under `deny_unknown_fields`.
-            /// Nothing writes it back.
-            #[serde(default, rename = "model_bin_audit_receipts")]
-            _model_bin_audit_receipts: serde::de::IgnoredAny,
-            /// Retired alongside `model_bin_audit_receipts`.
-            #[serde(default, rename = "model_definition_resolutions")]
-            _model_definition_resolutions: serde::de::IgnoredAny,
-        }
-
-        let persisted = PersistedExecutionContext::deserialize(deserializer)?;
-        if (STABLE_ANALYSIS_PLAN_SCHEMA_VERSION..=PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION)
-            .contains(&persisted.schema_version)
-        {
-            let fields = persisted.simulation_plan.as_object().ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "schema-{} simulation_plan must be a JSON object",
-                    persisted.schema_version
-                ))
-            })?;
-            if let Some(retired) = RETIRED_SINGLETON_ANALYSIS_FIELDS
-                .iter()
-                .find(|&&field| fields.contains_key(field))
-            {
-                return Err(serde::de::Error::custom(format!(
-                    "schema-{} simulation_plan contains retired singleton field `{retired}`",
-                    persisted.schema_version
-                )));
-            }
-        }
-        let simulation_plan =
-            serde_json::from_value(persisted.simulation_plan).map_err(serde::de::Error::custom)?;
-        Ok(Self {
-            schema_version: persisted.schema_version,
-            simulation_plan,
-            model_libraries: persisted.model_libraries,
-            model_resolution_records: persisted.model_resolution_records,
-            model_validation_receipt: persisted.model_validation_receipt,
-        })
-    }
 }
 
 /// Serializable model-library data that affects model and section bindings.
@@ -227,7 +119,7 @@ impl ProjectExecutionContext {
         // never repaired here, so executable-card tampering remains fatal.
         for (index, library) in context.model_libraries.iter_mut().enumerate() {
             if !library.source_contents.is_empty() {
-                migrate_complete_model_section_catalog(library).map_err(|error| {
+                rebuild_complete_model_section_catalog(library).map_err(|error| {
                     format!(
                         "model_libraries[{index}] complete model-section catalog projection failed before save: {error}"
                     )
@@ -238,213 +130,17 @@ impl ProjectExecutionContext {
         Ok(context)
     }
 
-    /// Apply explicit migrations for execution-context schemas that shipped
-    /// before stable analysis ordering. No future schema is guessed.
-    pub fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
-        match self.schema_version {
-            LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION => {
-                let mut order: Vec<_> = self.simulation_plan.enabled.iter().copied().collect();
-                order.sort_unstable();
-                self.simulation_plan.analysis_order = order;
-                self.schema_version = UNPINNED_MODEL_SOURCE_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            UNPINNED_MODEL_SOURCE_SCHEMA_VERSION => {
-                // Schema 1 did not pin external model bytes. Never infer or
-                // accept the file currently present on disk during migration:
-                // retain the catalog and leave it unpinned so run binding
-                // fails closed until an explicit refresh/re-import.
-                for library in &mut self.model_libraries {
-                    library.source_closure.clear();
-                    library.source_edges.clear();
-                }
-                self.schema_version = PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION => {
-                // Schema 2 pinned canonical member bytes but did not retain
-                // the filesystem resolution decisions needed to reproduce
-                // aliases/search precedence without reopening paths. Keep the
-                // pins/catalog for repair; multi-file execution fails closed
-                // until refresh records the graph.
-                for library in &mut self.model_libraries {
-                    library.source_edges.clear();
-                }
-                self.schema_version = SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION => {
-                self.simulation_plan
-                    .migrate_legacy_analysis_plan(project_id)?;
-                self.schema_version = STABLE_ANALYSIS_PLAN_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            STABLE_ANALYSIS_PLAN_SCHEMA_VERSION => {
-                // Schema 4 persisted one stable analysis plan but had no
-                // named-plan catalog. Serde defaults deterministically promote
-                // that plan to the canonical initial name and root lineage.
-                self.simulation_plan
-                    .validate_plan_catalog()
-                    .map_err(|error| {
-                        format!("simulation plan catalog migration failed: {error}")
-                    })?;
-                self.schema_version = PLAN_CATALOG_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            PLAN_CATALOG_SCHEMA_VERSION => {
-                // Schema 5 pinned source identities and resolution edges but
-                // did not retain the authenticated bytes needed by browser
-                // execution. Leave legacy bindings repairable and fail closed
-                // until an explicit refresh captures their exact bytes.
-                for library in &mut self.model_libraries {
-                    library.source_contents.clear();
-                }
-                self.schema_version = RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION => {
-                // Schema 6 retained exact bytes for browser execution but did
-                // not distinguish their ownership. Never infer edit authority
-                // from byte availability: a legacy path remains external, and
-                // a source-less catalog remains built-in.
-                for library in &mut self.model_libraries {
-                    library.source_authority = if library.root_path.is_some() {
-                        ModelSourceAuthority::External
-                    } else {
-                        ModelSourceAuthority::BuiltIn
-                    };
-                }
-                self.schema_version = MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION => {
-                // Schema 7 introduced explicit source authority but predated
-                // typed model-authoring and qualification records. Serde
-                // defaults preserve those projects as honest empty metadata;
-                // no schema, test, or release facts are inferred.
-                self.schema_version = MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION => {
-                // Schema 8 introduced typed authoring and qualification but
-                // predated persisted measurement-correlation records. Serde
-                // defaults preserve those projects with an honest empty
-                // correlation ledger; no datasets, metrics, or review
-                // evidence are inferred during migration.
-                self.schema_version = MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION => {
-                // Schema 9 persisted measurement-correlation evidence but
-                // predated durable geometry-bin audit receipts. The empty
-                // serde default is the only honest migration; no audit is
-                // inferred from model cards or prior execution artifacts.
-                self.schema_version = MODEL_BIN_AUDIT_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            MODEL_BIN_AUDIT_SCHEMA_VERSION => {
-                // Schema 10 persisted model-bin audit evidence but predated
-                // typed corner-domain composition. Serde defaults preserve
-                // the historic file_path + corner-name meaning; execution
-                // resolves that pair as one required composite section.
-                self.schema_version = TYPED_CORNER_DOMAIN_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            TYPED_CORNER_DOMAIN_SCHEMA_VERSION => {
-                // Schema 11 introduced typed corner-domain composition but
-                // predated retained imported-source authority. Existing
-                // project-owned and external bindings retain their exact
-                // authority; no installed-pack origin is inferred from paths.
-                self.schema_version = RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION => {
-                // Schema 12 introduced retained imported-source authority but
-                // predated explicit contested-definition provider contracts.
-                // An empty migration is the only safe choice: any overlap
-                // remains blocked until a user selects an exact provider.
-                self.schema_version = EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION => {
-                // Schema 13 retained executable subcircuit source bytes but no
-                // durable interface catalog. Reconstruct only from the exact
-                // authenticated closure already inside the project; never
-                // inspect a live path or infer terminals from a symbol.
-                for (index, library) in self.model_libraries.iter_mut().enumerate() {
-                    library.subcircuits =
-                        authenticated_subcircuit_projection(library).map_err(|error| {
-                            format!(
-                                "model_libraries[{index}] subcircuit metadata migration failed: {error}"
-                            )
-                        })?;
-                }
-                self.schema_version = RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION => {
-                // Schema 14 retained exact model-card values and source lines,
-                // but discarded whether an active card came from the selected
-                // `.lib` section or the top level. Recover that provenance only
-                // by reparsing the authenticated bytes already in the project.
-                // Source-less built-ins and legacy repair-only external
-                // bindings honestly remain top-level/unknown.
-                for (index, library) in self.model_libraries.iter_mut().enumerate() {
-                    migrate_authenticated_model_sections(library).map_err(|error| {
-                        format!(
-                            "model_libraries[{index}] model-section provenance migration failed: {error}"
-                        )
-                    })?;
-                }
-                self.schema_version = AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION => {
-                // Schema 15 predated source-qualified provider decisions. An
-                // empty ledger is the only safe migration: existing overlaps
-                // stay fail-closed until a user publishes an exact decision.
-                self.model_resolution_records.clear();
-                self.schema_version = SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION => {
-                // Schema 16 kept the nominal model section and library order
-                // in the project-global manager. Preserve that exact former
-                // behavior explicitly in every plan; future changes then
-                // diverge independently.
-                let mut catalog = ModelCatalog::default();
-                for library in self.model_libraries.clone() {
-                    catalog.add_library(library.into_model_library());
-                }
-                let bindings = catalog.default_simulation_plan_bindings();
-                self.simulation_plan
-                    .migrate_legacy_model_bindings(&bindings);
-                self.schema_version = EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION;
-                self.migrate_to_current(project_id)
-            }
-            EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION => {
-                // Schema 17 persisted only the active top-level-plus-section
-                // projection. Reconstruct the complete section catalog from
-                // authenticated retained bytes so changing corners cannot keep
-                // stale parameters from the formerly active section.
-                for (index, library) in self.model_libraries.iter_mut().enumerate() {
-                    migrate_complete_model_section_catalog(library).map_err(|error| {
-                        format!(
-                            "model_libraries[{index}] complete model-section catalog migration failed: {error}"
-                        )
-                    })?;
-                }
-                self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
-                Ok(())
-            }
-            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION => {
-                self.simulation_plan.prepare_after_restore();
-                Ok(())
-            }
-            version => Err(format!(
-                "unsupported execution-context schema version {version}; this build supports version {PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION}"
-            )),
+    /// Accept only the current execution-context schema, then rebuild the
+    /// plan state that is never persisted.
+    pub fn prepare_after_restore(&mut self) -> Result<(), String> {
+        if self.schema_version != PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported execution-context schema version {}; this build supports version {}",
+                self.schema_version, PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+            ));
         }
+        self.simulation_plan.prepare_after_restore();
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -826,115 +522,7 @@ fn validate_choice_indices(plan: &SimulationSetup) -> Result<(), String> {
     Ok(())
 }
 
-fn authenticated_subcircuit_projection(
-    library: &ProjectModelLibrary,
-) -> Result<HashMap<String, ModelSubcircuitInterface>, String> {
-    if library.source_contents.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let root = library
-        .root_path
-        .as_ref()
-        .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
-    validate_retained_model_source_dialects(library, "retained source closure")?;
-    let sources = library
-        .source_contents
-        .iter()
-        .map(|content| (content.path.clone(), content.bytes.clone()));
-    let dependencies =
-        library
-            .source_edges
-            .iter()
-            .map(|edge| rspice_core::library::ResolvedLibDependency {
-                owner: edge.owner.clone(),
-                requested_path: edge.requested_path.clone(),
-                target: edge.target.clone(),
-            });
-    let mut parser = rspice_core::library::LibParser::new(
-        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
-    );
-    let parsed = parser
-        .parse_authenticated_closure(root.clone(), sources, dependencies)
-        .map_err(|error| format!("retained source closure cannot be authenticated: {error}"))?;
-    if !parsed.is_ok() {
-        return Err(format!(
-            "retained source closure does not parse: {}",
-            parsed
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
-    }
-    parsed_subcircuit_projection(&parsed, root)
-}
-
-fn migrate_authenticated_model_sections(library: &mut ProjectModelLibrary) -> Result<(), String> {
-    if library.source_contents.is_empty() {
-        for model in library.models.values_mut() {
-            model.section = None;
-        }
-        return Ok(());
-    }
-
-    let root = library
-        .root_path
-        .as_ref()
-        .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
-    let sources = library
-        .source_contents
-        .iter()
-        .map(|content| (content.path.clone(), content.bytes.clone()));
-    let dependencies =
-        library
-            .source_edges
-            .iter()
-            .map(|edge| rspice_core::library::ResolvedLibDependency {
-                owner: edge.owner.clone(),
-                requested_path: edge.requested_path.clone(),
-                target: edge.target.clone(),
-            });
-    let mut parser = rspice_core::library::LibParser::new(
-        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
-    );
-    let parsed = parser
-        .parse_authenticated_closure(root.clone(), sources, dependencies)
-        .map_err(|error| format!("retained source closure cannot be authenticated: {error}"))?;
-    if !parsed.is_ok() {
-        return Err(format!(
-            "retained source closure does not parse: {}",
-            parsed
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
-    }
-
-    let projection = parsed_model_projection(library, &parsed, root)?;
-    if projection.len() != library.models.len() {
-        return Err(
-            "persisted model catalog does not exactly cover the authenticated active cards"
-                .to_owned(),
-        );
-    }
-    for (name, persisted) in &mut library.models {
-        let candidate = projection.get(name).ok_or_else(|| {
-            format!("persisted model '{name}' is absent from the authenticated active cards")
-        })?;
-        if !parsed_model_projection_matches_without_section(persisted, candidate) {
-            return Err(format!(
-                "persisted model '{name}' is not an exact projection of its authenticated card"
-            ));
-        }
-        persisted.section.clone_from(&candidate.section);
-    }
-    Ok(())
-}
-
-fn migrate_complete_model_section_catalog(library: &mut ProjectModelLibrary) -> Result<(), String> {
+fn rebuild_complete_model_section_catalog(library: &mut ProjectModelLibrary) -> Result<(), String> {
     if library.source_contents.is_empty() {
         library.top_level_models.clear();
         library.section_models.clear();

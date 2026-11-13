@@ -1,9 +1,8 @@
 //! Application adapters for portable project execution context.
 //!
-//! The project crate owns persisted data, migration and validation. These
+//! The project crate owns persisted data and validation. These
 //! adapters capture workbench state and report host source availability.
 
-use crate::product::ProjectId;
 use crate::state::model_library::{ModelLibraryManager, ModelSourceAuthority};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::{first_unreachable_source, is_foreign_platform_absolute_path};
@@ -28,12 +27,11 @@ pub fn capture_execution_context(
     )
 }
 
-/// Restore editor/catalog state after portable migration and validation succeed.
+/// Restore editor/catalog state after the schema check and validation succeed.
 pub fn restore_execution_context(
     mut context: ProjectExecutionContext,
-    project_id: ProjectId,
 ) -> Result<(SimSetupState, ModelLibraryManager, Vec<String>), String> {
-    context.migrate_to_current(project_id)?;
+    context.prepare_after_restore()?;
     context.validate()?;
     let warnings = model_source_warnings(&context.model_libraries);
     let mut manager = ModelLibraryManager::new();

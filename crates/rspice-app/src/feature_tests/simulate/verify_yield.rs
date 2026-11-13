@@ -136,7 +136,6 @@ fn a_restored_session_and_a_reopened_project_state_the_same_yield() {
         .file;
     let (setup, _, _) = rspice_app_services::io::restore_execution_context(
         file.execution_context.expect("the project saves its plan"),
-        file.workspace.project.id(),
     )
     .expect("the plan restores");
     let mut simulation =

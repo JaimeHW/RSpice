@@ -444,19 +444,6 @@ impl SimulationSetupDocument {
         }
     }
 
-    /// Migrate the former project-global model selection into every plan.
-    /// Called only by the execution-context schema migration that predates
-    /// per-plan bindings; a current explicit empty closure remains empty.
-    pub fn migrate_legacy_model_bindings(
-        &mut self,
-        bindings: &[rspice_model_library::SimulationPlanModelBinding],
-    ) {
-        self.model_bindings = bindings.to_vec();
-        for plan in &mut self.inactive_plans {
-            plan.replace_model_bindings(bindings.to_vec());
-        }
-    }
-
     fn plan_identities(&self) -> HashSet<SimulationPlanId> {
         self.analysis_plan
             .iter()

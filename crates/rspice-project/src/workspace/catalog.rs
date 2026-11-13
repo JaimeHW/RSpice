@@ -60,35 +60,6 @@ fn validate_physical_layout_document_catalog(
 }
 
 impl ProjectWorkspace {
-    /// Assign deterministic stable identities to legacy top decks that predate
-    /// the multi-deck catalog. Migration uses only already-persisted project,
-    /// document, and logical-path identities, so loading identical bytes on a
-    /// second machine produces the same project state.
-    pub fn migrate_owned_netlist_deck_ids(&mut self) {
-        let namespace = self.project.id().as_uuid();
-        if let (Some(descriptor), Some(document)) =
-            (&mut self.netlist_descriptor, &self.netlist_document)
-            && descriptor.deck_id.is_nil()
-        {
-            let name = format!(
-                "rspice/top-deck/v1/{}/{}",
-                document.id().as_uuid(),
-                descriptor.artifact_name
-            );
-            descriptor.deck_id = Uuid::new_v5(&namespace, name.as_bytes());
-        }
-        for (index, deck) in self.retained_netlist_decks.iter_mut().enumerate() {
-            if deck.descriptor.deck_id.is_nil() {
-                let name = format!(
-                    "rspice/retained-top-deck/v1/{index}/{}/{}",
-                    deck.document.id().as_uuid(),
-                    deck.descriptor.artifact_name
-                );
-                deck.descriptor.deck_id = Uuid::new_v5(&namespace, name.as_bytes());
-            }
-        }
-    }
-
     pub fn physical_layout_documents(
         &self,
     ) -> &BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument> {

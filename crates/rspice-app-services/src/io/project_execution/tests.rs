@@ -37,25 +37,6 @@ fn context_from_state(
     crate::io::capture_execution_context(plan, manager)
 }
 
-#[test]
-fn retired_model_ledgers_decode_from_json_without_being_rewritten() {
-    let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
-        .expect("valid execution context");
-
-    let mut json = serde_json::to_value(&context).expect("serialize current context");
-    let object = json.as_object_mut().expect("context is a JSON object");
-    object.insert("model_bin_audit_receipts".to_owned(), serde_json::json!(42));
-    object.insert(
-        "model_definition_resolutions".to_owned(),
-        serde_json::json!(true),
-    );
-    let restored: ProjectExecutionContext =
-        serde_json::from_value(json).expect("retired JSON fields remain readable");
-    let rewritten = serde_json::to_value(restored).expect("rewrite current context");
-    assert!(rewritten.get("model_bin_audit_receipts").is_none());
-    assert!(rewritten.get("model_definition_resolutions").is_none());
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
     let unique = std::time::SystemTime::now()
@@ -166,7 +147,7 @@ fn source_qualified_provider_decision_round_trips_without_reauthorization() {
     let encoded = serde_json::to_vec(&context).expect("execution context serializes");
     let restored: ProjectExecutionContext =
         serde_json::from_slice(&encoded).expect("execution context deserializes");
-    let (_, restored, _) = crate::io::restore_execution_context(restored, project_id())
+    let (_, restored, _) = crate::io::restore_execution_context(restored)
         .expect("provider decision restores against exact retained sources");
     assert_eq!(
         restored
@@ -184,7 +165,7 @@ fn source_qualified_provider_decision_round_trips_without_reauthorization() {
 }
 
 #[test]
-fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
+fn retained_subcircuit_interfaces_round_trip_and_reject_tampering() {
     let mut manager = ModelLibraryManager::new();
     manager
         .load_library_bytes(
@@ -210,8 +191,8 @@ fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
 
     let restored: ProjectExecutionContext =
         serde_json::from_value(value.clone()).expect("context deserializes");
-    let (_, restored_manager, _) = crate::io::restore_execution_context(restored, project_id())
-        .expect("exact interface restores");
+    let (_, restored_manager, _) =
+        crate::io::restore_execution_context(restored).expect("exact interface restores");
     assert_eq!(
         restored_manager
             .get_library("browser-subcircuits")
@@ -232,31 +213,10 @@ fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
         error.contains("not the exact interface projection"),
         "{error}"
     );
-
-    let mut legacy = value;
-    legacy["schema_version"] = serde_json::json!(13);
-    legacy["model_libraries"][0]
-        .as_object_mut()
-        .expect("library is an object")
-        .remove("subcircuits");
-    let mut migrated: ProjectExecutionContext =
-        serde_json::from_value(legacy).expect("schema-13 context deserializes");
-    migrated
-        .migrate_to_current(project_id())
-        .expect("schema-13 interfaces rebuild from retained bytes");
-    assert_eq!(
-        migrated.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    assert_eq!(
-        migrated.model_libraries[0].subcircuits["AMP"].ports,
-        ["inp", "inn", "out"]
-    );
-    migrated.validate().expect("migrated context validates");
 }
 
 #[test]
-fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() {
+fn active_model_section_provenance_round_trips_and_rejects_tampering() {
     let mut manager = ModelLibraryManager::new();
     manager
         .load_library_bytes(
@@ -294,7 +254,7 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
         serde_json::from_value(value.clone()).expect("current context deserializes");
     restored.validate().expect("exact section validates");
     let (_, mut restored_manager, warnings) =
-        crate::io::restore_execution_context(restored.clone(), project_id())
+        crate::io::restore_execution_context(restored.clone())
             .expect("complete section catalog restores");
     assert!(warnings.is_empty());
     let restored_library = restored_manager
@@ -305,47 +265,6 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
         restored_library.models["nch"].parameters.get("kp"),
         Some(&2.0e-3)
     );
-
-    let mut schema_17 = value.clone();
-    schema_17["schema_version"] = serde_json::json!(17);
-    schema_17["model_libraries"][0]
-        .as_object_mut()
-        .expect("library is an object")
-        .remove("top_level_models");
-    schema_17["model_libraries"][0]
-        .as_object_mut()
-        .expect("library is an object")
-        .remove("section_models");
-    let mut schema_17: ProjectExecutionContext =
-        serde_json::from_value(schema_17).expect("schema-17 context deserializes");
-    schema_17
-        .migrate_to_current(project_id())
-        .expect("complete catalog rebuilds from authenticated bytes");
-    assert_eq!(
-        schema_17.model_libraries[0].section_models["FF"]["nch"]
-            .parameters
-            .get("kp"),
-        Some(&2.0e-3)
-    );
-    schema_17.validate().expect("schema-17 migration validates");
-
-    let mut legacy = value.clone();
-    legacy["schema_version"] = serde_json::json!(14);
-    legacy["model_libraries"][0]["models"]["nch"]
-        .as_object_mut()
-        .expect("model is an object")
-        .remove("section");
-    let mut migrated: ProjectExecutionContext =
-        serde_json::from_value(legacy).expect("schema-14 context deserializes");
-    migrated
-        .migrate_to_current(project_id())
-        .expect("schema-14 section is recovered from authenticated bytes");
-    assert_eq!(
-        migrated.model_libraries[0].models["nch"].section.as_deref(),
-        Some("TT")
-    );
-    assert_eq!(migrated.model_libraries[0].models["helper"].section, None);
-    migrated.validate().expect("migrated context validates");
 
     let mut tampered = value.clone();
     tampered["model_libraries"][0]["models"]["nch"]
@@ -387,259 +306,7 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
     );
 }
 
-#[test]
-fn schema_three_still_accepts_singletons_only_for_load_time_migration() {
-    let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
-        .expect("baseline context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(3);
-    let persisted_plan = value["simulation_plan"]
-        .as_object_mut()
-        .expect("simulation plan is an object");
-    persisted_plan.remove("analysis_plan");
-    persisted_plan.insert("enabled".to_owned(), serde_json::json!([1]));
-    persisted_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
-    persisted_plan.insert("listed".to_owned(), serde_json::json!([1]));
-    persisted_plan.insert(
-        "tran".to_owned(),
-        serde_json::to_value(
-            rspice_app_state::workbench::app_state::sim_setup::TranSetup::default(),
-        )
-        .expect("legacy draft serializes"),
-    );
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema 3 accepts its legacy fields");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema 3 migrates at the load boundary");
-
-    assert_eq!(
-        restored.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    assert!(restored.simulation_plan.stable_analysis_plan().is_ok());
-    restored.validate().expect("migrated context validates");
-}
-
-#[test]
-fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
-    let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
-        .expect("baseline context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(4);
-    let persisted_plan = value["simulation_plan"]
-        .as_object_mut()
-        .expect("simulation plan is an object");
-    persisted_plan.remove("active_plan_name");
-    persisted_plan.remove("active_plan_lineage");
-    persisted_plan.remove("inactive_plans");
-    persisted_plan["analysis_plan"]
-        .as_object_mut()
-        .expect("stable analysis plan is an object")
-        .remove("configuration_receipts");
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema 4 remains readable");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema 4 promotes deterministically");
-
-    assert_eq!(
-        restored.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    assert_eq!(
-        restored.simulation_plan.active_plan_name().as_str(),
-        "Default plan"
-    );
-    assert_eq!(restored.simulation_plan.plan_count(), 1);
-    assert_eq!(
-        restored.simulation_plan.active_plan_lineage(),
-        rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanLineage::default()
-    );
-    restored.validate().expect("promoted context validates");
-}
-
-#[test]
-fn schema_sixteen_migrates_global_model_selection_into_every_plan() {
-    let mut manager = ModelLibraryManager::new();
-    let library = manager
-        .load_library_bytes(
-            "foundry.lib",
-            b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n.lib FF\n.model nch NMOS (LEVEL=1 KP=2e-3)\n.endl FF\n"
-                .to_vec(),
-            Some("FF"),
-        )
-        .expect("legacy global model selection loads");
-    let mut plan = SimSetupState::new();
-    plan.clone_active_plan(
-        "Legacy second plan",
-        rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanCloneOptions::default(),
-    )
-    .expect("second plan exists");
-    let context = context_from_state(&plan, &manager).expect("current context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(16);
-    let persisted_plan = value["simulation_plan"]
-        .as_object_mut()
-        .expect("simulation plan is an object");
-    persisted_plan.remove("model_bindings");
-    for stored in persisted_plan["inactive_plans"]
-        .as_array_mut()
-        .expect("inactive plans are an array")
-    {
-        stored
-            .as_object_mut()
-            .expect("stored plan is an object")
-            .remove("model_bindings");
-    }
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema sixteen remains readable");
-    restored
-        .migrate_to_current(project_id())
-        .expect("global selections migrate to explicit plan bindings");
-
-    assert_eq!(restored.simulation_plan.model_bindings.len(), 1);
-    assert_eq!(
-        restored.simulation_plan.model_bindings[0].library_name,
-        library
-    );
-    assert_eq!(
-        restored.simulation_plan.model_bindings[0]
-            .selected_corner
-            .as_deref(),
-        Some("FF")
-    );
-    assert_eq!(
-        restored.simulation_plan.inactive_plans()[0].model_bindings(),
-        restored.simulation_plan.model_bindings.as_slice(),
-        "the former global closure applied to every plan and must migrate without behavioral drift"
-    );
-    restored.validate().expect("migrated context validates");
-}
-
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn schema_six_classifies_legacy_sources_without_inventing_edit_authority() {
-    let (directory, path) = model_fixture();
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .load_library_file(&path, Some("TT"))
-        .expect("load external source");
-    manager.add_library(ModelLibrary::new("built-in-catalog"));
-    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(6);
-    for library in value["model_libraries"]
-        .as_array_mut()
-        .expect("libraries array")
-    {
-        library
-            .as_object_mut()
-            .expect("library object")
-            .remove("source_authority");
-    }
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema six remains readable");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema six migrates");
-    restored.validate().expect("migrated context validates");
-    assert!(restored.model_libraries.iter().any(|library| {
-        library.name == "foundry" && library.source_authority == ModelSourceAuthority::External
-    }));
-    assert!(restored.model_libraries.iter().any(|library| {
-        library.name == "built-in-catalog"
-            && library.source_authority == ModelSourceAuthority::BuiltIn
-    }));
-
-    std::fs::remove_dir_all(directory).expect("remove model fixture");
-}
-
-#[test]
-fn schema_seven_migrates_without_inventing_model_authoring_records() {
-    let mut manager = ModelLibraryManager::new();
-    manager.add_library(ModelLibrary::new("legacy-catalog"));
-    let context =
-        context_from_state(&SimSetupState::new(), &manager).expect("baseline context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(7);
-    for library in value["model_libraries"]
-        .as_array_mut()
-        .expect("libraries are an array")
-    {
-        library
-            .as_object_mut()
-            .expect("library is an object")
-            .remove("model_definition_metadata");
-        library
-            .as_object_mut()
-            .expect("library is an object")
-            .remove("model_qualification");
-        library
-            .as_object_mut()
-            .expect("library is an object")
-            .remove("model_correlation");
-    }
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema seven remains readable");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema seven migrates");
-
-    assert_eq!(
-        restored.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    assert!(restored.model_libraries.iter().all(|library| {
-        library.model_definition_metadata.is_empty()
-            && library.model_qualification.is_empty()
-            && library.model_correlation.is_empty()
-    }));
-    restored.validate().expect("migrated context validates");
-}
-
-#[test]
-fn schema_eight_migrates_without_inventing_correlation_records() {
-    let mut manager = ModelLibraryManager::new();
-    manager.add_library(ModelLibrary::new("legacy-qualified-catalog"));
-    let context =
-        context_from_state(&SimSetupState::new(), &manager).expect("baseline context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(8);
-    for library in value["model_libraries"]
-        .as_array_mut()
-        .expect("libraries are an array")
-    {
-        library
-            .as_object_mut()
-            .expect("library is an object")
-            .remove("model_correlation");
-    }
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema eight remains readable");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema eight migrates");
-
-    assert_eq!(
-        restored.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    assert!(
-        restored
-            .model_libraries
-            .iter()
-            .all(|library| library.model_correlation.is_empty())
-    );
-    restored.validate().expect("migrated context validates");
-}
-
 #[test]
 fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
     let definition = crate::state::model_library::ProjectModelDefinition {
@@ -740,8 +407,7 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
     let restored: ProjectExecutionContext =
         serde_json::from_str(&json).expect("context deserializes");
     let (_, restored_manager, warnings) =
-        crate::io::restore_execution_context(restored, project_id())
-            .expect("project-owned model restores");
+        crate::io::restore_execution_context(restored).expect("project-owned model restores");
 
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(
@@ -793,8 +459,8 @@ fn retained_import_round_trip_executes_from_authenticated_bytes_after_source_dis
 
     let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     std::fs::remove_dir_all(directory).expect("remove live imported source");
-    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
-        .expect("retained import restores");
+    let (_, restored, warnings) =
+        crate::io::restore_execution_context(context).expect("retained import restores");
     assert!(warnings.is_empty());
     let restored_library = restored
         .get_library(&library_name)
@@ -839,7 +505,7 @@ fn project_owned_multifile_closure_restores_distinct_member_identities() {
         .expect("multi-file project-owned closure validates");
     std::fs::remove_dir_all(directory).expect("retained restore must not need fixture files");
 
-    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
+    let (_, restored, warnings) = crate::io::restore_execution_context(context)
         .expect("multi-file project-owned closure restores from retained bytes");
     assert!(warnings.is_empty(), "{warnings:?}");
     let library = restored.get_library("foundry").expect("library restores");
@@ -1150,7 +816,7 @@ fn restored_execution_lifecycle_never_retains_runner_authority() {
         let mut restored: ProjectExecutionContext =
             serde_json::from_value(value).expect("persisted lifecycle deserializes");
         restored
-            .migrate_to_current(project_id())
+            .prepare_after_restore()
             .expect("current context restores");
         let instance = &restored
             .simulation_plan
@@ -1161,7 +827,7 @@ fn restored_execution_lifecycle_never_retains_runner_authority() {
         assert_eq!(instance.lifecycle(), AnalysisLifecycleState::Draft);
         restored.validate().expect("normalized context validates");
 
-        let (mut setup, _, _) = crate::io::restore_execution_context(restored, project_id())
+        let (mut setup, _, _) = crate::io::restore_execution_context(restored)
             .expect("normalized context enters application state");
         setup
             .stable_analysis_plan_mut()
@@ -1208,7 +874,7 @@ fn incomplete_disabled_and_enabled_analysis_drafts_round_trip_losslessly() {
     let restored: ProjectExecutionContext =
         serde_json::from_str(&serialized).expect("context deserializes");
     let (restored, _, _) =
-        crate::io::restore_execution_context(restored, project_id()).expect("context restores");
+        crate::io::restore_execution_context(restored).expect("context restores");
     let restored = restored
         .stable_analysis_plan()
         .expect("v4 restores a stable plan");
@@ -1264,58 +930,6 @@ fn duplicate_and_unknown_stable_analysis_data_fail_precisely() {
     );
 }
 
-#[test]
-fn legacy_context_migrates_to_sorted_execution_order() {
-    let mut plan = SimSetupState::new();
-    plan.ensure_initialized();
-    plan.analysis_plan = None;
-    plan.enabled.extend([4, 0]);
-    plan.analysis_order.clear();
-    let mut context = ProjectExecutionContext {
-        schema_version: 0,
-        simulation_plan: plan.setup,
-        model_libraries: Vec::new(),
-        model_resolution_records: Vec::new(),
-        model_validation_receipt: None,
-    };
-
-    context
-        .migrate_to_current(project_id())
-        .expect("legacy migration");
-
-    let migrated = context
-        .simulation_plan
-        .stable_analysis_plan()
-        .expect("legacy context migrates to stable identity");
-    assert_eq!(migrated.instances().len(), AnalysisKind::ALL.len());
-    assert_eq!(
-        migrated
-            .instances()
-            .iter()
-            .take(3)
-            .map(|instance| (instance.kind(), instance.enabled()))
-            .collect::<Vec<_>>(),
-        vec![
-            (AnalysisKind::OperatingPoint, true),
-            (AnalysisKind::Transient, true),
-            (AnalysisKind::Noise, true),
-        ]
-    );
-    let noise = migrated
-        .instances()
-        .iter()
-        .find(|instance| instance.kind() == AnalysisKind::Noise)
-        .expect("noise migrated");
-    let op = migrated
-        .instances()
-        .iter()
-        .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
-        .expect("OP migrated");
-    assert_eq!(noise.dependencies().len(), 1);
-    assert_eq!(noise.dependencies()[0].target(), op.id());
-    context.validate().expect("migrated context validates");
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn model_source_and_section_bindings_round_trip_without_substitution() {
@@ -1350,8 +964,7 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
         serde_json::from_str(&json).expect("context deserializes");
 
     let (_, restored_manager, warnings) =
-        crate::io::restore_execution_context(restored_context, project_id())
-            .expect("available source restores");
+        crate::io::restore_execution_context(restored_context).expect("available source restores");
 
     assert!(warnings.is_empty());
     assert_eq!(
@@ -1423,119 +1036,8 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn schema_ten_corner_names_migrate_to_required_composite_contracts() {
-    let (directory, path) = model_fixture();
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .load_library_file(&path, Some("TT"))
-        .expect("load legacy-shaped source");
-    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
-    let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(10);
-    for library in value["model_libraries"]
-        .as_array_mut()
-        .expect("libraries array")
-    {
-        for corner in library["corners"]
-            .as_object_mut()
-            .expect("corner map")
-            .values_mut()
-        {
-            let corner = corner.as_object_mut().expect("corner object");
-            corner.remove("section_bindings");
-            corner.remove("required_domains");
-            corner.remove("minimum_temperature_c");
-            corner.remove("maximum_temperature_c");
-        }
-    }
-
-    let mut restored: ProjectExecutionContext =
-        serde_json::from_value(value).expect("schema ten shape decodes");
-    restored
-        .migrate_to_current(project_id())
-        .expect("schema ten migrates");
-    assert_eq!(
-        restored.schema_version,
-        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    let (_, restored_manager, _) = crate::io::restore_execution_context(restored, project_id())
-        .expect("migrated state restores");
-    let corner = restored_manager
-        .get_library("foundry")
-        .and_then(|library| library.corners.get("TT"))
-        .expect("TT corner restores");
-    assert_eq!(
-        corner.effective_required_domains(),
-        vec![CornerSectionDomain::Composite]
-    );
-    assert_eq!(
-        corner.effective_section_bindings(),
-        vec![CornerSectionBinding::new(
-            CornerSectionDomain::Composite,
-            "TT"
-        )]
-    );
-
-    std::fs::remove_dir_all(directory).expect("remove model fixture");
-}
-
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn schema_one_external_source_migrates_unpinned_and_stays_blocked_until_refresh() {
-    let (directory, path) = model_fixture();
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .load_library_file(&path, Some("TT"))
-        .expect("load source");
-    let mut context =
-        context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
-    context.schema_version = 1;
-    context.model_libraries[0].source_closure.clear();
-
-    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
-        .expect("legacy unpinned catalog remains recoverable");
-
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("legacy binding is not content-pinned"));
-    let blocked = restored
-        .seal_execution_sources()
-        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
-        .expect_err("unpinned legacy source must not run");
-    assert!(blocked.contains("is not content-pinned"));
-
-    std::fs::remove_dir_all(directory).expect("remove model fixture");
-}
-
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn schema_two_multifile_source_migrates_without_inventing_resolution_edges() {
-    let (directory, path) = model_fixture();
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .load_library_file(&path, Some("TT"))
-        .expect("load multifile source");
-    let mut context =
-        context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
-    context.schema_version = 2;
-    context.model_libraries[0].source_edges.clear();
-
-    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
-        .expect("schema-two catalog remains repairable");
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("does not record how its files include each other"));
-    let blocked = restored
-        .seal_execution_sources()
-        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
-        .expect_err("missing legacy graph must block a multifile source");
-    assert!(
-        blocked.contains("no authenticated resolution edge"),
-        "{blocked}"
-    );
-
-    std::fs::remove_dir_all(directory).expect("remove model fixture");
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
@@ -1551,9 +1053,8 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
         .expect("external library keeps canonical root");
 
     std::fs::remove_file(&path).expect("remove source");
-    let (_, retained, warnings) =
-        crate::io::restore_execution_context(context.clone(), project_id())
-            .expect("missing source is retained for repair");
+    let (_, retained, warnings) = crate::io::restore_execution_context(context.clone())
+        .expect("missing source is retained for repair");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("is unavailable"));
     assert_eq!(
@@ -1575,7 +1076,7 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
             ".include \"shared.inc\"\n.lib TT\n.model nch NMOS (LEVEL=1 KP=9e-3)\n.endl TT\n.lib FF\n.model nch NMOS (LEVEL=1 KP=8e-3)\n.endl FF\n",
         )
         .expect("write changed source");
-    let (_, retained, warnings) = crate::io::restore_execution_context(context, project_id())
+    let (_, retained, warnings) = crate::io::restore_execution_context(context)
         .expect("changed source must not discard persisted catalog");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("differs from the explicitly accepted SHA-256"));
@@ -1634,7 +1135,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
     context
         .validate()
         .expect("foreign desktop syntax remains valid project metadata");
-    let (_, manager, warnings) = crate::io::restore_execution_context(context, project_id())
+    let (_, manager, warnings) = crate::io::restore_execution_context(context)
         .expect("foreign binding remains retained for repair");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("foreign-platform"), "{:?}", warnings);
