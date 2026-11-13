@@ -403,6 +403,37 @@ fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
     }
 }
 
+/// Pointing into a pane reads each expression it draws in the pane's unit,
+/// as each of its signals reads: `V(TOP)*2` in volts, never a bare prefix.
+#[test]
+fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
+    const DOUBLE: &str = "V(TOP)*2";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, DOUBLE);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let row = text(&output, "45 hidden").expect("the volts pane's header row");
+    let at = egui::pos2(600.0, row.bottom() + 150.0);
+    run(&ctx, &mut state, vec![egui::Event::PointerMoved(at)]);
+    run(&ctx, &mut state, Vec::new());
+    let output = run(&ctx, &mut state, Vec::new());
+    let painted = texts(&output.shapes);
+    let label = painted
+        .iter()
+        .filter(|(text, rect)| text == DOUBLE && rect.top() > row.bottom())
+        .map(|(_, rect)| *rect)
+        .next_back()
+        .expect("the hover readout names the expression");
+    let value = painted
+        .iter()
+        .find(|(_, rect)| {
+            (rect.center().y - label.center().y).abs() < 2.0 && rect.left() > label.right()
+        })
+        .map(|(text, _)| text.clone())
+        .expect("the hover readout reads the expression");
+    assert!(value.ends_with('V'), "the reading is in volts: {value:?}");
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the staircase named in its own pane beside the DAC, and an expression of
 /// volts named in the volts pane with cursor A's reading, then hidden there.

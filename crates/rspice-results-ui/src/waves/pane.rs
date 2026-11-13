@@ -15,8 +15,7 @@ use rspice_ui_kit::plot::sample::{
     BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, TraceLook,
-    XScale, fmt_si_significant,
+    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, TraceLook, XScale,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
@@ -832,9 +831,10 @@ pub fn show_plot<'a>(
             let value = sample_at_with_shape(&expr.x, &expr.y, &expr.shape, x, interpolation);
             rows.push((
                 expr.label.clone(),
-                // The hover readout is a readout: the expression's value, not
-                // the reader's digit preference spelled out in zeros.
-                super::units::as_readout(&fmt_si_significant(value, "", significant_digits)),
+                // The hover readout is a readout: the expression's value in
+                // the unit of the pane that draws it, not the reader's digit
+                // preference spelled out in zeros, nor a prefix with no unit.
+                super::units::fmt_in_unit_readout(value, pane.axis_unit(), significant_digits),
             ));
         }
         rows
