@@ -21,8 +21,8 @@ pub use authorization::PreparedRunAuthorization;
 pub use headless::{
     HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, prepare_headless_run,
 };
+pub use headless_tasks::HeadlessTaskRequest;
 pub(crate) use headless_tasks::small_signal_state_keyword;
-pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
 pub use snapshot::PreparedRunMetadata;
 pub(crate) use snapshot::bound_cards::BoundStateReader;
 pub use snapshot::{

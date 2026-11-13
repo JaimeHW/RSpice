@@ -42,6 +42,7 @@ pub struct HeadlessTaskRequest {
 ///
 /// A graph prepared without its source reads no file, so a `CHECKPOINT=`
 /// card here must arrive with its state sealed in its request.
+#[cfg(test)]
 pub fn prepare_headless_tasks(
     requests: Vec<HeadlessTaskRequest>,
     source_revision: ObjectRevision,
@@ -65,8 +66,9 @@ pub fn prepare_headless_tasks(
 /// Reads the bytes of the checkpoint file a `CHECKPOINT=` card names.
 pub(crate) type CheckpointReader<'a> = dyn Fn(&str) -> Result<Vec<u8>, String> + 'a;
 
-/// [`prepare_headless_tasks`], reading each `CHECKPOINT=` card's file that
-/// is not sealed with its request through `read_checkpoint`.
+/// Validate and order a headless graph as application preparation does,
+/// reading each `CHECKPOINT=` card's file that is not sealed with its request
+/// through `read_checkpoint`.
 pub(crate) fn prepare_headless_tasks_reading_checkpoints(
     mut requests: Vec<HeadlessTaskRequest>,
     source_revision: ObjectRevision,

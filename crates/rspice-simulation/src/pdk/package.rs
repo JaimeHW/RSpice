@@ -96,6 +96,7 @@ impl ValidatedPdkTechnologyPackage {
 pub struct SealedPdkModelSources(PdkModelSourceParts);
 
 impl SealedPdkModelSources {
+    #[cfg(any(test, feature = "pdk-test-fixtures"))]
     pub fn as_parts(&self) -> &PdkModelSourceParts {
         &self.0
     }
