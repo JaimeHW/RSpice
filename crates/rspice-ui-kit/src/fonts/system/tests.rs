@@ -19,16 +19,16 @@ fn fixture(file: &str) -> PathBuf {
 
 fn korean() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansKR-Regular.ttf"),
-        "IBM Plex Sans KR",
+        fixture("RSpiceTestCJKKR-Regular.ttf"),
+        "RSpice Test CJK KR",
         FaceClass::Han(HanVariant::Korean),
     )
 }
 
 fn japanese() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansJP-Regular.ttf"),
-        "IBM Plex Sans JP",
+        fixture("RSpiceTestCJKJP-Regular.ttf"),
+        "RSpice Test CJK JP",
         FaceClass::Han(HanVariant::Japanese),
     )
 }
@@ -37,8 +37,8 @@ fn japanese() -> KnownFace {
 /// chain holds is offered as an installed script face in their place.
 fn script_stand_in() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansJP-Regular.ttf"),
-        "IBM Plex Sans JP",
+        fixture("RSpiceTestCJKJP-Regular.ttf"),
+        "RSpice Test CJK JP",
         FaceClass::Script,
     )
 }
@@ -112,7 +112,7 @@ fn a_script_no_embedded_face_has_paints_from_an_installed_face() {
     assert_eq!(before, square, "until the face joins, Hangul is the square");
 
     let after = ink(&ctx, &settle(&ctx, "한국"));
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans KR"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK KR"]);
     assert_ne!(after, before);
     assert_ne!(after, ink(&ctx, &frame(&ctx, " ")));
 
@@ -157,7 +157,7 @@ fn the_first_frame_does_not_wait_for_the_font_files() {
 
     release.send(()).unwrap();
     settle(&ctx, "한국");
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans KR"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK KR"]);
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn faces_found_for_one_frame_join_in_one_rebuild_scripts_before_cjk() {
     assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), 1);
     assert_eq!(
         joined_families(&ctx),
-        ["IBM Plex Sans JP", "IBM Plex Sans KR"]
+        ["RSpice Test CJK JP", "RSpice Test CJK KR"]
     );
     let keys: Vec<String> = plugin(&ctx, |plugin| {
         plugin.joined.iter().map(SystemFace::key).collect()
@@ -198,13 +198,13 @@ fn the_document_language_reorders_the_cjk_faces() {
     // Japanese ahead of Korean.
     let ctx = context(Source::files(vec![korean(), japanese()]));
     settle(&ctx, "、");
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans JP"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK JP"]);
 
     set_document_language(&ctx, Some("ko"));
     settle(&ctx, "、");
     assert_eq!(
         joined_families(&ctx),
-        ["IBM Plex Sans KR", "IBM Plex Sans JP"]
+        ["RSpice Test CJK KR", "RSpice Test CJK JP"]
     );
     let rebuilds = plugin(&ctx, |plugin| plugin.rebuilds);
 
@@ -222,14 +222,14 @@ fn the_han_preference_reorders_the_cjk_faces_after_the_document_language() {
     // Japanese ahead of Korean.
     let ctx = context(Source::files(vec![korean(), japanese()]));
     settle(&ctx, "、");
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans JP"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK JP"]);
     let rebuilds = plugin(&ctx, |plugin| plugin.rebuilds);
 
     set_han_preference(&ctx, HanPreference::Prefer(HanVariant::Korean));
     settle(&ctx, "、");
     assert_eq!(
         joined_families(&ctx),
-        ["IBM Plex Sans KR", "IBM Plex Sans JP"]
+        ["RSpice Test CJK KR", "RSpice Test CJK JP"]
     );
     assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), rebuilds + 1);
 
@@ -241,7 +241,7 @@ fn the_han_preference_reorders_the_cjk_faces_after_the_document_language() {
     settle(&ctx, "、");
     assert_eq!(
         joined_families(&ctx),
-        ["IBM Plex Sans JP", "IBM Plex Sans KR"]
+        ["RSpice Test CJK JP", "RSpice Test CJK KR"]
     );
 }
 
@@ -265,7 +265,7 @@ fn reinstalling_the_fonts_keeps_the_faces_that_joined() {
     frame(&ctx, "한국");
     frame(&ctx, "한국");
     assert_eq!(ink(&ctx, &frame(&ctx, "한국")), joined);
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans KR"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK KR"]);
 }
 
 #[test]

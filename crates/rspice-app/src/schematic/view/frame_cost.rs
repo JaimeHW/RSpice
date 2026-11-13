@@ -1031,13 +1031,13 @@ fn chinese_values() -> [FrameTimes; 3] {
         hover_frames(&ctx, &mut chinese_values_at_100(), symbols.as_ref())
     };
 
-    // IBM Plex Sans SC, read through the same path as an installed face.
+    // The RSpice Test CJK SC subset, read through the same path as an installed face.
     let ctx = context_with_system_faces(vec![KnownFace::new(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/fonts/IBMPlexSansSC-Regular.ttf"
+            "/../../assets/fonts/RSpiceTestCJKSC-Regular.ttf"
         ),
-        "IBM Plex Sans SC",
+        "RSpice Test CJK SC",
         FaceClass::Han(HanVariant::Simplified),
     )]);
     let mut state = chinese_values_at_100();
@@ -1054,7 +1054,7 @@ fn chinese_values() -> [FrameTimes; 3] {
     // The pass that took the face asked for the rebuild; this one makes it.
     let (joins_ms, _) = run_frame(&ctx, &mut state, symbols.as_ref(), centre);
     let lettered = hover_frames(&ctx, &mut state, symbols.as_ref());
-    assert_eq!(joined_families(&ctx), ["IBM Plex Sans SC"]);
+    assert_eq!(joined_families(&ctx), ["RSpice Test CJK SC"]);
     [
         FrameTimes {
             name: "Chinese values, 100 %: squares",

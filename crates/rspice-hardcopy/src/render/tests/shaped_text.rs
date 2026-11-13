@@ -516,10 +516,10 @@ impl Installed {
         Self { _turn: turn }
     }
 
-    /// IBM Plex Sans JP, read as an installed face so every machine has it.
+    /// The RSpice Test CJK JP subset, read as an installed face so every machine has it.
     fn japanese() -> Self {
         Self::faces(vec![installed_face(fixture_font(
-            "IBMPlexSansJP-Regular.ttf",
+            "RSpiceTestCJKJP-Regular.ttf",
         ))])
     }
 }
@@ -542,7 +542,7 @@ fn fixture_font(file: &str) -> std::path::PathBuf {
 fn installed_face(path: std::path::PathBuf) -> rspice_fonts::system::KnownFace {
     rspice_fonts::system::KnownFace::new(
         path,
-        "IBM Plex Sans JP",
+        "RSpice Test CJK JP",
         rspice_fonts::system::FaceClass::Han(rspice_fonts::HanVariant::Japanese),
     )
 }
@@ -559,7 +559,7 @@ fn a_pdf_letters_what_no_embedded_face_has_from_an_installed_face() {
         assert!(
             page.glyphs
                 .iter()
-                .any(|(base, _)| base.contains("IBMPlexSansJP")),
+                .any(|(base, _)| base.contains("RSpiceTestCJKJP")),
             "{:?}",
             page.glyphs
         );
@@ -595,7 +595,7 @@ fn an_svg_draws_an_installed_face_as_outlines_defined_once() {
     assert!(svg.contains("<path id=\"o1-1\""), "{svg}");
     assert_eq!(svg.matches("<use href=\"#o").count(), 3, "{svg}");
     assert!(svg.contains("<title>中文中</title>"), "{svg}");
-    assert!(!svg.contains("IBM Plex Sans JP"), "{svg}");
+    assert!(!svg.contains("RSpice Test CJK JP"), "{svg}");
     let text = &svg[svg.find("<text").unwrap()..];
     assert!(
         !text.contains('中'),
@@ -625,12 +625,12 @@ fn the_receipt_names_an_installed_face_by_its_file_never_the_home_directory() {
     let [face] = installed.as_slice() else {
         panic!("one installed face: {:?}", publication.faces_used());
     };
-    assert_eq!(face.family(), "IBM Plex Sans JP");
+    assert_eq!(face.family(), "RSpice Test CJK JP");
     assert_eq!(face.weight(), 400);
     let HardcopyFaceSource::System { path } = face.source() else {
         panic!("{face:?}");
     };
-    assert!(path.ends_with("IBMPlexSansJP-Regular.ttf"), "{path}");
+    assert!(path.ends_with("RSpiceTestCJKJP-Regular.ttf"), "{path}");
     let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     if let Some(home) = std::env::var_os(home).filter(|home| !home.is_empty()) {
         assert!(!path.contains(home.to_str().unwrap()), "{path}");
@@ -679,7 +679,7 @@ fn a_receipt_writes_a_face_one_user_installed_from_the_home_directory() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn print_never_embeds_a_face_whose_licence_forbids_it() {
-    let mut bytes = std::fs::read(fixture_font("IBMPlexSansJP-Regular.ttf")).unwrap();
+    let mut bytes = std::fs::read(fixture_font("RSpiceTestCJKJP-Regular.ttf")).unwrap();
     let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
     let os2 = (0..tables)
         .map(|table| 12 + 16 * table)
@@ -704,7 +704,7 @@ fn print_never_embeds_a_face_whose_licence_forbids_it() {
         !page
             .glyphs
             .iter()
-            .any(|(base, _)| base.contains("IBMPlexSansJP")),
+            .any(|(base, _)| base.contains("RSpiceTestCJKJP")),
         "{:?}",
         page.glyphs
     );

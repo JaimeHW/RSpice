@@ -13,16 +13,16 @@ fn fixture(file: &str) -> PathBuf {
 
 fn korean() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansKR-Regular.ttf"),
-        "IBM Plex Sans KR",
+        fixture("RSpiceTestCJKKR-Regular.ttf"),
+        "RSpice Test CJK KR",
         FaceClass::Han(Korean),
     )
 }
 
 fn japanese() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansJP-Regular.ttf"),
-        "IBM Plex Sans JP",
+        fixture("RSpiceTestCJKJP-Regular.ttf"),
+        "RSpice Test CJK JP",
         FaceClass::Han(Japanese),
     )
 }
@@ -44,12 +44,12 @@ fn a_face_joins_for_a_character_only_it_has() {
     let [face] = resolution.joined.as_slice() else {
         panic!("one face joins: {resolution:?}");
     };
-    assert_eq!(face.family(), "IBM Plex Sans KR");
+    assert_eq!(face.family(), "RSpice Test CJK KR");
     assert_eq!(face.class(), FaceClass::Han(Korean));
     assert!(face.covers('한') && face.covers('국'));
     assert_eq!(
         face.bytes(),
-        std::fs::read(fixture("IBMPlexSansKR-Regular.ttf")).unwrap()
+        std::fs::read(fixture("RSpiceTestCJKKR-Regular.ttf")).unwrap()
     );
 }
 
@@ -70,8 +70,8 @@ fn a_face_joins_once_and_a_character_none_has_is_missing() {
 fn the_han_order_chooses_the_face_of_a_shared_character() {
     // U+3001 IDEOGRAPHIC COMMA is in both faces.
     for (order, family) in [
-        (Japanese.order(), "IBM Plex Sans JP"),
-        (Korean.order(), "IBM Plex Sans KR"),
+        (Japanese.order(), "RSpice Test CJK JP"),
+        (Korean.order(), "RSpice Test CJK KR"),
     ] {
         let fonts = SystemFonts::spawn(Source::files(vec![korean(), japanese()]), order);
         fonts.request(vec!['、']);
@@ -87,12 +87,12 @@ fn the_han_order_chooses_the_face_of_a_shared_character() {
 fn a_new_order_joins_the_face_of_the_form_now_first() {
     let fonts = SystemFonts::spawn(Source::files(vec![korean(), japanese()]), Korean.order());
     fonts.request(vec!['、']);
-    assert_eq!(answer(&fonts).joined[0].family(), "IBM Plex Sans KR");
+    assert_eq!(answer(&fonts).joined[0].family(), "RSpice Test CJK KR");
     fonts.reorder(Japanese.order(), vec!['、']);
     let joined = answer(&fonts).joined;
     assert_eq!(
         joined.iter().map(SystemFace::family).collect::<Vec<_>>(),
-        ["IBM Plex Sans JP"]
+        ["RSpice Test CJK JP"]
     );
     assert!(
         joined[0].precedence(&Japanese.order()) < (1, 4),
@@ -118,10 +118,10 @@ fn a_gated_worker_reads_nothing_and_answers_nothing_until_released() {
 fn a_file_that_no_longer_parses_when_read_joins_nothing() {
     let path =
         std::env::temp_dir().join(format!("rspice-fonts-refused-{}.ttf", std::process::id()));
-    std::fs::copy(fixture("IBMPlexSansKR-Regular.ttf"), &path).unwrap();
+    std::fs::copy(fixture("RSpiceTestCJKKR-Regular.ttf"), &path).unwrap();
     let mut catalog = Catalog::probe(&[KnownFace::new(
         &path,
-        "IBM Plex Sans KR",
+        "RSpice Test CJK KR",
         FaceClass::Han(Korean),
     )]);
     assert_eq!(catalog.candidates.len(), 1);
@@ -153,7 +153,7 @@ fn a_known_file_that_is_absent_offers_nothing() {
     let catalog = Catalog::probe(&[
         KnownFace::new(fixture("absent.ttf"), "Absent", FaceClass::Script),
         KnownFace::new(
-            fixture("IBMPlexSansKR-Regular.ttf"),
+            fixture("RSpiceTestCJKKR-Regular.ttf"),
             "Another family",
             FaceClass::Script,
         ),

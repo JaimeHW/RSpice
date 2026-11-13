@@ -21,14 +21,14 @@ fn fixture(file: &str) -> PathBuf {
 
 fn japanese() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansJP-Regular.ttf"),
-        "IBM Plex Sans JP",
+        fixture("RSpiceTestCJKJP-Regular.ttf"),
+        "RSpice Test CJK JP",
         FaceClass::Han(Japanese),
     )
 }
 
 fn korean_at(path: PathBuf) -> KnownFace {
-    KnownFace::new(path, "IBM Plex Sans KR", FaceClass::Han(Korean))
+    KnownFace::new(path, "RSpice Test CJK KR", FaceClass::Han(Korean))
 }
 
 /// A copy of `file` whose OS/2 table sets `fs_type`, written where the test
@@ -65,10 +65,10 @@ fn print_letters_from_the_installed_faces_it_is_told_of() {
     print_from(Source::files(vec![japanese()]), Simplified.order());
     let (id, whole) = face_for("中", &['中']).expect("the Japanese face has 中");
     assert!(whole);
-    assert_eq!(id.face().family(), "IBM Plex Sans JP");
+    assert_eq!(id.face().family(), "RSpice Test CJK JP");
     assert_eq!(
         id.face().bytes(),
-        std::fs::read(fixture("IBMPlexSansJP-Regular.ttf")).unwrap()
+        std::fs::read(fixture("RSpiceTestCJKJP-Regular.ttf")).unwrap()
     );
     assert_eq!(face_for("中", &['中']), Some((id, true)), "asked once");
     assert_eq!(face_for("\u{0378}", &['\u{0378}']), None);
@@ -99,7 +99,7 @@ fn print_passes_over_a_face_it_may_not_embed() {
         (0x0100, false),
         (0x0200, false),
     ] {
-        let path = with_fs_type("IBMPlexSansKR-Regular.ttf", fs_type);
+        let path = with_fs_type("RSpiceTestCJKKR-Regular.ttf", fs_type);
         print_from(Source::files(vec![korean_at(path.clone())]), Korean.order());
         assert_eq!(
             face_for("한", &['한']).is_some(),
@@ -114,14 +114,14 @@ fn print_passes_over_a_face_it_may_not_embed() {
 #[test]
 fn print_orders_the_cjk_faces_as_the_screen_does() {
     let _turn = print_source();
-    let korean = korean_at(fixture("IBMPlexSansKR-Regular.ttf"));
+    let korean = korean_at(fixture("RSpiceTestCJKKR-Regular.ttf"));
     print_from(Source::files(vec![korean, japanese()]), Korean.order());
     let shared = '\u{3002}';
     let cluster = shared.to_string();
     let first = face_for(&cluster, &[shared]).expect("both faces have the full stop");
-    assert_eq!(first.0.face().family(), "IBM Plex Sans KR");
+    assert_eq!(first.0.face().family(), "RSpice Test CJK KR");
     set_print_order(Japanese.order());
     let then = face_for(&cluster, &[shared]).expect("both faces have the full stop");
-    assert_eq!(then.0.face().family(), "IBM Plex Sans JP");
+    assert_eq!(then.0.face().family(), "RSpice Test CJK JP");
     print_from_none();
 }
