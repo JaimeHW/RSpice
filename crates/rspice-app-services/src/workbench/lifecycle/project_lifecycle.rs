@@ -1584,7 +1584,6 @@ pub fn revert_document_model(
     id: ProjectDocumentId,
 ) -> Result<RevertFollowUp, ProjectLifecycleError> {
     let baseline = state.platform.project_lifecycle.accepted_snapshot()?;
-    let baseline_project_id = baseline.file.workspace.project.id();
 
     let follow_up = match id {
         ProjectDocumentId::ProjectConfiguration => {

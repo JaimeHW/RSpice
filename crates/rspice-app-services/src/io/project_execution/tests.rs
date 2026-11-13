@@ -12,7 +12,7 @@ use crate::state::model_library::{
     CorrelationSuite,
 };
 use crate::state::model_library::{
-    ModelCorrelationState, ModelLibrary, ModelQualificationState, ModelSectionQualification,
+    ModelCorrelationState, ModelQualificationState, ModelSectionQualification,
     ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin,
     ProjectModelDefinition, ProjectModelRevisionDefinition, is_portable_absolute_path,
 };
@@ -22,13 +22,6 @@ use rspice_project::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-fn project_id() -> ProjectId {
-    ProjectId::from_namespace(
-        uuid::Uuid::from_u128(0xe707_36ed_7eef_5205_b51e_9608_f55e_bd35),
-        b"project-execution-tests",
-    )
-}
 
 fn context_from_state(
     plan: &SimSetupState,
