@@ -203,10 +203,6 @@ pub(crate) use actions::workspace::{
     sync_active_schematic, veriloga_master_of_component, veriloga_source_for_component,
 };
 pub(crate) use dialogs::find_replace::find_replace_matches;
-#[cfg(test)]
-pub(crate) use dialogs::placement::net_label::{
-    open_net_label_placement, place_sequenced_net_label,
-};
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement_in, place_sequenced_net_label_in,
 };

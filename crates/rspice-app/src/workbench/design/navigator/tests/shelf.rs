@@ -566,9 +566,12 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
         assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
         let before = app.state.model.schematic.document().net_labels.len();
         for y in [0, 20] {
-            assert!(crate::workbench::app::place_sequenced_net_label(
-                &mut app.state,
-                Point::new(10 * before as i32, y),
+            let dialog_modal_open = app.state.dialog_modal_open();
+            assert!(crate::workbench::app::place_sequenced_net_label_in(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                dialog_modal_open,
+                Point::new(10 * before as i32, y)
             ));
         }
         let labels = &app.state.model.schematic.document().net_labels[before..];
@@ -596,8 +599,14 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
         );
     }
     app.state.model.schematic.arm_tool(Tool::Select);
+    let dialog_modal_open = app.state.dialog_modal_open();
     assert!(
-        !crate::workbench::app::place_sequenced_net_label(&mut app.state, Point::new(0, 80)),
+        !crate::workbench::app::place_sequenced_net_label_in(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            Point::new(0, 80)
+        ),
         "a changed tool retires the rail"
     );
 }

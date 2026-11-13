@@ -19,8 +19,6 @@ use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::{deny_read_only_edit, sync_active_schematic};
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
@@ -115,27 +113,15 @@ impl DraftValidation {
     }
 }
 
-/// Capture a snapped label anchor without changing the schematic.
+/// Capture a snapped label anchor in the entry's draft without changing the
+/// schematic.
 ///
 /// The armed tool decides which label is being placed, so the canvas never has
 /// to carry a second entry point for the connector.
 ///
 /// Returning `false` means the active document does not currently own edit
-/// authority or another application modal already owns the interaction.
-#[cfg(test)]
-pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> bool {
-    let dialog_modal_open = state.dialog_modal_open();
-    open_net_label_placement_in(
-        &mut state.design.net_label_placement,
-        &mut state.model,
-        &mut state.workbench,
-        dialog_modal_open,
-        anchor,
-    )
-}
-
-/// [`open_net_label_placement`] over the entry's draft, the model and the
-/// session, with whether the dialog gate was held.
+/// authority or another application modal already owns the interaction
+/// (`dialog_modal_open`, whether the dialog gate was held).
 pub(crate) fn open_net_label_placement_in(
     dialog: &mut NetLabelPlacementDialogState,
     model: &mut Model,
@@ -289,19 +275,7 @@ fn anchor_on_bus(model: &Model, anchor: Point) -> bool {
 
 /// Place the name an armed sequence holds next at `anchor`, as one undo
 /// step, and arm the one after it. Returns whether a sequence answered the
-/// click; with none armed, the click opens the entry.
-#[cfg(test)]
-pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> bool {
-    let dialog_modal_open = state.dialog_modal_open();
-    place_sequenced_net_label_in(
-        &mut state.model,
-        &mut state.workbench,
-        dialog_modal_open,
-        anchor,
-    )
-}
-
-/// [`place_sequenced_net_label`] over the model and the session, with
+/// click; with none armed, the click opens the entry. `dialog_modal_open` is
 /// whether the dialog gate was held.
 pub(crate) fn place_sequenced_net_label_in(
     model: &mut Model,
@@ -400,6 +374,7 @@ fn apply_commit(
 mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Draw the entry as its dialog step does.
     fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -444,12 +419,26 @@ mod tests {
 
     fn open_at(app: &mut RSpiceApp, anchor: Point) {
         app.state.model.schematic.session.editor.tool = Tool::Label;
-        assert!(open_net_label_placement(&mut app.state, anchor));
+        let dialog_modal_open = app.state.dialog_modal_open();
+        assert!(open_net_label_placement_in(
+            &mut app.state.design.net_label_placement,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            anchor
+        ));
     }
 
     fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
         app.state.model.schematic.session.editor.tool = Tool::OffSheetConnector;
-        assert!(open_net_label_placement(&mut app.state, anchor));
+        let dialog_modal_open = app.state.dialog_modal_open();
+        assert!(open_net_label_placement_in(
+            &mut app.state.design.net_label_placement,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            anchor
+        ));
     }
 
     #[test]
@@ -538,7 +527,14 @@ mod tests {
     /// Place what the entry names at `anchor`.
     fn commit_entry(state: &mut AppState, anchor: Point, entry: &str) {
         state.model.schematic.session.editor.tool = Tool::Label;
-        assert!(open_net_label_placement(state, anchor));
+        let dialog_modal_open = state.dialog_modal_open();
+        assert!(open_net_label_placement_in(
+            &mut state.design.net_label_placement,
+            &mut state.model,
+            &mut state.workbench,
+            dialog_modal_open,
+            anchor
+        ));
         state.design.net_label_placement.name = entry.to_owned();
         let DraftValidation::Valid(commit) = validate_draft(state) else {
             panic!("{entry} is a valid entry");
@@ -577,8 +573,20 @@ mod tests {
         commit_entry(&mut app.state, Point::new(0, 0), "D0");
         assert_eq!(next_name(&app).as_deref(), Some("D1"));
 
-        assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 20)));
-        assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 40)));
+        let dialog_modal_open = app.state.dialog_modal_open();
+        assert!(place_sequenced_net_label_in(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            Point::new(0, 20)
+        ));
+        let dialog_modal_open = app.state.dialog_modal_open();
+        assert!(place_sequenced_net_label_in(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            Point::new(0, 40)
+        ));
         assert!(!app.state.design.net_label_placement.open);
         assert_eq!(label_names(&app), ["D0", "D1", "D2"]);
         assert_eq!(next_name(&app).as_deref(), Some("D3"));
@@ -604,11 +612,20 @@ mod tests {
             let mut y = 0;
             while next_name(&app).is_some() {
                 y += 20;
-                assert!(place_sequenced_net_label(&mut app.state, Point::new(0, y)));
+                let dialog_modal_open = app.state.dialog_modal_open();
+                assert!(place_sequenced_net_label_in(
+                    &mut app.state.model,
+                    &mut app.state.workbench,
+                    dialog_modal_open,
+                    Point::new(0, y)
+                ));
             }
             assert_eq!(label_names(&app), expected);
-            assert!(!place_sequenced_net_label(
-                &mut app.state,
+            let dialog_modal_open = app.state.dialog_modal_open();
+            assert!(!place_sequenced_net_label_in(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                dialog_modal_open,
                 Point::new(0, 200)
             ));
         }

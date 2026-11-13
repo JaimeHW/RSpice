@@ -89,8 +89,12 @@ fn place_bus_tap_opens_and_draws_in_the_frame() {
 fn net_label_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     let before = labelled(&mut app, "Net label");
-    assert!(crate::workbench::app::open_net_label_placement(
-        &mut app.state,
+    let dialog_modal_open = app.state.dialog_modal_open();
+    assert!(crate::workbench::app::open_net_label_placement_in(
+        &mut app.state.design.net_label_placement,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        dialog_modal_open,
         Point::new(0, 0)
     ));
     assert_eq!(labelled(&mut app, "Net label"), before + 1);
