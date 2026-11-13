@@ -362,7 +362,6 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
         first.entries[1].currentness,
         ReportReferenceCurrentness::Frozen
     );
-    assert!(!first.is_current_for_sign_off());
 
     let refreshed = ReportReferenceSnapshot::new(
         linked_source,
@@ -386,7 +385,6 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
         )
         .unwrap();
     let second = document.audit_references(&inventory).unwrap();
-    assert!(second.is_current_for_sign_off());
     assert_ne!(first.audit_digest, second.audit_digest);
 }
 
@@ -1223,7 +1221,6 @@ fn frozen_plot_is_publishable_without_inventory_and_artifact_changes_affect_audi
     let first = document
         .audit_references(&ReportReferenceInventory::default())
         .unwrap();
-    assert!(first.is_current_for_sign_off());
     assert_eq!(
         first.entries[0].frozen_artifact_media_type.as_deref(),
         Some("image/svg+xml")
@@ -1941,5 +1938,4 @@ fn reference_audit_digest_is_deterministic_for_identical_inputs() {
     let first = document.audit_references(&inventory).unwrap();
     let second = document.audit_references(&inventory).unwrap();
     assert_eq!(first.audit_digest, second.audit_digest);
-    assert!(first.is_current_for_sign_off());
 }

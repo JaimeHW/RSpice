@@ -135,15 +135,6 @@ impl SensitivityStudyEvidence {
         self.point_count() >= 2
     }
 
-    /// How the filter reads to someone who did not type it.
-    pub fn filter_label(&self) -> &str {
-        if self.filter.is_empty() {
-            "every device and model parameter"
-        } else {
-            self.filter.as_str()
-        }
-    }
-
     /// Refuse a study the engine could not have produced.
     ///
     /// Every rule is a property of the engine's own answer: the grid is the
@@ -393,7 +384,6 @@ mod tests {
         assert_eq!(dc.point_count(), 1);
         assert!(!dc.is_swept());
         assert_eq!(dc.frequency_at(0), None);
-        assert_eq!(dc.filter_label(), "PARAM:*");
 
         let ac = ac_fixture();
         ac.validate().expect("the AC fixture is valid evidence");
@@ -401,7 +391,6 @@ mod tests {
         assert!(ac.is_swept());
         assert_eq!(ac.frequency_at(2), Some(1000.0));
         assert_eq!(ac.frequency_at(3), None);
-        assert_eq!(ac.filter_label(), "every device and model parameter");
 
         let text = serde_json::to_string(&ac).expect("evidence serializes");
         let restored: SensitivityStudyEvidence =

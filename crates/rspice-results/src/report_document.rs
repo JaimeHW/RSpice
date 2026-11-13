@@ -830,21 +830,6 @@ pub struct ReportReferenceAudit {
     pub entries: Vec<ReportReferenceAuditEntry>,
 }
 
-impl ReportReferenceAudit {
-    /// True only when every linked block resolves exactly and every frozen
-    /// block retains its embedded artifact. A frozen source being absent from
-    /// the live inventory does not invalidate its immutable artifact.
-    #[must_use]
-    pub fn is_current_for_sign_off(&self) -> bool {
-        self.entries.iter().all(|entry| {
-            matches!(
-                entry.currentness,
-                ReportReferenceCurrentness::Current | ReportReferenceCurrentness::Frozen
-            )
-        })
-    }
-}
-
 /// Provenance of the first reconstructable source revision retained by a
 /// report document.
 ///
