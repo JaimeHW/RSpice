@@ -38,6 +38,9 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
     let mut search_rect: Option<egui::Rect> = None;
     let mut producer_rect: Option<egui::Rect> = None;
     let mut facet_rects: Vec<egui::Rect> = Vec::new();
+    // The Tree | Flat toggle is one segmented control whose segments are
+    // separate radio buttons, so its facet is their union.
+    let mut layout_rect: Option<egui::Rect> = None;
     // The narrowest the dock can be dragged to. `set_width` alone only raises
     // the minimum, so the surface would otherwise lay itself out against the
     // default screen and the row geometry below would prove nothing about the
@@ -73,13 +76,23 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
             ));
         }
         if node.role() == egui::accesskit::Role::ComboBox
-            && matches!(node.label(), Some("Quantity kind" | "Quantity sort"))
+            && node.label() == Some("Quantity kind")
             && let Some(bounds) = node.bounds()
         {
             facet_rects.push(egui::Rect::from_min_max(
                 egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                 egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
             ));
+        }
+        if node.role() == egui::accesskit::Role::RadioButton
+            && matches!(node.label(), Some("Tree" | "Flat"))
+            && let Some(bounds) = node.bounds()
+        {
+            let segment = egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            );
+            layout_rect = Some(layout_rect.map_or(segment, |rect| rect.union(segment)));
         }
         if node.role() == egui::accesskit::Role::ComboBox
             && node.label() == Some("Producing analysis")
@@ -116,11 +129,12 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
         producer.width(),
         search.width()
     );
-    assert_eq!(facet_rects.len(), 2, "kind and sort facets");
+    facet_rects.extend(layout_rect);
+    assert_eq!(facet_rects.len(), 2, "kind and layout facets");
     facet_rects.sort_by(|a, b| a.left().total_cmp(&b.left()));
     let [kind, sort] = [facet_rects[0], facet_rects[1]];
-    // The pair splits unevenly: kind carries the long option names, sort three
-    // short ones, so neither list clips at the dock's own width.
+    // The pair splits unevenly: kind carries the long option names, the layout
+    // toggle two short ones, so neither clips at the dock's own width.
     let pair = kind.width() + sort.width();
     assert!(
         (kind.width() / pair - 0.554).abs() <= 0.01,

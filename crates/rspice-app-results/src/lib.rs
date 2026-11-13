@@ -100,6 +100,10 @@ pub mod workbench {
             pub mod results;
             pub mod results_actions;
             pub mod results_rows;
+            mod results_sets;
+            mod results_tree;
+            #[cfg(test)]
+            mod tests;
         }
     }
     pub mod documents {

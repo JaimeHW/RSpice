@@ -39,22 +39,6 @@ fn each_pane_keeps_its_own_y_viewport() {
 }
 
 #[test]
-fn favorite_toggle_is_a_strict_membership_flip() {
-    let mut results = ResultViewerState::default();
-    let analysis = AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "TRAN", 0.0);
-    let key = SourceWaveformPresentationKey::new(
-        AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis),
-        "V(out)",
-    );
-
-    assert!(!results.is_favorite_signal(&key));
-    results.toggle_favorite_signal(key.clone());
-    assert!(results.is_favorite_signal(&key));
-    results.toggle_favorite_signal(key.clone());
-    assert!(!results.is_favorite_signal(&key));
-}
-
-#[test]
 fn recent_signals_front_insert_deduplicate_and_age_out() {
     let mut results = ResultViewerState::default();
     let analysis = AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "TRAN", 0.0);
@@ -88,11 +72,8 @@ fn browser_signal_marks_do_not_alias_equal_names_from_different_datasets() {
     );
     let mut results = ResultViewerState::default();
 
-    results.toggle_favorite_signal(first.clone());
     results.note_recent_signal(first.clone());
 
-    assert!(results.is_favorite_signal(&first));
     assert_eq!(results.recent_signal_rank(&first), Some(0));
-    assert!(!results.is_favorite_signal(&second));
     assert_eq!(results.recent_signal_rank(&second), None);
 }

@@ -547,7 +547,6 @@ pub(super) fn result_artifact_context_menu(
     response: &egui::Response,
     state: &mut ResultsParts<'_>,
     artifact: &ResultArtifact,
-    favorite: bool,
 ) {
     let exact_error =
         crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
@@ -630,19 +629,12 @@ pub(super) fn result_artifact_context_menu(
             }
             ui.close();
         }
-        if ui
-            .button(if favorite {
-                "Remove from favorites"
-            } else {
-                "Add to favorites"
-            })
-            .clicked()
-        {
-            state
-                .results
-                .session
-                .toggle_favorite_result_artifact(artifact.identity.clone());
-            ui.close();
+        if super::results_rows::is_plottable_artifact(artifact.identity.canonical_name()) {
+            super::results_sets::add_to_set_menu(
+                ui,
+                state,
+                &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
+            );
         }
         let export = ui.add_enabled(exact_available, egui::Button::new("Export\u{2026}"));
         if let Some(error) = exact_error.as_deref() {
@@ -685,7 +677,6 @@ pub(super) fn result_signal_context_menu(
     state: &mut ResultsParts<'_>,
     key: &SourceWaveformPresentationKey,
     visible: bool,
-    favorite: bool,
 ) {
     let key = key.clone();
     let exact_error =
@@ -820,17 +811,11 @@ pub(super) fn result_signal_context_menu(
             ui.close();
         }
         ui.separator();
-        if ui
-            .button(if favorite {
-                "Remove from favorites"
-            } else {
-                "Add to favorites"
-            })
-            .clicked()
-        {
-            state.results.session.toggle_favorite_signal(key.clone());
-            ui.close();
-        }
+        super::results_sets::add_to_set_menu(
+            ui,
+            state,
+            &ResultBrowserSelectionKey::Waveform(key.clone()),
+        );
         let signal_name = key
             .resolve(&state.model.simulation.retained.runs)
             .map(|(.., waveform)| waveform.name.clone());

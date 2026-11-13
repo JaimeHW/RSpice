@@ -1108,8 +1108,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
             .results
             .results
             .session
-            .favorite_signals
-            .insert(SourceWaveformPresentationKey::new(analysis, name));
+            .note_recent_signal(SourceWaveformPresentationKey::new(analysis, name));
         state
             .results
             .results
@@ -1134,7 +1133,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
     assert_eq!(state.results.results.session.markers[0].analysis, kept);
     assert_eq!(state.results.results.session.log_y_panes.len(), 1);
     assert_eq!(state.results.results.session.hidden_strips.len(), 1);
-    assert_eq!(state.results.results.session.favorite_signals.len(), 1);
+    assert_eq!(state.results.results.session.recent_signals.len(), 1);
     assert_eq!(state.results.results.session.analysis_exprs.len(), 1);
     assert!(
         state

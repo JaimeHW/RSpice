@@ -25,15 +25,21 @@ use super::results_actions::{
     select_result_browser_key, select_result_dataset, set_result_quantity_ticked,
 };
 use super::results_rows::{
-    ResultCompletenessClass, expression_header, result_analysis_browser_status,
-    result_analysis_completeness, result_analysis_domain, result_browser_manifest_row,
-    result_quantity_kind_label, result_run_completeness, result_run_operational_label,
-    retained_result_artifacts, show_virtualized_result_signals, signal_row,
+    ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
+    result_analysis_browser_status, result_analysis_completeness, result_analysis_domain,
+    result_browser_manifest_row, result_quantity_kind_label, result_run_completeness,
+    result_run_operational_label, retained_result_artifacts, show_virtualized_result_signals,
+    signal_row, signal_rows,
+};
+use super::results_sets::signal_sets_menu;
+use super::results_tree::{
+    BrowserQuery, InstanceNode, SignalKind, TreeItem, build_tree, split_hierarchy,
 };
 use rspice_app_workbench::workbench::docks::navigator::muted;
 use rspice_app_workbench::workbench::docks::navigator::{
     PANEL_SEARCH_MARGIN_X, panel_search_field_width, search_focus_requested,
 };
+use rspice_vocabulary::natural_order::natural_cmp;
 
 /// The content width the pair still reads at: the navigator dock's own minimum
 /// of 220 px less its 8 px insets. Above it the typed facets stay side by side
@@ -67,19 +73,22 @@ pub(in crate::workbench) fn results(
     {
         state.results.session.clear_checked_signals();
     }
-    let query = state.workbench.navigator_filter().trim().to_lowercase();
+    let query = BrowserQuery::parse(state.workbench.navigator_filter());
     let ticked = ticked_result_quantities(state.model, state.results);
+    // What a set saves: the ticked quantities in the order the runs hold them.
+    let ticked_ordered =
+        ordered_checked_result_keys(&ticked, &state.model.simulation.retained.runs);
     let active_browser_tab = results_browser_active_tab(ui.ctx());
-    // Kind/sort read the values the toolbar stored last frame — the row
+    // Kind/layout read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
     // one-frame contract the viewer-tab chevrons use.
     let stored_kind = ui
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserKind>(results_browser_kind_id()))
         .unwrap_or_default();
-    let sort = ui
+    let layout = ui
         .ctx()
-        .data(|data| data.get_temp::<ResultsBrowserSort>(results_browser_sort_id()))
+        .data(|data| data.get_temp::<ResultsBrowserLayout>(results_browser_layout_id()))
         .unwrap_or_default();
     let stored_scope = ui
         .ctx()
@@ -106,9 +115,6 @@ pub(in crate::workbench) fn results(
     } else {
         None
     };
-    // A snapshot keeps the favorites predicate borrow-free inside the run map;
-    // recency reads its owning accessor, which states the rank once.
-    let favorite_signals = state.results.session.favorite_signals.clone();
     let active_run = state
         .model
         .simulation
@@ -153,9 +159,7 @@ pub(in crate::workbench) fn results(
     let expressions = expression_source
         .iter()
         .enumerate()
-        .filter(|(_, (_, expression))| {
-            query.is_empty() || expression.text.to_lowercase().contains(&query)
-        })
+        .filter(|(_, (_, expression))| query.matches_name(&expression.text))
         .map(|(expression_index, (identity, expression))| {
             (identity.clone(), expression_index, expression.clone())
         })
@@ -213,29 +217,17 @@ pub(in crate::workbench) fn results(
                         evidence_valid,
                     );
                     let analysis_query_matches = query.is_empty()
-                        || run.label.to_lowercase().contains(&query)
-                        || analysis.label.to_lowercase().contains(&query)
-                        || analysis
-                            .analysis_type
-                            .display_name()
-                            .to_lowercase()
-                            .contains(&query)
-                        || analysis
-                            .analysis_type
-                            .short_label()
-                            .to_lowercase()
-                            .contains(&query)
-                        || analysis.id.to_string().contains(&query)
+                        || query.matches_word(&run.label)
+                        || query.matches_word(&analysis.label)
+                        || query.matches_word(analysis.analysis_type.display_name())
+                        || query.matches_word(analysis.analysis_type.short_label())
+                        || query.matches_word(&analysis.id.to_string())
                         || analysis.provenance().is_some_and(|provenance| {
-                            provenance
-                                .source_instance_id()
-                                .to_string()
-                                .to_lowercase()
-                                .contains(&query)
+                            query.matches_word(&provenance.source_instance_id().to_string())
                         })
-                        || integrity.contains(&query)
-                        || completeness.contains(&query)
-                        || currentness_label.contains(&query);
+                        || query.matches_word(integrity)
+                        || query.matches_word(completeness)
+                        || query.matches_word(currentness_label);
                     let mut signals = analysis
                         .waveforms
                         .iter()
@@ -261,10 +253,10 @@ pub(in crate::workbench) fn results(
                             let quantity_kind =
                                 result_quantity_kind_label(&waveform.name, unit);
                             if !analysis_query_matches
-                                && !waveform.name.to_lowercase().contains(&query)
-                                && !unit.to_lowercase().contains(&query)
-                                && !quantity_kind.to_lowercase().contains(&query)
-                                && !"vector".contains(&query)
+                                && !query.matches_name(&waveform.name)
+                                && !query.matches_word(unit)
+                                && !query.matches_word(quantity_kind)
+                                && !query.matches_word("vector")
                             {
                                 return None;
                             }
@@ -274,9 +266,6 @@ pub(in crate::workbench) fn results(
                             );
                             let in_scope = match scope {
                                 ResultsBrowserScope::All => true,
-                                ResultsBrowserScope::Favorites => {
-                                    favorite_signals.contains(&identity)
-                                }
                                 ResultsBrowserScope::Recent => state.results
                                     .session.recent_signal_rank(&identity)
                                     .is_some(),
@@ -286,6 +275,7 @@ pub(in crate::workbench) fn results(
                             }
                             let samples = waveform.y.len();
                             Some(ResultSignal {
+                                kind: SignalKind::of_waveform(&waveform.name, quantity_kind),
                                 waveform_index,
                                 visible: ticked.contains(&ResultBrowserSelectionKey::Waveform(
                                     identity.clone(),
@@ -330,19 +320,14 @@ pub(in crate::workbench) fn results(
                         .filter(|artifact| kind.admits_artifact(artifact.kind, &artifact.unit))
                         .filter(|artifact| {
                             analysis_query_matches
-                                || artifact.name.to_lowercase().contains(&query)
-                                || artifact
-                                    .identity
-                                    .canonical_name()
-                                    .to_lowercase()
-                                    .contains(&query)
-                                || artifact.kind.label().to_lowercase().contains(&query)
-                                || artifact.meta.to_lowercase().contains(&query)
+                                || query.matches_name(artifact_hierarchical_name(artifact))
+                                || query.matches_word(&artifact.name)
+                                || query.matches_word(artifact.identity.canonical_name())
+                                || query.matches_word(artifact.kind.label())
+                                || query.matches_word(&artifact.meta)
                         })
                         .filter(|artifact| match scope {
                             ResultsBrowserScope::All => true,
-                            ResultsBrowserScope::Favorites => state.results
-                                .session.is_favorite_result_artifact(&artifact.identity),
                             ResultsBrowserScope::Recent => state.results
                                 .session.recent_result_artifact_rank(&artifact.identity)
                                 .is_some(),
@@ -360,19 +345,9 @@ pub(in crate::workbench) fn results(
                                 .session.recent_result_artifact_rank(&artifact.identity)
                                 .unwrap_or(usize::MAX)
                         });
-                    } else if sort == ResultsBrowserSort::Name {
-                        signals.sort_by(|left, right| {
-                            left.name
-                                .to_ascii_lowercase()
-                                .cmp(&right.name.to_ascii_lowercase())
-                                .then_with(|| left.name.cmp(&right.name))
-                        });
-                        artifacts.sort_by(|left, right| {
-                            left.name
-                                .to_ascii_lowercase()
-                                .cmp(&right.name.to_ascii_lowercase())
-                                .then_with(|| left.name.cmp(&right.name))
-                        });
+                    } else if layout == ResultsBrowserLayout::Flat {
+                        signals.sort_by(|left, right| natural_cmp(&left.name, &right.name));
+                        artifacts.sort_by(|left, right| natural_cmp(&left.name, &right.name));
                     }
                     let matches_analysis =
                         analysis_query_matches || !signals.is_empty() || !artifacts.is_empty();
@@ -387,7 +362,41 @@ pub(in crate::workbench) fn results(
                     } else {
                         analysis.label.clone()
                     };
+                    // The tree lists what the filters let through, so every
+                    // branch it holds leads to a match.
+                    let tree = (layout == ResultsBrowserLayout::Tree).then(|| {
+                        let mut tree = build_tree(
+                            signals
+                                .iter()
+                                .enumerate()
+                                .map(|(index, signal)| (TreeItem::Signal(index), signal.name.as_str()))
+                                .chain(artifacts.iter().enumerate().map(|(index, artifact)| {
+                                    (
+                                        TreeItem::Artifact(index),
+                                        artifact_hierarchical_name(artifact),
+                                    )
+                                })),
+                        );
+                        // Recent keeps recency order; otherwise each level
+                        // reads by kind and name, as a hierarchy browser's do.
+                        if scope != ResultsBrowserScope::Recent {
+                            tree.sort(&|item| match item {
+                                TreeItem::Signal(index) => (
+                                    signals[index].kind.rank(),
+                                    split_hierarchy(&signals[index].name).leaf,
+                                ),
+                                TreeItem::Artifact(index) => (
+                                    artifact_signal_kind(&artifacts[index])
+                                        .map_or(u8::MAX, SignalKind::rank),
+                                    split_hierarchy(artifact_hierarchical_name(&artifacts[index]))
+                                        .leaf,
+                                ),
+                            });
+                        }
+                        tree
+                    });
                     matches_analysis.then(|| ResultAnalysis {
+                        tree,
                         domain: result_analysis_domain(
                             analysis.analysis_type,
                             analysis.waveforms.first(),
@@ -419,7 +428,7 @@ pub(in crate::workbench) fn results(
             );
             let run_currentness_label = run_currentness.id();
             let matches_run = query.is_empty()
-                || run.label.to_lowercase().contains(&query)
+                || query.matches_word(&run.label)
                 || !analyses.is_empty()
                 || (active_run == Some(run_index) && expression_query_match);
             let run_integrity = if run.analyses.iter().all(|analysis| {
@@ -437,10 +446,10 @@ pub(in crate::workbench) fn results(
             // print them: a reader who types "corrupted" is asking a question
             // about the dataset, not about a label.
             let matches_run = matches_run
-                || run_integrity.contains(&query)
-                || run_state.contains(&query)
-                || run_currentness_label.contains(&query)
-                || run.dataset_id.to_string().to_lowercase().contains(&query);
+                || query.matches_word(run_integrity)
+                || query.matches_word(run_state)
+                || query.matches_word(run_currentness_label)
+                || query.matches_word(&run.dataset_id.to_string());
             matches_run.then(|| ResultRun {
                 run_index,
                 dataset_id: run.dataset_id,
@@ -460,55 +469,32 @@ pub(in crate::workbench) fn results(
         .flat_map(|run| run.analyses.iter())
         .map(|analysis| analysis.signals.len() + analysis.artifacts.len())
         .sum::<usize>();
-    let visible_result_keys =
-        runs.iter()
-            .filter(|run| {
-                !query.is_empty()
-                    || result_browser_dataset_expanded(
-                        ui.ctx(),
-                        run.dataset_id,
-                        active_run == Some(run.run_index) || runs.len() == 1,
-                    )
-            })
-            .flat_map(|run| {
-                run.analyses.iter().filter(|analysis| {
-                    !query.is_empty()
-                        || result_browser_group_expanded(
-                            ui.ctx(),
-                            analysis.presentation_key,
-                            active_run == Some(run.run_index)
-                                && active_analysis == Some(analysis.analysis_index),
-                        )
-                })
-            })
-            .flat_map(|analysis| {
-                analysis
-                    .signals
-                    .iter()
-                    .map(|signal| ResultBrowserSelectionKey::Waveform(signal.identity.clone()))
-                    .chain(analysis.artifacts.iter().map(|artifact| {
-                        ResultBrowserSelectionKey::Artifact(artifact.identity.clone())
-                    }))
-            })
-            .collect::<Vec<_>>();
+    let signal_list = signal_rows(
+        ui.ctx(),
+        &runs,
+        active_run,
+        active_analysis,
+        !query.is_empty(),
+    );
+    let visible_result_keys = signal_list.visible_keys(&runs);
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
     // The mockup's browser toolbar: the query over this tab, then the analysis,
-    // kind, and sort facets. The facets are absent on Datasets and Expressions —
+    // kind facet, and the layout. They are absent on Datasets and Expressions —
     // a manifest binding has no quantity kind to filter and no hierarchy to
     // order, and a saved expression is found by name.
     results_browser_toolbar(
         ui,
         state,
         stored_kind,
-        sort,
+        layout,
         stored_producer_facet,
         tab == ResultsBrowserTab::Signals,
     );
     // The scope band: the signals tab owns the scope control on the left —
-    // All | Favorites | Recent over the session's real star and recency
-    // state — and the count on the right states how much of the tab's
+    // All | Recent over the session's real recency state — then the Sets
+    // menu, and the count on the right states how much of the tab's
     // inventory is being held back, which is nothing to say while all of it
-    // is on screen.
+    // is on screen and no query is asking.
     {
         let t = Tokens::get(ui.ctx());
         let shown = match tab {
@@ -545,7 +531,10 @@ pub(in crate::workbench) fn results(
         // set is in force, so spelling either one again costs the row the width
         // the count needs at the dock's minimum. With everything on screen the
         // tab's own count has already said it, so the band says nothing.
-        let count_copy = (shown != loaded).then(|| format!("{shown} / {loaded}"));
+        // A query states its match count even when everything matches, so
+        // a pattern that should have narrowed the list says that it did not.
+        let count_copy =
+            (shown != loaded || !query.is_empty()).then(|| format!("{shown} / {loaded}"));
         // Nothing held back and no scope control to hold: the band would be an
         // empty strip under a rule.
         if count_copy.is_some() || tab == ResultsBrowserTab::Signals {
@@ -556,13 +545,10 @@ pub(in crate::workbench) fn results(
                 |ui| {
                     ui.add_space(8.0);
                     if tab == ResultsBrowserTab::Signals {
-                        // One scope is in force at a time, so the three read as
-                        // one control rather than three independent marks.
-                        const SCOPES: [ResultsBrowserScope; 3] = [
-                            ResultsBrowserScope::All,
-                            ResultsBrowserScope::Favorites,
-                            ResultsBrowserScope::Recent,
-                        ];
+                        // One scope is in force at a time, so the two read as
+                        // one control rather than two independent marks.
+                        const SCOPES: [ResultsBrowserScope; 2] =
+                            [ResultsBrowserScope::All, ResultsBrowserScope::Recent];
                         let mut index = SCOPES
                             .iter()
                             .position(|candidate| *candidate == scope)
@@ -570,7 +556,7 @@ pub(in crate::workbench) fn results(
                         let changed = crate::ui::widgets::segmented(
                             ui,
                             "workbench.results.browser-scope",
-                            &["All", "Favorites", "Recent"],
+                            &["All", "Recent"],
                             &mut index,
                             crate::ui::widgets::SegmentedWidth::Natural,
                         );
@@ -580,6 +566,8 @@ pub(in crate::workbench) fn results(
                                 data.insert_temp(results_browser_scope_id(), scope_now);
                             });
                         }
+                        ui.add_space(6.0);
+                        signal_sets_menu(ui, state, &ticked_ordered);
                     }
                     // The count is the band's last register: how many of the
                     // tab's rows the filter in force is letting through.
@@ -793,12 +781,13 @@ pub(in crate::workbench) fn results(
             ui,
             state,
             &runs,
+            &signal_list,
             active_run,
             active_analysis,
             selected_trace.as_ref(),
             selected_artifact.as_ref(),
             &visible_result_keys,
-            &query,
+            !query.is_empty(),
             kind,
             scope,
         );
@@ -1082,38 +1071,36 @@ impl ResultsBrowserKind {
     }
 }
 
-/// Row ordering facet: retained hierarchy order, or name.
+/// How the signals tab lays its quantities out: as the design's instance
+/// tree, each level by kind and then by name, or as one flat list of full
+/// names in name order — EZwave's "hierarchical (tree) or flat (list)
+/// format". Both count numbers in names (`L2` before `L10`). Recency is the Recent scope on the band below: one owner for
+/// it, not a third order that silently competes with it.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ResultsBrowserSort {
+pub(super) enum ResultsBrowserLayout {
     #[default]
-    Hierarchy,
-    Name,
+    Tree,
+    Flat,
 }
 
-impl ResultsBrowserSort {
-    const ALL: [Self; 2] = [Self::Hierarchy, Self::Name];
+impl ResultsBrowserLayout {
+    const ALL: [Self; 2] = [Self::Tree, Self::Flat];
 
     const fn label(self) -> &'static str {
         match self {
-            // Labels stay inside the facet's own share of the row: the pair is
-            // sized to the panel, not to its longest string.
-            Self::Hierarchy => "Hierarchy",
-            // The mockup's third option, "Recently used", is the Recent
-            // scope on the status band below: one owner for recency, not a
-            // sort that silently competes with it.
-            Self::Name => "Name",
+            Self::Tree => "Tree",
+            Self::Flat => "Flat",
         }
     }
 }
 
-/// Working-set scope of the signals tab: everything, the user's starred
-/// signals, or the signals touched most recently. Backed by the real
-/// favorite/recency state on `ResultsState`, never a static filter.
+/// Working-set scope of the signals tab: everything, or the signals touched
+/// most recently, from the real recency state on `ResultsState`. A working
+/// set the reader wants to keep is a signal set, saved with the project.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum ResultsBrowserScope {
     #[default]
     All,
-    Favorites,
     Recent,
 }
 
@@ -1247,21 +1234,21 @@ pub(super) fn results_browser_clear_filters(
 }
 
 /// The data browser's own toolbar: the query, the producing analysis, then the
-/// kind and sort pair.
+/// kind facet and the tree or flat layout.
 ///
 /// The mockup lays this out as one bordered block under the tab band with an
 /// 8 px inset and a 5 px gutter, in three registers widest-first. The analysis
 /// facet takes a whole row because its option strings are the longest in the
 /// panel and because it is the one control that changes what the tree contains
 /// rather than how it reads; the typed pair below splits unevenly, since kind
-/// carries the longer option names and sort carries three short ones. Facets
+/// carries the longer option names and the layout two short words. Facets
 /// are sized to the panel rather than to their own labels, so the block reads
 /// as one control stack at any dock width.
 fn results_browser_toolbar(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     kind: ResultsBrowserKind,
-    sort: ResultsBrowserSort,
+    layout: ResultsBrowserLayout,
     producer: Option<AnalysisPresentationKey>,
     show_quantity_facets: bool,
 ) {
@@ -1292,10 +1279,13 @@ fn results_browser_toolbar(
                     bottom: 5,
                 }),
         );
+        const QUERY_HELP: &str = "Text finds a word anywhere. A pattern with * ? or [a-z] \
+                                  matches whole hierarchical names, case-blind: x1.* or V(*out)";
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label(placeholder);
-            node.set_description("Filter the quantities of the selected browser tab");
+            node.set_description(QUERY_HELP);
         });
+        let response = response.on_hover_text(QUERY_HELP);
         WorkbenchIcon::Search.paint(
             ui.painter(),
             egui::Rect::from_center_size(
@@ -1368,9 +1358,6 @@ fn results_browser_toolbar(
             let kind_options = ResultsBrowserKind::ALL
                 .map(|value| value.label().to_owned())
                 .to_vec();
-            let sort_options = ResultsBrowserSort::ALL
-                .map(|value| value.label().to_owned())
-                .to_vec();
             if result_browser_facets_stack(row_width) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = GUTTER;
@@ -1386,25 +1373,14 @@ fn results_browser_toolbar(
                         ui.ctx()
                             .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
                     }
-                    if let Some(picked) = crate::ui::widgets::select(
-                        ui,
-                        "workbench.results.browser-sort",
-                        "Quantity sort",
-                        sort.label(),
-                        &sort_options,
-                        row_width,
-                    ) {
-                        let sort_now = ResultsBrowserSort::ALL[picked];
-                        ui.ctx()
-                            .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
-                    }
+                    results_browser_layout_control(ui, layout, row_width);
                 });
             } else {
                 // Kind takes the wider share of the pair: its option list holds
-                // the long names, sort holds three short ones.
+                // the long names, the layout two short words.
                 let pair_width = row_width - GUTTER;
                 let kind_width = (pair_width * 0.554).max(48.0);
-                let sort_width = (pair_width - kind_width).max(48.0);
+                let layout_width = (pair_width - kind_width).max(48.0);
                 if let Some(picked) = crate::ui::widgets::select(
                     ui,
                     "workbench.results.browser-kind",
@@ -1418,18 +1394,7 @@ fn results_browser_toolbar(
                         .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
                 }
                 ui.add_space(GUTTER);
-                if let Some(picked) = crate::ui::widgets::select(
-                    ui,
-                    "workbench.results.browser-sort",
-                    "Quantity sort",
-                    sort.label(),
-                    &sort_options,
-                    sort_width,
-                ) {
-                    let sort_now = ResultsBrowserSort::ALL[picked];
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
-                }
+                results_browser_layout_control(ui, layout, layout_width);
             }
         });
     }
@@ -1443,12 +1408,44 @@ fn results_browser_toolbar(
     );
 }
 
+/// Tree or flat, one click apart: the layout is a pair of segments rather
+/// than a list to open.
+fn results_browser_layout_control(ui: &mut Ui, layout: ResultsBrowserLayout, width: f32) {
+    let labels = ResultsBrowserLayout::ALL.map(ResultsBrowserLayout::label);
+    let mut index = ResultsBrowserLayout::ALL
+        .iter()
+        .position(|candidate| *candidate == layout)
+        .unwrap_or(0);
+    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let changed = ui
+        .allocate_ui_with_layout(
+            egui::vec2(width, height),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_width(width);
+                crate::ui::widgets::segmented(
+                    ui,
+                    "workbench.results.browser-layout",
+                    &labels,
+                    &mut index,
+                    crate::ui::widgets::SegmentedWidth::Equal,
+                )
+            },
+        )
+        .inner;
+    if changed {
+        let layout_now = ResultsBrowserLayout::ALL[index];
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(results_browser_layout_id(), layout_now));
+    }
+}
+
 fn results_browser_kind_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-kind-facet")
 }
 
-fn results_browser_sort_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-sort-facet")
+fn results_browser_layout_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-layout")
 }
 
 fn results_browser_scope_id() -> egui::Id {
@@ -1515,6 +1512,37 @@ pub fn set_result_browser_group_expanded(
     ctx.data_mut(|data| {
         data.insert_temp(
             egui::Id::new(("workbench.results.browser-group", analysis)),
+            expanded,
+        );
+    });
+}
+
+/// Whether an instance of the tree is open. Instances fold by default, so an
+/// analysis opens as its top-level signals and the instances under them.
+pub(super) fn result_browser_instance_expanded(
+    ctx: &egui::Context,
+    analysis: AnalysisPresentationKey,
+    instance: &str,
+) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new((
+            "workbench.results.browser-instance",
+            analysis,
+            instance,
+        )))
+    })
+    .unwrap_or(false)
+}
+
+pub(super) fn set_result_browser_instance_expanded(
+    ctx: &egui::Context,
+    analysis: AnalysisPresentationKey,
+    instance: &str,
+    expanded: bool,
+) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(("workbench.results.browser-instance", analysis, instance)),
             expanded,
         );
     });
@@ -1821,6 +1849,8 @@ pub(super) struct ResultAnalysis {
     pub(super) success: bool,
     pub(super) signals: Vec<ResultSignal>,
     pub(super) artifacts: Vec<ResultArtifact>,
+    /// The instance tree over `signals` and `artifacts`, in the tree layout.
+    pub(super) tree: Option<InstanceNode>,
 }
 
 pub(super) struct ResultSignal {
@@ -1830,8 +1860,9 @@ pub(super) struct ResultSignal {
     pub(super) color: String,
     pub(super) visible: bool,
     pub(super) value: Option<String>,
-    /// The row's second register, empty when there is nothing to put in it.
+    /// The row's typed metadata, empty when there is nothing to say.
     pub(super) meta: String,
+    pub(super) kind: SignalKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1843,6 +1874,16 @@ pub enum ResultArtifactKind {
 }
 
 impl ResultArtifactKind {
+    /// The mark an artifact row wears when it is not a net or a bus.
+    pub(super) const fn glyph(self) -> &'static str {
+        match self {
+            Self::Scalar => "#",
+            Self::Array => "[]",
+            Self::EventStream => ">",
+            Self::Contribution => "S",
+        }
+    }
+
     const fn label(self) -> &'static str {
         match self {
             Self::Scalar => "Scalar",
@@ -1881,14 +1922,25 @@ pub(super) enum ResultSignalVirtualRow {
         run: usize,
         analysis: usize,
     },
+    /// An instance of the design, by its index in the frame's instance
+    /// list; it folds what it owns.
+    Instance {
+        instance: usize,
+        depth: usize,
+        expanded: bool,
+    },
+    /// A signal, `depth` instances down the tree; zero in the flat layout
+    /// and at the top of the design.
     Signal {
         run: usize,
         analysis: usize,
         signal: usize,
+        depth: usize,
     },
     Artifact {
         run: usize,
         analysis: usize,
         artifact: usize,
+        depth: usize,
     },
 }

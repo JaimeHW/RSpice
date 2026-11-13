@@ -343,13 +343,6 @@ pub struct ResultViewerState {
     pub lane_name_width: Option<f32>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
-    /// Signals starred in the results data browser. A deliberate,
-    /// session-scoped mark like `markers`, keyed by immutable dataset, stable
-    /// analysis identity, and retained waveform name. Equal names in another
-    /// run cannot inherit this mark.
-    pub favorite_signals: HashSet<SourceWaveformPresentationKey>,
-    /// Personal favorites for typed non-waveform quantities.
-    pub favorite_result_artifacts: HashSet<ResultArtifactPresentationKey>,
     /// Most-recent-first stable waveform identities the user selected or
     /// revealed, deduplicated and bounded: the browser's Recent scope is this
     /// order.
@@ -874,17 +867,6 @@ impl ResultViewerState {
             .unwrap_or_default()
     }
 
-    /// Flip one signal's membership in the browser's Favorites scope.
-    pub fn toggle_favorite_signal(&mut self, key: SourceWaveformPresentationKey) {
-        if !self.favorite_signals.remove(&key) {
-            self.favorite_signals.insert(key);
-        }
-    }
-
-    pub fn is_favorite_signal(&self, key: &SourceWaveformPresentationKey) -> bool {
-        self.favorite_signals.contains(key)
-    }
-
     /// Record a deliberate signal interaction for the Recent scope: front
     /// insertion, deduplicated, bounded so the scope stays a shortlist.
     pub fn note_recent_signal(&mut self, key: SourceWaveformPresentationKey) {
@@ -934,16 +916,6 @@ impl ResultViewerState {
             (target_index, anchor_index)
         };
         ordered_visible[start..=end].to_vec()
-    }
-
-    pub fn toggle_favorite_result_artifact(&mut self, key: ResultArtifactPresentationKey) {
-        if !self.favorite_result_artifacts.remove(&key) {
-            self.favorite_result_artifacts.insert(key);
-        }
-    }
-
-    pub fn is_favorite_result_artifact(&self, key: &ResultArtifactPresentationKey) -> bool {
-        self.favorite_result_artifacts.contains(key)
     }
 
     pub fn note_recent_result_artifact(&mut self, key: ResultArtifactPresentationKey) {
@@ -1199,10 +1171,7 @@ impl ResultViewerState {
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));
         self.maximized_strip = self.maximized_strip.filter(|analysis| live(*analysis));
-        self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
-        self.favorite_result_artifacts
-            .retain(|key| live(key.analysis()));
         self.recent_result_artifacts
             .retain(|key| live(key.analysis()));
         self.checked_result_quantities

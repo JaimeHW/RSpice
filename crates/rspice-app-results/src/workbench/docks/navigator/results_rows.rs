@@ -4,6 +4,7 @@
 use egui::{Response, ScrollArea, Ui};
 
 use crate::state::bus_notations;
+use crate::ui::accessibility::counted;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsParts};
@@ -15,15 +16,17 @@ use super::super::super::design_system::WorkbenchIcon;
 use super::results::{
     ResultArtifact, ResultArtifactKind, ResultRun, ResultSignalVirtualRow, ResultsBrowserKind,
     ResultsBrowserScope, data_state_meta, result_browser_dataset_expanded,
-    result_browser_group_expanded, results_browser_clear_filters,
+    result_browser_group_expanded, result_browser_instance_expanded, results_browser_clear_filters,
     set_result_browser_dataset_expanded, set_result_browser_group_expanded,
+    set_result_browser_instance_expanded,
 };
 use super::results_actions::{
     execute, handle_result_artifact_keyboard, handle_result_signal_keyboard,
     plot_and_inspect_signal, result_artifact_context_menu, result_signal_context_menu,
     result_signal_row_id, select_result_analysis_by_key, select_result_artifact,
-    select_result_signal_by_key, update_result_browser_multi_selection,
+    select_result_signal_by_key, set_result_quantity_ticked, update_result_browser_multi_selection,
 };
+use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
@@ -33,17 +36,31 @@ pub(super) const BUS_ROW_PREFIX: &str = "payload/transient-events/bus/";
 /// The identity of the row of an event net the run keeps only as history,
 /// before the `D(net)` or `E(net)` name its lane answers to.
 pub(super) const EVENT_NET_ROW_PREFIX: &str = "payload/transient-events/net/";
-pub const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
-pub const SIGNAL_ROW_HEIGHT: f32 = 30.0;
-// The results browser's two-register quantity row and its group head, from
-// the mockup's `.result-browser-quantity` / `.result-browser-analysis-head`.
-pub const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
-const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
+pub const EXPRESSION_HEADER_HEIGHT: f32 = 24.0;
+pub const SIGNAL_ROW_HEIGHT: f32 = 22.0;
+/// The browser's row at compact density: one register, so a dock shows half
+/// again as many signals as the 36 px two-register row did. Every row of the
+/// list, heads included, shares it, because the list is virtualized against
+/// one stride.
+pub const RESULT_QUANTITY_ROW_HEIGHT: f32 = 22.0;
+/// The same row at relaxed density.
+const RESULT_QUANTITY_ROW_HEIGHT_RELAXED: f32 = 24.0;
 const RESULT_BROWSER_VIRTUALIZATION_THRESHOLD: usize = 250;
 const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
 const RESULT_BROWSER_OVERSCAN_ROWS: usize = 20;
-const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
 pub const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
+
+/// The height of every row the data browser lists: 22 px at compact density,
+/// 24 px at relaxed, and the theme's touch target on a coarse pointer. The
+/// interface scale zooms text and row together, so a row that holds its text
+/// at one scale holds it at all of them.
+pub(super) fn result_browser_row_height(t: &Tokens) -> f32 {
+    let desktop = match t.density {
+        crate::ui::tokens::Density::Compact => RESULT_QUANTITY_ROW_HEIGHT,
+        crate::ui::tokens::Density::Relaxed => RESULT_QUANTITY_ROW_HEIGHT_RELAXED,
+    };
+    responsive_result_control_height(desktop, t.metrics.ctl_h)
+}
 
 /// A result control's height: its own desktop height, or in a touch
 /// composition the theme's touch target, which Accessibility may raise.
@@ -619,32 +636,78 @@ const fn pstb_classification_navigator_label(
     }
 }
 
-pub(super) fn show_virtualized_result_signals(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    runs: &[ResultRun],
+/// An instance row of the signal list: the node, and the analysis it
+/// belongs to.
+pub(super) struct InstanceRow<'a> {
+    pub(super) run: usize,
+    pub(super) analysis: usize,
+    pub(super) node: &'a InstanceNode,
+}
+
+/// The signal list as the reader sees it: one row per dataset, analysis,
+/// open instance and listed quantity, in screen order.
+pub(super) struct SignalRows<'a> {
+    pub(super) rows: Vec<ResultSignalVirtualRow>,
+    pub(super) instances: Vec<InstanceRow<'a>>,
+    /// Quantities under open heads, which is what "nothing matches" counts.
+    pub(super) quantity_rows: usize,
+}
+
+impl SignalRows<'_> {
+    /// The quantities on screen, top to bottom: what a Shift range and
+    /// "Tick visible quantities" act on.
+    pub(super) fn visible_keys(&self, runs: &[ResultRun]) -> Vec<ResultBrowserSelectionKey> {
+        self.rows
+            .iter()
+            .filter_map(|row| match *row {
+                ResultSignalVirtualRow::Signal {
+                    run,
+                    analysis,
+                    signal,
+                    ..
+                } => Some(ResultBrowserSelectionKey::Waveform(
+                    runs[run].analyses[analysis].signals[signal]
+                        .identity
+                        .clone(),
+                )),
+                ResultSignalVirtualRow::Artifact {
+                    run,
+                    analysis,
+                    artifact,
+                    ..
+                } => Some(ResultBrowserSelectionKey::Artifact(
+                    runs[run].analyses[analysis].artifacts[artifact]
+                        .identity
+                        .clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// Lay the filtered runs out as rows. A query opens every head and every
+/// instance, since each branch the filter left holds a match.
+pub(super) fn signal_rows<'a>(
+    ctx: &egui::Context,
+    runs: &'a [ResultRun],
     active_run: Option<usize>,
     active_analysis: Option<usize>,
-    selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
-    selected_artifact: Option<&ResultArtifactPresentationKey>,
-    ordered_visible: &[ResultBrowserSelectionKey],
-    query: &str,
-    kind: ResultsBrowserKind,
-    scope: ResultsBrowserScope,
-) {
-    // A row labels the conductor the design drew; its identity stays the deck
-    // name the engine answered under.
-    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
-    let mut rows = Vec::new();
-    let mut signal_rows = 0_usize;
+    filtering: bool,
+) -> SignalRows<'a> {
+    let mut list = SignalRows {
+        rows: Vec::new(),
+        instances: Vec::new(),
+        quantity_rows: 0,
+    };
     for (run_position, run) in runs.iter().enumerate() {
-        let run_expanded = !query.is_empty()
+        let run_expanded = filtering
             || result_browser_dataset_expanded(
-                ui.ctx(),
+                ctx,
                 run.dataset_id,
                 active_run == Some(run.run_index) || runs.len() == 1,
             );
-        rows.push(ResultSignalVirtualRow::Dataset {
+        list.rows.push(ResultSignalVirtualRow::Dataset {
             run: run_position,
             expanded: run_expanded,
         });
@@ -652,19 +715,16 @@ pub(super) fn show_virtualized_result_signals(
             continue;
         }
         if run.analyses.is_empty() {
-            rows.push(ResultSignalVirtualRow::DatasetOmission { run: run_position });
+            list.rows
+                .push(ResultSignalVirtualRow::DatasetOmission { run: run_position });
             continue;
         }
         for (analysis_position, analysis) in run.analyses.iter().enumerate() {
             let analysis_active = active_run == Some(run.run_index)
                 && active_analysis == Some(analysis.analysis_index);
-            let expanded = !query.is_empty()
-                || result_browser_group_expanded(
-                    ui.ctx(),
-                    analysis.presentation_key,
-                    analysis_active,
-                );
-            rows.push(ResultSignalVirtualRow::Analysis {
+            let expanded = filtering
+                || result_browser_group_expanded(ctx, analysis.presentation_key, analysis_active);
+            list.rows.push(ResultSignalVirtualRow::Analysis {
                 run: run_position,
                 analysis: analysis_position,
                 expanded,
@@ -673,34 +733,122 @@ pub(super) fn show_virtualized_result_signals(
                 continue;
             }
             if analysis.signals.is_empty() && analysis.artifacts.is_empty() {
-                rows.push(ResultSignalVirtualRow::Omission {
+                list.rows.push(ResultSignalVirtualRow::Omission {
                     run: run_position,
                     analysis: analysis_position,
                 });
-            } else {
-                signal_rows += analysis.signals.len() + analysis.artifacts.len();
-                rows.extend((0..analysis.signals.len()).map(|signal| {
-                    ResultSignalVirtualRow::Signal {
-                        run: run_position,
-                        analysis: analysis_position,
-                        signal,
-                    }
-                }));
-                rows.extend((0..analysis.artifacts.len()).map(|artifact| {
-                    ResultSignalVirtualRow::Artifact {
-                        run: run_position,
-                        analysis: analysis_position,
-                        artifact,
-                    }
-                }));
+                continue;
+            }
+            list.quantity_rows += analysis.signals.len() + analysis.artifacts.len();
+            match &analysis.tree {
+                Some(tree) => push_instance_rows(
+                    ctx,
+                    &mut list,
+                    (run_position, analysis_position),
+                    analysis.presentation_key,
+                    tree,
+                    0,
+                    filtering,
+                ),
+                None => {
+                    list.rows.extend((0..analysis.signals.len()).map(|signal| {
+                        ResultSignalVirtualRow::Signal {
+                            run: run_position,
+                            analysis: analysis_position,
+                            signal,
+                            depth: 0,
+                        }
+                    }));
+                    list.rows
+                        .extend((0..analysis.artifacts.len()).map(|artifact| {
+                            ResultSignalVirtualRow::Artifact {
+                                run: run_position,
+                                analysis: analysis_position,
+                                artifact,
+                                depth: 0,
+                            }
+                        }));
+                }
             }
         }
     }
+    list
+}
 
-    let row_height = responsive_result_control_height(
-        RESULT_QUANTITY_ROW_HEIGHT.max(RESULT_ANALYSIS_HEAD_HEIGHT),
-        Tokens::get(ui.ctx()).metrics.ctl_h,
-    );
+/// One level of an analysis's tree: its instances, each followed by what it
+/// owns while it is open, then the quantities that sit at this level.
+fn push_instance_rows<'a>(
+    ctx: &egui::Context,
+    list: &mut SignalRows<'a>,
+    (run, analysis): (usize, usize),
+    analysis_key: AnalysisPresentationKey,
+    node: &'a InstanceNode,
+    depth: usize,
+    filtering: bool,
+) {
+    for child in &node.children {
+        let expanded = filtering || result_browser_instance_expanded(ctx, analysis_key, &child.key);
+        list.instances.push(InstanceRow {
+            run,
+            analysis,
+            node: child,
+        });
+        list.rows.push(ResultSignalVirtualRow::Instance {
+            instance: list.instances.len() - 1,
+            depth,
+            expanded,
+        });
+        if expanded {
+            push_instance_rows(
+                ctx,
+                list,
+                (run, analysis),
+                analysis_key,
+                child,
+                depth + 1,
+                filtering,
+            );
+        }
+    }
+    for item in &node.items {
+        list.rows.push(match *item {
+            TreeItem::Signal(signal) => ResultSignalVirtualRow::Signal {
+                run,
+                analysis,
+                signal,
+                depth,
+            },
+            TreeItem::Artifact(artifact) => ResultSignalVirtualRow::Artifact {
+                run,
+                analysis,
+                artifact,
+                depth,
+            },
+        });
+    }
+}
+
+pub(super) fn show_virtualized_result_signals(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    runs: &[ResultRun],
+    list: &SignalRows<'_>,
+    active_run: Option<usize>,
+    active_analysis: Option<usize>,
+    selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
+    selected_artifact: Option<&ResultArtifactPresentationKey>,
+    ordered_visible: &[ResultBrowserSelectionKey],
+    filtering: bool,
+    kind: ResultsBrowserKind,
+    scope: ResultsBrowserScope,
+) {
+    // A row labels the conductor the design drew; its identity stays the deck
+    // name the engine answered under.
+    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
+    let rows = &list.rows;
+    let signal_rows = list.quantity_rows;
+
+    let row_height = result_browser_row_height(&Tokens::get(ui.ctx()));
     let list_height = ui
         .available_height()
         .max(row_height)
@@ -710,9 +858,10 @@ pub(super) fn show_virtualized_result_signals(
         .auto_shrink([false, true])
         .max_height(list_height)
         .show_viewport(ui, |ui, viewport| {
-            let spacing = ui.spacing().item_spacing.y;
-            let row_stride = row_height + spacing;
-            ui.set_height((row_stride * rows.len() as f32 - spacing).max(0.0));
+            // Rows abut, as a tree's do: the row is the stride.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let row_stride = row_height;
+            ui.set_height(row_stride * rows.len() as f32);
             let mut visible_start = (viewport.min.y / row_stride).floor().max(0.0) as usize;
             let visible_end =
                 ((viewport.max.y / row_stride).ceil() as usize + 1).min(rows.len());
@@ -839,7 +988,7 @@ pub(super) fn show_virtualized_result_signals(
                                 ))
                             };
                             if head.clicked() {
-                                if query.is_empty() {
+                                if !filtering {
                                     set_result_browser_group_expanded(
                                         ui.ctx(),
                                         analysis.presentation_key,
@@ -883,13 +1032,31 @@ pub(super) fn show_virtualized_result_signals(
                             };
                             result_browser_virtual_omission(ui, reason, row_height);
                         }
+                        ResultSignalVirtualRow::Instance {
+                            instance,
+                            depth,
+                            expanded,
+                        } => {
+                            let row = &list.instances[instance];
+                            instance_row(ui, state, runs, row, depth, expanded);
+                        }
                         ResultSignalVirtualRow::Signal {
                             run,
                             analysis,
                             signal,
+                            depth,
                         } => {
+                            let in_tree = runs[run].analyses[analysis].tree.is_some();
                             let analysis = &runs[run].analyses[analysis];
                             let signal = &analysis.signals[signal];
+                            let shown = notations.display(&signal.name);
+                            // Under an instance a row names the signal inside
+                            // it; the instance rows above it carry the path.
+                            let label = if in_tree {
+                                split_hierarchy(&shown).leaf
+                            } else {
+                                shown.into_owned()
+                            };
                             let t = Tokens::get(ui.ctx());
                             let color = rspice_results_ui::presentation::trace_color(
                                 &signal.color,
@@ -904,13 +1071,17 @@ pub(super) fn show_virtualized_result_signals(
                                 result_signal_row_id(&ResultBrowserSelectionKey::Waveform(
                                     signal.identity.clone(),
                                 )),
-                                &notations.display(&signal.name),
+                                RowLabel {
+                                    name: &label,
+                                    full_name: &signal.name,
+                                    kind: signal.kind,
+                                    indent: depth,
+                                },
                                 &signal.meta,
                                 signal.value.as_deref(),
                                 color,
                                 signal_selected,
                                 signal.visible,
-                                state.results.session.is_favorite_signal(&signal.identity),
                             );
                             if responses.check.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -919,14 +1090,6 @@ pub(super) fn show_virtualized_result_signals(
                                     ordered_visible,
                                     modifiers,
                                 );
-                            }
-                            if responses
-                                .favorite
-                                .as_ref()
-                                .is_some_and(|star| star.clicked())
-                            {
-                                state.results
-                                    .session.toggle_favorite_signal(signal.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -957,37 +1120,43 @@ pub(super) fn show_virtualized_result_signals(
                                 &signal.identity,
                                 ordered_visible,
                             );
-                            let favorite = state.results
-                                .session.is_favorite_signal(&signal.identity);
                             result_signal_context_menu(
                                 &responses.selection,
                                 state,
                                 &signal.identity,
                                 signal.visible,
-                                favorite,
                             );
                         }
                         ResultSignalVirtualRow::Artifact {
                             run,
                             analysis,
                             artifact,
+                            depth,
                         } => {
+                            let in_tree = runs[run].analyses[analysis].tree.is_some();
                             let analysis = &runs[run].analyses[analysis];
                             let artifact = &analysis.artifacts[artifact];
+                            let label = if in_tree && depth > 0 {
+                                split_hierarchy(artifact_hierarchical_name(artifact)).leaf
+                            } else {
+                                artifact.name.clone()
+                            };
                             let selection_key =
                                 ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
                             let selected = selected_artifact == Some(&artifact.identity);
-                            let favorite = state.results
-                                .session.is_favorite_result_artifact(&artifact.identity);
                             let responses = result_artifact_row(
                                 ui,
                                 result_signal_row_id(&selection_key),
-                                &artifact.name,
+                                RowLabel {
+                                    name: &label,
+                                    full_name: &artifact.name,
+                                    kind: artifact_signal_kind(artifact)
+                                        .unwrap_or(SignalKind::Other(artifact.kind.glyph())),
+                                    indent: depth,
+                                },
                                 &artifact.meta,
                                 artifact.value.as_deref(),
-                                artifact.kind,
                                 selected,
-                                favorite,
                                 state.results
                                     .session.is_checked_result_artifact(&artifact.identity),
                             );
@@ -997,14 +1166,6 @@ pub(super) fn show_virtualized_result_signals(
                                     ordered_visible,
                                     ui.input(|input| input.modifiers),
                                 );
-                            }
-                            if responses
-                                .favorite
-                                .as_ref()
-                                .is_some_and(|star| star.clicked())
-                            {
-                                state.results
-                                    .session.toggle_favorite_result_artifact(artifact.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -1026,12 +1187,7 @@ pub(super) fn show_virtualized_result_signals(
                                 artifact,
                                 ordered_visible,
                             );
-                            result_artifact_context_menu(
-                                &responses.selection,
-                                state,
-                                artifact,
-                                favorite,
-                            );
+                            result_artifact_context_menu(&responses.selection, state, artifact);
                         }
                         },
                     );
@@ -1046,7 +1202,6 @@ pub(super) fn show_virtualized_result_signals(
                 "No results yet. Run a simulation."
             } else {
                 match scope {
-                    ResultsBrowserScope::Favorites => "Star a signal to build the Favorites scope.",
                     ResultsBrowserScope::Recent => "Signals you select or show collect here.",
                     ResultsBrowserScope::All => {
                         "No signal of the active dataset matches this filter."
@@ -1056,6 +1211,178 @@ pub(super) fn show_virtualized_result_signals(
         );
         results_browser_clear_filters(ui, state, kind, scope);
     }
+}
+
+/// The hierarchical name an artifact row is placed in the tree by and
+/// answers a pattern with: an event net's `D(net)` or `E(net)`, a bus's
+/// `name[msb:lsb]`, and any other artifact its own name.
+pub(super) fn artifact_hierarchical_name(artifact: &ResultArtifact) -> &str {
+    let canonical = artifact.identity.canonical_name();
+    canonical
+        .strip_prefix(EVENT_NET_ROW_PREFIX)
+        .or_else(|| canonical.strip_prefix(BUS_ROW_PREFIX))
+        .unwrap_or(&artifact.name)
+}
+
+/// Whether an artifact row is one the plot can take: an event net's or a
+/// bus's, which the strip draws as a lane.
+pub(super) fn is_plottable_artifact(canonical: &str) -> bool {
+    canonical.starts_with(EVENT_NET_ROW_PREFIX) || canonical.starts_with(BUS_ROW_PREFIX)
+}
+
+/// The kind of an artifact row that is a net or a bus; `None` for the
+/// tables and records the other artifacts are.
+pub(super) fn artifact_signal_kind(artifact: &ResultArtifact) -> Option<SignalKind> {
+    let canonical = artifact.identity.canonical_name();
+    if canonical.starts_with(BUS_ROW_PREFIX) {
+        return Some(SignalKind::Bus);
+    }
+    let net = canonical.strip_prefix(EVENT_NET_ROW_PREFIX)?;
+    Some(if net.starts_with("E(") {
+        SignalKind::Real
+    } else {
+        SignalKind::Digital
+    })
+}
+
+/// The browser keys of every quantity an instance owns, at every depth.
+pub(super) fn instance_leaf_keys(
+    runs: &[ResultRun],
+    row: &InstanceRow<'_>,
+) -> Vec<ResultBrowserSelectionKey> {
+    let analysis = &runs[row.run].analyses[row.analysis];
+    row.node
+        .leaves()
+        .into_iter()
+        .map(|leaf| match leaf {
+            TreeItem::Signal(index) => {
+                ResultBrowserSelectionKey::Waveform(analysis.signals[index].identity.clone())
+            }
+            TreeItem::Artifact(index) => {
+                ResultBrowserSelectionKey::Artifact(analysis.artifacts[index].identity.clone())
+            }
+        })
+        .collect()
+}
+
+/// An instance of the design in the tree: its disclosure caret, its name,
+/// and how many quantities it holds. A click or the arrow keys fold it; its
+/// menu plots or removes everything under it.
+fn instance_row(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    runs: &[ResultRun],
+    row: &InstanceRow<'_>,
+    depth: usize,
+    expanded: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let analysis_key = runs[row.run].analyses[row.analysis].presentation_key;
+    let node = row.node;
+    let height = result_browser_row_height(&t);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::CollapsingHeader,
+            ui.is_enabled(),
+            format!(
+                "{}, instance, {}, {}",
+                node.path,
+                counted(node.count, "quantity", "quantities"),
+                if expanded { "expanded" } else { "collapsed" }
+            ),
+        )
+    });
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+        }
+        // The caret sits in the kind column of the rows it folds, so an
+        // instance and its own quantities line up one indent apart.
+        let caret_left = rect.left() + 26.0 + depth as f32 * TREE_INDENT;
+        if expanded {
+            WorkbenchIcon::ChevronDown
+        } else {
+            WorkbenchIcon::ChevronRight
+        }
+        .paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(caret_left + 6.0, rect.center().y),
+                egui::vec2(11.0, 11.0),
+            ),
+            c.text_faint,
+        );
+        let count = grouped_count(node.count);
+        let count_galley = ui.painter().layout_no_wrap(
+            count,
+            theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+            c.text_faint,
+        );
+        let count_width = count_galley.size().x;
+        ui.painter().galley(
+            egui::pos2(
+                rect.right() - 8.0 - count_width,
+                rect.center().y - count_galley.size().y * 0.5,
+            ),
+            count_galley,
+            c.text_faint,
+        );
+        let name_left = caret_left + KIND_GLYPH_WIDTH;
+        let font = theme::mono(tokens::FS_0, FontWeight::Medium);
+        let name = super::super::super::design_system::elide_text(
+            ui,
+            &node.name,
+            &font,
+            rect.right() - 8.0 - count_width - 8.0 - name_left,
+        );
+        ui.painter().text(
+            egui::pos2(name_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            font,
+            c.text,
+        );
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    if response.clicked() {
+        set_result_browser_instance_expanded(ui.ctx(), analysis_key, &node.key, !expanded);
+    }
+    if response.has_focus() {
+        let (collapse, expand) = response.ctx.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            )
+        });
+        if (collapse && expanded) || (expand && !expanded) {
+            set_result_browser_instance_expanded(ui.ctx(), analysis_key, &node.key, expand);
+        }
+    }
+    let response = response.on_hover_text(format!(
+        "{} · {}",
+        node.path,
+        counted(node.count, "quantity", "quantities")
+    ));
+    response.context_menu(|ui| {
+        let plot = format!("Plot all {}", grouped_count(node.count));
+        if ui.button(plot).clicked() {
+            for key in instance_leaf_keys(runs, row) {
+                set_result_quantity_ticked(state, &key, true);
+            }
+            ui.close();
+        }
+        if ui.button("Remove all from the plot").clicked() {
+            for key in instance_leaf_keys(runs, row) {
+                set_result_quantity_ticked(state, &key, false);
+            }
+            ui.close();
+        }
+    });
 }
 
 fn result_browser_virtual_omission(ui: &mut Ui, text: &str, row_height: f32) {
@@ -1249,7 +1576,7 @@ pub(super) fn result_browser_manifest_row(
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let height = responsive_result_control_height(RESULT_MANIFEST_ROW_HEIGHT, t.metrics.ctl_h);
+    let height = result_browser_row_height(&t);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
@@ -1320,7 +1647,7 @@ pub(super) fn result_browser_manifest_row(
     response
 }
 
-/// The mockup's `.result-browser-analysis-head`: a 31 px group head whose
+/// The mockup's `.result-browser-analysis-head`: a one-row group head whose
 /// kind glyph, name, domain caption, and quantity count identify the retained
 /// analysis a quantity belongs to, so no row has to repeat any of it.
 fn result_browser_analysis_head(
@@ -1336,7 +1663,7 @@ fn result_browser_analysis_head(
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let height = responsive_result_control_height(RESULT_ANALYSIS_HEAD_HEIGHT, t.metrics.ctl_h);
+    let height = result_browser_row_height(&t);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
@@ -1390,12 +1717,13 @@ fn result_browser_analysis_head(
         c.text_faint,
     );
 
-    // 18x18 kind glyph. It says which kind of thing the group is, which is
-    // neither selection nor status, so it is neutral: it used to be painted
-    // in accent on every head, and in warn ink when the run had failed.
+    // 16x16 kind glyph, inside the dense row's 22 px. It says which kind of
+    // thing the group is, which is neither selection nor status, so it is
+    // neutral: it used to be painted in accent on every head, and in warn ink
+    // when the run had failed.
     let glyph_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 5.0 + 14.0 + 9.0, rect.center().y),
-        egui::vec2(18.0, 18.0),
+        egui::pos2(rect.left() + 5.0 + 14.0 + 8.0, rect.center().y),
+        egui::vec2(16.0, 16.0),
     );
     ui.painter().rect_filled(glyph_rect, 4.0, c.bg_inset);
     ui.painter().rect_stroke(
@@ -1546,34 +1874,29 @@ pub(super) struct SignalRowResponses {
     pub(super) visibility: egui::Response,
     /// The tick, on quantity rows only.
     pub(super) check: egui::Response,
-    /// Hover-revealed star toggle; present only while the row shows it.
-    pub(super) favorite: Option<egui::Response>,
 }
 
-/// One retained quantity, in the mockup's two-register anatomy: a selection
-/// checkbox column, the name with its persistent favorite flag and a
-/// right-aligned preview value, and the typed metadata line beneath.
+/// One retained quantity, in one dense register: the tick column, the kind
+/// mark at the row's depth in the tree, the name, and a right-aligned
+/// preview value or, without one, the typed metadata.
 ///
-/// Each mark states exactly one fact. The checkbox is batch membership; the
-/// name's ink is plot membership; the favorite flag is a saved preference.
-/// The flag and the favorite *action* are deliberately different marks — the
-/// flag states membership on an idle row, while the action cluster appears on
-/// hover and takes the value column, so a resting list stays pure data
-/// instead of carrying a column of controls down the panel.
+/// Each mark states exactly one fact. The tick is plot membership, and so is
+/// the name's ink; the kind mark is what the quantity is. A resting list is
+/// pure data, with no column of controls down the panel.
 fn result_quantity_row(
     ui: &mut Ui,
     id: egui::Id,
-    name: &str,
+    label: RowLabel<'_>,
     meta: &str,
     value: Option<&str>,
     color: egui::Color32,
     selected: bool,
     visible: bool,
-    favorite: bool,
 ) -> SignalRowResponses {
+    let name = label.full_name;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let row_height = responsive_result_control_height(RESULT_QUANTITY_ROW_HEIGHT, t.metrics.ctl_h);
+    let row_height = result_browser_row_height(&t);
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
@@ -1603,11 +1926,13 @@ fn result_quantity_row(
         )
     });
     let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
-    // A row with nothing in its second register is spoken as its name.
+    // A row is spoken as its name and the kind its mark shows, then any
+    // metadata it carries.
+    let kind_word = label.kind.label();
     let spoken = if meta.is_empty() {
-        name.to_owned()
+        format!("{name}, {kind_word}")
     } else {
-        format!("{name}, {meta}")
+        format!("{name}, {kind_word}, {meta}")
     };
     selection.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -1622,7 +1947,6 @@ fn result_quantity_row(
             selection,
             visibility: check.clone(),
             check,
-            favorite: None,
         };
     }
 
@@ -1660,98 +1984,31 @@ fn result_quantity_row(
         );
     }
 
-    // Two baselines inside the row: identity above, typed metadata below.
-    // A row with nothing to say in the second register keeps the row's
-    // height — the list is virtualized against one stride — and centres the
-    // name in it rather than leaving a blank line under the words.
-    //
-    // The name carries the trace's own colour while the signal is plotted,
-    // so the list answers "which curve is this" in the place the eye already
-    // is, with no swatch column. A signal that is not on a pane stays neutral.
-    let (name_y, meta_y) = if meta.is_empty() {
-        (rect.center().y, rect.center().y)
-    } else {
-        (rect.top() + 11.0, rect.top() + 25.0)
-    };
-    let text_left = selection_rect.left();
-    let name_end = ui
-        .painter()
-        .text(
-            egui::pos2(text_left, name_y),
-            egui::Align2::LEFT_CENTER,
-            name,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            if visible { color } else { c.text_dim },
-        )
-        .right();
-    if favorite {
-        WorkbenchIcon::StarFilled.paint(
-            ui.painter(),
-            egui::Rect::from_center_size(
-                egui::pos2(name_end + 5.0 + 5.0, name_y),
-                egui::vec2(10.0, 10.0),
-            ),
-            c.warn.gamma_multiply(0.72),
-        );
-    }
-
-    // The favorite mark and the preview value share the right column: on an
-    // idle row the value owns it, on intent the mark takes it.
-    let favorite_response = if hovered {
-        let star_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 3.0 - 11.0, rect.center().y),
-            egui::vec2(22.0, 24.0),
-        );
-        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                favorite,
-                format!("{name} favorite"),
+    // One register: the name, and in the right column the value or, failing
+    // one, the typed metadata. The name carries the trace's own colour while
+    // the signal is plotted, so the list answers "which curve is this" in the
+    // place the eye already is, with no swatch column. A signal that is not
+    // on a pane stays neutral.
+    let name_y = rect.center().y;
+    let text_left = paint_kind_glyph(ui, selection_rect.left(), name_y, &label);
+    let right_text = value.or((!meta.is_empty()).then_some(meta));
+    paint_row_line(
+        ui,
+        rect,
+        text_left,
+        label.name,
+        if visible { color } else { c.text_dim },
+        right_text.map(|text| {
+            (
+                text,
+                if visible && value.is_some() {
+                    c.text_dim
+                } else {
+                    c.text_faint
+                },
             )
-        });
-        if response.hovered() {
-            ui.painter().rect_filled(star_rect, 3.0, c.bg_active);
-        }
-        if favorite {
-            WorkbenchIcon::StarFilled
-        } else {
-            WorkbenchIcon::Star
-        }
-        .paint(
-            ui.painter(),
-            egui::Rect::from_center_size(star_rect.center(), egui::vec2(13.0, 13.0)),
-            if favorite { c.warn } else { c.text_faint },
-        );
-        theme::paint_focus_ring(ui, &response, star_rect);
-        Some(response.on_hover_text(if favorite {
-            format!("Remove {name} from favorites")
-        } else {
-            format!("Add {name} to favorites")
-        }))
-    } else {
-        if let Some(value) = value {
-            ui.painter().text(
-                egui::pos2(rect.right() - 8.0, name_y),
-                egui::Align2::RIGHT_CENTER,
-                value,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                if visible { c.text_dim } else { c.text_faint },
-            );
-        }
-        None
-    };
-
-    if !meta.is_empty() {
-        ui.painter().text(
-            egui::pos2(text_left, meta_y),
-            egui::Align2::LEFT_CENTER,
-            meta,
-            theme::sans(tokens::FS_MICRO, FontWeight::Medium),
-            c.text_faint,
-        );
-    }
+        }),
+    );
 
     theme::paint_focus_ring(ui, &check, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
@@ -1765,30 +2022,101 @@ fn result_quantity_row(
         selection,
         visibility: check.clone(),
         check,
-        favorite: favorite_response,
     }
+}
+
+/// What a dense row names and where it sits: the label it paints (the
+/// signal's name inside its instance in the tree, its full name otherwise),
+/// the full name it is spoken and explained by, the kind its mark shows, and
+/// how many instances down the tree it is.
+pub(super) struct RowLabel<'a> {
+    pub(super) name: &'a str,
+    pub(super) full_name: &'a str,
+    pub(super) kind: SignalKind,
+    pub(super) indent: usize,
+}
+
+/// How far each level of the tree steps in.
+const TREE_INDENT: f32 = 12.0;
+/// The kind column: wide enough for a two-character mark such as `dB`.
+const KIND_GLYPH_WIDTH: f32 = 18.0;
+
+/// Paint a row's kind mark at its indent and return where its name starts.
+/// The mark is neutral ink: a kind is neither selection nor status.
+fn paint_kind_glyph(ui: &Ui, left: f32, center_y: f32, label: &RowLabel<'_>) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let glyph_left = left + label.indent as f32 * TREE_INDENT;
+    ui.painter().text(
+        egui::pos2(glyph_left + KIND_GLYPH_WIDTH * 0.5 - 2.0, center_y),
+        egui::Align2::CENTER_CENTER,
+        label.kind.glyph(),
+        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+        t.color.text_faint,
+    );
+    glyph_left + KIND_GLYPH_WIDTH
+}
+
+/// One line of a dense row: `name` from `left`, elided so it stops short of
+/// the right column, which holds `right` flush against the row's end.
+fn paint_row_line(
+    ui: &Ui,
+    rect: egui::Rect,
+    left: f32,
+    name: &str,
+    name_color: egui::Color32,
+    right: Option<(&str, egui::Color32)>,
+) {
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mut name_right = rect.right() - 8.0;
+    if let Some((text, color)) = right {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), color);
+        // The value yields to the name past half the row: a long bus member
+        // list must not push the identity out of its own row.
+        let room = ((name_right - left) * 0.5).max(0.0);
+        let shown = if galley.size().x <= room {
+            text.to_owned()
+        } else {
+            super::super::super::design_system::elide_text(ui, text, &font, room)
+        };
+        let galley = ui.painter().layout_no_wrap(shown, font.clone(), color);
+        let width = galley.size().x;
+        ui.painter().galley(
+            egui::pos2(name_right - width, rect.center().y - galley.size().y * 0.5),
+            galley,
+            color,
+        );
+        name_right -= width + 8.0;
+    }
+    let shown = super::super::super::design_system::elide_text(ui, name, &font, name_right - left);
+    ui.painter().text(
+        egui::pos2(left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        font,
+        name_color,
+    );
 }
 
 struct ArtifactRowResponses {
     selection: egui::Response,
     check: egui::Response,
-    favorite: Option<egui::Response>,
 }
 
 fn result_artifact_row(
     ui: &mut Ui,
     id: egui::Id,
-    name: &str,
+    label: RowLabel<'_>,
     meta: &str,
     value: Option<&str>,
-    kind: ResultArtifactKind,
     selected: bool,
-    favorite: bool,
     checked: bool,
 ) -> ArtifactRowResponses {
+    let name = label.full_name;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let row_height = responsive_result_control_height(RESULT_QUANTITY_ROW_HEIGHT, t.metrics.ctl_h);
+    let row_height = result_browser_row_height(&t);
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
@@ -1817,15 +2145,14 @@ fn result_artifact_row(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("{name}, {meta}"),
+            match label.kind {
+                SignalKind::Other(_) => format!("{name}, {meta}"),
+                kind => format!("{name}, {}, {meta}", kind.label()),
+            },
         )
     });
     if !ui.is_rect_visible(rect) {
-        return ArtifactRowResponses {
-            selection,
-            check,
-            favorite: None,
-        };
+        return ArtifactRowResponses { selection, check };
     }
     if selected {
         ui.painter().rect_filled(rect, 0.0, c.accent_dim);
@@ -1852,86 +2179,28 @@ fn result_artifact_row(
         ui.painter()
             .rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
     }
-    let (name_y, meta_y) = if meta.is_empty() {
-        (rect.center().y, rect.center().y)
-    } else {
-        (rect.top() + 11.0, rect.top() + 25.0)
-    };
-    let glyph = match kind {
-        ResultArtifactKind::Scalar => "#",
-        ResultArtifactKind::Array => "[]",
-        ResultArtifactKind::EventStream => ">",
-        ResultArtifactKind::Contribution => "S",
-    };
-    ui.painter().text(
-        egui::pos2(selection_rect.left(), name_y),
-        egui::Align2::LEFT_CENTER,
-        glyph,
-        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
-        c.accent,
-    );
-    let name_left = selection_rect.left() + 18.0;
-    let name_end = ui
-        .painter()
-        .text(
-            egui::pos2(name_left, name_y),
-            egui::Align2::LEFT_CENTER,
-            name,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text,
-        )
-        .right();
-    if favorite {
-        ui.painter().text(
-            egui::pos2(name_end + 5.0, name_y),
-            egui::Align2::LEFT_CENTER,
-            "*",
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.warn.gamma_multiply(0.72),
-        );
-    }
-    let favorite_response = hovered.then(|| {
-        let star_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 14.0, rect.center().y),
-            egui::vec2(26.0, 26.0),
-        );
-        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                favorite,
-                format!("{name} favorite"),
+    let name_y = rect.center().y;
+    let name_left = paint_kind_glyph(ui, selection_rect.left(), name_y, &label);
+    // One register, as on a signal row: the value, or failing one the shape
+    // and unit, takes the right column.
+    let right_text = value.or((!meta.is_empty()).then_some(meta));
+    paint_row_line(
+        ui,
+        rect,
+        name_left,
+        label.name,
+        c.text,
+        right_text.map(|text| {
+            (
+                text,
+                if value.is_some() {
+                    c.text_dim
+                } else {
+                    c.text_faint
+                },
             )
-        });
-        ui.painter().text(
-            star_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if favorite { "*" } else { "+" },
-            theme::mono(tokens::FS_1, FontWeight::Regular),
-            if favorite { c.warn } else { c.text_faint },
-        );
-        theme::paint_focus_ring(ui, &response, star_rect);
-        response
-    });
-    if !hovered && let Some(value) = value {
-        ui.painter().text(
-            egui::pos2(rect.right() - 8.0, name_y),
-            egui::Align2::RIGHT_CENTER,
-            value,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
-        );
-    }
-    if !meta.is_empty() {
-        ui.painter().text(
-            egui::pos2(name_left, meta_y),
-            egui::Align2::LEFT_CENTER,
-            meta,
-            theme::sans(tokens::FS_MICRO, FontWeight::Medium),
-            c.text_faint,
-        );
-    }
+        }),
+    );
     theme::paint_focus_ring(ui, &check, check_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
     ArtifactRowResponses {
@@ -1941,7 +2210,6 @@ fn result_artifact_row(
         } else {
             format!("Select {name} for a batch action")
         }),
-        favorite: favorite_response,
     }
 }
 
@@ -2051,6 +2319,5 @@ pub(super) fn signal_row(
         check: visibility.clone(),
         selection,
         visibility,
-        favorite: None,
     }
 }
