@@ -119,8 +119,15 @@ fn queue_manual_deck_analyses(
         .iter()
         .filter(|command| matches!(command, AnalysisCommand::MonteCarlo(_)))
         .count();
+    // A `.STEP` over a swept analysis is a family: one analysis per point,
+    // nested `.STEP` cards included. It claims the deck's temperature and
+    // parameter steps alike, so neither older plan runs beside it.
+    let step_family_plan = match build_step_family_plan(reference_temperature_celsius, &parsed) {
+        Ok(plan) => plan,
+        Err(err) => return Err(vec![err]),
+    };
     let mut preflight_errors = Vec::new();
-    if step_count > 1 {
+    if step_count > 1 && step_family_plan.is_none() {
         preflight_errors.push(format!(
             "Manual deck runs support one .step command per run; found {step_count}. Split independent sweeps into separate runs."
         ));
@@ -134,31 +141,39 @@ fn queue_manual_deck_analyses(
         return Err(preflight_errors);
     }
 
-    let temperature_plan = match build_temperature_plan(&parsed.analyses) {
-        Ok(plan) => plan,
-        Err(err) => return Err(vec![err]),
-    };
-    let parameter_step_plan =
-        match build_parameter_step_plan(reference_temperature_celsius, &parsed) {
+    let (temperature_plan, parameter_step_plan) = if step_family_plan.is_some() {
+        (None, None)
+    } else {
+        let temperature_plan = match build_temperature_plan(&parsed.analyses) {
             Ok(plan) => plan,
             Err(err) => return Err(vec![err]),
         };
+        match build_parameter_step_plan(&parsed) {
+            Ok(plan) => (temperature_plan, plan),
+            Err(err) => return Err(vec![err]),
+        }
+    };
     let monte_carlo_plan = match build_monte_carlo_transient_plan(
         reference_temperature_celsius,
         &parsed,
         deck,
-        [&temperature_plan, &parameter_step_plan],
+        [&temperature_plan, &parameter_step_plan, &step_family_plan],
     ) {
         Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
-    let plans = [temperature_plan, parameter_step_plan, monte_carlo_plan];
-    let deck_family = plans
+    let plans = [
+        temperature_plan,
+        parameter_step_plan,
+        step_family_plan,
+        monte_carlo_plan,
+    ];
+    let family = plans
         .iter()
         .flatten()
         .flat_map(|plan| &plan.items)
         .any(|item| item.spec_options.member.is_some());
-    if deck_family
+    if family
         && (parsed
             .analyses
             .iter()
@@ -166,7 +181,7 @@ fn queue_manual_deck_analyses(
             || !parsed.fft_analyses.is_empty())
     {
         return Err(vec![
-            "A Monte Carlo or .step transient runs one transient per trial or point, and a .four or .fft card would read only the first of them. Remove the card, or run the transient without its .mc or .step."
+            "A Monte Carlo or .step family runs one analysis per trial or point, and a .four or .fft card would read only the first of them. Remove the card, or run the analysis without its .mc or .step."
                 .to_owned(),
         ]);
     }
@@ -480,17 +495,17 @@ fn build_temperature_plan(
     }))
 }
 
-/// One transient per member of the deck's `.MC` study or `.STEP` sweep:
-/// the deck's `.TRAN` lowered as it is on its own, each copy naming its
-/// member. The deck keeps the family card, which is what each member is
-/// materialized from.
-fn transient_family_items(
+/// One analysis per member of the deck's `.MC` study or `.STEP` sweep: the
+/// deck's card lowered as it is on its own, each copy naming its member. The
+/// deck keeps the family card, which is what each member is materialized
+/// from.
+fn family_items(
     reference_temperature_celsius: f64,
     parsed: &Netlist,
-    tran: &AnalysisCommand,
+    base: &AnalysisCommand,
     members: Vec<crate::deck_family::DeckFamilyMember>,
 ) -> Result<Vec<QueuedAnalysis>, String> {
-    let base = command_to_queue_item(reference_temperature_celsius, parsed, tran)?;
+    let base = command_to_queue_item(reference_temperature_celsius, parsed, base)?;
     Ok(members
         .into_iter()
         .map(|member| {
@@ -512,7 +527,7 @@ fn build_monte_carlo_transient_plan(
     reference_temperature_celsius: f64,
     parsed: &Netlist,
     deck: &str,
-    claimed: [&Option<PlannedQueueItem>; 2],
+    claimed: [&Option<PlannedQueueItem>; 3],
 ) -> Result<Option<PlannedQueueItem>, String> {
     let analyses = &parsed.analyses;
     let Some(mc_index) = analyses
@@ -557,7 +572,7 @@ fn build_monte_carlo_transient_plan(
     Ok(Some(PlannedQueueItem {
         insert_index: skip_indices[0],
         skip_indices,
-        items: transient_family_items(
+        items: family_items(
             reference_temperature_celsius,
             parsed,
             &analyses[*tran_index],
@@ -566,10 +581,90 @@ fn build_monte_carlo_transient_plan(
     }))
 }
 
-fn build_parameter_step_plan(
+/// A `.STEP` sweep of a swept analysis: one analysis per point of the deck
+/// plan, each keeping its whole sweep — one Id–Vds curve per gate voltage,
+/// one Bode curve per capacitor, one forward curve per temperature — as
+/// LTspice and QSPICE keep one curve per step. Nested `.STEP` cards,
+/// `.STEP TEMP` among them, are the cross product of their points, the first
+/// card varying fastest.
+///
+/// `None` when the deck states no `.STEP`, or when what it steps is not a
+/// swept analysis: a stepped operating point is a value per point, which the
+/// parameter and temperature plans lower.
+fn build_step_family_plan(
     reference_temperature_celsius: f64,
     parsed: &Netlist,
 ) -> Result<Option<PlannedQueueItem>, String> {
+    let analyses = &parsed.analyses;
+    let mut skip_indices = analyses
+        .iter()
+        .enumerate()
+        .filter(|(_, command)| {
+            matches!(
+                command,
+                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+            )
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if !analyses
+        .iter()
+        .any(|command| matches!(command, AnalysisCommand::Step(_)))
+    {
+        return Ok(None);
+    }
+    let bases = analyses
+        .iter()
+        .enumerate()
+        .filter(|(_, command)| {
+            !matches!(
+                command,
+                AnalysisCommand::Step(_)
+                    | AnalysisCommand::Temp { .. }
+                    | AnalysisCommand::MonteCarlo(_)
+                    | AnalysisCommand::Four { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    if !bases
+        .iter()
+        .any(|(_, command)| is_step_family_base(command))
+    {
+        return Ok(None);
+    }
+    let [(base_index, base)] = bases.as_slice() else {
+        return Err(format!(
+            "A .step family solves one analysis per point, and the deck states {}. Split them into separate runs.",
+            bases
+                .iter()
+                .map(|(_, command)| command_name(command))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    };
+    let members = crate::deck_family::step_members(parsed, &Default::default())
+        .map_err(|error| format!(".step of {}: {error}", command_name(base)))?;
+    skip_indices.push(*base_index);
+    skip_indices.sort_unstable();
+    Ok(Some(PlannedQueueItem {
+        insert_index: skip_indices[0],
+        skip_indices,
+        items: family_items(reference_temperature_celsius, parsed, base, members)?,
+    }))
+}
+
+/// Whether a `.STEP` of `command` keeps one whole sweep per point.
+const fn is_step_family_base(command: &AnalysisCommand) -> bool {
+    matches!(
+        command,
+        AnalysisCommand::Dc { .. }
+            | AnalysisCommand::Ac { .. }
+            | AnalysisCommand::Noise { .. }
+            | AnalysisCommand::Tran { .. }
+    )
+}
+
+fn build_parameter_step_plan(parsed: &Netlist) -> Result<Option<PlannedQueueItem>, String> {
     let analyses = &parsed.analyses;
     let Some((step_index, step)) = analyses.iter().enumerate().find_map(|(idx, command)| {
         if let AnalysisCommand::Step(step) = command {
@@ -581,14 +676,13 @@ fn build_parameter_step_plan(
         return Ok(None);
     };
 
+    // A stepped swept analysis is a family, lowered before this plan; what
+    // reaches it steps an operating point or nothing at all.
     let mut supported_bases = Vec::new();
     let mut unsupported = Vec::new();
     for (idx, command) in analyses.iter().enumerate() {
         match command {
-            AnalysisCommand::Op
-            | AnalysisCommand::Dc { .. }
-            | AnalysisCommand::Tran { .. }
-            | AnalysisCommand::Ac { .. } => supported_bases.push((idx, command)),
+            AnalysisCommand::Op => supported_bases.push((idx, command)),
             AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {}
             AnalysisCommand::MonteCarlo(_) => {}
             other if is_analysis_command(other) => unsupported.push(command_name(other)),
@@ -600,7 +694,7 @@ fn build_parameter_step_plan(
         unsupported.sort_unstable();
         unsupported.dedup();
         return Err(format!(
-            "Manual parameter .step supports .op, .dc, .tran, or .ac as its paired base analysis; found unsupported analysis {} for target {}",
+            "Manual parameter .step supports .op, .dc, .ac, .noise, or .tran as its paired base analysis; found unsupported analysis {} for target {}",
             unsupported.join(", "),
             step_target_name(step)
         ));
@@ -616,11 +710,9 @@ fn build_parameter_step_plan(
         ));
     }
 
-    let (base_index, base_mode) = if let Some((index, command)) = supported_bases.first() {
-        (*index, temperature_base_mode(command)?)
-    } else {
-        (step_index, CornerBaseMode::Op)
-    };
+    let base_index = supported_bases
+        .first()
+        .map_or(step_index, |(index, _)| *index);
     let mut skip_indices = vec![step_index];
     if base_index != step_index {
         skip_indices.push(base_index);
@@ -628,28 +720,19 @@ fn build_parameter_step_plan(
     skip_indices.sort_unstable();
     skip_indices.dedup();
 
-    // A swept transient keeps every point's waveforms: one transient per
-    // point rather than one value per point.
-    let items = if let Some((_, tran @ AnalysisCommand::Tran { .. })) = supported_bases.first() {
-        let members = crate::deck_family::step_members(parsed, &Default::default())
-            .map_err(|error| format!(".step transient: {error}"))?;
-        transient_family_items(reference_temperature_celsius, parsed, tran, members)?
-    } else {
-        vec![QueuedAnalysis {
+    Ok(Some(PlannedQueueItem {
+        insert_index: skip_indices[0],
+        skip_indices,
+        items: vec![QueuedAnalysis {
             numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
             spec_options: SpecExecutionOptions {
-                parametric_base: Some(base_mode),
+                parametric_base: Some(CornerBaseMode::Op),
                 ..SpecExecutionOptions::default()
             },
             analysis_line: format!(".step {}", step_target_name(step)),
-        }]
-    };
-    Ok(Some(PlannedQueueItem {
-        insert_index: skip_indices[0],
-        skip_indices,
-        items,
+        }],
     }))
 }
 

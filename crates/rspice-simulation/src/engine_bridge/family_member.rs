@@ -1,14 +1,16 @@
 //! One member of the deck's `.MC` study or `.STEP` sweep, solved as an
-//! ordinary transient.
+//! ordinary analysis.
 //!
 //! The member is materialized by the engine entries its whole family runs
 //! through: a Monte Carlo trial by the engine's trial sampler at the trial's
 //! own index (a population of one starting there, which draws what that index
 //! draws in the whole population), and a `.STEP` point by the deck plan's
 //! materializer at the point's coordinate. The materialized circuit then runs
-//! the task's transient through the same dispatch every transient takes, so
-//! the member keeps its waveforms, events, `.MEAS` results, assertions and
-//! finish exactly as a plain transient of that circuit would.
+//! the task's analysis through the same dispatch every analysis takes, so the
+//! member keeps its waveforms, events, `.MEAS` results, assertions and finish
+//! exactly as a plain analysis of that circuit would: a transient its
+//! waveforms, a `.DC` its whole sweep, an `.AC` or `.NOISE` its whole
+//! frequency response.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -24,8 +26,9 @@ use crate::execution_options::FamilyMember;
 use crate::results::SimulationResult;
 
 impl EngineBridge {
-    /// Solve `member` of the deck's own study or sweep with `config`, which
-    /// must be a transient.
+    /// Solve `member` of the deck's own study or sweep with `config`: a
+    /// transient for a trial, and a transient, DC sweep, AC or noise
+    /// analysis for a point.
     pub(crate) fn run_family_member(
         &self,
         config: &AnalysisConfig,
@@ -35,10 +38,11 @@ impl EngineBridge {
         member: FamilyMember,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
-        if !matches!(config, AnalysisConfig::Transient(_)) {
+        if !member.solves(config) {
             return Err(SimulationError::InvalidConfig(format!(
-                "{} is solved as a transient; this task's analysis is not one",
-                member.label()
+                "{} is solved as {}; this task's analysis is not one",
+                member.label(),
+                member.solved_as()
             )));
         }
         let netlist = self.materialize_input(
@@ -174,8 +178,11 @@ impl EngineBridge {
             .materialize_run_with_abort(index, abort)
             .map_err(|error| refused("materializing the point", &error))?;
         let (_, point, _, _) = run.into_parts();
+        // Resolved from the point's own options, not the deck's: a
+        // `.STEP TEMP` point states its temperature there, and an engine
+        // already resolved for the deck would solve every point at the deck's.
         EngineBridge {
-            engine: engine.resolved_for_netlist(&point),
+            engine: self.engine.resolved_for_netlist(&point),
             measurement_references: self.measurement_references.clone(),
         }
         .dispatch_analysis(config, &point, abort)

@@ -95,7 +95,10 @@ fn a_changed_pvt_basis_keeps_successful_points_and_the_failed_family_after_reloa
             ".tran 1e-8 1e-6 0.5e-6 1e-8",
             ".ac dec 2 1e3 1e4",
         ] {
-            let source = format!("{CONDITIONAL}.step temp list {temperatures}\n{analysis}\n.end\n");
+            // A `.TEMP` list is a PVT family of any analysis; a `.STEP TEMP`
+            // of a swept one is a family of whole sweeps instead
+            // (`step_family.rs`).
+            let source = format!("{CONDITIONAL}.temp {temperatures}\n{analysis}\n.end\n");
             let run = super::super::test_execution::run_manual_batch_with_lifecycle(
                 &source,
                 rspice_results::run::SimulationRunLifecycle::Failed,

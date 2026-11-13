@@ -956,7 +956,7 @@ pub fn build_prepared_manual_deck<R, A>(
     })
 }
 
-/// Record on each transient that solves one trial or point of the deck's
+/// Record on each analysis that solves one trial or point of the deck's
 /// `.MC` study or `.STEP` sweep which member it solves, with the value each
 /// swept axis takes at a point, and name the task after it.
 fn attach_family_members(
@@ -970,10 +970,7 @@ fn attach_family_members(
         return Ok(());
     }
     let refused = |error: String| {
-        PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!(".step transient: {error}"),
-        )
+        PreparationError::new(PreparationStage::AnalysisPlan, format!(".step: {error}"))
     };
     let points = if tasks
         .iter()

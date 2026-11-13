@@ -794,7 +794,8 @@ fn manual_deck_temp_directive_does_not_block_runnable_analysis() {
 }
 
 #[test]
-fn manual_deck_step_temp_uses_paired_transient_base_analysis() {
+fn manual_deck_step_temp_of_a_transient_runs_one_transient_per_temperature() {
+    use crate::execution_options::FamilyMember;
     let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
             reference_pvt.temperature_celsius,
@@ -802,22 +803,17 @@ fn manual_deck_step_temp_uses_paired_transient_base_analysis() {
         )
         .expect("manual deck queue");
 
-    assert_eq!(queue.len(), 1);
-    assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
-    let temp = queue[0]
-        .spec_options
-        .temp
-        .as_ref()
-        .expect("temperature options");
-    assert_eq!(temp.temperatures_c, vec![0.0, 25.0, 125.0]);
-    assert!(matches!(
-        temp.base_mode,
-        CornerBaseMode::Transient {
-            stop_time,
-            step_time,
-        } if (stop_time - 10e-9).abs() < 1e-21
-            && (step_time - 1e-9).abs() < 1e-21
-    ));
+    assert_eq!(queue.len(), 3, "{queue:?}");
+    for (index, task) in queue.iter().enumerate() {
+        assert!(
+            matches!(task.spec, AnalysisSpec::Transient { stop_time, .. } if stop_time == 10e-9)
+        );
+        assert_eq!(
+            task.spec_options.member,
+            Some(FamilyMember::StepPoint { index })
+        );
+        assert!(task.spec_options.temp.is_none());
+    }
 }
 
 #[test]
@@ -859,6 +855,102 @@ fn manual_deck_parameter_step_of_a_transient_runs_one_transient_per_point() {
         );
         assert!(task.spec_options.parametric_base.is_none());
     }
+}
+
+#[test]
+fn manual_deck_step_of_a_swept_analysis_runs_one_analysis_per_point() {
+    use crate::execution_options::FamilyMember;
+    let reference_pvt = ReferencePoint::default();
+    let deck = |cards: &str| {
+        format!(
+            "deck\n.param r=1k c=1n\nV1 in 0 DC 1 AC 1\nR1 in out {{r}}\nC1 out 0 {{c}}\n{cards}\n.end\n"
+        )
+    };
+    for (cards, points) in [
+        (".step param r list 1k 2k 3k\n.dc V1 0 1 0.5", 3),
+        (".step param c list 1n 10n\n.ac dec 10 1 1meg", 2),
+        (
+            ".noise V(out) V1 dec 10 1 1meg\n.step temp list -40 27 125",
+            3,
+        ),
+        // Nested cards are the cross product of their points.
+        (
+            ".step param r list 1k 2k\n.step param c list 1n 10n 100n\n.step temp list 0 50\n.ac dec 10 1 1meg",
+            12,
+        ),
+        (".step param r list 1k 2k\n.dc V1 0 1 0.5\n.temp 0 50", 4),
+    ] {
+        let queue = build_manual_deck_queue(reference_pvt.temperature_celsius, &deck(cards))
+            .unwrap_or_else(|error| panic!("{cards}: {error:?}"));
+        assert_eq!(queue.len(), points, "{cards}: {queue:?}");
+        for (index, task) in queue.iter().enumerate() {
+            assert!(
+                matches!(
+                    task.spec,
+                    AnalysisSpec::DcSweep { .. }
+                        | AnalysisSpec::Ac { .. }
+                        | AnalysisSpec::Noise { .. }
+                ),
+                "{cards}: {:?}",
+                task.spec
+            );
+            assert_eq!(
+                task.spec_options.member,
+                Some(FamilyMember::StepPoint { index })
+            );
+            assert!(
+                task.spec_options.temp.is_none() && task.spec_options.parametric_base.is_none()
+            );
+        }
+    }
+
+    // A stepped operating point stays one value per point.
+    let op = build_manual_deck_queue(
+        reference_pvt.temperature_celsius,
+        &deck(".step param r list 1k 2k\n.op"),
+    )
+    .expect("stepped operating point");
+    assert!(matches!(
+        op[..],
+        [QueuedAnalysis {
+            spec: AnalysisSpec::Parametric,
+            spec_options: SpecExecutionOptions {
+                parametric_base: Some(CornerBaseMode::Op),
+                member: None,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn manual_deck_step_family_refusals_name_the_card() {
+    let reference_pvt = ReferencePoint::default();
+    let refused = |cards: &str| {
+        build_manual_deck_queue(
+            reference_pvt.temperature_celsius,
+            &format!("deck\n.param r=1k\nV1 in 0 DC 1 AC 1\nR1 in out {{r}}\nC1 out 0 1n\nM1 out in 0 0 nm\n.model nm nmos level=1\n{cards}\n.end\n"),
+        )
+        .expect_err("refused")
+        .join("\n")
+    };
+    let two = refused(".step param r list 1k 2k\n.dc V1 0 1 0.5\n.ac dec 10 1 1meg");
+    assert!(
+        two.contains("one analysis per point, and the deck states .dc, .ac"),
+        "{two}"
+    );
+    // A card at a transient state needs its transient, so it is never alone.
+    let state = refused(".step param r list 1k 2k\n.tran 1n 10n\n.ac dec 10 1 1meg ACTIMES=5n");
+    assert!(
+        state.contains("one analysis per point, and the deck states .tran, .ac"),
+        "{state}"
+    );
+    let unsupported = refused(".step param r list 1k 2k\n.tf V(out) V1");
+    assert!(
+        unsupported.contains("unsupported analysis .tf"),
+        "{unsupported}"
+    );
 }
 
 #[test]
@@ -941,7 +1033,7 @@ fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
     let reference_pvt = ReferencePoint::default();
     let nested = build_manual_deck_queue(
             reference_pvt.temperature_celsius,
-            "deck\nV1 in 0 0\nV2 bias 0 0\nR1 in bias 1k\n.dc V1 0 1 0.5 V2 0 2 1\n.step temp list 25 125\n.end\n",
+            "deck\nV1 in 0 0\nV2 bias 0 0\nR1 in bias 1k\n.dc V1 0 1 0.5 V2 0 2 1\n.temp 25 125\n.end\n",
         )
         .expect("nested DC temperature sweep");
     assert!(matches!(
@@ -951,7 +1043,7 @@ fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
 
     let transient = build_manual_deck_queue(
             reference_pvt.temperature_celsius,
-            "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 20n 2n 0.5n uic\n.step temp list 25 125\n.end\n",
+            "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 20n 2n 0.5n uic\n.temp 25 125\n.end\n",
         )
         .expect("full transient temperature sweep");
     assert!(matches!(

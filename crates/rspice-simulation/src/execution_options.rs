@@ -17,7 +17,7 @@ pub struct SpecExecutionOptions {
     pub pnoise: Option<crate::periodic::PnoiseRunConfig>,
     pub pstb: Option<crate::periodic::PstbRunConfig>,
     /// The one member of the deck's own `.MC` study or `.STEP` sweep this
-    /// transient solves. `None` solves the deck as it stands.
+    /// analysis solves. `None` solves the deck as it stands.
     pub member: Option<FamilyMember>,
     /// Resume this transient from the checkpoint the transient it depends on
     /// captured at this scheduled time, rather than solving from the start.
@@ -27,12 +27,12 @@ pub struct SpecExecutionOptions {
 }
 
 /// One member of a statistical study or a parameter sweep, solved as an
-/// ordinary transient with its own waveforms, events, `.MEAS` results and
+/// ordinary analysis with its own waveforms, events, `.MEAS` results and
 /// checks.
 ///
 /// The task's deck carries the `.MC` or `.STEP` card the member belongs to,
 /// and the member is materialized from it exactly as the engine's own
-/// Monte Carlo transient and `.STEP` transient materialize theirs: a trial is
+/// Monte Carlo transient and `.STEP` sweep materialize theirs: a trial is
 /// drawn from the card's seed at its own index, so trial `k` of a run of one
 /// draws what trial `k` of the whole study draws; a point is the sweep's own
 /// coordinate. A study is then one task per member, each with its full
@@ -41,12 +41,14 @@ pub struct SpecExecutionOptions {
 #[serde(rename_all = "snake_case", tag = "member")]
 pub enum FamilyMember {
     /// Trial `index` of the deck's `.MC` study, in the card's own numbering
-    /// (its first trial included), varied as `variation_source` states.
+    /// (its first trial included), varied as `variation_source` states. A
+    /// trial is a transient.
     MonteCarloTrial {
         index: usize,
         variation_source: rspice_simulation_contract::mc_draft::McVariationSource,
     },
-    /// Point `index` of the deck's `.STEP` sweep, in sweep order.
+    /// Point `index` of the deck's `.STEP` sweep, in sweep order. A point is
+    /// a transient, a DC sweep, an AC analysis or a noise analysis.
     StepPoint { index: usize },
 }
 
@@ -56,6 +58,32 @@ impl FamilyMember {
         match self {
             Self::MonteCarloTrial { index, .. } => format!("trial {index}"),
             Self::StepPoint { index } => format!("point {index}"),
+        }
+    }
+
+    /// Whether this member is solved as `config`'s analysis.
+    pub(crate) fn solves(
+        self,
+        config: &rspice_simulation_contract::config::AnalysisConfig,
+    ) -> bool {
+        use rspice_simulation_contract::config::AnalysisConfig;
+        match self {
+            Self::MonteCarloTrial { .. } => matches!(config, AnalysisConfig::Transient(_)),
+            Self::StepPoint { .. } => matches!(
+                config,
+                AnalysisConfig::Transient(_)
+                    | AnalysisConfig::DcSweep(_)
+                    | AnalysisConfig::Ac(_)
+                    | AnalysisConfig::Noise(_)
+            ),
+        }
+    }
+
+    /// The analyses this member is solved as, for a refusal.
+    pub(crate) const fn solved_as(self) -> &'static str {
+        match self {
+            Self::MonteCarloTrial { .. } => "a transient",
+            Self::StepPoint { .. } => "a transient, DC sweep, AC or noise analysis",
         }
     }
 }

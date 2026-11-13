@@ -1,17 +1,21 @@
-//! The members of a deck's Monte Carlo or `.STEP` transient.
+//! The members of a deck's Monte Carlo study or `.STEP` sweep.
 //!
-//! A deck that pairs its `.TRAN` card with a `.MC` study or a `.STEP` sweep
-//! runs as one transient task per trial or point, each naming its member
-//! ([`FamilyMember`]) and each keeping its full result. This module reads
-//! the members off the deck without solving anything, so every route that
-//! lowers such a deck — the application's manual-deck run and the corpus
-//! runner's headless cases — lowers it to the same members:
+//! A deck that pairs its `.TRAN` card with a `.MC` study, or a swept analysis
+//! (`.DC`, `.AC`, `.NOISE`, `.TRAN`) with a `.STEP` sweep, runs as one task
+//! per trial or point, each naming its member ([`FamilyMember`]) and each
+//! keeping its full result: one curve per member, the family LTspice and
+//! QSPICE draw. This module reads the members off the deck without solving
+//! anything, so every route that lowers such a deck — the application's
+//! manual-deck run and the corpus runner's headless cases — lowers it to the
+//! same members:
 //!
 //! - a trial is one index of the card's own numbering, from its first trial,
 //!   varied as the deck states its variation (its own statistical functions,
 //!   or the card's spread over the parameters it names);
 //! - a point is one coordinate of the deck plan, in the plan's order (the
 //!   first `.STEP` card varies fastest), with the value each axis takes there.
+//!   Nested `.STEP` cards, `.STEP TEMP` among them, are the cross product of
+//!   their points.
 //!
 //! [`member_parameters`] then reads what each member's circuit resolves its
 //! top-level `.param` values to — the draw a trial makes, the coordinate a
@@ -33,7 +37,7 @@ pub(crate) const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 /// Statistical functions a deck may state its Monte Carlo variation with.
 const STATISTICAL_FUNCTIONS: [&str; 5] = ["agauss(", "aunif(", "gauss(", "unif(", "limit("];
 
-/// One member of a deck's Monte Carlo or `.STEP` transient.
+/// One member of a deck's Monte Carlo study or `.STEP` sweep.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeckFamilyMember {
     /// The member a transient task names.
@@ -159,14 +163,22 @@ pub fn monte_carlo_members(
 
 /// The points of the deck's `.STEP` sweep, in the deck plan's order, each
 /// with the value every swept axis takes there.
+///
+/// A `.TEMP` card is an axis of the plan too. Listing several temperatures
+/// it sweeps them, and its value names each point as `temp`, the way a
+/// `.STEP TEMP` names it; one temperature sweeps nothing, so it names none.
 pub fn step_members(
     netlist: &Netlist,
     limits: &ResourceLimits,
 ) -> Result<Vec<DeckFamilyMember>, String> {
-    use rspice_core::execution::{DeckPlan, RunAxisValue};
+    use rspice_core::execution::{AxisKind, DeckPlan, RunAxisValue};
     let plan = DeckPlan::from_netlist(netlist, limits)
         .map_err(|error| format!("the .step plan: {error}"))?;
-    if plan.axes().is_empty() {
+    if !plan
+        .axes()
+        .iter()
+        .any(|axis| axis.step_target().is_some() || axis.kind() == AxisKind::Data)
+    {
         return Err("the deck has no .STEP card".to_owned());
     }
     let coordinates = plan
@@ -176,12 +188,21 @@ pub fn step_members(
         .iter()
         .enumerate()
         .map(|(index, coordinate)| {
+            if coordinate.assignments().len() != plan.axes().len() {
+                return Err(format!(
+                    "point {index} assigns {} axes of the plan's {}",
+                    coordinate.assignments().len(),
+                    plan.axes().len()
+                ));
+            }
             let mut values = Vec::new();
-            for assignment in coordinate.assignments() {
+            for (assignment, axis) in coordinate.assignments().iter().zip(plan.axes()) {
+                let swept = axis.step_target().is_some() || axis.values().len() > 1;
                 match assignment.value() {
-                    RunAxisValue::Numeric(value) => {
+                    RunAxisValue::Numeric(value) if swept => {
                         values.push((axis_label(assignment), *value));
                     }
+                    RunAxisValue::Numeric(_) => {}
                     RunAxisValue::DataRow(bindings) => values.extend(
                         bindings
                             .iter()
@@ -189,7 +210,7 @@ pub fn step_members(
                     ),
                     RunAxisValue::AlterVariant { label, .. } => {
                         return Err(format!(
-                            "point {index} is the .ALTER variant {label}, which a transient member cannot solve"
+                            "point {index} is the .ALTER variant {label}, which a family member cannot solve"
                         ));
                     }
                 }
@@ -218,6 +239,9 @@ fn axis_label(assignment: &rspice_core::execution::AxisAssignment) -> String {
         })
         | Some(StepAxisTarget::Model { name, parameter }) => format!("{name}({parameter})"),
         Some(StepAxisTarget::Temperature) => "temp".to_owned(),
+        None if assignment.kind() == rspice_core::execution::AxisKind::Temperature => {
+            "temp".to_owned()
+        }
         None => assignment.name().to_owned(),
     }
 }
