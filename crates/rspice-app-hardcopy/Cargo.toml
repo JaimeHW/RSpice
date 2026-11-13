@@ -35,6 +35,7 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 
 [dev-dependencies]
+rspice-design = { workspace = true, features = ["test-support"] }
 rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 png = "0.18"

@@ -51,6 +51,7 @@ pub enum CheckReach {
 /// instance's master is judged from its placed binding — except where a
 /// configuration may bind it elsewhere, which this has no occurrence path to
 /// ask about and so does not judge.
+#[cfg(any(test, feature = "test-support"))]
 pub fn extract_checked_design(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,

@@ -46,7 +46,7 @@ serde_json.workspace = true
 # and the fingerprint observation the tests reach through rspice-app-state.
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
-rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
+rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation", "test-support"] }
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 ron = { version = "0.12.2", features = ["integer128"] }
 num-complex = "0.4"

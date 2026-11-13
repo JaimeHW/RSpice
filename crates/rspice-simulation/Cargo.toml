@@ -51,6 +51,6 @@ wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 
 [dev-dependencies]
+rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }
 wat = "1"
-rspice-design = { workspace = true, features = ["schematic-test-fixtures"] }
 ron = { version = "0.12.2", features = ["integer128"] }

@@ -131,6 +131,7 @@ impl ClipboardData {
     /// that sit on those wires.
     ///
     /// Calculates the center of the selection as the origin for paste offsets.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_selection(
         components: Vec<Component>,
         wires: Vec<Wire>,

@@ -11,6 +11,9 @@ rust-version.workspace = true
 # Counts the work an edit does, for tests that hold a gesture to it.
 # Enabled by `rspice-app`'s dev-dependency; never in a shipping build.
 work-observation = []
+# Constructors only tests call, for this crate's and dependent crates' tests.
+# Enabled by dev-dependencies; never in a shipping build.
+test-support = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

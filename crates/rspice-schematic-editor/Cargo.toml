@@ -23,5 +23,5 @@ rspice-ui-kit.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-rspice-design = { workspace = true, features = ["schematic-test-fixtures"] }
+rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }

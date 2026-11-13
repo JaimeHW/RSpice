@@ -49,7 +49,7 @@ rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
-rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
+rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation", "test-support"] }
 rspice-pack = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -299,6 +299,7 @@ impl Selection {
     }
 
     /// Select a wire segment
+    #[cfg(any(test, feature = "test-support"))]
     pub fn select_wire_segment(&mut self, wire_id: u64, segment_index: usize) {
         if !self.has_wire_segment(wire_id, segment_index) {
             self.wire_segments
@@ -307,6 +308,7 @@ impl Selection {
     }
 
     /// Select only a single wire segment
+    #[cfg(any(test, feature = "test-support"))]
     pub fn select_only_wire_segment(&mut self, wire_id: u64, segment_index: usize) {
         self.clear();
         self.wire_segments
@@ -345,6 +347,7 @@ impl Selection {
     }
 
     /// Select a wire vertex
+    #[cfg(any(test, feature = "test-support"))]
     pub fn select_wire_vertex(&mut self, wire_id: u64, vertex_index: usize) {
         if !self.has_wire_vertex(wire_id, vertex_index) {
             self.wire_vertices
@@ -353,6 +356,7 @@ impl Selection {
     }
 
     /// Select only a single wire vertex
+    #[cfg(any(test, feature = "test-support"))]
     pub fn select_only_wire_vertex(&mut self, wire_id: u64, vertex_index: usize) {
         self.clear();
         self.wire_vertices

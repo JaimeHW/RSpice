@@ -21,6 +21,10 @@ symbol-test-observation = []
 schematic-test-fixtures = []
 # Enabled by the app dev-dependency to count the work an edit does.
 work-observation = ["rspice-design-model/work-observation"]
+# Constructors and selection helpers only tests call, for this crate's and
+# dependent crates' tests. Enabled by dev-dependencies; never in a shipping
+# build.
+test-support = ["rspice-design-model/test-support"]
 
 [dependencies]
 log.workspace = true
@@ -48,4 +52,5 @@ uuid = { workspace = true, features = ["v5"] }
 uuid = { workspace = true, features = ["js", "v5"] }
 
 [dev-dependencies]
+rspice-design-model = { workspace = true, features = ["test-support"] }
 ron = { version = "0.12.2", features = ["integer128"] }

@@ -425,6 +425,7 @@ impl SchematicHistory {
     }
 
     /// Get the number of available undo steps
+    #[cfg(any(test, feature = "test-support"))]
     pub fn undo_count(&self) -> usize {
         self.undo_stack.len()
     }

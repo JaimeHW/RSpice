@@ -53,6 +53,7 @@ impl Library {
     }
 
     /// Get or create cell
+    #[cfg(any(test, feature = "test-support"))]
     pub fn get_or_create_cell(&mut self, name: &str) -> &mut Cell {
         self.cells
             .entry(name.to_string())

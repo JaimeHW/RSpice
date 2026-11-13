@@ -635,6 +635,7 @@ impl SheetCatalog {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn create_sheet(
         &mut self,
         definition: SheetDefinition,
