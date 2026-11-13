@@ -113,7 +113,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                 expected_components
             );
             let mut reopened = AppState::default();
-            assert!(load_project_from_path(&mut reopened, &path));
+            assert!(reopened.load_project_from_path(&path));
             assert!(!has_unsaved_changes(&reopened));
             let next = add_marker(&mut reopened, analysis);
             assert!(
@@ -276,7 +276,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         )
         .unwrap();
         let mut reopened = AppState::default();
-        assert!(load_project_from_path(&mut reopened, &path));
+        assert!(reopened.load_project_from_path(&path));
         assert!(!has_unsaved_changes(&reopened));
         let analysis = install_retained_results(&mut reopened);
         assert!(add_marker(&mut reopened, analysis) > published);
@@ -314,7 +314,7 @@ fn legacy_marker_history_is_adopted_without_dirtying_an_unchanged_project() {
     let written = crate::io::load_project_file(&path).unwrap();
     assert_eq!(written.file.result_presentation.marker_id_high_water, None);
     let mut reopened = AppState::default();
-    assert!(load_project_from_path(&mut reopened, &path));
+    assert!(reopened.load_project_from_path(&path));
     assert!(!has_unsaved_changes(&reopened));
     assert!(add_marker(&mut reopened, analysis) > highest);
     assert!(has_unsaved_changes(&reopened));
@@ -335,7 +335,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
     )
     .unwrap();
     // Install the published maximum through the real restoration path.
-    assert!(load_project_from_path(&mut state, &path));
+    assert!(state.load_project_from_path(&path));
     state.results.results.session.remove_marker(u32::MAX);
     save_native(
         &mut state,
@@ -345,7 +345,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
     )
     .unwrap();
     let mut reopened = AppState::default();
-    assert!(load_project_from_path(&mut reopened, &path));
+    assert!(reopened.load_project_from_path(&path));
     assert!(!has_unsaved_changes(&reopened));
     assert!(
         reopened

@@ -446,7 +446,7 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
 
     let mut guest = AppState::default();
     assert!(matches!(
-        apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
+        guest.apply_live_project_snapshot(text.as_bytes(), "Jaime"),
         LiveProjectApply::Applied
     ));
     assert!(guest.platform.project_lifecycle.is_open());
@@ -474,13 +474,13 @@ fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
     let mut guest = AppState::default();
     guest.model.simulation.execution.is_running = true;
     assert!(matches!(
-        apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
+        guest.apply_live_project_snapshot(text.as_bytes(), "Jaime"),
         LiveProjectApply::RetryLater
     ));
 
     guest.model.simulation.execution.is_running = false;
     assert!(matches!(
-        apply_live_project_snapshot(&mut guest, b"not a project", "Jaime"),
+        guest.apply_live_project_snapshot(b"not a project", "Jaime"),
         LiveProjectApply::Rejected
     ));
 }
@@ -1904,7 +1904,7 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
         crate::time_compat::unix_epoch().as_nanos()
     ));
 
-    assert!(!load_project_from_path(&mut state, &path));
+    assert!(!state.load_project_from_path(&path));
 
     state.drain_notices(&egui::Context::default());
     let activity = state.workbench.toasts.activity();

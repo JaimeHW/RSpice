@@ -44,7 +44,7 @@ pub(crate) fn dispatch_file_menu_action(
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectOpen) {
                 return;
             }
-            crate::workbench::workflows::project_workflow::open_project(state);
+            state.open_project();
         }
         FileMenuAction::SaveProjectAs => {
             state.save_project_as();

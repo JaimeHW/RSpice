@@ -275,7 +275,7 @@ impl RSpiceApp {
             path,
             recent_kind,
             example,
-            crate::workbench::workflows::project_workflow::open_project,
+            crate::workbench::app_state::AppState::open_project,
         );
     }
 
@@ -378,11 +378,7 @@ impl RSpiceApp {
             RecentKind::Project => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let opened =
-                        crate::workbench::workflows::project_workflow::load_project_from_path(
-                            &mut self.state,
-                            &path,
-                        );
+                    let opened = self.state.load_project_from_path(&path);
                     if opened {
                         self.restore_workspace_after_project_load();
                     }

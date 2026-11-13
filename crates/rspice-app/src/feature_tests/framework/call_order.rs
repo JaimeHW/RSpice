@@ -1047,7 +1047,7 @@ const LIVE_SESSION_PUMP: &[Step] = &[
         "5",
         &[
             "live_session.take_mirror_snapshot()",
-            "apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label())",
+            "state.apply_live_project_snapshot(snapshot.bytes(), snapshot.host_label())",
             "live_session.mirror_snapshot_applied(&mut live_host(state), snapshot, outcome)",
         ],
     ),

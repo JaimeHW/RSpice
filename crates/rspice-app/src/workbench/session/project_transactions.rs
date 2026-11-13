@@ -26,8 +26,8 @@ use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 use crate::workbench::lifecycle::project_lifecycle::SaveScope;
 use crate::workbench::lifecycle::project_lifecycle::{
-    LifecycleParts, PersistenceBinding, ProjectCloseDestination, RevertReviewToken,
-    has_unsaved_changes,
+    LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
+    RevertReviewToken, has_unsaved_changes,
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
@@ -38,7 +38,7 @@ use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 use crate::workbench::workflows::project_workflow::BrowserProjectOpen;
 use crate::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
-    OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome, apply_live_project_snapshot,
+    OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
@@ -378,6 +378,126 @@ impl AppState {
             }
         }
     }
+
+    /// Open the project file the reader picks in place of the open project.
+    /// Returns whether it opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open_project(&mut self) -> bool {
+        match crate::io::show_open_project_dialog() {
+            Ok(path) => self.load_project_from_path(&path),
+            Err(ProjectIoError::Cancelled) => false,
+            Err(error) => {
+                self.report_failure("Project open failed", error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Ask the browser for a project file to open in place of the open
+    /// project. Returns whether the picker opened.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_project(&mut self) -> bool {
+        let transaction =
+            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    lifecycle_error(self, error, "Project open blocked");
+                    return false;
+                }
+            };
+        let context = crate::workbench::lifecycle::project_lifecycle::browser_operation_context(
+            &self.model,
+            &self.platform,
+        );
+        match project_workflow::start_browser_project_import(transaction, context) {
+            Ok(()) => {
+                self.prompt("Choose an RSpice project file to open.");
+                true
+            }
+            Err(error) => {
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    &mut self.platform,
+                );
+                self.report_failure("Project open failed", error);
+                false
+            }
+        }
+    }
+
+    /// Open the project at `path` in place of the open project. Returns
+    /// whether it opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn load_project_from_path(&mut self, path: &std::path::Path) -> bool {
+        let transaction =
+            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    lifecycle_error(self, error, "Project open blocked");
+                    return false;
+                }
+            };
+        match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
+            Ok((project, binding)) => {
+                let canonical_path = binding.canonical_path.clone();
+                self.apply_loaded_project_authorized(
+                    project,
+                    ProjectLoadOrigin::PersistentPath(&canonical_path),
+                    Some(binding),
+                    transaction,
+                )
+            }
+            Err(error) => {
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    &mut self.platform,
+                );
+                self.report_failure("Project open failed", error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Replace the whole workbench project with a live-session host's snapshot.
+    /// The join flow already confirmed closing local work and the session
+    /// arbitrates write authority, so no dialog or recent-file bookkeeping runs.
+    pub(crate) fn apply_live_project_snapshot(
+        &mut self,
+        bytes: &[u8],
+        host_label: &str,
+    ) -> LiveProjectApply {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return LiveProjectApply::Rejected;
+        };
+        let project = match crate::io::project_io::load_project_text(text, None) {
+            Ok(project) => project,
+            Err(error) => {
+                log::warn!("live session project snapshot rejected: {error}");
+                return LiveProjectApply::Rejected;
+            }
+        };
+        let transaction =
+            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+                Ok(transaction) => transaction,
+                Err(
+                    ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress,
+                ) => {
+                    return LiveProjectApply::RetryLater;
+                }
+                Err(error) => {
+                    lifecycle_error(self, error, "Live session mirror blocked");
+                    return LiveProjectApply::Rejected;
+                }
+            };
+        if self.apply_loaded_project_authorized(
+            project,
+            ProjectLoadOrigin::LiveSession(host_label),
+            None,
+            transaction,
+        ) {
+            LiveProjectApply::Applied
+        } else {
+            LiveProjectApply::Rejected
+        }
+    }
 }
 
 /// Reverting the active document to what its project last saved, answered
@@ -499,7 +619,7 @@ impl AppState {
             lifecycle_error(self, error, "Project Save As failed");
             return false;
         }
-        if !project_workflow::load_project_from_path(self, path) {
+        if !self.load_project_from_path(path) {
             return false;
         }
         self.record(
@@ -514,12 +634,7 @@ impl AppState {
 /// Answer a lifecycle refusal on the status bar, or a project that could not
 /// be read or written as a failure the session records, as the project's
 /// report of it says.
-#[cfg(not(target_arch = "wasm32"))]
-fn lifecycle_error(
-    state: &mut AppState,
-    error: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleError,
-    context: &str,
-) {
+fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
     project_workflow::report_lifecycle_error(
         &mut state.model,
         &mut state.workbench,
@@ -776,7 +891,7 @@ pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) 
     );
     if let Some(snapshot) = live_session.take_mirror_snapshot() {
         let outcome =
-            match apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label()) {
+            match state.apply_live_project_snapshot(snapshot.bytes(), snapshot.host_label()) {
                 LiveProjectApply::Applied => MirrorApply::Applied,
                 LiveProjectApply::RetryLater => MirrorApply::RetryLater,
                 LiveProjectApply::Rejected => MirrorApply::Rejected,

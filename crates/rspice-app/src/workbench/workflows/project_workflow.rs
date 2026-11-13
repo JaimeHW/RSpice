@@ -1175,34 +1175,6 @@ pub(crate) fn settle_closed_project(
     model_restore_errors
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool {
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                lifecycle_error(state, error, "Project open blocked");
-                return false;
-            }
-        };
-    match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
-        Ok((project, binding)) => {
-            let canonical_path = binding.canonical_path.clone();
-            state.apply_loaded_project_authorized(
-                project,
-                ProjectLoadOrigin::PersistentPath(&canonical_path),
-                Some(binding),
-                transaction,
-            )
-        }
-        Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            state.report_failure("Project open failed", error.to_string());
-            false
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn apply_loaded_project(
     state: &mut AppState,
@@ -1524,88 +1496,6 @@ pub(crate) enum LiveProjectApply {
     Rejected,
 }
 
-/// Replace the whole workbench project with a live-session host's snapshot.
-/// The join flow already confirmed closing local work and the session
-/// arbitrates write authority, so no dialog or recent-file bookkeeping runs.
-pub(crate) fn apply_live_project_snapshot(
-    state: &mut AppState,
-    bytes: &[u8],
-    host_label: &str,
-) -> LiveProjectApply {
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return LiveProjectApply::Rejected;
-    };
-    let project = match crate::io::project_io::load_project_text(text, None) {
-        Ok(project) => project,
-        Err(error) => {
-            log::warn!("live session project snapshot rejected: {error}");
-            return LiveProjectApply::Rejected;
-        }
-    };
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(
-                ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress,
-            ) => {
-                return LiveProjectApply::RetryLater;
-            }
-            Err(error) => {
-                lifecycle_error(state, error, "Live session mirror blocked");
-                return LiveProjectApply::Rejected;
-            }
-        };
-    if state.apply_loaded_project_authorized(
-        project,
-        ProjectLoadOrigin::LiveSession(host_label),
-        None,
-        transaction,
-    ) {
-        LiveProjectApply::Applied
-    } else {
-        LiveProjectApply::Rejected
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn open_project(state: &mut AppState) -> bool {
-    match crate::io::show_open_project_dialog() {
-        Ok(path) => load_project_from_path(state, &path),
-        Err(ProjectIoError::Cancelled) => false,
-        Err(error) => {
-            state.report_failure("Project open failed", error.to_string());
-            false
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn open_project(state: &mut AppState) -> bool {
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                lifecycle_error(state, error, "Project open blocked");
-                return false;
-            }
-        };
-    let context = crate::workbench::lifecycle::project_lifecycle::browser_operation_context(
-        &state.model,
-        &state.platform,
-    );
-    match start_browser_project_import(transaction, context) {
-        Ok(()) => {
-            state.prompt("Choose an RSpice project file to open.");
-            true
-        }
-        Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            state.report_failure("Project open failed", error);
-            false
-        }
-    }
-}
-
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 enum BrowserProjectImportResult {
@@ -1643,7 +1533,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn start_browser_project_import(
+pub(crate) fn start_browser_project_import(
     transaction: crate::product::TransactionId,
     context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
 ) -> Result<(), String> {

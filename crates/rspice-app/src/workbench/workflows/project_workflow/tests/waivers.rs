@@ -62,7 +62,7 @@ fn a_waiver_survives_save_and_reopen() {
     )
     .expect("the project saves");
     let mut reopened = AppState::default();
-    let opened = load_project_from_path(&mut reopened, &path);
+    let opened = reopened.load_project_from_path(&path);
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(path.with_extension("rspiceproj.bak"));
     let mut lock = path.as_os_str().to_os_string();

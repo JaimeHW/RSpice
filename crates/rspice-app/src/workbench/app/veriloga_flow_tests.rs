@@ -859,10 +859,7 @@ fn a_new_veriloga_device_runs_from_the_canvas_to_its_operating_point_and_back_fr
 
     let mut reopened = User::new(RSpiceApp::test_instance());
     assert!(
-        crate::workbench::workflows::project_workflow::load_project_from_path(
-            &mut reopened.app.state,
-            &path,
-        ),
+        reopened.app.state.load_project_from_path(&path),
         "the project reopens"
     );
     reopened.app.state.open_workspace_view(top);
