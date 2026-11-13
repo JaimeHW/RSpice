@@ -147,15 +147,52 @@ fn exact_sensitivity(value: SensitivityValue<f64>) -> String {
     }
 }
 
-fn chart_value(value: SensitivityValue<f64>) -> String {
+/// A chart row's value in engineering notation at the reader's significant
+/// digits, as the sheets' other tables state theirs. A normalized
+/// sensitivity has no unit, so its prefix rides the number (`-1.25m`, never
+/// `-1.25 m`, which reads as metres). It is signed: the bars beside it grow
+/// both ways from zero, and the sign is what tells a reader which way the
+/// output moves. The row's hover keeps the panel's exact reading.
+fn chart_value(value: SensitivityValue<f64>, significant_digits: usize) -> String {
     let Some(value) = value.value() else {
         return "Unavailable".to_owned();
     };
-    if value == 0.0 {
-        "0".to_owned()
+    let shown = unitless(value, significant_digits);
+    if value > 0.0 {
+        format!("+{shown}")
     } else {
-        format!("{value:+.6e}")
+        shown
     }
+}
+
+/// The chart's full scale, as one magnitude both ends of its bars share.
+fn chart_scale(max_magnitude: f64, significant_digits: usize) -> String {
+    format!("±{}", unitless(max_magnitude, significant_digits))
+}
+
+/// A unitless value in engineering notation, its prefix on the number.
+fn unitless(value: f64, significant_digits: usize) -> String {
+    rspice_ui_kit::plot::fmt_si_readout(value, "", significant_digits).replace(' ', "")
+}
+
+/// The Value column, wide enough for any value at `significant_digits`: a
+/// sign, three integer digits, the rest as decimals and a prefix. It never
+/// narrows below the width the column was drawn at.
+fn value_width(ui: &Ui, significant_digits: usize) -> f32 {
+    let widest = format!(
+        "+888.{}m",
+        "8".repeat(significant_digits.saturating_sub(3).max(1))
+    );
+    let text = ui
+        .painter()
+        .layout_no_wrap(
+            widest,
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x;
+    (text + 2.0 * CELL_INSET + 4.0).max(VALUE_WIDTH)
 }
 
 fn paint_cell(
@@ -176,7 +213,14 @@ fn paint_cell(
         .text(egui::pos2(x, cell.center().y), align, text, font, color);
 }
 
-pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&SensitivityPlan>) {
+/// The ranked chart. Its values are stated at `significant_digits`, the
+/// reader's Results preference.
+pub fn show(
+    ui: &mut Ui,
+    source: ActiveSensitivity<'_>,
+    plan: Option<&SensitivityPlan>,
+    significant_digits: usize,
+) {
     let view = match source {
         ActiveSensitivity::Ready(view) => view,
         ActiveSensitivity::Missing => {
@@ -226,7 +270,6 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let viewport_width = ui.available_width().max(1.0);
     // The dense row of the sheet's other tables, and the header is one of
     // them. The rows abut, each drawing its own rule, so a row's pitch is its
     // height and the plan's offsets place it exactly.
@@ -236,10 +279,17 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let width = viewport_width.max(TABLE_MIN_WIDTH);
+            // The viewport is what the rows can use: measured before the
+            // scroll area, the width still held the vertical bar's track,
+            // and a sheet long enough to scroll cut its Value column off by
+            // the bar's width.
+            let value_width = value_width(ui, significant_digits);
+            let width = viewport
+                .width()
+                .max(TABLE_MIN_WIDTH - VALUE_WIDTH + value_width);
             ui.set_min_width(width);
 
-            let sensitivity_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH;
+            let sensitivity_width = width - RANK_WIDTH - PARAMETER_WIDTH - value_width;
             let sensitivity_offset = RANK_WIDTH + PARAMETER_WIDTH;
             let value_offset = sensitivity_offset + sensitivity_width;
             let (header, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
@@ -276,7 +326,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             );
             paint_cell(
                 ui,
-                column_rect(header, value_offset, VALUE_WIDTH),
+                column_rect(header, value_offset, value_width),
                 "Value",
                 egui::Align2::RIGHT_CENTER,
                 header_font,
@@ -289,7 +339,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             paint_cell(
                 ui,
                 column_rect(header, sensitivity_offset, sensitivity_width),
-                format!("±{max_magnitude:.6e}"),
+                chart_scale(max_magnitude, significant_digits),
                 egui::Align2::RIGHT_CENTER,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 c.text_faint,
@@ -430,8 +480,8 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
 
                 paint_cell(
                     ui,
-                    column_rect(rect, value_offset, VALUE_WIDTH),
-                    chart_value(row.normalized),
+                    column_rect(rect, value_offset, value_width),
+                    chart_value(row.normalized, significant_digits),
                     egui::Align2::RIGHT_CENTER,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text,
@@ -591,9 +641,19 @@ mod tests {
         let plan = SensitivityPlan::new(&rows);
         assert_eq!(plan.order(), &[2, 1, 0]);
         assert_eq!(plan.max_magnitude, 3.0);
-        assert_eq!(chart_value(rows[0].normalized), "Unavailable");
+        assert_eq!(chart_value(rows[0].normalized, 7), "Unavailable");
         assert!(exact_sensitivity(rows[0].normalized).contains("zero output"));
-        assert_eq!(chart_value(rows[1].normalized), "0");
+        assert_eq!(chart_value(rows[1].normalized, 7), "0");
+    }
+
+    /// A chart value reads in engineering notation at the reader's digits,
+    /// signed, its prefix on the number; the scale reads the same way.
+    #[test]
+    fn chart_values_read_in_engineering_notation_at_the_readers_digits() {
+        assert_eq!(chart_value(3.0.into(), 7), "+3");
+        assert_eq!(chart_value((-1.234_567_89e-3).into(), 7), "-1.234568m");
+        assert_eq!(chart_value(2.718_281_828e4.into(), 3), "+27.2k");
+        assert_eq!(chart_scale(0.012_5, 7), "±12.5m");
     }
 
     /// A panel value reads in engineering notation, and an AC basis names

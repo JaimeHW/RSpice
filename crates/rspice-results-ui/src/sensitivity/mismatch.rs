@@ -144,7 +144,6 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
     let normalized = evidence.normalized_contributions;
     let max_contribution = plan.max_contribution;
     let cumulative = plan.cumulative();
-    let viewport_width = ui.available_width().max(1.0);
     let row_height = table_row_height(ui);
     egui::ScrollArea::both()
         .id_salt("rspice.results.dc-mismatch-contribution")
@@ -154,7 +153,11 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             // of them. The rows abut, each drawing its own rule, so a row's
             // pitch is its height and the plan's offsets place it exactly.
             ui.spacing_mut().item_spacing.y = 0.0;
-            let width = viewport_width.max(TABLE_MIN_WIDTH);
+            // The viewport is what the rows can use: measured before the
+            // scroll area, the width still held the vertical bar's track,
+            // and a sheet long enough to scroll cut its Value column off by
+            // the bar's width.
+            let width = viewport.width().max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
             let bar_width = width - FIXED_WIDTH;

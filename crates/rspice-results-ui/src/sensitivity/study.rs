@@ -1,8 +1,9 @@
 //! Retained sensitivity-study charts, frequency selection and exact readouts.
 
 use super::{
-    CELL_INSET, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, VALUE_WIDTH, chart_value,
-    column_rect, exact_sensitivity, exact_value, paint_cell, unavailable_reason,
+    CELL_INSET, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, VALUE_WIDTH, chart_scale,
+    chart_value, column_rect, exact_sensitivity, exact_value, paint_cell, unavailable_reason,
+    value_width,
 };
 use crate::{
     presentation::{panel_note, table_row_height, well_hint},
@@ -327,7 +328,14 @@ fn paint_frequency_profile(
     }
 }
 
-pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
+/// The ranked chart at the read point. Its values are stated at
+/// `significant_digits`, the reader's Results preference.
+pub fn show(
+    ui: &mut Ui,
+    source: ActiveStudy<'_>,
+    plan: Option<&StudyPlan>,
+    significant_digits: usize,
+) {
     let view = match source {
         ActiveStudy::Ready(view) => view,
         ActiveStudy::Missing => {
@@ -377,7 +385,6 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let viewport_width = ui.available_width().max(1.0);
     let row_height = table_row_height(ui);
     egui::ScrollArea::both()
         .id_salt("rspice.results.sensitivity-study")
@@ -387,7 +394,14 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
             // of them. The rows abut, each drawing its own rule, so a row's
             // pitch is its height and the plan's offsets place it exactly.
             ui.spacing_mut().item_spacing.y = 0.0;
-            let width = viewport_width.max(TABLE_MIN_WIDTH);
+            // The viewport is what the rows can use: measured before the
+            // scroll area, the width still held the vertical bar's track,
+            // and a sheet long enough to scroll cut its Value column off by
+            // the bar's width.
+            let value_width = value_width(ui, significant_digits);
+            let width = viewport
+                .width()
+                .max(TABLE_MIN_WIDTH - VALUE_WIDTH + value_width);
             ui.set_min_width(width);
 
             // The profile column exists only where there is a band to
@@ -398,10 +412,10 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
             } else {
                 0.0
             };
-            let bar_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH - profile_width;
+            let bar_width = width - RANK_WIDTH - PARAMETER_WIDTH - value_width - profile_width;
             let bar_offset = RANK_WIDTH + PARAMETER_WIDTH;
             let value_offset = bar_offset + bar_width;
-            let profile_offset = value_offset + VALUE_WIDTH;
+            let profile_offset = value_offset + value_width;
             let (header, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
             ui.painter().hline(
                 header.x_range(),
@@ -426,7 +440,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 ),
                 (
                     value_offset,
-                    VALUE_WIDTH,
+                    value_width,
                     "Value",
                     egui::Align2::RIGHT_CENTER,
                 ),
@@ -457,7 +471,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
             paint_cell(
                 ui,
                 column_rect(header, bar_offset, bar_width),
-                format!("±{max_magnitude:.6e}"),
+                chart_scale(max_magnitude, significant_digits),
                 egui::Align2::RIGHT_CENTER,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 c.text_faint,
@@ -608,8 +622,8 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
 
                 paint_cell(
                     ui,
-                    column_rect(rect, value_offset, VALUE_WIDTH),
-                    chart_value(normalized),
+                    column_rect(rect, value_offset, value_width),
+                    chart_value(normalized, significant_digits),
                     egui::Align2::RIGHT_CENTER,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text,
