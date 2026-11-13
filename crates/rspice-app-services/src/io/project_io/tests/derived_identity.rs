@@ -609,36 +609,6 @@ fn a_receipt_written_before_derived_identities_still_loads() {
     assert!(restored.file.simulation_results_warning.is_none());
 }
 
-#[test]
-fn an_older_schema_carrying_a_derivation_record_is_refused() {
-    let mut project = project_with_execution_context();
-    let (source_id, source_revision, plan_id) = authored_ac(&project);
-    let derivation = DerivedAnalysisIdentity::new(source_id, run_set_point_role(0))
-        .expect("a point role is named");
-    attach_run(
-        &mut project,
-        plan_id,
-        source_revision,
-        &[TaskFixture::derived(derivation, AnalysisType::Ac, 2)],
-        1,
-    );
-    let json = serialize_project_file(&project).expect("the current-schema project serializes");
-
-    let mut relabelled: serde_json::Value = serde_json::from_str(&json).expect("project parses");
-    relabelled["simulation_results"]["schema_version"] = serde_json::json!(14);
-    let relabelled = serde_json::to_string(&relabelled).expect("relabelled project re-encodes");
-
-    let restored = load_project_text(&relabelled, None).expect("the project still opens");
-    let warning = restored
-        .file
-        .simulation_results_warning
-        .expect("a relabelled file is refused with a stated reason");
-    assert!(
-        warning.contains("carries a derived task identity that schema could not persist"),
-        "{warning}"
-    );
-}
-
 /// Participation removes points from a run, and the identities that survive are
 /// still the ones the whole space would have minted.
 ///

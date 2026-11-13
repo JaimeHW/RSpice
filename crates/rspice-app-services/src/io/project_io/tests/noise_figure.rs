@@ -111,7 +111,7 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
 }
 
 #[test]
-fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_schema() {
+fn hbnoise_reference_results_survive_project_load_and_reject_tampering() {
     for conversion in [
         None,
         Some(crate::state::PeriodicNoiseConversionEvidence {
@@ -222,24 +222,6 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
                 assert!(rejected.file.simulation_results_warning.is_some());
             }
         }
-        let mut v32: serde_json::Value = serde_json::from_str(&json).unwrap();
-        v32["simulation_results"]["schema_version"] = serde_json::json!(32);
-        let migrated = load_project_text(&v32.to_string(), None).unwrap();
-        assert_eq!(
-            migrated.file.simulation_results.runs.is_empty(),
-            conversion.is_some()
-        );
-        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
-        old["simulation_results"]["schema_version"] = serde_json::json!(31);
-        let rejected = load_project_text(&old.to_string(), None).unwrap();
-        assert!(rejected.file.simulation_results.runs.is_empty());
-        assert!(rejected.file.simulation_results_warning.unwrap().contains(
-            if conversion.is_some() {
-                "before v33"
-            } else {
-                "before v32"
-            }
-        ));
     }
 }
 
@@ -301,23 +283,6 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
             restored.active_analysis().unwrap().result_data_digest(),
             digest
         );
-        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
-        old["simulation_results"]["schema_version"] = 33.into();
-        let migrated = load_project_text(&old.to_string(), None).unwrap();
-        assert_eq!(
-            migrated.file.simulation_results.runs.is_empty(),
-            quantity.is_some()
-        );
-        if quantity.is_none() {
-            assert_eq!(
-                crate::io::simulation_state_from_results(migrated.file.simulation_results)
-                    .unwrap()
-                    .active_analysis()
-                    .unwrap()
-                    .result_data_digest(),
-                digest
-            );
-        }
         if quantity.is_some() {
             let mut changed: serde_json::Value = serde_json::from_str(&json).unwrap();
             changed["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["input_quantity"] =

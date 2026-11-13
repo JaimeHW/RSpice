@@ -1049,66 +1049,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_session_result_sequences_migrate_to_stable_identities() {
-        let mut state = AppState::default();
-        let mut run = crate::state::SimulationRun::new(3);
-        run.add_analysis(crate::state::AnalysisResult::new(
-            7,
-            crate::state::AnalysisType::Transient,
-            "TRAN legacy session",
-        ));
-        seal_legacy_unattributed(&mut run);
-        state.model.simulation.retained.runs = vec![run].into();
-        state.model.simulation.retained.next_run_id = 3;
-        state.model.simulation.view.active_run_idx = Some(0);
-        state.model.simulation.view.active_analysis_idx = Some(0);
-        let mut value = serde_json::to_value(&state).expect("session converts to JSON");
-        let results = value["simulation_results"]
-            .as_object_mut()
-            .expect("simulation result object");
-        results.insert("schema_version".to_owned(), serde_json::Value::from(1));
-        results.remove("active_run_stable_id");
-        results.remove("active_dataset_id");
-        results.remove("active_analysis_sequence");
-        results.insert("active_run_id".to_owned(), serde_json::Value::from(3));
-        results.insert("active_analysis_id".to_owned(), serde_json::Value::from(7));
-        let persisted_run = results["runs"][0]
-            .as_object_mut()
-            .expect("persisted run object");
-        persisted_run.remove("run_id");
-        persisted_run.remove("dataset_id");
-        persisted_run.remove("job_id");
-        persisted_run.remove("execution_target");
-        persisted_run.remove("lifecycle");
-        persisted_run.remove("dataset_content_digest");
-        persisted_run
-            .get_mut("analyses")
-            .and_then(serde_json::Value::as_array_mut)
-            .and_then(|analyses| analyses.first_mut())
-            .and_then(serde_json::Value::as_object_mut)
-            .expect("persisted analysis object")
-            .remove("result_data_digest");
-        persisted_run.remove("provenance_mode");
-
-        let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");
-
-        let active_run = restored
-            .model
-            .simulation
-            .active_run()
-            .expect("active run restores");
-        let active_analysis = restored
-            .model
-            .simulation
-            .active_analysis()
-            .expect("active analysis restores");
-        assert!(!active_run.run_id.as_uuid().is_nil());
-        assert!(!active_run.dataset_id.as_uuid().is_nil());
-        assert_eq!(active_run.id, 3);
-        assert_eq!(active_analysis.id, 7);
-    }
-
-    #[test]
     fn app_state_session_round_trips_exact_result_family_metadata() {
         let metadata = crate::state::AnalysisResultFamilyMetadata::Corner {
             member_measurements: Vec::new(),

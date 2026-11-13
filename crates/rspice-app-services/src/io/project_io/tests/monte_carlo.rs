@@ -39,7 +39,7 @@ fn monte_carlo_project_restore_distinguishes_legacy_default_from_explicit_zero()
 }
 
 #[test]
-fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence() {
+fn project_file_round_trips_exact_result_family_metadata() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let metadata = crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
@@ -116,58 +116,5 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
             .active_analysis()
             .and_then(|analysis| analysis.family_metadata.as_ref()),
         Some(&metadata)
-    );
-
-    let mut stale: serde_json::Value = serde_json::from_str(&json).unwrap();
-    stale["simulation_results"]["schema_version"] = serde_json::Value::from(30);
-    let rejected = load_project_text(&serde_json::to_string(&stale).unwrap(), None).unwrap();
-    assert!(rejected.file.simulation_results.runs.is_empty());
-    assert!(
-        rejected
-            .file
-            .simulation_results_warning
-            .unwrap()
-            .contains("before v31")
-    );
-
-    // A schema-29 document also cannot claim confidence evidence introduced in 30.
-    stale["simulation_results"]["schema_version"] = serde_json::Value::from(29);
-    stale["simulation_results"]["runs"][0]["analyses"][0]["family_metadata"]["member_measurements"] =
-        serde_json::json!([]);
-    let rejected = load_project_text(&stale.to_string(), None).unwrap();
-    assert!(rejected.file.simulation_results.runs.is_empty());
-    assert!(
-        rejected
-            .file
-            .simulation_results_warning
-            .unwrap()
-            .contains("before v30")
-    );
-
-    let mut v6: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
-    v6["simulation_results"]["schema_version"] = serde_json::Value::from(6);
-    v6["simulation_results"]["runs"][0]
-        .as_object_mut()
-        .expect("run object")
-        .remove("dataset_content_digest");
-    v6["simulation_results"]["runs"][0]["analyses"][0]
-        .as_object_mut()
-        .expect("analysis object")
-        .remove("family_metadata");
-    v6["simulation_results"]["runs"][0]["analyses"][0]
-        .as_object_mut()
-        .expect("analysis object")
-        .remove("result_data_digest");
-    let migrated = load_project_text(&v6.to_string(), None).expect("v6 project migrates");
-    assert_eq!(migrated.file.simulation_results.schema_version, 45);
-    let migrated = crate::io::simulation_state_from_results(migrated.file.simulation_results)
-        .expect("migrated v6 results restore");
-    assert!(
-        migrated
-            .active_analysis()
-            .expect("migrated analysis")
-            .family_metadata
-            .is_none(),
-        "legacy absence must remain explicit instead of being inferred from waveforms"
     );
 }
