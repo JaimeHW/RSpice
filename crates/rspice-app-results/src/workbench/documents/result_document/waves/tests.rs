@@ -895,8 +895,11 @@ fn one_unit_stays_one_pane() {
     assert_eq!(panes[0].unit, "V");
 }
 
+/// A current the dataset does not plot, and nobody has, opens no pane: the
+/// strip is its volts alone until the current is plotted. A pane the reader
+/// emptied stays (see `hidden_unit_signals_keep_a_pane_available_for_reactivation`).
 #[test]
-fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
+fn a_trace_hidden_only_by_default_opens_no_pane() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
@@ -923,13 +926,8 @@ fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
     );
 
     let panes = models[0].unit_panes();
-    assert_eq!(panes.len(), 2);
+    assert_eq!(panes.len(), 1, "no pane for a current nobody plotted");
     assert_eq!(panes[0].unit, "V");
-    assert_eq!(panes[1].unit, "A");
-    assert!(
-        panes[1].traces.is_empty(),
-        "the amp pane remains as the owner of its hidden signal"
-    );
 }
 
 #[test]
