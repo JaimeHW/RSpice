@@ -627,15 +627,13 @@ fn interface_strip(
         // With nothing to fix, the compile result of a device New Verilog-A
         // device… created hands it back to the schematic it came from.
         None => {
-            let Some((receipt, target)) = receipt.and_then(|receipt| {
+            let (receipt, target) = receipt.and_then(|receipt| {
                 let handoff = receipt.placement.as_ref()?;
                 (&handoff.view == reference)
                     .then(|| veriloga_placement_target(cx.model, handoff))
                     .flatten()
                     .map(|target| (receipt, target))
-            }) else {
-                return None;
-            };
+            })?;
             let ports = receipt.compilation.report().abi.formal_ports.len();
             let text = if ports == 1 {
                 messages.format(
