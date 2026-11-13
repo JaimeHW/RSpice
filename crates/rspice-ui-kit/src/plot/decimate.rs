@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod blocks;
+
 use super::sample::{LogicalView, SweepClass, SweepShape, XOrientation};
 use super::scale::XScale;
 #[cfg(test)]
@@ -39,6 +41,11 @@ pub struct DecimationCache {
 #[derive(Debug, Clone, Default)]
 struct Held {
     map: HashMap<CacheKey, Entry>,
+    /// Block extrema of the long ascending traces the last frames reduced,
+    /// so a pan or zoom re-reduces them a block at a time. Each is about a
+    /// twentieth of its trace's values and lives only while frames keep
+    /// drawing from it.
+    blocks: HashMap<u64, (Arc<blocks::BlockIndex>, u64)>,
     #[cfg(any(test, feature = "test-support"))]
     work: DecimationWork,
 }
@@ -152,6 +159,16 @@ const STALE_ENTRY_CAP: usize = 256;
 /// stays cheap even for a caller that never advances the frame tick.
 const ENTRY_CEILING: usize = 16_384;
 
+/// Samples per column, across a trace's whole extent, from which its block
+/// index pays for itself.
+///
+/// Building one reads the trace once more. A 100k-sample trace on a
+/// 1 728-column strip holds about sixty samples a column, under one block, so
+/// its index never skips anything and its first reduction cost 15% more than
+/// reading the samples; a 5M-sample trace holds about 2 900, and its first
+/// reduction cost 26% less and every pan frame after it a ninth.
+const BLOCK_INDEX_SAMPLES_PER_COLUMN: usize = 256;
+
 /// Default resident budget for reconstructable display envelopes.
 ///
 /// Every entry here is derived data that costs one O(n) pass to rebuild, so
@@ -198,6 +215,7 @@ impl DecimationCache {
     /// Discard derived samples while preserving the configured memory budget.
     pub fn invalidate(&mut self) {
         self.held.map.clear();
+        self.held.blocks.clear();
         self.resident_bytes = 0;
     }
 
@@ -280,8 +298,31 @@ impl DecimationCache {
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
+        let ascending = shape.is_some_and(|shape| shape.class() == SweepClass::Ascending);
         let envelope: Arc<[[f64; 2]]> = match reduction {
             Reduction::PixelCells => decimate_pixel_cells(x, y, view),
+            // A long ascending trace is reduced a block at a time; the result
+            // is the reference reduction's, point for point.
+            Reduction::Ordered
+                if ascending
+                    && x.len().min(y.len()) >= view.columns * BLOCK_INDEX_SAMPLES_PER_COLUMN =>
+            {
+                self.block_index(trace_key, x, y)
+                    .and_then(|index| {
+                        index.decimate_ascending(x, y, view.x0, view.x1, view.x_scale, view.columns)
+                    })
+                    .unwrap_or_else(|| {
+                        decimate_minmax(
+                            x,
+                            y,
+                            view.x0,
+                            view.x1,
+                            view.x_scale,
+                            view.columns,
+                            XOrientation::Ascending,
+                        )
+                    })
+            }
             // `reduction_for` never selects a band; only `band` keys one.
             Reduction::Ordered | Reduction::OrderedReversed | Reduction::Band => {
                 let orientation = if reduction == Reduction::OrderedReversed {
@@ -339,6 +380,33 @@ impl DecimationCache {
         let band: Arc<[[f64; 2]]> = band_columns(members, view).into();
         self.retain(key, &band);
         band
+    }
+
+    /// The block extrema of one trace, read now if no index of these very
+    /// samples is held. Building one drops the indices no frame has drawn
+    /// from since the frame before.
+    fn block_index(
+        &mut self,
+        trace_key: u64,
+        x: &[f64],
+        y: &[f64],
+    ) -> Option<Arc<blocks::BlockIndex>> {
+        let tick = self.tick;
+        if !self
+            .held
+            .blocks
+            .get(&trace_key)
+            .is_some_and(|(index, _)| index.describes(x, y))
+        {
+            let index = Arc::new(blocks::BlockIndex::build(x, y)?);
+            self.held
+                .blocks
+                .retain(|_, (_, last_used)| last_used.saturating_add(1) >= tick);
+            self.held.blocks.insert(trace_key, (index, tick));
+        }
+        let (index, last_used) = self.held.blocks.get_mut(&trace_key)?;
+        *last_used = tick;
+        Some(Arc::clone(index))
     }
 
     fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {

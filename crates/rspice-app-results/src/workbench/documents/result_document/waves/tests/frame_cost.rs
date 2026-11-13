@@ -280,8 +280,9 @@ fn report(load: &str, state: &mut ResultsTestHost) {
         )
     }
     // What one full decimation of every trace costs on its own, at the
-    // column count a 1 680-px strip asks for.
-    let decimation = {
+    // column count a 1 680-px strip asks for: read sample by sample, and as
+    // the strip reads an ascending trace, a block at a time (index included).
+    let (decimation, by_blocks) = {
         let run = state
             .model
             .simulation
@@ -299,12 +300,26 @@ fn report(load: &str, state: &mut ResultsTestHost) {
             columns: 1_600,
             rows: 960,
         };
-        let mut cache = rspice_ui_kit::plot::DecimationCache::default();
-        let started = Instant::now();
-        for (key, waveform) in waveforms.iter().enumerate() {
-            let _ = cache.series(key as u64, &waveform.x, &waveform.y, view, false, None);
-        }
-        started.elapsed()
+        let time = |shapes: &[Option<rspice_ui_kit::plot::sample::SweepShape>]| {
+            let mut cache = rspice_ui_kit::plot::DecimationCache::default();
+            let started = Instant::now();
+            for (key, (waveform, shape)) in waveforms.iter().zip(shapes).enumerate() {
+                let _ = cache.series(
+                    key as u64,
+                    &waveform.x,
+                    &waveform.y,
+                    view,
+                    false,
+                    shape.as_ref(),
+                );
+            }
+            started.elapsed()
+        };
+        let shapes: Vec<_> = waveforms
+            .iter()
+            .map(|waveform| Some(rspice_ui_kit::plot::sample::SweepShape::of(&waveform.x)))
+            .collect();
+        (time(&vec![None; waveforms.len()]), time(&shapes))
     };
     let walks = WorkCounts::reset();
     let (cold, warm, hover) = measure(state, 10, 20);
@@ -317,8 +332,10 @@ fn report(load: &str, state: &mut ResultsTestHost) {
         line("hover", &hover),
         line("pan", &pan),
         format!(
-            "  decimating every trace once: {:.2} ms | dataset walks {:?} | samples read {:?}",
+            "  decimating every trace once: {:.2} ms sample by sample, {:.2} ms by blocks | \
+             dataset walks {:?} | samples read {:?}",
             decimation.as_secs_f64() * 1e3,
+            by_blocks.as_secs_f64() * 1e3,
             walks.nonzero(),
             walks.nonzero_samples()
         ),
