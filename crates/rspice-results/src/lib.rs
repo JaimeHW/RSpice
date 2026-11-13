@@ -33,6 +33,7 @@ pub mod eye_mask;
 pub mod family_measurements;
 pub mod family_metadata;
 pub mod family_projection;
+pub mod feature_search;
 pub mod fft;
 #[cfg(feature = "engine-evidence")]
 pub mod floquet;
