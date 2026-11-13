@@ -110,13 +110,8 @@ impl ProjectSourceBundle {
         Ok(bundle)
     }
 
-    pub(super) fn migrated(
-        mut document: ProjectSourceDocument,
-    ) -> Result<Self, ProjectSourceError> {
+    pub(super) fn migrated(document: ProjectSourceDocument) -> Result<Self, ProjectSourceError> {
         let id = ProjectSourceId::migrated(&document);
-        if document.id.is_missing() {
-            document.id = ProjectSourceDocumentId::migrated(id, document.logical_path());
-        }
         document.validate()?;
         let revision = document.revision;
         let was_validated = document.validation_is_current();
@@ -1367,86 +1362,5 @@ impl ProjectSourceBundle {
     pub(super) fn invalidate_validation(&mut self) {
         self.validated_identity = None;
         self.root.invalidate_validation();
-    }
-
-    /// One-time migration from the pre-role schema. Runtime execution never
-    /// calls this heuristic. It exists only while decoding schema v1, after
-    /// which the resolved bindings are persisted explicitly in schema v2.
-    pub(super) fn migrate_schema_v1(&mut self) -> Result<(), ProjectSourceError> {
-        if self.root.id.is_missing() {
-            self.root.id = ProjectSourceDocumentId::migrated(self.id, self.root.logical_path());
-        }
-        for file in &mut self.files {
-            file.revision = self.revision;
-            if file.id.is_missing() {
-                file.id = ProjectSourceDocumentId::migrated(self.id, file.logical_path());
-            }
-        }
-        if self.language != ProjectSourceLanguage::RSpiceAutomation {
-            self.invalidate_validation();
-            return Ok(());
-        }
-        self.roles = default_source_roles(self.language, self.root.logical_path())?;
-        if self
-            .root
-            .logical_path()
-            .to_ascii_lowercase()
-            .ends_with(".rspice")
-        {
-            self.invalidate_validation();
-            self.canonicalize();
-            return Ok(());
-        }
-
-        let run_plans = self
-            .files
-            .iter()
-            .filter(|file| {
-                let path = file.logical_path().to_ascii_lowercase();
-                path.ends_with(".yaml") || path.ends_with(".yml")
-            })
-            .map(ProjectSourceFile::logical_path)
-            .collect::<Vec<_>>();
-        for path in run_plans {
-            self.roles.push(ProjectSourceRoleBinding::try_new(
-                path,
-                ProjectSourceRole::AutomationRunPlan,
-            )?);
-        }
-        let locks = self
-            .files
-            .iter()
-            .filter(|file| file.content().contains("rspice-python-lock/"))
-            .map(ProjectSourceFile::logical_path)
-            .collect::<Vec<_>>();
-        if let [path] = locks.as_slice() {
-            self.roles.push(ProjectSourceRoleBinding::try_new(
-                *path,
-                ProjectSourceRole::AutomationEnvironmentLock,
-            )?);
-        }
-        let permission_manifests = self
-            .files
-            .iter()
-            .filter(|file| {
-                file.content().lines().any(|line| {
-                    let key = line.split('=').next().unwrap_or_default().trim();
-                    matches!(
-                        key,
-                        "project_files" | "artifact_directory" | "network" | "process_spawn"
-                    )
-                })
-            })
-            .map(ProjectSourceFile::logical_path)
-            .collect::<Vec<_>>();
-        if let [path] = permission_manifests.as_slice() {
-            self.roles.push(ProjectSourceRoleBinding::try_new(
-                *path,
-                ProjectSourceRole::AutomationPermissionManifest,
-            )?);
-        }
-        self.invalidate_validation();
-        self.canonicalize();
-        Ok(())
     }
 }

@@ -971,7 +971,8 @@ mod tests {
             "from automation_helpers.naming import run_label\nprint(run_label('tt'))\n";
         let automation_helper = "def run_label(corner):\n    return f'production-{corner}'\n";
         let run_plan = "schema: rspice.run-plan/v1\nanalyses: [op]\n";
-        let environment_lock = "format = \"rspice-python-lock/v1\"\npython = \"3.14.6\"\n";
+        let environment_lock =
+            "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\n";
         let permission_manifest = "schema = \"rspice.permissions/v1\"\nnetwork = \"deny\"\n";
 
         let veriloga = ProjectSourceBundle::try_new(

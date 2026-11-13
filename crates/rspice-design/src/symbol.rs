@@ -10,20 +10,6 @@
 //! [`SymbolDocument::body`] as [`SymbolShape::Text`] and reaches every
 //! surface the rest of the body reaches — canvas, preview, SVG export and
 //! extents alike.
-//!
-//! # One-way migration from editor schema 1
-//!
-//! Schema 1 kept free text beside the geometry, in the editor sidecar, where
-//! only the editor ever drew it. [`SymbolDocument::load_from_view`] adopts
-//! whatever a legacy view still carries into the body, and nothing writes the
-//! sidecar field again. Two consequences follow, both deliberate:
-//!
-//! - A document this build writes carries a `Text` variant that a build older
-//!   than editor schema 2 cannot deserialize; it will report the symbol
-//!   metadata as invalid rather than silently drop the text.
-//! - Schema 1's per-text visibility flag does not survive. Body geometry is
-//!   always drawn, so a hidden legacy text becomes a drawn one; hiding it
-//!   again means deleting it.
 
 pub mod edit;
 pub mod generated;
@@ -468,19 +454,6 @@ pub struct SymbolAttribute {
     pub position: Point,
 }
 
-/// As much of editor schema 1's free-text record as the body needs.
-///
-/// Read only by the migration in [`SymbolDocument::load_from_view`], which
-/// moves each one into the body as [`SymbolShape::Text`]; nothing writes it.
-/// The record's `id` and `shown` are deliberately not modelled — identity was
-/// a sidecar concern, and body geometry is always drawn — so unlike every
-/// other record here this one tolerates the fields it does not read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SymbolTextObject {
-    text: String,
-    position: Point,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SymbolEditorMetadata {
@@ -489,14 +462,6 @@ pub struct SymbolEditorMetadata {
     pub revision: u64,
     pub revision_note: String,
     pub revisions: Vec<SymbolRevisionRecord>,
-    /// Schema 1's free text, accepted so a legacy sidecar still parses.
-    /// [`SymbolDocument::load_from_view`] is what adopts it into the body;
-    /// [`Self::normalize`] then drops this copy and [`Self::validate`]
-    /// refuses to encode one that still carries it.
-    #[serde(default, rename = "texts", skip_serializing)]
-    legacy_texts: Vec<SymbolTextObject>,
-    #[serde(default, rename = "next_text_id", skip_serializing)]
-    legacy_next_text_id: u64,
 }
 
 /// One published symbol revision.
@@ -518,14 +483,6 @@ pub struct SymbolRevisionRecord {
     /// Pin names in netlist order at publication.
     #[serde(default)]
     pub pin_names: Vec<String>,
-    /// Schema 2's counts, accepted so an older history still parses and
-    /// dropped on the next write. Nothing reads them.
-    #[serde(default, rename = "pin_count", skip_serializing)]
-    legacy_pin_count: usize,
-    #[serde(default, rename = "shape_count", skip_serializing)]
-    legacy_shape_count: usize,
-    #[serde(default, rename = "text_count", skip_serializing)]
-    legacy_text_count: usize,
 }
 
 impl Default for SymbolEditorMetadata {
@@ -536,8 +493,6 @@ impl Default for SymbolEditorMetadata {
             revision: 0,
             revision_note: String::new(),
             revisions: Vec::new(),
-            legacy_texts: Vec::new(),
-            legacy_next_text_id: 0,
         }
     }
 }
@@ -577,15 +532,6 @@ impl SymbolEditorMetadata {
 
     pub fn normalize(&mut self, document: &SymbolDocument) {
         self.schema_version = SYMBOL_EDITOR_METADATA_SCHEMA_VERSION;
-        // The body owns authored text now; the document adopted these on
-        // load, so the sidecar's copy is spent.
-        self.legacy_texts.clear();
-        self.legacy_next_text_id = 0;
-        for record in &mut self.revisions {
-            record.legacy_pin_count = 0;
-            record.legacy_shape_count = 0;
-            record.legacy_text_count = 0;
-        }
         for kind in SymbolAttributeKind::ALL {
             if self
                 .attributes
@@ -613,12 +559,6 @@ impl SymbolEditorMetadata {
                 self.schema_version
             ));
         }
-        if !self.legacy_texts.is_empty() || self.legacy_next_text_id != 0 {
-            return Err(
-                "Invalid symbol editor metadata: authored text belongs to the symbol body"
-                    .to_owned(),
-            );
-        }
         if self.revision_note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES
             || self.revision_note.chars().any(char::is_control)
         {
@@ -632,15 +572,6 @@ impl SymbolEditorMetadata {
         }
         let mut previous_revision = 0;
         for record in &self.revisions {
-            if record.legacy_pin_count != 0
-                || record.legacy_shape_count != 0
-                || record.legacy_text_count != 0
-            {
-                return Err(
-                    "Invalid symbol editor metadata: a revision is identified by its document digest and pin names, not by object counts"
-                        .to_owned(),
-                );
-            }
             validate_symbol_text(&record.note, "revision note")?;
             for name in &record.pin_names {
                 validate_symbol_text(name, "revision pin name")?;
@@ -754,9 +685,6 @@ impl SymbolEditorMetadata {
             note: note.to_owned(),
             document_digest: document.content_digest(),
             pin_names: document.pins.iter().map(|pin| pin.name.clone()).collect(),
-            legacy_pin_count: 0,
-            legacy_shape_count: 0,
-            legacy_text_count: 0,
         });
         Ok(revision)
     }
@@ -912,12 +840,12 @@ impl SymbolDocument {
 
     pub fn load_from_view(view: &View) -> Result<Self, String> {
         // Counted unconditionally: a view carrying no document still builds the
-        // default artwork, adopts any legacy editor text, and validates the
-        // result, which is the same derivation as the parse it replaces.
+        // default artwork and validates the result, which is the same
+        // derivation as the parse it replaces.
         #[cfg(any(test, feature = "symbol-test-observation"))]
         SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
 
-        let mut document = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
+        let document = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
             Some(raw) if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES => {
                 return Err(format!(
                     "Invalid symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
@@ -928,18 +856,6 @@ impl SymbolDocument {
                 .map_err(|err| format!("Invalid symbol metadata: {err}"))?,
             None => Self::default(),
         };
-        // Text authored before editor schema 2 lived in the sidecar and was
-        // drawn only by the editor. Adopting it here is what puts it on every
-        // placed instance and every export, whether or not the symbol is ever
-        // saved again.
-        for text in legacy_editor_texts(view) {
-            document.body.push(SymbolShape::Text {
-                anchor: text.position,
-                text: text.text,
-                size: SymbolTextSize::Normal,
-                align: SymbolTextAlign::Left,
-            });
-        }
         document.validate()?;
         Ok(document)
     }
@@ -982,10 +898,6 @@ impl SymbolDocument {
         let raw = self.encode()?;
         view.metadata
             .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), raw);
-        // The body owns whatever schema-1 text this view carried, so the
-        // sidecar's copy has to go with the same write: left behind, the next
-        // load would adopt it a second time and double every label.
-        retire_legacy_editor_texts(view);
         view.modified = true;
         Ok(())
     }
@@ -1426,43 +1338,6 @@ impl SymbolDocument {
     }
 }
 
-/// Free text an editor-schema-1 sidecar still carries.
-///
-/// A sidecar this build writes never names the field, so the substring test
-/// keeps the ordinary load — which happens once per resolved instance — free
-/// of a second parse.
-fn legacy_editor_texts(view: &View) -> Vec<SymbolTextObject> {
-    let Some(encoded) = view.metadata.get(SYMBOL_EDITOR_METADATA_KEY) else {
-        return Vec::new();
-    };
-    if encoded.len() > MAX_SYMBOL_DOCUMENT_BYTES || !encoded.contains("\"texts\"") {
-        return Vec::new();
-    }
-    serde_json::from_str::<SymbolEditorMetadata>(encoded)
-        .map(|sidecar| sidecar.legacy_texts)
-        .unwrap_or_default()
-}
-
-/// Drop the schema-1 free text from a view's sidecar, leaving the rest of it
-/// exactly as written so a field this build does not model survives the edit.
-fn retire_legacy_editor_texts(view: &mut View) {
-    let Some(encoded) = view.metadata.get(SYMBOL_EDITOR_METADATA_KEY) else {
-        return;
-    };
-    if !encoded.contains("\"texts\"") {
-        return;
-    }
-    let Ok(serde_json::Value::Object(mut sidecar)) = serde_json::from_str(encoded) else {
-        return;
-    };
-    sidecar.remove("texts");
-    sidecar.remove("next_text_id");
-    if let Ok(rewritten) = serde_json::to_string(&sidecar) {
-        view.metadata
-            .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), rewritten);
-    }
-}
-
 fn validate_symbol_point(point: Point, label: &str) -> Result<(), String> {
     if point.x.unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32
         || point.y.unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32
@@ -1757,70 +1632,6 @@ mod validation_tests {
             .expect_err("a control character in body text must be rejected");
 
         assert!(error.contains("text 1 is invalid or too long"), "{error}");
-    }
-
-    /// The one-way migration: a view written by editor schema 1 loads with
-    /// its free text in the body, and the sidecar it re-encodes no longer
-    /// names the field.
-    #[test]
-    fn legacy_sidecar_text_is_adopted_into_the_body_and_never_written_back() {
-        let mut view = View::new("symbol", ViewType::Symbol);
-        SymbolDocument::default()
-            .store_in_view(&mut view)
-            .expect("the empty document stores");
-        view.metadata.insert(
-            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
-            r#"{"schema_version":1,"attributes":[{"kind":"reference","default_value":"U?","shown":true,"position":{"x":-20,"y":-40}},{"kind":"value","default_value":"VALUE","shown":true,"position":{"x":-20,"y":40}},{"kind":"model","default_value":"","shown":false,"position":{"x":-20,"y":60}}],"texts":[{"id":1,"text":"AMP","position":{"x":10,"y":-20},"shown":true}],"next_text_id":2,"revision":0,"revision_note":"","revisions":[]}"#
-                .to_owned(),
-        );
-
-        let document = SymbolDocument::load_from_view(&view).expect("the legacy document loads");
-        let metadata = SymbolEditorMetadata::load_from_view(&view, &document)
-            .expect("the legacy sidecar loads");
-        let encoded = metadata.encode().expect("the migrated sidecar encodes");
-
-        assert_eq!(
-            document.body,
-            vec![SymbolShape::Text {
-                anchor: Point::new(10, -20),
-                text: "AMP".to_owned(),
-                size: SymbolTextSize::Normal,
-                align: SymbolTextAlign::Left,
-            }]
-        );
-        assert!(
-            !encoded.contains("\"texts\""),
-            "the migrated sidecar must not carry free text: {encoded}"
-        );
-        assert!(
-            !encoded.contains("next_text_id"),
-            "the migrated sidecar must not carry a text id counter: {encoded}"
-        );
-        assert_eq!(
-            metadata.schema_version,
-            SYMBOL_EDITOR_METADATA_SCHEMA_VERSION
-        );
-    }
-
-    /// Storing the migrated document retires the sidecar field it came from,
-    /// so a reload adopts nothing and the label is not drawn twice.
-    #[test]
-    fn storing_a_migrated_document_retires_the_sidecar_it_adopted_from() {
-        let mut view = View::new("symbol", ViewType::Symbol);
-        view.metadata.insert(
-            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
-            r#"{"schema_version":1,"attributes":[],"texts":[{"id":1,"text":"AMP","position":{"x":0,"y":0},"shown":true}],"next_text_id":2,"revision":0,"revision_note":"","revisions":[]}"#
-                .to_owned(),
-        );
-
-        let migrated = SymbolDocument::load_from_view(&view).expect("the legacy document loads");
-        migrated
-            .store_in_view(&mut view)
-            .expect("the migrated document stores");
-        let reloaded = SymbolDocument::load_from_view(&view).expect("the stored document reloads");
-
-        assert_eq!(migrated.text_runs().count(), 1);
-        assert_eq!(reloaded.body, migrated.body);
     }
 
     /// Reconciling used to reset every pin to its direction's default type,

@@ -14,10 +14,6 @@ fn dependency(importer: &str, imported: &str) -> ProjectSourceDependency {
     ProjectSourceDependency::try_new(importer, imported).unwrap()
 }
 
-fn role(path: &str, source_role: ProjectSourceRole) -> ProjectSourceRoleBinding {
-    ProjectSourceRoleBinding::try_new(path, source_role).unwrap()
-}
-
 fn bundle_fixture() -> ProjectSourceBundle {
     ProjectSourceBundle::try_new_with_id(
         "6d3c50a8-dd02-46da-beca-160517eea8a9".parse().unwrap(),
@@ -275,7 +271,7 @@ fn automation_authoring_uses_persisted_roles_without_veriloga_include_injection(
         ("plans/signoff.data", "schema: rspice.run-plan/v1\n"),
         (
             "environment/pinned.toml",
-            "format = \"rspice-python-lock/v1\"\n",
+            "format = \"rspice-python-lock/v3\"\n",
         ),
         (
             "security/project-policy.toml",
@@ -599,110 +595,6 @@ fn closure_accepts_the_exact_ten_thousand_file_contract_limit() {
 }
 
 #[test]
-fn legacy_singletons_migrate_deterministically_and_keep_accessors() {
-    let source = ProjectSourceDocument::try_new(
-        "sensor.va",
-        ProjectSourceLanguage::VerilogA,
-        "module sensor; endmodule\r\n",
-    )
-    .unwrap();
-    let legacy = serde_json::json!({ "verilog_a": source, "automation": null });
-    let first: ProjectSourceRegistry = serde_json::from_value(legacy.clone()).unwrap();
-    let second: ProjectSourceRegistry = serde_json::from_value(legacy).unwrap();
-
-    assert_eq!(
-        first.iter_bundles().next().unwrap().id(),
-        second.iter_bundles().next().unwrap().id()
-    );
-    assert_eq!(
-        first
-            .get(ProjectSourceLanguage::VerilogA)
-            .unwrap()
-            .content(),
-        "module sensor; endmodule\r\n"
-    );
-    let canonical = serde_json::to_value(&first).unwrap();
-    assert_eq!(
-        canonical["schema_version"],
-        PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION
-    );
-    assert!(canonical.get("verilog_a").is_none());
-}
-
-#[test]
-fn schema_v1_automation_role_heuristics_are_one_time_and_persist_as_schema_v2() {
-    let bundle = ProjectSourceBundle::try_new_with_roles(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
-        ProjectSourceLanguage::RSpiceAutomation,
-        "flows/main.py",
-        "print('ok')\n",
-        [
-            dependency_file("plans/release.yaml", "schema: rspice.run-plan/v1\n"),
-            dependency_file(
-                "environment/pinned.toml",
-                "format = \"rspice-python-lock/v1\"\n",
-            ),
-            dependency_file(
-                "security/policy.toml",
-                "project_files = \"read\"\nnetwork = \"deny\"\n",
-            ),
-        ],
-        [
-            dependency("flows/main.py", "plans/release.yaml"),
-            dependency("flows/main.py", "environment/pinned.toml"),
-            dependency("flows/main.py", "security/policy.toml"),
-        ],
-        [role("flows/main.py", ProjectSourceRole::AutomationEntry)],
-    )
-    .unwrap();
-    let registry = ProjectSourceRegistry::try_from_bundles([bundle]).unwrap();
-    let mut persisted = serde_json::to_value(registry).unwrap();
-    persisted["schema_version"] = serde_json::json!(1);
-    persisted["bundles"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("roles");
-    persisted["bundles"][0]["root"]
-        .as_object_mut()
-        .unwrap()
-        .remove("id");
-    for file in persisted["bundles"][0]["files"].as_array_mut().unwrap() {
-        file.as_object_mut().unwrap().remove("id");
-    }
-
-    let migrated: ProjectSourceRegistry = serde_json::from_value(persisted).unwrap();
-    let migrated = migrated
-        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-            ProjectSourceLanguage::RSpiceAutomation,
-        ))
-        .unwrap();
-    assert_eq!(
-        migrated.role_for_path("flows/main.py"),
-        Some(ProjectSourceRole::AutomationEntry)
-    );
-    assert_eq!(
-        migrated.role_for_path("plans/release.yaml"),
-        Some(ProjectSourceRole::AutomationRunPlan)
-    );
-    assert_eq!(
-        migrated.role_for_path("environment/pinned.toml"),
-        Some(ProjectSourceRole::AutomationEnvironmentLock)
-    );
-    assert_eq!(
-        migrated.role_for_path("security/policy.toml"),
-        Some(ProjectSourceRole::AutomationPermissionManifest)
-    );
-    let canonical =
-        serde_json::to_value(ProjectSourceRegistry::try_from_bundles([migrated.clone()]).unwrap())
-            .unwrap();
-    assert_eq!(
-        canonical["schema_version"],
-        PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION
-    );
-    assert!(canonical["bundles"][0]["roles"].is_array());
-}
-
-#[test]
 fn persisted_corruption_fails_closed_during_deserialization() {
     let mut bundle = bundle_fixture();
     bundle.mark_validated().unwrap();
@@ -927,16 +819,15 @@ fn veriloga_runtime_identities_separate_project_bundle_and_selected_module() {
     ));
 }
 
-/// The project-wide Verilog-A bundle a v1 registry carried, as the legacy
-/// singleton field it was persisted in.
-fn legacy_veriloga_registry() -> ProjectSourceRegistry {
+/// A registry holding one project-wide Verilog-A Code Workspace bundle.
+fn veriloga_registry() -> ProjectSourceRegistry {
     let source = ProjectSourceDocument::try_new(
         "sensor.va",
         ProjectSourceLanguage::VerilogA,
         "module sensor(p, n); inout p, n; electrical p, n; endmodule\n",
     )
     .unwrap();
-    serde_json::from_value(serde_json::json!({ "verilog_a": source, "automation": null })).unwrap()
+    ProjectSourceRegistry::try_from_documents([source]).unwrap()
 }
 
 /// A Code Workspace bundle given to a cell view is the same source: same
@@ -944,7 +835,7 @@ fn legacy_veriloga_registry() -> ProjectSourceRegistry {
 /// that records the move are new, and the move cannot happen twice.
 #[test]
 fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
-    let mut registry = legacy_veriloga_registry();
+    let mut registry = veriloga_registry();
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
     let before = registry.bundle_for_owner(&owner).unwrap().id();
     registry.mark_bundle_validated(before).unwrap();
@@ -987,7 +878,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
 #[test]
 fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_change() {
     let project = ProjectId::new();
-    let mut registry = legacy_veriloga_registry();
+    let mut registry = veriloga_registry();
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
     let id = registry.bundle_for_owner(&owner).unwrap().id();
     let legacy_key =
