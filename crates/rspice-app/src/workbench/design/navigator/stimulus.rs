@@ -18,7 +18,6 @@
 //! they will not find, and a footer inside the list leaves the moment the list
 //! is longer than the dock.
 
-pub(in crate::workbench::docks) mod browser_state;
 mod row;
 
 #[cfg(test)]
@@ -41,12 +40,14 @@ use crate::ui::widgets::{ViewOption, view_switch};
 use crate::workbench::MessageId;
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, AdopterTally};
 use crate::workbench::design::DesignFeature;
+use crate::workbench::docks::navigator::stimulus_browser_state::{
+    StimulusBrowserState, StimulusScope,
+};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::{NavigatorTreeNode, Workspace};
-use browser_state::{StimulusBrowserState, StimulusScope};
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, labeled_icon_button};
-use super::{empty_navigator_row, nav_matches};
+use crate::workbench::docks::navigator::{empty_navigator_row, nav_matches};
 
 /// The scope strip's band, and the tally band under the tree.
 const SCOPE_BAND: f32 = 34.0;

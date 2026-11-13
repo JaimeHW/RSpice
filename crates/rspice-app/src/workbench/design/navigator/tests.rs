@@ -1072,7 +1072,7 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
 /// row published the label alone, so a reader working by ear was told a net
 /// exists and never how many pins reach it — which is the one number that
 /// separates a wired node from a stub. The Stimulus Library's own case is in
-/// `docks::navigator::stimulus`; both rails are painted by
+/// `design::navigator::stimulus`; both rails are painted by
 /// `nav_row_indented_styled_with_metrics`, and this pair is what holds it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]

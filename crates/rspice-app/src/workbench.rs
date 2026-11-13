@@ -108,7 +108,7 @@ mod dispatch;
 pub(crate) mod docks {
     #[cfg(test)]
     pub(crate) use inspector::run_details::RunDetailsDialogState;
-    pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
+    pub(crate) use navigator::stimulus_browser_state::StimulusBrowserState;
     pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
@@ -118,10 +118,6 @@ pub(crate) mod docks {
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
-        /// Visible to the dock layer so the library browser's own gate can render this
-        /// pane beside it: the two docks state the same counts about the same design,
-        /// and a review that only ever opened one of them would not see them disagree.
-        pub(in crate::workbench) mod stimulus;
         pub(in crate::workbench) mod veriloga;
     }
     pub(crate) mod navigator {
@@ -131,7 +127,7 @@ pub(crate) mod docks {
         #[cfg(test)]
         pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
         pub(in crate::workbench) mod source_bundle;
-        pub(in crate::workbench) mod stimulus;
+        pub(in crate::workbench) mod stimulus_browser_state;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
         pub(in crate::workbench) mod veriloga;
     }

@@ -253,7 +253,7 @@ impl Host for RSpiceApp {
             Point::Navigator(workspace) => {
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::navigator as design;
-                use crate::workbench::docks::navigator::stimulus;
+                use crate::workbench::design::navigator::stimulus;
 
                 match workspace {
                     // What the reader asked of the code navigator is
@@ -302,7 +302,7 @@ impl Host for RSpiceApp {
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::inspector as design;
-                use crate::workbench::docks::inspector::stimulus;
+                use crate::workbench::design::inspector::stimulus;
 
                 match workspace {
                     // What the reader asked of the project inspector is
