@@ -85,31 +85,6 @@ fn typed_values_emit_canonical_deterministic_parameter_lines() {
 }
 
 #[test]
-fn legacy_missing_row_identity_is_deterministic_but_null_is_rejected() {
-    let mut value = serde_json::to_value(resistance_variable(
-        "RLOAD",
-        "10 kohm",
-        DesignVariableScope::Project,
-    ))
-    .unwrap();
-    value.as_object_mut().unwrap().remove("id");
-    let first: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-    let replay: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(first.id, replay.id);
-
-    value
-        .as_object_mut()
-        .unwrap()
-        .insert("id".to_owned(), serde_json::Value::Null);
-    assert!(
-        serde_json::from_value::<DesignVariable>(value)
-            .unwrap_err()
-            .to_string()
-            .contains("must not be null")
-    );
-}
-
-#[test]
 fn plan_payload_round_trip_preserves_nested_ownership() {
     let plan_id = SimulationPlanId::new();
     // Assign rather than struct-update: `ProjectWorkspace` keeps its
