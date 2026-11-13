@@ -1,8 +1,9 @@
 //! Band-integrated noise contributors, conversion provenance and noise-figure presentation.
 
+use crate::presentation::table_row_height;
 use egui::{Align2, Sense, Ui};
 use rspice_results::noise::NoiseSummary;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{elide_middle, section_header};
 use rspice_ui_kit::plot::fmt_si_readout;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -28,7 +29,6 @@ const RANK_W: f32 = 30.0;
 const SOURCE_W: f32 = 132.0;
 const POWER_W: f32 = 94.0;
 const SHARE_W: f32 = 70.0;
-const ROW_H: f32 = 31.0;
 const CELL_INSET: f32 = 6.0;
 
 fn contributor_table_width() -> f32 {
@@ -161,6 +161,10 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let viewport_width = ui.available_width().max(1.0);
+    // The dense row of the sheet's other tables. The rows abut, each drawing
+    // its own rule, so the header and every row are one row height apart.
+    let row_height = table_row_height(ui);
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
 
     let table = ui
         .scope(|ui| {
@@ -169,12 +173,13 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                 .auto_shrink([false, true])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     let width = viewport_width.max(contributor_table_width());
                     ui.set_min_width(width);
-                    contributor_header(ui, width);
+                    contributor_header(ui, width, row_height);
                     for (rank, row) in summary.rows.iter().enumerate() {
                         let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(width, ROW_H), Sense::hover());
+                            ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Label,
@@ -213,8 +218,15 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             Align2::LEFT_CENTER,
                             c.text_faint,
                         );
-                        let source = format!("{}\n{}", row.device, row.mechanism);
-                        paint_cell(ui, rect, RANK_W, SOURCE_W, source, Align2::LEFT_CENTER, c.text);
+                        // Device and mechanism share the row's one line. A
+                        // source too long for its column elides in the
+                        // middle and is read whole on hover.
+                        let source = format!("{} · {}", row.device, row.mechanism);
+                        let shown = elide_middle(ui, &source, &font, SOURCE_W - 2.0 * CELL_INSET);
+                        if shown != source {
+                            response.clone().on_hover_text(&source);
+                        }
+                        paint_cell(ui, rect, RANK_W, SOURCE_W, shown, Align2::LEFT_CENTER, c.text);
                         paint_cell(
                             ui,
                             rect,
@@ -226,7 +238,8 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                         );
                         let share_offset = RANK_W + SOURCE_W + POWER_W;
                         let share_cell = column_rect(rect, share_offset, width - share_offset);
-                        let fill_rect = share_cell.shrink2(egui::vec2(CELL_INSET, 8.0));
+                        let fill_rect = share_cell
+                            .shrink2(egui::vec2(CELL_INSET, (row_height * 0.25).round()));
                         let fill = fill_rect.width()
                             * (row.share_pct as f32 / 100.0).clamp(0.0, 1.0);
                         ui.painter().rect_filled(
@@ -264,9 +277,9 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
     });
 }
 
-fn contributor_header(ui: &mut Ui, width: f32) {
+fn contributor_header(ui: &mut Ui, width: f32, row_height: f32) {
     let c = Tokens::get(ui.ctx()).color;
-    let (rect, row) = ui.allocate_exact_size(egui::vec2(width, 23.0), Sense::hover());
+    let (rect, row) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
     ui.ctx().accesskit_node_builder(row.id, |node| {
         node.set_role(egui::accesskit::Role::Row);
     });

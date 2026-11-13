@@ -1,8 +1,8 @@
 //! Retained DC mismatch charts and signed contributor readouts.
 
-use super::{CELL_INSET, HEADER_HEIGHT, PANEL_ROW_HEIGHT, ROW_HEIGHT, column_rect, paint_cell};
+use super::{CELL_INSET, PANEL_ROW_HEIGHT, column_rect, paint_cell};
 use crate::{
-    presentation::{panel_note, well_hint},
+    presentation::{panel_note, table_row_height, well_hint},
     strip::StripHeader,
     virtual_rows::RowOffsets,
 };
@@ -72,7 +72,8 @@ impl MismatchPlan {
     pub fn new(evidence: &DcMismatchEvidence) -> Self {
         let cumulative = evidence.cumulative_shares();
         Self {
-            offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, cumulative.len())),
+            // Counted in rows: the chart scales them by the density's row height.
+            offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, cumulative.len())),
             cumulative,
             max_contribution: evidence.max_contribution_magnitude(),
         }
@@ -144,10 +145,15 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
     let max_contribution = plan.max_contribution;
     let cumulative = plan.cumulative();
     let viewport_width = ui.available_width().max(1.0);
+    let row_height = table_row_height(ui);
     egui::ScrollArea::both()
         .id_salt("rspice.results.dc-mismatch-contribution")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
+            // The dense row of the sheet's other tables, and the header is one
+            // of them. The rows abut, each drawing its own rule, so a row's
+            // pitch is its height and the plan's offsets place it exactly.
+            ui.spacing_mut().item_spacing.y = 0.0;
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
@@ -158,8 +164,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             let share_offset = contribution_offset + CONTRIBUTION_WIDTH;
             let cumulative_offset = share_offset + SHARE_WIDTH;
 
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, HEADER_HEIGHT), Sense::hover());
+            let (header, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
@@ -232,8 +237,8 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     c.text_faint,
                 );
                 ui.painter().text(
-                    egui::pos2(bar_cell.right(), header.bottom() - 4.0),
-                    egui::Align2::RIGHT_BOTTOM,
+                    egui::pos2(bar_cell.right(), header.center().y),
+                    egui::Align2::RIGHT_CENTER,
                     "100 %",
                     scale_font,
                     c.text_faint,
@@ -241,22 +246,22 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             } else {
                 let scale = fmt_si(max_contribution, unit, 4);
                 ui.painter().text(
-                    egui::pos2(bar_cell.left(), header.bottom() - 4.0),
-                    egui::Align2::LEFT_BOTTOM,
+                    egui::pos2(bar_cell.left(), header.center().y),
+                    egui::Align2::LEFT_CENTER,
                     format!("-{scale}"),
                     scale_font.clone(),
                     c.text_faint,
                 );
                 ui.painter().text(
-                    egui::pos2(bar_cell.center().x, header.bottom() - 4.0),
-                    egui::Align2::CENTER_BOTTOM,
+                    egui::pos2(bar_cell.center().x, header.center().y),
+                    egui::Align2::CENTER_CENTER,
                     "0",
                     scale_font.clone(),
                     c.text_faint,
                 );
                 ui.painter().text(
-                    egui::pos2(bar_cell.right(), header.bottom() - 4.0),
-                    egui::Align2::RIGHT_BOTTOM,
+                    egui::pos2(bar_cell.right(), header.center().y),
+                    egui::Align2::RIGHT_CENTER,
                     scale,
                     scale_font,
                     c.text_faint,
@@ -264,10 +269,10 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             }
 
             let rows = plan.offsets().plan(egui::Rangef::new(
-                viewport.min.y - HEADER_HEIGHT,
-                viewport.max.y - HEADER_HEIGHT,
+                (viewport.min.y - row_height) / row_height,
+                (viewport.max.y - row_height) / row_height,
             ));
-            ui.allocate_space(egui::vec2(width, rows.leading));
+            ui.allocate_space(egui::vec2(width, rows.leading * row_height));
             for (rank, row) in evidence
                 .contributors
                 .iter()
@@ -277,7 +282,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             {
                 let running = cumulative.get(rank).copied().unwrap_or_default();
                 let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
+                    ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
                 let accessible_label = format!(
                     "Rank {}, {} {}, {}, contribution {}, share {} percent, cumulative {} percent",
                     rank + 1,
@@ -399,7 +404,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                 }
 
                 let cell = column_rect(rect, bar_offset, bar_width);
-                let bar_area = cell.shrink2(egui::vec2(CELL_INSET, 7.0));
+                let bar_area = cell.shrink2(egui::vec2(CELL_INSET, (row_height * 0.25).round()));
                 // The parent sheet's own tone for a negative contribution: a
                 // share that reduces the variance is a statement the design
                 // made, not a fault, and it must not introduce a colour.
@@ -463,7 +468,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                 }
                 theme::paint_focus_ring(ui, &response, rect);
             }
-            ui.allocate_space(egui::vec2(width, rows.trailing));
+            ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
 pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {

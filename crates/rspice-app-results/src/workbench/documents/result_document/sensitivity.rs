@@ -309,6 +309,126 @@ mod tests {
         assert!(tree.nodes.iter().any(|(_, node)| node.value().is_some_and(|label|
             label.contains("Unranked, parameter gain, normalized sensitivity Unavailable (zero output), raw sensitivity 0"))), "{tree:?}");
     }
+    /// One frame of the sensitivity sheet in `theme`, `size` points wide and
+    /// tall.
+    fn sheet_frame(
+        state: &mut ResultsTestHost,
+        theme: crate::ui::Theme,
+        size: egui::Vec2,
+    ) -> (egui::Context, egui::FullOutput) {
+        let ctx = egui::Context::default();
+        theme.apply(&ctx);
+        ctx.enable_accesskit();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| show(ui, &mut state.results_parts()));
+                },
+            ));
+        }
+        (ctx, output.expect("two frames ran"))
+    }
+
+    /// The chart's rows are the dense rows of the event, SOA and optimisation
+    /// tables at either density, the header is one of them, and the rows abut,
+    /// so the plan's row offsets place every row the viewport shows where it
+    /// is drawn.
+    #[test]
+    fn the_chart_rows_are_dense_at_either_density() {
+        use rspice_ui_kit::tokens::Density;
+        for density in [Density::Compact, Density::Relaxed] {
+            let mut state = ranked_state(40);
+            let theme = crate::ui::Theme {
+                density,
+                ..crate::ui::Theme::default()
+            };
+            let (ctx, output) = sheet_frame(&mut state, theme, egui::vec2(1_000.0, 700.0));
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("the sensitivity sheet publishes an accessibility tree");
+            let mut tops: Vec<f64> = tree
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.value().is_some_and(|text| text.starts_with("Rank ")))
+                .filter_map(|(_, node)| node.bounds())
+                .map(|bounds| bounds.y0)
+                .collect();
+            tops.sort_by(f64::total_cmp);
+            let row = f64::from(crate::ui::tokens::Tokens::get(&ctx).metrics.row_h) - 4.0;
+            assert!(
+                tops.len() >= 12,
+                "{density:?}: the sheet drew {} rows",
+                tops.len()
+            );
+            for pair in tops.windows(2) {
+                assert!(
+                    (pair[1] - pair[0] - row).abs() <= 0.5,
+                    "{density:?}: rows {:.1} px apart, wanted {row} px rows that abut",
+                    pair[1] - pair[0]
+                );
+            }
+            let header = texts(&output)
+                .into_iter()
+                .find(|(text, _)| text == "Parameter")
+                .map(|(_, rect)| rect)
+                .expect("the header names its columns");
+            let below_header = tops[0] - f64::from(header.center().y);
+            assert!(
+                (below_header - row * 0.5).abs() <= 1.0,
+                "{density:?}: the first row starts {below_header:.1} px below the header's middle, \
+                 wanted half a {row} px row"
+            );
+        }
+    }
+
+    /// Every run of text the frame painted, with where it was laid out.
+    fn texts(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut out);
+        }
+        out
+    }
+
+    /// The sensitivity sheet for review, written under `RSPICE_PICTURES` when
+    /// it is set.
+    #[test]
+    #[ignore = "writes the review pictures"]
+    fn write_the_sensitivity_sheet_picture() {
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let mut state = ranked_state(40);
+        let canvas = rspice_ui_kit::raster::render_themed(
+            crate::ui::Theme::default(),
+            egui::vec2(1_000.0, 520.0),
+            |ui, _| show(ui, &mut state.results_parts()),
+        );
+        std::fs::write(
+            format!("{directory}/sensitivity-sheet.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    }
+
     #[test]
     fn the_panel_lists_only_the_rows_its_viewport_shows() {
         let mut state = ranked_state(4_000);
@@ -352,8 +472,10 @@ mod tests {
             sensitivity_plan(&mut state.results_parts()).expect("a retained sensitivity result");
 
         assert_eq!(plan.display.offsets().rows(), plan.display.order().len());
+        // The offsets count rows; the chart scales them by the row height the
+        // density preference sets.
         assert!(
-            (plan.display.offsets().total_height() - 60_000.0).abs() < 1.0e-3,
+            (plan.display.offsets().total_height() - 2_000.0).abs() < 1.0e-3,
             "the plan's extent is {}",
             plan.display.offsets().total_height()
         );

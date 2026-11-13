@@ -1,12 +1,11 @@
 //! Retained sensitivity-study charts, frequency selection and exact readouts.
 
 use super::{
-    CELL_INSET, HEADER_HEIGHT, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, ROW_HEIGHT,
-    VALUE_WIDTH, chart_value, column_rect, exact_sensitivity, exact_value, paint_cell,
-    unavailable_reason,
+    CELL_INSET, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, VALUE_WIDTH, chart_value,
+    column_rect, exact_sensitivity, exact_value, paint_cell, unavailable_reason,
 };
 use crate::{
-    presentation::{panel_note, well_hint},
+    presentation::{panel_note, table_row_height, well_hint},
     strip::StripHeader,
     virtual_rows::RowOffsets,
 };
@@ -151,7 +150,8 @@ impl StudyPlan {
             .fold(0.0_f64, f64::max);
         Self {
             index,
-            offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, order.len())),
+            // Counted in rows: the chart scales them by the density's row height.
+            offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, order.len())),
             order,
             max_magnitude,
             sweep_max_magnitude,
@@ -269,7 +269,7 @@ fn paint_frequency_profile(
     index: usize,
     color: rspice_ui_kit::palette::Palette,
 ) {
-    let area = cell.shrink2(egui::vec2(CELL_INSET, 6.0));
+    let area = cell.shrink2(egui::vec2(CELL_INSET, (cell.height() * 0.2).round()));
     if area.width() <= 1.0 || area.height() <= 1.0 || plan.sweep_max_magnitude <= 0.0 {
         return;
     }
@@ -378,10 +378,15 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let viewport_width = ui.available_width().max(1.0);
+    let row_height = table_row_height(ui);
     egui::ScrollArea::both()
         .id_salt("rspice.results.sensitivity-study")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
+            // The dense row of the sheet's other tables, and the header is one
+            // of them. The rows abut, each drawing its own rule, so a row's
+            // pitch is its height and the plan's offsets place it exactly.
+            ui.spacing_mut().item_spacing.y = 0.0;
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
@@ -397,8 +402,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
             let bar_offset = RANK_WIDTH + PARAMETER_WIDTH;
             let value_offset = bar_offset + bar_width;
             let profile_offset = value_offset + VALUE_WIDTH;
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, HEADER_HEIGHT), Sense::hover());
+            let (header, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
@@ -447,35 +451,25 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 );
             }
 
-            let chart_cell =
-                column_rect(header, bar_offset, bar_width).shrink2(egui::vec2(CELL_INSET, 0.0));
-            let zero_x = chart_cell.center().x;
-            let scale_text = format!("{max_magnitude:.6e}");
-            for (x, align, text) in [
-                (
-                    chart_cell.left(),
-                    egui::Align2::LEFT_BOTTOM,
-                    format!("-{scale_text}"),
-                ),
-                (zero_x, egui::Align2::CENTER_BOTTOM, "0".to_owned()),
-                (chart_cell.right(), egui::Align2::RIGHT_BOTTOM, scale_text),
-            ] {
-                ui.painter().text(
-                    egui::pos2(x, header.bottom() - 4.0),
-                    align,
-                    text,
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text_faint,
-                );
-            }
+            // The chart's full scale shares the column's header row, at its
+            // right edge: the bars grow both ways from the zero rule every row
+            // draws through its middle, so one magnitude states both ends.
+            paint_cell(
+                ui,
+                column_rect(header, bar_offset, bar_width),
+                format!("±{max_magnitude:.6e}"),
+                egui::Align2::RIGHT_CENTER,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.text_faint,
+            );
 
             // One row per selected variable: a real design selects thousands,
             // and only the ones on screen are worth laying out.
             let rows = plan.offsets().plan(egui::Rangef::new(
-                viewport.min.y - HEADER_HEIGHT,
-                viewport.max.y - HEADER_HEIGHT,
+                (viewport.min.y - row_height) / row_height,
+                (viewport.max.y - row_height) / row_height,
             ));
-            ui.allocate_space(egui::vec2(width, rows.leading));
+            ui.allocate_space(egui::vec2(width, rows.leading * row_height));
             for (rank, row) in ranked
                 .iter()
                 .map(|row| &view.evidence.rows[*row])
@@ -486,7 +480,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 let normalized = column_at(&row.normalized, index);
                 let raw = column_at(&row.raw, index);
                 let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
+                    ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
                 let accessible_label = format!(
                     "{}, variable {}, normalized sensitivity {}, raw sensitivity {}",
                     if normalized.value().is_some() {
@@ -567,7 +561,8 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 let bar_cell = column_rect(rect, bar_offset, bar_width);
                 match normalized {
                     SensitivityValue::Available(normalized) => {
-                        let bar_area = bar_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
+                        let bar_area =
+                            bar_cell.shrink2(egui::vec2(CELL_INSET, (row_height * 0.25).round()));
                         let center_x = bar_area.center().x;
                         let half_width = bar_area.width() * 0.5;
                         let ratio = if max_magnitude > 0.0 {
@@ -631,7 +626,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 }
                 theme::paint_focus_ring(ui, &response, rect);
             }
-            ui.allocate_space(egui::vec2(width, rows.trailing));
+            ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
 pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {

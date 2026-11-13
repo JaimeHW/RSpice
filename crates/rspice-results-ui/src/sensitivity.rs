@@ -2,7 +2,7 @@
 
 use crate::{
     op_inspector::op_column_rect as column_rect,
-    presentation::{panel_note, well_hint},
+    presentation::{panel_note, table_row_height, well_hint},
     strip::StripHeader,
     virtual_rows::RowOffsets,
 };
@@ -26,8 +26,6 @@ const PARAMETER_WIDTH: f32 = 230.0;
 const SENSITIVITY_WIDTH: f32 = 360.0;
 const VALUE_WIDTH: f32 = 118.0;
 const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + SENSITIVITY_WIDTH + VALUE_WIDTH;
-const ROW_HEIGHT: f32 = 30.0;
-const HEADER_HEIGHT: f32 = 34.0;
 const CELL_INSET: f32 = 10.0;
 /// Height of one row of the panel's ranked table, spacing included.
 const PANEL_ROW_HEIGHT: f32 = 20.0;
@@ -72,6 +70,9 @@ impl SensitivityPlan {
         &self.offsets
     }
 
+    /// The ranking of `rows`, its scale and its row offsets. The offsets
+    /// count rows: the chart's row height follows the density preference,
+    /// which the plan is built without, so the chart scales them to points.
     pub fn new(rows: &[SensitivityResultRow]) -> Self {
         let order = ranked_rows(rows);
         let max_magnitude = order
@@ -79,7 +80,7 @@ impl SensitivityPlan {
             .filter_map(|index| rows[*index].normalized.value().map(f64::abs))
             .fold(0.0_f64, f64::max);
         Self {
-            offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, order.len())),
+            offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, order.len())),
             order,
             max_magnitude,
         }
@@ -226,18 +227,22 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let viewport_width = ui.available_width().max(1.0);
+    // The dense row of the sheet's other tables, and the header is one of
+    // them. The rows abut, each drawing its own rule, so a row's pitch is its
+    // height and the plan's offsets place it exactly.
+    let row_height = table_row_height(ui);
     egui::ScrollArea::both()
         .id_salt("rspice.results.sensitivity-contribution")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
             let sensitivity_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH;
             let sensitivity_offset = RANK_WIDTH + PARAMETER_WIDTH;
             let value_offset = sensitivity_offset + sensitivity_width;
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, HEADER_HEIGHT), Sense::hover());
+            let (header, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
@@ -278,28 +283,14 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
                 c.text_faint,
             );
 
-            let chart_cell = column_rect(header, sensitivity_offset, sensitivity_width)
-                .shrink2(egui::vec2(CELL_INSET, 0.0));
-            let zero_x = chart_cell.center().x;
-            let scale_text = format!("{max_magnitude:.6e}");
-            ui.painter().text(
-                egui::pos2(chart_cell.left(), header.bottom() - 4.0),
-                egui::Align2::LEFT_BOTTOM,
-                format!("-{scale_text}"),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_faint,
-            );
-            ui.painter().text(
-                egui::pos2(zero_x, header.bottom() - 4.0),
-                egui::Align2::CENTER_BOTTOM,
-                "0",
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_faint,
-            );
-            ui.painter().text(
-                egui::pos2(chart_cell.right(), header.bottom() - 4.0),
-                egui::Align2::RIGHT_BOTTOM,
-                scale_text,
+            // The chart's full scale shares the column's header row, at its
+            // right edge: the bars grow both ways from the zero rule every row
+            // draws through its middle, so one magnitude states both ends.
+            paint_cell(
+                ui,
+                column_rect(header, sensitivity_offset, sensitivity_width),
+                format!("±{max_magnitude:.6e}"),
+                egui::Align2::RIGHT_CENTER,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 c.text_faint,
             );
@@ -308,10 +299,10 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             // only the ones on screen are worth laying out. The offsets come
             // from the plan, built with the ranking they address.
             let rows = plan.offsets().plan(egui::Rangef::new(
-                viewport.min.y - HEADER_HEIGHT,
-                viewport.max.y - HEADER_HEIGHT,
+                (viewport.min.y - row_height) / row_height,
+                (viewport.max.y - row_height) / row_height,
             ));
-            ui.allocate_space(egui::vec2(width, rows.leading));
+            ui.allocate_space(egui::vec2(width, rows.leading * row_height));
             for (rank, row) in ranked
                 .iter()
                 .map(|index| &view.rows[*index])
@@ -320,7 +311,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
                 .take(rows.end - rows.first)
             {
                 let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
+                    ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
                 let accessible_label = format!(
                     "{}, parameter {}, normalized sensitivity {}, raw sensitivity {}",
                     if row.normalized.value().is_some() {
@@ -392,7 +383,8 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
 
                 let sensitivity_cell = column_rect(rect, sensitivity_offset, sensitivity_width);
                 if let SensitivityValue::Available(normalized) = row.normalized {
-                    let bar_area = sensitivity_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
+                    let bar_area = sensitivity_cell
+                        .shrink2(egui::vec2(CELL_INSET, (row_height * 0.25).round()));
                     let center_x = bar_area.center().x;
                     let half_width = bar_area.width() * 0.5;
                     let ratio = if max_magnitude > 0.0 {
@@ -446,7 +438,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
                 );
                 theme::paint_focus_ring(ui, &response, rect);
             }
-            ui.allocate_space(egui::vec2(width, rows.trailing));
+            ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
 pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&SensitivityPlan>) {

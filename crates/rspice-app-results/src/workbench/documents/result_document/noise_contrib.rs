@@ -176,4 +176,161 @@ mod tests {
         assert_eq!(label, "second");
         assert_eq!(summary.band, (2.0, 20.0));
     }
+
+    fn contributor_summary() -> NoiseSummary {
+        let sources = [
+            ("M1", "flicker", 4.1e-12, 41.0),
+            ("M1", "thermal", 2.2e-12, 22.0),
+            ("XAMP.XBIAS.M14", "flicker", 1.4e-12, 14.0),
+            ("R7", "thermal", 9.0e-13, 9.0),
+            ("Q3", "shot", 6.0e-13, 6.0),
+            ("M2", "thermal", 4.0e-13, 4.0),
+            ("RLOAD", "thermal", 2.0e-13, 2.0),
+            ("Q3", "burst", 1.0e-13, 1.0),
+        ];
+        NoiseSummary {
+            rows: sources
+                .iter()
+                .map(|(device, mechanism, power, share)| {
+                    rspice_results::noise::NoiseContributorRow {
+                        device: (*device).to_owned(),
+                        mechanism: (*mechanism).to_owned(),
+                        power: *power,
+                        share_pct: *share,
+                    }
+                })
+                .collect(),
+            total_rms: Some(3.2e-6),
+            band: (10.0, 1.0e6),
+            ..NoiseSummary::default()
+        }
+    }
+
+    fn contributor_panel(ui: &mut Ui, summary: &NoiseSummary) {
+        view::right_panel(
+            ui,
+            view::ContributorEvidence::Retained {
+                summary,
+                label: "NOISE",
+            },
+            &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+        );
+    }
+
+    /// The contributor table's rows are the dense rows of the sheet's other
+    /// tables at either density: one line each, device and mechanism side by
+    /// side, the header one of them, and the rows abutting.
+    #[test]
+    fn the_contributor_rows_are_dense_at_either_density() {
+        let summary = contributor_summary();
+        for density in [
+            rspice_ui_kit::tokens::Density::Compact,
+            rspice_ui_kit::tokens::Density::Relaxed,
+        ] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme {
+                density,
+                ..crate::ui::Theme::default()
+            }
+            .apply(&ctx);
+            ctx.enable_accesskit();
+            let mut output = None;
+            for _ in 0..2 {
+                output = Some(ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(340.0, 640.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default()
+                            .show(ctx, |ui| contributor_panel(ui, &summary));
+                    },
+                ));
+            }
+            let output = output.expect("two frames ran");
+            let metrics = crate::ui::tokens::Tokens::get(&ctx).metrics;
+            let row = f64::from(metrics.row_h - 4.0);
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .expect("the panel publishes an accessibility tree");
+            let header = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::ColumnHeader
+                        && node.label() == Some("Source")
+                })
+                .and_then(|(_, node)| node.bounds())
+                .expect("the table names its columns");
+            let mut tops: Vec<f64> = tree
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.value()
+                        .or(node.label())
+                        .is_some_and(|text| text.starts_with("Contributor rank"))
+                })
+                .filter_map(|(_, node)| node.bounds())
+                .map(|bounds| bounds.y0)
+                .collect();
+            tops.sort_by(f64::total_cmp);
+            assert_eq!(tops.len(), summary.rows.len(), "{density:?}");
+            assert!(
+                (header.y1 - header.y0 - row).abs() <= 0.5,
+                "{density:?}: the header is {:.1} px tall",
+                header.y1 - header.y0
+            );
+            assert!(
+                (tops[0] - header.y1).abs() <= 0.5,
+                "{density:?}: the first row starts {:.1} px below the header",
+                tops[0] - header.y1
+            );
+            for pair in tops.windows(2) {
+                assert!(
+                    (pair[1] - pair[0] - row).abs() <= 0.5,
+                    "{density:?}: rows {:.1} px apart, wanted {row} px rows that abut",
+                    pair[1] - pair[0]
+                );
+            }
+            let mut painted = Vec::new();
+            for clipped in &output.shapes {
+                if let egui::Shape::Text(text) = &clipped.shape {
+                    painted.push(text.galley.job.text.clone());
+                }
+            }
+            assert!(
+                painted.iter().any(|text| text == "M1 · flicker"),
+                "{density:?}: device and mechanism share one line: {painted:?}"
+            );
+            assert!(
+                painted.iter().all(|text| !text.contains('\n')),
+                "{density:?}: a cell wraps onto a second line"
+            );
+        }
+    }
+
+    /// The contributor panel for review, written under `RSPICE_PICTURES` when
+    /// it is set.
+    #[test]
+    #[ignore = "writes the review pictures"]
+    fn write_the_noise_contributor_picture() {
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let summary = contributor_summary();
+        let canvas = rspice_ui_kit::raster::render_themed(
+            crate::ui::Theme::default(),
+            egui::vec2(340.0, 420.0),
+            |ui, _| contributor_panel(ui, &summary),
+        );
+        std::fs::write(
+            format!("{directory}/noise-contributors.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    }
 }
