@@ -115,39 +115,59 @@ pub fn controls(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) ->
             settings.selected = names.first().cloned();
         }
         let selected_text = settings.selected.as_deref().unwrap_or_default().to_owned();
-        let changed = ui
-            .horizontal_wrapped(|ui| {
-                let mut changed = false;
-                ui.label("Measure");
-                rspice_ui_kit::widgets::Combo::from_id_salt("hist_measurement")
-                    .selected_text(&selected_text)
-                    .show_ui(ui, |ui| {
-                        for name in names {
-                            changed |= ui
-                                .selectable_value(&mut settings.selected, Some(name.clone()), name)
-                                .changed();
-                        }
-                    });
-                ui.label("Display");
-                rspice_ui_kit::widgets::Combo::from_id_salt("hist_mode")
-                    .selected_text(settings.mode.label())
-                    .show_ui(ui, |ui| {
-                        for mode in HistogramDisplayMode::ALL {
-                            changed |= ui
-                                .selectable_value(&mut settings.mode, mode, mode.label())
-                                .changed();
-                        }
-                    });
-                ui.label("Bins");
-                changed |= ui
-                    .add_enabled(
-                        settings.mode != HistogramDisplayMode::Cdf,
-                        egui::DragValue::new(&mut settings.bin_count).range(1..=1000),
-                    )
-                    .changed();
-                changed
+        // The controls are interface chrome, on a panel band of their own as
+        // the strip header under them is: on the canvas-filled pane their
+        // labels took the interface's text over the canvas, unreadable when
+        // the two themes differ. The band meets the header with no canvas
+        // seam between them.
+        let t = Tokens::get(ui.ctx());
+        let row_spacing = ui.spacing().item_spacing.y;
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let changed = egui::Frame::NONE
+            .fill(t.color.bg_panel)
+            .inner_margin(egui::Margin::symmetric(6, 3))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = row_spacing;
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    let mut changed = false;
+                    ui.label("Measure");
+                    rspice_ui_kit::widgets::Combo::from_id_salt("hist_measurement")
+                        .selected_text(&selected_text)
+                        .show_ui(ui, |ui| {
+                            for name in names {
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut settings.selected,
+                                        Some(name.clone()),
+                                        name,
+                                    )
+                                    .changed();
+                            }
+                        });
+                    ui.label("Display");
+                    rspice_ui_kit::widgets::Combo::from_id_salt("hist_mode")
+                        .selected_text(settings.mode.label())
+                        .show_ui(ui, |ui| {
+                            for mode in HistogramDisplayMode::ALL {
+                                changed |= ui
+                                    .selectable_value(&mut settings.mode, mode, mode.label())
+                                    .changed();
+                            }
+                        });
+                    ui.label("Bins");
+                    changed |= ui
+                        .add_enabled(
+                            settings.mode != HistogramDisplayMode::Cdf,
+                            egui::DragValue::new(&mut settings.bin_count).range(1..=1000),
+                        )
+                        .changed();
+                    changed
+                })
+                .inner
             })
             .inner;
+        ui.spacing_mut().item_spacing.y = row_spacing;
         return changed;
     }
     false

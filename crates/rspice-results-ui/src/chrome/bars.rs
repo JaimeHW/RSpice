@@ -308,6 +308,10 @@ fn operating_point_filter_id() -> egui::Id {
 /// and the inset is kept whether or not the mark is showing, so neither the
 /// field nor its text moves on the first keystroke.
 fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
+    // egui fades the body tone for a hint, which fell to 3.84:1 on the field
+    // in the light interface; the palette's tertiary text holds 4.5:1.
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    let restored = ui.visuals_mut().weak_text_color.replace(faint);
     let field = ui.add(
         egui::TextEdit::singleline(filter)
             .id(operating_point_filter_id())
@@ -321,6 +325,7 @@ fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
             })
             .hint_text("Filter…"),
     );
+    ui.visuals_mut().weak_text_color = restored;
     filter_field_clear(ui, &field, filter);
 }
 

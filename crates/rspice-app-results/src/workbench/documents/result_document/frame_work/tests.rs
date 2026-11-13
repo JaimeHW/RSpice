@@ -1002,3 +1002,6 @@ fn a_reset_snapshot_measures_only_work_that_follows_it() {
     assert_eq!(baseline.since().total(), 0);
     assert_eq!(baseline.since().total_samples(), 0);
 }
+
+/// Every sheet, drawn whole in all four theme combinations.
+mod contrast;

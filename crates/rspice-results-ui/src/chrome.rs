@@ -283,7 +283,7 @@ pub fn instrument_control<'a>(
         label.to_owned(),
         theme::mono(tokens::FS_0, FontWeight::Medium),
         if active {
-            t.color.accent
+            t.color.text
         } else {
             t.color.text_dim
         },
@@ -315,15 +315,16 @@ pub fn instrument_control<'a>(
                 egui::Stroke::new(1.0, t.color.accent),
             );
         }
+        // The active control reads in the primary text over its wash, as a
+        // selected tab does; the underline carries the accent. Accent text on
+        // the accent wash fell to 4.37:1 in the light interface.
         ui.painter().galley(
             egui::pos2(
                 rect.center().x - galley.size().x * 0.5,
                 rect.center().y - galley.size().y * 0.5,
             ),
             galley,
-            if active {
-                t.color.accent
-            } else if hover {
+            if active || hover {
                 t.color.text
             } else {
                 t.color.text_dim

@@ -328,15 +328,13 @@ pub fn pane_header(
 ) -> Option<PaneHeaderAction> {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        if is_active {
-            t.color.accent_dim
-        } else {
-            t.color.bg_panel
-        },
-    );
+    // The header is interface chrome on the canvas-filled pane: an opaque
+    // panel, with the active pane's accent wash over it. The wash alone let
+    // the canvas through, and the interface's text sat dark on dark.
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    if is_active {
+        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+    }
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -358,9 +356,11 @@ pub fn pane_header(
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 painted_label(
                     ui,
+                    // Secondary text: the tertiary tone fell to 4.04:1 on the
+                    // active pane's wash in the dark interface.
                     RichText::new(viewer_title)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
+                        .color(t.color.text_dim),
                     egui::TextWrapMode::Extend,
                 );
             });
