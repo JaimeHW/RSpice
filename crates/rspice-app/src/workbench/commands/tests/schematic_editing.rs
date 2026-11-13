@@ -272,7 +272,7 @@ fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
 }
 
 /// R1 and R2 touch pin to pin with no wire: one node. Turning R2 took its
-/// pin off R1's and parted the node silently (audit W-C2). The turn now
+/// pin off R1's and parted the node silently. The turn now
 /// runs a square wire from the pin that stayed to the one that turned, in
 /// the turn's one undo step.
 #[test]
@@ -1611,7 +1611,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
 
 /// Two wires drawn end to end on one line stayed two wires, with a vertex
 /// in the middle of a straight run, and there was no command to lay them as
-/// one (audit W-C5). Join collinear wires does, as one undo step.
+/// one. Join collinear wires does, as one undo step.
 #[test]
 fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
     use crate::state::{Point, Wire};

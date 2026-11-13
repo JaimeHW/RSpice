@@ -276,7 +276,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
     (
         "a_mixed_checkpoint_restores_external_clock_state_without_initial_replay",
         "hardening_external_toggle",
-        // Re-measured for the left-limit D/A drive (P0.10 D9): the same 508
+        // Re-measured for the left-limit D/A drive: the same 508
         // points on the same grid, every event bit-identical, and QS against
         // its 10k-loaded drive, held from before each edge on the edge's own
         // point, worst 3.2934 V -> 6.6e-14 V (mean 6.5e-2 -> 3.2e-14 V).
@@ -315,7 +315,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         // current moved the grid by at most 4.7e-21 s and OUT by 1.2e-12 V;
         // both left OUT's error against the analytic 1020-ohm x 10 pF response
         // at 0.2566 V, the edge integrated over the step that ends on it. The
-        // left-limit D/A drive (P0.10 D9) solves each edge's own point with
+        // left-limit D/A drive solves each edge's own point with
         // the drive from before it and restarts the step leaving it: worst
         // 0.2566 -> 4.87e-3 V, mean 0.1116 -> 1.32e-3 V, the error one edge
         // adds 0.269 -> 4.1e-3 V (1856 -> 1861 points). All 101 `qdiv`
@@ -391,7 +391,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         },
     ),
     // The three feedback decks were re-measured for the left-limit D/A drive
-    // (P0.10 D9) together: the same 36 points on the same grid, every event
+    // together: the same 36 points on the same grid, every event
     // bit-identical, and YA/YB against their 10k-loaded drives, held from
     // before each edge on the edge's own point, worst 3.2934 V -> 6.6e-14 V
     // (mean 9.1e-2 -> 2.0e-14 V) in all three.
@@ -447,7 +447,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         // 8.2e-14 V, every CLK/FROMX/QDIV event bit-identical, and OUT's error
         // against the analytic RC response unchanged (worst 1.949e-3 V).
         //
-        // Re-measured again for the left-limit D/A drive (P0.10 D9): every
+        // Re-measured again for the left-limit D/A drive: every
         // CLK/FROMX/QDIV event bit-identical, 190 -> 191 points. The error a
         // QDIV edge adds to OUT fell 3.20e-4 -> 2.7e-5 V (the 1 ps edge is now
         // exact, 3.2e-4 V before). OUT's run-wide worst rose 1.949e-3 ->
@@ -500,8 +500,8 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
     (
         "a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop",
         "hardening_toggling_two_minimums",
-        // Both toggling clocks were re-measured for the left-limit D/A drive
-        // (P0.10 D9): the same grids, every event bit-identical, and Q against
+        // Both toggling clocks were re-measured for the left-limit D/A drive:
+        // the same grids, every event bit-identical, and Q against
         // its 10k-loaded drive worst 3.2934 V -> 6.6e-14 V (means 1.77 V and
         // 8.1e-3 V -> 3.2e-14 V; the two-minimum clock moves at every point,
         // so before the change nearly every sample held the next level).
@@ -648,7 +648,7 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// see "One fixture is pinned by its point count instead" on
 /// [`FINGERPRINTED_FIXTURES`].
 ///
-/// Re-measured for P0.10 (88 -> 65): the restart after a landing no longer
+/// Re-measured (88 -> 65): the restart after a landing no longer
 /// doubles out of the solver floor (D10). Of the 22 accepted steps below
 /// 1e-14 s around `clk`'s 2/3 ns fall, the 3 landings of the root chase
 /// itself remain and the 19 doubling rungs after them are gone.

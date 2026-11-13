@@ -12,12 +12,7 @@
 //!   `veriloga_mixed_signal_regressions.rs` each carry a load the original did
 //!   not have (`Rload q 0 1e12` and friends), which is exactly the shape the
 //!   unloaded-output defect hides behind, so the unloaded originals are kept
-//!   here and marked with the lane that owns each remaining failure.
-//!
-//! Every `#[ignore]` reason starts with its repair lane, so counting the ignore
-//! attributes whose reason opens with an `R` lane id across `tri_family_*.rs`
-//! counts the open lanes; an ignored case is expected to FAIL under
-//! `-- --ignored` until that lane lands.
+//!   here.
 //!
 //! Pinned quantities print as `TRIFAMILY <key>=<value>`; set
 //! `RSPICE_TRI_FAMILY_EMIT=1` and run with `--nocapture` to re-measure them all
@@ -55,7 +50,7 @@ const DECK_E_OUT_LATE: f64 = 1.827762;
 /// erring exactly as before in both: worst 0.1335 V at the 5 ns edge, which
 /// was integrated over the step that ends on it.
 ///
-/// Re-measured a third time for the left-limit D/A drive (P0.10 D9), which
+/// Re-measured a third time for the left-limit D/A drive, which
 /// solves each edge's own point with the drive from before it and restarts
 /// the step leaving it: 267 -> 271 points, all 20 `clk` and 11 `qdiv`
 /// transitions bit-identical, and `out` worst 0.1335 -> 1.08e-3 V, mean

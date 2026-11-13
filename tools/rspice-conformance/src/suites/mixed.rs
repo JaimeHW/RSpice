@@ -71,7 +71,7 @@ pub enum Route {
     Interp,
     /// x64/AArch64 native JIT Verilog-A with no interpreter fallback.
     Native,
-    /// The browser worker (P4.7), as an external producer.
+    /// The browser worker, as an external producer.
     Worker,
     /// The desktop application (P4), as an external producer.
     App,

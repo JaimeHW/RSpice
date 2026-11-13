@@ -10,16 +10,16 @@
 //! `wrong(malformed-refusal:<missing>)`; one whose label names a different
 //! analysis is `wrong(misnamed-analysis)`.
 //!
-//! [`REQUIRE_STRUCTURED_REFUSAL`] was off at P0.5 (amendment A2), when an
-//! instance or analysis found only in the prose counted as `form=prose`. It
-//! flipped at P1.2's exit: every runner now carries the refusal's instance and
-//! analysis kind as typed fields, so a prose-only identity is malformed.
+//! [`REQUIRE_STRUCTURED_REFUSAL`] was once off, when an instance or analysis
+//! found only in the prose counted as `form=prose`. It is on: every runner
+//! carries the refusal's instance and analysis kind as typed fields, so a
+//! prose-only identity is malformed.
 
 use super::Outcome;
 use super::case::{CaseResult, ErrorRecord};
 use super::compare::Verdict;
 
-/// Flipped at the exit of P1.2 (design §7 D2 / amendment A2).
+/// On since every runner carries a refusal's identity as typed fields.
 pub const REQUIRE_STRUCTURED_REFUSAL: bool = true;
 
 /// The fixed analysis labels a refusal may use, per card kind.
@@ -64,7 +64,7 @@ pub struct QuantityVerdict {
 #[derive(Debug, Clone)]
 pub enum QuantityOutcome {
     Compared(Verdict),
-    /// The oracle's reference is not available (O2/O3 before P0.3).
+    /// The oracle's reference is not available.
     OracleAbsent(String),
     /// RSpice delivered no value for a declared signal: silent omission.
     Missing(String),
@@ -520,7 +520,7 @@ mod tests {
         let absent = QuantityVerdict {
             quantity: "code".into(),
             oracle: "O2".into(),
-            outcome: QuantityOutcome::OracleAbsent("P0.3".into()),
+            outcome: QuantityOutcome::OracleAbsent("Icarus without libvvp".into()),
         };
         assert_eq!(
             classify(&end, "tran", &[], &[passed.clone(), absent.clone()]).outcome,

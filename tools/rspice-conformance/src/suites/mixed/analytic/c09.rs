@@ -8,7 +8,7 @@
 //!
 //! The converter model is the variant's: `base` states `.param vcc=3.3`, a
 //! static supply (A/D threshold 1.65 V, D/A level 3.3 V, amendment A4); `p3`
-//! (authored supply-port connect modules, P3.2) and `live` (inferred supply,
+//! (authored supply-port connect modules) and `live` (inferred supply,
 //! P3.2a) convert against v(vdd) itself (threshold v/2, level v).
 
 use super::{Context, Registry, points, values};

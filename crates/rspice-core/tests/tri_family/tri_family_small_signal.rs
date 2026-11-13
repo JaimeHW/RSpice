@@ -12,11 +12,6 @@
 //! * does an authored `ddt` charge carry the same truncation-error authority a
 //!   native capacitor does, so tightening `reltol` tightens the grid?
 //!
-//! Every `#[ignore]` reason starts with its repair lane, so counting the ignore
-//! attributes whose reason opens with an `R` lane id across `tri_family_*.rs`
-//! counts the open lanes; an ignored case is expected to FAIL under
-//! `-- --ignored` until that lane lands.
-//!
 //! Pinned quantities print as `TRIFAMILY <key>=<value>`; set
 //! `RSPICE_TRI_FAMILY_EMIT=1` and run with `--nocapture` to re-measure them all
 //! in one pass without asserting any of them. They are self-agreement

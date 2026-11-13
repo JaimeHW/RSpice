@@ -39,7 +39,7 @@ pub fn required_analyses(id: &str) -> Option<&'static [&'static str]> {
         "C10" => &["tran"],
         "C11" => &["tran", "pss", "pac", "pnoise"],
         "C12" => &["tran", "op"],
-        // P0.6 probes carry their own analysis lists.
+        // The probes carry their own analysis lists.
         "P06a" => &["trnoise"],
         "P06b" => &["mc-tran", "step-tran"],
         "P06c" => &["tran"],
@@ -874,7 +874,7 @@ fn check_o3_templates(design: &Design, quantity: &Quantity, findings: &mut Vec<F
 }
 
 /// A checked-in reference must be bound to the oracle deck it came from; an
-/// absent one is legal (O2 before P0.3) and makes the quantity unverified.
+/// absent one is legal and makes the quantity unverified.
 fn check_reference_binding(design: &Design, reference: &str, findings: &mut Vec<Finding>) {
     let slug = &design.slug;
     let path = design.dir.join(reference);

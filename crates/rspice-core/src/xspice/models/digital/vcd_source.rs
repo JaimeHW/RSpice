@@ -90,7 +90,7 @@ fn invalid(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
-/// The value a VCD bit drives: P3.5's four-state mapping, so `z` is the
+/// The value a VCD bit drives: the four-state mapping, so `z` is the
 /// disconnected state the HDL reads as `HiZ`.
 fn digital_value(bit: VcdBit) -> DigitalValue {
     match bit {

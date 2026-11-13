@@ -9,11 +9,8 @@
 //!
 //! * live assertions, which pin behaviour that is correct today, and
 //! * `#[ignore]`d assertions, which state the CORRECT expectation for a defect
-//!   that is open. Every ignore reason starts with the repair lane that owns
-//!   it, so counting the ignore attributes whose reason opens with an `R` lane
-//!   id across `tri_family_*.rs` counts the open lanes. An ignored case here is
-//!   expected to FAIL under `-- --ignored` until its lane lands; when it
-//!   passes, delete the attribute.
+//!   that is open. An ignored case is expected to FAIL under `-- --ignored`
+//!   until the defect is fixed; when it passes, delete the attribute.
 //!
 //! # The sequence golden, and what it is worth
 //!
@@ -97,7 +94,7 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// E its sampled voltages, and deck A its pinned analog solution at every
 /// digital instant.
 ///
-/// Re-measured for P0.10 at 1139. Main had drifted to 1166 since 2f5a150284
+/// Re-measured at 1139. Main had drifted to 1166 since 2f5a150284
 /// gave the explicit converters root detection: `a_adc` lands its 1.6 V root
 /// with V exactly at `in_low`, its move to `x` is then a root at that point
 /// itself and is landed one hard minimum later, and the restart after that
@@ -156,7 +153,7 @@ const DECK_C2_POINTS: usize = 275;
 /// Deck C2 carries two mixed modules and no native source at all, so it is the
 /// one deck here whose whole timeline is the discrete halves' schedule.
 ///
-/// The voltage hash was re-measured for the left-limit D/A drive (P0.10 D9):
+/// The voltage hash was re-measured for the left-limit D/A drive:
 /// the same 265 points on the same grid, every event bit-identical, and `c`
 /// against its 10k-loaded drive, held from before each edge on the edge's own
 /// point, worst 3.2934 V -> 6.6e-14 V.
@@ -618,7 +615,7 @@ fn deck_a_tri_family_transient_sequence_golden() {
 ///
 /// What this case pins is that every landing is a single step: the step
 /// after a landing restarts from the proposal the event interrupted, and is
-/// controller-sized. The ladder P0.10 D10 found — the restart after the 48.48
+/// controller-sized. The ladder found — the restart after the 48.48
 /// ps landing capped at twice its own width by the device truncation ceiling,
 /// and doubled out of the floor over twenty accepted points — is the shape this
 /// fails on.

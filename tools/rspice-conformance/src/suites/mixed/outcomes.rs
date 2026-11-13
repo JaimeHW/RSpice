@@ -1,4 +1,4 @@
-//! `outcomes.tsv`: the P0.5 baseline of every design × variant × analysis ×
+//! `outcomes.tsv`: the baseline of every design × variant × analysis ×
 //! route cell, and the ratchet that holds it.
 //!
 //! `run` compares each observed outcome with its recorded row and fails on any

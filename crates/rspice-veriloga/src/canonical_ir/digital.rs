@@ -1563,9 +1563,9 @@ impl DigitalRadix {
 /// refused when it runs, naming the lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DigitalSystemLane {
-    /// Display, control, severity, random and plusargs (P2 lane L1).
+    /// Display, control, severity, random and plusargs.
     Effects,
-    /// File I/O, `$sformat`, `$readmem*` and VCD tasks (P2 lane L5).
+    /// File I/O, `$sformat`, `$readmem*` and VCD tasks.
     Files,
 }
 

@@ -367,7 +367,7 @@ endmodule
     /// The sample interval of `.TRAN 1n 2u NOISEFMAX=500meg`.
     const NT: f64 = 1.0e-9;
 
-    /// Test 1, the P0.6 probe `p06a-trnoise-module` verbatim: a mixed host,
+    /// Test 1, the probe `p06a-trnoise-module` verbatim: a mixed host,
     /// its analog-only twin and a native resistor as the control, in one run.
     ///
     /// Each module is a 1 kΩ conductance with a `white_noise(1e-18)` current,
@@ -375,7 +375,7 @@ endmodule
     /// is `sqrt(4kT·1k·5e8) = 91.0 µV`. Over `[0.1u, 2u]` the 1900 held
     /// samples are independent, and the 99% χ² interval of a standard
     /// deviation from 1900 samples is ±4.2%, which gives the probe's
-    /// intervals. Before P0.9 both modules read σ = 0.
+    /// intervals. Both modules once read σ = 0.
     #[test]
     fn mixed_and_runtime_module_noise_reach_the_transient() {
         let mixed = ModelFile::new("noisy_mixed", NOISY_MIXED);

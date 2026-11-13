@@ -72,7 +72,7 @@ enum Commands {
         #[arg(long, value_parser = job_count)]
         jobs: Option<usize>,
     },
-    /// Run one P0.6 probe.
+    /// Run one probe.
     Probe {
         which: String,
         #[arg(long)]

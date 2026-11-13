@@ -344,7 +344,7 @@ use super::*;
 // Version 130 preserves generated analog order and scope identities (HIR 148).
 //
 // Version 140 follows the canonical IR's schema from 158 to 159, which changes
-// what a cached digital plan means (design P2 lane L1). A plan now carries a
+// what a cached digital plan means. A plan now carries a
 // site table, one row per system task or function call with its arguments,
 // outputs, `%m` scope, `$finish` level and source line; a scope table, which
 // is always present because the root module is a scope; and observer functions

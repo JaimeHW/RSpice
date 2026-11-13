@@ -3762,7 +3762,6 @@ impl SemanticAnalyzer {
         }
         let Some(kind) = DigitalSystemCallKind::from_name(name) else {
             let detail = if name == "$sdf_annotate" {
-                // SDF back-annotation arrives with plan P6.5.
                 "`$sdf_annotate` is not supported yet: SDF back-annotation of `specify` \
                  timing is not implemented"
                     .to_string()

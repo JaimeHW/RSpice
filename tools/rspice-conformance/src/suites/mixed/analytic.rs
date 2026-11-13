@@ -1,7 +1,7 @@
 //! O6: analytic expectations, one module per design.
 //!
 //! A quantity names its expectation as `cNN::name` (or `p06x::name` for a
-//! P0.6 probe, registered in [`super::probes`]). Each function receives the
+//! probe, registered in [`super::probes`]). Each function receives the
 //! quantity and, for expectations that depend on what the run itself sampled
 //! (a code against the input it converted, a trial against its own drawn
 //! parameter), RSpice's observation. Each design's lane owns its module.

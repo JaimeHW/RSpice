@@ -1,4 +1,4 @@
-//! P0.6 probes (`tests/mixed-corpus/probes/`, design §4): three questions the
+//! Probes (`tests/mixed-corpus/probes/`, design §4): three questions the
 //! plan could not answer by reading code, each a small design with the same
 //! schema and a decisive assertion.
 //!
