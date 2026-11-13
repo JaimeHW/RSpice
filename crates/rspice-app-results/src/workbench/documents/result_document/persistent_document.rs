@@ -73,6 +73,7 @@ pub fn show(
             return;
         }
     }
+    sources::show_banner(ui, state, document_id);
     let Some(document) = projection(state.results_reads(), document_id) else {
         unavailable_surface(
             ui,
@@ -573,6 +574,9 @@ pub fn refresh_latest_binding(
     LatestBinding::Current
 }
 
+/// Open `document_id` onto its selected page and pane. A pane whose run is
+/// gone or changed still opens: the document then names the problem and
+/// offers a re-point, and the pane draws no run in its place.
 pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) -> bool {
     let Some(document) = state
         .model
@@ -608,9 +612,8 @@ pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocument
         return false;
     };
     let pane = pane.clone();
-    if select_pane_binding(state, &pane).is_err() {
-        return false;
-    }
+    // A pane that cannot select its run shows why when it is drawn.
+    let _ = select_pane_binding(state, &pane);
     state
         .results
         .session
@@ -1353,6 +1356,7 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
 }
 
 mod lanes;
+pub(crate) mod sources;
 
 #[cfg(test)]
 pub(crate) mod tests;
