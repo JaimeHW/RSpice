@@ -1334,6 +1334,109 @@ mod tests {
         "app.state",
     ];
 
+    /// The places the live deck parts are held under the names the crate
+    /// gives them: the model, the netlist editor's state and the include tabs
+    /// the reader opened, through the whole state or as parts. The bare names
+    /// are parts held by `&mut`, which a swap or replace takes as they are.
+    const DECK_PARTS: [&str; 18] = [
+        "*model",
+        "state.model",
+        "self.model",
+        "app.state.model",
+        "self.state.model",
+        "*netlist",
+        "state.code.netlist",
+        "self.code.netlist",
+        "app.state.code.netlist",
+        "self.state.code.netlist",
+        "*open_documents",
+        "state.code.netlist_open_documents",
+        "self.code.netlist_open_documents",
+        "app.state.code.netlist_open_documents",
+        "self.state.code.netlist_open_documents",
+        "model",
+        "netlist",
+        "open_documents",
+    ];
+
+    /// Whether `line` installs a deck transaction's result by hand: an
+    /// assignment, swap, replace or `clone_from` whose target is a live deck
+    /// part and whose value is a local binding or a binding's `model`,
+    /// `netlist` or `open_documents`.
+    fn installs_deck_part(line: &str) -> bool {
+        let line = line.trim();
+        let is_candidate = |text: &str| {
+            let text = text
+                .trim()
+                .trim_start_matches("&mut ")
+                .trim_start_matches('&');
+            let text = text.strip_suffix(".clone()").unwrap_or(text);
+            let (binding, part) = text.split_once('.').unwrap_or((text, "model"));
+            ["model", "netlist", "open_documents"].contains(&part)
+                && binding.starts_with(|first: char| first.is_ascii_lowercase() || first == '_')
+                && binding
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        };
+        let is_deck_part = |text: &str| {
+            let text = text.trim().trim_start_matches("&mut ");
+            DECK_PARTS.contains(&text)
+        };
+        for target in DECK_PARTS {
+            let Some(rest) = line.strip_prefix(target) else {
+                continue;
+            };
+            if let Some(value) = rest.trim_start().strip_prefix('=')
+                && !value.starts_with('=')
+                && let Some(value) = value.trim().strip_suffix(';')
+                && !["model", "netlist", "open_documents"].contains(&target)
+                && is_candidate(value)
+            {
+                return true;
+            }
+            if rest.starts_with(".clone_from(") {
+                return true;
+            }
+        }
+        ["mem::swap(", "mem::replace("].into_iter().any(|call| {
+            line.find(call).is_some_and(|start| {
+                let arguments = call_arguments(&line[start + call.len()..]);
+                let (first, second) = arguments.split_once(',').unwrap_or((arguments, ""));
+                is_deck_part(first) || is_deck_part(second)
+            })
+        })
+    }
+
+    #[test]
+    fn the_deck_part_detector_reads_every_spelling_and_nothing_else() {
+        for spelling in [
+            "*model = candidate.model;",
+            "    *netlist = transaction.netlist;",
+            "*open_documents = candidate.open_documents.clone();",
+            "state.model = candidate;",
+            "app.state.code.netlist = candidate.netlist;",
+            "self.code.netlist_open_documents = candidate.open_documents;",
+            "std::mem::swap(&mut state.model, &mut candidate.model);",
+            "std::mem::replace(netlist, candidate.netlist);",
+            "model.clone_from(&candidate.model);",
+        ] {
+            assert!(installs_deck_part(spelling), "missed `{spelling}`");
+        }
+        for spelling in [
+            "candidate.commit_deck(model, netlist, open_documents);",
+            "model = candidate.model;",
+            "let model = candidate.model;",
+            "*netlist == candidate.netlist;",
+            "*model = Model::default();",
+            "state.model.workspace = candidate.model;",
+            "self.model_cache = candidate;",
+            "state.code.netlist_open_documents = self.netlist_open_documents;",
+            "std::mem::take(&mut state.code.netlist);",
+        ] {
+            assert!(!installs_deck_part(spelling), "misread `{spelling}`");
+        }
+    }
+
     /// Whether `line` installs a whole application state built elsewhere:
     /// an assignment, swap, replace or `clone_from` whose target is the whole
     /// state and whose value is a local binding.
@@ -1418,11 +1521,21 @@ mod tests {
     /// live state drops them, and the next frame cancels the print or export
     /// the operator started. `AppState::commit_candidate` carries them across;
     /// it is the one place a whole state is installed.
+    ///
+    /// A deck transaction builds its result in copies of the model, the
+    /// netlist editor's state and the include tabs alone, and
+    /// `DeckTransaction::commit_deck` is the one place those copies are
+    /// installed: it installs all three together, and the model through its
+    /// own commit, which carries the notices not yet shown across.
     #[test]
-    fn project_transactions_install_their_candidate_only_through_commit_candidate() {
+    fn project_transactions_install_their_candidate_only_through_their_commit() {
         let owner = Path::new("workbench")
             .join("app_state")
             .join("transaction.rs");
+        let deck_owner = Path::new("workbench")
+            .join("documents")
+            .join("netlist_document")
+            .join("deck_transaction.rs");
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
@@ -1451,8 +1564,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut owners = 0_usize;
+        let mut deck_owners = 0_usize;
         let mut commits = 0_usize;
         let mut found = Vec::new();
+        let mut deck_found = Vec::new();
         for (path, source) in &sources {
             if !ships(path, &roots) {
                 continue;
@@ -1461,10 +1576,18 @@ mod tests {
                 owners += source.matches("fn commit_candidate(").count();
                 continue;
             }
+            if path.ends_with(&deck_owner) {
+                deck_owners += source.matches("fn commit_deck(").count();
+                continue;
+            }
             for (number, line) in without_test_items(source).lines().enumerate() {
                 commits += line.matches(".commit_candidate(").count();
+                commits += line.matches(".commit_deck(").count();
                 if writes_back_whole_state(line) {
                     found.push(format!("{}:{}", path.display(), number + 1));
+                }
+                if installs_deck_part(line) {
+                    deck_found.push(format!("{}:{}", path.display(), number + 1));
                 }
             }
         }
@@ -1485,6 +1608,19 @@ mod tests {
             "these install a whole application state by hand, which drops the runtime \
              sessions a clone leaves out — commit it with `AppState::commit_candidate`:\n  {}",
             found.join("\n  ")
+        );
+        assert_eq!(
+            deck_owners,
+            1,
+            "`DeckTransaction::commit_deck` is defined once, in {}",
+            deck_owner.display()
+        );
+        assert!(
+            deck_found.is_empty(),
+            "these install a deck transaction's result by hand, which can leave the model, \
+             the netlist editor and its tabs out of step or drop the notices not yet shown — \
+             commit it with `DeckTransaction::commit_deck`:\n  {}",
+            deck_found.join("\n  ")
         );
     }
 

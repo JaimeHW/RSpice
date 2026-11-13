@@ -27,10 +27,7 @@ impl AppState {
             &mut candidate.hardcopy.hardcopy,
             &mut self.hardcopy.hardcopy,
         );
-        candidate
-            .model
-            .notices
-            .prepend(std::mem::take(&mut self.model.notices));
+        self.model.carry_unshown_notices_into(&mut candidate.model);
         if let (Some(committed), Some(live)) = (
             candidate.results.results.session.spec_drafts.as_mut(),
             self.results.results.session.spec_drafts.as_mut(),

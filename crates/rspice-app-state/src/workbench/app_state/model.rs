@@ -238,6 +238,21 @@ impl Model {
         });
     }
 
+    /// Carry the notices raised here and not yet shown into `candidate`, a
+    /// copy of this model a transaction changed, ahead of any the transaction
+    /// raised itself. A copy starts without them, so a candidate installed
+    /// without this drops them.
+    pub fn carry_unshown_notices_into(&mut self, candidate: &mut Model) {
+        candidate.notices.prepend(std::mem::take(&mut self.notices));
+    }
+
+    /// Install `candidate`, a validated copy of this model a transaction
+    /// changed, with the notices not yet shown carried across.
+    pub fn install_candidate(&mut self, mut candidate: Model) {
+        self.carry_unshown_notices_into(&mut candidate);
+        *self = candidate;
+    }
+
     /// Whether this project is intentionally owned by an authored or imported
     /// netlist-first SPICE deck and has no schematic-derived baseline.
     ///

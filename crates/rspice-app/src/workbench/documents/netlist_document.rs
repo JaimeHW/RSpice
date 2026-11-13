@@ -23,6 +23,7 @@ const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 mod baseline;
 mod comparison;
 mod completion;
+mod deck_transaction;
 pub(crate) mod diagnostics;
 mod editor;
 mod executed_deck;

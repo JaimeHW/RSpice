@@ -73,8 +73,7 @@ impl Model {
         {
             return LiveOwnedSource::Rejected;
         }
-        candidate.notices.prepend(std::mem::take(&mut self.notices));
-        *self = candidate;
+        self.install_candidate(candidate);
         LiveOwnedSource::Applied(next_document.map(Box::new))
     }
 }
