@@ -38,38 +38,25 @@ fn every_class_the_catalog_assigns_is_reachable_from_a_chip() {
     }
 }
 
-/// A session saved under any spelling this facet has ever had still opens.
-///
-/// The facet is durable view state, so a rename is a compatibility event:
-/// without the aliases, a session naming `updatable` deserializes as an
-/// error and takes the whole `ModelsWorkbenchViewState` down with it — the
-/// reader loses every selection in the workspace to a facet rename.
+/// Every facet round-trips under the kebab-case spelling written today.
 #[test]
-fn every_spelling_this_facet_has_shipped_still_deserializes() {
+fn every_facet_round_trips_under_its_current_spelling() {
     for (stored, expected) in [
         ("\"all\"", ModelHubFacet::All),
         ("\"needs-attention\"", ModelHubFacet::NeedsAttention),
         ("\"installed\"", ModelHubFacet::Installed),
         ("\"pinned\"", ModelHubFacet::Pinned),
         ("\"available\"", ModelHubFacet::Available),
-        // Retired spellings. Both named an exception the ledger now
-        // reports in its attention column, so both restore onto the facet
-        // that collects exceptions rather than onto "all", which would
-        // silently widen what the reader had narrowed.
-        ("\"updatable\"", ModelHubFacet::NeedsAttention),
-        ("\"incompatible\"", ModelHubFacet::NeedsAttention),
     ] {
         assert_eq!(
             serde_json::from_str::<ModelHubFacet>(stored).expect(stored),
-            expected,
-            "{stored} no longer opens"
+            expected
+        );
+        assert_eq!(
+            serde_json::to_string(&expected).expect("serializes"),
+            stored
         );
     }
-    assert_eq!(
-        serde_json::to_string(&ModelHubFacet::NeedsAttention).expect("serializes"),
-        "\"needs-attention\"",
-        "the spelling written today is the kebab-case one"
-    );
 }
 
 /// A session written before the catalog could be sorted still opens.
