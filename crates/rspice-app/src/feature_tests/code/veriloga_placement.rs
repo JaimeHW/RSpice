@@ -4,12 +4,13 @@
 //! These pins create a device through the form, compile it the way a
 //! worker's answer is published, and press what the compile result offers.
 
-use super::veriloga_design_tests::open_project_app;
-use super::veriloga_interface_tests::{compile_and_publish, edit_source};
-use super::*;
+use super::veriloga_interface::compile_and_publish;
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
+use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
+use crate::workbench::app::veriloga_design_tests::open_project_app;
+use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::state::Workspace;
 
 const LIBRARY: &str = "behavioral";

@@ -4,19 +4,21 @@
 //! and the import waits for it rather than refusing. Add files on the Files
 //! rail adds files from disk to a source that already exists.
 
-use super::veriloga_design_tests::{
-    DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
-};
-use super::*;
 use crate::state::workspace::ImportedInclude;
 use crate::state::{CellViewRef, ProjectSourceOwner};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{
+    DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
+};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace;
 
 /// A root whose parameter and body live in files of their own, as the model
 /// authors' sources keep them.
 const ROOT: &str = "`include \"disciplines.vams\"\nmodule gainer(a, b);\n  inout a, b;\n  electrical a, b;\n`include \"params.inc\"\n  analog begin\n`include \"body.inc\"\n  end\nendmodule\n";
+
 const PARAMS: &str = "  parameter real g = 2;\n";
+
 const BODY: &str = "    I(a, b) <+ g * V(a, b);\n";
 
 /// A folder of its own under the system's temporary directory, holding

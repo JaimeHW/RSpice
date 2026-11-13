@@ -1217,9 +1217,6 @@ mod wiring_acceptance;
 pub(crate) mod veriloga_design_tests;
 
 #[cfg(test)]
-mod veriloga_cell_source_tests;
-
-#[cfg(test)]
 mod accessible_mirror_tests;
 #[cfg(test)]
 mod pane_focus_tests;
@@ -1228,20 +1225,9 @@ mod pane_focus_tests;
 pub(crate) mod veriloga_interface_tests;
 
 #[cfg(test)]
-mod veriloga_symbol_tests;
-
-#[cfg(test)]
-mod veriloga_parameter_tests;
-
-#[cfg(test)]
-mod veriloga_placement_tests;
-
-#[cfg(test)]
 mod run_flow_tests;
 #[cfg(test)]
 pub(crate) mod veriloga_flow_tests;
-#[cfg(test)]
-mod veriloga_import_tests;
 
 #[cfg(test)]
 mod touch_flow_tests;

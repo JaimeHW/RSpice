@@ -2,13 +2,14 @@
 //! placed by role, a hand-drawn symbol kept through a recompile and Update
 //! symbol, and Open symbol taking the module to the symbol editor.
 
-use super::veriloga_design_tests::{
+use super::veriloga_interface::{add_module_cell, compile_and_publish, view};
+use crate::state::{CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
+use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, frame_with, open_in_design, open_project_app, themed_context,
 };
-use super::veriloga_interface_tests::{add_module_cell, compile_and_publish, edit_source, view};
-use super::*;
-use crate::state::{CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType};
-use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
+use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,

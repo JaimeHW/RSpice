@@ -4,15 +4,16 @@
 //! own poll, then read what the library, the property sheet, the design check
 //! and the deck say about an instance of the module.
 
-use super::veriloga_design_tests::{open_in_design, open_project_app};
-use super::veriloga_interface_tests::{
-    add_module_cell, compile_and_publish, configured_deck, edit_source,
-    ensure_veriloga_configuration, view,
+use super::veriloga_interface::{
+    add_module_cell, compile_and_publish, configured_deck, ensure_veriloga_configuration, view,
 };
-use super::*;
 use crate::state::{
     CellViewRef, Point, PropertySheet, PropertyType, PropertyValue, View, ViewType,
 };
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{open_in_design, open_project_app};
+use crate::workbench::app::veriloga_interface_tests::edit_source;
+use crate::workbench::app_state::AppState;
 use rspice_design::library::metadata::{
     CellParameter, ParameterDeclaration, ParameterRange, ParameterScope, ParameterValueType,
     VERILOGA_PARAMETER_CONTRACT_KEY, cell_parameter_contract,

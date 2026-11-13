@@ -4,13 +4,13 @@
 
 use std::collections::BTreeMap;
 
+use super::veriloga_design::wait_for_compile;
+use super::veriloga_interface::compile_and_publish;
 use crate::state::ProjectSourceRole;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
-    wait_for_compile,
 };
-use crate::workbench::app::veriloga_interface_tests::compile_and_publish;
 use crate::workbench::app::{VerilogABuildSettingsDraft, save_veriloga_build_settings};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;

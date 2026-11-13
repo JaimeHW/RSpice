@@ -7,7 +7,7 @@
 //! frame; the dialogs themselves never inspect each other.
 
 pub(in crate::workbench) mod check_and_save;
-pub(in crate::workbench) mod check_and_save_validation;
+pub(crate) mod check_and_save_validation;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;

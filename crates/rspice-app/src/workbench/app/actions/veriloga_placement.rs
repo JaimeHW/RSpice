@@ -13,7 +13,7 @@ use crate::workbench::app_state::{AppState, Model};
 /// Where `handoff`'s device is offered for placement: the schematic the form
 /// was opened from while its tab is open, else the design's top schematic.
 /// Never the device's own cell.
-pub(in crate::workbench) fn veriloga_placement_target(
+pub(crate) fn veriloga_placement_target(
     model: &Model,
     handoff: &VerilogAPlacementHandoff,
 ) -> Option<CellViewRef> {

@@ -17,7 +17,7 @@ use crate::workbench::state::Workspace;
 
 impl RSpiceApp {
     /// Create the import form's cells and open the first in Design.
-    pub(in crate::workbench) fn commit_veriloga_import(&mut self) -> Result<CellViewRef, String> {
+    pub(crate) fn commit_veriloga_import(&mut self) -> Result<CellViewRef, String> {
         let state = &mut self.state;
         let imported = veriloga_import::publish_veriloga_import(
             &mut state.model,
@@ -31,9 +31,7 @@ impl RSpiceApp {
     }
 
     /// Create the drafted device's cell and open its module in Design.
-    pub(in crate::workbench) fn commit_new_veriloga_device(
-        &mut self,
-    ) -> Result<CellViewRef, String> {
+    pub(crate) fn commit_new_veriloga_device(&mut self) -> Result<CellViewRef, String> {
         let state = &mut self.state;
         let created = new_veriloga_device::publish_new_veriloga_device(
             &mut state.model,

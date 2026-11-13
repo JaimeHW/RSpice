@@ -6,16 +6,17 @@
 //! deck that named it keeps resolving, File > Import makes cell views of its
 //! own, and a deck's reference to a module opens that module's tab.
 
-use super::veriloga_design_tests::{
-    DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
-};
-use super::*;
 use crate::io::ProjectSnapshot;
 use crate::state::{
     Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceDocument, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
     SymbolDocument, View, ViewType,
 };
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{
+    DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
+};
+use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace;
 use crate::workbench::state::Workspace;
 

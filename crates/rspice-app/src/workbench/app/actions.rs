@@ -23,8 +23,8 @@ pub(crate) use symbol::{
     duplicate_selected_symbol_shape, paste_symbol_shape, select_all_symbol_items,
     transform_selected_symbol_item, transform_selected_symbol_pin,
 };
-pub(in crate::workbench) mod veriloga_placement;
-pub(in crate::workbench) mod veriloga_symbol;
+pub(crate) mod veriloga_placement;
+pub(crate) mod veriloga_symbol;
 pub(in crate::workbench) mod workspace;
 
 use egui::{Context, Popup};
