@@ -42,7 +42,7 @@ pub(crate) use import_review::{
     NetlistImportReviewState,
 };
 pub(crate) use navigation::{open_diagnostic_location, open_source_location};
-pub(crate) use owned_source::{open_owned_source, open_owned_source_in};
+pub(crate) use owned_source::open_owned_source_in;
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
     commit_dependency_relink,
@@ -2322,7 +2322,7 @@ pub struct NetlistDocumentState {
         std::sync::Arc<[rspice_core::netlist::UnreadSourceRegion]>,
     )>,
     /// Outline and line offsets of the visible buffer. Read through
-    /// [`visible_source_index`], which is what keeps it current.
+    /// [`visible_source_index_in`], which is what keeps it current.
     source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
     /// The same for the project's top-level deck while the editor shows other
     /// text. Read through [`root_deck_source_index`].

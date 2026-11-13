@@ -173,7 +173,7 @@ fn header(ui: &mut Ui, project_name: &str) {
 }
 
 fn body(ui: &mut Ui, state: &mut AppState, action: &mut Option<NetlistFirstAction>) {
-    let index = root_deck_source_index(state);
+    let index = root_deck_source_index(&state.model, &mut state.code.netlist);
     let facts = deck_facts(state, &index);
 
     let available = ui.available_rect_before_wrap();
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn deck_facts_read_the_live_document_rather_than_placeholders() {
         let mut app = netlist_first_app();
-        let index = root_deck_source_index(&mut app.state);
+        let index = root_deck_source_index(&app.state.model, &mut app.state.code.netlist);
         let facts = deck_facts(&app.state, &index);
 
         assert!(facts.name.contains("front_end"), "name: {}", facts.name);
@@ -924,7 +924,7 @@ mod tests {
             text.contains("R1 in inn 4.7k"),
             "deck lines missing in:\n{text}"
         );
-        let index = root_deck_source_index(&mut app.state);
+        let index = root_deck_source_index(&app.state.model, &mut app.state.code.netlist);
         assert_eq!(deck_facts(&app.state, &index).lines, 13);
     }
 

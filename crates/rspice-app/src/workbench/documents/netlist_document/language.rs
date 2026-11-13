@@ -468,11 +468,9 @@ pub(super) struct CachedProjectIndex {
     pub(super) index: Arc<NetlistProjectIndex>,
 }
 
-pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIndex>> {
-    project_index_in(&state.model, &mut state.code.netlist)
-}
-
-/// [`project_index`], over the model and the netlist editor's state.
+/// The project index of the root the editor shows, cached in the netlist
+/// editor's state against the root document's revision. It reads the
+/// model.
 pub(crate) fn project_index_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -861,18 +859,9 @@ pub(crate) fn open_project_location_in(
     Ok(())
 }
 
-pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String, String> {
-    go_to_definition_at_cursor_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
-        &mut state.workbench,
-    )
-}
-
-/// [`go_to_definition_at_cursor`], over the model, the netlist editor's
-/// state, the include tabs the reader opened, the runs and the session.
+/// Go to the definition of the symbol at the caret, opening the source it
+/// is in, over the model, the netlist editor's state, the include tabs the
+/// reader opened, the runs and the session.
 pub(crate) fn go_to_definition_at_cursor_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -1099,12 +1088,8 @@ fn preferred_quick_fix(netlist: &NetlistDocumentState) -> Option<BoundQuickFix> 
         .find_map(BoundQuickFix::of)
 }
 
-pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
-    find_references_at_cursor_in(&state.model, &mut state.code.netlist, &mut state.workbench)
-}
-
-/// [`find_references_at_cursor`], over the model, the netlist editor's state
-/// and the session.
+/// List the references to the symbol at the caret in the navigator, over the
+/// model, the netlist editor's state and the session.
 pub(crate) fn find_references_at_cursor_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -1129,11 +1114,8 @@ pub(crate) fn find_references_at_cursor_in(
     })
 }
 
-pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String> {
-    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist)
-}
-
-/// [`begin_rename_at_cursor`], over the model and the netlist editor's state.
+/// Open the rename dialog for the symbol at the caret, over the model and the
+/// netlist editor's state.
 pub(crate) fn begin_rename_at_cursor_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -1195,8 +1177,8 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
     if original.eq_ignore_ascii_case(&replacement) {
         return Err("Enter a different model or subcircuit name.".to_owned());
     }
-    let index =
-        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
+    let index = project_index_in(&state.model, &mut state.code.netlist)
+        .ok_or_else(|| "The active source has no project index.".to_owned())?;
     if !index.definitions_named(&replacement).is_empty() {
         return Err(format!(
             "A definition named '{replacement}' already exists in the project's sources."

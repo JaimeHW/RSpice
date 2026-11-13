@@ -557,7 +557,12 @@ fn a_parameter_override_error_is_reported_on_its_own_line() {
     let mut state = parameter_override_state(base, authored);
 
     let revision = state.code.netlist.revision;
-    validate_visible_source(&mut state, revision);
+    validate_visible_source_in(
+        &state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        revision,
+    );
     let error = state
         .code
         .netlist
@@ -578,7 +583,12 @@ fn validated(deck: &str) -> AppState {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content = deck.to_owned();
     let revision = state.code.netlist.revision;
-    validate_visible_source(&mut state, revision);
+    validate_visible_source_in(
+        &state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        revision,
+    );
     state
 }
 
@@ -731,7 +741,12 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
     assert_eq!(hover_on(&mut state, deck, "{vth}", 1), None);
 
     let revision = state.code.netlist.revision;
-    validate_visible_source(&mut state, revision);
+    validate_visible_source_in(
+        &state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        revision,
+    );
     assert_eq!(
         hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
         Some("500m".to_owned()),

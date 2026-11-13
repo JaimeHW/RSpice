@@ -608,17 +608,6 @@ fn refresh_diagnostics(
     validate_visible_source_in(model, netlist, include_resolutions, revision);
 }
 
-/// [`validate_visible_source_in`] over the whole state.
-#[cfg(test)]
-fn validate_visible_source(state: &mut AppState, revision: u64) {
-    validate_visible_source_in(
-        &state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
-        revision,
-    );
-}
-
 /// Validate the visible source as it stands and publish the result, bound to
 /// `revision`, over the model, the netlist editor's state and where the
 /// page's includes resolved.

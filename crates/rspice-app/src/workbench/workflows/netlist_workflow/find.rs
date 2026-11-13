@@ -9,7 +9,7 @@ use crate::state::replace_source_ranges;
 use crate::workbench::MessageId;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, NetlistFindAction, NetlistFindStep, open_owned_source,
+    ActiveNetlistDocument, NetlistFindAction, NetlistFindStep, open_owned_source_in,
 };
 
 /// Carry out the find window's `step`: replace every match Replace all
@@ -75,7 +75,7 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                         );
                 }
                 ActiveNetlistDocument::OwnedSource => {
-                    let _ = open_owned_source(state);
+                    let _ = open_owned_source_in(&mut state.model, &mut state.code.netlist);
                 }
                 ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {}
             }
@@ -102,7 +102,7 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                 && target.active_document == ActiveNetlistDocument::OwnedSource
                 && state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
             {
-                let _ = open_owned_source(state);
+                let _ = open_owned_source_in(&mut state.model, &mut state.code.netlist);
             }
             if target.deck_id.is_none()
                 && let Some(identity) = target.dependency_identity.as_deref()

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::{AppState, Model, NetlistDocumentState};
+use super::{Model, NetlistDocumentState};
 use crate::state::NetlistSourceIndex;
 
 /// The outline and line offsets of the buffer the editor is showing.
@@ -13,12 +13,8 @@ use crate::state::NetlistSourceIndex;
 /// structure that did not change. The index is rebuilt only when the bytes
 /// differ from the ones it was built from: that comparison is a memcmp, and
 /// unlike a revision counter it cannot go stale behind a writer that forgets
-/// to bump it.
-pub(crate) fn visible_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
-    visible_source_index_in(&state.model, &mut state.code.netlist)
-}
-
-/// [`visible_source_index`], over the model and the netlist editor's state.
+/// to bump it. It reads the model and keeps the index in the netlist
+/// editor's state.
 pub(crate) fn visible_source_index_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -30,19 +26,22 @@ pub(crate) fn visible_source_index_in(
     Arc::clone(&netlist.source_index)
 }
 
-/// [`visible_source_index`] for the project's own top-level deck, whatever
+/// [`visible_source_index_in`] for the project's own top-level deck, whatever
 /// the editor shows. Until the Netlist workspace has been opened, a restored
 /// session or a reopened project has put nothing in the editor, and an
 /// include file the editor has open is not the deck.
-pub(crate) fn root_deck_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
-    let Some(deck) = state.model.workspace.content.netlist_source.as_deref() else {
-        return visible_source_index(state);
+pub(crate) fn root_deck_source_index(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Arc<NetlistSourceIndex> {
+    let Some(deck) = model.workspace.content.netlist_source.as_deref() else {
+        return visible_source_index_in(model, netlist);
     };
-    if state.code.netlist.source_index.describes(deck) {
-        return Arc::clone(&state.code.netlist.source_index);
+    if netlist.source_index.describes(deck) {
+        return Arc::clone(&netlist.source_index);
     }
-    if !state.code.netlist.root_deck_index.describes(deck) {
-        state.code.netlist.root_deck_index = Arc::new(NetlistSourceIndex::parse(deck));
+    if !netlist.root_deck_index.describes(deck) {
+        netlist.root_deck_index = Arc::new(NetlistSourceIndex::parse(deck));
     }
-    Arc::clone(&state.code.netlist.root_deck_index)
+    Arc::clone(&netlist.root_deck_index)
 }

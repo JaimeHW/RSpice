@@ -531,7 +531,7 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     state.model.simulation.source.netlist_content = root.to_owned();
     state.code.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
 
-    begin_rename_at_cursor(&mut state).unwrap();
+    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "amplifier".to_owned();
     assert_eq!(commit_rename(&mut state).unwrap(), 3);
 
@@ -584,7 +584,7 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     );
 
     state.code.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
-    begin_rename_at_cursor(&mut state).unwrap();
+    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "drive".to_owned();
     assert_eq!(commit_rename(&mut state).unwrap(), 4);
     let renamed = state
@@ -606,7 +606,7 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     .unwrap();
 
     state.code.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
-    begin_rename_at_cursor(&mut state).unwrap();
+    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "curve".to_owned();
     assert_eq!(commit_rename(&mut state).unwrap(), 2);
     let renamed = state

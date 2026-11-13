@@ -805,10 +805,20 @@ fn navigate_netlist(state: &mut AppState, command: CodeCommand) -> Result<(), St
     use crate::workbench::documents::netlist_document::language as netlist;
 
     let message = match command {
-        CodeCommand::GoToDefinition => Some(netlist::go_to_definition_at_cursor(state)?),
-        CodeCommand::FindReferences => Some(netlist::find_references_at_cursor(state)?),
+        CodeCommand::GoToDefinition => Some(netlist::go_to_definition_at_cursor_in(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.runs,
+            &mut state.workbench,
+        )?),
+        CodeCommand::FindReferences => Some(netlist::find_references_at_cursor_in(
+            &state.model,
+            &mut state.code.netlist,
+            &mut state.workbench,
+        )?),
         CodeCommand::RenameSymbol => {
-            netlist::begin_rename_at_cursor(state)?;
+            netlist::begin_rename_at_cursor_in(&state.model, &mut state.code.netlist)?;
             None
         }
         _ => None,

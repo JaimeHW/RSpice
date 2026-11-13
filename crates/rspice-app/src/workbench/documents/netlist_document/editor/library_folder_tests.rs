@@ -41,7 +41,12 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.model.simulation.source.netlist_content = source.to_owned();
     let revision = state.code.netlist.revision;
-    validate_visible_source(&mut state, revision);
+    validate_visible_source_in(
+        &state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        revision,
+    );
     assert!(
         !errors(&state).is_empty(),
         "nothing the deck is searched from holds device.inc"

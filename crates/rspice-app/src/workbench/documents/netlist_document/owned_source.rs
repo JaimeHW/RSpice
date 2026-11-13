@@ -5,17 +5,13 @@
 
 // Through the parent rather than `crate::workbench`, the same route
 // `comparison` takes.
-use super::{ActiveNetlistDocument, AppState, Model, NetlistDocumentState};
+use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::NetlistDocumentId;
 
 /// Open (or explicitly create) the project-owned source derived from the
 /// immutable generated primary. Existing owned bytes are never overwritten.
-pub(crate) fn open_owned_source(state: &mut AppState) -> bool {
-    open_owned_source_in(&mut state.model, &mut state.code.netlist)
-}
-
-/// [`open_owned_source`], over the model and the netlist editor's state.
+/// It works over the model and the netlist editor's state.
 pub(crate) fn open_owned_source_in(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if model.workspace.content.netlist_source.is_none() {
         return false;

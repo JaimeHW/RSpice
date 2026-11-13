@@ -1408,7 +1408,12 @@ mod tests {
         retain_generated(&mut state, "new generated\n.end\n");
         state.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
-        assert!(crate::workbench::documents::netlist_document::open_owned_source(&mut state));
+        assert!(
+            crate::workbench::documents::netlist_document::open_owned_source_in(
+                &mut state.model,
+                &mut state.code.netlist
+            )
+        );
         assert_eq!(
             state.model.simulation.source.netlist_content,
             "retained owned\n.end\n"
