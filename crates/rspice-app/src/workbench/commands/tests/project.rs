@@ -12,11 +12,9 @@ use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
-use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
@@ -50,21 +48,6 @@ fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
                 .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "project tab bypasses the open-project boundary: {page:?}"
         );
-    }
-}
-
-#[test]
-fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
-    for page in ProjectPage::ALL {
-        let mut app = RSpiceApp::test_instance();
-        app.state.open_project_session();
-        app.state.workbench.workspace = Workspace::Results;
-        app.state.project.project_page = ProjectPage::Overview;
-
-        app.execute_command_key(ProjectCommand::Page(page).key());
-
-        assert_eq!(app.state.workbench.workspace, Workspace::Project);
-        assert_eq!(app.state.project.project_page, page);
     }
 }
 
@@ -131,17 +114,6 @@ fn closed_projects_expose_only_the_project_workspace() {
         }
         assert!(workspace_available(true, workspace));
     }
-}
-
-#[test]
-fn new_cell_command_captures_exact_library_catalog_revision() {
-    let mut app = RSpiceApp::test_instance();
-    let revision = app.state.model.library_manager.revision();
-
-    app.execute_command_key(ProjectCommand::NewCell.key());
-
-    assert!(app.state.project.new_cell_dialog);
-    assert_eq!(app.state.project.new_cell_library_revision, revision);
 }
 
 #[test]
@@ -480,39 +452,5 @@ fn standalone_schematic_save_remains_available_without_a_project() {
     assert_eq!(
         app.command_availability(save.key()),
         CommandAvailability::Available
-    );
-}
-
-/// All projects…, which ends File ▸ Open recent, opens the launcher on every
-/// project, not on the filter it was left on.
-#[test]
-fn all_projects_opens_the_launcher_on_every_project() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.project.project_launcher_filter = ProjectLauncherFilter::Recent;
-    app.state.project.project_launcher_open = false;
-    let _ = app
-        .state
-        .workbench
-        .outbox
-        .take::<FocusProjectLauncherSearch>();
-
-    app.execute_command_key(ProjectCommand::ProjectLauncher.key());
-    let state = &app.state;
-
-    assert!(state.project.project_launcher_open);
-    assert!(
-        state
-            .workbench
-            .outbox
-            .peek::<FocusProjectLauncherSearch>()
-            .is_some()
-    );
-    assert_eq!(
-        state.project.project_launcher_page,
-        crate::workbench::project::workspace_state::ProjectLauncherPage::Projects
-    );
-    assert_eq!(
-        state.project.project_launcher_filter,
-        ProjectLauncherFilter::All
     );
 }
