@@ -1622,7 +1622,7 @@ mod tests {
         );
 
         assert!(
-            !state.can_run_simulation(),
+            state.simulation_run_block_reason().is_some(),
             "current error-level DRC results must block schematic simulation"
         );
     }
@@ -1748,7 +1748,7 @@ mod tests {
             None,
             "a typical plan runs without an attached project technology"
         );
-        assert!(state.can_run_simulation());
+        assert!(state.simulation_run_block_reason().is_none());
 
         state
             .model
@@ -1764,7 +1764,7 @@ mod tests {
             "{reason}"
         );
         assert!(reason.contains("SS"), "{reason}");
-        assert!(!state.can_run_simulation());
+        assert!(state.simulation_run_block_reason().is_some());
     }
 
     #[test]
@@ -1787,7 +1787,7 @@ mod tests {
             reason.contains("predates checkpoint-backed authority receipts"),
             "{reason}"
         );
-        assert!(!state.can_run_simulation());
+        assert!(state.simulation_run_block_reason().is_some());
     }
 
     #[test]
@@ -1831,7 +1831,7 @@ mod tests {
         );
 
         assert!(
-            !state.can_run_simulation(),
+            state.simulation_run_block_reason().is_some(),
             "schematic Simulate must still be blocked by current schematic DRC"
         );
         let manual_reason = state

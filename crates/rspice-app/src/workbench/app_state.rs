@@ -191,13 +191,6 @@ impl AppState {
         crate::workbench::framework::dialogs::application_modal_open(self)
     }
 
-    /// Whether static authored state permits a run. Interactive Run commands
-    /// intentionally remain available while this is false so the complete
-    /// preflight can explain every blocker and offer its remediation route.
-    pub fn can_run_simulation(&self) -> bool {
-        self.simulation_run_block_reason().is_none()
-    }
-
     /// [`run_preflight::simulation_run_block_reason`] for the session's model.
     pub fn simulation_run_block_reason(&self) -> Option<String> {
         run_preflight::simulation_run_block_reason(&self.model, self.slot_facts())

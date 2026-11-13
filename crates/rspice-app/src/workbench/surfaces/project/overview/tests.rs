@@ -241,7 +241,7 @@ fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
 
     // Simulate's run preflight reads the schematic a netlist-first project
     // leaves pristine, so routing there would strand the reader.
-    assert!(!app.state.can_run_simulation());
+    assert!(app.state.simulation_run_block_reason().is_some());
     raise(&mut app, latest_run.intent.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
 }
