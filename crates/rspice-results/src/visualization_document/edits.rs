@@ -196,6 +196,16 @@ pub enum DocumentEdit {
         expression: String,
         value: f64,
     },
+    /// A measurement evaluated once per member of the family the pane
+    /// shows; `value` is the statistic `family` names.
+    AddFamilyMeasurement {
+        pane_id: PaneId,
+        trace_ids: Vec<TraceId>,
+        #[serde(deserialize_with = "deserialize_source_text_string")]
+        expression: String,
+        value: f64,
+        family: FamilyMeasurementSummary,
+    },
     AddAnnotation {
         pane_id: PaneId,
         anchor: AnnotationAnchor,

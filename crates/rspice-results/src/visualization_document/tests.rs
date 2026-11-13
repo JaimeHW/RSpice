@@ -871,6 +871,7 @@ fn nested_sequences_and_source_strings_are_bounded_during_deserialization() {
         label: "Point".to_owned(),
         expression: None,
         value: None,
+        family: None,
     };
     let mut measurement_json = serde_json::to_value(measurement).unwrap();
     let trace = measurement_json["trace_ids"][0].clone();
@@ -963,6 +964,7 @@ fn document_aggregate_nested_resource_budgets_accept_boundaries_and_reject_overf
         label: "Aggregate boundary".to_owned(),
         expression: None,
         value: None,
+        family: None,
     };
     let mut encoded = serde_json::to_value(document().0).unwrap();
     encoded["measurements"] = serde_json::to_value(vec![measurement; 5]).unwrap();
@@ -2025,4 +2027,162 @@ fn schema_v1_documents_migrate_page_and_pane_composition_deterministically() {
             anchor_pane_id: migrated.panes()[0].id,
         }
     );
+}
+
+/// One pane with one `V(out)` trace, ready to keep a measurement on.
+fn document_with_trace() -> (VisualizationDocument, PaneId, TraceId) {
+    let (mut document, source) = document();
+    let pane = document.panes()[0].id;
+    let axes = document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id: pane,
+                    label: "Time".to_owned(),
+                    orientation: AxisOrientation::Horizontal,
+                    scale: AxisScale::Linear,
+                    unit: Some("s".to_owned()),
+                    range: None,
+                }),
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id: pane,
+                    label: "Voltage".to_owned(),
+                    orientation: AxisOrientation::VerticalLeft,
+                    scale: AxisScale::Linear,
+                    unit: Some("V".to_owned()),
+                    range: None,
+                }),
+            ],
+        )
+        .unwrap();
+    let [EntityRef::Axis(x_axis), EntityRef::Axis(y_axis)] = axes.created[..] else {
+        unreachable!()
+    };
+    let trace = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddTrace(NewTrace {
+                pane_id: pane,
+                binding: source,
+                signal_key: "v(out)".to_owned(),
+                coordinate_key: "time".to_owned(),
+                row_predicates: Vec::new(),
+                x_axis_id: x_axis,
+                y_axis_id: y_axis,
+                label: "V(out)".to_owned(),
+            })],
+        )
+        .unwrap();
+    let EntityRef::Trace(trace) = trace.created[0] else {
+        unreachable!()
+    };
+    (document, pane, trace)
+}
+
+/// Five members measuring 1..5, judged against [1.5, 4.5].
+fn family_summary(statistic: FamilyStatistic) -> FamilyMeasurementSummary {
+    FamilyMeasurementSummary {
+        statistic,
+        members: 5,
+        measured: 5,
+        mean: 3.0,
+        std_dev: Some(2.5_f64.sqrt()),
+        min: 1.0,
+        max: 5.0,
+        lower: Some(1.5),
+        upper: Some(4.5),
+        passed: Some(3),
+        failing: vec!["Trial 0".to_owned(), "Trial 4".to_owned()],
+    }
+}
+
+#[test]
+fn a_family_measurement_keeps_its_distribution_and_reads_back() {
+    let (mut document, pane, trace) = document_with_trace();
+    let summary = family_summary(FamilyStatistic::Yield);
+    assert_eq!(summary.statistic_value(), Some(60.0));
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddFamilyMeasurement {
+                pane_id: pane,
+                trace_ids: vec![trace],
+                expression: "avg(V(out))".to_owned(),
+                value: 60.0,
+                family: summary.clone(),
+            }],
+        )
+        .unwrap();
+    let kept = &document.measurements()[0];
+    assert_eq!(
+        (kept.value, kept.family.as_ref()),
+        (Some(60.0), Some(&summary))
+    );
+
+    let encoded = serde_json::to_value(&document).unwrap();
+    assert_eq!(encoded["schema_version"], serde_json::json!(12));
+    let decoded: VisualizationDocument = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(decoded.measurements()[0].family.as_ref(), Some(&summary));
+
+    // A schema-11 document is one whose measurements were single evaluations.
+    let mut older = encoded;
+    older["schema_version"] = serde_json::json!(11);
+    older["measurements"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("family");
+    let read: VisualizationDocument = serde_json::from_value(older).unwrap();
+    assert_eq!(read.measurements()[0].family, None);
+}
+
+#[test]
+fn a_family_measurement_value_is_the_statistic_it_names() {
+    let (mut document, pane, trace) = document_with_trace();
+    let add = |value: f64, family: FamilyMeasurementSummary| DocumentEdit::AddFamilyMeasurement {
+        pane_id: pane,
+        trace_ids: vec![trace],
+        expression: "avg(V(out))".to_owned(),
+        value,
+        family,
+    };
+    let revision = document.revision();
+    // The mean is 3, not 60.
+    assert!(
+        document
+            .transact(
+                revision,
+                vec![add(60.0, family_summary(FamilyStatistic::Mean))]
+            )
+            .is_err()
+    );
+    // A yield needs a limit, and names every failing member.
+    let mut unlimited = family_summary(FamilyStatistic::Mean);
+    unlimited.lower = None;
+    unlimited.upper = None;
+    assert!(
+        document
+            .transact(revision, vec![add(3.0, unlimited)])
+            .is_err()
+    );
+    let mut unnamed = family_summary(FamilyStatistic::Mean);
+    unnamed.failing.pop();
+    assert!(
+        document
+            .transact(revision, vec![add(3.0, unnamed)])
+            .is_err()
+    );
+    // One measured member has no standard deviation.
+    let mut sigma = family_summary(FamilyStatistic::Mean);
+    sigma.measured = 1;
+    assert!(document.transact(revision, vec![add(3.0, sigma)]).is_err());
+
+    let mut unjudged = family_summary(FamilyStatistic::StdDev);
+    unjudged.lower = None;
+    unjudged.upper = None;
+    unjudged.passed = None;
+    unjudged.failing.clear();
+    document
+        .transact(revision, vec![add(2.5_f64.sqrt(), unjudged)])
+        .unwrap();
 }

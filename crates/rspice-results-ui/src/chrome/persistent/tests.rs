@@ -55,15 +55,58 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
 #[test]
 fn a_measurement_reads_in_engineering_notation_at_the_document_digits() {
     assert_eq!(
-        measurement_text("rms(V(out))", Some(12.345_678), 7),
+        measurement_text("rms(V(out))", Some((12.345_678, None)), 7),
         "rms(V(out)) = 12.34568"
     );
     assert_eq!(
-        measurement_text("max(V(out))", Some(1.234_567_8e-6), 4),
+        measurement_text("max(V(out))", Some((1.234_567_8e-6, None)), 4),
         "max(V(out)) = 1.235 µ"
     );
     assert_eq!(
         measurement_text("Measurement 3", None, 7),
         "Measurement 3 = unevaluated"
     );
+}
+
+/// A family measurement leads with the statistic it keeps and follows with
+/// the whole distribution, the yield against its limits and who failed.
+#[test]
+fn a_family_measurement_reads_its_distribution_and_yield() {
+    use rspice_results::visualization_document::{FamilyMeasurementSummary, FamilyStatistic};
+    let mut family = FamilyMeasurementSummary {
+        statistic: FamilyStatistic::Yield,
+        members: 6,
+        measured: 5,
+        mean: 3.0,
+        std_dev: Some(2.5_f64.sqrt()),
+        min: 1.0,
+        max: 5.0,
+        lower: Some(1.5),
+        upper: Some(4.5),
+        passed: Some(3),
+        failing: vec![
+            "Trial 0".to_owned(),
+            "Trial 4".to_owned(),
+            "Trial 5".to_owned(),
+        ],
+    };
+    assert_eq!(
+        measurement_text(
+            "avg(V(out)) yield",
+            Some((50.0, Some(FamilyStatistic::Yield))),
+            4
+        ),
+        "avg(V(out)) yield = 50 %"
+    );
+    assert_eq!(
+        family_text(&family, 3),
+        "n 5 of 6 \u{b7} mean 3.00 \u{b7} \u{3c3} 1.58 \u{b7} min 1.00 \u{b7} max 5.00 \u{b7} \
+         yield 3/6 (50 %) [1.50, 4.50] \u{b7} fails Trial 0, Trial 4, Trial 5"
+    );
+    family.lower = None;
+    family.failing = (0..6).map(|index| format!("Trial {index}")).collect();
+    family.passed = Some(0);
+    assert!(family_text(&family, 3).ends_with(
+        "yield 0/6 (0 %) \u{2264} 4.50 \u{b7} fails Trial 0, Trial 1, Trial 2, Trial 3 +2"
+    ));
 }

@@ -470,6 +470,56 @@ impl VisualizationDocument {
         Ok(())
     }
 
+    /// Keep one authored measurement: a single evaluation, or the
+    /// distribution of one evaluated on every member of a family.
+    fn add_scalar_measurement(
+        &mut self,
+        pane_id: PaneId,
+        trace_ids: Vec<TraceId>,
+        expression: String,
+        value: f64,
+        family: Option<FamilyMeasurementSummary>,
+        created: &mut Vec<EntityRef>,
+    ) -> Result<(), VisualizationError> {
+        if expression.trim().is_empty()
+            || expression.len() > MAX_SOURCE_TEXT_BYTES
+            || expression.chars().any(char::is_control)
+            || !value.is_finite()
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "measurement.expression",
+                message: format!(
+                    "a scalar measurement requires a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
+                ),
+            });
+        }
+        if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
+            return Err(VisualizationError::InvalidValue {
+                field: "measurement.traces",
+                message: format!("a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"),
+            });
+        }
+        for trace_id in &trace_ids {
+            self.require_trace_in_pane(*trace_id, pane_id)?;
+        }
+        if let Some(family) = &family {
+            family.validate(Some(value))?;
+        }
+        let id = MeasurementId::allocate(self.allocate_serial()?)?;
+        self.measurements.push(Measurement {
+            id,
+            pane_id,
+            trace_ids,
+            kind: MeasurementKind::Point,
+            label: format!("Measurement {}", id.get()),
+            expression: Some(expression),
+            value: Some(value),
+            family,
+        });
+        created.push(EntityRef::Measurement(id));
+        Ok(())
+    }
+
     pub(super) fn apply_edit(
         &mut self,
         edit: DocumentEdit,
@@ -853,6 +903,7 @@ impl VisualizationDocument {
                     label,
                     expression: None,
                     value: None,
+                    family: None,
                 });
                 created.push(EntityRef::Measurement(id));
                 Ok(())
@@ -966,43 +1017,21 @@ impl VisualizationDocument {
                 trace_ids,
                 expression,
                 value,
-            } => {
-                if expression.trim().is_empty()
-                    || expression.len() > MAX_SOURCE_TEXT_BYTES
-                    || expression.chars().any(char::is_control)
-                    || !value.is_finite()
-                {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "measurement.expression",
-                        message: format!(
-                            "a scalar measurement requires a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
-                        ),
-                    });
-                }
-                if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "measurement.traces",
-                        message: format!(
-                            "a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"
-                        ),
-                    });
-                }
-                for trace_id in &trace_ids {
-                    self.require_trace_in_pane(*trace_id, pane_id)?;
-                }
-                let id = MeasurementId::allocate(self.allocate_serial()?)?;
-                self.measurements.push(Measurement {
-                    id,
-                    pane_id,
-                    trace_ids,
-                    kind: MeasurementKind::Point,
-                    label: format!("Measurement {}", id.get()),
-                    expression: Some(expression),
-                    value: Some(value),
-                });
-                created.push(EntityRef::Measurement(id));
-                Ok(())
-            }
+            } => self.add_scalar_measurement(pane_id, trace_ids, expression, value, None, created),
+            DocumentEdit::AddFamilyMeasurement {
+                pane_id,
+                trace_ids,
+                expression,
+                value,
+                family,
+            } => self.add_scalar_measurement(
+                pane_id,
+                trace_ids,
+                expression,
+                value,
+                Some(family),
+                created,
+            ),
             DocumentEdit::SetMarker {
                 marker_id,
                 coordinate,
@@ -1869,6 +1898,9 @@ impl VisualizationDocument {
                         ),
                     });
                 }
+            }
+            if let Some(family) = &measurement.family {
+                family.validate(measurement.value)?;
             }
             if measurement.trace_ids.is_empty()
                 || measurement.trace_ids.len() > MAX_ENTITY_REFERENCES

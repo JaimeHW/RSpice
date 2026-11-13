@@ -1792,6 +1792,149 @@ pub struct Measurement {
     /// Exact finite result evaluated when the measurement was committed.
     #[serde(default)]
     pub value: Option<f64>,
+    /// The distribution of the expression over the family the pane shows,
+    /// when it was evaluated once per member; `value` is then the statistic
+    /// it names. Absent before schema 12, when every measurement was one
+    /// evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family: Option<FamilyMeasurementSummary>,
+}
+
+/// Which statistic of a family measurement its value reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FamilyStatistic {
+    Mean,
+    /// The sample standard deviation, divided by n − 1.
+    StdDev,
+    Min,
+    Max,
+    /// The passing share of the members, in percent.
+    Yield,
+}
+
+impl FamilyStatistic {
+    pub const ALL: [FamilyStatistic; 5] = [
+        FamilyStatistic::Mean,
+        FamilyStatistic::StdDev,
+        FamilyStatistic::Min,
+        FamilyStatistic::Max,
+        FamilyStatistic::Yield,
+    ];
+
+    /// The statistic as a measurement states it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            FamilyStatistic::Mean => "mean",
+            FamilyStatistic::StdDev => "\u{3c3}",
+            FamilyStatistic::Min => "min",
+            FamilyStatistic::Max => "max",
+            FamilyStatistic::Yield => "yield",
+        }
+    }
+}
+
+/// A measurement evaluated once per member of a family, kept as the
+/// distribution its members' values formed when it was committed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FamilyMeasurementSummary {
+    pub statistic: FamilyStatistic,
+    /// Every member the expression was evaluated on.
+    pub members: u32,
+    /// Members with a finite value; the rest could not be measured.
+    pub measured: u32,
+    pub mean: f64,
+    /// Absent below two measured members, where it is not defined.
+    pub std_dev: Option<f64>,
+    pub min: f64,
+    pub max: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lower: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper: Option<f64>,
+    /// Members inside the limits, present exactly when a limit is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passed: Option<u32>,
+    /// The failing members by name, in family order. An unmeasured member
+    /// fails.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failing: Vec<String>,
+}
+
+impl FamilyMeasurementSummary {
+    /// The passing share in percent, when the summary was judged.
+    #[must_use]
+    pub fn yield_percent(&self) -> Option<f64> {
+        self.passed
+            .map(|passed| 100.0 * f64::from(passed) / f64::from(self.members.max(1)))
+    }
+
+    /// The number the measurement's value holds.
+    #[must_use]
+    pub fn statistic_value(&self) -> Option<f64> {
+        match self.statistic {
+            FamilyStatistic::Mean => Some(self.mean),
+            FamilyStatistic::StdDev => self.std_dev,
+            FamilyStatistic::Min => Some(self.min),
+            FamilyStatistic::Max => Some(self.max),
+            FamilyStatistic::Yield => self.yield_percent(),
+        }
+    }
+
+    fn validate(&self, value: Option<f64>) -> Result<(), VisualizationError> {
+        let invalid = |message: &str| VisualizationError::InvalidValue {
+            field: "measurement.family",
+            message: message.to_owned(),
+        };
+        if self.measured == 0 || self.measured > self.members {
+            return Err(invalid(
+                "a family measurement measures 1 to all of its members",
+            ));
+        }
+        let finite = [self.mean, self.min, self.max]
+            .into_iter()
+            .chain(self.std_dev)
+            .chain(self.lower)
+            .chain(self.upper)
+            .all(f64::is_finite);
+        if !finite
+            || self.min > self.max
+            || self.std_dev.is_some_and(|sigma| sigma < 0.0)
+            || self.std_dev.is_some() != (self.measured >= 2)
+        {
+            return Err(invalid(
+                "a family measurement's statistics are inconsistent",
+            ));
+        }
+        let limited = self.lower.is_some() || self.upper.is_some();
+        let consistent_limits = match (self.lower, self.upper, self.passed) {
+            (Some(lower), Some(upper), _) if lower > upper => false,
+            (_, _, Some(passed)) => {
+                limited
+                    && passed <= self.members
+                    && self.failing.len() == (self.members - passed) as usize
+            }
+            (_, _, None) => !limited && self.failing.is_empty(),
+        };
+        if !consistent_limits {
+            return Err(invalid(
+                "a family measurement's yield needs its limits, and lists each failing member",
+            ));
+        }
+        for label in &self.failing {
+            validate_label("measurement.family.failing", label)?;
+        }
+        if value
+            .is_none_or(|value| Some(value.to_bits()) != self.statistic_value().map(f64::to_bits))
+        {
+            return Err(invalid(
+                "a family measurement's value is the statistic it names",
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn deserialize_trace_row_predicates<'de, D>(
@@ -2250,7 +2393,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
-            7..=10 => document.schema_version = Self::SCHEMA_VERSION,
+            7..=11 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -2264,6 +2407,12 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
+    /// Schema 12 keeps a measurement evaluated once per member of a family
+    /// with the distribution its members formed: statistic, count, mean,
+    /// sample standard deviation, minimum, maximum, and a yield against its
+    /// limits with the failing members named. A schema-11 document reads as
+    /// one whose measurements were each one evaluation, which they were.
+    ///
     /// Schema 11 lets a dataset reference its retained run by identity and
     /// content digest instead of holding a copy of every sample, and lets a
     /// document embed that run's record when it is archived. A schema-10
@@ -2288,7 +2437,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 11;
+    pub const SCHEMA_VERSION: u16 = 12;
 
     pub fn new(
         title: impl Into<String>,

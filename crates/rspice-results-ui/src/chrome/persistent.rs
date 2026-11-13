@@ -2,7 +2,9 @@
 
 use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, pos2, vec2};
 use rspice_results::number_format::fmt_si_significant;
-use rspice_results::visualization_document::{Annotation, Measurement, PageLayout, PaneId};
+use rspice_results::visualization_document::{
+    Annotation, FamilyMeasurementSummary, FamilyStatistic, Measurement, PageLayout, PaneId,
+};
 use rspice_ui_kit::{
     panels::painted_label,
     theme::{self, FontWeight},
@@ -164,15 +166,28 @@ pub fn evidence_bar(
                                 .expression
                                 .as_deref()
                                 .unwrap_or(&measurement.label);
+                            let name = measurement.family.as_ref().map_or_else(
+                                || name.to_owned(),
+                                |family| format!("{name} {}", family.statistic.label()),
+                            );
                             ui.label(
                                 RichText::new(measurement_text(
-                                    name,
-                                    measurement.value,
+                                    &name,
+                                    measurement.value.map(|value| {
+                                        (value, measurement.family.as_ref().map(|f| f.statistic))
+                                    }),
                                     significant_digits,
                                 ))
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                                 .color(t.color.text),
                             );
+                            if let Some(family) = &measurement.family {
+                                ui.label(
+                                    RichText::new(family_text(family, significant_digits))
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_dim),
+                                );
+                            }
                         }
                         for annotation in annotations {
                             ui.label(
@@ -188,12 +203,75 @@ pub fn evidence_bar(
 
 /// One measurement as the evidence bar states it: what was measured, by the
 /// expression the reader wrote, and its value in engineering notation.
-fn measurement_text(name: &str, value: Option<f64>, significant_digits: usize) -> String {
+///
+/// A family measurement's value is the statistic it names; a yield is a
+/// percentage.
+fn measurement_text(
+    name: &str,
+    value: Option<(f64, Option<FamilyStatistic>)>,
+    significant_digits: usize,
+) -> String {
     let value = value.map_or_else(
         || "unevaluated".to_owned(),
-        |value| fmt_si_significant(value, "", significant_digits),
+        |(value, statistic)| match statistic {
+            Some(FamilyStatistic::Yield) => percent(value),
+            _ => fmt_si_significant(value, "", significant_digits),
+        },
     );
     format!("{name} = {value}")
+}
+
+/// The most failing members a family measurement names before it counts
+/// the rest.
+const NAMED_FAILURES: usize = 4;
+
+/// What a family measurement's members added up to, after its value: how
+/// many were measured, the distribution, and the yield against its limits
+/// with the members that failed.
+fn family_text(family: &FamilyMeasurementSummary, significant_digits: usize) -> String {
+    let si = |value: f64| fmt_si_significant(value, "", significant_digits);
+    let mut parts = vec![if family.measured == family.members {
+        format!("n {}", family.members)
+    } else {
+        format!("n {} of {}", family.measured, family.members)
+    }];
+    parts.push(format!("mean {}", si(family.mean)));
+    parts.push(format!(
+        "\u{3c3} {}",
+        family.std_dev.map_or_else(|| "\u{2014}".to_owned(), si)
+    ));
+    parts.push(format!("min {}", si(family.min)));
+    parts.push(format!("max {}", si(family.max)));
+    if let (Some(passed), Some(share)) = (family.passed, family.yield_percent()) {
+        let limits = match (family.lower, family.upper) {
+            (Some(lower), Some(upper)) => format!("[{}, {}]", si(lower), si(upper)),
+            (Some(lower), None) => format!("\u{2265} {}", si(lower)),
+            (None, Some(upper)) => format!("\u{2264} {}", si(upper)),
+            (None, None) => String::new(),
+        };
+        parts.push(format!(
+            "yield {passed}/{} ({}) {limits}",
+            family.members,
+            percent(share)
+        ));
+        if !family.failing.is_empty() {
+            let mut named = family.failing[..family.failing.len().min(NAMED_FAILURES)].join(", ");
+            if family.failing.len() > NAMED_FAILURES {
+                named.push_str(&format!(" +{}", family.failing.len() - NAMED_FAILURES));
+            }
+            parts.push(format!("fails {named}"));
+        }
+    }
+    parts.join(" \u{b7} ")
+}
+
+/// A share in percent, to one decimal unless it is whole.
+fn percent(share: f64) -> String {
+    if share.fract() == 0.0 {
+        format!("{share:.0} %")
+    } else {
+        format!("{share:.1} %")
+    }
 }
 
 /// Retained entity counts shown in the pane header's detail.
