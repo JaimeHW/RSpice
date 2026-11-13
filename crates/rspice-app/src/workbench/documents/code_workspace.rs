@@ -119,6 +119,76 @@ pub(in crate::workbench) use veriloga_library::{
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
+/// Compile the project's Automation workspace as a new session opens it,
+/// and keep its manifest and worker snapshot.
+pub(crate) fn bootstrap_automation(
+    workspace: &crate::state::ProjectWorkspace,
+    code_workspace: &mut CodeWorkspaceRuntimeState,
+) {
+    let mut automation = None;
+    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
+        &crate::state::ProjectSourceOwner::code_workspace(
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+        ),
+    ) {
+        let mut documents = vec![crate::automation_workflow::AutomationSourceDocument {
+            path: bundle.root().logical_path(),
+            source: bundle.root().content(),
+        }];
+        documents.extend(bundle.files().iter().map(|file| {
+            crate::automation_workflow::AutomationSourceDocument {
+                path: file.logical_path(),
+                source: file.content(),
+            }
+        }));
+        let roles = bundle
+            .roles()
+            .iter()
+            .filter_map(|binding| {
+                let role = match binding.role() {
+                    crate::state::ProjectSourceRole::VerilogABuildProfile
+                    | crate::state::ProjectSourceRole::AutomationEntry => return None,
+                    crate::state::ProjectSourceRole::AutomationRunPlan => {
+                        crate::automation_workflow::AutomationSourceRole::RunPlan
+                    }
+                    crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
+                        crate::automation_workflow::AutomationSourceRole::EnvironmentLock
+                    }
+                    crate::state::ProjectSourceRole::AutomationPermissionManifest => {
+                        crate::automation_workflow::AutomationSourceRole::PermissionManifest
+                    }
+                };
+                Some(crate::automation_workflow::AutomationRoleBinding {
+                    path: binding.logical_path(),
+                    role,
+                })
+            })
+            .collect::<Vec<_>>();
+        let (_plan, manifest) = crate::automation_workflow::compile_automation_documents(
+            bundle.root().logical_path(),
+            &documents,
+            &roles,
+        )
+        .expect("the canonical bootstrapped Automation workspace must compile");
+        let runtime_snapshot = crate::automation_workflow::build_automation_runtime_snapshot(
+            workspace.content.project.id(),
+            bundle,
+            &manifest,
+            Vec::new(),
+        )
+        .expect("the canonical bootstrapped Automation worker snapshot must be valid");
+        automation = Some((manifest, runtime_snapshot));
+        // Static compilation prepares editor metadata and the immutable worker
+        // snapshot, but it cannot authorize Python execution. The managed
+        // runtime creates the validation receipt after authoritative CPython
+        // compilation.
+    }
+    if let Some((manifest, runtime_snapshot)) = automation {
+        code_workspace.automation.manifest = Some(manifest);
+        code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
+    }
+}
+
 /// The cell view whose Verilog-A source a deck's `.veriloga` locator names.
 ///
 /// A deck reaches a module through the key its bundle derives, so the key is

@@ -109,71 +109,12 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         pdk_load_error,
         restore_session_model_library_manager,
     );
-    let workspace = &model.workspace;
     let snap_grid_size = model
         .schematic
         .document()
         .document_policy
         .grid_pitch
         .canvas_grid_size();
-    let mut automation = None;
-    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
-        &crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-        ),
-    ) {
-        let mut documents = vec![crate::automation_workflow::AutomationSourceDocument {
-            path: bundle.root().logical_path(),
-            source: bundle.root().content(),
-        }];
-        documents.extend(bundle.files().iter().map(|file| {
-            crate::automation_workflow::AutomationSourceDocument {
-                path: file.logical_path(),
-                source: file.content(),
-            }
-        }));
-        let roles = bundle
-            .roles()
-            .iter()
-            .filter_map(|binding| {
-                let role = match binding.role() {
-                    crate::state::ProjectSourceRole::VerilogABuildProfile
-                    | crate::state::ProjectSourceRole::AutomationEntry => return None,
-                    crate::state::ProjectSourceRole::AutomationRunPlan => {
-                        crate::automation_workflow::AutomationSourceRole::RunPlan
-                    }
-                    crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
-                        crate::automation_workflow::AutomationSourceRole::EnvironmentLock
-                    }
-                    crate::state::ProjectSourceRole::AutomationPermissionManifest => {
-                        crate::automation_workflow::AutomationSourceRole::PermissionManifest
-                    }
-                };
-                Some(crate::automation_workflow::AutomationRoleBinding {
-                    path: binding.logical_path(),
-                    role,
-                })
-            })
-            .collect::<Vec<_>>();
-        let (_plan, manifest) = crate::automation_workflow::compile_automation_documents(
-            bundle.root().logical_path(),
-            &documents,
-            &roles,
-        )
-        .expect("the canonical bootstrapped Automation workspace must compile");
-        let runtime_snapshot = crate::automation_workflow::build_automation_runtime_snapshot(
-            workspace.content.project.id(),
-            bundle,
-            &manifest,
-            Vec::new(),
-        )
-        .expect("the canonical bootstrapped Automation worker snapshot must be valid");
-        automation = Some((manifest, runtime_snapshot));
-        // Static compilation prepares editor metadata and the immutable worker
-        // snapshot, but it cannot authorize Python execution. The managed
-        // runtime creates the validation receipt after authoritative CPython
-        // compilation.
-    }
 
     let mut state = AppState {
         model,
@@ -201,10 +142,10 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     *state.models.pdk_settings_dialog = super::pdk_settings::PdkSettingsDialogState::new();
     *state.results.analysis = analysis;
     state.design.schematic_snap.grid_size = snap_grid_size;
-    if let Some((manifest, runtime_snapshot)) = automation {
-        state.code.code_workspace.automation.manifest = Some(manifest);
-        state.code.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
-    }
+    crate::workbench::documents::code_workspace::bootstrap_automation(
+        &state.model.workspace,
+        &mut state.code.code_workspace,
+    );
     // A first start opens on this untitled project: until it is edited,
     // New project, Close project and Exit have nothing of it to save.
     crate::workbench::lifecycle::project_lifecycle::mark_pristine(&mut state);

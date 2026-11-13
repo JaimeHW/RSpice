@@ -47,6 +47,22 @@ enum RuntimeDiscovery {
 }
 
 impl NativeAutomationRuntime {
+    /// The runtime a test session holds: discovery never runs, so nothing in
+    /// the environment or on disk is read and no thread starts, and the
+    /// runtime stays unavailable.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn undiscovered() -> Self {
+        Self {
+            discovery: RuntimeDiscovery::Unavailable(
+                "a test session discovers no managed runtime".to_owned(),
+            ),
+            worker: None,
+            next_request_id: 1,
+            last_event_sequence: 0,
+            active_limits: None,
+        }
+    }
+
     pub fn discover() -> Self {
         let key_id = env!("RSPICE_AUTOMATION_RUNTIME_KEY_ID");
         let key_hex = env!("RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX");

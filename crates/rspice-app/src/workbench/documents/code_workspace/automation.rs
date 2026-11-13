@@ -77,6 +77,22 @@ pub(crate) struct CodeHandles {
     pub(crate) automation_runtime_project_id: crate::product::ProjectId,
 }
 
+/// A test session's handles: the managed runtime is never discovered, so a
+/// test reads nothing of the machine it runs on, and a new project identity
+/// is authorized.
+#[cfg(test)]
+impl Default for CodeHandles {
+    fn default() -> Self {
+        Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::undiscovered(),
+            #[cfg(target_arch = "wasm32")]
+            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+            automation_runtime_project_id: crate::product::ProjectId::default(),
+        }
+    }
+}
+
 /// What the code workspace's operations read and change, lent for the one
 /// call: the Code & Automation page's state, the deck's, the runtime the
 /// code feature runs, the model, the session, the platform's state, and the

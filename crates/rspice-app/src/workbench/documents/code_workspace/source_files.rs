@@ -1317,7 +1317,10 @@ fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::code::{
+        CodeFeature,
+        tests::{CodeHarness, harness},
+    };
 
     #[test]
     fn production_source_lifecycle_has_no_panic_based_state_transitions() {
@@ -1336,8 +1339,8 @@ mod tests {
 
     /// A test app with the Verilog-A view `behavioral/gain/veriloga` open
     /// over a one-file bundle.
-    fn veriloga_view_app() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
+    fn veriloga_view_app() -> CodeHarness {
+        let mut harness = harness();
         let reference = veriloga_reference();
         let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
         view.metadata
@@ -1346,9 +1349,8 @@ mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new(&reference.library);
         library.add_cell(cell);
-        app.state.model.library_manager.add_library(library);
-        app.state
-            .model.workspace
+        harness.model.library_manager.add_library(library);
+        harness.model.workspace
             .content
             .project_sources
             .insert_bundle(
@@ -1363,16 +1365,16 @@ mod tests {
                 .expect("a valid cell-view bundle"),
             )
             .expect("one bundle per cell view");
-        app.state
+        harness
             .model
             .workspace
             .open_view(reference, crate::state::ViewType::VerilogA);
-        app
+        harness
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn verilog_a_bundle(app: &RSpiceApp) -> &crate::state::ProjectSourceBundle {
-        app.state
+    fn verilog_a_bundle(harness: &CodeHarness) -> &crate::state::ProjectSourceBundle {
+        harness
             .model
             .workspace
             .content
@@ -1403,8 +1405,8 @@ mod tests {
         )
         .unwrap();
         let bundle_id = bundle.id();
-        let mut app = RSpiceApp::test_instance();
-        app.state
+        let mut harness = harness();
+        harness
             .model
             .workspace
             .content
@@ -1413,7 +1415,7 @@ mod tests {
             .unwrap();
 
         open_source_file_dialog_in_bundle(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             bundle_id,
             CodeSourceFileAction::Duplicate,
@@ -1421,17 +1423,16 @@ mod tests {
             "cell/gain.va",
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_file_dialog
             .as_mut()
             .unwrap()
             .proposed_path = "cell/gain_copy.va".to_owned();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
 
-        let exact = app
-            .state
+        let exact = harness
             .model
             .workspace
             .content
@@ -1440,8 +1441,8 @@ mod tests {
             .unwrap();
         assert!(exact.contains_file("cell/gain_copy.va"));
         assert_eq!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .veriloga
                 .selected_file
@@ -1450,15 +1451,15 @@ mod tests {
             Some(bundle_id)
         );
         open_source_history_in_bundle(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             bundle_id,
             "cell/gain.va",
         )
         .unwrap();
         assert_eq!(
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .source_history
                 .as_ref()
@@ -1469,10 +1470,9 @@ mod tests {
 
     #[test]
     fn dropped_automation_source_uses_the_transactional_project_import_path() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let before = app
-            .state
+        let before = harness
             .model
             .workspace
             .content
@@ -1483,22 +1483,20 @@ mod tests {
             .get();
 
         let message = import_dropped_automation_source(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             "helpers.py".to_owned(),
             "def characterize():\n    return 42\n".to_owned(),
         )
         .expect("drop import");
-        let logical_path = app
+        let logical_path = harness
             .state
-            .code
             .code_workspace
             .automation
             .selected_file
             .clone()
             .expect("imported selection");
         assert!(message.contains(&logical_path));
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1510,16 +1508,15 @@ mod tests {
             bundle.file_content(&logical_path),
             Some("def characterize():\n    return 42\n")
         );
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
     #[test]
     fn editor_authority_rejects_closed_read_only_and_governed_sources() {
-        let mut app = veriloga_view_app();
+        let mut harness = veriloga_view_app();
         let automation_owner =
             ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let automation = app
-            .state
+        let automation = harness
             .model
             .workspace
             .content
@@ -1536,8 +1533,7 @@ mod tests {
             .expect("managed environment lock")
             .to_owned();
         let verilog_owner = ProjectSourceOwner::cell_view(veriloga_reference());
-        let verilog_root = app
-            .state
+        let verilog_root = harness
             .model
             .workspace
             .content
@@ -1549,43 +1545,43 @@ mod tests {
             .to_owned();
 
         assert!(source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &lock
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::VerilogA,
             "missing/model.va"
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "missing/automation.py"
         ));
 
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .automation
             .pending_runtime_validation =
@@ -1593,42 +1589,42 @@ mod tests {
                 request_id: 41,
                 bundle_id: automation_bundle_id,
                 token: super::super::SourceOperationToken {
-                    project_id: app.state.model.workspace.content.project.id(),
+                    project_id: harness.model.workspace.content.project.id(),
                     revision: automation_revision,
                     content_digest: automation_digest,
                 },
             });
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .automation
             .pending_runtime_validation = None;
 
-        app.state.close_project_session();
+        harness.close_project_session();
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
 
-        app.state.open_project_session();
-        app.state.model.safe_mode.activate(
+        harness.open_project_session();
+        harness.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
@@ -1636,16 +1632,16 @@ mod tests {
             String::new(),
         );
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
@@ -1653,10 +1649,9 @@ mod tests {
 
     #[test]
     fn managed_environment_lock_blocks_graph_mutation_but_allows_an_editable_copy() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -1678,7 +1673,7 @@ mod tests {
             CodeSourceFileAction::Delete,
         ] {
             let error = open_source_file_dialog(
-                &mut app.code_workspace_parts(),
+                &mut CodeFeature::workspace_parts(&mut harness.cx()),
                 ProjectSourceLanguage::RSpiceAutomation,
                 action,
                 &lock,
@@ -1686,11 +1681,11 @@ mod tests {
             )
             .unwrap_err();
             assert!(error.contains("environment lock is read-only"));
-            assert!(app.state.code.code_workspace.source_file_dialog.is_none());
+            assert!(harness.state.code_workspace.source_file_dialog.is_none());
         }
 
         let error = open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::RSpiceAutomation,
             CodeSourceFileAction::New,
             &lock,
@@ -1699,13 +1694,16 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("environment lock is read-only"));
 
-        let error =
-            request_automation_source_import(&mut app.code_workspace_parts(), &lock).unwrap_err();
+        let error = request_automation_source_import(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &lock,
+        )
+        .unwrap_err();
         assert!(error.contains("cannot own imported project dependencies"));
 
-        app.state.code.code_workspace.automation.selected_file = Some(lock.clone());
+        harness.state.code_workspace.automation.selected_file = Some(lock.clone());
         let error = import_dropped_automation_source(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             "should-not-import.py".to_owned(),
             "value = 1\n".to_owned(),
         )
@@ -1713,16 +1711,15 @@ mod tests {
         assert!(error.contains("read-only managed environment lock"));
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::RSpiceAutomation,
             CodeSourceFileAction::Duplicate,
             &lock,
             &root,
         )
         .expect("an exact project-owned copy remains available");
-        let draft = app
+        let draft = harness
             .state
-            .code
             .code_workspace
             .source_file_dialog
             .as_ref()
@@ -1730,17 +1727,18 @@ mod tests {
         assert_eq!(draft.bundle_id, bundle_id);
         assert_eq!(draft.action, CodeSourceFileAction::Duplicate);
         assert_eq!(draft.source_path, lock);
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_file_dialog
             .as_mut()
             .expect("duplicate transaction")
             .action = CodeSourceFileAction::Rename;
-        let error = commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap_err();
+        let error = commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            .unwrap_err();
         assert!(error.contains("became read-only"));
         assert_eq!(
-            app.state
+            harness
                 .model
                 .workspace
                 .content
@@ -1756,101 +1754,96 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_file_actions_are_persisted_transactionally() {
-        let mut app = veriloga_view_app();
-        app.state
-            .model
-            .workspace
-            .content
-            .mark_project_sources_clean();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
+        let mut harness = veriloga_view_app();
+        harness.model.workspace.content.mark_project_sources_clean();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_file_dialog
             .as_mut()
             .unwrap()
             .proposed_path = "models/helper.va".to_owned();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
-        assert!(verilog_a_bundle(&app).contains_file("models/helper.va"));
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(verilog_a_bundle(&harness).contains_file("models/helper.va"));
+        assert!(harness.model.workspace.content.project_sources_dirty);
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Rename,
             "models/helper.va",
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_file_dialog
             .as_mut()
             .unwrap()
             .proposed_path = "models/renamed.va".to_owned();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
-        assert!(!verilog_a_bundle(&app).contains_file("models/helper.va"));
-        assert!(verilog_a_bundle(&app).contains_file("models/renamed.va"));
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(!verilog_a_bundle(&harness).contains_file("models/helper.va"));
+        assert!(verilog_a_bundle(&harness).contains_file("models/renamed.va"));
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Move,
             "models/renamed.va",
             &root,
         )
         .unwrap();
-        app.state
-            .code
+        harness
+            .state
             .code_workspace
             .source_file_dialog
             .as_mut()
             .unwrap()
             .proposed_path = "library/renamed.va".to_owned();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
-        assert!(!verilog_a_bundle(&app).contains_file("models/renamed.va"));
-        assert!(verilog_a_bundle(&app).contains_file("library/renamed.va"));
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(!verilog_a_bundle(&harness).contains_file("models/renamed.va"));
+        assert!(verilog_a_bundle(&harness).contains_file("library/renamed.va"));
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Duplicate,
             "library/renamed.va",
             &root,
         )
         .unwrap();
-        let duplicate = app
+        let duplicate = harness
             .state
-            .code
             .code_workspace
             .source_file_dialog
             .as_ref()
             .unwrap()
             .proposed_path
             .clone();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
-        assert!(verilog_a_bundle(&app).contains_file(&duplicate));
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(verilog_a_bundle(&harness).contains_file(&duplicate));
 
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &duplicate,
             &root,
         )
         .unwrap();
-        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
-        assert!(!verilog_a_bundle(&app).contains_file(&duplicate));
+        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        assert!(!verilog_a_bundle(&harness).contains_file(&duplicate));
     }
 
     /// New source in a cell view's bundle refuses a path that differs from a
@@ -1859,54 +1852,59 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn new_source_in_a_cell_bundle_rejects_unicode_case_alias_paths() {
-        let mut app = veriloga_view_app();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
-        let create = |app: &mut RSpiceApp, path: &str| {
+        let mut harness = veriloga_view_app();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
+        let create = |harness: &mut CodeHarness, path: &str| {
             open_source_file_dialog(
-                &mut app.code_workspace_parts(),
+                &mut CodeFeature::workspace_parts(&mut harness.cx()),
                 ProjectSourceLanguage::VerilogA,
                 CodeSourceFileAction::New,
                 &root,
                 &root,
             )
             .unwrap();
-            app.state
-                .code
+            harness
+                .state
                 .code_workspace
                 .source_file_dialog
                 .as_mut()
                 .unwrap()
                 .proposed_path = path.to_owned();
-            let result = commit_source_file_dialog(&mut app.code_workspace_parts());
-            app.state.code.code_workspace.source_file_dialog = None;
+            let result =
+                commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()));
+            harness.state.code_workspace.source_file_dialog = None;
             result
         };
-        create(&mut app, "Models/étage.va").expect("a new path is created");
-        let before = verilog_a_bundle(&app).clone();
+        create(&mut harness, "Models/étage.va").expect("a new path is created");
+        let before = verilog_a_bundle(&harness).clone();
 
         for alias in ["MODELS/ÉTAGE.VA", "models/Étage.va", "GAIN.VA"] {
-            let error = create(&mut app, alias).expect_err(alias);
+            let error = create(&mut harness, alias).expect_err(alias);
             assert!(error.contains("case-insensitively"), "{alias}: {error}");
-            assert_eq!(verilog_a_bundle(&app), &before, "{alias} changed nothing");
+            assert_eq!(
+                verilog_a_bundle(&harness),
+                &before,
+                "{alias} changed nothing"
+            );
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_file_commit_rejects_a_stale_bundle_transaction() {
-        let mut app = veriloga_view_app();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
-        let bundle_id = verilog_a_bundle(&app).id();
-        let before = verilog_a_bundle(&app).closure_digest();
+        let mut harness = veriloga_view_app();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
+        let bundle_id = verilog_a_bundle(&harness).id();
+        let before = verilog_a_bundle(&harness).closure_digest();
         open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
             &root,
         )
         .unwrap();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1917,20 +1915,21 @@ mod tests {
             )
             .unwrap();
 
-        let error = commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap_err();
+        let error = commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            .unwrap_err();
         assert!(error.contains("changed while the transaction was open"));
-        assert_ne!(verilog_a_bundle(&app).closure_digest(), before);
-        assert!(!verilog_a_bundle(&app).contains_file("untitled.va"));
+        assert_ne!(verilog_a_bundle(&harness).closure_digest(), before);
+        assert!(!verilog_a_bundle(&harness).contains_file("untitled.va"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_history_restores_the_exact_bundle_as_a_new_revision() {
-        let mut app = veriloga_view_app();
-        let bundle_id = verilog_a_bundle(&app).id();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
-        let original = verilog_a_bundle(&app).root().content().to_owned();
-        app.state
+        let mut harness = veriloga_view_app();
+        let bundle_id = verilog_a_bundle(&harness).id();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
+        let original = verilog_a_bundle(&harness).root().content().to_owned();
+        harness
             .model
             .workspace
             .content
@@ -1940,29 +1939,30 @@ mod tests {
                 "module changed; endmodule\n".to_owned(),
             )
             .unwrap();
-        let edited_revision = verilog_a_bundle(&app).revision();
+        let edited_revision = verilog_a_bundle(&harness).revision();
 
         open_source_history(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
-        commit_source_history_restore(&mut app.code_workspace_parts()).unwrap();
+        commit_source_history_restore(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            .unwrap();
 
-        assert_eq!(verilog_a_bundle(&app).root().content(), original);
-        assert!(verilog_a_bundle(&app).revision().get() > edited_revision.get());
-        assert!(app.state.code.code_workspace.source_history.is_none());
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert_eq!(verilog_a_bundle(&harness).root().content(), original);
+        assert!(verilog_a_bundle(&harness).revision().get() > edited_revision.get());
+        assert!(harness.state.code_workspace.source_history.is_none());
+        assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_history_restore_rejects_a_newer_source_closure() {
-        let mut app = veriloga_view_app();
-        let bundle_id = verilog_a_bundle(&app).id();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
-        app.state
+        let mut harness = veriloga_view_app();
+        let bundle_id = verilog_a_bundle(&harness).id();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
+        harness
             .model
             .workspace
             .content
@@ -1973,12 +1973,12 @@ mod tests {
             )
             .unwrap();
         open_source_history(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             &root,
         )
         .unwrap();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1989,10 +1989,12 @@ mod tests {
             )
             .unwrap();
 
-        let error = commit_source_history_restore(&mut app.code_workspace_parts()).unwrap_err();
+        let error =
+            commit_source_history_restore(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+                .unwrap_err();
         assert!(error.contains("changed while history was open"));
         assert_eq!(
-            verilog_a_bundle(&app).root().content(),
+            verilog_a_bundle(&harness).root().content(),
             "module newer; endmodule\n"
         );
     }
@@ -2000,10 +2002,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn bundle_root_delete_is_rejected_before_a_dialog_opens() {
-        let mut app = veriloga_view_app();
-        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
+        let mut harness = veriloga_view_app();
+        let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
         let error = open_source_file_dialog(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &root,
@@ -2011,17 +2013,16 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("bundle root cannot be deleted"));
-        assert!(app.state.code.code_workspace.source_file_dialog.is_none());
+        assert!(harness.state.code_workspace.source_file_dialog.is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn automation_import_applies_to_the_exact_owned_bundle() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let language = ProjectSourceLanguage::RSpiceAutomation;
         let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2032,18 +2033,21 @@ mod tests {
         let importer = bundle.root().logical_path().to_owned();
         let logical_path = unique_suggestion(bundle, &importer, "analysis_helpers.py");
 
-        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
-        let request = app.state.code.code_workspace.source_import.take().unwrap();
+        request_automation_source_import(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &importer,
+        )
+        .unwrap();
+        let request = harness.state.code_workspace.source_import.take().unwrap();
         let message = apply_automation_source_import(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             request,
             "analysis_helpers.py".to_owned(),
             "def gain(value):\n    return value * 2\n".to_owned(),
         )
         .unwrap();
 
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2055,21 +2059,20 @@ mod tests {
             Some("def gain(value):\n    return value * 2\n")
         );
         assert_eq!(
-            app.state.code.code_workspace.automation.selected_file,
+            harness.state.code_workspace.automation.selected_file,
             Some(logical_path.clone())
         );
         assert!(message.contains(&logical_path));
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn automation_import_rejects_a_stale_picker_result() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let language = ProjectSourceLanguage::RSpiceAutomation;
         let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2079,9 +2082,13 @@ mod tests {
         let bundle_id = bundle.id();
         let importer = bundle.root().logical_path().to_owned();
 
-        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
-        let request = app.state.code.code_workspace.source_import.take().unwrap();
-        app.state
+        request_automation_source_import(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &importer,
+        )
+        .unwrap();
+        let request = harness.state.code_workspace.source_import.take().unwrap();
+        harness
             .model
             .workspace
             .content
@@ -2093,7 +2100,7 @@ mod tests {
             .unwrap();
 
         let error = apply_automation_source_import(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             request,
             "stale.py".to_owned(),
             "raise RuntimeError('must not be imported')\n".to_owned(),
@@ -2101,7 +2108,7 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("changed while the source picker was open"));
         assert!(
-            !app.state
+            !harness
                 .model
                 .workspace
                 .content
@@ -2115,11 +2122,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn automation_import_rechecks_read_only_authority_after_picker_open() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let language = ProjectSourceLanguage::RSpiceAutomation;
         let owner = ProjectSourceOwner::code_workspace(language);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2130,9 +2136,13 @@ mod tests {
         let importer = bundle.root().logical_path().to_owned();
         let before_revision = bundle.revision().get();
 
-        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
-        let request = app.state.code.code_workspace.source_import.take().unwrap();
-        app.state.model.safe_mode.activate(
+        request_automation_source_import(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &importer,
+        )
+        .unwrap();
+        let request = harness.state.code_workspace.source_import.take().unwrap();
+        harness.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
@@ -2140,15 +2150,14 @@ mod tests {
             String::new(),
         );
         let error = apply_automation_source_import(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             request,
             "must-not-import.py".to_owned(),
             "raise RuntimeError('must not commit')\n".to_owned(),
         )
         .unwrap_err();
         assert!(error.contains("read-only"));
-        let unchanged = app
-            .state
+        let unchanged = harness
             .model
             .workspace
             .content
@@ -2162,12 +2171,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn automation_editability_follows_persisted_role_not_filename() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let owner = crate::state::ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
         );
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2180,7 +2188,7 @@ mod tests {
             .next()
             .unwrap()
             .to_owned();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -2191,15 +2199,14 @@ mod tests {
             )
             .unwrap();
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "environment/runtime-policy.toml",
         ));
 
-        let root = app
-            .state
+        let root = harness
             .model
             .workspace
             .content
@@ -2209,7 +2216,7 @@ mod tests {
             .root()
             .logical_path()
             .to_owned();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -2220,9 +2227,9 @@ mod tests {
             )
             .unwrap();
         assert!(source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "data/user-owned.lock",
         ));
@@ -2231,22 +2238,17 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn empty_project_creates_arbitrary_role_bound_automation_workspace() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
+        let mut harness = harness();
+        harness
             .model
             .workspace
             .content
             .remove_project_source(ProjectSourceLanguage::RSpiceAutomation);
-        app.state
-            .model
-            .workspace
-            .content
-            .mark_project_sources_clean();
+        harness.model.workspace.content.mark_project_sources_clean();
 
-        open_source_workspace_dialog(&mut app.code_workspace_parts()).unwrap();
-        let draft = app
+        open_source_workspace_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        let draft = harness
             .state
-            .code
             .code_workspace
             .source_workspace_dialog
             .as_mut()
@@ -2257,10 +2259,10 @@ mod tests {
         draft.permission_manifest_path = "security/least-privilege.data".to_owned();
         draft.netlist_source_path = "circuits/owned-deck.cir".to_owned();
 
-        commit_source_workspace_dialog(&mut app.code_workspace_parts()).unwrap();
+        commit_source_workspace_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            .unwrap();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2287,16 +2289,15 @@ mod tests {
                 .unwrap()
                 .contains("source: circuits/owned-deck.cir")
         );
-        assert!(app.state.model.workspace.content.project_sources_dirty);
+        assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn automation_singleton_role_moves_in_one_monotonic_revision() {
-        let mut app = RSpiceApp::test_instance();
+        let mut harness = harness();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2310,7 +2311,7 @@ mod tests {
             .next()
             .unwrap()
             .to_owned();
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -2324,8 +2325,7 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-        let before = app
-            .state
+        let before = harness
             .model
             .workspace
             .content
@@ -2336,13 +2336,12 @@ mod tests {
             .get();
 
         assign_automation_source_role(
-            &mut app.code_workspace_parts(),
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
             "environment/next-runtime.data",
             Some(ProjectSourceRole::AutomationEnvironmentLock),
         )
         .unwrap();
-        let bundle = app
-            .state
+        let bundle = harness
             .model
             .workspace
             .content
@@ -2356,16 +2355,16 @@ mod tests {
             Some(ProjectSourceRole::AutomationEnvironmentLock)
         );
         assert!(source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &old_lock,
         ));
         assert!(!source_document_is_editable(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.platform,
+            &harness.model,
+            &harness.state.code_workspace,
+            &harness.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "environment/next-runtime.data",
         ));

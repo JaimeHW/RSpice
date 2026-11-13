@@ -8,7 +8,7 @@ use crate::state::{
 };
 
 use super::*;
-use crate::workbench::RSpiceApp;
+use crate::workbench::code::tests::harness;
 
 #[test]
 fn source_workspace_runtime_transitions_have_no_production_panic_shortcuts() {
@@ -110,7 +110,7 @@ fn prepared_run(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn environment_authority_is_one_exact_multi_name_scope() {
-    let app = RSpiceApp::test_instance();
+    let harness = harness();
     let documents = [
         AutomationSourceDocument {
             path: "characterize.py",
@@ -147,7 +147,7 @@ fn environment_authority_is_one_exact_multi_name_scope() {
         .expect("valid workspace");
     manifest.environment = vec!["RSPICE_ALPHA".to_owned(), "RSPICE_BETA".to_owned()];
 
-    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&harness.model, &manifest).expect("capability scope");
     let environment = grants
         .iter()
         .filter(|grant| {
@@ -164,10 +164,9 @@ fn environment_authority_is_one_exact_multi_name_scope() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn unscoped_network_and_process_permissions_fail_closed() {
-    let mut app = RSpiceApp::test_instance();
+    let mut harness = harness();
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-    let bundle = app
-        .state
+    let bundle = harness
         .model
         .workspace
         .content
@@ -185,15 +184,14 @@ fn unscoped_network_and_process_permissions_fail_closed() {
         .unwrap()
         .replace("network = \"deny\"", "network = \"allow\"")
         .replace("process_spawn = \"deny\"", "process_spawn = \"allow\"");
-    app.state
+    harness
         .model
         .workspace
         .content
         .replace_project_source_bundle_file(bundle_id, &permissions_path, permissions)
         .unwrap();
 
-    let bundle = app
-        .state
+    let bundle = harness
         .model
         .workspace
         .content
@@ -249,7 +247,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
         .expect("valid baseline workspace");
     manifest.network = "allow".to_owned();
     manifest.process_spawn = "allow".to_owned();
-    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&harness.model, &manifest).expect("capability scope");
     assert!(grants.iter().all(|grant| {
         !matches!(
             grant.capability,
@@ -261,7 +259,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
 
 #[test]
 fn ambient_external_write_and_clipboard_authorities_are_never_granted() {
-    let app = RSpiceApp::test_instance();
+    let harness = harness();
     let documents = [
         AutomationSourceDocument {
             path: "characterize.py",
@@ -296,7 +294,7 @@ fn ambient_external_write_and_clipboard_authorities_are_never_granted() {
     ];
     let (_, manifest) = compile_automation_documents("characterize.py", &documents, &roles)
         .expect("valid governed workspace");
-    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&harness.model, &manifest).expect("capability scope");
 
     assert!(grants.iter().all(|grant| {
         !matches!(
@@ -375,7 +373,7 @@ fn dispatch_matching_requires_exact_project_and_plan_revisions() {
             .expect("prepared run")
             .source_content_digest(),
         prepared_inputs: crate::simulation::controller::PreparedRunSetInputs::of_unprepared(
-            &RSpiceApp::test_instance().state,
+            &crate::simulation::controller::test_host::RunTestHost::default(),
         ),
         plan_name: "Plan".to_owned(),
         plan_payload: SimulationPlanPayload::default(),

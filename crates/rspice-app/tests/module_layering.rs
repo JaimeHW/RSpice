@@ -845,6 +845,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // These name `RSpiceApp` itself, so they retire as signatures stop taking
     // the whole application, not with a module move.
     ("documents/code_workspace", "app"),
+    // The code workspace's tests that only seed and read state run over the
+    // code feature on its own, and the feature builds that harness, as the
+    // models feature builds the model editor's below.
+    ("documents/code_workspace", "code"), // retires at the code flip
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the
