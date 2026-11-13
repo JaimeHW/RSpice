@@ -19,7 +19,7 @@ use rspice_results::{
     waveform::RetainedTrace,
 };
 use rspice_ui_kit::{
-    panels::section_header,
+    panels::{elide_middle, section_header},
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_readout},
     tokens::Tokens,
 };
@@ -457,7 +457,12 @@ pub fn show(
 
     let visible_rules = plan.visible(filter);
 
-    let width = ui.available_width().max(1_270.0);
+    // The table fills the sheet and scrolls sideways only once the sheet is
+    // narrower than every column's floor. The numbers, the interval, the
+    // verdict and the row's buttons keep their width; the device and the rule
+    // share what is left and give it up first, eliding in the middle with the
+    // whole name on hover, so a narrow sheet never clips a control.
+    let width = ui.available_width();
     egui::ScrollArea::horizontal()
         .id_salt("rspice.results.soa-horizontal")
         .auto_shrink([false, true])
@@ -469,14 +474,14 @@ pub fn show(
                 .id_salt("rspice.results.soa")
                 .striped(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::remainder().at_least(170.0))
-                .column(Column::remainder().at_least(190.0))
-                .column(Column::initial(118.0))
-                .column(Column::initial(118.0))
-                .column(Column::initial(118.0))
-                .column(Column::initial(190.0))
-                .column(Column::initial(92.0))
-                .column(Column::initial(210.0))
+                .column(Column::remainder().at_least(96.0).clip(true))
+                .column(Column::remainder().at_least(150.0).clip(true))
+                .column(Column::initial(104.0))
+                .column(Column::initial(104.0))
+                .column(Column::initial(104.0))
+                .column(Column::initial(176.0))
+                .column(Column::initial(76.0))
+                .column(Column::auto())
                 .header(row_height, |mut header| {
                     for label in [
                         "Device",
@@ -515,13 +520,16 @@ pub fn show(
                         });
                         row.set_selected(is_selected);
                         row.col(|ui| {
-                            if ui
-                                .selectable_label(
-                                    is_selected,
-                                    RichText::new(&evaluation.device_id).monospace(),
-                                )
-                                .clicked()
-                            {
+                            let font = egui::TextStyle::Monospace.resolve(ui.style());
+                            let budget =
+                                ui.available_width() - 2.0 * ui.spacing().button_padding.x;
+                            let shown = elide_middle(ui, &evaluation.device_id, &font, budget);
+                            let mut response = ui
+                                .selectable_label(is_selected, RichText::new(&shown).monospace());
+                            if shown != evaluation.device_id {
+                                response = response.on_hover_text(&evaluation.device_id);
+                            }
+                            if response.clicked() {
                                 requested = Some(SoaRuleSelection {
                                     analysis: analysis_key,
                                     device_id: evaluation.device_id.clone(),
@@ -530,7 +538,13 @@ pub fn show(
                             }
                         });
                         row.col(|ui| {
-                            ui.label(parameter_label(evaluation.parameter));
+                            let label = parameter_label(evaluation.parameter);
+                            let font = egui::TextStyle::Body.resolve(ui.style());
+                            let shown = elide_middle(ui, label, &font, ui.available_width());
+                            let response = ui.label(&shown);
+                            if shown != label {
+                                response.on_hover_text(label);
+                            }
                         });
                         let unit = &evaluation.unit;
                         row.col(|ui| {
