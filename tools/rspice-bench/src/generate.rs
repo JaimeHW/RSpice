@@ -7,21 +7,12 @@
 //! builds the same 1k/10k ladders; keep the two in step.
 
 use crate::error::BenchError;
-use clap::Args;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Where the shipped run writes the generated decks before timing them.
 pub const GENERATED_DECKS_DIR: &str = "target/benchmarks/decks";
-
-/// Arguments for the `gen` subcommand.
-#[derive(Args, Debug)]
-pub struct GenArgs {
-    /// Directory the generated decks are written into.
-    #[arg(long, default_value = GENERATED_DECKS_DIR, value_name = "DIR")]
-    pub dir: PathBuf,
-}
 
 /// Parameters of one generated RC-ladder deck.
 ///
@@ -176,15 +167,6 @@ fn ladder_deck(spec: &LadderSpec) -> String {
     let _ = writeln!(deck, ".print tran v({prev})");
     deck.push_str(".end\n");
     deck
-}
-
-/// Entry point of the `gen` subcommand: writes every generated deck into
-/// `args.dir`, creating the directory if needed.
-pub fn generate(args: &GenArgs) -> Result<(), BenchError> {
-    for path in write_decks(&args.dir)? {
-        println!("wrote {}", path.display());
-    }
-    Ok(())
 }
 
 /// Writes every generated deck into `dir`, creating it if needed, and

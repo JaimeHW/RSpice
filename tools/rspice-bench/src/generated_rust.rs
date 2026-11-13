@@ -106,14 +106,6 @@ struct GeneratedStructure {
     local_edge_assignments: u64,
 }
 
-#[derive(Debug)]
-pub(crate) struct AuthenticatedGeneratedBundle {
-    pub(crate) digest: String,
-    pub(crate) source_bytes: u64,
-    pub(crate) device_count: usize,
-    pub(crate) file_count: usize,
-}
-
 #[derive(Debug, Default, Serialize)]
 struct SourceCategory {
     files: usize,
@@ -371,53 +363,6 @@ fn read_and_authenticate(
         });
     }
     Ok(bytes)
-}
-
-/// Authenticates the complete generated bundle and returns the identity needed
-/// to make compile-time reports comparable with source-resource reports.
-pub(crate) fn authenticate_generated_bundle(
-    generated_root: &Path,
-) -> Result<AuthenticatedGeneratedBundle, BenchError> {
-    let manifest_path = generated_root.join(MANIFEST_FILE_NAME);
-    let manifest_text = fs::read_to_string(&manifest_path).map_err(|source| {
-        BenchError::io(
-            format!("read generated Rust manifest `{}`", manifest_path.display()),
-            source,
-        )
-    })?;
-    let manifest = parse_generated_builtin_manifest(&manifest_text).ok_or_else(|| {
-        BenchError::GeneratedRust {
-            message: format!(
-                "`{}` is not a supported generated Rust manifest",
-                manifest_path.display()
-            ),
-        }
-    })?;
-
-    let mut measured_bytes = 0u64;
-    let mut bundle_hasher = blake3::Hasher::new();
-    for file in &manifest.files {
-        let bytes = read_and_authenticate(generated_root, file)?;
-        measured_bytes = measured_bytes.saturating_add(file.bytes);
-        update_digest_record(&mut bundle_hasher, file.relative_path.as_bytes());
-        update_digest_record(&mut bundle_hasher, &bytes);
-    }
-    let digest = bundle_hasher.finalize().to_hex().to_string();
-    if measured_bytes != manifest.source_bytes || digest != manifest.bundle_digest {
-        return Err(BenchError::GeneratedRust {
-            message: format!(
-                "generated Rust bundle does not match its manifest: measured bytes={measured_bytes}, declared bytes={}, measured digest={digest}, declared digest={}",
-                manifest.source_bytes, manifest.bundle_digest
-            ),
-        });
-    }
-
-    Ok(AuthenticatedGeneratedBundle {
-        digest,
-        source_bytes: measured_bytes,
-        device_count: manifest.device_count,
-        file_count: manifest.file_count,
-    })
 }
 
 fn measure_structure(

@@ -1,5 +1,5 @@
 //! Cancellation requested after accepted GP work, rather than during setup.
-//! Work-count assertions are portable; wall-time measurements live in rspice-bench.
+//! The assertions count work, so they are portable across hosts.
 
 use rspice_core::abort_signal::{AbortSignal, TransientSample};
 use rspice_core::engine::TransientStartupMode;

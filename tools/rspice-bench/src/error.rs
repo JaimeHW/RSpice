@@ -10,12 +10,6 @@ use std::path::PathBuf;
 /// All failures the benchmark rig can report.
 #[derive(Debug)]
 pub enum BenchError {
-    /// A public core transient benchmark run failed.
-    #[cfg(feature = "core-transient")]
-    CoreTransient {
-        context: String,
-        source: Box<rspice_core::SimulationError>,
-    },
     /// An I/O operation failed; `context` says what was being attempted.
     Io {
         /// Human-readable description of the failed operation.
@@ -62,11 +56,6 @@ pub enum BenchError {
         /// Actionable resource or integrity failure.
         message: String,
     },
-    /// Generated leaf-package compile-time measurement failed.
-    GeneratedCompile {
-        /// Actionable preparation, compiler, or comparison failure.
-        message: String,
-    },
     /// A baseline or performance-gate policy was invalid or incomparable.
     BenchmarkPolicy {
         /// Actionable explanation of the rejected policy or baseline.
@@ -79,8 +68,6 @@ pub enum BenchError {
 impl fmt::Display for BenchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            #[cfg(feature = "core-transient")]
-            Self::CoreTransient { context, .. } => write!(f, "{context}"),
             Self::Io { context, .. } => write!(f, "{context}"),
             Self::MissingRspice { tried } => {
                 write!(
@@ -107,7 +94,6 @@ impl fmt::Display for BenchError {
             Self::NativeJit { message } => write!(f, "{message}"),
             Self::Klu { message } => write!(f, "{message}"),
             Self::GeneratedRust { message } => write!(f, "{message}"),
-            Self::GeneratedCompile { message } => write!(f, "{message}"),
             Self::BenchmarkPolicy { message } => write!(f, "{message}"),
             Self::Internal(message) => write!(f, "internal error: {message}"),
         }
@@ -117,8 +103,6 @@ impl fmt::Display for BenchError {
 impl std::error::Error for BenchError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            #[cfg(feature = "core-transient")]
-            Self::CoreTransient { source, .. } => Some(source.as_ref()),
             Self::Io { source, .. } => Some(source),
             Self::Json { source, .. } => Some(source),
             _ => None,

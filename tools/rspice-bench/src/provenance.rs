@@ -1,6 +1,5 @@
 //! Reproducibility metadata shared by benchmark reports.
 
-use crate::error::BenchError;
 use crate::workspace_root;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -86,15 +85,6 @@ pub fn tool() -> ToolProvenance {
             .map(|name| name.to_string_lossy().into_owned()),
         executable_blake3: current_exe.as_deref().and_then(hash_file),
     }
-}
-
-pub fn require_release(tool: &ToolProvenance) -> Result<(), BenchError> {
-    if tool.profile != "release" {
-        return Err(BenchError::BenchmarkPolicy {
-            message: "trusted benchmark runs require a release build; pass --exploratory to run an ungated debug measurement".to_string(),
-        });
-    }
-    Ok(())
 }
 
 fn hash_file(path: &Path) -> Option<String> {

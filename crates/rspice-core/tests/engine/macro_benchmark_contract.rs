@@ -7,7 +7,7 @@
 use rspice_core::{Engine, Netlist};
 use std::fmt::Write as _;
 
-/// The RC ladder `rspice-bench gen` writes (`tools/rspice-bench/src/generate.rs`):
+/// The RC ladder `rspice-bench run` generates (`tools/rspice-bench/src/generate.rs`):
 /// identical 100-ohm / 1 pF sections driven by a PULSE source, printing the
 /// far-end node.
 fn rc_ladder_deck(sections: usize, pulse: &str, tstep: &str, tstop: &str) -> String {

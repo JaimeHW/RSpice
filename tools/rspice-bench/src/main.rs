@@ -10,13 +10,8 @@
 //!
 //! Subcommands:
 //!
-//! * `gen` — write the generated benchmark decks (RC ladders, MOS array) into
-//!   a directory. The emitted text is byte-stable, so checked-in copies can be
-//!   reproduced exactly.
 //! * `generated-rust` — authenticate and gate generated Verilog-A Rust
 //!   source resources.
-//! * `generated-compile` — measure generated-catalog Rust compile time with
-//!   reproducible provenance and package-only rebuild auditing.
 //! * `klu` — time the KLU solver kernels (analyze/factor/refactor/solve) in
 //!   isolation on circuit-shaped matrices, with optional per-nonzero budgets.
 //! * `native-jit` — in-process Verilog-A native JIT gate.
@@ -30,12 +25,9 @@
 
 mod error;
 mod generate;
-mod generated_compile;
 mod generated_rust;
 #[cfg(feature = "generated-stamp-base")]
 mod generated_stamp;
-#[cfg(feature = "core-transient")]
-mod gp_transient;
 mod klu;
 mod native_jit;
 mod provenance;
@@ -58,15 +50,8 @@ struct Cli {
 /// Top-level subcommands.
 #[derive(Subcommand, Debug)]
 enum BenchCommand {
-    /// Measure native GP transient execution, cancellation, and transport storage.
-    #[cfg(feature = "core-transient")]
-    GpTransient(gp_transient::GpTransientArgs),
-    /// Write the deterministic, generated benchmark decks into a directory.
-    Gen(generate::GenArgs),
     /// Authenticate and gate generated Verilog-A Rust source resources.
     GeneratedRust(generated_rust::GeneratedRustArgs),
-    /// Measure generated Verilog-A leaf-package release compile time.
-    GeneratedCompile(generated_compile::GeneratedCompileArgs),
     /// Measure and gate generated Verilog-A built-in stamp throughput.
     #[cfg(feature = "generated-stamp-base")]
     GeneratedStamp(generated_stamp::GeneratedStampArgs),
@@ -89,11 +74,7 @@ pub(crate) fn workspace_root() -> PathBuf {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let outcome = match cli.command {
-        #[cfg(feature = "core-transient")]
-        BenchCommand::GpTransient(args) => gp_transient::run(&args),
-        BenchCommand::Gen(args) => generate::generate(&args).map(|()| ExitCode::SUCCESS),
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),
-        BenchCommand::GeneratedCompile(args) => generated_compile::run(&args),
         #[cfg(feature = "generated-stamp-base")]
         BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
         BenchCommand::Klu(args) => klu::run(&args),
