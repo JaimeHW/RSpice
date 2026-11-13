@@ -20,14 +20,18 @@ use std::time::{Duration, Instant};
 use super::{OracleAbsent, Table, column_name};
 use crate::suites::ngspice::reference::live::{RawReferencePlot, parse_ngspice_raw_plots};
 
-pub const DEFAULT_EXE: &str =
-    "C:/Users/James/Desktop/ngspice-46-release/Spice64/bin/ngspice_con.exe";
+/// The console build's name: on Windows `ngspice.exe` is the GUI.
+const PROGRAMS: &[&str] = if cfg!(windows) {
+    &["ngspice_con"]
+} else {
+    &["ngspice"]
+};
 
 pub fn discover() -> Result<PathBuf, OracleAbsent> {
     super::discover(
         "ngspice (O1)",
         "RSPICE_NGSPICE_EXE",
-        DEFAULT_EXE,
+        super::Fallback::Path(PROGRAMS),
         "install ngspice-46 and point RSPICE_NGSPICE_EXE at its console build (ngspice_con.exe on Windows, never the GUI ngspice.exe)",
     )
 }

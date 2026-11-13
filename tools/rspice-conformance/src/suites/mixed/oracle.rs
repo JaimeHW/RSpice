@@ -546,11 +546,20 @@ pub fn oracles_required() -> bool {
     std::env::var("RSPICE_MIXED_ORACLES_REQUIRED").is_ok_and(|value| value == "1")
 }
 
-/// Resolve an executable from an override variable or a default path.
+/// Where [`discover`] looks when the override variable is unset.
+pub enum Fallback<'a> {
+    /// The first of these programs a directory of `PATH` holds, with the
+    /// platform's executable suffix.
+    Path(&'a [&'a str]),
+    /// The first of these files that exists.
+    Files(Vec<PathBuf>),
+}
+
+/// Resolve a tool from an override variable, or else from its fallback.
 pub fn discover(
     oracle: &'static str,
     override_env: &str,
-    default: &str,
+    fallback: Fallback<'_>,
     hint: &'static str,
 ) -> Result<PathBuf, OracleAbsent> {
     let mut probed = Vec::new();
@@ -567,17 +576,35 @@ pub fn discover(
             })
         };
     }
-    let path = PathBuf::from(default);
-    probed.push(path.display().to_string());
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(OracleAbsent {
+    let candidates = match fallback {
+        Fallback::Path(programs) => {
+            probed.push(format!("PATH ({})", programs.join(", ")));
+            let directories = std::env::var_os("PATH")
+                .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+                .unwrap_or_default();
+            programs
+                .iter()
+                .flat_map(|program| {
+                    let file = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+                    directories
+                        .iter()
+                        .map(move |directory| directory.join(&file))
+                })
+                .collect::<Vec<_>>()
+        }
+        Fallback::Files(files) => {
+            probed.extend(files.iter().map(|file| file.display().to_string()));
+            files
+        }
+    };
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or(OracleAbsent {
             oracle,
             probed,
             hint,
         })
-    }
 }
 
 #[cfg(test)]

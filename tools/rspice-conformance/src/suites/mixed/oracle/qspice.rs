@@ -27,7 +27,7 @@ pub fn discover() -> Result<PathBuf, OracleAbsent> {
     super::discover(
         "QSPICE (O8)",
         "RSPICE_QSPICE_EXE",
-        DEFAULT_EXE,
+        super::Fallback::Files(vec![PathBuf::from(DEFAULT_EXE)]),
         "install QSPICE and point RSPICE_QSPICE_EXE at QSPICE64.exe",
     )
 }

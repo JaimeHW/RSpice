@@ -19,11 +19,6 @@ use std::time::Duration;
 use super::OracleAbsent;
 use crate::suites::verilog::oracle::{OracleAvailability, VerilogEngine, detect};
 
-pub const DEFAULT_COSIM_LIB: &str =
-    "C:/Users/James/Desktop/ngspice-46-release/Spice64/lib/ngspice/ivlng.dll";
-pub const DEFAULT_COSIM_VPI: &str =
-    "C:/Users/James/Desktop/ngspice-46-release/Spice64/lib/ngspice/ivlng.vpi";
-
 /// Log lines that mean the digital block never ran.
 pub const LOAD_FAILURES: [&str; 3] = [
     "d_cosim failed to load",
@@ -46,13 +41,13 @@ pub fn discover() -> Result<CosimTools, OracleAbsent> {
     let cosim_library = super::discover(
         "d_cosim ivlng (O2)",
         "RSPICE_NGSPICE_COSIM_LIB",
-        DEFAULT_COSIM_LIB,
+        beside_ngspice(&ngspice, &["ivlng.dll", "ivlng.so"]),
         "ngspice's ivlng shim (Spice64/lib/ngspice/ivlng.dll)",
     )?;
     let cosim_vpi = super::discover(
         "d_cosim ivlng VPI (O2)",
         "RSPICE_NGSPICE_COSIM_VPI",
-        DEFAULT_COSIM_VPI,
+        beside_ngspice(&ngspice, &["ivlng.vpi"]),
         "ngspice's ivlng VPI module (Spice64/lib/ngspice/ivlng.vpi)",
     )?;
     let iverilog = match detect(VerilogEngine::Icarus) {
@@ -64,7 +59,7 @@ pub fn discover() -> Result<CosimTools, OracleAbsent> {
     };
     if !libvvp_present(&iverilog) {
         return Err(absent(
-            "iverilog found, but no libvvp beside it; O2 needs Icarus built with --enable-libvvp (P0.3)",
+            "iverilog found, but no libvvp beside it; O2 needs Icarus built with --enable-libvvp",
         ));
     }
     Ok(CosimTools {
@@ -75,11 +70,25 @@ pub fn discover() -> Result<CosimTools, OracleAbsent> {
     })
 }
 
+/// The `ivlng` shim files of the ngspice install `ngspice` runs from: its
+/// code models sit in `lib/ngspice` beside the `bin` directory.
+fn beside_ngspice(ngspice: &Path, names: &[&str]) -> super::Fallback<'static> {
+    let library = ngspice
+        .parent()
+        .and_then(Path::parent)
+        .map(|prefix| prefix.join("lib").join("ngspice"));
+    super::Fallback::Files(
+        library
+            .map(|library| names.iter().map(|name| library.join(name)).collect())
+            .unwrap_or_default(),
+    )
+}
+
 fn absent(probed: &str) -> OracleAbsent {
     OracleAbsent {
         oracle: "ngspice + d_cosim + Icarus (O2)",
         probed: vec![probed.to_owned()],
-        hint: "install Icarus Verilog built with --enable-libvvp (P0.3), source oracles/env.sh, then run `rspice-mixed-corpus capture --oracle O2`",
+        hint: "install Icarus Verilog built with --enable-libvvp, source oracles/env.sh, then run `rspice-mixed-corpus capture --oracle O2`",
     }
 }
 

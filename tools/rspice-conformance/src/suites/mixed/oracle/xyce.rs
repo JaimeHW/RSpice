@@ -11,14 +11,12 @@ use std::time::{Duration, Instant};
 
 use super::{OracleAbsent, Table, column_name};
 
-pub const DEFAULT_EXE: &str = "C:/Users/James/Desktop/XyceNF-7.10.0/bin/Xyce.exe";
-
 pub fn discover() -> Result<PathBuf, OracleAbsent> {
     super::discover(
         "Xyce (O4)",
         "RSPICE_XYCE_EXE",
-        DEFAULT_EXE,
-        "install Xyce 7.10 and point RSPICE_XYCE_EXE at Xyce.exe",
+        super::Fallback::Path(&["Xyce"]),
+        "install Xyce 7.10 and put Xyce on PATH or point RSPICE_XYCE_EXE at it",
     )
 }
 
