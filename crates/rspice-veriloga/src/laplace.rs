@@ -545,6 +545,7 @@ impl StateSpaceFilter {
 
     /// Create a first-order lowpass filter with cutoff frequency
     /// H(s) = omega_c / (s + omega_c)
+    #[cfg(test)]
     pub fn lowpass_first_order(cutoff_hz: f64) -> Result<Self, LaplaceError> {
         let omega_c = 2.0 * PI * cutoff_hz;
         Self::from_transfer_function(&[omega_c], &[1.0, omega_c])
@@ -552,6 +553,7 @@ impl StateSpaceFilter {
 
     /// Create a differentiator with time constant tau
     /// H(s) = tau*s / (tau*s + 1)
+    #[cfg(test)]
     pub fn differentiator(tau: f64) -> Result<Self, LaplaceError> {
         Self::from_transfer_function(&[tau, 0.0], &[tau, 1.0])
     }
@@ -641,6 +643,7 @@ impl StateSpaceFilter {
     /// calculation: neither accepted state nor an in-flight candidate is
     /// changed, so callers can use it during Newton linearization without
     /// affecting transactionality.
+    #[cfg(test)]
     pub fn backward_euler_input_gain(&self, timestep: f64) -> Result<f64, LaplaceError> {
         self.validate_structure()?;
         // Preserve the historical order-zero API contract: a purely static
@@ -1110,6 +1113,7 @@ impl StateSpaceFilter {
     }
 
     /// Compute frequency-response magnitude and phase at `freq_hz`.
+    #[cfg(test)]
     pub fn frequency_response(&self, freq_hz: f64) -> Result<(f64, f64), LaplaceError> {
         let (real, imag) = self.frequency_response_rectangular(freq_hz)?;
         let response = Complex64::new(real, imag);

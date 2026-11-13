@@ -579,6 +579,7 @@ impl ZiFilter {
     }
 
     /// Whether the latest evaluation produced a candidate sample.
+    #[cfg(test)]
     pub fn sampling_now(&self) -> bool {
         matches!(self.candidate, Some(Candidate::Sample { .. }))
     }

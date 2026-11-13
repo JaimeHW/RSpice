@@ -141,6 +141,7 @@ impl SourceInfo {
     }
 
     /// Get the line content for a given line number (1-indexed)
+    #[cfg(test)]
     pub fn get_line(&self, line: u32) -> Option<&str> {
         let idx = usize::try_from(line.checked_sub(1)?).ok()?;
         if idx >= self.line_starts.len() {
@@ -196,6 +197,7 @@ impl SourceMap {
     }
 
     /// Format a span for error display
+    #[cfg(test)]
     pub fn format_span(&self, span: Span) -> String {
         if let Some(source) = self.get(span.source)
             && let Some((line, col)) = source.line_col(span.start)
@@ -207,6 +209,7 @@ impl SourceMap {
     }
 
     /// Get the source text for a span
+    #[cfg(test)]
     pub fn span_text(&self, span: Span) -> Option<&str> {
         self.get(span.source)
             .and_then(|source| source.content.get(span.start as usize..span.end as usize))

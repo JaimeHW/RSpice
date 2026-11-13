@@ -640,6 +640,7 @@ impl VmContext {
 
     /// Capture one analog task without producing an externally visible effect.
     /// Only circuit-wide acceptance publishes calls for host delivery.
+    #[cfg(test)]
     pub fn record_analog_task(
         &mut self,
         kind: rspice_veriloga_runtime::AnalogTaskKind,
@@ -769,6 +770,7 @@ impl VmContext {
     }
 
     /// Create with state variables for transient analysis.
+    #[cfg(test)]
     pub fn with_states(num_terminals: usize, num_states: usize) -> Self {
         Self {
             state_values: vec![0.0; num_states],

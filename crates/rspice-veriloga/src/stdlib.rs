@@ -299,6 +299,7 @@ pub(crate) const BUILTIN_INCLUDE_SOURCE_BYTES: usize = builtin_include_source_by
 ///
 /// Recognizes the modern `.vams` names, the legacy `.h` names used by older
 /// ADMS-era compact models, and the `.va` names OpenVAF also accepts.
+#[cfg(test)]
 pub fn builtin_include(filename: &str) -> Option<&'static str> {
     builtin_include_document(filename).map(|(_, source)| source)
 }

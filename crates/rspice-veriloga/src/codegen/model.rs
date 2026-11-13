@@ -247,6 +247,7 @@ pub struct ZiRuntimeLayout {
 }
 
 impl ZiRuntimeLayout {
+    #[cfg(test)]
     pub const fn unit_coefficients(filter_id: usize) -> Self {
         Self {
             filter_id,
