@@ -91,7 +91,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 
 /// Compile the open view and publish the result through the frame loop's
 /// poll, exactly as a worker's answer is published.
-pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
+pub(crate) fn compile_and_publish(app: &mut RSpiceApp) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
     let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),

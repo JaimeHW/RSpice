@@ -4,13 +4,14 @@
 //! it announces and pressed where it was drawn, and what a press did is read
 //! back from the editor and the schematic it was meant to move.
 
-use super::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
-use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, ProjectSourceDependency,
     ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
     ProjectSourceRole, ProjectSourceRoleBinding, View, ViewType,
 };
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
+use crate::workbench::app_state::AppState;
 use crate::workbench::{MessageCatalog, MessageId, UiTextLocale};
 
 const LIBRARY: &str = "behavioral";

@@ -91,7 +91,7 @@ fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
 
 /// One whole application frame: the frame loop's preparation, the chrome,
 /// the docks and the surface, and the dialogs.
-pub(super) fn frame(
+pub(crate) fn frame(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     size: egui::Vec2,
@@ -100,7 +100,7 @@ pub(super) fn frame(
 }
 
 /// One whole application frame with `events` delivered to it.
-pub(super) fn frame_with(
+pub(crate) fn frame_with(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     size: egui::Vec2,
@@ -120,7 +120,7 @@ pub(super) fn frame_with(
     )
 }
 
-pub(super) fn themed_context() -> egui::Context {
+pub(crate) fn themed_context() -> egui::Context {
     let ctx = egui::Context::default();
     // egui names a shortcut's modifier after the host's operating system, so
     // a context that inherits it asserts "Ctrl+F" on one machine and "Cmd+F"
@@ -148,7 +148,7 @@ fn shows_veriloga_editor(output: &egui::FullOutput) -> bool {
         })
 }
 
-pub(super) const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
+pub(crate) const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
 
 fn tab_is_dirty(app: &RSpiceApp, reference: &CellViewRef) -> bool {
     app.state
@@ -549,7 +549,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
 }
 
 /// Frame until the compile in flight answers, as the application would.
-pub(super) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(crate) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
     while app.state.code.code_workspace.veriloga.pending.is_some() {
         assert!(

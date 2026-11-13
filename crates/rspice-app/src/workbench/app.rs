@@ -133,6 +133,8 @@ pub(crate) use dialogs::source_document::{
 
 pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
 
+#[cfg(test)]
+pub(crate) use dialogs::veriloga_build_settings::save_veriloga_build_settings;
 pub(crate) use dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, open_veriloga_build_settings, veriloga_build_settings_available,
 };
@@ -1221,11 +1223,9 @@ mod veriloga_cell_source_tests;
 mod accessible_mirror_tests;
 #[cfg(test)]
 mod pane_focus_tests;
-#[cfg(test)]
-mod source_editor_command_tests;
 
 #[cfg(test)]
-mod veriloga_interface_tests;
+pub(crate) mod veriloga_interface_tests;
 
 #[cfg(test)]
 mod veriloga_symbol_tests;
@@ -1244,13 +1244,7 @@ pub(in crate::workbench) mod veriloga_flow_tests;
 mod veriloga_import_tests;
 
 #[cfg(test)]
-mod veriloga_panel_tests;
-
-#[cfg(test)]
 mod touch_flow_tests;
-
-#[cfg(test)]
-mod veriloga_build_settings_tests;
 
 #[cfg(test)]
 mod tests {

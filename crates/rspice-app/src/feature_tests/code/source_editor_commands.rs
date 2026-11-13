@@ -2,11 +2,11 @@
 //! reader: the Edit menu, the shortcuts and the palette reach the text rather
 //! than a schematic hidden behind it, and no page carries a menu of its own.
 
-use super::veriloga_design_tests::{
+use crate::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
-use super::*;
-use crate::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
