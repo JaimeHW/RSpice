@@ -5,6 +5,7 @@ mod hdf5;
 mod matlab;
 mod noise_stack;
 mod numpy;
+mod raw;
 mod typed_csv;
 mod vcd;
 
@@ -90,10 +91,12 @@ enum ResultExportFormat {
     NumpyNpz,
     MatlabV5,
     Vcd,
+    SpiceRawBinary,
+    SpiceRawAscii,
 }
 
 impl ResultExportFormat {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 12] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
@@ -104,6 +107,8 @@ impl ResultExportFormat {
         Self::NumpyNpz,
         Self::MatlabV5,
         Self::Vcd,
+        Self::SpiceRawBinary,
+        Self::SpiceRawAscii,
     ];
 
     const fn canonical_id(self) -> &'static str {
@@ -118,6 +123,8 @@ impl ResultExportFormat {
             Self::NumpyNpz => "numpy-npz",
             Self::MatlabV5 => "matlab-v5",
             Self::Vcd => "vcd",
+            Self::SpiceRawBinary => "spice-raw-binary",
+            Self::SpiceRawAscii => "spice-raw-ascii",
         }
     }
 }
@@ -269,6 +276,8 @@ pub fn action_export_csv_with_io(
         EngineeringExportFormat::NumpyArchive => ResultExportFormat::NumpyNpz,
         EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
         EngineeringExportFormat::MatlabV5File => ResultExportFormat::MatlabV5,
+        EngineeringExportFormat::SpiceRawBinary => ResultExportFormat::SpiceRawBinary,
+        EngineeringExportFormat::SpiceRawAscii => ResultExportFormat::SpiceRawAscii,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
         state.prompt(error);
@@ -286,7 +295,9 @@ pub fn action_export_csv_with_io(
         | EngineeringExportFormat::NumpyArray
         | EngineeringExportFormat::NumpyArchive
         | EngineeringExportFormat::Hdf5EngineeringDataset
-        | EngineeringExportFormat::MatlabV5File => true,
+        | EngineeringExportFormat::MatlabV5File
+        | EngineeringExportFormat::SpiceRawBinary
+        | EngineeringExportFormat::SpiceRawAscii => true,
     };
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
         state.prompt(
@@ -348,6 +359,14 @@ pub fn action_export_csv_with_io(
             matlab::export_matlab(state, io, &displayed);
             return;
         }
+        EngineeringExportFormat::SpiceRawBinary => {
+            raw::export_raw(state, io, &displayed, rspice_core::io::RawFormat::Binary);
+            return;
+        }
+        EngineeringExportFormat::SpiceRawAscii => {
+            raw::export_raw(state, io, &displayed, rspice_core::io::RawFormat::Ascii);
+            return;
+        }
         _ => {}
     }
     // Everything past this point publishes a table of the displayed view, so
@@ -364,8 +383,12 @@ pub fn action_export_csv_with_io(
         | EngineeringExportFormat::NumpyArray
         | EngineeringExportFormat::NumpyArchive
         | EngineeringExportFormat::Hdf5EngineeringDataset
-        | EngineeringExportFormat::MatlabV5File => {
-            unreachable!("native bundle, dump, NumPy, HDF5 and MATLAB formats dispatch above")
+        | EngineeringExportFormat::MatlabV5File
+        | EngineeringExportFormat::SpiceRawBinary
+        | EngineeringExportFormat::SpiceRawAscii => {
+            unreachable!(
+                "native bundle, dump, NumPy, HDF5, MATLAB and rawfile formats dispatch above"
+            )
         }
     };
     // What the reader is looking at comes first, and exactly one view owns

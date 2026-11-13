@@ -240,6 +240,12 @@ pub enum EngineeringExportFormat {
     /// slot and no free-form names, so both are stated on export rather than
     /// invented into the file.
     MatlabV5File,
+    /// One analysis as a SPICE rawfile with binary values, through the core
+    /// writer the CLI's `--format raw` uses: it reads in ngspice and LTspice,
+    /// and a transient's event histories follow it as the engine's own plots.
+    SpiceRawBinary,
+    /// [`Self::SpiceRawBinary`] with ASCII values, every bit spelled out.
+    SpiceRawAscii,
 }
 
 impl EngineeringExportFormat {
@@ -255,6 +261,8 @@ impl EngineeringExportFormat {
             Self::NumpyArchive => 7,
             Self::Hdf5EngineeringDataset => 8,
             Self::MatlabV5File => 9,
+            Self::SpiceRawBinary => 10,
+            Self::SpiceRawAscii => 11,
         }
     }
 
@@ -270,6 +278,8 @@ impl EngineeringExportFormat {
             7 => Ok(Self::NumpyArchive),
             8 => Ok(Self::Hdf5EngineeringDataset),
             9 => Ok(Self::MatlabV5File),
+            10 => Ok(Self::SpiceRawBinary),
+            11 => Ok(Self::SpiceRawAscii),
             _ => Err("engineering export index is outside its domain"),
         }
     }
@@ -2108,17 +2118,17 @@ mod tests {
         );
     }
 
-    /// Ten offered indices, and nothing past them.
+    /// Twelve offered indices, and nothing past them.
     #[test]
     fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {
-        for index in 0..=9 {
+        for index in 0..=11 {
             UserPreferences::default()
                 .set_choice(ChoicePreference::EngineeringExport, index)
                 .unwrap_or_else(|error| panic!("index {index} is offered: {error}"));
         }
         assert!(
             UserPreferences::default()
-                .set_choice(ChoicePreference::EngineeringExport, 10)
+                .set_choice(ChoicePreference::EngineeringExport, 12)
                 .is_err()
         );
     }
@@ -2142,7 +2152,7 @@ mod tests {
     /// Both have to hold, because a saved preference outlives the index it was
     /// chosen by and the export dispatcher reads the name.
     #[test]
-    fn the_five_encoded_formats_are_runtime_choices_that_persist_by_name() {
+    fn the_encoded_formats_are_runtime_choices_that_persist_by_name() {
         for (index, format, durable) in [
             (
                 5,
@@ -2157,6 +2167,16 @@ mod tests {
                 "hdf5-engineering-dataset",
             ),
             (9, EngineeringExportFormat::MatlabV5File, "matlab-v5-file"),
+            (
+                10,
+                EngineeringExportFormat::SpiceRawBinary,
+                "spice-raw-binary",
+            ),
+            (
+                11,
+                EngineeringExportFormat::SpiceRawAscii,
+                "spice-raw-ascii",
+            ),
         ] {
             let mut preferences = UserPreferences::default();
             preferences

@@ -13,6 +13,7 @@ use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 mod binary_formats;
 mod periodic_noise;
 mod soa;
+mod spice_raw;
 mod typed_csv;
 
 use std::path::PathBuf;
@@ -49,7 +50,7 @@ fn dc_op_with_one_node() -> crate::state::DcOpResult {
 }
 
 #[test]
-fn export_registry_matches_the_ten_contract_ids_and_refuses_any_other() {
+fn export_registry_matches_the_contract_ids_and_refuses_any_other() {
     assert_eq!(
         ResultExportFormat::ALL.map(ResultExportFormat::canonical_id),
         [
@@ -63,6 +64,8 @@ fn export_registry_matches_the_ten_contract_ids_and_refuses_any_other() {
             "numpy-npz",
             "matlab-v5",
             "vcd",
+            "spice-raw-binary",
+            "spice-raw-ascii",
         ]
     );
     // Every id in the vocabulary has an encoder now that MATLAB v5 has one,

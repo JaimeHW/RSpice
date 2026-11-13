@@ -23,7 +23,7 @@ pub struct DatasetExportPicker {
 
 /// Every format the export writes, in the order the stored choice numbers
 /// them, and whether it can hold only one analysis.
-const FORMATS: [(&str, bool); 10] = [
+const FORMATS: [(&str, bool); 12] = [
     ("CSV", false),
     ("Touchstone where compatible", false),
     ("TSV", false),
@@ -34,6 +34,8 @@ const FORMATS: [(&str, bool); 10] = [
     ("NumPy .npz \u{00b7} one named array per signal", true),
     ("HDF5 \u{00b7} names and units carried", true),
     ("MATLAB v5 \u{00b7} column vectors, complex for AC", true),
+    ("SPICE raw \u{00b7} binary, for ngspice and LTspice", true),
+    ("SPICE raw \u{00b7} ASCII values", true),
 ];
 
 /// Why a one-analysis format is unavailable on a view that shows several.

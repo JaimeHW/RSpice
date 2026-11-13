@@ -1,7 +1,11 @@
-//! Waveform interpretation over the existing bounded core SPICE RAW reader.
+//! Waveform interpretation over the existing bounded core SPICE RAW reader,
+//! and the publication of a retained analysis through the core RAW writer.
 
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use rspice_core::io::RawParseError;
+
+#[cfg(feature = "result-waveform")]
+pub mod result;
 
 #[derive(Debug)]
 pub enum RawReadError {

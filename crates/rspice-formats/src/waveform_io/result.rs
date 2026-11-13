@@ -16,10 +16,14 @@ pub(crate) const EXPORT_TEST_LIMITS:
         max_signal_name_bytes: 1_024,
     };
 mod runtime_export;
-#[cfg(any(feature = "native-bundle", feature = "result-hdf5"))]
+#[cfg(any(
+    feature = "native-bundle",
+    feature = "result-hdf5",
+    feature = "spice-raw"
+))]
 pub(crate) use export::axis_signal_for_analysis;
 pub(crate) use export::axis_signal_for_analysis_type;
-#[cfg(feature = "result-hdf5")]
+#[cfg(any(feature = "result-hdf5", feature = "spice-raw"))]
 pub(crate) use export::signal_type_from_waveform_name;
 #[cfg(feature = "native-bundle")]
 pub(crate) use export::validate_shared_x_axis;
