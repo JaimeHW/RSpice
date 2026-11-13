@@ -19,9 +19,9 @@ use rspice_model_library::symbol::ModelBoundSymbolDefinition;
 /// One row of the symbol's publication contract.
 ///
 /// Every row is computed from the document and its interface alone, so the
-/// same rows decide a headless `Command::SymbolSave` and fill the dialog's
-/// table. A row that renders one verdict and enforces another is the defect
-/// this split exists to make impossible.
+/// same rows decide a headless "Validate and save symbol" and fill the
+/// dialog's table. A row that renders one verdict and enforces another is
+/// the defect this split exists to make impossible.
 #[derive(Debug, Clone)]
 pub struct SymbolSaveCheck {
     pub label: &'static str,
