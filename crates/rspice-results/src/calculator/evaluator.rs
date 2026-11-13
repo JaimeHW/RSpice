@@ -4,6 +4,7 @@
 //! Handles vector arithmetic logic.
 
 use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
+use super::measures::Argument;
 pub use super::value::{CalcValue, RealValue};
 
 /// Interface for retrieving simulation data
@@ -120,10 +121,17 @@ pub fn evaluate(
             }
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
-                arg_values.push(evaluate(arg, ctx)?);
+                arg_values.push(match arg {
+                    CalculatorExpr::Keyword(word) => Argument::Keyword(word.clone()),
+                    _ => Argument::Value(evaluate(arg, ctx)?),
+                });
             }
-            super::complex_functions::dispatch(name, arg_values)
+            super::measures::dispatch(name, arg_values)
         }
+
+        CalculatorExpr::Keyword(word) => Err(EvaluationError::TypeMismatch(format!(
+            "\"{word}\" is an option of a measurement function, not a value"
+        ))),
     };
     value?.checked()
 }

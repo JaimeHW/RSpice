@@ -36,6 +36,12 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+/// The quoted words a measurement function reads as an option rather than a
+/// signal: edge types, pulse levels and bandwidth shapes, spelled as ViVA
+/// spells them. The set is closed so that every other quoted text keeps
+/// naming a signal.
+pub(super) const OPTION_WORDS: &[&str] = &["rising", "falling", "either", "high", "low", "band"];
+
 // =============================================================================
 // Lexer
 // =============================================================================
@@ -44,6 +50,8 @@ impl std::error::Error for ParseError {}
 pub enum Token {
     Number(f64),
     Ident(String),
+    /// A quoted option word ([`OPTION_WORDS`]), already lower-cased.
+    Keyword(String),
     // Operators
     Plus,
     Minus,
@@ -185,7 +193,15 @@ impl<'a> Lexer<'a> {
                 'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident(false)),
                 // A leading separator opens a canonical hierarchical name.
                 '/' if !self.after_value => Token::Ident(self.read_ident(true)),
-                '"' => Token::Ident(self.read_string_literal()?),
+                '"' => {
+                    let text = self.read_string_literal()?;
+                    let word = text.to_ascii_lowercase();
+                    if OPTION_WORDS.contains(&word.as_str()) {
+                        Token::Keyword(word)
+                    } else {
+                        Token::Ident(text)
+                    }
+                }
                 '+' => {
                     self.chars.next();
                     Token::Plus
@@ -232,7 +248,10 @@ impl<'a> Lexer<'a> {
             },
         };
 
-        self.after_value = matches!(token, Token::Number(_) | Token::Ident(_) | Token::RParen);
+        self.after_value = matches!(
+            token,
+            Token::Number(_) | Token::Ident(_) | Token::Keyword(_) | Token::RParen
+        );
         Ok(SpannedToken { token, position })
     }
 }
@@ -405,6 +424,10 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_ident_or_call(&name)
             }
+            Token::Keyword(word) => {
+                self.advance()?;
+                Ok(CalculatorExpr::Keyword(word))
+            }
             Token::LParen => {
                 let start = self.current.position;
                 self.advance()?;
@@ -505,6 +528,7 @@ fn describe_token(token: &Token) -> String {
     match token {
         Token::Number(_) => "number".to_string(),
         Token::Ident(name) => format!("identifier '{name}'"),
+        Token::Keyword(word) => format!("option \"{word}\""),
         Token::Plus => "'+'".to_string(),
         Token::Minus => "'-'".to_string(),
         Token::Star => "'*'".to_string(),

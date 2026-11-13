@@ -7,11 +7,14 @@ pub mod ast;
 mod complex_functions;
 mod complex_ops;
 pub mod evaluator;
+mod frequency_measures;
 pub mod functions;
+mod measures;
 pub mod parser;
 pub mod retained;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_parser;
+mod time_measures;
 pub mod value;
 
 use crate::interpolation;

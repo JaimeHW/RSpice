@@ -84,7 +84,7 @@ pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> 
 /// A level touched exactly at a retained sample is reported once, under the
 /// same ownership rule the phase inversions use: each segment owns its leading
 /// endpoint, and the final segment additionally owns its trailing one.
-fn log_frequency_crossings(frequency: &[f64], series: &[f64], level: f64) -> Vec<f64> {
+pub(crate) fn log_frequency_crossings(frequency: &[f64], series: &[f64], level: f64) -> Vec<f64> {
     let n = frequency.len().min(series.len());
     let mut out = Vec::new();
     for i in 1..n {

@@ -168,6 +168,6 @@ fn collect_signals(expression: &calculator::ast::CalculatorExpr, signals: &mut V
                 collect_signals(argument, signals);
             }
         }
-        CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
+        CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) | CalculatorExpr::Keyword(_) => {}
     }
 }

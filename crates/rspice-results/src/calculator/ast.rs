@@ -35,6 +35,12 @@ pub enum CalculatorExpr {
     },
     /// Constant (TIME, FREQ)
     Constant(CalculatorConstant),
+    /// A quoted option word a measurement function reads, in lower case:
+    /// an edge type (`"rising"`, `"falling"`, `"either"`), a pulse level
+    /// (`"high"`, `"low"`) or a bandwidth shape (`"low"`, `"high"`,
+    /// `"band"`). Only those words are options; any other quoted text still
+    /// names a signal.
+    Keyword(String),
 }
 
 /// Binary operators

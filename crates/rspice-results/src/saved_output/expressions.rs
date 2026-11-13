@@ -47,7 +47,9 @@ pub fn saved_output_references(
                     }
                     CalculatorExpr::UnaryOp { operand, .. } => pending.push(operand),
                     CalculatorExpr::FunctionCall { args, .. } => pending.extend(args),
-                    CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
+                    CalculatorExpr::Number(_)
+                    | CalculatorExpr::Constant(_)
+                    | CalculatorExpr::Keyword(_) => {}
                 }
             }
         }

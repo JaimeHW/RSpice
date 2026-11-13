@@ -32,6 +32,7 @@
 //! it calls these kernels only when an operation has defined real semantics.
 
 use super::evaluator::EvaluationError;
+use super::measures::Argument;
 use super::value::RealValue as CalcValue;
 use std::f64::consts::PI;
 
@@ -63,18 +64,17 @@ impl FunctionRegistry {
             "max" => max(args),
             "pp" => pp(args),
             "yval" => yval(args),
-            "cross" => cross(args),
-            "freq" => freq(args),
-            "period" => period(args),
-            "duty" => duty(args),
-            "overshoot" => overshoot(args),
-            "rise" | "risetime" => rise(args),
-            "fall" | "falltime" => fall(args),
-            "settling" => settling(args),
-            "delay" => delay(args),
             "thd" => thd(args),
 
-            _ => Err(EvaluationError::UnknownFunction(name.to_string())),
+            _ => match super::time_measures::lookup(&name.to_lowercase()) {
+                // Edge, pulse and step measurements take option words, so
+                // they live with the argument handling that reads them.
+                Some(measure) => {
+                    let args: Vec<Argument> = args.into_iter().map(Argument::from).collect();
+                    measure(name, &args).map(CalcValue::Scalar)
+                }
+                None => Err(EvaluationError::UnknownFunction(name.to_string())),
+            },
         }
     }
 }
@@ -364,7 +364,7 @@ fn unwrap(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 ///
 /// Holes are skipped rather than poisoning the answer: a `NaN` left by the
 /// domain policy above says "no value here", not "no value anywhere".
-fn extremes(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationError> {
+pub(super) fn extremes(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationError> {
     let mut low = f64::INFINITY;
     let mut high = f64::NEG_INFINITY;
     for value in y.iter().filter(|v| v.is_finite()) {
@@ -416,7 +416,7 @@ fn pp(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 /// search short-circuits on the very first comparison there, answering every
 /// in-range query with the first stored sample. The arithmetic itself needs
 /// no mirroring — `dx` is signed — so only the comparisons flip.
-fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
+pub(super) fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
     let descending = x.len() > 1 && x[0] > x[x.len() - 1];
     let before = |a: f64, b: f64| if descending { a >= b } else { a <= b };
     if before(at, x[0]) {
@@ -446,7 +446,7 @@ fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
 /// Duplicated timepoints are not a reversal, so the test is `<`, not `<=`;
 /// the aggregates (`avg`, `rms`) and the sample-wise transforms are absent
 /// here because a signed width and a signed `dx` already carry the direction.
-fn forward_domain(name: &str, x: &[f64]) -> Result<(), EvaluationError> {
+pub(super) fn forward_domain(name: &str, x: &[f64]) -> Result<(), EvaluationError> {
     match (1..x.len()).find(|&i| x[i] < x[i - 1]) {
         Some(index) => Err(EvaluationError::MathError(format!(
             "{name} reads its x-axis as elapsed time, but this sweep runs backwards \
@@ -475,339 +475,6 @@ fn yval(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
         )));
     }
     Ok(CalcValue::Scalar(interpolate(x, y, at)))
-}
-
-/// Where a signal passed through a level, and which way it was going.
-#[derive(Clone, Copy)]
-struct Crossing {
-    x: f64,
-    rising: bool,
-}
-
-/// Every crossing of `level`, in domain order — which is storage order, so
-/// every caller clears its grid through [`forward_domain`] first. `rising`
-/// likewise means rising *in x*, not merely increasing along the samples.
-///
-/// A sample sitting exactly on the level is not itself a crossing — a curve
-/// that touches the level and turns back has not crossed it. A run of
-/// at-level samples between two opposite signs is reported at the first of
-/// them, which is where the level was actually reached. A non-finite sample
-/// breaks the search: a hole is not a crossing, and pretending otherwise
-/// would invent an edge across a gap.
-fn crossings(x: &[f64], y: &[f64], level: f64) -> Vec<Crossing> {
-    let mut found = Vec::new();
-    let mut previous: Option<(usize, f64)> = None;
-    for i in 0..x.len().min(y.len()) {
-        let delta = y[i] - level;
-        if !delta.is_finite() {
-            previous = None;
-            continue;
-        }
-        if delta == 0.0 {
-            continue;
-        }
-        let sign = if delta > 0.0 { 1.0 } else { -1.0 };
-        if let Some((before, previous_sign)) = previous
-            && previous_sign != sign
-        {
-            let at = if i == before + 1 {
-                x[before] + (level - y[before]) * (x[i] - x[before]) / (y[i] - y[before])
-            } else {
-                x[before + 1]
-            };
-            found.push(Crossing {
-                x: at,
-                rising: sign > 0.0,
-            });
-        }
-        previous = Some((i, sign));
-    }
-    found
-}
-
-/// The 50 % level a periodic measurement keys off: `(min + max) / 2`.
-fn mid_level(name: &str, y: &[f64]) -> Result<f64, EvaluationError> {
-    let (low, high) = extremes(name, y)?;
-    if low == high {
-        return Err(EvaluationError::MathError(format!(
-            "{name} needs a signal that moves; every sample is {low}"
-        )));
-    }
-    Ok((low + high) * 0.5)
-}
-
-/// `cross(w, level, n)` — where `w` crosses `level` for the nth time.
-fn cross(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("cross", &args, 3)?;
-    let (x, y) = series_arg("cross", &args[0])?;
-    forward_domain("cross", x)?;
-    let level = scalar_arg("cross", "level", &args[1])?;
-    let ordinal = scalar_arg("cross", "ordinal", &args[2])?;
-    // NaN is rejected explicitly rather than left to the negation: `ordinal`
-    // is whatever the reader's expression evaluated to, and a NaN that got
-    // past here would cast to `0usize` and underflow `wanted - 1` below.
-    if ordinal.is_nan() || ordinal < 1.0 || ordinal.fract() != 0.0 {
-        return Err(EvaluationError::MathError(
-            "cross ordinal must be a whole number of 1 or more".to_owned(),
-        ));
-    }
-    let wanted = ordinal as usize;
-    let found = crossings(x, y, level);
-    match found.get(wanted - 1) {
-        Some(crossing) => Ok(CalcValue::Scalar(crossing.x)),
-        None => Err(EvaluationError::MathError(format!(
-            "the signal crosses {level} {} time(s), not {wanted}",
-            found.len()
-        ))),
-    }
-}
-
-/// Repetition rate from the rising mid-level crossings.
-///
-/// Measured across *all* the cycles present rather than the first one, so
-/// jitter averages out instead of deciding the answer.
-fn fundamental(name: &str, x: &[f64], y: &[f64]) -> Result<f64, EvaluationError> {
-    let mid = mid_level(name, y)?;
-    let rising: Vec<f64> = crossings(x, y, mid)
-        .into_iter()
-        .filter(|crossing| crossing.rising)
-        .map(|crossing| crossing.x)
-        .collect();
-    if rising.len() < 2 {
-        return Err(EvaluationError::MathError(format!(
-            "{name} needs at least one whole period between rising mid-level crossings"
-        )));
-    }
-    let span = rising[rising.len() - 1] - rising[0];
-    if span <= 0.0 {
-        return Err(EvaluationError::MathError(format!(
-            "{name} found no elapsed time between mid-level crossings"
-        )));
-    }
-    Ok((rising.len() - 1) as f64 / span)
-}
-
-fn freq(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("freq", &args, 1)?;
-    let (x, y) = series_arg("freq", &args[0])?;
-    forward_domain("freq", x)?;
-    Ok(CalcValue::Scalar(fundamental("freq", x, y)?))
-}
-
-fn period(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("period", &args, 1)?;
-    let (x, y) = series_arg("period", &args[0])?;
-    forward_domain("period", x)?;
-    Ok(CalcValue::Scalar(1.0 / fundamental("period", x, y)?))
-}
-
-/// `duty(w)` — percent of each period spent above the mid level, averaged
-/// over every whole cycle the window contains.
-fn duty(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("duty", &args, 1)?;
-    let (x, y) = series_arg("duty", &args[0])?;
-    forward_domain("duty", x)?;
-    let mid = mid_level("duty", y)?;
-    let found = crossings(x, y, mid);
-    let mut total = 0.0;
-    let mut cycles = 0usize;
-    for (index, start) in found.iter().enumerate() {
-        if !start.rising {
-            continue;
-        }
-        let rest = &found[index + 1..];
-        let (Some(falls), Some(repeats)) = (
-            rest.iter().find(|crossing| !crossing.rising),
-            rest.iter().find(|crossing| crossing.rising),
-        ) else {
-            continue;
-        };
-        let cycle = repeats.x - start.x;
-        if cycle <= 0.0 {
-            continue;
-        }
-        total += (falls.x - start.x) / cycle;
-        cycles += 1;
-    }
-    if cycles == 0 {
-        return Err(EvaluationError::MathError(
-            "duty needs a whole cycle: a rising mid-level crossing, a fall, and the next rise"
-                .to_owned(),
-        ));
-    }
-    Ok(CalcValue::Scalar(100.0 * total / cycles as f64))
-}
-
-/// The levels a step response starts and ends at, taken from the first and
-/// last finite samples.
-fn step_levels(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationError> {
-    let no_sample = || EvaluationError::MathError(format!("{name} has no finite sample"));
-    let initial = y
-        .iter()
-        .find(|v| v.is_finite())
-        .copied()
-        .ok_or_else(no_sample)?;
-    let settled = y
-        .iter()
-        .rev()
-        .find(|v| v.is_finite())
-        .copied()
-        .ok_or_else(no_sample)?;
-    if initial == settled {
-        return Err(EvaluationError::MathError(format!(
-            "{name} needs a step; the first and last samples are both {initial}"
-        )));
-    }
-    Ok((initial, settled))
-}
-
-/// `overshoot(w)` — percent by which the response passed its final value,
-/// relative to the step it took to get there.
-fn overshoot(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("overshoot", &args, 1)?;
-    let (x, y) = series_arg("overshoot", &args[0])?;
-    // "Final value" is the last sample in time, so the direction matters.
-    forward_domain("overshoot", x)?;
-    let (initial, settled) = step_levels("overshoot", y)?;
-    let (low, high) = extremes("overshoot", y)?;
-    let step = settled - initial;
-    let peak = if step > 0.0 { high } else { low };
-    Ok(CalcValue::Scalar(100.0 * (peak - settled) / step))
-}
-
-/// The 10 %–90 % transition time of the first edge going `rising`'s way,
-/// with the two levels taken from the waveform's own excursion.
-fn edge(name: &str, x: &[f64], y: &[f64], rising: bool) -> Result<f64, EvaluationError> {
-    let (low, high) = extremes(name, y)?;
-    if low == high {
-        return Err(EvaluationError::MathError(format!(
-            "{name} needs an edge; every sample is {low}"
-        )));
-    }
-    let excursion = high - low;
-    let ten = low + 0.1 * excursion;
-    let ninety = low + 0.9 * excursion;
-    let (from, to) = if rising { (ten, ninety) } else { (ninety, ten) };
-    let start = crossings(x, y, from)
-        .into_iter()
-        .find(|crossing| crossing.rising == rising)
-        .ok_or_else(|| {
-            EvaluationError::MathError(format!("{name} finds no edge through the {from} level"))
-        })?;
-    let end = crossings(x, y, to)
-        .into_iter()
-        .find(|crossing| crossing.rising == rising && crossing.x >= start.x)
-        .ok_or_else(|| {
-            EvaluationError::MathError(format!("{name} finds no edge through the {to} level"))
-        })?;
-    Ok(end.x - start.x)
-}
-
-fn rise(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("rise", &args, 1)?;
-    let (x, y) = series_arg("rise", &args[0])?;
-    forward_domain("rise", x)?;
-    Ok(CalcValue::Scalar(edge("rise", x, y, true)?))
-}
-
-fn fall(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("fall", &args, 1)?;
-    let (x, y) = series_arg("fall", &args[0])?;
-    forward_domain("fall", x)?;
-    Ok(CalcValue::Scalar(edge("fall", x, y, false)?))
-}
-
-/// `settling(w, band)` — time from the start of the window until `w` enters
-/// and stays inside `band` percent of its step, measured about the final
-/// value.
-fn settling(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("settling", &args, 2)?;
-    let (x, y) = series_arg("settling", &args[0])?;
-    forward_domain("settling", x)?;
-    let band = scalar_arg("settling", "band", &args[1])?;
-    // NaN is rejected explicitly rather than left to the negation: a NaN band
-    // makes `tolerance` NaN, every in-band test below false, and `settling`
-    // would report a settling time it never measured.
-    if band.is_nan() || band <= 0.0 {
-        return Err(EvaluationError::MathError(
-            "settling band must be a positive percentage of the step".to_owned(),
-        ));
-    }
-    let (initial, settled) = step_levels("settling", y)?;
-    let tolerance = (settled - initial).abs() * band / 100.0;
-    // The *last* excursion outside the band is what settling means; an early
-    // dip through it says nothing about when the response finally stayed put.
-    let mut last_outside = None;
-    for (index, value) in y.iter().enumerate() {
-        if value.is_finite() && (value - settled).abs() > tolerance {
-            last_outside = Some(index);
-        }
-    }
-    let Some(outside) = last_outside else {
-        return Ok(CalcValue::Scalar(0.0));
-    };
-    if outside + 1 >= y.len() {
-        return Err(EvaluationError::MathError(format!(
-            "the signal never settles inside {band} % of its step"
-        )));
-    }
-    let (before, after) = (outside, outside + 1);
-    if !y[after].is_finite() {
-        return Err(EvaluationError::MathError(format!(
-            "the signal's last excursion outside {band} % of its step is followed by a hole, \
-             so there is no sample to place the band entry against"
-        )));
-    }
-    // Interpolate on the *signed* deviation, toward the band edge the signal
-    // actually crosses — the one on the side it was last outside. A response
-    // that flies past the settled value between these two samples lands on
-    // the far side of it, and reading unsigned magnitudes there interpolates
-    // toward the wrong edge and reports the entry late.
-    let departure = y[before] - settled;
-    let arrival = y[after] - settled;
-    let band_edge = if departure > 0.0 {
-        tolerance
-    } else {
-        -tolerance
-    };
-    let travel = arrival - departure;
-    // |departure| > tolerance >= |arrival|, so the two deviations differ and
-    // this cannot divide by zero; a duplicated timepoint gives x[before].
-    let entry = x[before] + (band_edge - departure) * (x[after] - x[before]) / travel;
-    Ok(CalcValue::Scalar(entry - x[0]))
-}
-
-/// `delay(a, b)` — how long after `a` first crosses its mid level `b`
-/// crosses its own. `delay(a, b, level)` measures both against one level
-/// instead, which is what a logic threshold needs.
-///
-/// The two waveforms are read independently, so they need not share a grid.
-fn delay(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_range("delay", &args, 2, 3)?;
-    let (from_x, from_y) = series_arg("delay", &args[0])?;
-    let (to_x, to_y) = series_arg("delay", &args[1])?;
-    forward_domain("delay", from_x)?;
-    forward_domain("delay", to_x)?;
-    let (from_level, to_level) = match args.get(2) {
-        Some(value) => {
-            let level = scalar_arg("delay", "level", value)?;
-            (level, level)
-        }
-        None => (mid_level("delay", from_y)?, mid_level("delay", to_y)?),
-    };
-    let first = crossings(from_x, from_y, from_level)
-        .first()
-        .copied()
-        .ok_or_else(|| {
-            EvaluationError::MathError(format!("the first waveform never crosses {from_level}"))
-        })?;
-    let second = crossings(to_x, to_y, to_level)
-        .first()
-        .copied()
-        .ok_or_else(|| {
-            EvaluationError::MathError(format!("the second waveform never crosses {to_level}"))
-        })?;
-    Ok(CalcValue::Scalar(second.x - first.x))
 }
 
 /// How many harmonics `thd` weighs when the caller does not say.
