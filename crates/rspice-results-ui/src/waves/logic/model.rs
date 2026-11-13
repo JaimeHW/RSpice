@@ -112,6 +112,8 @@ pub struct LogicLane {
     name: String,
     times: Vec<f64>,
     levels: Vec<LogicLevel>,
+    /// The instants, by index, from which the level is unknown.
+    unknown: Vec<usize>,
 }
 
 impl LogicLane {
@@ -127,11 +129,7 @@ impl LogicLane {
                 LogicLevel::from_event_code(code).unwrap_or(LogicLevel::Unknown),
             )
         }));
-        Self {
-            name: name.into(),
-            times,
-            levels,
-        }
+        Self::from_changes(name.into(), times, levels)
     }
 
     /// The lane `digital()` reads an analog signal as: its step waveform,
@@ -148,10 +146,23 @@ impl LogicLane {
             };
             (time, level)
         }));
+        Self::from_changes(name.into(), times, levels)
+    }
+
+    /// A lane over its change instants and the level from each, with the
+    /// unknown stretches indexed.
+    fn from_changes(name: String, times: Vec<f64>, levels: Vec<LogicLevel>) -> Self {
+        let unknown = levels
+            .iter()
+            .enumerate()
+            .filter(|(_, level)| **level == LogicLevel::Unknown)
+            .map(|(index, _)| index)
+            .collect();
         Self {
-            name: name.into(),
+            name,
             times,
             levels,
+            unknown,
         }
     }
 
@@ -167,6 +178,12 @@ impl LogicLane {
     /// The level from each instant in [`Self::times`].
     pub fn levels(&self) -> &[LogicLevel] {
         &self.levels
+    }
+
+    /// The instants, by index and increasing, from which the level is
+    /// unknown.
+    pub fn unknown(&self) -> &[usize] {
+        &self.unknown
     }
 
     /// The level held at `t`, right-continuously; `None` before the net was
@@ -212,6 +229,19 @@ pub struct BusLane {
     words: Vec<Box<[Option<u8>]>>,
     /// Why the word could not be reassembled, when it could not.
     refusal: Option<String>,
+    /// The instants, by index, from which the word has a bit that is not 0
+    /// or 1.
+    unresolved: Vec<usize>,
+}
+
+/// Whether a word has a bit that is not 0 or 1.
+fn word_is_unresolved(codes: &[Option<u8>]) -> bool {
+    codes.iter().any(|code| {
+        !matches!(
+            event_code_to_vcd_bit(*code),
+            Some(VcdBit::Zero | VcdBit::One)
+        )
+    })
 }
 
 impl BusLane {
@@ -249,6 +279,12 @@ impl BusLane {
                 )),
             ),
         };
+        let unresolved = words
+            .iter()
+            .enumerate()
+            .filter(|(_, codes)| word_is_unresolved(codes))
+            .map(|(index, _)| index)
+            .collect();
         Self {
             name,
             members,
@@ -256,6 +292,7 @@ impl BusLane {
             times,
             words,
             refusal,
+            unresolved,
         }
     }
 
@@ -299,14 +336,13 @@ impl BusLane {
 
     /// Whether the word from instant `index` has a bit that is not 0 or 1.
     pub fn word_is_unresolved(&self, index: usize) -> bool {
-        self.word(index).is_some_and(|codes| {
-            codes.iter().any(|code| {
-                !matches!(
-                    event_code_to_vcd_bit(*code),
-                    Some(VcdBit::Zero | VcdBit::One)
-                )
-            })
-        })
+        self.unresolved.binary_search(&index).is_ok()
+    }
+
+    /// The instants, by index and increasing, from which the word has a bit
+    /// that is not 0 or 1.
+    pub fn unresolved(&self) -> &[usize] {
+        &self.unresolved
     }
 
     /// The word from instant `index`, spelled in `radix` or in its fallback.

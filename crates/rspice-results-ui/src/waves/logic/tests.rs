@@ -74,7 +74,7 @@ fn logic_transitions_land_on_the_exact_event_instants() {
         left: 50.0,
         right: 1050.0,
     };
-    let edges: Vec<(f32, usize)> = plan_lane(q.times(), &map)
+    let edges: Vec<(f32, usize)> = plan_lane(q.times(), q.unknown(), &map)
         .into_iter()
         .filter_map(|stroke| match stroke {
             LaneStroke::Edge { x, index } => Some((x, index)),
@@ -191,7 +191,7 @@ fn a_million_transitions_plan_in_work_proportional_to_the_pixel_columns() {
         left: 0.0,
         right: columns,
     };
-    let strokes = plan_lane(lane.times(), &map);
+    let strokes = plan_lane(lane.times(), lane.unknown(), &map);
     // Each step of the plan emits at least one stroke and runs at most two
     // bisections, so the stroke count bounds the work done.
     assert!(
@@ -215,7 +215,7 @@ fn a_million_transitions_plan_in_work_proportional_to_the_pixel_columns() {
         t1: 500_040.0 * NS,
         ..map
     };
-    let edges = plan_lane(lane.times(), &zoom)
+    let edges = plan_lane(lane.times(), lane.unknown(), &zoom)
         .into_iter()
         .filter(|stroke| matches!(stroke, LaneStroke::Edge { .. }))
         .count();
@@ -235,7 +235,7 @@ fn a_dense_column_between_sparse_edges_is_one_block_and_the_held_value_resumes()
         left: 0.0,
         right: 100.0,
     };
-    let strokes = plan_lane(lane.times(), &map);
+    let strokes = plan_lane(lane.times(), lane.unknown(), &map);
     assert_eq!(
         strokes,
         [
@@ -263,6 +263,121 @@ fn a_dense_column_between_sparse_edges_is_one_block_and_the_held_value_resumes()
                 index: 7
             },
         ]
+    );
+}
+
+/// An unknown value inside a dense block is drawn as unknown across the
+/// columns it reaches and the rest of the block as activity, and one held
+/// into a block's first column from before the block counts as inside it.
+/// Before, a block was activity whole and the unknown inside it was lost.
+#[test]
+fn an_unknown_inside_a_dense_block_keeps_its_columns() {
+    let points = [
+        (0.0, 0),
+        // Five changes in column 20 and four in column 21, unknown from
+        // 21.2 to 21.3.
+        (20.0, 1),
+        (20.1, 0),
+        (20.2, 1),
+        (20.3, 0),
+        (20.4, 1),
+        (21.1, 0),
+        (21.2, 2),
+        (21.3, 1),
+        (21.4, 0),
+        // Unknown from 55 into the burst in column 60.
+        (55.0, 2),
+        (60.0, 1),
+        (60.2, 0),
+        (60.4, 1),
+        (60.6, 0),
+    ];
+    let lane = LogicLane::from_events("burst", points);
+    assert_eq!(lane.unknown(), [7, 10]);
+    let map = TimeMapping {
+        t0: 0.0,
+        t1: 100.0,
+        left: 0.0,
+        right: 100.0,
+    };
+    assert_eq!(
+        plan_lane(lane.times(), lane.unknown(), &map),
+        [
+            LaneStroke::Hold {
+                x0: 0.0,
+                x1: 20.0,
+                index: 0
+            },
+            LaneStroke::Activity { x0: 20.0, x1: 21.0 },
+            LaneStroke::Unknown { x0: 21.0, x1: 22.0 },
+            LaneStroke::Hold {
+                x0: 22.0,
+                x1: 55.0,
+                index: 9
+            },
+            LaneStroke::Edge { x: 55.0, index: 10 },
+            LaneStroke::Hold {
+                x0: 55.0,
+                x1: 60.0,
+                index: 10
+            },
+            LaneStroke::Unknown { x0: 60.0, x1: 61.0 },
+            LaneStroke::Hold {
+                x0: 61.0,
+                x1: 100.0,
+                index: 14
+            },
+        ]
+    );
+}
+
+/// A lane `digital()` reads off an analog signal indexes its holes, the X
+/// stretches, as a simulated lane does, so the plan keeps them visible at any
+/// zoom.
+#[test]
+fn a_digital_conversion_indexes_its_unknown_stretches() {
+    let x = [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0];
+    let y = [0.0, 0.0, f64::NAN, f64::NAN, 1.0, 1.0, 0.5, 0.5];
+    let lane = LogicLane::from_levels("d", &x, &y);
+    let unknown: Vec<usize> = (0..lane.levels().len())
+        .filter(|index| lane.levels()[*index] == LogicLevel::Unknown)
+        .collect();
+    assert_eq!(unknown.len(), 2, "the hole and the half level read as X");
+    assert_eq!(lane.unknown(), unknown.as_slice());
+}
+
+/// A lone unknown narrower than a pixel is drawn across the whole pixels it
+/// touches rather than as a sliver of one, and never as a hold.
+#[test]
+fn an_unknown_narrower_than_a_pixel_is_drawn_a_whole_pixel_wide() {
+    let lane = LogicLane::from_events(
+        "glitch",
+        [(0.0, 0), (10.9, 2), (11.2, 1), (40.95, 2), (41.05, 0)],
+    );
+    let map = TimeMapping {
+        t0: 0.0,
+        t1: 100.0,
+        left: 0.0,
+        right: 100.0,
+    };
+    let strokes = plan_lane(lane.times(), lane.unknown(), &map);
+    let unknown: Vec<_> = strokes
+        .iter()
+        .filter(|stroke| matches!(stroke, LaneStroke::Unknown { .. }))
+        .copied()
+        .collect();
+    assert_eq!(
+        unknown,
+        [
+            LaneStroke::Unknown { x0: 10.0, x1: 12.0 },
+            LaneStroke::Unknown { x0: 40.0, x1: 42.0 },
+        ]
+    );
+    assert!(
+        !strokes
+            .iter()
+            .any(|stroke| matches!(stroke, LaneStroke::Hold { index: 1 | 3, .. })),
+        "{strokes:?}"
     );
 }
 

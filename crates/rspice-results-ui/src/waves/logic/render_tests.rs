@@ -392,3 +392,104 @@ fn write_lane_render_png() {
     std::fs::write(&path, render.canvas.png(height)).expect("write lane render");
     println!("lane render: {}", path.display());
 }
+
+/// The columns of a full-zoom render of a clock that goes unknown for one
+/// change in thousands, above a lane of lone unknowns narrower than a pixel
+/// at sub-pixel offsets, and where each unknown starts: (canvas, levels of
+/// each row, the unknown columns of each row, the error ink).
+fn unknown_slivers() -> (Canvas, [LaneLevels; 2], [Vec<usize>; 2], Color32) {
+    const COLUMNS: f32 = 400.0;
+    // A clock toggling every nanosecond for 200 µs: 500 changes a column.
+    let count = 200_000u32;
+    let dense_unknown: Vec<u32> = (0..37).map(|k| 1_234 + k * 5_381).collect();
+    let dense = LogicLane::from_events(
+        "clk",
+        (0..count).map(|k| {
+            let code = if dense_unknown.contains(&k) {
+                2
+            } else {
+                (k % 2) as u8
+            };
+            (f64::from(k) * NS, code)
+        }),
+    );
+    // Unknown for a tenth of a pixel at each of ten offsets inside a pixel.
+    let end = f64::from(count) * NS;
+    let pixel = end / f64::from(COLUMNS);
+    let sparse_starts: Vec<f64> = (0..10)
+        .map(|k| (f64::from(k).mul_add(37.0, 11.0) + f64::from(k) * 0.1) * pixel)
+        .collect();
+    let mut points = vec![(0.0, 0)];
+    for start in &sparse_starts {
+        points.extend([(*start, 2), (start + 0.1 * pixel, 0)]);
+    }
+    let sparse = LogicLane::from_events("glitch", points);
+    let map = TimeMapping {
+        t0: 0.0,
+        t1: end,
+        left: 0.0,
+        right: COLUMNS,
+    };
+    let rows = [0.0, LOGIC_ROW_HEIGHT]
+        .map(|top| Rect::from_x_y_ranges(0.0..=COLUMNS, top..=top + LOGIC_ROW_HEIGHT));
+    let mut error = Color32::RED;
+    let canvas = raster::render(egui::vec2(COLUMNS, 2.0 * LOGIC_ROW_HEIGHT), |ui, _| {
+        let tokens = rspice_ui_kit::tokens::Tokens::get(ui.ctx());
+        let style = LaneStyle::new(&tokens, tokens.color.traces[0]);
+        error = style.unknown;
+        paint_logic_lane(ui.painter(), rows[0], &dense, &map, &style);
+        paint_logic_lane(ui.painter(), rows[1], &sparse, &map, &style);
+    });
+    let column = |t: f64| map.x(t).floor() as usize;
+    (
+        canvas,
+        rows.map(LaneLevels::of),
+        [
+            dense_unknown
+                .iter()
+                .map(|k| column(f64::from(*k) * NS))
+                .collect(),
+            sparse_starts.iter().map(|t| column(*t)).collect(),
+        ],
+        error,
+    )
+}
+
+/// Every unknown stretch stays visible at any zoom, at least a pixel wide in
+/// the error ink, as SimVision draws it. On a clock at full zoom, where a
+/// column holds five hundred changes, each of 37 changes going unknown
+/// leaves the error ink on the lane's high level in its own column; so does
+/// each lone unknown a tenth of a pixel wide, at every offset inside its
+/// pixel. Before, the dense ones were drawn as activity in the lane's colour
+/// and the lone ones as a sliver some offsets lost.
+#[test]
+fn every_unknown_stretch_is_drawn_at_least_a_pixel_wide_at_full_zoom() {
+    let (canvas, levels, columns, error) = unknown_slivers();
+    let mut missing = Vec::new();
+    for (row, (levels, columns)) in levels.iter().zip(&columns).enumerate() {
+        for &column in columns {
+            let ink = line_ink(&canvas, column, levels.high, error);
+            if ink < 0.8 {
+                missing.push(format!("row {row}, column {column}: {ink:.2}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "unknowns drawn without the error ink:\n{}",
+        missing.join("\n")
+    );
+}
+
+/// The full-zoom unknowns for review. Set `RSPICE_REVIEW_DIR` to choose
+/// where.
+#[test]
+#[ignore = "writes a PNG for review"]
+fn write_unknown_slivers_png() {
+    let (canvas, ..) = unknown_slivers();
+    let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let path = directory.join("logic-unknown-slivers.png");
+    std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
+    println!("{}", path.display());
+}

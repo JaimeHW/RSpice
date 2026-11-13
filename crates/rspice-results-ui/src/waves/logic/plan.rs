@@ -8,6 +8,11 @@
 //! consumes a whole pixel column or emits one exact edge, and finds its next
 //! position by bisection, so a plan costs `O(columns · log changes)` whatever
 //! the trace's length.
+//!
+//! An unknown value is never lost to the zoom. A stretch of `x` narrower than
+//! a pixel, alone or inside a dense block, is drawn at least one pixel wide in
+//! the unknown style, as SimVision draws it: the reader looking for where a
+//! net went unknown has to see every place it did at any zoom.
 
 /// The shared time axis, mapped onto a lane's screen extent.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,12 +60,16 @@ pub enum LaneStroke {
     Edge { x: f32, index: usize },
     /// Two or more changes in every column of `[x0, x1)`.
     Activity { x0: f32, x1: f32 },
+    /// An unknown value somewhere in every column of `[x0, x1)`: a stretch
+    /// too narrow to draw as its own hold, at least one pixel wide.
+    Unknown { x0: f32, x1: f32 },
 }
 
-/// Plan a lane whose value changes at `times` (strictly increasing).
+/// Plan a lane whose value changes at `times` (strictly increasing), and is
+/// unknown from the changes `unknown` lists by index (increasing).
 ///
 /// Nothing is drawn before the first change: the net had not been observed.
-pub fn plan_lane(times: &[f64], map: &TimeMapping) -> Vec<LaneStroke> {
+pub fn plan_lane(times: &[f64], unknown: &[usize], map: &TimeMapping) -> Vec<LaneStroke> {
     let mut strokes = Vec::new();
     if times.is_empty() || !map.is_drawable() {
         return strokes;
@@ -79,13 +88,18 @@ pub fn plan_lane(times: &[f64], map: &TimeMapping) -> Vec<LaneStroke> {
     let column_of = |t: f64| (t - map.t0).mul_add(scale, left).floor();
     // The changes up to the end of `column`.
     let column_end = |column: f64| times[..end].partition_point(|&t| column_of(t) <= column);
-    fn hold(strokes: &mut Vec<LaneStroke>, held: Option<usize>, x0: f32, x1: f32) {
-        if let Some(index) = held
-            && x1 > x0
-        {
+    let is_unknown = |index: usize| unknown.binary_search(&index).is_ok();
+    let hold = |strokes: &mut Vec<LaneStroke>, held: Option<usize>, x0: f32, x1: f32| {
+        let Some(index) = held else { return };
+        if x1 <= x0 {
+            return;
+        }
+        if x1 - x0 < 1.0 && is_unknown(index) {
+            push_unknown(strokes, x0, x1, map);
+        } else {
             strokes.push(LaneStroke::Hold { x0, x1, index });
         }
-    }
+    };
 
     let mut index = first;
     while index < end {
@@ -108,14 +122,17 @@ pub fn plan_lane(times: &[f64], map: &TimeMapping) -> Vec<LaneStroke> {
                 block_end = following + 1.0;
                 cursor = after;
             }
-            let (x0, x1) = (column as f32, block_end as f32);
+            let x0 = column as f32;
             hold(&mut strokes, held, x_start, x0.max(x_start));
-            strokes.push(LaneStroke::Activity {
-                x0: x0.max(map.left),
-                x1: x1.min(map.right),
-            });
+            // The value held into the block's first column counts as one of
+            // its changes: an unknown that ends there is inside the block.
+            let block = DenseBlock {
+                columns: (column, block_end),
+                changes: (held.unwrap_or(index), cursor),
+            };
+            block.plan(&mut strokes, times, unknown, &column_of, map);
             held = Some(cursor - 1);
-            x_start = x1.min(map.right);
+            x_start = (block_end as f32).min(map.right);
             index = cursor;
         } else {
             hold(&mut strokes, held, x_start, x);
@@ -127,4 +144,68 @@ pub fn plan_lane(times: &[f64], map: &TimeMapping) -> Vec<LaneStroke> {
     }
     hold(&mut strokes, held, x_start, map.right);
     strokes
+}
+
+/// An unknown stretch across `[x0, x1]`, widened to the whole pixels it
+/// touches, at least one, and merged into the one it continues.
+fn push_unknown(strokes: &mut Vec<LaneStroke>, x0: f32, x1: f32, map: &TimeMapping) {
+    let x0 = x0.floor();
+    let x1 = x1.ceil().max(x0 + 1.0).min(map.right);
+    let x0 = x0.min(x1 - 1.0).max(map.left);
+    if let Some(LaneStroke::Unknown { x1: last, .. }) = strokes.last_mut()
+        && *last >= x0
+    {
+        *last = last.max(x1);
+        return;
+    }
+    strokes.push(LaneStroke::Unknown { x0, x1 });
+}
+
+/// A run of dense columns and the changes inside it.
+struct DenseBlock {
+    /// The block's screen columns, `[first, end)`.
+    columns: (f64, f64),
+    /// The changes whose values the block shows, by index, `[first, end)`.
+    changes: (usize, usize),
+}
+
+impl DenseBlock {
+    /// Draw the block as activity, with every column an unknown value
+    /// reaches drawn as unknown instead. Each step consumes at least one
+    /// column and finds the next unknown change by bisection.
+    fn plan(
+        &self,
+        strokes: &mut Vec<LaneStroke>,
+        times: &[f64],
+        unknown: &[usize],
+        column_of: &impl Fn(f64) -> f64,
+        map: &TimeMapping,
+    ) {
+        let (block_first, block_end) = self.columns;
+        let (first, end) = self.changes;
+        let activity = |strokes: &mut Vec<LaneStroke>, from: f64, to: f64| {
+            if to > from {
+                strokes.push(LaneStroke::Activity {
+                    x0: (from as f32).max(map.left),
+                    x1: (to as f32).min(map.right),
+                });
+            }
+        };
+        let mut at = block_first;
+        let mut k = unknown.partition_point(|&change| change < first);
+        while k < unknown.len() && unknown[k] < end {
+            let change = unknown[k];
+            let from = column_of(times[change]).max(block_first);
+            let to = times
+                .get(change + 1)
+                .map_or(block_end - 1.0, |&t| column_of(t))
+                .min(block_end - 1.0);
+            activity(strokes, at, from);
+            push_unknown(strokes, from as f32, (to + 1.0) as f32, map);
+            at = to + 1.0;
+            k += unknown[k..]
+                .partition_point(|&change| change < end && column_of(times[change]) <= to);
+        }
+        activity(strokes, at, block_end);
+    }
 }

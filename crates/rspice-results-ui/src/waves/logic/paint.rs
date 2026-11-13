@@ -6,8 +6,10 @@
 //! and high impedance (`z`) a dashed line at mid level in the warning token,
 //! a colour of its own. A bus word is a hexagonal segment labelled in the
 //! lane's radix, elided when the label is wider than the segment, and a word
-//! with any unknown or high-impedance bit takes the unknown band's fill. Activity blocks are filled between the levels in the
-//! lane's own colour. No colour is introduced here: the lane colour is the
+//! with any unknown or high-impedance bit takes the unknown band's fill.
+//! Activity blocks are filled between the levels in the lane's own colour,
+//! and an unknown stretch inside one, or one narrower than a pixel, is drawn
+//! as the unknown band at least a pixel wide. No colour is introduced here: the lane colour is the
 //! host's trace colour, and everything else is a kit token.
 
 use super::model::{BusLane, LogicLane, LogicLevel};
@@ -90,6 +92,18 @@ fn activity(painter: &Painter, x0: f32, x1: f32, levels: LaneLevels, style: &Lan
     );
 }
 
+/// An unknown stretch: the band between the levels in the error token.
+fn unknown_band(painter: &Painter, x0: f32, x1: f32, levels: LaneLevels, style: &LaneStyle) {
+    painter.rect_filled(
+        Rect::from_x_y_ranges(x0..=x1, levels.high..=levels.low),
+        0.0,
+        style.unknown.gamma_multiply(UNKNOWN_FILL),
+    );
+    let edge = Stroke::new(style.width, style.unknown);
+    painter.hline(x0..=x1, levels.high, edge);
+    painter.hline(x0..=x1, levels.low, edge);
+}
+
 fn level_run(
     painter: &Painter,
     x0: f32,
@@ -106,16 +120,7 @@ fn level_run(
         LogicLevel::High => {
             painter.hline(x0..=x1, levels.high, stroke);
         }
-        LogicLevel::Unknown => {
-            painter.rect_filled(
-                Rect::from_x_y_ranges(x0..=x1, levels.high..=levels.low),
-                0.0,
-                style.unknown.gamma_multiply(UNKNOWN_FILL),
-            );
-            let edge = Stroke::new(style.width, style.unknown);
-            painter.hline(x0..=x1, levels.high, edge);
-            painter.hline(x0..=x1, levels.low, edge);
-        }
+        LogicLevel::Unknown => unknown_band(painter, x0, x1, levels, style),
         LogicLevel::HighImpedance => {
             painter.extend(Shape::dashed_line(
                 &[pos2(x0, levels.mid()), pos2(x1, levels.mid())],
@@ -136,7 +141,7 @@ pub fn paint_logic_lane(
     style: &LaneStyle,
 ) {
     let levels = LaneLevels::of(rect);
-    for stroke in plan_lane(lane.times(), map) {
+    for stroke in plan_lane(lane.times(), lane.unknown(), map) {
         match stroke {
             LaneStroke::Hold { x0, x1, index } => {
                 level_run(painter, x0, x1, lane.levels()[index], levels, style);
@@ -152,6 +157,7 @@ pub fn paint_logic_lane(
             }
             LaneStroke::Edge { .. } => {}
             LaneStroke::Activity { x0, x1 } => activity(painter, x0, x1, levels, style),
+            LaneStroke::Unknown { x0, x1 } => unknown_band(painter, x0, x1, levels, style),
         }
     }
 }
@@ -221,7 +227,7 @@ pub fn paint_bus_lane(
         return;
     }
     let stroke = Stroke::new(style.width, style.color);
-    for planned in plan_lane(lane.times(), map) {
+    for planned in plan_lane(lane.times(), lane.unresolved(), map) {
         match planned {
             LaneStroke::Hold { x0, x1, index } => {
                 let unresolved = lane.word_is_unresolved(index);
@@ -254,6 +260,7 @@ pub fn paint_bus_lane(
             }
             LaneStroke::Edge { .. } => {}
             LaneStroke::Activity { x0, x1 } => activity(painter, x0, x1, levels, style),
+            LaneStroke::Unknown { x0, x1 } => unknown_band(painter, x0, x1, levels, style),
         }
     }
 }
