@@ -967,6 +967,24 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
             "a member drawn along a rising sweep carries no arrows"
         );
     }
+    // Every member reads against the drain voltage of its own point, so the
+    // strip names the quantity alone, never the column it was chosen from.
+    let painted = painted_texts(&ctx, &mut state);
+    assert!(
+        painted.iter().any(|(text, _)| text == "vs V(D)"),
+        "the strip header reads \"vs V(D)\": {painted:?}"
+    );
+    assert!(
+        painted
+            .iter()
+            .any(|(text, _)| text.starts_with("V(D) \u{b7} at each ")),
+        "the X axis caption reads \"V(D) \u{b7} at each … sample\": {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|(text, _)| text.starts_with("vs V(D) [")
+            || text.starts_with("V(D) [VG=1.5; point 1] \u{b7}")),
+        "neither names the member column it was chosen from: {painted:?}"
+    );
 }
 
 /// Vout against Vin from a slow transient ramp through a resistor into a
