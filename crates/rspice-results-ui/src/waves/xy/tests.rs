@@ -168,4 +168,16 @@ fn a_nested_sweeps_member_reads_the_abscissa_of_its_own_point() {
         None
     );
     assert_eq!(member_abscissa_name("D(data[3])", "V(IN)"), None);
+    // A pane drawn against one member's V(D) would read every member's
+    // V(D) against itself.
+    assert!(is_own_abscissa(
+        "V(D) [VG=2; point 2]",
+        "V(D) [VG=1.5; point 1]"
+    ));
+    assert!(is_own_abscissa("V(a)", "V(a)"));
+    assert!(!is_own_abscissa(
+        "I(VD) [VG=2; point 2]",
+        "V(D) [VG=1.5; point 1]"
+    ));
+    assert!(!is_own_abscissa("V(b)", "V(a)"));
 }

@@ -282,6 +282,13 @@ fn member_abscissa_name(curve: &str, abscissa: &str) -> Option<String> {
     Some(format!("{}{suffix}", member_base(abscissa)))
 }
 
+/// Whether the curve `curve` would be read against itself when its pane is
+/// drawn against the signal `abscissa`: that is the diagonal, not a curve,
+/// so the pane neither draws nor lists it.
+pub(crate) fn is_own_abscissa(curve: &str, abscissa: &str) -> bool {
+    curve == abscissa || member_abscissa_name(curve, abscissa).is_some_and(|name| name == curve)
+}
+
 /// The abscissa of a signal: that signal's series in each member of the
 /// strip that plots it.
 pub(crate) fn signal_abscissa(model: &StripModel, name: &str) -> Option<ResolvedAbscissa> {
@@ -480,9 +487,8 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             continue;
         };
         if let Abscissa::Signal { name } = abscissa
-            && trace.source_waveform_name == *name
+            && is_own_abscissa(&trace.source_waveform_name, name)
         {
-            // The abscissa read against itself is the diagonal, not a curve.
             continue;
         }
         // A nested sweep names each member's columns with its point,

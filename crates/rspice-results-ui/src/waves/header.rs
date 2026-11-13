@@ -312,6 +312,10 @@ pub fn show_header(
         .as_ref()
         .and_then(|menu| menu.current.as_ref())
         .map(|current| abscissa_tag(current, &display));
+    let drawn_against = match abscissa.as_ref().and_then(|menu| menu.current.as_ref()) {
+        Some(Abscissa::Signal { name }) => Some(name.as_str()),
+        _ => None,
+    };
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
     // An expression whose unit cannot be stated has a pane of its own and
@@ -451,6 +455,11 @@ pub fn show_header(
         .iter()
         .take(model.signal_trace_count)
         .filter(|trace| trace_belongs_to_pane(model, pane, ordinal, trace))
+        // The signal a pane is drawn against is its X, not a curve.
+        .filter(|trace| {
+            !drawn_against
+                .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
+        })
         .collect();
     let (plotted_traces, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
         traces.into_iter().partition(|trace| trace.visible);
