@@ -9,7 +9,9 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::ToolbarTool;
+use crate::workbench::framework::feature::{
+    Feature, ToolbarControlShow, ToolbarEntry, ToolbarIcon, ToolbarQuestion, ToolbarTool,
+};
 use crate::workbench::framework::host::{Point, ToolbarScope, ToolbarSlot};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
@@ -462,6 +464,70 @@ pub fn feature_tools(
 ) {
     for tool in tools {
         toolbar_text_command(ui, app, tool.key, tool.icon, tool.label, layout);
+    }
+}
+
+/// Draw the toolbar `entries` a feature registered, in order: a tool as a
+/// labelled command, an icon as an icon command, a separator between
+/// groups, a control in the slot the toolbar takes for it, and the entries
+/// of an `Only` while its question holds.
+///
+/// `ask` answers a question over the feature's reads (an icon's press, an
+/// `Only`'s condition) as the host lends them; `control` lends the
+/// feature's context to a control's draw.
+pub fn feature_toolbar<H: WorkbenchHost, F: Feature>(
+    ui: &mut egui::Ui,
+    app: &mut H,
+    entries: &[ToolbarEntry<F>],
+    layout: LayoutSpec,
+    ask: fn(&H, ToolbarQuestion<F>) -> bool,
+    control: fn(&mut H, &mut egui::Ui, ToolbarControlShow<F>, LayoutSpec),
+) {
+    for entry in entries {
+        match entry {
+            ToolbarEntry::Tool(tool) => {
+                toolbar_text_command(ui, app, tool.key, tool.icon, tool.label, layout);
+            }
+            ToolbarEntry::Icon(icon) => {
+                let presentation = icon_presentation(app, icon, ask);
+                toolbar_command(ui, app, icon.key, layout, presentation);
+            }
+            ToolbarEntry::Separator => context_separator(ui, layout),
+            ToolbarEntry::Control(drawn) => {
+                if take_projected_tool_slot(ui, layout) {
+                    control(app, ui, drawn.show, layout);
+                } else if let Some(icon) = &drawn.overflow {
+                    let presentation = icon_presentation(app, icon, ask);
+                    overflow::set_aside(
+                        ui,
+                        overflow::OverflowTool::command(app, icon.key, presentation),
+                    );
+                }
+            }
+            ToolbarEntry::Only(holds, nested) => {
+                if ask(app, *holds) {
+                    feature_toolbar(ui, app, nested, layout, ask, control);
+                }
+            }
+        }
+    }
+}
+
+/// How the toolbar draws `icon`: pressed as its own press answers, or as
+/// its command's check mark where it has none.
+fn icon_presentation<H: WorkbenchHost, F: Feature>(
+    app: &H,
+    icon: &ToolbarIcon<F>,
+    ask: fn(&H, ToolbarQuestion<F>) -> bool,
+) -> ToolbarCommandPresentation {
+    let selected = match icon.pressed {
+        Some(pressed) => ask(app, pressed),
+        None => app.checked(icon.key) == Some(true),
+    };
+    ToolbarCommandPresentation::Icon {
+        icon: icon.icon,
+        selected,
+        label: icon.label,
     }
 }
 

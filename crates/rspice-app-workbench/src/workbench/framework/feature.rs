@@ -14,10 +14,13 @@
 //! the feature answers only whether its command can run here and what it
 //! does once the prologue lets it through.
 
+use std::collections::HashSet;
+
 use crate::state::command_catalog::CommandKey;
 use crate::state::{CellViewRef, Component, LibraryManager, ProjectSourceRegistry};
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::workbench_session::WorkbenchSession;
 use rspice_app_runs::simulation::{NetlistShown, ProjectCompileReceipt};
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -899,6 +902,70 @@ pub struct ToolbarTool {
     pub label: &'static str,
 }
 
+/// The name a feature gives one of its context toolbars. The shell names it
+/// to choose the toolbar its scope shows, and
+/// [`FeatureRegistry::validate_toolbars`] checks that every name it uses is
+/// registered, once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ToolbarId(&'static str);
+
+impl ToolbarId {
+    pub const fn new(name: &'static str) -> Self {
+        Self(name)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// A question a toolbar asks of a feature's reads: whether an icon shows
+/// pressed, or whether an `Only`'s entries show.
+pub type ToolbarQuestion<F> = fn(&Reads<'_, F>) -> bool;
+
+/// How a control draws itself in the slot the toolbar took for it.
+pub type ToolbarControlShow<F> = fn(&mut Cx<'_, F>, &mut egui::Ui, LayoutSpec);
+
+/// One entry of a feature's context toolbar. The toolbar lays the entries
+/// out in order, takes a slot of a narrow row for each, and folds what gets
+/// none into More tools.
+pub enum ToolbarEntry<F: Feature> {
+    /// A declared command drawn as a labelled button.
+    Tool(ToolbarTool),
+    /// A declared command drawn as an icon button.
+    Icon(ToolbarIcon<F>),
+    /// The rule between two groups of tools.
+    Separator,
+    /// A control the feature draws itself, in one slot of the row.
+    Control(ToolbarControl<F>),
+    /// Entries the toolbar shows only while `F`'s state holds, such as the
+    /// in-place symbol's way back; they take no slot otherwise.
+    Only(ToolbarQuestion<F>, &'static [ToolbarEntry<F>]),
+}
+
+/// A declared command the toolbar draws as an icon button.
+pub struct ToolbarIcon<F: Feature> {
+    pub key: CommandKey,
+    pub icon: WorkbenchIcon,
+    /// The button's accessible name and hover text; `None` takes the
+    /// command's own label, so no button goes unnamed.
+    pub label: Option<&'static str>,
+    /// The toolbar's pressed state where it differs from the menu's check
+    /// mark; `None` shows the button pressed while the command's own
+    /// `checked` answers `Some(true)`.
+    pub pressed: Option<ToolbarQuestion<F>>,
+}
+
+/// A control a feature draws itself in one slot of the context toolbar:
+/// a toggle or a choice that is not a command.
+pub struct ToolbarControl<F: Feature> {
+    /// Draw the control in the slot the toolbar took for it.
+    pub show: ToolbarControlShow<F>,
+    /// What More tools lists in the control's place when the row has no
+    /// slot left; `None` leaves the control out of a narrow row.
+    pub overflow: Option<ToolbarIcon<F>>,
+}
+
 /// Everything one feature registered, built once.
 pub struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
@@ -909,6 +976,7 @@ pub struct FeatureRegistry<F: Feature> {
     navigator: Option<FeatureNavigator<F>>,
     split: Option<FeatureSplit<F>>,
     toolbar: &'static [ToolbarTool],
+    toolbars: &'static [(ToolbarId, &'static [ToolbarEntry<F>])],
 }
 
 impl<F: Feature> FeatureRegistry<F> {
@@ -923,6 +991,7 @@ impl<F: Feature> FeatureRegistry<F> {
             navigator: None,
             split: None,
             toolbar: &[],
+            toolbars: &[],
         };
         F::register(&mut registry);
         registry
@@ -985,6 +1054,50 @@ impl<F: Feature> FeatureRegistry<F> {
         self.toolbar
     }
 
+    /// Register the feature's context toolbars, each under the name the
+    /// shell chooses it by.
+    pub fn toolbars(&mut self, toolbars: &'static [(ToolbarId, &'static [ToolbarEntry<F>])]) {
+        self.toolbars = toolbars;
+    }
+
+    /// The entries of the toolbar the feature registered as `id`, if any.
+    pub fn toolbar_entries(&self, id: ToolbarId) -> Option<&'static [ToolbarEntry<F>]> {
+        self.toolbars
+            .iter()
+            .find(|(registered, _)| *registered == id)
+            .map(|(_, entries)| *entries)
+    }
+
+    /// Whether the feature's toolbars hold together: each name is
+    /// registered once, and every name in `named`, the ones the shell
+    /// chooses a toolbar by, is registered. The error lists every problem,
+    /// one per line.
+    pub fn validate_toolbars(
+        &self,
+        named: impl IntoIterator<Item = ToolbarId>,
+    ) -> Result<(), String> {
+        let mut problems = Vec::new();
+        let mut registered = HashSet::new();
+        for (id, _) in self.toolbars {
+            if !registered.insert(*id) {
+                problems.push(format!("toolbar `{}` is registered twice", id.as_str()));
+            }
+        }
+        for id in named {
+            if !registered.contains(&id) {
+                problems.push(format!(
+                    "toolbar `{}` is named but not registered",
+                    id.as_str()
+                ));
+            }
+        }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems.join("\n"))
+        }
+    }
+
     /// The registered dialog step `key` names, if the feature draws one.
     pub fn dialog(&self, key: DialogKey) -> Option<&FeatureDialog<F>> {
         self.dialogs.iter().find(|dialog| dialog.key == key)
@@ -1040,5 +1153,72 @@ impl<F: Feature> FeatureRegistry<F> {
     #[cfg(any(test, feature = "test-support"))]
     pub fn registered_routed(&self) -> &'static [RoutedCommand<F>] {
         self.routed
+    }
+}
+
+#[cfg(test)]
+mod toolbar_tests {
+    use super::*;
+
+    const SHOWN: ToolbarId = ToolbarId::new("test.shown");
+    const SPARE: ToolbarId = ToolbarId::new("test.spare");
+    const UNKNOWN: ToolbarId = ToolbarId::new("test.unknown");
+
+    /// A feature that registers two toolbars, each once.
+    struct Once;
+
+    impl Feature for Once {
+        type State = ();
+        type Session = WorkbenchSession;
+        type Handles = NoHandles;
+
+        fn register(registry: &mut FeatureRegistry<Self>) {
+            const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<Once>])] =
+                &[(SHOWN, &[ToolbarEntry::Separator]), (SPARE, &[])];
+            registry.toolbars(TOOLBARS);
+        }
+    }
+
+    /// A feature that registers one toolbar's name twice.
+    struct Twice;
+
+    impl Feature for Twice {
+        type State = ();
+        type Session = WorkbenchSession;
+        type Handles = NoHandles;
+
+        fn register(registry: &mut FeatureRegistry<Self>) {
+            const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<Twice>])] =
+                &[(SHOWN, &[]), (SHOWN, &[ToolbarEntry::Separator])];
+            registry.toolbars(TOOLBARS);
+        }
+    }
+
+    /// Each name the shell chooses by reaches the entries registered under
+    /// it, and a name nobody registered reaches none.
+    #[test]
+    fn a_registered_toolbar_is_found_by_its_name() {
+        let registry = FeatureRegistry::<Once>::build();
+        assert!(matches!(
+            registry.toolbar_entries(SHOWN),
+            Some([ToolbarEntry::Separator])
+        ));
+        assert!(matches!(registry.toolbar_entries(SPARE), Some([])));
+        assert!(registry.toolbar_entries(UNKNOWN).is_none());
+        assert_eq!(registry.validate_toolbars([SHOWN, SPARE]), Ok(()));
+    }
+
+    /// A name registered twice, and a name the shell chooses by that no
+    /// toolbar answers to, are each one line of the error.
+    #[test]
+    fn toolbars_registered_twice_or_named_unregistered_are_refused() {
+        assert_eq!(
+            FeatureRegistry::<Twice>::build().validate_toolbars([SHOWN]),
+            Err("toolbar `test.shown` is registered twice".to_owned())
+        );
+        assert_eq!(
+            FeatureRegistry::<Once>::build().validate_toolbars([SHOWN, UNKNOWN]),
+            Err("toolbar `test.unknown` is named but not registered".to_owned())
+        );
     }
 }
