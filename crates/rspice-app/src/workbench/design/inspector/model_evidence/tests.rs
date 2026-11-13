@@ -3,13 +3,14 @@
 
 use super::*;
 use crate::state::ComponentType;
+use crate::workbench::AppState;
 
 #[test]
 fn native_component_never_claims_a_resolved_catalog_model() {
     let state = AppState::default();
     let component = Component::new(1, ComponentType::Resistor, crate::state::Point::origin());
 
-    let evidence = component_model_evidence(&state, &component);
+    let evidence = component_model_evidence(&state.model, &component);
 
     assert_eq!(evidence.model, None, "a resistor names no model");
     assert_eq!(evidence.problem, None);
@@ -21,7 +22,7 @@ fn missing_explicit_model_is_reported_as_unresolved_review_evidence() {
     let component = Component::new(2, ComponentType::NpnBjt, crate::state::Point::origin())
         .with_name_value("Q1", "vendor_npn");
 
-    let evidence = component_model_evidence(&state, &component);
+    let evidence = component_model_evidence(&state.model, &component);
 
     assert_eq!(evidence.model.as_deref(), Some("vendor_npn"));
     let (problem, text) = evidence.problem.expect("a missing model is a problem");
@@ -51,7 +52,7 @@ fn a_model_resolves_only_from_a_file_its_library_records() {
     let component = Component::new(3, ComponentType::NpnBjt, crate::state::Point::origin())
         .with_name_value("Q1", "vendor_npn");
 
-    let evidence = component_model_evidence(&state, &component);
+    let evidence = component_model_evidence(&state.model, &component);
 
     assert_eq!(evidence.model.as_deref(), Some("vendor_npn"));
     assert_eq!(evidence.problem, None, "a recorded file says nothing more");
@@ -62,7 +63,7 @@ fn a_model_resolves_only_from_a_file_its_library_records() {
         .get_library_mut("vendor")
         .expect("the fixture library");
     library.source_closure.clear();
-    let evidence = component_model_evidence(&state, &component);
+    let evidence = component_model_evidence(&state.model, &component);
     let (problem, text) = evidence
         .problem
         .expect("a file the library does not record is a problem");
@@ -95,7 +96,7 @@ fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
     .with_library_cell(binding)
     .with_name_value("XU1", "OPA189");
 
-    let evidence = component_model_evidence(&state, &component);
+    let evidence = component_model_evidence(&state.model, &component);
 
     assert_eq!(evidence.model.as_deref(), Some("OPA189_B"));
     assert_eq!(evidence.problem, None);

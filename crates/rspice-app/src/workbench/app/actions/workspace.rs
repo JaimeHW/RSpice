@@ -22,8 +22,8 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use symbol_document::{SymbolUiState, project_active_symbol_session};
 
 pub(crate) use history::{
-    DesignHistoryParts, HistoryDirection, HistoryStepParts, commit_pending_inspector_edit,
-    take_history_step,
+    DesignHistoryParts, HistoryDirection, HistoryStepParts, commit_inline_component_edit,
+    commit_pending_inspector_edit, inline_edit_authority, take_history_step,
 };
 pub(crate) use navigation::NavigationParts;
 

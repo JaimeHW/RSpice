@@ -701,14 +701,30 @@ fn choosing_a_functional_preset_inline_fills_its_parameters() {
         .cloned()
         .expect("placed");
     let process = InlineEditField::Parameter("PROCESS".to_owned());
-    let cmos = prepare_field_edit(&app.state, &component, &process, "CMOS").expect("a valid edit");
+    let cmos = prepare_field_edit(
+        &app.state.design,
+        &app.state.model,
+        &app.state.workbench,
+        &component,
+        &process,
+        "CMOS",
+    )
+    .expect("a valid edit");
     assert!(
         cmos.params.contains("PROCESS=CMOS") && cmos.params.contains("RDIV=100k"),
         "{}",
         cmos.params
     );
     let rout = InlineEditField::Parameter("ROUT".to_owned());
-    let tuned = prepare_field_edit(&app.state, &cmos, &rout, "75").expect("a valid edit");
+    let tuned = prepare_field_edit(
+        &app.state.design,
+        &app.state.model,
+        &app.state.workbench,
+        &cmos,
+        &rout,
+        "75",
+    )
+    .expect("a valid edit");
     assert!(
         tuned.params.contains("ROUT=75") && tuned.params.contains("PROCESS=CMOS"),
         "{}",
@@ -738,7 +754,25 @@ fn choosing_a_gates_input_count_inline_redraws_its_pins() {
         .expect("placed");
     assert_eq!(component.terminal_positions().len(), 3);
     let inputs = InlineEditField::Parameter("INPUTS".to_owned());
-    let four = prepare_field_edit(&app.state, &component, &inputs, "4").expect("a valid edit");
+    let four = prepare_field_edit(
+        &app.state.design,
+        &app.state.model,
+        &app.state.workbench,
+        &component,
+        &inputs,
+        "4",
+    )
+    .expect("a valid edit");
     assert_eq!(four.terminal_positions().len(), 5, "{}", four.params);
-    assert!(prepare_field_edit(&app.state, &component, &inputs, "6").is_err());
+    assert!(
+        prepare_field_edit(
+            &app.state.design,
+            &app.state.model,
+            &app.state.workbench,
+            &component,
+            &inputs,
+            "6"
+        )
+        .is_err()
+    );
 }

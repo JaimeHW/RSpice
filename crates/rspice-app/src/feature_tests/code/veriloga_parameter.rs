@@ -110,9 +110,13 @@ fn set_params(state: &mut AppState, id: u64, params: &str) {
 }
 
 fn sheet_of(state: &AppState, id: u64) -> PropertySheet {
-    crate::workbench::app::authoritative_component_property_sheet(state, &placed(state, id))
-        .expect("the sheet resolves")
-        .expect("an instance of a compiled module has a sheet")
+    crate::workbench::app::authoritative_component_property_sheet(
+        &state.design.property_registry,
+        &state.model,
+        &placed(state, id),
+    )
+    .expect("the sheet resolves")
+    .expect("an instance of a compiled module has a sheet")
 }
 
 /// A compile states the module's parameters on its view with everything a

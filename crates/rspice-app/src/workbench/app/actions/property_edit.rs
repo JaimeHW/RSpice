@@ -164,13 +164,14 @@ fn cell_contract_property_sheet(
 /// inspector. Dynamic catalog/library cells must never fall back to the
 /// generic `CellInstance` registry sheet.
 pub(crate) fn authoritative_component_property_sheet(
-    state: &AppState,
+    registry: &crate::properties::PropertyEditorSchema,
+    model: &Model,
     component: &Component,
 ) -> Result<Option<PropertySheet>, String> {
     if component.kind == ComponentType::CellInstance {
-        authoritative_cell_instance_sheet(&state.model, component)
+        authoritative_cell_instance_sheet(model, component)
     } else {
-        Ok(state.design.property_registry.get(component.kind).cloned())
+        Ok(registry.get(component.kind).cloned())
     }
 }
 

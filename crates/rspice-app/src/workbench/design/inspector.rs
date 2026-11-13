@@ -28,6 +28,12 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::workspace::{
+    commit_inline_component_edit, commit_pending_inspector_edit, inline_edit_authority,
+    sync_active_schematic,
+};
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{
     Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row, property_row_captioned,
     property_row_combo, property_row_flagged, property_row_input_action,
@@ -36,8 +42,8 @@ use crate::workbench::design_system::{
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::{Host, InspectorScope, Point};
 use crate::workbench::framework::requests::RevealModel;
-use crate::workbench::state::{InlineEditField, Workspace};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::slots::DesignState;
+use crate::workbench::state::{InlineEditField, WorkbenchSession, Workspace};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcViolation};
@@ -81,8 +87,8 @@ pub(super) enum DesignSubject {
 
 /// Wire IDs implied by the selection, including wires that merely own a
 /// selected segment or vertex.
-fn selected_wire_ids(state: &AppState) -> Vec<u64> {
-    let selection = &state.model.schematic.session.editor.selection;
+fn selected_wire_ids(model: &Model) -> Vec<u64> {
+    let selection = &model.schematic.session.editor.selection;
     let mut ids: Vec<u64> = selection.wires.iter().copied().collect();
     ids.extend(
         selection
@@ -98,8 +104,8 @@ fn selected_wire_ids(state: &AppState) -> Vec<u64> {
 
 /// `true` when the selection holds conductors only — wires, their segments
 /// and vertices, and net labels — and at least one of them.
-fn conductors_only(state: &AppState) -> bool {
-    let selection = &state.model.schematic.session.editor.selection;
+fn conductors_only(model: &Model) -> bool {
+    let selection = &model.schematic.session.editor.selection;
     let empty = selection.wires.is_empty()
         && selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
@@ -114,14 +120,13 @@ fn conductors_only(state: &AppState) -> bool {
         && selection.probes.is_empty()
 }
 
-pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
-    let selection = &state.model.schematic.session.editor.selection;
-    if let Some(name) = navigator_selected_net_name(state, nets) {
+pub(super) fn subject(model: &Model, nets: &[DesignNet]) -> DesignSubject {
+    let selection = &model.schematic.session.editor.selection;
+    if let Some(name) = navigator_selected_net_name(model, nets) {
         return DesignSubject::Net(name);
     }
     if let Some(id) = selection.single_component() {
-        if let Some(port) = state
-            .model
+        if let Some(port) = model
             .schematic
             .document()
             .components
@@ -149,8 +154,8 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
     if let Some(id) = selection.single_probe() {
         return DesignSubject::Probe(id);
     }
-    if conductors_only(state)
-        && let Some(name) = selected_net_name(state, nets)
+    if conductors_only(model)
+        && let Some(name) = selected_net_name(model, nets)
     {
         return DesignSubject::Net(name);
     }
@@ -163,9 +168,8 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
 /// The Navigator can select a legal semantic net that has no drawn wire or
 /// label. Accept that runtime authority only while both the current net
 /// projection and the concrete schematic selection still match exactly.
-fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let authority = state
-        .model
+fn navigator_selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
+    let authority = model
         .schematic
         .session
         .editor
@@ -185,8 +189,7 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
         .collect::<Vec<_>>();
     component_ids.sort_unstable();
     component_ids.dedup();
-    if state
-        .model
+    if model
         .schematic
         .session
         .editor
@@ -197,7 +200,7 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
         return None;
     }
 
-    let selection = &state.model.schematic.session.editor.selection;
+    let selection = &model.schematic.session.editor.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -220,7 +223,7 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
 
 /// The single net a conductor selection resolves to, or `None` when the
 /// selection spans several nets or resolves to none.
-fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
+fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
     let mut resolved: Option<String> = None;
     let mut accept = |candidate: &str| -> bool {
         match resolved.as_deref() {
@@ -232,9 +235,8 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     };
     // A selected label names its net outright.
-    for label in &state.model.schematic.document().net_labels {
-        if state
-            .model
+    for label in &model.schematic.document().net_labels {
+        if model
             .schematic
             .session
             .editor
@@ -246,7 +248,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             return None;
         }
     }
-    for wire_id in selected_wire_ids(state) {
+    for wire_id in selected_wire_ids(model) {
         let Some(net) = nets.iter().find(|net| net.wire_ids.contains(&wire_id)) else {
             continue;
         };
@@ -254,8 +256,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             return None;
         }
     }
-    if !state
-        .model
+    if !model
         .schematic
         .session
         .editor
@@ -270,11 +271,10 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         // still says which net that conductor is on, so membership is never
         // re-derived here. An ambiguous crossing takes one stable seed rather
         // than joining two electrical nets.
-        let connectivity = extract(&state.model.schematic, None);
-        for junction in &state.model.schematic.session.editor.selection.junctions {
+        let connectivity = extract(&model.schematic, None);
+        for junction in &model.schematic.session.editor.selection.junctions {
             let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
-                state
-                    .model
+                model
                     .schematic
                     .document()
                     .wires
@@ -304,8 +304,8 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 
 pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(session) = app.state.workbench.inline_edit.session()
-        && (session.authority != app.state.inline_edit_authority()
-            || app.state.schematic_edit_read_only()
+        && (session.authority != inline_edit_authority(&app.state.model)
+            || app.state.model.schematic_edit_read_only()
             || !app
                 .state
                 .model
@@ -334,11 +334,11 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             return;
         }
     }
-    let mut sheet = sheet_connectivity(&app.state);
+    let mut sheet = sheet_connectivity(&app.state.model);
     if let Some(reason) = sheet.unresolved.as_deref() {
         unresolved_projection_note(ui, reason);
     }
-    let mut inspected = subject(&app.state, &sheet.nets);
+    let mut inspected = subject(&app.state.model, &sheet.nets);
 
     // Resolve a pending field before the selection can adopt a different owner.
     let owner = match inspected {
@@ -353,8 +353,8 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|session| session.expected.id)
         && owner != Some(editing)
     {
-        match app.state.commit_inline_component_edit() {
-            Ok(true) => sheet = sheet_connectivity(&app.state),
+        match commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench) {
+            Ok(true) => sheet = sheet_connectivity(&app.state.model),
             Ok(false) => {}
             Err(_) => {
                 app.state
@@ -409,11 +409,11 @@ struct SheetConnectivity {
 /// emits. A version-keyed cache here would be wrong anyway: net identity
 /// depends on instance values and port parameters, which do not advance the
 /// schematic topology version.
-fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
-    let projection = match state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+fn sheet_connectivity(model: &Model) -> SheetConnectivity {
+    let projection = match model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     ) {
         Ok(projection) => projection,
         Err(error) => {
@@ -425,11 +425,11 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
         }
     };
     let hierarchy =
-        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(model.library_manager.catalog(), &projection);
     let nets = rspice_design::connectivity::summary::projection_nets(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
-        &state.model.workspace.content.active_view.key(),
+        &model.workspace.content.active_view.key(),
     );
 
     let mut bound: HashMap<(u64, &str), &str> = HashMap::new();
@@ -449,8 +449,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
         }
     }
 
-    let terminals = state
-        .model
+    let terminals = model
         .schematic
         .document()
         .components
@@ -574,18 +573,12 @@ fn object_title(ui: &mut Ui, name: &str, kind: Option<&str>, occurrence: Option<
 /// says nothing. The catalog answers for both the page number and the name,
 /// which is what keeps this row, the strip's chip and the status bar's page
 /// segment from disagreeing.
-fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
-    let Some(catalog) = sheet_visibility::multi_sheet_catalog(state) else {
+fn sheet_row(ui: &mut Ui, model: &Model, object_id: u64) {
+    let Some(catalog) = sheet_visibility::multi_sheet_catalog(model) else {
         return;
     };
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let Some(id) = state
-        .model
+    let key = model.workspace.content.active_schematic_reference().key();
+    let Some(id) = model
         .workspace
         .content
         .design_management
@@ -637,7 +630,9 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
                 .selection
                 .has_component(component.id)
         })
-        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
+        .filter(|component| {
+            sheet_visibility::object_is_in_scope(&app.state.model, scope, component.id)
+        })
         .map(|component| {
             (
                 component.id,
@@ -707,7 +702,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     section_block_gap(ui);
     property_row(ui, "Text", &note.text);
     property_row(ui, "Layer", note.layer.label());
-    sheet_row(ui, &app.state, id);
+    sheet_row(ui, &app.state.model, id);
     if let Some(review) = note.review.as_ref() {
         property_row(ui, "Review state", review.state.keyword());
     }
@@ -729,7 +724,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     object_title(ui, "Shape", Some(shape.kind().label()), None);
     section_block_gap(ui);
     property_row(ui, "Layer", shape.layer.label());
-    sheet_row(ui, &app.state, id);
+    sheet_row(ui, &app.state.model, id);
 }
 
 fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
@@ -756,9 +751,9 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         bound.unwrap_or("not bound"),
         bound.is_none().then_some(Problem::Warning),
     );
-    sheet_row(ui, &app.state, id);
+    sheet_row(ui, &app.state.model, id);
 
-    let writable = !app.state.schematic_edit_read_only();
+    let writable = !app.state.model.schematic_edit_read_only();
     let mut enabled = probe.enabled;
     section_block_gap(ui);
     let enabled_response = ui.add_enabled(
@@ -785,7 +780,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 .schematic
                 .edit_probe_intent(id, enabled, plot_on_materialization);
         if changed {
-            app.state.sync_active_schematic_to_workspace();
+            sync_active_schematic(&mut app.state.model, &mut app.state.workbench);
             app.invalidate_simulation_preflight();
         }
     }

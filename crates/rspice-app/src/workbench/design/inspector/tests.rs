@@ -13,6 +13,7 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
+use crate::workbench::AppState;
 use crate::workbench::docks::inspector::shared::{
     checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
 };
@@ -96,24 +97,24 @@ fn a_closed_edit_session_leaves_no_reserved_validation_strip() {
 #[test]
 fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     let (mut app, id) = app_with_model_bound_instance();
-    assert!(!editing_identity_field(&app.state, id));
-    assert!(!editing_parameter_field(&app.state, id));
+    assert!(!editing_identity_field(&app.state.workbench, id));
+    assert!(!editing_parameter_field(&app.state.workbench, id));
 
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
-    assert!(editing_identity_field(&app.state, id));
-    assert!(!editing_parameter_field(&app.state, id));
+    assert!(editing_identity_field(&app.state.workbench, id));
+    assert!(!editing_parameter_field(&app.state.workbench, id));
 
     assert!(begin_edit(
         &mut app,
         id,
         InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
     ));
-    assert!(!editing_identity_field(&app.state, id));
-    assert!(editing_parameter_field(&app.state, id));
+    assert!(!editing_identity_field(&app.state.workbench, id));
+    assert!(editing_parameter_field(&app.state.workbench, id));
 
     app.state.commit_inline_component_edit().unwrap();
-    assert!(!editing_identity_field(&app.state, id));
-    assert!(!editing_parameter_field(&app.state, id));
+    assert!(!editing_identity_field(&app.state.workbench, id));
+    assert!(!editing_parameter_field(&app.state.workbench, id));
 }
 
 pub(crate) fn accesskit_nodes(
@@ -285,7 +286,7 @@ fn an_inspected_object_names_its_sheet_only_above_one_sheet() {
 #[test]
 fn an_empty_selection_inspects_the_sheet() {
     let state = AppState::default();
-    assert_eq!(subject(&state, &[]), DesignSubject::Sheet);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Sheet);
 }
 
 #[test]
@@ -307,7 +308,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
         .editor
         .selection
         .select_only_component(ids[0]);
-    assert_eq!(subject(&state, &[]), DesignSubject::Component(ids[0]));
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Component(ids[0]));
 
     state
         .model
@@ -316,7 +317,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
         .editor
         .selection
         .select_component(ids[1]);
-    assert_eq!(subject(&state, &[]), DesignSubject::Multi);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Multi);
 }
 
 #[test]
@@ -333,7 +334,7 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
         .selection
         .select_only_probe(73);
 
-    assert_eq!(subject(&state, &[]), DesignSubject::Probe(73));
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Probe(73));
 
     state
         .model
@@ -342,7 +343,7 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
         .editor
         .selection
         .select_wire(9);
-    assert_eq!(subject(&state, &[]), DesignSubject::Multi);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Multi);
 }
 
 #[test]
@@ -382,7 +383,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
         .selection
         .select_wire(8);
     assert_eq!(
-        subject(&state, &nets),
+        subject(&state.model, &nets),
         DesignSubject::Net("vout".to_owned())
     );
 
@@ -393,7 +394,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
         .editor
         .selection
         .select_wire(9);
-    assert_eq!(subject(&state, &nets), DesignSubject::Multi);
+    assert_eq!(subject(&state.model, &nets), DesignSubject::Multi);
 }
 
 #[test]
@@ -437,11 +438,11 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
     }];
 
     assert_eq!(
-        subject(&state, &nets),
+        subject(&state.model, &nets),
         DesignSubject::Net("PORT_OUT".to_owned())
     );
     state.model.schematic.session.editor.net_highlight.clear();
-    assert_eq!(subject(&state, &nets), DesignSubject::Component(71));
+    assert_eq!(subject(&state.model, &nets), DesignSubject::Component(71));
 }
 
 #[test]
@@ -474,7 +475,7 @@ fn explicit_junction_selection_resolves_its_live_net() {
     }];
 
     assert_eq!(
-        subject(&state, &nets),
+        subject(&state.model, &nets),
         DesignSubject::Net("BIAS".to_owned())
     );
 }
@@ -506,7 +507,10 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
         wire_ids: Vec::new(),
     }];
 
-    assert_eq!(subject(&state, &nets), DesignSubject::Net("VIN".to_owned()));
+    assert_eq!(
+        subject(&state.model, &nets),
+        DesignSubject::Net("VIN".to_owned())
+    );
 }
 
 #[test]
@@ -521,7 +525,7 @@ fn a_conductor_with_no_resolved_net_never_claims_one() {
         .select_wire(42);
 
     // One unresolved wire is a single selected object, not a net.
-    assert_eq!(subject(&state, &[]), DesignSubject::Multi);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Multi);
 }
 
 #[test]
@@ -534,7 +538,7 @@ fn isolated_instance_terminals_are_open_not_bound_to_synthetic_nodes() {
         .components
         .push(Component::new(42, ComponentType::Resistor, Point::origin()));
 
-    let sheet = sheet_connectivity(&state);
+    let sheet = sheet_connectivity(&state.model);
     let terminals = sheet.terminals.get(&42).expect("resistor terminals");
 
     assert_eq!(terminals.len(), 2);
@@ -571,13 +575,16 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
 #[test]
 fn a_net_below_the_root_is_read_under_its_instance_path() {
     let mut state = AppState::default();
-    assert_eq!(net_engine_name(&state, "OUT").as_deref(), Some("out"));
+    assert_eq!(net_engine_name(&state.model, "OUT").as_deref(), Some("out"));
     state.model.workspace.descend_into(
         "X1".to_owned(),
         CellViewRef::new("user", "inverter", "schematic"),
         ViewType::Schematic,
     );
-    assert_eq!(net_engine_name(&state, "OUT").as_deref(), Some("x1.out"));
+    assert_eq!(
+        net_engine_name(&state.model, "OUT").as_deref(),
+        Some("x1.out")
+    );
 }
 
 /// A net names where it reaches and what it connects. Its class, wire count
@@ -597,7 +604,7 @@ fn the_net_panel_states_scope_and_pins_only() {
             Point::new(40, 0),
         ));
     app.state.sync_active_schematic_to_workspace();
-    let nets = sheet_connectivity(&app.state).nets;
+    let nets = sheet_connectivity(&app.state.model).nets;
     let name = nets.first().expect("the wire is a net").name.clone();
     let painted = painted_panel(|ui| net_panel(ui, &mut app, &name, &nets));
     for gone in [
@@ -924,15 +931,50 @@ fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
     state.model.schematic.document_mut_for_test().components[1].name = "R2".to_owned();
     let subject = state.model.schematic.document().components[0].clone();
 
-    assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "R7").is_none());
     assert!(
-        field_rejection(&state, &subject, &InlineEditField::Instance, "R1").is_none(),
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Instance,
+            "R7"
+        )
+        .is_none()
+    );
+    assert!(
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Instance,
+            "R1"
+        )
+        .is_none(),
         "its own name is not a collision"
     );
-    let collision = field_rejection(&state, &subject, &InlineEditField::Instance, "r2")
-        .expect("case-insensitive collision is rejected");
+    let collision = field_rejection(
+        &state.design,
+        &state.model,
+        &state.workbench,
+        &subject,
+        &InlineEditField::Instance,
+        "r2",
+    )
+    .expect("case-insensitive collision is rejected");
     assert!(collision.contains("already exists"), "was {collision}");
-    assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "  ").is_some());
+    assert!(
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Instance,
+            "  "
+        )
+        .is_some()
+    );
 }
 
 #[test]
@@ -941,8 +983,15 @@ fn an_instance_rename_still_obeys_the_family_designator_rule() {
     state.model.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
     let resistor = state.model.schematic.document().components[0].clone();
 
-    let rejected = field_rejection(&state, &resistor, &InlineEditField::Instance, "C1")
-        .expect("a resistor cannot take a capacitor designator");
+    let rejected = field_rejection(
+        &state.design,
+        &state.model,
+        &state.workbench,
+        &resistor,
+        &InlineEditField::Instance,
+        "C1",
+    )
+    .expect("a resistor cannot take a capacitor designator");
     assert!(rejected.contains('R'), "was {rejected}");
 }
 
@@ -951,11 +1000,33 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     let state = state_with_two_components();
     let subject = state.model.schematic.document().components[0].clone();
 
-    assert!(field_rejection(&state, &subject, &InlineEditField::Value, "10k").is_none());
-    assert!(field_rejection(&state, &subject, &InlineEditField::Value, "").is_none());
     assert!(
         field_rejection(
-            &state,
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Value,
+            "10k"
+        )
+        .is_none()
+    );
+    assert!(
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Value,
+            ""
+        )
+        .is_none()
+    );
+    assert!(
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
             &subject,
             &InlineEditField::Parameter("noisy".to_owned()),
             "maybe"
@@ -964,7 +1035,9 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     );
     assert!(
         field_rejection(
-            &state,
+            &state.design,
+            &state.model,
+            &state.workbench,
             &subject,
             &InlineEditField::Parameter("noisy".to_owned()),
             "yes"
@@ -973,7 +1046,9 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     );
     assert!(
         field_rejection(
-            &state,
+            &state.design,
+            &state.model,
+            &state.workbench,
             &subject,
             &InlineEditField::Parameter("vendor_extension".to_owned()),
             "arbitrary source text"
@@ -999,8 +1074,15 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
     let subject = state.model.schematic.document().components[0].clone();
     let field = InlineEditField::Parameter("td".to_owned());
 
-    let inline =
-        field_rejection(&state, &subject, &field, "-1ns").expect("a negative PWL delay is refused");
+    let inline = field_rejection(
+        &state.design,
+        &state.model,
+        &state.workbench,
+        &subject,
+        &field,
+        "-1ns",
+    )
+    .expect("a negative PWL delay is refused");
 
     // What the same delay says through the shared gate, read there rather than
     // restated here. The parameter is spelled without its unit because this
@@ -1024,7 +1106,15 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
     assert_eq!(inline, editor, "one refusal, two surfaces");
     assert!(inline.contains("PWL TD"), "was {inline}");
     assert!(
-        field_rejection(&state, &subject, &field, "1ns").is_none(),
+        field_rejection(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &field,
+            "1ns"
+        )
+        .is_none(),
         "a non-negative delay still commits"
     );
 }
@@ -1033,7 +1123,8 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
 fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
     let state = AppState::default();
     let component = Component::new(7, ComponentType::Resistor, Point::origin());
-    let contract = inline_parameter_contract(&state, &component, &HashMap::new());
+    let contract =
+        inline_parameter_contract(&state.design, &state.model, &component, &HashMap::new());
     let keys = contract
         .iter()
         .map(|parameter| parameter.key.as_str())
@@ -1054,7 +1145,7 @@ fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
 #[test]
 fn component_identity_reports_occurrence_and_graphical_execution_views() {
     let mut state = AppState::default();
-    assert_eq!(containing_occurrence_path(&state), "/");
+    assert_eq!(containing_occurrence_path(&state.model), "/");
 
     state.model.workspace.descend_into(
         "XAFE".to_owned(),
@@ -1067,13 +1158,13 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
         .with_library_cell(binding)
         .with_name_value("RGAIN", "499");
 
-    assert_eq!(containing_occurrence_path(&state), "/XAFE");
+    assert_eq!(containing_occurrence_path(&state.model), "/XAFE");
     state.model.workspace.descend_into(
         "XBIAS".to_owned(),
         CellViewRef::new("user", "bias", "schematic"),
         ViewType::Schematic,
     );
-    assert_eq!(containing_occurrence_path(&state), "/XAFE/XBIAS");
+    assert_eq!(containing_occurrence_path(&state.model), "/XAFE/XBIAS");
     assert_eq!(instance_view(&component), Some("symbol"));
     let resistor = Component::new(10, ComponentType::Resistor, Point::origin());
     assert_eq!(instance_view(&resistor), None, "a primitive binds no view");
@@ -1147,14 +1238,14 @@ fn model_choices_stay_inside_the_bound_library_and_device_family() {
         .iter()
         .find(|component| component.id == id)
         .expect("bound component");
-    let choices = bound_model_choices(&app.state, component, "OPA189_A");
+    let choices = bound_model_choices(&app.state.model, component, "OPA189_A");
     let values = choices
         .iter()
         .map(|(value, _)| value.as_str())
         .collect::<Vec<_>>();
     assert_eq!(values, ["OPA189_A", "OPA189_B"]);
     assert_eq!(
-        catalog_model_location(&app.state, component),
+        catalog_model_location(&app.state.model, component),
         Some(("vendor_analog".to_owned(), "OPA189_A".to_owned()))
     );
 }
@@ -1181,7 +1272,7 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
         .module_name = Some("NJF_MODEL".to_owned());
 
     let component = &app.state.model.schematic.document().components[0];
-    let choices = bound_model_choices(&app.state, component, "NJF_MODEL");
+    let choices = bound_model_choices(&app.state.model, component, "NJF_MODEL");
     assert_eq!(
         choices
             .iter()
@@ -1223,7 +1314,7 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
     app.state.model.schematic.init_undo_history();
 
     let choices = bound_model_choices(
-        &app.state,
+        &app.state.model,
         &app.state.model.schematic.document().components[0],
         "DIODE_A",
     );
@@ -1268,7 +1359,7 @@ fn bound_model_choices_offer_a_binned_family_once() {
     app.state.model.schematic.init_undo_history();
 
     let component = app.state.model.schematic.document().components[0].clone();
-    let choices = bound_model_choices(&app.state, &component, "nch.1");
+    let choices = bound_model_choices(&app.state.model, &component, "nch.1");
     let owned = |pairs: &[(&str, &str)]| {
         pairs
             .iter()
@@ -1294,11 +1385,11 @@ fn bound_model_choices_offer_a_binned_family_once() {
         Some("nch")
     );
     assert_eq!(
-        bound_model_choices(&app.state, &component, "nch"),
+        bound_model_choices(&app.state.model, &component, "nch"),
         owned(&[("nch", "nch · 2 bins"), ("nch_hv", "nch_hv")]),
         "once the family is bound, no bin is offered beside it"
     );
-    let evidence = super::component_model_evidence(&app.state, &component);
+    let evidence = super::component_model_evidence(&app.state.model, &component);
     assert_eq!(evidence.model.as_deref(), Some("nch"));
     assert!(evidence.problem.is_none(), "{:?}", evidence.problem);
 }
@@ -1317,7 +1408,7 @@ fn a_veriloga_cell_opens_its_exact_code_source_target() {
         .with_name_value("XBRIDGE", "sensor_bridge");
 
     assert_eq!(
-        component_model_source_target(&state, &component),
+        component_model_source_target(&state.model, &component),
         Some(ComponentModelSourceTarget::VerilogA(CellViewRef::new(
             "behavioral",
             "sensor_bridge",
@@ -1492,7 +1583,7 @@ fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
         .clone();
 
     let declared = crate::state::parse_params_string(&component.params);
-    let rows = inline_parameter_contract(&state, &component, &declared);
+    let rows = inline_parameter_contract(&state.design, &state.model, &component, &declared);
     let keys = |rows: &[InlineParameterContract]| {
         rows.iter()
             .map(|row| row.key.to_ascii_lowercase())
@@ -1521,7 +1612,12 @@ fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
     // the instance, not a field the card invited.
     component.params = format!("{} sa=1u", component.params);
     let declared = crate::state::parse_params_string(&component.params);
-    let offered = keys(&inline_parameter_contract(&state, &component, &declared));
+    let offered = keys(&inline_parameter_contract(
+        &state.design,
+        &state.model,
+        &component,
+        &declared,
+    ));
     assert!(offered.iter().any(|key| key == "sa"), "{offered:?}");
 }
 
@@ -1534,7 +1630,7 @@ fn a_device_below_the_root_is_read_under_its_instance_path() {
     let component =
         Component::new(7, ComponentType::Nmos, Point::origin()).with_name_value("MN", "nch");
     assert_eq!(
-        device_engine_name(&state, &component).as_deref(),
+        device_engine_name(&state.model, &component).as_deref(),
         Some("mn")
     );
     state.model.workspace.descend_into(
@@ -1543,7 +1639,7 @@ fn a_device_below_the_root_is_read_under_its_instance_path() {
         ViewType::Schematic,
     );
     assert_eq!(
-        device_engine_name(&state, &component).as_deref(),
+        device_engine_name(&state.model, &component).as_deref(),
         Some("x1.mn")
     );
 }
@@ -1745,13 +1841,13 @@ fn the_inspector_states_an_unresolved_configuration_instead_of_buffer_connectivi
         ));
     state.sync_active_schematic_to_workspace();
     assert!(
-        !sheet_connectivity(&state).nets.is_empty(),
+        !sheet_connectivity(&state.model).nets.is_empty(),
         "the fixture sheet has connectivity while its configuration resolves"
     );
 
     unresolve_configuration(&mut state);
 
-    let sheet = sheet_connectivity(&state);
+    let sheet = sheet_connectivity(&state.model);
     let reason = sheet
         .unresolved
         .expect("the projection refuses an unresolvable configuration");
@@ -1838,7 +1934,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         .assign_objects(catalog.revision(), second, [SECOND_WIRE])
         .expect("the second conductor belongs to the second page");
 
-    let sheet = sheet_connectivity(&state);
+    let sheet = sheet_connectivity(&state.model);
     assert!(sheet.unresolved.is_none(), "the fixture design resolves");
     assert_eq!(
         sheet.nets.len(),
@@ -1863,7 +1959,7 @@ fn a_model_the_plan_binds_reads_as_resolved_beside_another_drawings_copy() {
     }
     let component = Component::new(77, ComponentType::Diode, Point::origin())
         .with_name_value("D77", "shared_diode");
-    let ambiguous = super::component_model_evidence(&state, &component)
+    let ambiguous = super::component_model_evidence(&state.model, &component)
         .problem
         .expect("two libraries and no plan binding is a contest");
     assert_eq!(ambiguous.0, Problem::Failure);
@@ -1874,7 +1970,7 @@ fn a_model_the_plan_binds_reads_as_resolved_beside_another_drawings_copy() {
         .simulation_plan_binding("beta")
         .expect("the fixture library is bindable");
     state.model.sim_setup.model_bindings.push(binding);
-    let evidence = super::component_model_evidence(&state, &component);
+    let evidence = super::component_model_evidence(&state.model, &component);
     assert_eq!(evidence.problem, None, "the run reads beta alone");
 }
 
@@ -1894,7 +1990,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
 
     // Two providers and no decision: nothing resolves it, so the row says so
     // and there is nowhere to jump.
-    let contested = super::component_model_evidence(&state, &component);
+    let contested = super::component_model_evidence(&state.model, &component);
     let (problem, text) = contested
         .problem
         .expect("an unresolved contest is a problem");
@@ -1903,7 +1999,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
         text.starts_with("Model shared_diode ambiguous"),
         "an unresolved contest is ambiguous: {text}"
     );
-    assert_eq!(catalog_model_location(&state, &component), None);
+    assert_eq!(catalog_model_location(&state.model, &component), None);
 
     // The project resolves it. Execution and the Models workspace now both run
     // `beta`, so the inspector must stop calling the same reference ambiguous
@@ -1918,13 +2014,13 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
             "Test selects the executable provider.",
         )
         .expect("two providers accept a project-global decision");
-    let resolved = super::component_model_evidence(&state, &component);
+    let resolved = super::component_model_evidence(&state.model, &component);
     assert_eq!(
         resolved.problem, None,
         "a recorded decision resolves the reference"
     );
     assert_eq!(
-        catalog_model_location(&state, &component),
+        catalog_model_location(&state.model, &component),
         Some(("beta".to_owned(), "shared_diode".to_owned())),
         "the jump follows the effective provider"
     );
@@ -1936,7 +2032,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
 #[test]
 fn the_component_title_states_the_occurrence_only_below_the_root() {
     let (mut app, id) = app_with_model_bound_instance();
-    let sheet = sheet_connectivity(&app.state);
+    let sheet = sheet_connectivity(&app.state.model);
     let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
     let first = painted.lines().next().unwrap_or_default();
     assert!(
@@ -1981,7 +2077,7 @@ fn the_cmos_inverter_example_binds_models_the_library_resolves() {
             .find(|component| component.name == name)
             .unwrap_or_else(|| panic!("the inverter has no {name}"));
         assert_eq!(
-            component_model_evidence(&state, component),
+            component_model_evidence(&state.model, component),
             ComponentModelEvidence::resolved(model),
             "{name}'s model binding"
         );

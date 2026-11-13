@@ -4,7 +4,7 @@ use rspice_ui_kit::panels::Problem;
 
 use crate::state::model_library::ModelConsumerScope;
 use crate::state::{CellViewRef, Component, ViewType, explicit_component_model};
-use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
 
 /// The model an instance runs, and what is wrong with that binding when
 /// something is. A binding that resolves says nothing beyond the model's name.
@@ -37,12 +37,11 @@ impl ComponentModelEvidence {
 /// view names, and whether its source has a compile that is still current.
 /// No model catalog is involved, so none is reported as unverified.
 fn project_module_evidence(
-    state: &AppState,
+    model: &Model,
     binding: &crate::state::LibraryCellInstance,
 ) -> Option<ComponentModelEvidence> {
     let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
-    let view = state
-        .model
+    let view = model
         .library_manager
         .get_library(&reference.library)?
         .get_cell(&reference.cell)?
@@ -50,26 +49,25 @@ fn project_module_evidence(
     if view.view_type != ViewType::VerilogA {
         return None;
     }
-    let model = view
+    let module = view
         .metadata
         .get("veriloga.module")
         .cloned()
         .unwrap_or_else(|| binding.cell.clone());
-    let bundle = state
-        .model
+    let bundle = model
         .workspace
         .content
         .project_sources
         .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(reference));
     Some(match bundle {
-        Some(bundle) if bundle.validation_is_current() => ComponentModelEvidence::resolved(model),
+        Some(bundle) if bundle.validation_is_current() => ComponentModelEvidence::resolved(module),
         Some(_) => ComponentModelEvidence::failed(
-            model,
+            module,
             Problem::Warning,
             "Recompile needed: the module changed since its compile".to_owned(),
         ),
         None => ComponentModelEvidence::failed(
-            model,
+            module,
             Problem::Failure,
             "No Verilog-A/AMS source for this view".to_owned(),
         ),
@@ -77,7 +75,7 @@ fn project_module_evidence(
 }
 
 pub(super) fn component_model_evidence(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> ComponentModelEvidence {
     if let Some(binding) = component.library_cell.as_ref() {
@@ -111,14 +109,10 @@ pub(super) fn component_model_evidence(
                 ),
             };
         }
-        if let Some(evidence) = project_module_evidence(state, binding) {
+        if let Some(evidence) = project_module_evidence(model, binding) {
             return evidence;
         }
-        if let Some(library) = state
-            .model
-            .model_library_manager
-            .get_library(&binding.library)
-        {
+        if let Some(library) = model.model_library_manager.get_library(&binding.library) {
             let candidates = [
                 binding.module_name.as_deref(),
                 Some(binding.cell.as_str()),
@@ -133,32 +127,31 @@ pub(super) fn component_model_evidence(
             }
         }
 
-        let model = binding
+        let name = binding
             .module_name
             .clone()
             .unwrap_or_else(|| binding.cell.clone());
         if binding.source_path.is_some() {
             // The deck includes the file the binding names; no loaded library
             // vouches for what is in it.
-            let text = format!("Model {model} is not in a loaded library");
-            return ComponentModelEvidence::failed(model, Problem::Warning, text);
+            let text = format!("Model {name} is not in a loaded library");
+            return ComponentModelEvidence::failed(name, Problem::Warning, text);
         }
 
-        let project_view_exists = state
-            .model
+        let project_view_exists = model
             .library_manager
             .get_library(&binding.library)
             .and_then(|library| library.get_cell(&binding.cell))
             .and_then(|cell| cell.get_view(&binding.view))
             .is_some();
         return if project_view_exists {
-            ComponentModelEvidence::resolved(model)
+            ComponentModelEvidence::resolved(name)
         } else {
             let text = format!(
                 "Library cell {}/{} ({}) not found",
                 binding.library, binding.cell, binding.view
             );
-            ComponentModelEvidence::failed(model, Problem::Failure, text)
+            ComponentModelEvidence::failed(name, Problem::Failure, text)
         };
     }
 
@@ -171,16 +164,14 @@ pub(super) fn component_model_evidence(
             let text = format!("Model {model_name} not found in the loaded libraries");
             ComponentModelEvidence::failed(model_name, Problem::Failure, text)
         };
-        return match state
-            .model
+        return match model
             .model_library_manager
             .effective_plan_definition_provider(
-                &state.model.sim_setup.model_bindings,
+                &model.sim_setup.model_bindings,
                 ModelConsumerScope::PrimitiveModel,
                 &model_name,
             ) {
-            Ok(Some(provider)) => state
-                .model
+            Ok(Some(provider)) => model
                 .model_library_manager
                 .get_library(&provider.library)
                 .and_then(|library| {

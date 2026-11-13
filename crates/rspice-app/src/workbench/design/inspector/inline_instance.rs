@@ -56,16 +56,20 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
 /// field beside it.
 #[cfg(test)]
 pub(super) fn field_rejection(
-    state: &AppState,
+    design: &DesignState,
+    model: &Model,
+    wb: &WorkbenchSession,
     component: &Component,
     field: &InlineEditField,
     candidate: &str,
 ) -> Option<String> {
-    prepare_field_edit(state, component, field, candidate).err()
+    prepare_field_edit(design, model, wb, component, field, candidate).err()
 }
 
 fn prepare_field_edit(
-    state: &AppState,
+    design: &DesignState,
+    model: &Model,
+    wb: &WorkbenchSession,
     component: &Component,
     field: &InlineEditField,
     source: &str,
@@ -73,8 +77,11 @@ fn prepare_field_edit(
     let mut authored = source.to_owned();
     let mut typed_value = None;
     if let InlineEditField::Parameter(key) = field
-        && let Some(sheet) =
-            crate::workbench::app::authoritative_component_property_sheet(state, component)?
+        && let Some(sheet) = crate::workbench::app::authoritative_component_property_sheet(
+            &design.property_registry,
+            model,
+            component,
+        )?
         && let Some(definition) = sheet.get(key)
     {
         let source = if definition.verilog_numbers {
@@ -82,14 +89,15 @@ fn prepare_field_edit(
         } else {
             source.to_owned()
         };
-        typed_value = parameter_source_value(state, definition, &source)?;
+        typed_value = parameter_source_value(model, wb, definition, &source)?;
         authored = typed_value
             .as_ref()
             .map(|value| parameter_source_text(definition, &source, value))
             .unwrap_or_default();
     }
     let candidate = edited_component(component, field, &authored)?;
-    if let Some(refusal) = source_contract_rejection(state, &candidate, field, typed_value.as_ref())
+    if let Some(refusal) =
+        source_contract_rejection(design, &candidate, field, typed_value.as_ref())
     {
         return Err(refusal);
     }
@@ -103,8 +111,7 @@ fn prepare_field_edit(
         return Ok(candidate);
     }
     candidate.validate_reference_designator(&candidate.name)?;
-    if state
-        .model
+    if model
         .schematic
         .document()
         .components
@@ -129,12 +136,12 @@ fn prepare_field_edit(
 /// `edited_component` preparation the commit uses, so the gate can never judge a string the
 /// commit would not have written.
 fn source_contract_rejection(
-    state: &AppState,
+    design: &DesignState,
     component: &Component,
     field: &InlineEditField,
     typed_value: Option<&PropertyValue>,
 ) -> Option<String> {
-    let sheet = state.design.property_registry.get(component.kind)?;
+    let sheet = design.property_registry.get(component.kind)?;
     if matches!(field, InlineEditField::Instance) {
         // The reference designator is not a waveform field, and re-reading the
         // contract on a rename would refuse a rename for a value the rename
@@ -143,7 +150,7 @@ fn source_contract_rejection(
     }
     let mut values = crate::properties::property_bridge::collect_properties_from_component(
         component,
-        &state.design.property_registry,
+        &design.property_registry,
     );
     // The edited field is presented as the *typed* value it commits as, which
     // is what the modal editor's own commit hands the gate. Without this the
@@ -183,7 +190,8 @@ fn parameter_source_text(
 /// means "inherit the model or property-sheet default" and is not the same
 /// transaction as authoring an empty value.
 fn parameter_source_value(
-    state: &AppState,
+    model: &Model,
+    wb: &WorkbenchSession,
     definition: &PropertyDefinition,
     candidate: &str,
 ) -> Result<Option<PropertyValue>, String> {
@@ -200,8 +208,8 @@ fn parameter_source_value(
             return rspice_design::properties::value::parse_expression_source(
                 definition,
                 candidate,
-                state.model.preferences.quantity_presentation_policy(),
-                state.workbench.number_locale,
+                model.preferences.quantity_presentation_policy(),
+                wb.number_locale,
             )
             .map(Some);
         }
@@ -320,7 +328,7 @@ fn edited_component(
 }
 /// Finish the previous field before opening a draft against the live component.
 pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEditField) -> bool {
-    if app.state.schematic_edit_read_only() {
+    if app.state.model.schematic_edit_read_only() {
         return false;
     }
     if app
@@ -332,7 +340,7 @@ pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEd
     {
         return true;
     }
-    if app.state.commit_inline_component_edit().is_err() {
+    if commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err() {
         return false;
     }
     let Some(component) = app
@@ -353,7 +361,7 @@ pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEd
         expected: component,
         description: edit_description(&field),
         field,
-        authority: app.state.inline_edit_authority(),
+        authority: inline_edit_authority(&app.state.model),
         error: None,
         widget: None,
     };
@@ -365,7 +373,14 @@ pub(super) fn update_edit(app: &mut RSpiceApp, text: String) {
     let Some(session) = app.state.workbench.inline_edit.session() else {
         return;
     };
-    let candidate = prepare_field_edit(&app.state, &session.expected, &session.field, &text);
+    let candidate = prepare_field_edit(
+        &app.state.design,
+        &app.state.model,
+        &app.state.workbench,
+        &session.expected,
+        &session.field,
+        &text,
+    );
     app.state.workbench.inline_edit.set_draft(text, candidate);
 }
 
@@ -446,7 +461,7 @@ pub(super) fn edit_row_with_hint(
     caption: PropertyRowCaption<'_>,
 ) -> Option<String> {
     let captioned = caption.unit.is_some() || caption.description.is_some();
-    let editable = !app.state.schematic_edit_read_only();
+    let editable = !app.state.model.schematic_edit_read_only();
     if !editable {
         let value = field_value(component, &field);
         let shown = if value.is_empty() { hint } else { &value };
@@ -565,12 +580,12 @@ pub(super) fn edit_row_with_hint(
             .inline_edit
             .buffer_for(component.id, &field)
             .is_some()
-        && app.state.commit_inline_component_edit().is_err()
+        && commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err()
     {
         restore_edit_focus(ui.ctx(), app);
     }
     if tuning_response.is_some_and(|response| response.clicked()) {
-        if app.state.commit_inline_component_edit().is_err() {
+        if commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err() {
             restore_edit_focus(ui.ctx(), app);
             return app
                 .state
@@ -661,7 +676,7 @@ pub(super) fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -
 /// is. It cannot: the sheet catalog is not reachable from the painter, and a
 /// name whose painted width varied with the catalog would break the one
 /// intrinsic bounds function that marquee selection and fit-to-content share.
-/// The inspector holds `AppState`, so the partner sheets are stated here.
+/// The inspector reads the model, so the partner sheets are stated here.
 pub(super) struct OffSheetDeclaration {
     pub(super) direction: String,
     pub(super) partners: String,
@@ -669,12 +684,11 @@ pub(super) struct OffSheetDeclaration {
 
 /// `None` for a net no off-sheet connector names, which is why its rows are
 /// absent rather than filled with "not applicable".
-pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffSheetDeclaration> {
+pub(super) fn off_sheet_declaration(model: &Model, name: &str) -> Option<OffSheetDeclaration> {
     // Net names are not case-sensitive under either naming policy: the
     // extraction joins `Out` and `out`, so their connectors are one net's.
     let same_name = |candidate: &str| candidate.eq_ignore_ascii_case(name);
-    let connectors: Vec<&crate::state::NetLabel> = state
-        .model
+    let connectors: Vec<&crate::state::NetLabel> = model
         .schematic
         .document()
         .net_labels
@@ -698,14 +712,8 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
         .collect::<Vec<_>>()
         .join(", ");
 
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let catalog = state
-        .model
+    let key = model.workspace.content.active_schematic_reference().key();
+    let catalog = model
         .workspace
         .content
         .design_management
@@ -714,8 +722,7 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
     let mut pages: Vec<u32> = Vec::new();
     if let Some(catalog) = catalog {
         for label in &connectors {
-            let Some(sheet) = state
-                .model
+            let Some(sheet) = model
                 .workspace
                 .content
                 .design_management
@@ -771,7 +778,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
     object_title(ui, &net_name, Some("Net"), None);
 
-    let off_sheet = off_sheet_declaration(&app.state, &net_name);
+    let off_sheet = off_sheet_declaration(&app.state.model, &net_name);
 
     section_header(ui, "Net identity", None);
     property_row(ui, "Scope", &scope);
@@ -818,7 +825,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
     // The node voltage the active run solved for this net, when it solved
     // one; with none the section is absent.
-    if let Some(annotation) = net_operating_point(&app.state, &net_name) {
+    if let Some(annotation) = net_operating_point(&app.state.model, &net_name) {
         if annotation.current {
             section_header(ui, "Operating point", None);
         } else {
@@ -848,7 +855,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         violation_targets_net(violation, net)
     });
     let collisions = if checks_current(&app.state.model) {
-        net_name_collision_count(&app.state, net)
+        net_name_collision_count(&app.state.model, net)
     } else {
         0
     };
@@ -932,9 +939,8 @@ pub(super) struct NetAnnotation {
 /// name on the top sheet, the dotted instance path below it. The run names
 /// every node that way, so a bare name below the root would read a node of
 /// the top sheet.
-pub(super) fn net_engine_name(state: &AppState, name: &str) -> Option<String> {
-    state
-        .model
+pub(super) fn net_engine_name(model: &Model, name: &str) -> Option<String> {
+    model
         .workspace
         .content
         .occurrence_path()
@@ -944,11 +950,11 @@ pub(super) fn net_engine_name(state: &AppState, name: &str) -> Option<String> {
 
 /// The selected run's DC node voltage for a net. A run of an earlier
 /// drawing is still read, and says it is stale.
-pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnnotation> {
-    let bare = net_engine_name(state, net)?;
+pub(super) fn net_operating_point(model: &Model, net: &str) -> Option<NetAnnotation> {
+    let bare = net_engine_name(model, net)?;
     let wrapped = format!("v({bare})");
-    let current = active_run_matches_design(state);
-    state.model.simulation.active_run().and_then(|run| {
+    let current = active_run_matches_design(model);
+    model.simulation.active_run().and_then(|run| {
         run.analyses.iter().find_map(|analysis| {
             analysis.dc_op.as_ref().and_then(|op| {
                 op.node_voltages
@@ -968,15 +974,15 @@ pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnno
     })
 }
 
-pub(super) fn active_run_matches_design(state: &AppState) -> bool {
-    let Some(run) = state.model.simulation.active_run() else {
+pub(super) fn active_run_matches_design(model: &Model) -> bool {
+    let Some(run) = model.simulation.active_run() else {
         return false;
     };
     run.prepared_receipt().is_some_and(|receipt| {
-        receipt.project_revision() == state.model.workspace.content.project.revision()
-    }) && state.model.simulation.source.cross_probe.is_current_for(
-        &state.model.workspace.content.active_view,
-        state.model.schematic.topology_version(),
+        receipt.project_revision() == model.workspace.content.project.revision()
+    }) && model.simulation.source.cross_probe.is_current_for(
+        &model.workspace.content.active_view,
+        model.schematic.topology_version(),
     )
 }
 
@@ -1036,17 +1042,16 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
     }
 }
 
-pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usize {
+pub(super) fn net_name_collision_count(model: &Model, net: &DesignNet) -> usize {
     // Which labels stand on this net is the one extraction's answer, so the
     // collision count describes the node the deck emits.
-    let connectivity = extract(&state.model.schematic, None);
+    let connectivity = extract(&model.schematic, None);
     let wire_ids = net
         .wire_ids
         .iter()
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    let mut names = state
-        .model
+    let mut names = model
         .schematic
         .document()
         .net_labels
@@ -1062,8 +1067,7 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
         .map(|label| normalized_net_name(&label.name))
         .collect::<std::collections::HashSet<_>>();
     for terminal in &net.terminals {
-        if let Some(port) = state
-            .model
+        if let Some(port) = model
             .schematic
             .document()
             .components

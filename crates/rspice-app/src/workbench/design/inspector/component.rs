@@ -31,9 +31,9 @@ pub(super) fn component_panel(
         );
         return;
     };
-    let evidence = component_model_evidence(&app.state, &component);
+    let evidence = component_model_evidence(&app.state.model, &component);
     // The design root is implicit: on the top sheet the path says nothing.
-    let occurrence = containing_occurrence_path(&app.state);
+    let occurrence = containing_occurrence_path(&app.state.model);
     object_title(
         ui,
         &component.name,
@@ -53,8 +53,8 @@ pub(super) fn component_panel(
 /// The title names the component beside this, so the path carries the
 /// enclosing instances and stops there — and the design root is implicit, so an
 /// inspected component on the top sheet reports `/`.
-pub(super) fn containing_occurrence_path(state: &AppState) -> String {
-    state.model.workspace.content.occurrence_path().to_string()
+pub(super) fn containing_occurrence_path(model: &Model) -> String {
+    model.workspace.content.occurrence_path().to_string()
 }
 
 /// What a component is, for its title: a built-in's catalog name, a generated
@@ -96,10 +96,15 @@ pub(super) fn instance_view(component: &Component) -> Option<&str> {
 }
 
 pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
-    let editable = !app.state.schematic_edit_read_only();
+    let editable = !app.state.model.schematic_edit_read_only();
     let properties = section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
-        crate::workbench::app::open_property_editor(&mut app.state, component.id);
+        crate::workbench::app::actions::property_edit::open_property_editor_in(
+            &mut app.state.design.property_form_parts(),
+            &mut app.state.model,
+            &mut app.state.workbench,
+            component.id,
+        );
     }
     properties.on_disabled_hover_text("the active document is read-only");
     let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");
@@ -124,11 +129,11 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     if let Some(view) = instance_view(component) {
         property_row(ui, "View", view);
     }
-    sheet_row(ui, &app.state, component.id);
+    sheet_row(ui, &app.state.model, component.id);
     if editable {
         rejection_slot(
             ui,
-            editing_identity_field(&app.state, component.id),
+            editing_identity_field(&app.state.workbench, component.id),
             instance_rejection.as_deref().or(value_rejection.as_deref()),
         );
     }
@@ -163,11 +168,10 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             .get_library(&reference.library)
             .is_some_and(|library| !library.read_only)
     });
-    let model_source = component_model_source_target(&app.state, component);
-    let hierarchy_master = app
-        .state
-        .hierarchy_master_for_component(component.id)
-        .map(|(_, reference)| reference);
+    let model_source = component_model_source_target(&app.state.model, component);
+    let hierarchy_master =
+        crate::workbench::app::hierarchy_master_for_component(&app.state.model, component.id)
+            .map(|(_, reference)| reference);
     // The deck the instance emits is part of its identity, so the jump to it
     // belongs beside the symbol, master and model routes rather than in a
     // section of its own. It appears only once a deck states the instance.
@@ -184,14 +188,28 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 .ghost()
                 .show(ui);
                 if response.clicked() {
-                    app.state.open_workspace_view(reference);
+                    app.state
+                        .design
+                        .navigation_parts(
+                            &mut app.state.model,
+                            &mut app.state.workbench,
+                            &app.state.runs,
+                        )
+                        .open_workspace_view(reference);
                 }
             }
 
             if let Some(reference) = hierarchy_master.as_ref() {
                 let label = format!("Descend into {}", reference.cell);
                 if Button::new(&label).ghost().show(ui).clicked() {
-                    app.state.open_selected_instance_master();
+                    app.state
+                        .design
+                        .navigation_parts(
+                            &mut app.state.model,
+                            &mut app.state.workbench,
+                            &app.state.runs,
+                        )
+                        .open_selected_instance_master();
                 }
             }
 
@@ -208,7 +226,10 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 };
                 let response = Button::new(label).ghost().show(ui);
                 if response.clicked() {
-                    if !app.state.commit_pending_inspector_edit() {
+                    if !commit_pending_inspector_edit(
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                    ) {
                         return;
                     }
                     match target {
@@ -219,7 +240,14 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                             });
                         }
                         ComponentModelSourceTarget::VerilogA(reference) => {
-                            app.state.open_workspace_view(reference.clone());
+                            app.state
+                                .design
+                                .navigation_parts(
+                                    &mut app.state.model,
+                                    &mut app.state.workbench,
+                                    &app.state.runs,
+                                )
+                                .open_workspace_view(reference.clone());
                             app.state.workbench.activate(Workspace::Design);
                         }
                     }
@@ -236,7 +264,7 @@ pub(super) enum ComponentModelSourceTarget {
 }
 
 pub(super) fn component_model_source_target(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> Option<ComponentModelSourceTarget> {
     if let Some(binding) = component.library_cell.as_ref() {
@@ -245,8 +273,7 @@ pub(super) fn component_model_source_target(
             binding.cell.clone(),
             binding.view.clone(),
         );
-        let is_veriloga = state
-            .model
+        let is_veriloga = model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -256,19 +283,16 @@ pub(super) fn component_model_source_target(
             return Some(ComponentModelSourceTarget::VerilogA(reference));
         }
     }
-    catalog_model_location(state, component)
+    catalog_model_location(model, component)
         .map(|(library, model)| ComponentModelSourceTarget::Catalog { library, model })
 }
 
 pub(super) fn catalog_model_location(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> Option<(String, String)> {
     if let Some(binding) = component.library_cell.as_ref()
-        && let Some(library) = state
-            .model
-            .model_library_manager
-            .get_library(&binding.library)
+        && let Some(library) = model.model_library_manager.get_library(&binding.library)
     {
         let candidates = [
             binding.module_name.as_deref(),
@@ -290,20 +314,16 @@ pub(super) fn catalog_model_location(
     // Requiring exactly one name match made the action vanish precisely when
     // an engineer most needs to see which copy wins.
     let model_name = crate::state::explicit_component_model(component)?;
-    let provider = state
-        .model
+    let provider = model
         .model_library_manager
         .effective_plan_definition_provider(
-            &state.model.sim_setup.model_bindings,
+            &model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             &model_name,
         )
         .ok()
         .flatten()?;
-    let library = state
-        .model
-        .model_library_manager
-        .get_library(&provider.library)?;
+    let library = model.model_library_manager.get_library(&provider.library)?;
     // A binned family opens at its first bin; which bin runs is the
     // simulator's choice from the instance's geometry.
     let model = library
@@ -328,16 +348,15 @@ const CLASSIC_MOS_INSTANCE_PARAMETERS: &[&str] = &[
 ///
 /// The card it binds, or — for a bare placement, which the netlister resolves
 /// onto its family's foundation card — that card's level.
-fn bound_model_spice_level(state: &AppState, component: &Component) -> Option<u32> {
-    let (library, model) = catalog_model_location(state, component)
-        .or_else(|| foundation_default_model_location(state, component))?;
-    let model = state
-        .model
+fn bound_model_spice_level(model: &Model, component: &Component) -> Option<u32> {
+    let (library, name) = catalog_model_location(model, component)
+        .or_else(|| foundation_default_model_location(model, component))?;
+    let model = model
         .model_library_manager
         .get_library(&library)?
         .models
         .values()
-        .find(|candidate| candidate.name == model)?;
+        .find(|candidate| candidate.name == name)?;
     model.spice_level.or(match model.level {
         crate::state::model_library::ModelLevel::SpiceLevel1 => Some(1),
         crate::state::model_library::ModelLevel::SpiceLevel3 => Some(3),
@@ -347,7 +366,7 @@ fn bound_model_spice_level(state: &AppState, component: &Component) -> Option<u3
 
 /// Where the foundation card a bare bulk-MOS placement runs on lives.
 fn foundation_default_model_location(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> Option<(String, String)> {
     let family = match component.kind {
@@ -355,11 +374,10 @@ fn foundation_default_model_location(
         ComponentType::Pmos => rspice_core::library::FoundationDeviceFamily::Pmos,
         _ => return None,
     };
-    let provider = state
-        .model
+    let provider = model
         .model_library_manager
         .effective_plan_definition_provider(
-            &state.model.sim_setup.model_bindings,
+            &model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             family.default_model_name(),
         )
@@ -375,20 +393,19 @@ fn foundation_default_model_location(
 /// so without this a LEVEL=1 inverter offers BSIM4 geometry modes, stress
 /// distances, mismatch terms and body squares that nothing in its deck reads.
 fn level_supported_instance_parameters(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> Option<&'static [&'static str]> {
     if !matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos) {
         return None;
     }
-    matches!(bound_model_spice_level(state, component)?, 1..=6)
+    matches!(bound_model_spice_level(model, component)?, 1..=6)
         .then_some(CLASSIC_MOS_INSTANCE_PARAMETERS)
 }
 
 /// The model cards the project's libraries state for `module`, by name.
-pub(super) fn model_cards_of_module(state: &AppState, module: &str) -> Vec<String> {
-    let mut cards = state
-        .model
+pub(super) fn model_cards_of_module(model: &Model, module: &str) -> Vec<String> {
+    let mut cards = model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -408,7 +425,7 @@ pub(super) fn model_cards_of_module(state: &AppState, module: &str) -> Vec<Strin
 }
 
 pub(super) fn bound_model_choices(
-    state: &AppState,
+    model: &Model,
     component: &Component,
     current: &str,
 ) -> Vec<(String, String)> {
@@ -419,11 +436,7 @@ pub(super) fn bound_model_choices(
     else {
         return Vec::new();
     };
-    let Some(library) = state
-        .model
-        .model_library_manager
-        .get_library(&binding.library)
-    else {
+    let Some(library) = model.model_library_manager.get_library(&binding.library) else {
         return Vec::new();
     };
     let Some(current_model) = library.executable_cards(current).into_iter().next() else {
@@ -475,18 +488,14 @@ pub(super) fn bound_model_choices(
 }
 
 pub(super) fn bound_model_section_choices(
-    state: &AppState,
+    model: &Model,
     component: &Component,
     selected_model: &str,
 ) -> Vec<(String, String)> {
     let Some(binding) = component.library_cell.as_ref() else {
         return Vec::new();
     };
-    let Some(library) = state
-        .model
-        .model_library_manager
-        .get_library(&binding.library)
-    else {
+    let Some(library) = model.model_library_manager.get_library(&binding.library) else {
         return Vec::new();
     };
     let mut sections = library
@@ -532,7 +541,7 @@ pub(crate) fn bind_component_model_from_catalog(
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    app.state.commit_inline_component_edit()?;
+    commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench)?;
     crate::workbench::docks::inspector::validate_component_model_catalog_binding(
         &app.state.model,
         component_id,
@@ -600,7 +609,7 @@ pub(crate) fn apply_bound_model_choice(
     component_id: u64,
     selected_model: &str,
 ) -> Result<bool, String> {
-    app.state.commit_inline_component_edit()?;
+    commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench)?;
     let component = app
         .state
         .model
@@ -659,7 +668,7 @@ pub(super) fn apply_bound_model_section(
     component_id: u64,
     selected_section: &str,
 ) {
-    if !app.state.commit_pending_inspector_edit() {
+    if !commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench) {
         return;
     }
     let Some(component) = app
@@ -679,7 +688,7 @@ pub(super) fn apply_bound_model_section(
         .as_ref()
         .and_then(|binding| binding.module_name.as_deref())
         .unwrap_or(component.value.as_str());
-    let allowed = bound_model_section_choices(&app.state, &component, selected_model);
+    let allowed = bound_model_section_choices(&app.state.model, &component, selected_model);
     if !allowed
         .iter()
         .any(|(value, _)| value.eq_ignore_ascii_case(selected_section))
@@ -703,7 +712,7 @@ pub(super) fn parameters_section(
     component: &Component,
     evidence: &ComponentModelEvidence,
 ) {
-    let editable = !app.state.schematic_edit_read_only();
+    let editable = !app.state.model.schematic_edit_read_only();
     section_header(
         ui,
         "Simulation parameters",
@@ -715,7 +724,7 @@ pub(super) fn parameters_section(
     // idea the deck does not give a module.
     let runs_module = app.state.model.instantiates_veriloga_view(component);
     let model_choices = evidence.model.as_deref().map_or_else(Vec::new, |model| {
-        bound_model_choices(&app.state, component, model)
+        bound_model_choices(&app.state.model, component, model)
     });
     let mut selected_model = component
         .library_cell
@@ -737,10 +746,9 @@ pub(super) fn parameters_section(
             .as_ref()
             .and_then(|binding| binding.model_card.clone())
             .unwrap_or_default();
-        let cards = evidence
-            .model
-            .as_deref()
-            .map_or_else(Vec::new, |module| model_cards_of_module(&app.state, module));
+        let cards = evidence.model.as_deref().map_or_else(Vec::new, |module| {
+            model_cards_of_module(&app.state.model, module)
+        });
         let listed = |name: &str| cards.iter().any(|card| card.eq_ignore_ascii_case(name));
         if !cards.is_empty() || !bound_card.is_empty() {
             let choices = std::iter::once((String::new(), "None".to_owned()))
@@ -757,7 +765,7 @@ pub(super) fn parameters_section(
                 &mut bound_card,
                 &choices,
                 editable,
-            ) && app.state.commit_pending_inspector_edit()
+            ) && commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench)
                 && app.state.model.schematic.select_instance_model_card(
                     component.id,
                     (!bound_card.is_empty()).then(|| bound_card.clone()),
@@ -783,7 +791,7 @@ pub(super) fn parameters_section(
             editable,
         ) && let Err(error) = apply_bound_model_choice(app, component.id, &selected_model)
         {
-            app.state.prompt(error);
+            app.state.workbench.prompt(error);
         }
     } else if let Some(model) = evidence.model.as_deref() {
         property_row(ui, "Model", model);
@@ -795,7 +803,7 @@ pub(super) fn parameters_section(
     let section_choices = if runs_module {
         Vec::new()
     } else {
-        bound_model_section_choices(&app.state, component, &selected_model)
+        bound_model_section_choices(&app.state.model, component, &selected_model)
     };
     let mut selected_section = component
         .library_cell
@@ -822,7 +830,7 @@ pub(super) fn parameters_section(
         "inherit · {} °C",
         app.state.model.sim_setup.reference_pvt.temperature_celsius
     );
-    let mut rejection = supports_instance_temperature(&app.state, component)
+    let mut rejection = supports_instance_temperature(&app.state.model, component)
         .then(|| {
             edit_row_with_hint(
                 ui,
@@ -839,7 +847,8 @@ pub(super) fn parameters_section(
     // Every parameter declared by the authoritative family sheet is present
     // even on a freshly placed instance whose durable parameter string is
     // still empty. Authored extension fields are appended and never hidden.
-    let parameter_contract = inline_parameter_contract(&app.state, component, &declared);
+    let parameter_contract =
+        inline_parameter_contract(&app.state.design, &app.state.model, component, &declared);
     let raw_field = InlineEditField::Parameters;
     let raw_editor_active = app
         .state
@@ -861,7 +870,7 @@ pub(super) fn parameters_section(
         if editable {
             rejection_slot(
                 ui,
-                editing_parameter_field(&app.state, component.id),
+                editing_parameter_field(&app.state.workbench, component.id),
                 rejection.as_deref(),
             );
         }
@@ -930,12 +939,12 @@ pub(super) fn parameters_section(
     if editable {
         rejection_slot(
             ui,
-            editing_parameter_field(&app.state, component.id),
+            editing_parameter_field(&app.state.workbench, component.id),
             rejection.as_deref(),
         );
     }
     if let Some(key) = removed
-        && app.state.commit_pending_inspector_edit()
+        && commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench)
     {
         match app
             .state
@@ -944,7 +953,7 @@ pub(super) fn parameters_section(
         {
             Ok(true) => app.invalidate_simulation_preflight(),
             Ok(false) => {}
-            Err(error) => app.state.prompt(format!(
+            Err(error) => app.state.workbench.prompt(format!(
                 "{key} was not removed from {}: {error}",
                 component.name
             )),
@@ -964,8 +973,8 @@ pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 /// A built-in takes it when its compiled contract names it. An instance of a
 /// Verilog-A view never does: a module reads `$temperature`, and takes `temp`
 /// only as a parameter it declares, which its own typed row then offers.
-pub(super) fn supports_instance_temperature(state: &AppState, component: &Component) -> bool {
-    if state.model.instantiates_veriloga_view(component) {
+pub(super) fn supports_instance_temperature(model: &Model, component: &Component) -> bool {
+    if model.instantiates_veriloga_view(component) {
         return false;
     }
     component
@@ -982,9 +991,9 @@ pub(super) fn supports_instance_temperature(state: &AppState, component: &Compon
 
 /// `true` while one of the identity group's editable fields holds the open
 /// inline-edit session.
-pub(super) fn editing_identity_field(state: &AppState, component: u64) -> bool {
+pub(super) fn editing_identity_field(wb: &WorkbenchSession, component: u64) -> bool {
     matches!(
-        state.workbench.inline_edit.editing_field(component),
+        wb.inline_edit.editing_field(component),
         Some(InlineEditField::Instance | InlineEditField::Value)
     )
 }
@@ -992,9 +1001,9 @@ pub(super) fn editing_identity_field(state: &AppState, component: u64) -> bool {
 /// `true` while one of the parameter group's editable fields — the instance
 /// temperature, a typed parameter, or the raw override string — holds the
 /// open inline-edit session.
-pub(super) fn editing_parameter_field(state: &AppState, component: u64) -> bool {
+pub(super) fn editing_parameter_field(wb: &WorkbenchSession, component: u64) -> bool {
     matches!(
-        state.workbench.inline_edit.editing_field(component),
+        wb.inline_edit.editing_field(component),
         Some(InlineEditField::Parameters | InlineEditField::Parameter(_))
     )
 }
@@ -1019,7 +1028,8 @@ pub(super) struct InlineParameterContract {
 }
 
 pub(super) fn inline_parameter_contract(
-    state: &AppState,
+    design: &DesignState,
+    model: &Model,
     component: &Component,
     declared: &HashMap<String, String>,
 ) -> Vec<InlineParameterContract> {
@@ -1027,13 +1037,13 @@ pub(super) fn inline_parameter_contract(
     // `temp` has its own row where the instance takes the SPICE instance
     // temperature; anywhere else a `temp` the sheet declares is an ordinary
     // parameter row.
-    let temperature_row = supports_instance_temperature(state, component);
+    let temperature_row = supports_instance_temperature(model, component);
     let is_temperature = |key: &str| temperature_row && key.eq_ignore_ascii_case(TEMPERATURE_PARAM);
-    let compiled = state.model.has_compiled_parameter_sheet(component);
+    let compiled = model.has_compiled_parameter_sheet(component);
     // A parameter the bound model's level does not read has no row, unless
     // the instance sets it anyway: then it is the instance's own value and
     // belongs on the panel whatever the card would do with it.
-    let supported = level_supported_instance_parameters(state, component);
+    let supported = level_supported_instance_parameters(model, component);
     let read_by_the_model = |name: &str| {
         // Purchasing fields are the part's, whatever its model reads.
         rspice_design::schematic::bom::BomField::from_key(name).is_some()
@@ -1045,9 +1055,11 @@ pub(super) fn inline_parameter_contract(
     };
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
-    if let Ok(Some(sheet)) =
-        crate::workbench::app::authoritative_component_property_sheet(state, component)
-    {
+    if let Ok(Some(sheet)) = crate::workbench::app::authoritative_component_property_sheet(
+        &design.property_registry,
+        model,
+        component,
+    ) {
         for definition in sheet.iter().filter(|definition| {
             definition.display_mode != DisplayMode::Hidden
                 && definition.name != "name"
@@ -1365,9 +1377,8 @@ pub(super) fn operating_point_rows(
 /// element the engine knows on the top sheet, the dotted instance path below
 /// it. The report names every device that way, so a bare name below the root
 /// would read the operating point of a different instance of the same master.
-pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Option<String> {
-    state
-        .model
+pub(super) fn device_engine_name(model: &Model, component: &Component) -> Option<String> {
+    model
         .workspace
         .content
         .occurrence_path()
@@ -1378,7 +1389,7 @@ pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Opt
 /// The active run's operating point for `component`, when the run solved one
 /// for it. With none the section is absent.
 pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let Some(engine_name) = device_engine_name(&app.state, component) else {
+    let Some(engine_name) = device_engine_name(&app.state.model, component) else {
         return;
     };
     let Some(run) = app.state.model.simulation.active_run() else {
@@ -1397,7 +1408,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
     else {
         return;
     };
-    if active_run_matches_design(&app.state) {
+    if active_run_matches_design(&app.state.model) {
         section_header(ui, "Operating point", None);
     } else {
         section_header_explained(
@@ -1424,7 +1435,7 @@ pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Compone
     let findings = current_findings(&app.state.model, |violation| {
         violation_targets_component(violation, component)
     });
-    let soa = retained_component_soa(&app.state, &component.name);
+    let soa = retained_component_soa(&app.state.model, &component.name);
     if findings.is_empty() && soa.is_none() {
         return;
     }
@@ -1473,12 +1484,12 @@ pub(super) fn violation_targets_component(violation: &DrcViolation, component: &
 /// instance. A retained run from another project revision is deliberately
 /// ignored; showing its margin beside a changed schematic would be unsafe.
 pub(super) fn retained_component_soa(
-    state: &AppState,
+    model: &Model,
     component_name: &str,
 ) -> Option<ComponentSoaDisplay> {
-    let run = state.model.simulation.active_run()?;
+    let run = model.simulation.active_run()?;
     let receipt = run.prepared_receipt()?;
-    if receipt.project_revision() != state.model.workspace.content.project.revision() {
+    if receipt.project_revision() != model.workspace.content.project.revision() {
         return None;
     }
 

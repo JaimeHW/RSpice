@@ -84,7 +84,12 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
         ],
         "",
     );
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &component,
+        &HashMap::new(),
+    );
     let row = |key: &str| {
         rows.iter()
             .find(|row| row.key == key)
@@ -102,7 +107,7 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     );
     assert_eq!(row("vmax").hint, "computed");
 
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state.model, &component);
     let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
     assert!(
         painted.lines().any(|line| line == "S") && painted.lines().any(|line| line == "V"),
@@ -120,7 +125,12 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     );
 
     let capacitor = Component::new(9, ComponentType::Capacitor, Point::origin());
-    let rows = inline_parameter_contract(&app.state, &capacitor, &HashMap::new());
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &capacitor,
+        &HashMap::new(),
+    );
     let tc1 = rows
         .iter()
         .find(|row| row.key == "tc1")
@@ -172,7 +182,12 @@ fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
     declaration.array_length = Some(2);
     declaration.authored_default = Some("'{1k, 2}".to_owned());
     let (mut app, component) = app_with_compiled_veriloga_instance(&[breakpoints], "");
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &component,
+        &HashMap::new(),
+    );
     let row = rows.iter().find(|row| row.key == "pa").expect("a pa row");
     assert_eq!(row.hint, "'{1k, 2}");
 
@@ -189,7 +204,7 @@ fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
 
     assert!(begin_edit(&mut app, component.id, field.clone()));
     update_edit(&mut app, "[1 2 3]".to_owned());
-    let evidence = super::super::component_model_evidence(&app.state, &edited);
+    let evidence = super::super::component_model_evidence(&app.state.model, &edited);
     let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &edited, &evidence));
     let error = "pa takes 2 values; this has 3";
     assert!(
@@ -226,7 +241,7 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
         &[model_scoped, module_parameter("w", Some("1"), None, None)],
         "r=2k w=3",
     );
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state.model, &component);
     let painted = |app: &mut RSpiceApp, component: &Component| {
         painted_panel(|ui| parameters_section(ui, app, component, &evidence))
     };
@@ -251,7 +266,7 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
     library.add_model(card("other", "MIXER"));
     app.state.model.model_library_manager.add_library(library);
     assert_eq!(
-        model_cards_of_module(&app.state, "amp"),
+        model_cards_of_module(&app.state.model, "amp"),
         ["fastamp", "slowamp"]
     );
     assert!(
@@ -273,7 +288,8 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
         Some("fastamp")
     );
     let rows = inline_parameter_contract(
-        &app.state,
+        &app.state.design,
+        &app.state.model,
         &bound,
         &crate::state::parse_params_string(&bound.params),
     );
@@ -331,7 +347,12 @@ fn m_on_a_module_instance_is_its_typed_multiplicity() {
         &[module_parameter("gain", Some("2.5"), None, None)],
         "",
     );
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &component,
+        &HashMap::new(),
+    );
     assert!(rows.iter().any(|row| row.key == "m"), "{rows:?}");
 
     let field = InlineEditField::Parameter("m".to_owned());
@@ -363,8 +384,13 @@ fn temp_is_offered_on_a_module_instance_only_as_a_declared_parameter() {
         &[module_parameter("gain", Some("2.5"), None, None)],
         "",
     );
-    assert!(!supports_instance_temperature(&app.state, &component));
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    assert!(!supports_instance_temperature(&app.state.model, &component));
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &component,
+        &HashMap::new(),
+    );
     assert!(
         rows.iter().all(|row| row.key != TEMPERATURE_PARAM),
         "{rows:?}"
@@ -377,8 +403,13 @@ fn temp_is_offered_on_a_module_instance_only_as_a_declared_parameter() {
         ],
         "",
     );
-    assert!(!supports_instance_temperature(&app.state, &component));
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    assert!(!supports_instance_temperature(&app.state.model, &component));
+    let rows = inline_parameter_contract(
+        &app.state.design,
+        &app.state.model,
+        &component,
+        &HashMap::new(),
+    );
     let temp = rows
         .iter()
         .find(|row| row.key == TEMPERATURE_PARAM)
@@ -387,7 +418,7 @@ fn temp_is_offered_on_a_module_instance_only_as_a_declared_parameter() {
 
     // A native device still takes the instance temperature.
     let resistor = Component::new(9, ComponentType::Resistor, Point::origin());
-    assert!(supports_instance_temperature(&app.state, &resistor));
+    assert!(supports_instance_temperature(&app.state.model, &resistor));
 }
 
 /// A value for a parameter the module no longer declares is shown, flagged,
@@ -401,7 +432,8 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
         "gain=3 offset=1m",
     );
     let declared = crate::state::parse_params_string(&component.params);
-    let rows = inline_parameter_contract(&app.state, &component, &declared);
+    let rows =
+        inline_parameter_contract(&app.state.design, &app.state.model, &component, &declared);
     let offset = rows
         .iter()
         .find(|row| row.key == "offset")
@@ -413,7 +445,7 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
             .all(|row| !row.undeclared)
     );
 
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state.model, &component);
     let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
     assert!(
         painted.contains(UNDECLARED_PARAMETER_NOTE)
@@ -495,7 +527,7 @@ fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
 fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     let (mut app, component) = app_with_owned_veriloga_instance();
 
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state.model, &component);
     assert_eq!(evidence.model.as_deref(), Some("amp"));
     assert_eq!(evidence.problem, None, "a current compile says nothing");
 
@@ -548,7 +580,7 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
             "module amp(p, n);\nendmodule\n".to_owned(),
         )
         .expect("the edit applies");
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state.model, &component);
     assert_eq!(
         evidence.problem.as_ref().map(|(problem, _)| *problem),
         Some(Problem::Warning)

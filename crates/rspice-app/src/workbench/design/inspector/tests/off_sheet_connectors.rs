@@ -50,11 +50,11 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         ));
 
     // A plain label declares no crossing, so the panel stays as it was.
-    assert!(off_sheet_declaration(&state, "LOCAL").is_none());
-    assert!(off_sheet_declaration(&state, "never_drawn").is_none());
+    assert!(off_sheet_declaration(&state.model, "LOCAL").is_none());
+    assert!(off_sheet_declaration(&state.model, "never_drawn").is_none());
 
     // Before any sheet catalog exists the crossing has nowhere to land.
-    let lone = off_sheet_declaration(&state, "BIAS").expect("a connector declares itself");
+    let lone = off_sheet_declaration(&state.model, "BIAS").expect("a connector declares itself");
     assert_eq!(lone.direction, "input, output");
     assert_eq!(lone.partners, "none \u{2014} no partner on another sheet");
 
@@ -90,7 +90,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         .set_active(first)
         .expect("the first sheet is active");
 
-    let paired = off_sheet_declaration(&state, "BIAS").expect("a connector declares itself");
+    let paired = off_sheet_declaration(&state.model, "BIAS").expect("a connector declares itself");
     assert_eq!(paired.direction, "input, output");
     assert_eq!(paired.partners, "p2", "the partner's page, not its own");
 
@@ -105,7 +105,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         .set_active(second)
         .expect("the second sheet is active");
     assert_eq!(
-        off_sheet_declaration(&state, "BIAS")
+        off_sheet_declaration(&state.model, "BIAS")
             .expect("a connector declares itself")
             .partners,
         "p1"
@@ -144,7 +144,8 @@ fn the_net_inspector_folds_case_the_way_connectivity_does() {
                 .net_labels
                 .push(NetLabel::off_sheet(id, Point::new(x, 0), name, direction));
         }
-        let declared = off_sheet_declaration(&state, "Bias").expect("both connectors declare");
+        let declared =
+            off_sheet_declaration(&state.model, "Bias").expect("both connectors declare");
         assert_eq!(declared.direction, "input, output", "{policy:?}");
         assert_eq!(normalized_net_name("Out"), normalized_net_name("out"));
     }

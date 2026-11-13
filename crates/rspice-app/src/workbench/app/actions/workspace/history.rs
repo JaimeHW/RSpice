@@ -74,6 +74,7 @@ impl AppState {
     }
 
     /// [`inline_edit_authority`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
         inline_edit_authority(&self.model)
     }
