@@ -625,3 +625,78 @@ fn the_trial_under_the_pointer_is_highlighted_over_its_siblings() {
         "a pointer between trials highlights none: {plain}"
     );
 }
+
+/// The C6 buck converter's Monte Carlo transient as the strip draws it: its
+/// three trials of the output voltage and the inductor current, each signal
+/// one family; then the same with each family's envelope under its members;
+/// then twenty microseconds of the settled ripple with the pointer on one
+/// trial of the inductor current. Written under `RSPICE_PICTURES` when it is
+/// set.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_monte_carlo_family_picture() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c06-buck/deck/vdig.mc-tran.cir");
+    let source = std::fs::read_to_string(&path).expect("the corpus deck is readable");
+    let mut run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch_at(
+        &source,
+        &path,
+        crate::state::SimulationRunLifecycle::Completed,
+    );
+    for analysis in &mut run.analyses {
+        for waveform in &mut analysis.waveforms {
+            let name = waveform.name.to_ascii_lowercase();
+            waveform.visible = name == "vout" || name == "i(lbuck)";
+        }
+    }
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    let analysis = {
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        models[0].analysis_key
+    };
+    for (envelope, window, pointer, name) in [
+        (false, None, None, "monte-carlo-family"),
+        (true, None, None, "monte-carlo-envelope"),
+        (
+            true,
+            Some((400e-6, 420e-6)),
+            Some(egui::pos2(700.0, 570.0)),
+            "monte-carlo-highlight",
+        ),
+    ] {
+        state.results.results.session.show_family_envelope = envelope;
+        set_shared_x_view(&mut state.results.results.session, analysis, 2, window);
+        // The inductor current's pane reads the ripple, not the start-up.
+        state
+            .results
+            .results
+            .session
+            .analysis_plot_view_pane_mut(super::super::super::ResultViewer::Waves, analysis, 1)
+            .y = window.map(|_| (0.82, 0.98));
+        state.results.results.models.invalidate();
+        let pass = |ui: &mut egui::Ui, _: egui::Color32| {
+            well(ui);
+            show(ui, &mut state.results_parts());
+        };
+        let canvas = match pointer {
+            Some(pointer) => rspice_ui_kit::raster::render_with_pointer(FRAME, pointer, pass),
+            None => rspice_ui_kit::raster::render_themed(crate::ui::Theme::default(), FRAME, pass),
+        };
+        std::fs::write(
+            format!("{directory}/{name}.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    }
+}
