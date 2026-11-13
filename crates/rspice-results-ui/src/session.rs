@@ -293,6 +293,39 @@ pub enum PaneAxis {
     Y,
 }
 
+/// The family members the reader picked: brushed in the scatter sheet or
+/// clicked as a histogram bin. Every sheet that shows members reads and
+/// writes this one selection, so a trial picked in one is marked in the
+/// others.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemberSelection {
+    source: Option<AnalysisPresentationKey>,
+    rows: Vec<usize>,
+}
+
+impl MemberSelection {
+    /// The rows picked on `source`, in the population's trial order. A
+    /// selection made on another result is dropped rather than read as rows
+    /// of this one.
+    pub fn on(&mut self, source: AnalysisPresentationKey) -> &mut Vec<usize> {
+        if self.source != Some(source) {
+            self.source = Some(source);
+            self.rows.clear();
+        }
+        &mut self.rows
+    }
+
+    /// The rows picked on `source`, without taking the selection over.
+    #[must_use]
+    pub fn rows_on(&self, source: AnalysisPresentationKey) -> &[usize] {
+        if self.source == Some(source) {
+            &self.rows
+        } else {
+            &[]
+        }
+    }
+}
+
 /// Device-local result viewer state over explicit retained identities.
 #[derive(Debug, Clone, Default)]
 pub struct ResultViewerState {
@@ -341,8 +374,11 @@ pub struct ResultViewerState {
     pub smith: Box<crate::smith_chart::SmithSheetState>,
     /// Contribution sheet control: the frequency a swept study is read at.
     pub study: Box<crate::sensitivity::study::SensitivitySheetState>,
-    /// Scatter sheet controls and the brushed trial selection.
+    /// Scatter sheet controls.
     pub scatter: Box<crate::scatter::ScatterSheetState>,
+    /// The family members the reader picked, in any sheet that shows them.
+    /// Boxed: the results slot is built by value and has a stack budget.
+    pub members: Box<MemberSelection>,
     /// Box/violin sheet controls: the grouping, the margin scale, the body
     /// and the whisker rule.
     pub box_violin: Box<crate::box_violin::BoxViolinSheetState>,

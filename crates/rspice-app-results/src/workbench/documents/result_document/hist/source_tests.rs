@@ -477,3 +477,63 @@ fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
         assert!(!text.contains(gone), "still painted {gone}: {text}");
     }
 }
+
+/// One selection serves the histogram and the scatter sheet. Trials the
+/// scatter brushed are drawn over the bars they fall in, and a bin picked in
+/// the histogram becomes the scatter's selected trials; a selection made on
+/// another result never marks this one.
+#[test]
+fn a_histogram_bin_and_a_scatter_brush_share_one_member_selection() {
+    // Twenty trials, two at each of 0..9.
+    let samples: Vec<f64> = (0..20).map(|trial| f64::from(trial % 10)).collect();
+    let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
+        name: "V(out)".to_owned(),
+        samples: samples.clone(),
+        mean: 4.5,
+        std_dev: 2.946_898,
+        min: 0.0,
+        max: 9.0,
+    });
+    state.results.analysis.histogram_state.bin_count = 10;
+    let key = {
+        let simulation = &state.model.simulation;
+        super::super::AnalysisPresentationKey::new(
+            simulation.active_run().unwrap().dataset_id,
+            simulation.active_analysis().unwrap(),
+        )
+    };
+    assert!(paint(&mut state, false).contains("V(out)"));
+    assert!(!paint(&mut state, false).contains("picked"));
+
+    // Brushed in the scatter sheet: drawn over the histogram's bars.
+    *state.results.results.session.members.on(key) = vec![3, 13, 7];
+    assert!(paint(&mut state, false).contains("3 picked"));
+
+    // Picked in the histogram: the trials the bin counts, by its edge rule.
+    let histogram = active_histogram(state.results_reads()).unwrap();
+    let bin = histogram.bin_of(7.0).unwrap();
+    let rows = picked_rows(&samples, &histogram, view::HistogramPick::Bin(bin));
+    assert_eq!(rows, [7, 17]);
+    assert!(picked_rows(&samples, &histogram, view::HistogramPick::Clear).is_empty());
+    *state.results.results.session.members.on(key) = rows;
+    assert_eq!(state.results.results.session.members.rows_on(key), [7, 17]);
+    assert!(paint(&mut state, false).contains("2 picked"));
+
+    // Another result's selection is not this one's.
+    let other = super::super::AnalysisPresentationKey::new(
+        crate::product::DatasetId::new(),
+        state.model.simulation.active_analysis().unwrap(),
+    );
+    state.results.results.session.members.on(other).push(1);
+    assert!(
+        state
+            .results
+            .results
+            .session
+            .members
+            .rows_on(key)
+            .is_empty()
+    );
+    assert!(!paint(&mut state, false).contains("picked"));
+}

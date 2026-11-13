@@ -16,12 +16,18 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
 
 pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     let plan = population::plan(context);
+    let session = &mut context.results.session;
+    let mut scratch = Vec::new();
+    let members = plan
+        .as_deref()
+        .map_or(&mut scratch, |plan| session.members.on(plan.analysis()));
     if let Some(response) = view::show(
         ui,
         plan.as_deref().map(|plan| &**plan),
-        &mut context.results.session.scatter,
-        context.results.session.show_spec_limits,
-        &mut context.results.session.cache,
+        &mut session.scatter,
+        members,
+        session.show_spec_limits,
+        &mut session.cache,
     ) {
         super::record_drawn_axes(context.results, super::ResultViewer::Scatter, &response);
     }
@@ -29,10 +35,16 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
 
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     let plan = population::plan(context);
+    let session = &mut context.results.session;
+    let mut scratch = Vec::new();
+    let members = plan
+        .as_deref()
+        .map_or(&mut scratch, |plan| session.members.on(plan.analysis()));
     view::right_panel(
         ui,
         plan.as_deref().map(|plan| &**plan),
-        &mut context.results.session.scatter,
+        &mut session.scatter,
+        members,
     );
 }
 

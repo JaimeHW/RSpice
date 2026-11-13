@@ -180,14 +180,25 @@ impl Histogram {
             return;
         }
 
-        // Half-open bins, with the final upper edge included. Searching the
-        // actual edges also handles point populations and rounded tiny bins.
-        let bin_idx = self
-            .bins
-            .partition_point(|bin| bin.upper <= value)
-            .min(self.bins.len() - 1);
+        if let Some(bin_idx) = self.bin_of(value) {
+            self.bins[bin_idx].add(weight);
+        }
+    }
 
-        self.bins[bin_idx].add(weight);
+    /// The bin `value` counts in: half-open bins, with the final upper edge
+    /// included. `None` outside the range, where a sample is an underflow or
+    /// an overflow. Searching the actual edges also handles point
+    /// populations and rounded tiny bins.
+    #[must_use]
+    pub fn bin_of(&self, value: f64) -> Option<usize> {
+        let (hist_min, hist_max) = self.range();
+        (value.is_finite() && !self.bins.is_empty() && value >= hist_min && value <= hist_max).then(
+            || {
+                self.bins
+                    .partition_point(|bin| bin.upper <= value)
+                    .min(self.bins.len() - 1)
+            },
+        )
     }
 
     /// Add multiple samples

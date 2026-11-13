@@ -31,6 +31,8 @@ pub struct HistogramPlot<'a> {
     pub moments: Option<SampleMoments>,
     pub spec_limits: Option<(Option<f64>, Option<f64>)>,
     pub source: &'a SourceRevision,
+    /// The values of the members the reader picked, drawn over the bars.
+    pub selected: &'a [f64],
 }
 
 /// Retained method facts for the population selected by the host.
@@ -51,11 +53,21 @@ pub struct HistogramInspector<'a> {
     pub yield_result: Option<&'a YieldResult>,
 }
 
+/// What a click on the histogram asked of the member selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistogramPick {
+    /// Pick the members counted in this bin.
+    Bin(usize),
+    /// Pick no member.
+    Clear,
+}
+
 /// Plot outcomes applied by the host to its document view.
 #[derive(Default)]
 pub struct HistogramViewResponse {
     pub plot: Option<plot::PlotResponse>,
     pub fit_requested: bool,
+    pub picked: Option<HistogramPick>,
 }
 
 /// The share of the frame the single bar of a degenerate distribution covers.
@@ -208,6 +220,19 @@ pub fn show(
             on: true,
         });
     }
+    let selected_count = model
+        .selected
+        .iter()
+        .filter(|value| histogram.bin_of(**value).is_some())
+        .count();
+    let selected_name = format!("{selected_count} picked");
+    if selected_count > 0 {
+        legend.push(LegendChip {
+            name: &selected_name,
+            color: c.warn,
+            on: true,
+        });
+    }
     let header = strip::StripHeader::new("MC", &subtitle, &legend)
         .zoomed(view.is_zoomed())
         .show(ui);
@@ -316,6 +341,17 @@ pub fn show(
     let accent = c.accent;
     let accent_dim = c.accent_dim;
     let err = c.err;
+    let picked_fill = c.warn.gamma_multiply(0.55);
+    let picked_edge = c.warn;
+    // Each bin's share of the picked members, drawn as the matching part of
+    // its bar: in a count, a density or a percentage alike, the picked part
+    // stands in the bin's own ordinate scale.
+    let mut picked_per_bin = vec![0usize; bins.len()];
+    for value in model.selected {
+        if let Some(bin) = histogram.bin_of(*value) {
+            picked_per_bin[bin] += 1;
+        }
+    }
     cache.ensure_source(model.source);
     if let Some(cdf) = &display.cdf {
         spec.traces
@@ -396,6 +432,25 @@ pub fn show(
                 egui::StrokeKind::Inside,
             );
         }
+        for ((bin, &ordinate), &picked) in bins.iter().zip(ordinates).zip(&picked_per_bin) {
+            if picked == 0 || bin.count == 0 {
+                continue;
+            }
+            let share = ordinate * picked as f64 / bin.count as f64;
+            let left = mapper.x(bin.lower) + 1.0;
+            let right = (mapper.x(bin.upper) - 1.0).max(left + 1.0);
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(left, mapper.y(share)),
+                egui::pos2(right, mapper.y(0.0)),
+            );
+            painter.rect(
+                rect,
+                0.0,
+                picked_fill,
+                egui::Stroke::new(1.5, picked_edge),
+                egui::StrokeKind::Inside,
+            );
+        }
     }));
 
     let readout = |x: f64| -> Vec<(String, String)> {
@@ -414,6 +469,22 @@ pub fn show(
     };
 
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    // A click on a bar picks the members it counts; a click beside the
+    // bars, or Escape, picks none. A cumulative curve has no bars to pick.
+    if display.cdf.is_none() {
+        if let Some(x) = response.clicked_x {
+            out.picked = Some(
+                histogram
+                    .bin_of(x)
+                    .filter(|bin| histogram.bins[*bin].count > 0)
+                    .map_or(HistogramPick::Clear, HistogramPick::Bin),
+            );
+        } else if response.response.hovered()
+            && ui.input(|input| input.key_pressed(egui::Key::Escape))
+        {
+            out.picked = Some(HistogramPick::Clear);
+        }
+    }
     out.plot = Some(response);
     out
 }
@@ -729,5 +800,91 @@ mod tests {
         assert!((axis.x0 - 0.88).abs() < 1.0e-12, "{axis:?}");
         assert!((axis.x1 - 3.12).abs() < 1.0e-12, "{axis:?}");
         assert_eq!(binning_label(&histogram), "2 display bins");
+    }
+
+    /// A click on a bar picks the bin it stands in; a click beside the
+    /// bars picks no member; the picked members are counted in the legend.
+    #[test]
+    fn a_click_on_a_bar_picks_its_bin() {
+        use rspice_results::histogram::HistogramBuilder;
+        let samples: Vec<f64> = (0..40).map(|trial| f64::from(trial % 10)).collect();
+        let histogram = HistogramBuilder::new()
+            .name("V(out)")
+            .bin_count(10)
+            .range(-0.5, 9.5)
+            .build(&samples);
+        let display =
+            HistogramDisplay::new(&histogram, &samples, HistogramDisplayMode::Count).unwrap();
+        let source = SourceRevision::default();
+        let selected = [3.0, 3.0, 4.0];
+        let pick_at = |value: Option<f64>| {
+            let ctx = egui::Context::default();
+            rspice_ui_kit::Theme::default().apply(&ctx);
+            let mut cache = plot::DecimationCache::default();
+            let mut target = None;
+            let mut picked = None;
+            let mut text = String::new();
+            for frame in 0..4 {
+                let mut input = rspice_ui_kit::raster::display_input(egui::vec2(900.0, 500.0), 1.0);
+                if let (1 | 2, Some(at)) = (frame, target) {
+                    input.events = vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: frame == 1,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ];
+                }
+                let output = ctx.run_ui(input, |root| {
+                    egui::CentralPanel::default().show(root, |ui| {
+                        let out = show(
+                            ui,
+                            Ok(HistogramPlot {
+                                histogram: &histogram,
+                                display: Ok(&display),
+                                moments: None,
+                                spec_limits: None,
+                                source: &source,
+                                selected: &selected,
+                            }),
+                            PlotView::default(),
+                            &mut cache,
+                        );
+                        let plot = out.plot.expect("the histogram is drawn");
+                        if frame == 0 {
+                            let ((x0, x1), _) = plot.axes;
+                            let rect = plot.plot_rect;
+                            // An infinite value is the plot's right edge,
+                            // beside the last bar.
+                            target = value.map(|value| {
+                                let x = if value.is_finite() {
+                                    rect.left() + ((value - x0) / (x1 - x0)) as f32 * rect.width()
+                                } else {
+                                    rect.right() - 2.0
+                                };
+                                egui::pos2(x, rect.bottom() - 4.0)
+                            });
+                        }
+                        picked = picked.or(out.picked);
+                    });
+                });
+                if frame == 0 {
+                    for shape in &output.shapes {
+                        if let egui::Shape::Text(value) = &shape.shape {
+                            text.push_str(value.galley.text());
+                        }
+                    }
+                }
+            }
+            (picked, text)
+        };
+        let (picked, text) = pick_at(Some(7.0));
+        assert_eq!(picked, Some(HistogramPick::Bin(7)));
+        assert!(text.contains("3 picked"), "{text}");
+        let (beside, _) = pick_at(Some(f64::INFINITY));
+        assert_eq!(beside, Some(HistogramPick::Clear));
+        assert_eq!(pick_at(None).0, None);
     }
 }

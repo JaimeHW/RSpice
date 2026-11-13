@@ -18,6 +18,13 @@ pub(super) struct PopulationPlan {
     data: PopulationData,
 }
 
+impl PopulationPlan {
+    /// The analysis this population was resolved from.
+    pub(super) fn analysis(&self) -> AnalysisPresentationKey {
+        self.analysis
+    }
+}
+
 impl Deref for PopulationPlan {
     type Target = PopulationData;
     fn deref(&self) -> &Self::Target {

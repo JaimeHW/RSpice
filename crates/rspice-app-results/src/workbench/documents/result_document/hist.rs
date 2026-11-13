@@ -455,6 +455,54 @@ fn selected_histogram_name(state: ResultsReads<'_>) -> Option<String> {
     Some(names[index].to_owned())
 }
 
+/// The shown variable's samples, with the analysis they belong to, when
+/// each sample's position is its trial's row in the population the scatter
+/// sheet reads — so a bin picks the trials a brush would.
+///
+/// A run that dropped trials indexes its variables and its measured trials
+/// differently, retains no correspondence between them, and offers no link.
+fn member_samples(
+    state: ResultsReads<'_>,
+    name: &str,
+) -> Option<(super::AnalysisPresentationKey, Vec<f64>)> {
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+        &analysis.family_metadata
+    else {
+        return None;
+    };
+    let samples = variables
+        .iter()
+        .find(|variable| variable.name == name)?
+        .samples
+        .as_slice();
+    let population = rspice_results::population::build(
+        analysis,
+        rspice_results::population::PopulationRequirements::Retained(&[]),
+    )?;
+    (population.variables_paired && population.trial_count() == samples.len()).then(|| {
+        (
+            super::AnalysisPresentationKey::new(run.dataset_id, analysis),
+            samples.to_vec(),
+        )
+    })
+}
+
+/// The trial rows a pick in the histogram selects: the trials whose sample
+/// the picked bin counts, by the same edge rule that counted them.
+fn picked_rows(samples: &[f64], histogram: &Histogram, picked: view::HistogramPick) -> Vec<usize> {
+    match picked {
+        view::HistogramPick::Bin(bin) => samples
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| histogram.bin_of(**value) == Some(bin))
+            .map(|(row, _)| row)
+            .collect(),
+        view::HistogramPick::Clear => Vec::new(),
+    }
+}
+
 /// Render controls, resolve the current population, and apply local plot outcomes.
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let names: Vec<String> = histogram_names(state.results_reads())
@@ -467,8 +515,26 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
-    let plan = selected_histogram_name(state.results_reads())
-        .map(|name| hist_plan(state.results_reads(), &name));
+    let name = selected_histogram_name(state.results_reads());
+    let plan = name
+        .as_deref()
+        .map(|name| hist_plan(state.results_reads(), name));
+    let members = name
+        .as_deref()
+        .and_then(|name| member_samples(state.results_reads(), name));
+    let selected: Vec<f64> = members
+        .as_ref()
+        .map(|(key, samples)| {
+            state
+                .results
+                .session
+                .members
+                .rows_on(*key)
+                .iter()
+                .filter_map(|row| samples.get(*row).copied())
+                .collect()
+        })
+        .unwrap_or_default();
     let model = match &plan {
         None => Err(HistogramUnavailable::NoSelection {
             has_measurements: !names.is_empty(),
@@ -492,6 +558,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 )
                 .map(|result| (result.spec.min, result.spec.max)),
                 source: &plan.display_source,
+                selected: &selected,
             }),
     };
     let plot_view = state
@@ -499,6 +566,13 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .session
         .plot_view(super::ResultViewer::Hist, 0);
     let out = view::show(ui, model, plot_view, &mut state.results.session.cache);
+    if let (Some(picked), Some((key, samples)), Some(histogram)) = (
+        out.picked,
+        members,
+        plan.as_ref().and_then(|plan| plan.histogram.as_deref()),
+    ) {
+        *state.results.session.members.on(key) = picked_rows(&samples, histogram, picked);
+    }
     if out.fit_requested {
         state
             .results

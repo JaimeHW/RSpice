@@ -37,8 +37,6 @@ pub struct ScatterSheetState {
     pub y: Option<String>,
     pub color_by_status: bool,
     pub fit: bool,
-    /// Retained trial rows inside the brush, in trial order.
-    pub selection: Vec<usize>,
     /// The brush rectangle in data space: x0, y0, x1, y1.
     pub brush: Option<[f64; 4]>,
 }
@@ -50,7 +48,6 @@ impl Default for ScatterSheetState {
             y: None,
             color_by_status: true,
             fit: true,
-            selection: Vec::new(),
             brush: None,
         }
     }
@@ -178,7 +175,7 @@ pub fn domain_bar(
         150.0,
     ) {
         state.x = x_options.get(picked).cloned();
-        clear_selection(state);
+        state.brush = None;
     }
     if let Some(picked) = select(
         ui,
@@ -189,7 +186,7 @@ pub fn domain_bar(
         150.0,
     ) {
         state.y = y_options.get(picked).cloned();
-        clear_selection(state);
+        state.brush = None;
     }
 
     let mut colour = usize::from(!state.color_by_status);
@@ -233,7 +230,7 @@ pub fn domain_bar(
         if scatter.y.is_none() {
             scatter.y = Some(names[pair.x].clone());
         }
-        clear_selection(state);
+        state.brush = None;
     }
 
     let t = Tokens::get(ui.ctx());
@@ -260,8 +257,8 @@ pub fn domain_bar(
     true
 }
 
-fn clear_selection(state: &mut ScatterSheetState) {
-    state.selection.clear();
+fn clear_selection(state: &mut ScatterSheetState, members: &mut Vec<usize>) {
+    members.clear();
     state.brush = None;
 }
 
@@ -274,6 +271,7 @@ pub fn show(
     ui: &mut Ui,
     population: Option<&PopulationData>,
     state: &mut ScatterSheetState,
+    members: &mut Vec<usize>,
     show_limits: bool,
     cache: &mut plot::DecimationCache,
 ) -> Option<plot::PlotResponse> {
@@ -310,7 +308,7 @@ pub fn show(
         .iter()
         .filter(|(row, _, _)| plan.status.get(*row) == Some(&TrialStatus::Failing))
         .count();
-    let subtitle = if sheet.selection.is_empty() {
+    let subtitle = if members.is_empty() {
         format!(
             "{} vs {} \u{b7} {} trials \u{b7} {failing} failing",
             y_column.name,
@@ -322,7 +320,7 @@ pub fn show(
             "{} vs {} \u{b7} {} trials selected \u{b7} Esc clears",
             y_column.name,
             x_column.name,
-            sheet.selection.len()
+            members.len()
         )
     };
     let mut legend = vec![LegendChip {
@@ -378,7 +376,7 @@ pub fn show(
         .fit
         .then(|| population::least_squares(&xs, &ys))
         .flatten();
-    let selected = sheet.selection.clone();
+    let selected = members.clone();
     let painted = PaintedCloud {
         points: points.clone(),
         status: plan.status.clone(),
@@ -406,7 +404,7 @@ pub fn show(
     plot::set_interaction_mode(ui.ctx(), InteractionMode::Select);
     let response = plot::show(ui, &spec, cache, None, None);
 
-    apply_input(ui, state, &points, &response, ((x0, x1), (y0, y1)));
+    apply_input(ui, state, members, &points, &response, ((x0, x1), (y0, y1)));
     paint_hover_card(ui, plan, &points, &response, ((x0, x1), (y0, y1)));
     Some(response)
 }
@@ -638,6 +636,7 @@ fn nearest_point(
 fn apply_input(
     ui: &Ui,
     state: &mut ScatterSheetState,
+    members: &mut Vec<usize>,
     points: &[(usize, f64, f64)],
     response: &plot::PlotResponse,
     ranges: ((f64, f64), (f64, f64)),
@@ -674,7 +673,7 @@ fn apply_input(
                 if selection.is_empty() {
                     state.brush = None;
                 }
-                state.selection = selection;
+                *members = selection;
             }
         }
         return;
@@ -684,12 +683,12 @@ fn apply_input(
         && let Some(at) = response.response.interact_pointer_pos()
     {
         state.brush = None;
-        state.selection = nearest_point(response, points, ranges, at)
+        *members = nearest_point(response, points, ranges, at)
             .map(|row| vec![row])
             .unwrap_or_default();
     }
     if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-        clear_selection(state);
+        clear_selection(state, members);
     }
 }
 
@@ -747,6 +746,7 @@ pub fn right_panel(
     ui: &mut Ui,
     population: Option<&PopulationData>,
     state: &mut ScatterSheetState,
+    members: &mut Vec<usize>,
 ) {
     section_header(ui, "Correlation", None);
     let Some(plan) = population else {
@@ -771,7 +771,7 @@ pub fn right_panel(
     let rows = register_rows(plan, &points, x_column, y_column);
     crate::presentation::stat_table(ui, &rows);
 
-    let selection = state.selection.clone();
+    let selection = members.clone();
     if selection.is_empty() {
         return;
     }
@@ -809,8 +809,8 @@ pub fn right_panel(
     if selection.len() > listed {
         crate::presentation::panel_note(ui, &format!("+{} more", selection.len() - listed));
     }
-    if ui.button("Clear brush").clicked() {
-        clear_selection(state);
+    if ui.button("Clear selection").clicked() {
+        clear_selection(state, members);
     }
 }
 
