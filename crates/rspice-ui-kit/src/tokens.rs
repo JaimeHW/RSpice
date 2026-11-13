@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use egui::{Context, Id};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::palette::{self, Palette};
 
@@ -49,33 +49,13 @@ pub const FS_4: f32 = 16.0;
 // ============================================================================
 
 /// Design direction: one coherent visual identity for the whole application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Direction {
     /// "Instrument" — bench-instrument heritage: cool neutral grays, a single
     /// amber accent, mono-forward numerics, 3 px radii, accent line
     /// on the *top* edge of the active tab.
     #[default]
     Instrument,
-}
-
-impl<'de> Deserialize<'de> for Direction {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        enum PersistedDirection {
-            Instrument,
-            Meridian,
-            Graphite,
-        }
-
-        // Meridian and Graphite were emitted by the retired placeholder
-        // shell. Reading them is a migration operation, not a supported
-        // visual mode: every restored session uses the mockup-owned palette.
-        let _legacy_value = PersistedDirection::deserialize(deserializer)?;
-        Ok(Self::Instrument)
-    }
 }
 
 impl Direction {
@@ -349,13 +329,13 @@ mod tests {
     }
 
     #[test]
-    fn retired_placeholder_directions_deserialize_into_instrument() {
-        for persisted in ["Instrument", "Meridian", "Graphite"] {
-            let encoded = format!("\"{persisted}\"");
-            let restored: Direction =
-                serde_json::from_str(&encoded).expect("known persisted direction migrates");
-            assert_eq!(restored, Direction::Instrument);
+    fn only_the_instrument_direction_deserializes() {
+        assert_eq!(
+            serde_json::from_str::<Direction>("\"Instrument\"").unwrap(),
+            Direction::Instrument
+        );
+        for retired in ["Meridian", "Graphite", "invented"] {
+            assert!(serde_json::from_str::<Direction>(&format!("\"{retired}\"")).is_err());
         }
-        assert!(serde_json::from_str::<Direction>("\"invented\"").is_err());
     }
 }

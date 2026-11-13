@@ -140,18 +140,11 @@ impl EngineeringCanvasTheme {
             Self::Light => INSTRUMENT_LIGHT,
         }
     }
-
-    const fn migrate_from_interface_mode(mode: Mode) -> Self {
-        match mode {
-            Mode::Light => Self::Light,
-            Mode::Dark | Mode::System | Mode::HighContrast => Self::Dark,
-        }
-    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Theme {
-    /// Versioned visual identity. Retired placeholder-shell values migrate to Instrument.
+    /// Visual identity.
     pub direction: Direction,
     /// Dark or light surfaces.
     pub mode: Mode,
@@ -160,19 +153,13 @@ pub struct Theme {
     /// Tell traces apart by dash and marker as well as by hue (≈8 % of male
     /// engineers cannot separate red from green). Off by default: a curve is
     /// a solid line in its palette hue, as in every waveform viewer, and
-    /// symbols and dashes are a style the reader opts into.
-    ///
-    /// Stored as `color_safe_traces`. The key `colorblind_traces` was written
-    /// while this was on by default, so a stored `true` there records the old
-    /// default rather than a choice, and it is not read.
-    #[serde(rename = "color_safe_traces", default = "default_color_safe_traces")]
+    /// symbols and dashes are a style the reader opts into. Stored as
+    /// `color_safe_traces`.
+    #[serde(rename = "color_safe_traces")]
     pub colorblind_traces: bool,
     /// Symbol/grid separation on engineering canvases. `62` is the reviewed
     /// palette baseline used by the mockup.
-    #[serde(
-        default = "default_canvas_contrast",
-        deserialize_with = "deserialize_canvas_contrast"
-    )]
+    #[serde(deserialize_with = "deserialize_canvas_contrast")]
     pub canvas_contrast: u8,
     /// Independent reviewed palette for engineering document wells. This is
     /// deliberately separate from application chrome color mode.
@@ -192,56 +179,6 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(u8::deserialize(deserializer)?.min(100))
-}
-
-impl<'de> Deserialize<'de> for Theme {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Default)]
-        struct PresentCanvasTheme(Option<EngineeringCanvasTheme>);
-
-        impl<'de> Deserialize<'de> for PresentCanvasTheme {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                EngineeringCanvasTheme::deserialize(deserializer).map(|theme| Self(Some(theme)))
-            }
-        }
-
-        #[derive(Deserialize)]
-        struct PersistedTheme {
-            #[serde(default)]
-            direction: Direction,
-            #[serde(default)]
-            mode: Mode,
-            #[serde(default)]
-            density: Density,
-            #[serde(rename = "color_safe_traces", default = "default_color_safe_traces")]
-            colorblind_traces: bool,
-            #[serde(
-                default = "default_canvas_contrast",
-                deserialize_with = "deserialize_canvas_contrast"
-            )]
-            canvas_contrast: u8,
-            #[serde(default)]
-            canvas_theme: PresentCanvasTheme,
-        }
-
-        let persisted = PersistedTheme::deserialize(deserializer)?;
-        Ok(Self {
-            direction: persisted.direction,
-            mode: persisted.mode,
-            density: persisted.density,
-            colorblind_traces: persisted.colorblind_traces,
-            canvas_contrast: persisted.canvas_contrast,
-            canvas_theme: persisted.canvas_theme.0.unwrap_or_else(|| {
-                EngineeringCanvasTheme::migrate_from_interface_mode(persisted.mode)
-            }),
-        })
-    }
 }
 
 impl Default for Theme {
@@ -753,29 +690,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_and_out_of_range_canvas_contrast_are_normalized() {
-        let legacy = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","color_safe_traces":false}"#;
-        let restored: Theme = serde_json::from_str(legacy).expect("legacy theme deserializes");
-        assert_eq!(restored.canvas_contrast, 62);
-
-        let out_of_range = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","color_safe_traces":false,"canvas_contrast":255}"#;
+    fn out_of_range_canvas_contrast_is_clamped() {
+        let mut stored = serde_json::to_value(Theme::default()).expect("theme serializes");
+        stored["canvas_contrast"] = 255.into();
         let restored: Theme =
-            serde_json::from_str(out_of_range).expect("theme contrast is recoverable");
+            serde_json::from_value(stored).expect("theme contrast is recoverable");
         assert_eq!(restored.canvas_contrast, 100);
     }
 
     #[test]
-    fn legacy_theme_migrates_canvas_palette_from_its_interface_mode() {
-        let legacy_light = r#"{"direction":"Instrument","mode":"Light","density":"Compact"}"#;
-        let restored: Theme =
-            serde_json::from_str(legacy_light).expect("legacy light theme deserializes");
-        assert_eq!(restored.canvas_theme, EngineeringCanvasTheme::Light);
-
-        let legacy_dark = r#"{"direction":"Instrument","mode":"Dark","density":"Compact"}"#;
-        let restored: Theme =
-            serde_json::from_str(legacy_dark).expect("legacy dark theme deserializes");
-        assert_eq!(restored.canvas_theme, EngineeringCanvasTheme::Dark);
-
+    fn the_canvas_theme_round_trips_independently_of_the_interface_mode() {
         let independent = Theme {
             mode: Mode::Light,
             canvas_theme: EngineeringCanvasTheme::Dark,
@@ -786,22 +710,11 @@ mod tests {
         assert_eq!(restored.canvas_theme, EngineeringCanvasTheme::Dark);
     }
 
-    /// Traces are told apart by hue alone unless the reader asks for more. A
-    /// theme stored while color-safe traces were the default carries
-    /// `"colorblind_traces":true` without anyone having chosen it, so it comes
-    /// back off; a choice stored under the current key comes back as made.
+    /// Traces are told apart by hue alone unless the reader asks for more, and
+    /// the choice is stored under `color_safe_traces`.
     #[test]
-    fn color_safe_traces_are_off_unless_chosen_under_the_current_key() {
-        for stored in [
-            r#"{"direction":"Instrument","mode":"Dark","density":"Compact"}"#,
-            r#"{"direction":"Instrument","mode":"Dark","density":"Compact","colorblind_traces":true}"#,
-        ] {
-            let restored: Theme = serde_json::from_str(stored).expect("stored theme deserializes");
-            assert!(!restored.colorblind_traces, "{stored}");
-            assert!(!restored.tokens().color_safe_traces, "{stored}");
-        }
+    fn color_safe_traces_are_off_by_default_and_stored_under_their_key() {
         assert!(!Theme::default().colorblind_traces);
-
         let chosen = Theme {
             colorblind_traces: true,
             ..Theme::default()
