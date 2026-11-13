@@ -6170,13 +6170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rspice-veriloga-catalog-dump"
-version = "0.1.0"
-dependencies = [
- "rspice-core",
-]
-
-[[package]]
 name = "rspice-veriloga-model-angelov"
 version = "0.1.0"
 dependencies = [
@@ -6717,13 +6710,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-test",
  "web-time",
-]
-
-[[package]]
-name = "rspice-xspice-catalog-dump"
-version = "0.1.0"
-dependencies = [
- "rspice-core",
 ]
 
 [[package]]

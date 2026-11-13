@@ -38,7 +38,7 @@ jobs:
               --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state
               --exclude rspice-app-services --exclude rspice-app-runs --exclude rspice-app-workbench --exclude rspice-app-sheets --exclude rspice-app-settings --exclude rspice-app-results --exclude rspice-app-hardcopy --exclude rspice-app-cloud --exclude rspice-app-models --exclude rspice-app-simulate
               --exclude rspice-conformance
-              --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
+              --exclude 'rspice-veriloga-model*'
     env:
       CARGO_BUILD_JOBS: "2"
       # Coverage uses its coverage map, not DWARF. Bound link pressure and

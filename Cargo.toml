@@ -58,8 +58,6 @@ members = [
     "crates/rspice-veriloga",
     "tools/rspice-conformance",
     "tools/rspice-bench",
-    "tools/xspice-catalog-dump",
-    "tools/veriloga-catalog-dump",
 ]
 
 [workspace.package]

@@ -448,8 +448,7 @@ use faer.
 | [`rspice-viewer`](crates/rspice-viewer) | Figure runtime for published pages |
 
 **Tools** under `tools/`: `rspice-conformance` (reference-simulator corpus
-harnesses), `rspice-bench` (performance benchmarks), and the
-`xspice-catalog-dump` and `veriloga-catalog-dump` registry audits.
+harnesses) and `rspice-bench` (performance benchmarks).
 
 [models/](models/) holds the bundled SPICE and Verilog-A model sources,
 including the redistributable CMC packages; [tests/](tests/) holds the
