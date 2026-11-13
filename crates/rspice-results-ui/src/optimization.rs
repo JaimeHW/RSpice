@@ -1,6 +1,6 @@
 //! Optimization convergence plots and exact retained candidate presentation.
 
-use crate::presentation::{PlotView, stat_table};
+use crate::presentation::{PlotView, plain_readout, stat_table};
 use crate::strip::StripHeader;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -20,6 +20,8 @@ pub struct OptimizationPlot<'a> {
     pub selected: Option<usize>,
     pub plot_view: PlotView,
     pub cost_range: (f64, f64),
+    /// The reader's displayed significant digits.
+    pub significant_digits: usize,
 }
 
 /// Navigation and candidate requests to apply to the same bound source.
@@ -36,6 +38,36 @@ pub struct CandidateView<'a> {
     pub iterations: &'a [f64],
     pub best_cost: &'a f64,
     pub best_variables: &'a BTreeMap<String, f64>,
+    /// The reader's displayed significant digits.
+    pub significant_digits: usize,
+}
+
+/// A value at the reader's digits, in its own unit: an SI prefix where the
+/// unit takes one, and none on a decibel or a percentage, which `500 mdB`
+/// would misstate. Full precision belongs to copy and export.
+fn value_text(value: f64, unit: &str, digits: usize) -> String {
+    if unit.starts_with("dB") || unit == "%" {
+        plain_readout(value, unit, digits)
+    } else {
+        fmt_si_readout(value, unit, digits)
+    }
+}
+
+/// A difference, signed so the direction reads at a glance, in the notation
+/// every other value on the sheet uses.
+fn signed_readout(delta: f64, digits: usize) -> String {
+    let sign = if delta < 0.0 { "−" } else { "+" };
+    format!("{sign}{}", value_text(delta.abs(), "", digits))
+}
+
+/// An optimizer iteration: a count, never a measurement, so it prints whole
+/// rather than as `3.000000000e0`.
+fn iteration_text(iteration: f64, digits: usize) -> String {
+    if iteration.fract() == 0.0 && iteration.abs() < 1e15 {
+        format!("{}", iteration as i64)
+    } else {
+        value_text(iteration, "", digits)
+    }
 }
 
 fn nearest_candidate_index(iterations: &[f64], requested: f64) -> Option<usize> {
@@ -63,6 +95,7 @@ pub fn show(
         selected,
         plot_view,
         cost_range: (cost_min, cost_max),
+        significant_digits: digits,
     } = input;
     let mut requested = None;
     let outcome = if view.converged {
@@ -75,11 +108,11 @@ pub fn show(
     let header = StripHeader::new(
         "OPTIMIZATION",
         &format!(
-            "{} · {} iterations · {} · best cost {:.9e}",
+            "{} · {} iterations · {} · best cost {}",
             label,
             view.iterations.len(),
             outcome,
-            view.best_cost
+            value_text(view.best_cost, "", digits)
         ),
         &[],
     )
@@ -96,15 +129,14 @@ pub fn show(
                 (
                     format!("{}. {} ({:?})", index + 1, term.measurement, term.goal),
                     format!(
-                        "unit {}; value {:.9e}; target {}; scale {:.6e}; weight {:.6e}; cost {:.9e}",
-                        if term.unit.is_empty() { "native" } else { &term.unit },
-                        observation.value,
+                        "value {}; target {}; scale {}; weight {}; cost {}",
+                        value_text(observation.value, &term.unit, digits),
                         term.target
-                            .map(|value| format!("{value:.9e}"))
+                            .map(|value| value_text(value, &term.unit, digits))
                             .unwrap_or_else(|| "—".into()),
-                        term.scale,
-                        term.weight,
-                        observation.contribution
+                        value_text(term.scale, &term.unit, digits),
+                        value_text(term.weight, "", digits),
+                        value_text(observation.contribution, "", digits)
                     ),
                 )
             })
@@ -125,12 +157,32 @@ pub fn show(
             },
             None,
         );
-        let rows = view.best_constraints.iter().enumerate().map(|(index, observation)| {
-            let term = &observation.constraint;
-            (format!("{}. {}", index + 1, term.measurement), format!("unit {}; value {:.9e}; limits {} to {}; tolerance {:.6e}; scale {:.6e}; violation {:.9e}", if term.unit.is_empty() { "native" } else { &term.unit }, observation.value,
-                term.lower.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()),
-                term.upper.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()), term.tolerance, term.scale, observation.violation))
-        }).collect::<Vec<_>>();
+        let rows = view
+            .best_constraints
+            .iter()
+            .enumerate()
+            .map(|(index, observation)| {
+                let term = &observation.constraint;
+                let bound = |value: Option<f64>| {
+                    value.map_or_else(
+                        || "unbounded".to_owned(),
+                        |value| value_text(value, &term.unit, digits),
+                    )
+                };
+                (
+                    format!("{}. {}", index + 1, term.measurement),
+                    format!(
+                        "value {}; limits {} to {}; tolerance {}; scale {}; violation {}",
+                        value_text(observation.value, &term.unit, digits),
+                        bound(term.lower),
+                        bound(term.upper),
+                        value_text(term.tolerance, &term.unit, digits),
+                        value_text(term.scale, &term.unit, digits),
+                        value_text(observation.violation, "", digits)
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
         stat_table(
             ui,
             &rows
@@ -174,7 +226,7 @@ pub fn show(
         y: view.best_cost,
         // The best candidate is a fact, not a success: primary ink.
         color: Tokens::get(ui.ctx()).color.text,
-        label: format!("best {:.6e}", view.best_cost),
+        label: format!("best {}", value_text(view.best_cost, "", digits)),
         drop_line: true,
         label_dy: 0.0,
         shape: plot::MarkerShape::Point,
@@ -190,7 +242,7 @@ pub fn show(
             x: iteration,
             y: cost,
             color: Tokens::get(ui.ctx()).color.accent,
-            label: format!("selected {:.6e}", cost),
+            label: format!("selected {}", value_text(cost, "", digits)),
             drop_line: true,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
@@ -202,12 +254,15 @@ pub fn show(
                 ("candidate".to_owned(), index.to_string()),
                 (
                     "iteration".to_owned(),
-                    format!("{:.17e}", view.iterations[index]),
+                    iteration_text(view.iterations[index], digits),
                 ),
-                ("cost".to_owned(), format!("{:.17e}", view.cost.y[index])),
+                (
+                    "cost".to_owned(),
+                    value_text(view.cost.y[index], "", digits),
+                ),
                 (
                     "Δ best".to_owned(),
-                    format!("{:+.17e}", view.cost.y[index] - view.best_cost),
+                    signed_readout(view.cost.y[index] - view.best_cost, digits),
                 ),
             ]
         })
@@ -279,22 +334,22 @@ pub fn show(
                             if ui
                                 .selectable_label(
                                     is_selected,
-                                    RichText::new(format!("{iteration:.9e}")).monospace(),
+                                    RichText::new(iteration_text(iteration, digits)).monospace(),
                                 )
                                 .clicked()
                             {
                                 requested = Some(index);
                             }
                         });
-                        row.col(|ui| mono(ui, &format!("{:.17e}", view.cost.y[index])));
+                        row.col(|ui| mono(ui, &value_text(view.cost.y[index], "", digits)));
                         row.col(|ui| {
                             mono(
                                 ui,
-                                &format!("{:+.17e}", view.cost.y[index] - view.best_cost),
+                                &signed_readout(view.cost.y[index] - view.best_cost, digits),
                             )
                         });
                         for (_, waveform) in &visible_variables {
-                            row.col(|ui| mono(ui, &format!("{:.17e}", waveform.y[index])));
+                            row.col(|ui| mono(ui, &value_text(waveform.y[index], "", digits)));
                         }
                         row.col(|ui| {
                             if best_index == index {
@@ -330,6 +385,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         iterations,
         best_cost,
         best_variables,
+        significant_digits: digits,
     } = input;
     let cost = analysis
         .waveforms
@@ -342,12 +398,12 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
     // The iteration is an index, not a measurement: it printed as
     // "3.00000000000000000e0".
     let mut rows = vec![
-        ("Iteration", format!("{}", iterations[index] as i64), true),
+        ("Iteration", iteration_text(iterations[index], digits), true),
         (
             "Cost",
             cost.map_or_else(
                 || "unavailable".to_owned(),
-                |value| fmt_si_readout(value, "", 6),
+                |value| value_text(value, "", digits),
             ),
             true,
         ),
@@ -355,7 +411,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
             "Cost from best",
             cost.map_or_else(
                 || "unavailable".to_owned(),
-                |value| signed_readout(value - *best_cost),
+                |value| signed_readout(value - *best_cost, digits),
             ),
             true,
         ),
@@ -374,12 +430,12 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
             || "unavailable".to_owned(),
             |value| {
                 best_variables.get(name).map_or_else(
-                    || fmt_si_readout(value, "", 6),
+                    || value_text(value, "", digits),
                     |best| {
                         format!(
                             "{} · Δ {}",
-                            fmt_si_readout(value, "", 6),
-                            signed_readout(value - *best)
+                            value_text(value, "", digits),
+                            signed_readout(value - *best, digits)
                         )
                     },
                 )
@@ -400,13 +456,6 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         false,
     ));
     stat_table(ui, &rows);
-}
-
-/// A difference from the best candidate, signed so the direction reads at a
-/// glance and in the notation every other value on the panel uses.
-fn signed_readout(delta: f64) -> String {
-    let sign = if delta < 0.0 { "−" } else { "+" };
-    format!("{sign}{}", fmt_si_readout(delta.abs(), "", 6))
 }
 
 fn candidate_matches_best(

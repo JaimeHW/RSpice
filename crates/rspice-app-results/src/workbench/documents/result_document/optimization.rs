@@ -93,6 +93,7 @@ pub(super) fn active_metadata_is_valid(state: ResultsReads<'_>) -> bool {
 }
 
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let significant_digits = significant_digits(state.results_reads());
     let Some(run) = state.model.simulation.active_run() else {
         well_hint(ui, "Select a dataset with optimization results");
         return;
@@ -140,6 +141,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             history: view,
             plot_view,
             cost_range: (cost_min, cost_max),
+            significant_digits,
         },
         &mut state.results.session.cache,
     );
@@ -213,9 +215,21 @@ fn paint_selected_candidate(ui: &mut Ui, state: ResultsReads<'_>) -> bool {
             iterations,
             best_cost,
             best_variables,
+            significant_digits: significant_digits(state),
         },
     );
     true
+}
+
+/// The reader's displayed significant digits, for every number the sheet
+/// and its inspector state.
+fn significant_digits(state: ResultsReads<'_>) -> usize {
+    usize::from(
+        state
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    )
 }
 
 #[cfg(test)]
