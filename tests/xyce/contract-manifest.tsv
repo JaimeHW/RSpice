@@ -3241,7 +3241,7 @@ Netlists/PSEUDO/pseudo.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP102/idvg0_Id_T27.cir	executed	static_prn_dc
 Netlists/PSP102/idvg0_Id_T27_pmos.cir	executed	static_prn_dc
 Netlists/PSP102/invert_psp.cir	expected_unsupported	unsupported_xyce_contract
-Netlists/PSP102/psp102_outvars.cir	expected_unsupported	unsupported_xyce_reference
+Netlists/PSP102/psp102_outvars.cir	executed	static_prn_dc
 Netlists/PSP103/asym_nmos_idvdh_dt.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP103/asym_pmos_idvdh_dt.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP103/invert_psp.cir	expected_unsupported	unsupported_xyce_contract

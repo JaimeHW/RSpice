@@ -31,15 +31,6 @@ pub(super) const XYCE_DECK_DISPOSITIONS: &[XyceDeckDisposition] = &[
                  difference peaks at 1.4e-8, and its other columns match the reference",
     },
     XyceDeckDisposition {
-        deck: "Netlists/PSP102/psp102_outvars.cir",
-        contract: "unsupported_xyce_reference",
-        reason: "stored {N(X1:M1:GM)-{quotient}} column is 0 on all 221 rows though Xyce's own \
-                 columns differ by up to 2.6e-9; the quotient steps the gate 1e-8 V on a \
-                 3.2e-3 A current, so its 3.4e-14 A change is 1e-11 of the current, below any \
-                 Newton tolerance; RSpice's differs from Xyce's by 8e-16 A (2.4%) while its \
-                 analytic N(X1:M1:GM) matches",
-    },
-    XyceDeckDisposition {
         deck: "Netlists/Certification_Tests/BUG_277_SON/ring51_srcstep1.cir",
         contract: "unsupported_xyce_reference",
         reason: "the deck's TIMEINT RELTOL=1e-4 does not resolve its ring's edge times: \
