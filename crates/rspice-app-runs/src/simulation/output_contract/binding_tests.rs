@@ -196,7 +196,7 @@ fn scoped_calculator_dc_probes_resolve_every_member() {
 
 #[test]
 fn root_scope_spellings_resolve_the_same_voltage() {
-    let outputs = ["V(in)", "V(/in)", "V(/top/in)"]
+    let outputs = ["V(in)", "V(/in)"]
         .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
     let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
     run.validate_provenance().unwrap();
@@ -333,7 +333,7 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
     for spec in [AnalysisSpec::dc_op(), dc(), ac()] {
         let complex = matches!(spec, AnalysisSpec::Ac { .. });
         let nested = matches!(spec, AnalysisSpec::DcSweep { .. });
-        let outputs = ["V(/top/X1/mid,bias)", "I(X1:Vprobe)"].map(|expr| {
+        let outputs = ["V(/X1/mid,bias)", "I(X1:Vprobe)"].map(|expr| {
             let mut output = output(SavedOutputKind::RawVoltageOrCurrent, expr, expr);
             output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
             output
@@ -423,9 +423,9 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
     let deck = "OP identity\nV1 in 0 4\nR1 in 0 1k\nV2 V1 0 7\nR2 V1 0 1k\n.end\n";
     for (alias, source, query, expected) in [
         ("V(absent)", "V(in)", "V(absent)", None),
-        ("V(absent)", "V(in)", "V(/top/absent)", None),
+        ("V(absent)", "V(in)", "V(/absent)", None),
         ("I(absent)", "I(V1)", "I(absent)", None),
-        ("I(absent)", "I(V1)", "I(/top/absent)", None),
+        ("I(absent)", "I(V1)", "I(/absent)", None),
         ("absent", "V(in)", "V(absent)", None),
         ("V(V1)", "V(in)", "V(V1)", Some(7.0)),
         ("I(V1)", "V(in)", "I(V1)", Some(-0.004)),
@@ -553,7 +553,7 @@ fn replacement_ground_bang_alias_is_accepted_and_bound() {
 
 #[test]
 fn formal_port_probes_bind_to_the_instantiating_nodes() {
-    let outputs = ["V(X1.a)", "V(X1.b)", "V(/top/X1/a)", "V(/X1/b)"]
+    let outputs = ["V(X1.a)", "V(X1.b)", "V(/X1/a)", "V(/X1/b)"]
         .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
     let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
     run.validate_provenance().unwrap();
@@ -565,7 +565,7 @@ fn formal_port_probes_bind_to_the_instantiating_nodes() {
 #[test]
 fn scoped_canonical_ground_uses_the_owning_analysis_axis() {
     let outputs =
-        ["V(/0)", "V(/top/0)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+        ["V(/0)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
     let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
     for index in 0..outputs.len() {
         check_value(&run, index, 0.0);

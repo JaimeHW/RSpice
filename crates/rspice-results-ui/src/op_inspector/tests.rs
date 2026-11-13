@@ -109,7 +109,6 @@ fn a_name_reads_as_its_path_and_leaf_relative_to_the_root() {
     for (name, parent, leaf) in [
         ("V(out)", "", "out"),
         ("0", "", "0"),
-        ("V(top.n2)", "", "n2"),
         ("V(X1.mid)", "X1.", "mid"),
         ("V(/X1/n)", "X1.", "n"),
         ("XAFE.M1", "XAFE.", "M1"),

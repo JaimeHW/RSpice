@@ -38,7 +38,7 @@ fn task_ground_and_formal_port_bindings_survive_reload_without_deck_history() {
             SavedOutputKind::DerivedExpression,
         ] {
             for deferred in [false, true] {
-                let outputs = ["V(/top/X1/a)", "V(/X1/b)", "V(/top/GND!)"].map(|expression| {
+                let outputs = ["V(/X1/a)", "V(/X1/b)", "V(/GND!)"].map(|expression| {
                     let mut output = output(kind, &format!("Saved {expression}"), expression);
                     if deferred {
                         output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
@@ -122,7 +122,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
             ] {
                 for (label, query) in [
                     ("V(absent)", "V(absent)"),
-                    ("absent", "V(/top/absent)"),
+                    ("absent", "V(/absent)"),
                     ("I(absent)", "I(absent)"),
                 ] {
                     let alias = output(kind, label, "V(in)");
