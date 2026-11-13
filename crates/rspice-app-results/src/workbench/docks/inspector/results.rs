@@ -207,11 +207,18 @@ fn selected_result_trace(
         );
     }
 
+    // The swatch is the curve's colour as the strip drew it, through the one
+    // lookup the browser's rows read theirs by: the strip gives curves their
+    // palette places in the order they were plotted, not by column.
     let t = Tokens::get(ui.ctx());
-    let mut color = rspice_results_ui::presentation::trace_color(
-        &waveform_color,
-        t.color.traces[waveform_index % t.color.traces.len()],
-    );
+    let mut color =
+        crate::workbench::documents::result_document::browser_plot::plotted_signal_color(
+            crate::workbench::documents::result_document::browser_plot::last_strip_models(state),
+            &t.color.traces,
+            selected.analysis_key(),
+            waveform_index,
+            &waveform_color,
+        );
     if trace_colour_row(ui, &mut color) {
         set_selected_trace_color(&mut state.model.simulation, selected, color);
     }

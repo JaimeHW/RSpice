@@ -43,6 +43,37 @@ pub(crate) fn last_strip_models<'a>(
     state.results.models.last_built()
 }
 
+/// The colour the strip drew a waveform's curve in, so its browser row and the
+/// Inspector's swatch read in the curve's hue: the strip gives curves their
+/// palette places in the order they were plotted, not by column. Before the
+/// strip has drawn the analysis, the colour the waveform stores, or the
+/// palette place of its column.
+pub(crate) fn plotted_signal_color(
+    models: Option<&[rspice_results_ui::waves::StripModel]>,
+    palette: &[egui::Color32],
+    analysis: AnalysisPresentationKey,
+    waveform_index: usize,
+    stored: &str,
+) -> egui::Color32 {
+    models
+        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        .and_then(|model| {
+            model
+                .traces
+                .iter()
+                .find(|trace| !trace.overlay && trace.waveform_index == waveform_index)
+        })
+        .map_or_else(
+            || {
+                rspice_results_ui::presentation::trace_color(
+                    stored,
+                    palette[waveform_index % palette.len()],
+                )
+            },
+            |trace| trace.color,
+        )
+}
+
 /// Whether a row's tick is on. A waveform's tick is whether it is on the plot:
 /// there is no second record of it that the legend or the Inspector could
 /// disagree with.

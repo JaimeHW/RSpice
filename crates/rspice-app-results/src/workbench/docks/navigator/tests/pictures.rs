@@ -1,11 +1,12 @@
 //! Review pictures of the data browser beside the strip, on the C12 LDO
-//! testbench: the instance tree, a glob narrowing it, and the signal-set
-//! menu. Written only when `RSPICE_PICTURES` names a folder.
+//! testbench: the instance tree, a glob narrowing it, the signal-set menu,
+//! and the Inspector on a selected trace. Written only when `RSPICE_PICTURES`
+//! names a folder.
 
 use std::path::Path;
 
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
-use rspice_results_ui::selection::ResultBrowserSelectionKey;
+use rspice_results_ui::selection::{ResultBrowserSelectionKey, SelectedResultTrace};
 
 use crate::state::SimulationRun;
 use crate::workbench::documents::result_document::{
@@ -64,6 +65,8 @@ fn c12_run() -> SimulationRun {
 struct Review {
     host: ResultsTestHost,
     ctx: egui::Context,
+    /// Whether the Inspector is docked at the right.
+    inspector: bool,
 }
 
 impl Review {
@@ -75,7 +78,11 @@ impl Review {
         ctx.set_os(egui::os::OperatingSystem::Nix);
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        Self { host, ctx }
+        Self {
+            host,
+            ctx,
+            inspector: false,
+        }
     }
 
     fn analysis(&self) -> AnalysisPresentationKey {
@@ -84,7 +91,11 @@ impl Review {
     }
 
     fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
-        let Self { host, ctx } = self;
+        let Self {
+            host,
+            ctx,
+            inspector,
+        } = self;
         let mut input = rspice_ui_kit::raster::display_input(SIZE, 2.0);
         input.events = events;
         let mut run_details = None;
@@ -94,6 +105,17 @@ impl Review {
                 .show(ctx, |ui| {
                     results(ui, &mut host.results_parts(), &mut run_details);
                 });
+            if *inspector {
+                egui::Panel::right("inspector")
+                    .exact_size(300.0)
+                    .show(ctx, |ui| {
+                        crate::workbench::docks::inspector::results::results(
+                            ui,
+                            &mut host.results_parts(),
+                            &mut run_details,
+                        );
+                    });
+            }
             egui::CentralPanel::default().show(ctx, |ui| {
                 waves::show(ui, &mut host.results_parts());
             });
@@ -164,6 +186,7 @@ fn write_the_browser_pictures() {
     let mut run = c12_run();
     // The regulation loop on the plot: the output, the reference and the
     // feedback node inside the regulator.
+    let mut feedback = String::new();
     for analysis in &mut run.analyses {
         for waveform in &mut analysis.waveforms {
             let name = waveform.name.as_str();
@@ -171,6 +194,9 @@ fn write_the_browser_pictures() {
                 .strip_prefix("V(")
                 .and_then(|inner| inner.strip_suffix(')'))
                 .unwrap_or(name);
+            if bare == "xldo.FB" {
+                feedback = waveform.name.clone();
+            }
             waveform.visible = matches!(bare, "VOUT" | "xldo.VREF" | "xldo.FB");
         }
     }
@@ -191,6 +217,19 @@ fn write_the_browser_pictures() {
         set_result_browser_instance_expanded(&review.ctx, analysis, instance, true);
     }
     review.write(&directory, "browser-tree", vec![egui::Event::PointerGone]);
+
+    // The feedback node selected: the Inspector's swatch beside the strip
+    // that drew its curve.
+    review.host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(analysis, feedback));
+    review.inspector = true;
+    review.write(
+        &directory,
+        "inspector-swatch",
+        vec![egui::Event::PointerGone],
+    );
+    review.inspector = false;
+    review.host.results.results.session.selected_trace = None;
 
     review.host.workbench.set_navigator_filter("*.m[1-4]*");
     review.write(&directory, "browser-glob", vec![egui::Event::PointerGone]);

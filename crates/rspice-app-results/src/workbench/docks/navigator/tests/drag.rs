@@ -3,13 +3,14 @@
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
-use crate::workbench::documents::result_document::browser_plot::last_strip_models;
+use crate::workbench::documents::result_document::browser_plot::{
+    last_strip_models, plotted_signal_color,
+};
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultQuantityDrag, ResultsTestHost, set_result_quantity_ticked, waves,
 };
 
 use super::super::results::results;
-use super::super::results_rows::plotted_signal_color;
 use super::browser::{Node, find, hierarchical_run};
 
 const NAMES: [&str; 6] = [

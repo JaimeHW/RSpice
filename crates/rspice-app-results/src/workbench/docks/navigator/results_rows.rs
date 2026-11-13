@@ -32,7 +32,7 @@ use rspice_app_workbench::workbench::docks::navigator::muted;
 
 use crate::workbench::documents::result_document::ResultQuantityDrag;
 use crate::workbench::documents::result_document::browser_plot::{
-    BUS_ROW_PREFIX, EVENT_NET_ROW_PREFIX, drag_name, last_strip_models,
+    BUS_ROW_PREFIX, EVENT_NET_ROW_PREFIX, drag_name, last_strip_models, plotted_signal_color,
 };
 pub const EXPRESSION_HEADER_HEIGHT: f32 = 24.0;
 pub const SIGNAL_ROW_HEIGHT: f32 = 22.0;
@@ -1230,36 +1230,6 @@ pub(super) fn show_virtualized_result_signals(
         );
         results_browser_clear_filters(ui, state, kind, scope);
     }
-}
-
-/// The colour the strip drew a waveform's curve in, so its row reads in the
-/// curve's hue: the strip gives curves their palette places in the order they
-/// were plotted, not by column. Before the strip has drawn the analysis, the
-/// colour the waveform stores, or the palette place of its column.
-pub(super) fn plotted_signal_color(
-    models: Option<&[rspice_results_ui::waves::StripModel]>,
-    palette: &[egui::Color32],
-    analysis: AnalysisPresentationKey,
-    waveform_index: usize,
-    stored: &str,
-) -> egui::Color32 {
-    models
-        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
-        .and_then(|model| {
-            model
-                .traces
-                .iter()
-                .find(|trace| !trace.overlay && trace.waveform_index == waveform_index)
-        })
-        .map_or_else(
-            || {
-                rspice_results_ui::presentation::trace_color(
-                    stored,
-                    palette[waveform_index % palette.len()],
-                )
-            },
-            |trace| trace.color,
-        )
 }
 
 /// The hierarchical name an artifact row is placed in the tree by and

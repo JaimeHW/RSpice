@@ -84,3 +84,83 @@ fn result_trace_statistics_ignore_non_finite_samples() {
     assert_eq!(statistics.mean, 1.0);
     assert!(finite_trace_statistics(&[f64::NAN, f64::INFINITY]).is_none());
 }
+
+/// The Inspector's colour swatch for a selected trace is the colour the strip
+/// drew its curve in. The strip gives curves their palette places in the
+/// order they were plotted; the swatch took its column's place, so with the
+/// first column off the plot it showed V(c) in the third hue over a curve
+/// drawn in the second.
+#[test]
+fn the_colour_swatch_is_the_colour_the_strip_drew_the_curve_in() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::browser_plot::last_strip_models;
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, ResultsTestHost, waves,
+    };
+    use rspice_results_ui::selection::SelectedResultTrace;
+
+    let trace = |name: &str, visible: bool| {
+        let mut trace = RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "");
+        trace.visible = visible;
+        trace
+    };
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            trace("V(a)", false),
+            trace("V(b)", true),
+            trace("V(c)", true),
+        ]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(analysis, "V(c)"));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut swatch = None;
+    for _ in 0..2 {
+        let mut run_details = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::Panel::right("inspector")
+                    .exact_size(320.0)
+                    .show(ctx, |ui| {
+                        results(ui, &mut host.results_parts(), &mut run_details);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    waves::show(ui, &mut host.results_parts());
+                });
+            },
+        );
+        swatch = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Colour"))
+            .and_then(|(_, node)| node.value().map(str::to_owned));
+    }
+    let parts = host.results_parts();
+    let drawn = last_strip_models(&parts)
+        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        .and_then(|model| model.traces.iter().find(|trace| trace.waveform_index == 2))
+        .expect("the strip drew V(c)")
+        .color;
+    assert_eq!(
+        swatch.as_deref(),
+        Some(format!("#{:02X}{:02X}{:02X}", drawn.r(), drawn.g(), drawn.b()).as_str()),
+        "the swatch is not the curve's colour"
+    );
+    let column = crate::ui::tokens::Tokens::get(&ctx).color.traces[2];
+    assert_ne!(column, drawn, "the fixture tells the two apart");
+}
