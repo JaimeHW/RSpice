@@ -2282,7 +2282,7 @@ impl SchedulerContext<'_> {
     }
 }
 
-/// The kernel's conformance tests live in `tests/event_scheduler_kernel.rs`,
+/// The kernel's conformance tests live in `tests/xspice/event_scheduler_kernel.rs`,
 /// against the published API. These are here because they pin the three
 /// rounding rules of [`Instant`] against the crate-visible conversions they
 /// are implemented by, which no published API reaches.

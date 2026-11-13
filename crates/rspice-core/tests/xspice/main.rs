@@ -1,0 +1,31 @@
+//! XSPICE code models, the event scheduler and digital waveform files.
+
+mod event_scheduler_checkpoint;
+mod event_scheduler_kernel;
+mod sync_contract;
+mod vcd_round_trip;
+mod xspice_analog_models;
+mod xspice_complex_bindings;
+mod xspice_complex_functions;
+mod xspice_conformance;
+mod xspice_digital_models;
+mod xspice_instance_sampling;
+mod xspice_instance_values;
+mod xspice_native_bindings;
+mod xspice_nonnumeric_bindings;
+mod xspice_pole_descriptor;
+mod xspice_pspice_stim;
+mod xspice_quoted_context;
+mod xspice_real_boundary;
+mod xspice_reassignments;
+mod xspice_retained_siblings;
+mod xspice_scalar_dependencies;
+mod xspice_scoped_defaults;
+mod xspice_seegen_models;
+mod xspice_signed_expressions;
+mod xspice_static_precision;
+mod xspice_table_models;
+mod xspice_vector_aliases;
+mod xspice_vector_kinds;
+mod xspice_vector_literals;
+mod xspice_voltage_ports;

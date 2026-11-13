@@ -40,17 +40,17 @@
 //! | 3 | `EventScheduler::run_due_events`'s due-slot loop, plus `schedule_superseding_at` routing to the future tier |
 //! | 4 | `EventScheduler::open_due_slot` |
 //! | 5 | `xspice::models::digital_output`'s `input_transition_time` |
-//! | 6 | `tests/timestep_sequence.rs` (invariant **I1**) |
+//! | 6 | `tests/transient/timestep_sequence.rs` (invariant **I1**) |
 //!
 //! # Relationship to the neighbouring suites
 //!
-//! [`tests/event_scheduler_kernel.rs`] pins the kernel *in isolation*: the
+//! [`tests/xspice/event_scheduler_kernel.rs`] pins the kernel *in isolation*: the
 //! stratified regions, the total order, driver supersession, and cross-process
 //! determinism. This suite pins the kernel *as the analog engine drives it*.
 //! The two overlap deliberately at the ordering guarantee, because that is the
 //! one property both the kernel's own contract and D5 depend on.
 //!
-//! Clause 6 is pinned by [`tests/timestep_sequence.rs`], whose header states
+//! Clause 6 is pinned by [`tests/transient/timestep_sequence.rs`], whose header states
 //! it as invariant **I1** and whose `decks_stay_free_of_event_driven_content`
 //! keeps its decks pure analog. This suite adds the one variant it cannot
 //! express: that a pure-analog deck's accepted sequence is unchanged by event
@@ -886,7 +886,7 @@ c1 out 0 1p
 /// **D5 clause 6.** A deck with no event content takes an accepted-step
 /// sequence the event machinery cannot touch.
 ///
-/// [`tests/timestep_sequence.rs`] states this clause as invariant **I1** and
+/// [`tests/transient/timestep_sequence.rs`] states this clause as invariant **I1** and
 /// requires five pure-analog decks — source breakpoints, junction LTE,
 /// oscillatory order switching, a switch discontinuity, and Gear — to accept
 /// bit-identical `(time, step_size)` sequences run to run. Nothing here

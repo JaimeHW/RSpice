@@ -72,7 +72,7 @@ static MODEL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// The digital time base every mixed module runs on.
 ///
 /// `xspice::verilog`'s `TIME_UNIT_EXPONENT` is `-9`, and it is crate-private,
-/// so this suite re-states it the way `tests/sync_contract.rs` re-states the
+/// so this suite re-states it the way `tests/xspice/sync_contract.rs` re-states the
 /// XSPICE tick encoding. `the_tick_grid_is_one_nanosecond` fails if the two
 /// ever disagree about a time a mixed module actually produces.
 const TICK_EXPONENT: i8 = -9;
@@ -3506,7 +3506,7 @@ fn a_long_chain_of_crossings_accumulates_no_quantization_drift() {
 /// become an accepted analog timepoint bit-exactly, at every event of a long
 /// run.
 ///
-/// This is D5 clause 2 — `tests/sync_contract.rs` pins it on one awkward event
+/// This is D5 clause 2 — `tests/xspice/sync_contract.rs` pins it on one awkward event
 /// time, through the XSPICE path — exercised here over two hundred consecutive
 /// events of a mixed module instead. The chain is `next_hdl_activation` →
 /// `collect_transient_runtime_breakpoints` → `BreakpointManager::limit_step` →

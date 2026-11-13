@@ -2232,7 +2232,7 @@ mod tests {
         );
     }
 
-    /// **D5 clause 1**, the half `tests/sync_contract.rs` cannot reach.
+    /// **D5 clause 1**, the half `tests/xspice/sync_contract.rs` cannot reach.
     ///
     /// Conservative lockstep says the digital world executes only at analog
     /// timepoints the integrator accepts. Nothing in the event path enforces

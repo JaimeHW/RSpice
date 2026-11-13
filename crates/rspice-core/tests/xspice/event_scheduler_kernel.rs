@@ -1221,7 +1221,11 @@ fn scheduler_order_child_probe() {
 fn separate_processes_produce_identical_orderings() {
     let exe = env::current_exe().expect("test binary path");
     let output = Command::new(&exe)
-        .args(["--exact", "scheduler_order_child_probe", "--nocapture"])
+        .args([
+            "--exact",
+            "event_scheduler_kernel::scheduler_order_child_probe",
+            "--nocapture",
+        ])
         .env(CHILD_ENV, "1")
         .output()
         .expect("re-invoke the test binary");
