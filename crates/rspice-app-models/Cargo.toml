@@ -37,7 +37,6 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
-base64 = "0.23"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 # Native file dialogs
 rfd = { version = "0.17", features = ["file-handle-inner"] }
@@ -52,6 +51,7 @@ rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
+# Named by no test: it turns on the library fixtures (`LibraryManager::get_library_mut`).
 rspice-project = { workspace = true, features = ["library-test-fixtures"] }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]

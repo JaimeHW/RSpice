@@ -30,7 +30,6 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
-unicode-segmentation = "1.12"
 egui = { version = "0.35.0", default-features = false }
 time = { workspace = true }
 

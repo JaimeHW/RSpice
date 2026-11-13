@@ -73,6 +73,9 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 env_logger = "0.11"
 getrandom = { workspace = true }
 time = { workspace = true }
+# The local zone's offset, for times written on the reader's own clock.
+# `time` answers that only in a single-threaded process on Unix, and this one
+# never is; chrono reads the zone database itself. The browser asks `Date`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rspice-pack = { workspace = true }
 

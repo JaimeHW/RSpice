@@ -86,13 +86,10 @@ base64 = "0.23"
 
 # UUID for document identification
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
-unicode-normalization.workspace = true
-unicode-segmentation = "1.12"
 ropey.workspace = true
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = { version = "0.35.0", default-features = false }
-egui_extras = { version = "0.35.0", default-features = false }
 
 # Native file dialogs
 rfd = { version = "0.17", features = ["file-handle-inner"] }
@@ -117,15 +114,12 @@ rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
-csv.workspace = true
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
 zip.workspace = true
 ron = { version = "0.12.2", features = ["integer128"] }
 rustyhdf5 = { version = "1.93", default-features = false }
-parquet = { version = "60", default-features = false, features = ["arrow"] }
-wat = "1"
 # The notification centre's tests pin the local zone with `time`, and the
 # drawing-sheet preset tests sign a package with a fixed dalek key.
 time = { workspace = true }
@@ -139,12 +133,10 @@ rspice-pack = { workspace = true }
 lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rspice-output = { workspace = true, features = ["durable-file"] }
 # Native builds expose egui's semantic tree to platform assistive technology
 # through AccessKit. Keep this target-specific: eframe's browser backend does
 # not currently publish its AccessKit tree to the DOM.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
-rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
 
 # No RSpice source names `winit`; this edge exists only to turn on winit's
 # default features, which `eframe` above cannot reach: it is taken with
@@ -158,11 +150,6 @@ rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "
 winit = "0.30"
 
 env_logger = "0.11"
-
-# The local zone's offset, for times written on the reader's own clock.
-# `time` answers that only in a single-threaded process on Unix, and this one
-# never is; chrono reads the zone database itself. The browser asks `Date`.
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 # Default features keep the desktop solver's parallel paths. The native

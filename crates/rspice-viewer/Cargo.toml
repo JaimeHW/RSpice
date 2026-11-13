@@ -21,6 +21,7 @@ thiserror.workspace = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { version = "0.35.0", default-features = false, features = ["glow"] }
 wasm-bindgen = "0.2"
+# `#[wasm_bindgen] async fn hydrate_figure` expands to a wasm-bindgen-futures call.
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
 
