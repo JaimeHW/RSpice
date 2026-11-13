@@ -2,6 +2,7 @@
 
 mod configuration_inspector;
 mod configuration_page;
+mod library_changes;
 mod library_deletion;
 mod new_cell;
 mod new_view;

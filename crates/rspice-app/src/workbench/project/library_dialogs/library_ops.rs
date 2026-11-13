@@ -87,7 +87,7 @@ fn commit_new_library_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<String, 
 /// Rename the library the dialog names: how many instance references now
 /// name it, and what the rename left outside the model, or `None` when the
 /// name did not change.
-fn commit_rename_library_dialog(
+pub(crate) fn commit_rename_library_dialog(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<Option<(usize, WorkspacePruned)>, String> {
     if cx.model.library_manager.revision() != cx.state.rename_library_library_revision {
@@ -106,7 +106,9 @@ fn commit_rename_library_dialog(
 
 /// Take the library the review names out of the catalog, its revision not
 /// yet published.
-fn commit_delete_library_review(cx: &mut Cx<'_, ProjectFeature>) -> Result<LibraryRemoval, String> {
+pub(crate) fn commit_delete_library_review(
+    cx: &mut Cx<'_, ProjectFeature>,
+) -> Result<LibraryRemoval, String> {
     if cx.model.library_manager.revision() != cx.state.delete_library_library_revision {
         return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
     }

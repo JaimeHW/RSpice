@@ -2,12 +2,12 @@
 //! own context: what each opens over the feature's state and the model, and
 //! what each commits through the model's library catalog.
 
-mod cell_ops;
+pub(crate) mod cell_ops;
 pub(crate) mod deletion;
-mod library_ops;
+pub(crate) mod library_ops;
 pub(crate) mod new_cell;
 pub(crate) mod new_view;
-mod rename_view;
+pub(crate) mod rename_view;
 
 pub(super) use new_view::new_view_target;
 

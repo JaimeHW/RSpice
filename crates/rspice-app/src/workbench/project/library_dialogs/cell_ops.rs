@@ -278,7 +278,7 @@ fn create_cell_from_builtin_model(
 /// Rename the cell the dialog names: how many instance references now name
 /// it, and what the rename left outside the model, or `None` when the name
 /// did not change.
-fn commit_rename_cell_dialog(
+pub(crate) fn commit_rename_cell_dialog(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<Option<(usize, WorkspacePruned)>, String> {
     if cx.model.library_manager.revision() != cx.state.rename_cell_library_revision {
@@ -517,212 +517,140 @@ impl ProjectFeature {
 mod tests {
     use super::*;
     use crate::state::{Cell, Library};
-    use crate::workbench::project::library_dialogs::shown;
-    use crate::workbench::project::tests::with_cx;
-    use crate::workbench::{AppState, RSpiceApp};
+    use crate::workbench::project::test_host::harness;
 
     #[test]
     fn rename_cell_dialog_starts_with_the_exact_active_cell_identity() {
-        let mut state = AppState::default();
+        let mut harness = harness();
         let mut library = Library::new("work");
         library.add_cell(Cell::new("amplifier"));
-        state.model.library_manager.add_library(library);
+        harness.model.library_manager.add_library(library);
 
-        state
-            .project
-            .open_rename_cell_dialog(&state.model, "work", "amplifier")
+        harness
+            .state
+            .open_rename_cell_dialog(&harness.model, "work", "amplifier")
             .expect("default work/amplifier cell is writable");
 
-        assert!(state.project.rename_cell_dialog);
-        assert_eq!(state.project.rename_cell_library, "work");
-        assert_eq!(state.project.rename_cell_current, "amplifier");
-        assert_eq!(state.project.rename_cell_name, "amplifier");
-        assert!(state.project.rename_cell_error.is_none());
+        assert!(harness.state.rename_cell_dialog);
+        assert_eq!(harness.state.rename_cell_library, "work");
+        assert_eq!(harness.state.rename_cell_current, "amplifier");
+        assert_eq!(harness.state.rename_cell_name, "amplifier");
+        assert!(harness.state.rename_cell_error.is_none());
         assert_eq!(
-            state.project.rename_cell_library_revision,
-            state.model.library_manager.revision()
+            harness.state.rename_cell_library_revision,
+            harness.model.library_manager.revision()
         );
     }
 
     #[test]
     fn dialog_entry_points_reject_stale_targets_without_mutating_modal_state() {
-        let mut state = AppState::default();
+        let mut harness = harness();
         let mut library = Library::new("work");
         library.add_cell(Cell::new("amplifier"));
-        state.model.library_manager.add_library(library);
-        state.project.copy_cell_source_library = "sentinel".to_owned();
-        state.project.rename_cell_library = "sentinel".to_owned();
+        harness.model.library_manager.add_library(library);
+        harness.state.copy_cell_source_library = "sentinel".to_owned();
+        harness.state.rename_cell_library = "sentinel".to_owned();
 
         assert!(
-            state
-                .project
-                .open_copy_cell_dialog(&state.model, "missing", "amplifier")
+            harness
+                .state
+                .open_copy_cell_dialog(&harness.model, "missing", "amplifier")
                 .is_err()
         );
         assert!(
-            state
-                .project
-                .open_rename_cell_dialog(&state.model, "work", "missing")
+            harness
+                .state
+                .open_rename_cell_dialog(&harness.model, "work", "missing")
                 .is_err()
         );
 
-        assert!(!state.project.copy_cell_dialog);
-        assert!(!state.project.rename_cell_dialog);
-        assert_eq!(state.project.copy_cell_source_library, "sentinel");
-        assert_eq!(state.project.rename_cell_library, "sentinel");
+        assert!(!harness.state.copy_cell_dialog);
+        assert!(!harness.state.rename_cell_dialog);
+        assert_eq!(harness.state.copy_cell_source_library, "sentinel");
+        assert_eq!(harness.state.rename_cell_library, "sentinel");
     }
 
     #[test]
     fn rename_entry_point_rejects_read_only_library_without_mutation() {
-        let mut state = AppState::default();
+        let mut harness = harness();
         let mut work = Library::new("work");
         work.add_cell(Cell::new("amplifier"));
-        state.model.library_manager.add_library(work);
-        let library = state
+        harness.model.library_manager.add_library(work);
+        let library = harness
             .model
             .library_manager
             .get_library_mut("work")
             .expect("default work library exists");
         library.read_only = true;
 
-        let error = state
-            .project
-            .open_rename_cell_dialog(&state.model, "work", "amplifier")
+        let error = harness
+            .state
+            .open_rename_cell_dialog(&harness.model, "work", "amplifier")
             .expect_err("read-only libraries must fail closed");
 
         assert!(error.contains("read-only"));
-        assert!(!state.project.rename_cell_dialog);
-        assert!(state.project.rename_cell_library.is_empty());
+        assert!(!harness.state.rename_cell_dialog);
+        assert!(harness.state.rename_cell_library.is_empty());
     }
 
     #[test]
     fn copy_and_rename_dialog_commits_reject_intervening_catalog_change() {
-        let mut copy_app = RSpiceApp::test_instance();
-        copy_app.state = AppState::default();
+        let mut copy_harness = harness();
         let mut copy_library = Library::new("work");
         copy_library.add_cell(Cell::new("amplifier"));
-        copy_app
+        copy_harness.model.library_manager.add_library(copy_library);
+        copy_harness
             .state
-            .model
-            .library_manager
-            .add_library(copy_library);
-        copy_app
-            .state
-            .project
-            .open_copy_cell_dialog(&copy_app.state.model, "work", "amplifier")
+            .open_copy_cell_dialog(&copy_harness.model, "work", "amplifier")
             .expect("copy dialog opens");
         assert_eq!(
-            copy_app.state.project.copy_cell_library_revision,
-            copy_app.state.model.library_manager.revision()
+            copy_harness.state.copy_cell_library_revision,
+            copy_harness.model.library_manager.revision()
         );
-        copy_app
-            .state
+        copy_harness
             .model
             .library_manager
             .add_library(Library::new("intervening"));
 
-        let copy_error = with_cx(&mut copy_app, commit_copy_cell_dialog)
+        let copy_error = commit_copy_cell_dialog(&mut copy_harness.cx())
             .expect_err("stale copy must fail closed");
 
         assert_eq!(copy_error, LIBRARY_CATALOG_STALE_MESSAGE);
         assert!(
-            copy_app
-                .state
+            copy_harness
                 .model
                 .library_manager
                 .get_library("work")
                 .is_some_and(|library| library.get_cell("amplifier_copy").is_none())
         );
 
-        let mut rename_app = RSpiceApp::test_instance();
-        rename_app.state = AppState::default();
+        let mut rename_harness = harness();
         let mut rename_library = Library::new("work");
         rename_library.add_cell(Cell::new("amplifier"));
-        rename_app
-            .state
+        rename_harness
             .model
             .library_manager
             .add_library(rename_library);
-        rename_app
+        rename_harness
             .state
-            .project
-            .open_rename_cell_dialog(&rename_app.state.model, "work", "amplifier")
+            .open_rename_cell_dialog(&rename_harness.model, "work", "amplifier")
             .expect("rename dialog opens");
-        rename_app.state.project.rename_cell_name = "amplifier_v2".to_owned();
-        rename_app
-            .state
+        rename_harness.state.rename_cell_name = "amplifier_v2".to_owned();
+        rename_harness
             .model
             .library_manager
             .add_library(Library::new("intervening"));
 
-        let rename_error = with_cx(&mut rename_app, commit_rename_cell_dialog)
+        let rename_error = commit_rename_cell_dialog(&mut rename_harness.cx())
             .expect_err("stale rename must fail closed");
 
         assert_eq!(rename_error, LIBRARY_CATALOG_STALE_MESSAGE);
-        let library = rename_app
-            .state
+        let library = rename_harness
             .model
             .library_manager
             .get_library("work")
             .expect("source library remains");
         assert!(library.get_cell("amplifier").is_some());
         assert!(library.get_cell("amplifier_v2").is_none());
-    }
-
-    /// The reference design with its active cell's rename typed into the
-    /// dialog, and the active cell.
-    fn renaming_the_active_cell() -> (RSpiceApp, String, String) {
-        let mut app = RSpiceApp::test_instance();
-        app.state = crate::workbench::examples::hierarchy_reference::build().state;
-        let active = app.state.model.workspace.content.active_view.clone();
-        let (library, cell) = (active.library.clone(), active.cell.clone());
-        let state = &mut app.state;
-        state
-            .project
-            .open_rename_cell_dialog(&state.model, &library, &cell)
-            .expect("the active cell can be renamed");
-        state.project.rename_cell_name = format!("{cell}_v2");
-        (app, library, cell)
-    }
-
-    /// A rename carried out in the feature's context, with what it left
-    /// handed to the shell, ends where the rename carried out in place did:
-    /// what it left is carried out first, and only then is the rename
-    /// recorded.
-    #[test]
-    fn a_renamed_cell_states_what_the_rename_left_before_the_rename_itself() {
-        let (mut in_place, library, cell) = renaming_the_active_cell();
-        let name = format!("{cell}_v2");
-        let remapped = in_place
-            .state
-            .rename_cell(&library, &cell, &name)
-            .expect("the rename succeeds in place");
-        in_place.state.record(
-            LogSeverity::Info,
-            LogSource::Studio,
-            format!(
-                "Renamed cell '{cell}' to '{name}'; {remapped} instance references now name it."
-            ),
-        );
-
-        let (mut handed, _, _) = renaming_the_active_cell();
-        let (handed_remapped, pruned) = with_cx(&mut handed, commit_rename_cell_dialog)
-            .expect("the rename succeeds in the feature's context")
-            .expect("the name changed");
-        assert_eq!(handed_remapped, remapped);
-        handed
-            .state
-            .workbench
-            .outbox
-            .push(ProjectRequest::CatalogChanged {
-                pruned,
-                mutation: None,
-                notice: format!(
-                    "Renamed cell '{cell}' to '{name}'; {remapped} instance references now name it."
-                ),
-            });
-        handed.after_contribution();
-
-        assert_eq!(shown(&handed), shown(&in_place));
     }
 }

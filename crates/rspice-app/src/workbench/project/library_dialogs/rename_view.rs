@@ -58,7 +58,7 @@ impl ProjectState {
 /// Rename the view the dialog names: how many instance references now name
 /// it, and what the rename left outside the model, or `None` when the name
 /// did not change.
-fn commit_rename_view_dialog(
+pub(crate) fn commit_rename_view_dialog(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<Option<(usize, WorkspacePruned)>, String> {
     if cx.model.library_manager.revision() != cx.state.rename_view_library_revision {
