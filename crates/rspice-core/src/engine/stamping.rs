@@ -200,26 +200,6 @@ impl Engine {
         }
     }
 
-    /// Final transient nodal conditioning floor for the active dialect.
-    ///
-    /// Xyce removes its continuation shunt from the transient DAE. Native and
-    /// ngspice modes retain the configured numerical floor, including when
-    /// `.IC` supplies startup hints: hints initialize voltages but do not make
-    /// otherwise event-only or floating MNA rows nonsingular.
-    pub(in crate::engine) fn transient_nodal_gmin_floor(
-        &self,
-        circuit: &CircuitData,
-        startup_voltage_hints_active: bool,
-    ) -> Value {
-        if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce
-            || startup_voltage_hints_active
-        {
-            0.0
-        } else {
-            self.dc_nodal_gmin_floor(circuit)
-        }
-    }
-
     /// The event rows an assembly must pin: rows of pure event nets that no
     /// analog stamp reached. Every analysis shares this rule so that a DC,
     /// transient and small-signal assembly of the same circuit agree on which
@@ -558,24 +538,6 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::netlist::Netlist;
-
-    #[test]
-    fn transient_gmin_policy_preserves_dialect_and_startup_hint_contract() {
-        let circuit = CircuitData::new();
-        let mut engine = Engine::default();
-        let expected = engine.config.convergence_config.gmin_target;
-        assert!(expected > 0.0);
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), expected);
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
-
-        engine.config.spice_dialect = crate::engine::SpiceDialect::Ngspice;
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), expected);
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
-
-        engine.config.spice_dialect = crate::engine::SpiceDialect::Xyce;
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), 0.0);
-        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
-    }
 
     #[test]
     fn a_zero_nodal_floor_closes_a_pure_event_row_and_no_analog_one() {

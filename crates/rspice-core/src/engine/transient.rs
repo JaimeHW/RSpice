@@ -5394,19 +5394,22 @@ impl Engine {
         circuit
             .mosfets
             .set_native_xyce_transient_convergence(native_xyce_transient_convergence);
-        let startup_voltage_hints_active = resume.is_none()
-            && !self
-                .collect_node_voltage_hints(netlist, &circuit)
-                .constraints
-                .is_empty();
-        // Xyce applies its GMIN continuation only while solving the DC
-        // operating point.  It does not carry the final continuation shunt
-        // into the transient DAE; doing so changes even an ideal resistor's
-        // KCL by a low-bit amount and can materially alter hysteretic devices.
-        // Other dialects retain their numerical floor even when `.IC` supplies
-        // startup hints; hints do not regularize event-only or floating rows.
-        let transient_baseline_diag_gmin =
-            self.transient_nodal_gmin_floor(&circuit, startup_voltage_hints_active);
+        // The transient DAE carries no nodal floor. Xyce applies its GMIN
+        // continuation only while solving the DC operating point, and ngspice
+        // integrates at CKTdiagGmin = CKTgshunt, zero unless the deck sets
+        // RSHUNT: a 1e12/1e12 Ohm divider reads 0.5 V at every point of its
+        // transient. A floor changes even an ideal resistor's KCL by a
+        // low-bit amount and pulls every node only leakage holds. Outside the
+        // Xyce dialect each node the ground-path walk proves has no DC path
+        // takes GMIN alone instead, as the operating point holds it, whether
+        // this run solved that operating point, skipped it (UIC) or resumed
+        // past it: a node only a current reaches, with no capacitor either,
+        // has no equation without it. Pure event rows are pinned by the
+        // assembly itself.
+        if self.config.spice_dialect != SpiceDialect::Xyce {
+            Self::hold_every_node_without_dc_path(&mut circuit);
+        }
+        let transient_baseline_diag_gmin = 0.0;
         if circuit.has_nonlinear_devices() {
             self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
         }

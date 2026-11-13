@@ -753,7 +753,11 @@ fn physical_dispatch_collector_matches_analytic_delayed_exponential() {
 }
 
 #[test]
-fn physical_dispatch_native_nodal_floor_is_in_finite_event_current() {
+fn physical_dispatch_native_finite_event_current_carries_no_nodal_floor() {
+    // GMIN = 1 mS conditions the operating point's junctions, but no floor
+    // reaches the transient's source current: ngspice 46 gives -1.000e-3 A
+    // before the step and, after it, -2e-3 A as the mean of its trapezoidal
+    // ringing (-0.7523 A and +0.7483 A).
     let mut config = SimulationConfig::default();
     config.convergence_config.gmin_target = 1e-3;
     let (result, _) = run_with_configuration(
@@ -771,7 +775,7 @@ fn physical_dispatch_native_nodal_floor_is_in_finite_event_current() {
         .unwrap();
     for (&time, &current) in result.time.iter().zip(&result.branch_currents[source]) {
         // The 1 ns row is the step's left limit (ngspice 46).
-        let expected = if time <= 1e-9 { -0.002 } else { -0.004 };
+        let expected = if time <= 1e-9 { -0.001 } else { -0.002 };
         assert!(
             (current - expected).abs() < 1e-10,
             "native finite source current at {time:e}: {current:e}"

@@ -1154,16 +1154,52 @@ impl Engine {
         initial_guess: Option<&[Value]>,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        self.attempt_at_zero_dc_nodal_floor(circuit, matrix, abort, &mut |circuit, matrix| {
+            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort)
+        })
+    }
+
+    /// Run an operating-point solve without the nodal floor first, where the
+    /// DC operating point does ([`Self::tries_zero_dc_nodal_floor`]), and at
+    /// the floor when that fails: the transient's own operating point at
+    /// t = 0 follows the DC operating point's policy, as ngspice finds both
+    /// with the one CKTop at CKTdiagGmin = CKTgshunt.
+    pub(in crate::engine) fn solve_without_the_nodal_floor_first<T>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        abort: &dyn AbortSignal,
+        mut solve: impl FnMut(&mut CircuitData, &mut StaticMatrix) -> Result<T, SimulationError>,
+    ) -> Result<T, SimulationError> {
+        if self.tries_zero_dc_nodal_floor(circuit)
+            && let Some(solved) =
+                self.attempt_at_zero_dc_nodal_floor(circuit, matrix, abort, &mut solve)?
+        {
+            return Ok(solved);
+        }
+        solve(circuit, matrix)
+    }
+
+    /// `solve` without the nodal floor; `None` when it failed and the circuit
+    /// keeps the floor from then on. A singular system first holds each node
+    /// the ground-path walk proves has no DC path
+    /// ([`Self::hold_nodes_without_dc_path`]) and runs again.
+    fn attempt_at_zero_dc_nodal_floor<T>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        abort: &dyn AbortSignal,
+        solve: &mut impl FnMut(&mut CircuitData, &mut StaticMatrix) -> Result<T, SimulationError>,
+    ) -> Result<Option<T>, SimulationError> {
         let entry_private_nodes = circuit.compact_model_private_nodes.clone();
         let entry_settled_nodes = circuit.settled_compact_model_private_nodes.clone();
         loop {
             let entry_state = circuit.nonlinear_state_snapshot();
             circuit.zero_dc_nodal_floor = true;
-            let attempt =
-                self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort);
+            let attempt = solve(circuit, matrix);
             circuit.zero_dc_nodal_floor = false;
             let error = match attempt {
-                Ok(solution) => return Ok(Some(solution)),
+                Ok(solved) => return Ok(Some(solved)),
                 Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                 Err(_) if abort.is_aborted() => return Err(SimulationError::Aborted),
                 Err(error) => error,
@@ -1212,33 +1248,63 @@ impl Engine {
         {
             return false;
         }
+        let unconstrained: Vec<usize> = Self::nodes_proven_without_dc_path(circuit)
+            .into_iter()
+            .filter(|&row| matrix.row_is_deficient(row) || matrix.column_is_deficient(row))
+            .collect();
+        Self::hold_alone_through_gmin(circuit, unconstrained)
+    }
+
+    /// Hold through GMIN, alone, every node the DC ground-path walk proves
+    /// has no DC path, for a transient, which carries no floor: the same
+    /// nodes whether the run solved its operating point, skipped it (UIC) or
+    /// resumed past it, so a node only a current reaches still has an
+    /// equation, and a resumed run integrates the system the uninterrupted
+    /// one did.
+    pub(in crate::engine) fn hold_every_node_without_dc_path(circuit: &mut CircuitData) {
+        if circuit.settled_node_gmin == 0.0 {
+            return;
+        }
+        let floating = Self::nodes_proven_without_dc_path(circuit);
+        Self::hold_alone_through_gmin(circuit, floating);
+    }
+
+    /// Rows of the nodes the DC ground-path walk proves floating
+    /// (`CircuitData::dc_floating_component_for_matrix_row`) that take the
+    /// nodal floor and are not held already: not a pure event net, nor a
+    /// settled compact-model node, which take their own.
+    fn nodes_proven_without_dc_path(circuit: &CircuitData) -> Vec<usize> {
         let settled = circuit
             .settled_compact_model_private_nodes
             .as_deref()
             .unwrap_or_default();
-        let unconstrained: Vec<usize> = (0..circuit.num_nodes().min(circuit.matrix_size()))
+        (0..circuit.num_nodes().min(circuit.matrix_size()))
             .filter(|&row| {
                 circuit.receives_nodal_gmin(row)
                     && circuit.dc_floating_component_for_matrix_row(row).is_some()
                     && circuit.event_only_net_kind(row + 1).is_none()
                     && !settled.contains(&(row + 1))
                     && !circuit.dc_floor_held_nodes.contains(&row)
-                    && (matrix.row_is_deficient(row) || matrix.column_is_deficient(row))
             })
-            .collect();
-        if unconstrained.is_empty() {
+            .collect()
+    }
+
+    /// Add `rows` to the nodes held alone through GMIN, naming each; `false`
+    /// when there is none.
+    fn hold_alone_through_gmin(circuit: &mut CircuitData, rows: Vec<usize>) -> bool {
+        if rows.is_empty() {
             return false;
         }
         // The ground-path walk has already warned that each has no DC path.
         let node_names = circuit.node_names_sorted();
-        for &row in &unconstrained {
+        for &row in &rows {
             let name = node_names.get(row).map_or("?", String::as_str);
             log::info!(
                 "Node {name} has no DC path; holding it alone through GMIN = {:e} S.",
                 circuit.settled_node_gmin
             );
         }
-        circuit.dc_floor_held_nodes.extend(unconstrained);
+        circuit.dc_floor_held_nodes.extend(rows);
         true
     }
 
@@ -2372,7 +2438,25 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.solve_without_the_nodal_floor_first(circuit, matrix, abort, |circuit, matrix| {
+            self.solve_linear_transient_operating_point_at_current_floor(
+                circuit,
+                matrix,
+                time,
+                node_constraints,
+                abort,
+            )
+        })
+    }
 
+    fn solve_linear_transient_operating_point_at_current_floor(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        node_constraints: &[StartupVoltageConstraint],
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientOperatingPointSolution, SimulationError> {
         let nodal_gmin =
             if self.config.spice_dialect == SpiceDialect::Xyce && !node_constraints.is_empty() {
                 0.0
@@ -2612,14 +2696,17 @@ impl Engine {
         node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
-        let solution = self.solve_nonlinear_transient_op_with_node_hints_unchecked(
-            circuit,
-            matrix,
-            time,
-            hints,
-            node_constraints,
-            abort,
-        )?;
+        let solution =
+            self.solve_without_the_nodal_floor_first(circuit, matrix, abort, |circuit, matrix| {
+                self.solve_nonlinear_transient_op_with_node_hints_unchecked(
+                    circuit,
+                    matrix,
+                    time,
+                    hints,
+                    node_constraints,
+                    abort,
+                )
+            })?;
         self.check_settled_compact_model_private_nodes(circuit, &solution.values)?;
         Ok(solution)
     }

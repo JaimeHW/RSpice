@@ -50,7 +50,7 @@ mod determinism_fingerprint;
 mod digital_trace_invariants;
 
 use determinism_fingerprint::{
-    Fingerprint, assert_fingerprints_survive_new_processes, fingerprint, pin_fingerprint,
+    Fingerprint, assert_fingerprints_survive_new_processes, fingerprint, pin_fingerprint, pin_grid,
 };
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
@@ -259,7 +259,20 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
 /// case pins the point count, and every node waveform against its own
 /// analytic form at a tolerance; the fresh-process check still compares all
 /// three of its records child against child, on whichever platform runs it.
-const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
+///
+/// # The transient carries no nodal floor
+///
+/// Seven voltage hashes moved when the transient and its operating point
+/// stopped putting the 1e-15 S floor on every node, as ngspice carries none:
+/// `hardening_feedback`, `_feedback_order`, `_feedback_split`,
+/// `_toggling_two_minimums`, `_toggling_five_minimums`, `_external_toggle`
+/// and `_merge_window`. Each grid and point count held, and with the floor
+/// put back every one returned to its earlier value. The new hashes were
+/// measured on one platform only, and a voltage hash is a pin per platform
+/// (`determinism_fingerprint::pin_grid`), so those seven now pin their point
+/// count and grid alone ([`Pinned::Grid`]); the fresh-process check still
+/// compares all three records child against child.
+const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
     (
         "a_mixed_checkpoint_restores_external_clock_state_without_initial_replay",
         "hardening_external_toggle",
@@ -288,10 +301,9 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // event, P and QS bit-identical, and CLK moved at the 89 points on
         // its edges by at most 4.4e-16 V. The deck with that old double
         // written out reproduces the previous hash.
-        Fingerprint {
+        Pinned::Grid {
             points: 518,
             grid_hash: 0xac5c_1670_ff3a_1bea,
-            volt_hash: 0xb02c_de0c_fb84_6c84,
         },
     ),
     (
@@ -342,11 +354,11 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // 42 of them one ulp earlier or later, every grid point within
         // 6.5e-21 s of where it was, and QDIV and OUT within 1.6e-14 V and
         // 8.1e-13 V point for point.
-        Fingerprint {
+        Pinned::Whole(Fingerprint {
             points: 1760,
             grid_hash: 0x1b27_94c5_580c_3f52,
             volt_hash: 0xda44_3766_4b2b_a734,
-        },
+        }),
     ),
     (
         "an_activation_inside_the_breakpoint_merge_tolerance_is_delivered",
@@ -367,10 +379,9 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // `edge + 1 ps` sum is within a floor of: the same 353 points and
         // voltage hash, with 10 of QD's 19 completions one ulp onto their
         // image.
-        Fingerprint {
+        Pinned::Grid {
             points: 353,
             grid_hash: 0x768f_bd6e_6faa_0c6b,
-            volt_hash: 0xd37d_277c_dc23_aa1c,
         },
     ),
     // The three feedback decks were re-measured for the left-limit D/A drive
@@ -401,28 +412,25 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
-        Fingerprint {
+        Pinned::Grid {
             points: 38,
             grid_hash: 0xc6f5_1ce4_875a_777c,
-            volt_hash: 0x3751_9570_bc10_f5e8,
         },
     ),
     (
         "a_crossing_carried_between_two_instances_is_landed_on_once",
         "hardening_feedback_split",
-        Fingerprint {
+        Pinned::Grid {
             points: 38,
             grid_hash: 0xc6f5_1ce4_875a_777c,
-            volt_hash: 0xd96b_5f7e_236e_6672,
         },
     ),
     (
         "a_carried_crossing_wakes_its_process_after_the_write_that_caused_it",
         "hardening_feedback_order",
-        Fingerprint {
+        Pinned::Grid {
             points: 38,
             grid_hash: 0xc6f5_1ce4_875a_777c,
-            volt_hash: 0x3751_9570_bc10_f5e8,
         },
     ),
     (
@@ -459,29 +467,29 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // fell 7.97e-3 -> 2.68e-4 V in sum, and OUT's run-wide worst
         // 2.463e-3 -> 5.01e-4 V, its mean 1.10e-3 -> 2.49e-4 V. Every
         // CLK/FROMX/QDIV event stays bit-identical.
-        Fingerprint {
+        Pinned::Whole(Fingerprint {
             points: 190,
             grid_hash: 0x593b_21a6_bcf0_a8c2,
             volt_hash: 0xaf8a_b3ef_e073_1446,
-        },
+        }),
     ),
     (
         "a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_points",
         "hardening_ring_1p",
-        Fingerprint {
+        Pinned::Whole(Fingerprint {
             points: 14,
             grid_hash: 0x68b0_e564_ff7c_89de,
             volt_hash: 0x7395_ae1d_67b8_cd8b,
-        },
+        }),
     ),
     (
         "a_coupled_code_model_cadence_exactly_at_the_solver_floor_runs",
         "hardening_ring_10p",
-        Fingerprint {
+        Pinned::Whole(Fingerprint {
             points: 14,
             grid_hash: 0x68b0_e564_ff7c_89de,
             volt_hash: 0x7395_ae1d_67b8_cd8b,
-        },
+        }),
     ),
     (
         "a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop",
@@ -501,22 +509,53 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // the last few toggles (index 245 of 252, 405 of 407), where the
         // steps around the recorded stop-time toggle rearrange: 253 -> 252
         // and 407 -> 408 points.
-        Fingerprint {
+        Pinned::Grid {
             points: 252,
             grid_hash: 0x8fb8_9469_2f68_4df3,
-            volt_hash: 0x1de0_ca73_d008_84d1,
         },
     ),
     (
         "a_clock_five_minimum_steps_wide_is_refused_by_neither_guard",
         "hardening_toggling_five_minimums",
-        Fingerprint {
+        Pinned::Grid {
             points: 408,
             grid_hash: 0xec1a_8a54_8dae_13a9,
-            volt_hash: 0xed98_c6c2_6ef5_f1ae,
         },
     ),
 ];
+
+/// What a fixture's case asserts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pinned {
+    /// Its point count, grid and voltages.
+    Whole(Fingerprint),
+    /// Its point count and grid alone: see "The transient carries no nodal
+    /// floor" on [`FINGERPRINTED_FIXTURES`].
+    Grid { points: usize, grid_hash: u64 },
+}
+
+impl Pinned {
+    /// Whether `observed` is what this pins.
+    fn holds(&self, observed: Fingerprint) -> bool {
+        match *self {
+            Pinned::Whole(expected) => observed == expected,
+            Pinned::Grid { points, grid_hash } => {
+                observed.points == points && observed.grid_hash == grid_hash
+            }
+        }
+    }
+
+    /// The records a fresh process must print for `key`.
+    fn records(&self, key: &str) -> Vec<(String, String)> {
+        match *self {
+            Pinned::Whole(expected) => expected.records(key),
+            Pinned::Grid { points, grid_hash } => vec![
+                (format!("{key}_points"), points.to_string()),
+                (format!("{key}_grid_hash"), format!("{grid_hash:016x}")),
+            ],
+        }
+    }
+}
 
 /// Pin `result`'s fingerprint against [`FINGERPRINTED_FIXTURES`]'s entry.
 ///
@@ -531,10 +570,13 @@ fn pin_fixture(key: &str, result: &TransientResult) {
         .find(|(_, entry, _)| *entry == key)
         .unwrap_or_else(|| panic!("no fingerprint table entry for {key}"));
     let observed = fingerprint(result);
-    if observed != *expected || determinism_fingerprint::emitting() {
+    if !expected.holds(observed) || determinism_fingerprint::emitting() {
         print_trace(key, result);
     }
-    pin_fingerprint(key, observed, *expected);
+    match *expected {
+        Pinned::Whole(expected) => pin_fingerprint(key, observed, expected),
+        Pinned::Grid { points, grid_hash } => pin_grid(key, observed, points, grid_hash),
+    }
 }
 
 /// Print `result` word for word under `key`.

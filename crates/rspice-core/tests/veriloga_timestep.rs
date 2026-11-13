@@ -454,13 +454,20 @@ fn a_timer_target_just_before_a_source_corner_fires_at_the_corner() {
                 // sampled; the count is checked strictly between them.
                 continue;
             }
-            assert_eq!(
-                *level,
-                cycles.floor() + 1.0,
-                "per={per:e}: V(g) at t={time:e} counts the firings so far"
+            // `V(g) <+ q` is solved by Newton's correction, so its last bit
+            // is the solve's rounding: without the nodal floor one point
+            // reads 9.000000000000002 (one ulp) where the floor gave 9.
+            let count = cycles.floor() + 1.0;
+            assert!(
+                (*level - count).abs() <= 2.0 * f64::EPSILON * count,
+                "per={per:e}: V(g) = {level} at t={time:e} counts the firings so far, {count}"
             );
         }
-        assert_eq!(result.voltages[g].last(), Some(&11.0), "per={per:e}");
+        let last = *result.voltages[g].last().expect("points");
+        assert!(
+            (last - 11.0).abs() <= 2.0 * f64::EPSILON * 11.0,
+            "per={per:e}: V(g) ends at {last}"
+        );
         let creep = result
             .time
             .iter()

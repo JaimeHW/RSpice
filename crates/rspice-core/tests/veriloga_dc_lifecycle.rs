@@ -2427,12 +2427,21 @@ fn write_hdl(name: &str, source: &str) -> PathBuf {
     verilog
 }
 
+fn tran_waveform(result: &rspice_core::engine::TransientResult, name: &str) -> Vec<f64> {
+    result
+        .node_index_named(name)
+        .and_then(|index| result.try_voltage_waveform(index))
+        .unwrap_or_else(|| panic!("node {name} is in the transient result"))
+        .to_vec()
+}
+
 const TERAOHM_DIVIDER: &str = "vd ind 0 dc 1\nrd1 ind mid 1e12\nrd2 mid 0 1e12\n";
 
-/// The operating point of `deck` reads the 1e12/1e12 Ohm divider at 0.5 V,
-/// the value ngspice-46 prints for it: the node beside it that has no DC
-/// path takes GMIN alone, and every other node no floor. With the floor on
-/// every node the divider read 0.49975012493753124 V.
+/// The operating point and every transient point of `deck` read the
+/// 1e12/1e12 Ohm divider at 0.5 V, the value ngspice-46 prints for it at
+/// every point of a transient: the node beside it that has no DC path takes
+/// GMIN alone, and every other node no floor. With the floor on every node
+/// the divider read 0.49975012493753124 V.
 fn assert_divider_carries_no_floor(deck: &str) {
     let netlist = Netlist::parse(deck).expect("deck parses");
     let op = Engine::default()
@@ -2440,6 +2449,15 @@ fn assert_divider_carries_no_floor(deck: &str) {
         .expect("the operating point solves");
     let mid = node_voltage(&op, "mid");
     assert!((mid - 0.5).abs() <= 1.0e-12, "op v(mid) = {mid:e}");
+    let tran = Engine::default()
+        .run_tran(&netlist, 1e-6, 2e-8)
+        .expect("the transient solves");
+    for (time, value) in tran.time.iter().zip(tran_waveform(&tran, "mid")) {
+        assert!(
+            (value - 0.5).abs() <= 1.0e-12,
+            "v(mid) = {value:e} at t = {time:e}"
+        );
+    }
 }
 
 /// Only the module's `ddt()` contributions reach `b`, so its DC equations
@@ -2501,4 +2519,38 @@ fn a_converter_held_at_z_holds_only_its_node() {
         .expect("the operating point solves");
     assert_eq!(node_voltage(&op, "o"), 0.0);
     let _ = std::fs::remove_file(module);
+}
+
+/// The switched-capacitor filter's `out` and `a` reach the input only
+/// through switches open at 1e12 Ohm, so the 1e-15 S floor on every node
+/// pulled its transient's operating point to v(out) = 0.498504; the
+/// transient's operating point is now solved without the floor first, as
+/// the DC operating point is, and starts at 0.5 V, the value the analog twin
+/// of this deck reads at t = 0 under ngspice-46.
+#[test]
+fn a_switched_capacitor_transient_starts_without_the_nodal_floor() {
+    let clock = write_hdl(
+        "nonov_clk",
+        "`timescale 1ns/1ps\nmodule nonov_clk(ph1, ph2);\n  output ph1, ph2;\n  reg ph1, ph2;\n  \
+         initial begin\n    ph1 = 1'b0;\n    ph2 = 1'b0;\n  end\n  always begin\n    \
+         #20 ph1 = 1'b1;\n    #460 ph1 = 1'b0;\n    #40 ph2 = 1'b1;\n    #460 ph2 = 1'b0;\n    \
+         #20;\n  end\nendmodule\n",
+    );
+    let deck = format!(
+        "* switched-capacitor low-pass\n.hdl \"{}\"\n.param vcc=1.8\nxclk ph1 ph2 nonov_clk\n\
+         s1 in a ph1 0 swc\nc1 a 0 1p\ns2 a out ph2 0 swc\nc2 out 0 9p\n\
+         .model swc sw vt=0.9 vh=0.1 ron=1k roff=1e12\nvin in 0 dc 0.5 sin(0.5 0.2 10k)\n.end\n",
+        deck_path(&clock)
+    );
+    let result = Engine::default()
+        .run_tran(&Netlist::parse(&deck).expect("deck parses"), 1e-6, 2e-9)
+        .expect("the transient solves");
+    for node in ["out", "a"] {
+        let start = tran_waveform(&result, node)[0];
+        assert!(
+            (start - 0.5).abs() <= 1.0e-12,
+            "v({node}) = {start:e} at t = 0, ngspice-46 0.5"
+        );
+    }
+    let _ = std::fs::remove_file(clock);
 }

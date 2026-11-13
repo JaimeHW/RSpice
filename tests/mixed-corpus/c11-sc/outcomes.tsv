@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-mx	tran	interp	wrong	rec (O6) [0] |a−e|=1.214e-3 allowed 5.000e-5 (a=5.011858e-1, e=5.023999e-1)
-mx	tran	native	wrong	rec (O6) [0] |a−e|=1.214e-3 allowed 5.000e-5 (a=5.011858e-1, e=5.023999e-1)
+mx	tran	interp	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
+mx	tran	native	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured

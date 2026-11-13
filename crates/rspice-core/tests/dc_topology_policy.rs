@@ -424,6 +424,106 @@ fn a_node_without_a_dc_path_alone_takes_the_floor() {
     }
 }
 
+fn waveform(result: &rspice_core::engine::TransientResult, node: &str) -> Vec<f64> {
+    result
+        .node_index_named(node)
+        .and_then(|index| result.try_voltage_waveform(index))
+        .unwrap_or_else(|| panic!("node {node} is in the transient result"))
+        .to_vec()
+}
+
+/// A 1e12/1e12 Ohm divider reads 0.5 V at every point of its transient,
+/// t = 0 included, as ngspice-46 prints it (5.000000000000e-01 at all 59
+/// points of `.tran 1u 10u`): ngspice integrates at CKTdiagGmin =
+/// CKTgshunt, zero unless the deck sets RSHUNT. The transient's operating
+/// point used to be solved with the 1e-15 S floor on every node and the
+/// transient kept it, so the divider read 0.49975012493753124 V throughout.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_transient_carries_no_nodal_floor() {
+    let netlist = parse("Leakage-held divider\nV1 in 0 1\nR1 in mid 1e12\nR2 mid 0 1e12\n.end\n");
+    let result = engine()
+        .run_tran(&netlist, 10e-6, 1e-6)
+        .expect("the transient solves");
+    let mid = waveform(&result, "mid");
+    assert!(mid.len() > 2);
+    for (time, value) in result.time.iter().zip(&mid) {
+        assert!(
+            (value - 0.5).abs() <= 1.0e-12,
+            "v(mid) = {value:e} at t = {time:e}, ngspice-46 0.5"
+        );
+    }
+}
+
+/// Only capacitors reach `b`. Its transient's operating point holds `b`
+/// alone, as the DC operating point does, and the transient keeps that one
+/// hold, so the divider beside it reads 0.5 V at every point, the value
+/// ngspice-46 prints for it alone and in a UIC transient of this deck.
+/// (Without UIC, ngspice-46's operating point fails at "singular matrix:
+/// check node b" and its transient-op fallback puts GMIN on every node, so
+/// it starts and stays at 0.333333 V.) `b` starts at its charge-neutral
+/// 0.5 V.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_transient_holds_only_the_node_without_a_dc_path() {
+    let netlist = parse(
+        "Capacitor-only node beside a leakage-held divider\nV1 in 0 1\nR1 in mid 1e12\n\
+         R2 mid 0 1e12\nV2 in2 0 1\nR3 in2 a 1k\nC1 a b 1p\nC2 b 0 1p\n.end\n",
+    );
+    let (result, warnings) = warnings_of(|| engine().run_tran(&netlist, 1e-6, 2e-8));
+    let result = result.expect("the node without a DC path is held");
+    let mid = waveform(&result, "mid");
+    for (time, value) in result.time.iter().zip(&mid) {
+        assert!(
+            (value - 0.5).abs() <= 1.0e-12,
+            "v(mid) = {value:e} at t = {time:e}"
+        );
+    }
+    let b = waveform(&result, "b");
+    assert!((b[0] - 0.5).abs() <= 1.0e-12, "v(b) = {:e} at t = 0", b[0]);
+    assert!(
+        warnings
+            .iter()
+            .any(|line| line == "Voltage Node (B) does not have a DC path to ground"),
+        "{warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|line| line.contains("singular matrix")),
+        "{warnings:?}"
+    );
+}
+
+/// A UIC transient solves no operating point, so no singular system says
+/// which node lacks a DC path: nothing reaches `u` but a controlled current
+/// its own voltage does not set, and without a floor its row is empty at
+/// every step. ngspice-46 stops there ("singular matrix: check node u",
+/// "Timestep too small"). Each node the ground-path walk proves floating
+/// takes the hold the operating point would give it, so `u` stays at 0 V
+/// and the divider beside it reads 0.5 V.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_uic_transient_holds_a_node_without_a_dc_path() {
+    let netlist = parse(
+        "Zero-gain VCCS node beside a leakage-held divider\nV1 in 0 1\nR1 in mid 1e12\n\
+         R2 mid 0 1e12\nV5 in5 0 1\nR5 in5 0 1k\nG1 0 u in5 0 0\n.end\n",
+    );
+    let result = engine()
+        .run_tran_with_startup_mode(
+            &netlist,
+            1e-6,
+            2e-8,
+            rspice_core::engine::TransientStartupMode::Uic,
+        )
+        .expect("the node without a DC path is held");
+    let mid = waveform(&result, "mid");
+    let last = *mid.last().expect("points");
+    assert!(
+        (last - 0.5).abs() <= 1.0e-12,
+        "v(mid) = {last:e} at the end"
+    );
+    assert!(waveform(&result, "u").iter().all(|value| *value == 0.0));
+}
+
 /// `p`'s own conductances cancel, so the circuit's system is singular and
 /// the solve goes back to the 1e-15 S GMIN floor, which `n`'s conductance
 /// cancels exactly; every GMIN stage above the floor solves. GMIN stepping

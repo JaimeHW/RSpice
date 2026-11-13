@@ -1173,22 +1173,15 @@ mod generated_multi_letter {
 /// system, as they are on the native devices.
 ///
 /// Each device sits behind a zero-volt source `vm`, so KCL at the node between
-/// them is the reference: `vm`'s current and the node's GMIN floor at every
-/// transient sample, and `vm`'s current alone at an operating point and a DC
-/// sweep point, which are solved without the nodal floor, and in AC, which
-/// has no nodal GMIN. All agree to 1e-12.
+/// them is the reference: `vm`'s current alone, at every transient sample, an
+/// operating point, a DC sweep point and in AC, none of which carries a nodal
+/// floor on a node with a DC path. All agree to 1e-12.
 #[cfg(all(
     feature = "veriloga-model-diode-cmc",
     feature = "veriloga-model-r2-cmc"
 ))]
 mod card_routed {
     use super::*;
-
-    fn gmin() -> f64 {
-        rspice_core::SimulationConfig::default()
-            .convergence_config
-            .gmin_target
-    }
 
     /// Hold every transient sample to its KCL reference at the static
     /// tolerance, against the waveform's peak.
@@ -1207,13 +1200,6 @@ mod card_routed {
                 "{label}: sample {index} is {a:e} against KCL's {e:e}"
             );
         }
-    }
-
-    fn voltage(result: &TransientResult, node: &str) -> Vec<f64> {
-        result
-            .try_voltage_waveform_named(node)
-            .unwrap_or_else(|| panic!("V({node}) is retained"))
-            .to_vec()
     }
 
     fn resistor(source: &str, saves: &str, analysis: &str) -> String {
@@ -1274,11 +1260,7 @@ mod card_routed {
             100e-9,
             1e-9,
         );
-        let native = derived(&tran, "vm")
-            .iter()
-            .zip(voltage(&tran, "a"))
-            .map(|(current, anode)| current + gmin() * anode)
-            .collect::<Vec<_>>();
+        let native = derived(&tran, "vm");
         assert_kcl_waveform("tran I(r1)", &derived(&tran, "r1"), &native);
         assert_kcl_waveform("tran @r1[in1]", &lead(&tran, "r1", "in1"), &native);
 
@@ -1352,11 +1334,7 @@ mod card_routed {
             100e-9,
             1e-9,
         );
-        let native = derived(&tran, "vm")
-            .iter()
-            .zip(voltage(&tran, "b"))
-            .map(|(current, anode)| current - gmin() * anode)
-            .collect::<Vec<_>>();
+        let native = derived(&tran, "vm");
         assert_kcl_waveform("tran I(d1)", &derived(&tran, "d1"), &native);
         assert_kcl_waveform("tran @d1[ia]", &lead(&tran, "d1", "ia"), &native);
         assert_kcl_waveform("tran @d1[id]", &lead(&tran, "d1", "id"), &native);

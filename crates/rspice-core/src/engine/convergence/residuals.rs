@@ -116,9 +116,13 @@ impl Engine {
                 "accepted transient operating-point contract has an invalid nodal GMIN".to_string(),
             ));
         }
-        if contract.nodal_gmin == 0.0 {
+        // A node held alone through GMIN is conditioned as the floor would
+        // condition it: the physical system leaves its hold out, so a
+        // current the hold alone balances is found here.
+        if contract.nodal_gmin == 0.0 && circuit.dc_floor_held_nodes.is_empty() {
             return Ok(Vec::new());
         }
+        let held_nodes = std::mem::take(&mut circuit.dc_floor_held_nodes);
 
         let snapshot = circuit.nonlinear_state_snapshot();
         let result = matrix.with_probe_values(|probe, rhs| {
@@ -167,6 +171,7 @@ impl Engine {
                 )?;
             }
 
+            circuit.dc_floor_held_nodes.clone_from(&held_nodes);
             self.conditioning_dependent_kcl_violation_nodes_from_probe(
                 circuit,
                 probe,
@@ -176,6 +181,7 @@ impl Engine {
                 contract.junction_gmin.is_some() && Self::requires_vbic_correction_form(circuit),
             )
         });
+        circuit.dc_floor_held_nodes = held_nodes;
         circuit.restore_nonlinear_state(snapshot);
         result
     }
@@ -215,12 +221,21 @@ impl Engine {
         }
 
         Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+        // Without a floor, each node held alone takes its GMIN here.
+        let held_gmin = if gmin_floor == 0.0 {
+            circuit.settled_node_gmin
+        } else {
+            0.0
+        };
         let mut conditioned_rhs = Vec::new();
         let rhs = if direct {
             conditioned_rhs.extend_from_slice(rhs);
             for (row, value) in conditioned_rhs.iter_mut().take(node_count).enumerate() {
                 if !circuit.is_non_electrical_state_matrix_index(row) {
                     *value -= gmin_floor * solution[row];
+                }
+                if circuit.dc_floor_held_nodes.contains(&row) {
+                    *value -= held_gmin * solution[row];
                 }
             }
             conditioned_rhs.as_slice()
