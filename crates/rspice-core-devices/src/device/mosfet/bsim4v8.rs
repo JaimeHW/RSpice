@@ -73,8 +73,8 @@
 //! # Integration seams
 //!
 //! The [`Bsim4v8`] core owns `Arc<Bsim4v8Model>`, `Arc<Bsim4v8SizeDep>`,
-//! and [`Bsim4v8InstTemp`]. It exposes [`Bsim4v8::eval_polarity`] (raw node
-//! voltages in, `mtype`-folded internally) plus the ngspice limiting sequence
+//! and [`Bsim4v8InstTemp`]. It exposes [`Bsim4v8::eval`] (device-polarity
+//! branch voltages, already limited) plus the ngspice limiting sequence
 //! [`Bsim4v8::limit_voltages`]. The op struct carries every `here->BSIM4*`
 //! quantity the b4ld.c stamp consumes; the multiplier `m`, the mode swap of
 //! the matrix load, and the gmin policy live in the engine-facing wrapper
@@ -352,6 +352,7 @@ impl Bsim4v8 {
     /// Evaluate the operating point at raw node-space voltages: `mtype` is
     /// folded into the branch voltages here, exactly as b4ld.c forms
     /// `vbs`/`vgs`/`vds` from the node vector (b4ld.c:380-391).
+    #[cfg(test)]
     pub fn eval_polarity(
         &self,
         vds_node: Value,

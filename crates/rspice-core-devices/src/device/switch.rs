@@ -984,6 +984,7 @@ impl VoltageSwitch {
     }
 
     /// Set on/off resistances
+    #[cfg(test)]
     pub fn with_resistances(mut self, ron: Value, roff: Value) -> Self {
         self.ron = ron;
         self.roff = roff;
@@ -1742,6 +1743,7 @@ impl CurrentSwitch {
     }
 
     /// Set on/off resistances
+    #[cfg(test)]
     pub fn with_resistances(mut self, ron: Value, roff: Value) -> Self {
         self.ron = ron.max(1e-6);
         self.roff = roff.max(1e-6);

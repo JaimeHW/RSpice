@@ -39,8 +39,8 @@
 //! # Integration seams
 //!
 //! The [`Bsim3v3`] device owns `Arc<Bsim3v3Model>` + `Arc<Bsim3v3SizeDep>` +
-//! [`Bsim3v3InstTemp`] and exposes [`Bsim3v3::eval_polarity`] (raw node
-//! voltages in, `mtype`-folded internally) plus the ngspice limiting sequence
+//! [`Bsim3v3InstTemp`] and exposes [`Bsim3v3::eval`] (device-polarity branch
+//! voltages, already limited) plus the ngspice limiting sequence
 //! [`Bsim3v3::limit_voltages`]. The op struct carries every `here->BSIM3*`
 //! quantity the b3ld.c stamp consumes; the multiplier `m`, the mode swap of
 //! the matrix load (b3ld.c:2920-3120), and the gmin policy are the engine's
@@ -182,6 +182,7 @@ impl Bsim3v3 {
     /// Evaluate the DC operating point at raw node-space voltages: `mtype` is
     /// folded into the branch voltages here, exactly as b3ld.c forms
     /// `vbs`/`vgs`/`vds` from the node vector (b3ld.c:248-256).
+    #[cfg(test)]
     pub fn eval_polarity(
         &self,
         vds_node: Value,
