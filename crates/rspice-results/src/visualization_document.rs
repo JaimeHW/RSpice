@@ -79,6 +79,8 @@ pub const MAX_VISUALIZATION_COMPARISONS: usize = 4_096;
 pub const MAX_VISUALIZATION_USER_BUSES: usize = 1_024;
 /// Maximum member lanes grouped into one user bus.
 pub const MAX_USER_BUS_MEMBERS: usize = 256;
+/// The most words one bus can name.
+pub const MAX_BUS_VALUE_NAMES: usize = 256;
 /// Maximum member references retained across all user buses in one document.
 pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
 /// Maximum rows one pane's event-lane order names.
@@ -1605,6 +1607,38 @@ pub struct UserBus {
     pub radix: BusRadix,
     #[serde(default)]
     pub expanded: bool,
+    /// Names the reader gave the bus's words, by unsigned value, ascending.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_bus_value_names"
+    )]
+    pub value_names: Vec<BusValueName>,
+}
+
+/// A name for one word of a bus, such as a state machine's state: the text
+/// the bus shows for that value, as a SimVision mnemonic map gives it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BusValueName {
+    /// The word as an unsigned integer, whatever radix the bus reads in.
+    pub value: u64,
+    #[serde(deserialize_with = "deserialize_label_string")]
+    pub name: String,
+}
+
+/// The name `names`, ascending by value, gives `value`.
+pub fn bus_value_name(names: &[BusValueName], value: u64) -> Option<&str> {
+    names
+        .binary_search_by_key(&value, |name| name.value)
+        .ok()
+        .map(|index| names[index].name.as_str())
+}
+
+fn deserialize_bus_value_names<'de, D>(deserializer: D) -> Result<Vec<BusValueName>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_BUS_VALUE_NAMES>(deserializer)
 }
 
 impl NestedResourceCount for UserBus {
@@ -2348,6 +2382,16 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 .event_lane_orders
                 .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
         };
+        if document.schema_version < 12
+            && document
+                .user_buses
+                .iter()
+                .any(|bus| !bus.value_names.is_empty())
+        {
+            return Err(serde::de::Error::custom(
+                "a bus with named values requires visualization schema 12",
+            ));
+        }
         if document.schema_version < 11
             && document
                 .datasets

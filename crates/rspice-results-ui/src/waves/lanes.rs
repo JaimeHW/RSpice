@@ -11,8 +11,8 @@
 //! project result document keeps it in the document.
 
 use super::logic::{
-    BUS_ROW_HEIGHT, BusLane, BusOrigin, BusRadix, EventLane, EventLanes, LOGIC_ROW_HEIGHT, LaneRow,
-    LaneStackResponse, real_step_trace,
+    BUS_ROW_HEIGHT, BusLane, BusOrigin, BusRadix, BusValueName, EventLane, EventLanes,
+    LOGIC_ROW_HEIGHT, LaneRow, LaneStackResponse, real_step_trace,
 };
 use super::pane::ResolvedExpr;
 use super::readout::{READOUT_ABSENT, ReadoutRow};
@@ -69,12 +69,20 @@ pub struct EventLaneLayout {
     pub user_buses: Vec<UserLaneBus>,
     /// The selected rows; the first is the one the cursor steps along.
     pub selected: Vec<LaneKey>,
+    /// The names the reader gave each bus's words, by bus label, ascending
+    /// by value. A bus with none is absent.
+    pub value_names: BTreeMap<String, Vec<BusValueName>>,
 }
 
 impl EventLaneLayout {
     /// How the reader reads the bus `label`.
     pub fn bus_view(&self, label: &str) -> BusView {
         self.buses.get(label).copied().unwrap_or_default()
+    }
+
+    /// The names the reader gave the bus `label`'s words.
+    pub fn value_names(&self, label: &str) -> &[BusValueName] {
+        self.value_names.get(label).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -101,6 +109,8 @@ pub enum LaneSpec {
         /// MSB first.
         members: Vec<LaneMember>,
         view: BusView,
+        /// The names the reader gave its words, ascending by value.
+        names: Vec<BusValueName>,
         color: egui::Color32,
     },
 }
@@ -148,8 +158,18 @@ pub fn value_column_chars(specs: &[LaneSpec]) -> usize {
         .iter()
         .map(|spec| match spec {
             LaneSpec::Logic { .. } => 1,
-            LaneSpec::Bus { members, view, .. } => {
+            LaneSpec::Bus {
+                members,
+                view,
+                names,
+                ..
+            } => {
                 let width = members.len();
+                let named = names
+                    .iter()
+                    .map(|name| name.name.chars().count())
+                    .max()
+                    .unwrap_or(0);
                 let decimal = |bits: u32| 2_f64.powi(bits as i32).log10().ceil() as usize;
                 let word = match view.radix {
                     BusRadix::Binary => width,
@@ -161,7 +181,7 @@ pub fn value_column_chars(specs: &[LaneSpec]) -> usize {
                     BusRadix::Unsigned => decimal(width as u32),
                     BusRadix::Signed => 1 + decimal(width.saturating_sub(1) as u32),
                 };
-                word.max(width)
+                word.max(width).max(named)
             }
         })
         .max()
@@ -207,6 +227,7 @@ pub fn lane_specs(model: &StripModel, layout: Option<&EventLaneLayout>) -> Vec<L
             origin,
             color,
             view: layout.map_or_else(BusView::default, |layout| layout.bus_view(label)),
+            names: layout.map_or_else(Vec::new, |layout| layout.value_names(label).to_vec()),
             members,
         });
     };
@@ -347,6 +368,7 @@ pub fn lane_rows<'a>(
                 origin,
                 members,
                 view,
+                names,
                 color,
             } => {
                 let lane = match origin {
@@ -356,6 +378,7 @@ pub fn lane_rows<'a>(
                 Some(LaneRow::Bus {
                     lane,
                     radix: view.radix,
+                    names,
                     expanded: view.expanded,
                     members: members
                         .iter()
@@ -506,6 +529,15 @@ pub fn apply_response(
         layout
             .buses
             .insert(label.clone(), BusView { radix, ..view });
+    }
+    if let Some((index, names)) = response.set_value_names
+        && let Some(LaneSpec::Bus { label, .. }) = specs.get(index)
+    {
+        if names.is_empty() {
+            layout.value_names.remove(label);
+        } else {
+            layout.value_names.insert(label.clone(), names);
+        }
     }
     if let Some(indices) = response.group {
         let members: Vec<String> = indices

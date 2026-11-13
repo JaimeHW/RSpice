@@ -363,3 +363,54 @@ fn the_cursor_reads_a_bus_in_octal_and_ascii() {
         );
     }
 }
+
+/// A bus's named words read as their names in the readout, the others in
+/// the radix, and the value column is wide enough for the longest name.
+#[test]
+fn a_named_bus_word_reads_as_its_name() {
+    let model = model(&["D(clk)", "D(q[1])", "D(q[0])"]);
+    let mut layout = EventLaneLayout::default();
+    let specs = lane_specs(&model, Some(&layout));
+    let names = vec![
+        BusValueName {
+            value: 1,
+            name: "LOAD".to_owned(),
+        },
+        BusValueName {
+            value: 3,
+            name: "UNREACHED".to_owned(),
+        },
+    ];
+    apply_response(
+        &mut layout,
+        &specs,
+        LaneStackResponse {
+            set_value_names: Some((1, names.clone())),
+            ..LaneStackResponse::default()
+        },
+    );
+    assert_eq!(layout.value_names("q[1:0]"), names);
+    let specs = lane_specs(&model, Some(&layout));
+    assert_eq!(value_column_chars(&specs), "UNREACHED".len());
+    let rows = lane_readout_rows(
+        &model,
+        &specs,
+        &vec![None; specs.len()],
+        CursorPair {
+            a: Some(10.0 * NS),
+            b: Some(30.0 * NS),
+        },
+        4,
+    );
+    assert_eq!((rows[1].a.as_str(), rows[1].b.as_str()), ("LOAD", "0x2"));
+    // Naming nothing removes the bus's entry.
+    apply_response(
+        &mut layout,
+        &specs,
+        LaneStackResponse {
+            set_value_names: Some((1, Vec::new())),
+            ..LaneStackResponse::default()
+        },
+    );
+    assert!(layout.value_names.is_empty());
+}

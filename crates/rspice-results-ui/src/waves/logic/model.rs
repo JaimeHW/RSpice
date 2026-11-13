@@ -11,10 +11,13 @@
 use rspice_results::engine_evidence::{
     BusMemberHistory, VcdBit, bus_events, event_code_to_vcd_bit,
 };
-use rspice_results::events::projection::{BusRadix, BusWord, bus_word};
+use rspice_results::events::projection::{
+    BusRadix, BusWord, bus_word, bus_word_named, word_unsigned,
+};
 use rspice_results::events::{
     DigitalBusEvidence, DigitalEventTraceEvidence, RealEventTraceEvidence,
 };
+use rspice_results::visualization_document::BusValueName;
 
 /// One level of a scalar digital net, as a VCD bit spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,6 +291,37 @@ impl BusLane {
     /// The word from instant `index`, spelled in `radix` or in its fallback.
     pub fn spell(&self, index: usize, radix: BusRadix) -> Option<BusWord> {
         self.word(index).map(|codes| bus_word(codes, radix))
+    }
+
+    /// The word from instant `index`, as the reader named it, or else spelled
+    /// in `radix`.
+    pub fn spell_named(
+        &self,
+        index: usize,
+        radix: BusRadix,
+        names: &[BusValueName],
+    ) -> Option<BusWord> {
+        self.word(index)
+            .map(|codes| bus_word_named(codes, radix, names))
+    }
+
+    /// The word held at `t`, right-continuously, as the reader named it, or
+    /// else spelled in `radix`.
+    pub fn spell_at_named(
+        &self,
+        t: f64,
+        radix: BusRadix,
+        names: &[BusValueName],
+    ) -> Option<BusWord> {
+        held_index(&self.times, t).and_then(|index| self.spell_named(index, radix, names))
+    }
+
+    /// The unsigned value of the word held at `t`, when its bits are all 0
+    /// or 1 and there are at most 64 of them.
+    pub fn value_at(&self, t: f64) -> Option<u64> {
+        held_index(&self.times, t)
+            .and_then(|index| self.word(index))
+            .and_then(word_unsigned)
     }
 
     /// The word held at `t`, right-continuously, spelled in `radix`.

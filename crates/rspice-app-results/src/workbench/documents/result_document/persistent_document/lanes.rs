@@ -6,7 +6,7 @@
 //! order as the pane's event-lane order. A bus the run declared is no column
 //! of the source, so the document names it the only way it can: as a user
 //! bus over its member traces under the declared `name[msb:lsb]`, written only
-//! once the reader reads it in another radix or opens it.
+//! once the reader reads it in another radix, opens it or names its words.
 //!
 //! A native mixed run keeps its nets only as event history, so the source has
 //! no column and the document no trace for them. The document holds such a
@@ -175,6 +175,11 @@ pub(super) fn projected_layout(
                 expanded: bus.expanded,
             },
         );
+        if !bus.value_names.is_empty() {
+            layout
+                .value_names
+                .insert(bus.name.clone(), bus.value_names.clone());
+        }
         if !names.declares(&bus.name, &members) {
             layout.user_buses.push(UserLaneBus {
                 name: bus.name.clone(),
@@ -281,13 +286,14 @@ pub(super) fn lane_edits(
             nets,
             radix: view.radix,
             expanded: view.expanded,
+            value_names: layout.value_names(name).to_vec(),
         })
     };
     for user in &layout.user_buses {
         desired.extend(bus(&user.name, &user.members));
     }
     for (label, members) in &names.buses {
-        if layout.bus_view(label) != BusView::default() {
+        if layout.bus_view(label) != BusView::default() || !layout.value_names(label).is_empty() {
             desired.extend(bus(label, members));
         }
     }

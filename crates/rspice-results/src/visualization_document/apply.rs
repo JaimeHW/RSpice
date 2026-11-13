@@ -2053,6 +2053,23 @@ impl VisualizationDocument {
                 ),
             });
         }
+        if bus.value_names.len() > MAX_BUS_VALUE_NAMES
+            || bus
+                .value_names
+                .windows(2)
+                .any(|pair| pair[0].value >= pair[1].value)
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "user-bus.value-names",
+                message: format!(
+                    "bus {:?} names at most {MAX_BUS_VALUE_NAMES} distinct words, in ascending order",
+                    bus.name
+                ),
+            });
+        }
+        for name in &bus.value_names {
+            validate_label("user-bus.value-names", &name.name)?;
+        }
         let mut nets = HashSet::new();
         for net in &bus.nets {
             validate_label("user-bus.nets", net)?;

@@ -199,6 +199,44 @@ pub fn bus_word(codes: &[Option<u8>], radix: BusRadix) -> BusWord {
     }
 }
 
+/// Spell one bus word as [`bus_word`] does, unless the reader named it: a
+/// word whose bits are all 0 or 1 and whose unsigned value `names` lists
+/// reads as that name, whatever the radix.
+pub fn bus_word_named(
+    codes: &[Option<u8>],
+    radix: BusRadix,
+    names: &[crate::visualization_document::BusValueName],
+) -> BusWord {
+    if !names.is_empty()
+        && codes.len() <= MAX_DECIMAL_BUS_BITS
+        && let Some(value) = word_unsigned(codes)
+        && let Some(name) = crate::visualization_document::bus_value_name(names, value)
+    {
+        return BusWord {
+            text: name.to_owned(),
+            fallback: None,
+        };
+    }
+    bus_word(codes, radix)
+}
+
+/// The unsigned value of a word of at most 64 bits whose bits are all 0 or 1.
+pub fn word_unsigned(codes: &[Option<u8>]) -> Option<u64> {
+    use rspice_core::execution::event_code_to_vcd_bit;
+    use rspice_core::io::VcdBit;
+
+    if codes.len() > MAX_DECIMAL_BUS_BITS {
+        return None;
+    }
+    codes
+        .iter()
+        .try_fold(0_u64, |value, code| match event_code_to_vcd_bit(*code)? {
+            VcdBit::Zero => Some(value << 1),
+            VcdBit::One => Some((value << 1) | 1),
+            _ => None,
+        })
+}
+
 /// The hexadecimal spelling of a fully resolved word, declared MSB first.
 ///
 /// Grouped from the least significant bit so the last digit is always a whole
@@ -1049,6 +1087,32 @@ mod tests {
         );
         // A width that is not whole bytes pads the leading character.
         assert_eq!(text("1000001".to_owned()), "\"A\"");
+    }
+
+    #[test]
+    fn a_named_word_reads_as_its_name_in_any_radix() {
+        use crate::visualization_document::BusValueName;
+        let names = [
+            BusValueName {
+                value: 0,
+                name: "IDLE".to_owned(),
+            },
+            BusValueName {
+                value: 5,
+                name: "SHIFT".to_owned(),
+            },
+        ];
+        for radix in BusRadix::ALL {
+            assert_eq!(bus_word_named(&codes("0101"), radix, &names).text, "SHIFT");
+            assert_eq!(bus_word_named(&codes("0000"), radix, &names).text, "IDLE");
+        }
+        assert_eq!(
+            bus_word_named(&codes("0110"), BusRadix::Hex, &names).text,
+            "0x6"
+        );
+        // A word with an unknown bit has no value to name.
+        let unknown = [Some(0_u8), Some(1), Some(2), Some(1)];
+        assert_eq!(bus_word_named(&unknown, BusRadix::Hex, &names).text, "01x1");
     }
 
     #[test]

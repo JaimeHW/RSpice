@@ -8,12 +8,14 @@
 
 use super::model::{BusLane, LogicLane, RealLane};
 use rspice_results::events::projection::BusRadix;
+use rspice_results::visualization_document::BusValueName;
 
 /// One lane the cursor can be read on and stepped along.
 #[derive(Clone, Copy)]
 pub enum EventLane<'a> {
     Logic(&'a LogicLane),
-    Bus(&'a BusLane, BusRadix),
+    /// A bus, read in its radix unless the reader named the word.
+    Bus(&'a BusLane, BusRadix, &'a [BusValueName]),
     Real(&'a RealLane),
 }
 
@@ -36,7 +38,7 @@ impl EventLane<'_> {
     pub fn name(&self) -> &str {
         match self {
             Self::Logic(lane) => lane.name(),
-            Self::Bus(lane, _) => lane.name(),
+            Self::Bus(lane, ..) => lane.name(),
             Self::Real(lane) => lane.name(),
         }
     }
@@ -48,10 +50,13 @@ impl EventLane<'_> {
                 text: level.symbol().to_owned(),
                 fallback: None,
             }),
-            Self::Bus(lane, radix) => lane.spell_at(t, *radix).map(|word| LaneReadout {
-                text: word.text().to_owned(),
-                fallback: word.fallback(),
-            }),
+            Self::Bus(lane, radix, names) => {
+                lane.spell_at_named(t, *radix, names)
+                    .map(|word| LaneReadout {
+                        text: word.text().to_owned(),
+                        fallback: word.fallback(),
+                    })
+            }
             Self::Real(lane) => lane.value_at(t).map(|value| LaneReadout {
                 text: rspice_ui_kit::plot::fmt_significant(value, significant_digits, ""),
                 fallback: None,
@@ -65,8 +70,8 @@ impl EventLane<'_> {
         match (self, step) {
             (Self::Logic(lane), EdgeStep::Next) => lane.next_edge(t),
             (Self::Logic(lane), EdgeStep::Previous) => lane.previous_edge(t),
-            (Self::Bus(lane, _), EdgeStep::Next) => lane.next_edge(t),
-            (Self::Bus(lane, _), EdgeStep::Previous) => lane.previous_edge(t),
+            (Self::Bus(lane, ..), EdgeStep::Next) => lane.next_edge(t),
+            (Self::Bus(lane, ..), EdgeStep::Previous) => lane.previous_edge(t),
             (Self::Real(lane), EdgeStep::Next) => lane.next_edge(t),
             (Self::Real(lane), EdgeStep::Previous) => lane.previous_edge(t),
         }

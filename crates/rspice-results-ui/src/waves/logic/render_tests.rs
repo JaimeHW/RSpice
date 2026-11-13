@@ -124,6 +124,7 @@ fn render() -> Render {
             LaneRow::Bus {
                 lane: bus,
                 radix: BusRadix::Hex,
+                names: &[],
                 expanded: false,
                 members: Vec::new(),
                 color: lane_color,

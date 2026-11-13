@@ -10,7 +10,7 @@ use crate::state::{AnalysisResultPayload, SimulationRun};
 use egui::epaint::ClippedShape;
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
 use rspice_results::events::projection::bus_word;
-use rspice_results::visualization_document::{BusRadix, VisualizationDocument};
+use rspice_results::visualization_document::{BusRadix, BusValueName, VisualizationDocument};
 use rspice_results_ui::waves::lanes::{BusView, EventLaneLayout, LaneKey, UserLaneBus, lane_specs};
 use rspice_results_ui::waves::logic::LOGIC_ROW_HEIGHT;
 use std::sync::OnceLock;
@@ -495,11 +495,30 @@ fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultD
 }
 
 /// A saved view keeps its lanes: which nets are lanes, their order, the
-/// reader's bus and that bus's radix and expansion survive writing the
-/// document out and reading it back into a fresh session.
+/// reader's bus and that bus's radix, expansion and named words survive
+/// writing the document out and reading it back into a fresh session.
 #[test]
 fn radix_and_expansion_survive_save_and_reopen() {
     let (mut state, key) = sar_strip(BusRadix::Unsigned, true);
+    let names = vec![
+        BusValueName {
+            value: 0,
+            name: "ZERO".to_owned(),
+        },
+        BusValueName {
+            value: 255,
+            name: "FULL".to_owned(),
+        },
+    ];
+    state
+        .results
+        .results
+        .session
+        .event_lanes
+        .get_mut(&key)
+        .expect("the strip has its lanes")
+        .value_names
+        .insert("code".to_owned(), names.clone());
     let document_id = {
         let mut parts = state.results_parts();
         super::super::super::create_document::open(&mut parts);
@@ -535,6 +554,7 @@ fn radix_and_expansion_survive_save_and_reopen() {
         saved.user_buses().iter().any(|bus| bus.name == "code"
             && bus.radix == BusRadix::Unsigned
             && bus.expanded
+            && bus.value_names == names
             && bus.nets.len() == BITS.len()),
         "the document holds the reader's bus: {:?}",
         saved.user_buses()
@@ -566,6 +586,7 @@ fn radix_and_expansion_survive_save_and_reopen() {
             expanded: true
         }
     );
+    assert_eq!(layout.value_names("code"), names);
     let models = strip(&mut fresh);
     let model = &models[0];
     let labels: Vec<_> = lane_specs(model, Some(&layout))

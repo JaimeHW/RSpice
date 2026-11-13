@@ -126,6 +126,7 @@ fn reviewed_lanes(document: &mut VisualizationDocument, pane: PaneId, traces: [T
                     nets: Vec::new(),
                     radix: BusRadix::Hex,
                     expanded: true,
+                    value_names: Vec::new(),
                 }),
             ],
         )
@@ -163,6 +164,7 @@ fn lane_kinds_radix_and_user_buses_survive_a_save_and_reload() {
             nets: Vec::new(),
             radix: BusRadix::Hex,
             expanded: true,
+            value_names: Vec::new(),
         }]
     );
     assert_eq!(
@@ -195,6 +197,76 @@ fn a_bus_lane_keeps_its_radix_and_expansion_across_a_reload() {
     );
     let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
     assert_eq!(reloaded.traces()[0].lane, lane);
+}
+
+/// A bus's named words are part of its definition: saved, reloaded, and
+/// refused when they are not distinct and ascending. A document from before
+/// they existed cannot hold any.
+#[test]
+fn a_bus_keeps_its_value_names_across_a_reload() {
+    let (mut document, pane, [bit1, bit0, _]) = lane_document();
+    let named = |value: u64, name: &str| BusValueName {
+        value,
+        name: name.to_owned(),
+    };
+    for (trace_id, kind) in [(bit1, TraceLaneKind::Logic), (bit0, TraceLaneKind::Logic)] {
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::SetTraceLane {
+                    trace_id,
+                    lane: TraceLane {
+                        kind,
+                        ..TraceLane::default()
+                    },
+                }],
+            )
+            .unwrap();
+    }
+    let bus = |value_names: Vec<BusValueName>| UserBus {
+        pane_id: pane,
+        name: "state".to_owned(),
+        members: vec![bit1, bit0],
+        nets: Vec::new(),
+        radix: BusRadix::Unsigned,
+        expanded: false,
+        value_names,
+    };
+    let states = vec![named(0, "IDLE"), named(1, "LOAD"), named(3, "DONE")];
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::DefineUserBus(bus(states.clone()))],
+        )
+        .unwrap();
+    let saved = serde_json::to_value(&document).unwrap();
+    assert_eq!(saved["schema_version"], serde_json::json!(12));
+    assert_eq!(
+        saved["user_buses"][0]["value_names"][2],
+        serde_json::json!({"value": 3, "name": "DONE"})
+    );
+    let reloaded: VisualizationDocument = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(reloaded.user_buses()[0].value_names, states);
+    assert_eq!(bus_value_name(&states, 3), Some("DONE"));
+    assert_eq!(bus_value_name(&states, 2), None);
+
+    let mut legacy = saved;
+    legacy["schema_version"] = serde_json::json!(11);
+    assert!(serde_json::from_value::<VisualizationDocument>(legacy).is_err());
+
+    for unordered in [
+        vec![named(1, "LOAD"), named(0, "IDLE")],
+        vec![named(1, "LOAD"), named(1, "AGAIN")],
+    ] {
+        assert!(
+            document
+                .transact(
+                    document.revision(),
+                    vec![DocumentEdit::DefineUserBus(bus(unordered))],
+                )
+                .is_err()
+        );
+    }
 }
 
 /// A schema-8 document is one whose every trace is a value lane and that
@@ -258,6 +330,7 @@ fn a_user_bus_groups_distinct_logic_lanes_of_its_own_pane() {
             nets: Vec::new(),
             radix: BusRadix::Binary,
             expanded: false,
+            value_names: Vec::new(),
         })
     };
     for members in [vec![], vec![bit1, bit1], vec![bit1, real]] {
@@ -293,6 +366,7 @@ fn a_user_bus_groups_distinct_logic_lanes_of_its_own_pane() {
                 nets: Vec::new(),
                 radix: BusRadix::Unsigned,
                 expanded: false,
+                value_names: Vec::new(),
             })],
         )
         .unwrap();
@@ -456,6 +530,7 @@ fn history_only_nets_are_held_by_name() {
         nets,
         radix: BusRadix::Unsigned,
         expanded: true,
+        value_names: Vec::new(),
     };
     let lanes = vec![
         EventLaneRef::Net {

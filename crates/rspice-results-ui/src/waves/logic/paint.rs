@@ -14,6 +14,7 @@ use super::model::{BusLane, LogicLane, LogicLevel};
 use super::plan::{LaneStroke, TimeMapping, plan_lane};
 use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, pos2};
 use rspice_results::events::projection::BusRadix;
+use rspice_results::visualization_document::BusValueName;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 
@@ -194,7 +195,8 @@ fn elided_word(
     })
 }
 
-/// Paint a bus lane into `rect`, its words spelled in `radix`.
+/// Paint a bus lane into `rect`, its words spelled in `radix` unless the
+/// reader named them.
 ///
 /// A label is drawn whole where it fits between its segment's pointed ends,
 /// elided where only part of it does; a narrower segment shows its outline
@@ -203,7 +205,7 @@ pub fn paint_bus_lane(
     painter: &Painter,
     rect: Rect,
     lane: &BusLane,
-    radix: BusRadix,
+    (radix, names): (BusRadix, &[BusValueName]),
     map: &TimeMapping,
     style: &LaneStyle,
 ) {
@@ -232,7 +234,7 @@ pub fn paint_bus_lane(
                 painter.add(Shape::convex_polygon(outline, fill, stroke));
                 let width = x1 - x0 - 2.0 * (BUS_SLANT + LABEL_CLEARANCE);
                 if x1 - x0 >= MIN_LABELLED_SEGMENT
-                    && let Some(word) = lane.spell(index, radix)
+                    && let Some(word) = lane.spell_named(index, radix, names)
                 {
                     let galley = painter.layout_no_wrap(
                         word.text().to_owned(),

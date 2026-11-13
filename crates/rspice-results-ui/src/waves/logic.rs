@@ -27,6 +27,7 @@ pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
 pub use plan::{LaneStroke, TimeMapping, plan_lane};
 pub use real::real_step_trace;
 pub use rspice_results::events::projection::BusRadix;
+pub use rspice_results::visualization_document::BusValueName;
 
 use egui::{Color32, Rect, Sense, Ui, pos2, vec2};
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -61,6 +62,8 @@ pub enum LaneRow<'a> {
     Bus {
         lane: &'a BusLane,
         radix: BusRadix,
+        /// The names the reader gave the bus's words, ascending by value.
+        names: &'a [BusValueName],
         expanded: bool,
         /// The member lanes an expanded bus shows under it, MSB first.
         members: Vec<&'a LogicLane>,
@@ -73,7 +76,9 @@ impl<'a> LaneRow<'a> {
     pub fn event_lane(&self) -> EventLane<'a> {
         match self {
             Self::Logic { lane, .. } => EventLane::Logic(lane),
-            Self::Bus { lane, radix, .. } => EventLane::Bus(lane, *radix),
+            Self::Bus {
+                lane, radix, names, ..
+            } => EventLane::Bus(lane, *radix, names),
         }
     }
 
@@ -145,6 +150,9 @@ pub struct LaneStackResponse {
     pub toggle_expanded: Option<usize>,
     /// Read a bus row in another radix.
     pub set_radix: Option<(usize, BusRadix)>,
+    /// Replace the names of a bus row's words, ascending by value; empty
+    /// names none.
+    pub set_value_names: Option<(usize, Vec<BusValueName>)>,
     /// Group these logic rows, MSB first, into a user bus.
     pub group: Option<Vec<usize>>,
     /// Ungroup a user bus row.
@@ -417,6 +425,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             LaneRow::Bus {
                 lane,
                 radix,
+                names,
                 expanded,
                 members,
                 color,
@@ -445,14 +454,21 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                             },
                         columns,
                         lane.name(),
-                        readout(EventLane::Bus(lane, *radix)).as_deref(),
+                        readout(EventLane::Bus(lane, *radix, names)).as_deref(),
                         &tokens,
                     )
                     .map(|cell| (cell, lane.name())),
                 );
                 let style = LaneStyle::new(&tokens, *color);
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, main.y_range());
-                paint_bus_lane(&lane_painter, lane_rect, lane, *radix, &map, &style);
+                paint_bus_lane(
+                    &lane_painter,
+                    lane_rect,
+                    lane,
+                    (*radix, names),
+                    &map,
+                    &style,
+                );
                 if *expanded {
                     let mut member_top = main.bottom();
                     for member in members {
@@ -603,6 +619,148 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     output
 }
 
+/// A word of `width` bits, given as its unsigned value, spelled in `radix`.
+pub fn spell_value(value: u64, width: usize, radix: BusRadix) -> String {
+    let codes: Vec<Option<u8>> = (0..width)
+        .rev()
+        .map(|bit| Some(u8::from(bit < 64 && (value >> bit) & 1 == 1)))
+        .collect();
+    let radix = if radix == BusRadix::Ascii {
+        BusRadix::Hex
+    } else {
+        radix
+    };
+    rspice_results::events::projection::bus_word(&codes, radix)
+        .text()
+        .to_owned()
+}
+
+/// The unsigned value of a word the reader typed for a bus of `width` bits:
+/// `0x`, `0o` or `0b` digits, a binary word as wide as the bus when it reads
+/// in binary, a negative number in two's complement when it reads signed,
+/// and decimal otherwise. `None` when it is no word of that width.
+pub fn parse_word(text: &str, width: usize, radix: BusRadix) -> Option<u64> {
+    let text = text.trim().replace('_', "");
+    let lower = text.to_ascii_lowercase();
+    let value = if let Some(digits) = lower.strip_prefix("0x") {
+        u64::from_str_radix(digits, 16).ok()?
+    } else if let Some(digits) = lower.strip_prefix("0o") {
+        u64::from_str_radix(digits, 8).ok()?
+    } else if let Some(digits) = lower.strip_prefix("0b") {
+        u64::from_str_radix(digits, 2).ok()?
+    } else if radix == BusRadix::Binary
+        && text.len() == width
+        && text.chars().all(|c| c == '0' || c == '1')
+    {
+        u64::from_str_radix(&text, 2).ok()?
+    } else if let Some(magnitude) = text.strip_prefix('-') {
+        let magnitude: u64 = magnitude.parse().ok()?;
+        if radix != BusRadix::Signed || width == 0 || width > 64 {
+            return None;
+        }
+        if magnitude > 1_u64 << (width - 1) {
+            return None;
+        }
+        let modulus = if width == 64 { 0 } else { 1_u64 << width };
+        modulus.wrapping_sub(magnitude)
+    } else {
+        text.parse().ok()?
+    };
+    (width >= 64 || value >> width == 0).then_some(value)
+}
+
+/// The value-name editor of a bus row: the names it has, each with a remove
+/// control, and a value and a name to add, the value starting as the word at
+/// the cursor.
+fn value_names_menu(
+    ui: &mut Ui,
+    lane: &BusLane,
+    radix: BusRadix,
+    names: &[BusValueName],
+    cursor: Option<f64>,
+    index: usize,
+    output: &mut LaneStackResponse,
+) {
+    let width = lane.members().len();
+    if width > 64 {
+        ui.label("Wider than 64 bits: no word to name");
+        return;
+    }
+    let mut remove = None;
+    egui::Grid::new(ui.id().with("value-names"))
+        .num_columns(3)
+        .spacing([8.0, 2.0])
+        .show(ui, |ui| {
+            for (row, name) in names.iter().enumerate() {
+                ui.monospace(spell_value(name.value, width, radix));
+                ui.label(&name.name);
+                if ui.small_button("Remove").clicked() {
+                    remove = Some(row);
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(row) = remove {
+        let mut kept = names.to_vec();
+        kept.remove(row);
+        output.set_value_names = Some((index, kept));
+        ui.close();
+        return;
+    }
+    if !names.is_empty() {
+        ui.separator();
+    }
+    let id = ui.id().with(("value-name-draft", lane.name()));
+    let (mut value, mut name) = ui
+        .data(|data| data.get_temp::<(String, String)>(id))
+        .unwrap_or_else(|| {
+            let at_cursor = cursor
+                .and_then(|t| lane.value_at(t))
+                .map(|value| spell_value(value, width, radix))
+                .unwrap_or_default();
+            (at_cursor, String::new())
+        });
+    let parsed = parse_word(&value, width, radix);
+    let mut add = false;
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut value)
+                .desired_width(72.0)
+                .hint_text("Value"),
+        );
+        let named = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .desired_width(96.0)
+                .hint_text("Name"),
+        );
+        let ready = parsed.is_some() && !name.trim().is_empty();
+        add = ui.add_enabled(ready, egui::Button::new("Add")).clicked()
+            || (ready
+                && named.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+    });
+    if parsed.is_none() && !value.trim().is_empty() {
+        ui.label(format!("Not a {width}-bit word"));
+    }
+    if add && let Some(value) = parsed {
+        let mut updated: Vec<BusValueName> = names
+            .iter()
+            .filter(|held| held.value != value)
+            .cloned()
+            .collect();
+        updated.push(BusValueName {
+            value,
+            name: name.trim().to_owned(),
+        });
+        updated.sort_by_key(|held| held.value);
+        output.set_value_names = Some((index, updated));
+        ui.data_mut(|data| data.remove::<(String, String)>(id));
+        ui.close();
+    } else {
+        ui.data_mut(|data| data.insert_temp(id, (value, name)));
+    }
+}
+
 /// The row menu: the lane's cross-probes, a bus's radix and grouping, and
 /// grouping a logic selection.
 fn lane_menu(
@@ -648,13 +806,20 @@ fn lane_menu(
     if member.is_some() {
         return;
     }
-    if let LaneRow::Bus { lane, radix, .. } = row {
+    if let LaneRow::Bus {
+        lane, radix, names, ..
+    } = row
+    {
         for (candidate, label) in BUS_RADIXES {
             if ui.radio(*radix == candidate, label).clicked() {
                 output.set_radix = Some((index, candidate));
                 ui.close();
             }
         }
+        ui.separator();
+        ui.menu_button("Value names", |ui| {
+            value_names_menu(ui, lane, *radix, names, input.cursor, index, output);
+        });
         if lane.origin() == BusOrigin::User {
             ui.separator();
             if ui.button("Ungroup").clicked() {

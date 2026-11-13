@@ -322,7 +322,7 @@ fn the_cursor_reads_right_continuously_and_steps_onto_event_instants() {
     }
     assert_eq!(visited, lanes.logic("p").unwrap().times()[1..]);
 
-    let b = EventLane::Bus(lanes.bus("b").unwrap(), BusRadix::Unsigned);
+    let b = EventLane::Bus(lanes.bus("b").unwrap(), BusRadix::Unsigned, &[]);
     assert_eq!(
         b.readout_at(55.0 * NS, 4),
         Some(LaneReadout {
@@ -423,6 +423,7 @@ fn a_lane_names_the_digital_quantity_of_its_net_for_cross_probing() {
     let bus = LaneRow::Bus {
         lane: lanes.bus("b").unwrap(),
         radix: BusRadix::Hex,
+        names: &[],
         expanded: true,
         members: ["b[3]", "b[2]", "b[1]", "b[0]"]
             .into_iter()
@@ -641,4 +642,34 @@ fn clicking_a_marker_moves_the_cursor_and_asks_for_its_source_line() {
     assert_eq!(span.select_assertion, Some(0));
     assert_eq!(span.cursor_to, Some(70.0 * NS));
     assert_eq!(span.open_source, None);
+}
+
+/// A word the reader types for a value name reads in any radix's own
+/// spelling, and one wider than the bus is no word of it.
+#[test]
+fn a_typed_word_reads_in_the_buses_spellings() {
+    use super::{parse_word, spell_value};
+    assert_eq!(parse_word("0x2a", 8, BusRadix::Hex), Some(42));
+    assert_eq!(parse_word("0o52", 8, BusRadix::Unsigned), Some(42));
+    assert_eq!(parse_word("0b0010_1010", 8, BusRadix::Hex), Some(42));
+    assert_eq!(parse_word("00101010", 8, BusRadix::Binary), Some(42));
+    assert_eq!(parse_word("42", 8, BusRadix::Binary), Some(42));
+    assert_eq!(parse_word("-1", 8, BusRadix::Signed), Some(255));
+    assert_eq!(parse_word("-128", 8, BusRadix::Signed), Some(128));
+    assert_eq!(parse_word("-129", 8, BusRadix::Signed), None);
+    assert_eq!(parse_word("-1", 8, BusRadix::Unsigned), None);
+    assert_eq!(parse_word("256", 8, BusRadix::Unsigned), None);
+    assert_eq!(parse_word("IDLE", 8, BusRadix::Hex), None);
+    assert_eq!(spell_value(42, 8, BusRadix::Hex), "0x2a");
+    assert_eq!(spell_value(42, 8, BusRadix::Octal), "0o052");
+    assert_eq!(spell_value(255, 8, BusRadix::Signed), "-1");
+    assert_eq!(spell_value(42, 8, BusRadix::Ascii), "0x2a");
+    for radix in BusRadix::ALL {
+        let spelled = spell_value(200, 8, radix);
+        assert_eq!(
+            parse_word(&spelled, 8, radix),
+            Some(200),
+            "{radix:?} {spelled}"
+        );
+    }
 }
