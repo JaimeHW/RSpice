@@ -8,7 +8,7 @@
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::workspace::ProjectLibraryPublicationReceipt;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
@@ -31,14 +31,14 @@ struct PublicationDraft {
 }
 
 impl PublicationDraft {
-    fn new(state: &AppState) -> Self {
+    fn new(model: &Model) -> Self {
         Self {
-            source_project_revision: state.model.workspace.content.project.revision().get(),
-            source_library_revision: state.model.library_manager.revision(),
+            source_project_revision: model.workspace.content.project.revision().get(),
+            source_library_revision: model.library_manager.revision(),
             label: format!(
                 "{}-library-r{}",
-                state.model.workspace.content.project.name(),
-                state.model.workspace.content.project.revision().get()
+                model.workspace.content.project.name(),
+                model.workspace.content.project.revision().get()
             ),
             actor_id: String::new(),
             authority_id: String::new(),
@@ -157,19 +157,18 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
-pub(super) fn open_publication(ctx: &Context, state: &AppState) {
+pub(super) fn open_publication(ctx: &Context, model: &Model) {
     ctx.data_mut(|data| {
         data.remove::<RollbackDraft>(egui::Id::new(ROLLBACK_DIALOG_ID));
         data.insert_temp(
             egui::Id::new(PUBLICATION_DIALOG_ID),
-            PublicationDraft::new(state),
+            PublicationDraft::new(model),
         );
     });
 }
 
-pub(super) fn open_rollback(ctx: &Context, state: &AppState) {
-    let Some(receipt) = state
-        .model
+pub(super) fn open_rollback(ctx: &Context, model: &Model) {
+    let Some(receipt) = model
         .workspace
         .content
         .project
@@ -1427,7 +1426,7 @@ mod tests {
     }
 
     fn complete_publication_draft(app: &RSpiceApp) -> PublicationDraft {
-        let mut draft = PublicationDraft::new(&app.state);
+        let mut draft = PublicationDraft::new(&app.state.model);
         draft.label = "analog-core-1.0.0".to_owned();
         draft.actor_id = "release-engineer@example.test".to_owned();
         draft.authority_id = "organization-release-authority".to_owned();
@@ -1445,7 +1444,7 @@ mod tests {
         assert!(!audit_text_valid(&"x".repeat(241)));
 
         let app = RSpiceApp::test_instance();
-        let mut draft = PublicationDraft::new(&app.state);
+        let mut draft = PublicationDraft::new(&app.state.model);
         assert!(draft.field_error().is_some());
         draft = complete_publication_draft(&app);
         assert!(draft.field_error().is_none());
@@ -1563,7 +1562,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        open_publication(&ctx, &app.state);
+        open_publication(&ctx, &app.state.model);
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1586,7 +1585,7 @@ mod tests {
         assert!(labels.iter().any(|label| label == "Actor identity"));
         assert!(labels.iter().any(|label| label == "Authority identity"));
 
-        open_rollback(&ctx, &app.state);
+        open_rollback(&ctx, &app.state.model);
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| show(ctx, &mut app));
         let labels = output
             .platform_output

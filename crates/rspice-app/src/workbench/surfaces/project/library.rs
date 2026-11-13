@@ -6,12 +6,12 @@
 
 use super::*;
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::features::{self, render_dialog};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 
 mod builtin_models;
 
@@ -61,30 +61,14 @@ struct BrowserRowSpec<'a> {
     read_only: bool,
 }
 
-/// The Library page as the shell composes it: the browser, then the open
-/// built-in source and the detail, each in the project feature's context, and
-/// what the reader asked of each carried out as its call returns. The detail
-/// reads the selection the browser's intent writes, so that intent is carried
-/// out before the detail draws. Then the reports, publication and the
-/// membership dialogs.
+/// The Library page as the shell composes it: the page in the project
+/// feature's context, with what it raised answered as it returns, then the
+/// publication dialogs, which write their file through the application, and
+/// the membership dialogs.
 pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     let ctx = ui.ctx().clone();
-    let (intent, source_height) = library_browser(ui, &mut features::cx(app));
-    if let Some(intent) = intent {
-        apply_library_intent(&ctx, app, intent);
-    }
-    if app.state.project.builtin_models.open {
-        if let Some(intent) = builtin_source(ui, &mut features::cx(app), source_height) {
-            apply_library_intent(&ctx, app, intent);
-        }
-        if let Some(intent) = builtin_detail(ui, &features::cx(app)) {
-            apply_library_intent(&ctx, app, intent);
-        }
-    } else if let Some(intent) = library_detail(ui, &features::cx(app)) {
-        apply_library_intent(&ctx, app, intent);
-    }
-    show_library_usage_report(&ctx);
-    show_library_audit_history(&ctx, &app.state);
+    page(ui, &mut features::cx(app));
+    app.after_contribution();
     super::library_publication::show(&ctx, app);
     // The library and view membership modals are reachable only from this
     // surface's own routes, so this surface owns their frame. Each draws
@@ -94,6 +78,31 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     render_dialog(app, &ctx, DialogKey("project.rename_library"));
     render_dialog(app, &ctx, DialogKey("project.delete_library"));
     render_dialog(app, &ctx, DialogKey("project.rename_view"));
+}
+
+/// The Library page: the browser, then the open built-in source and the
+/// detail, and what the reader asked of each carried out as its call
+/// returns, or raised for the shell when it opens a view or runs a command.
+/// The detail reads the selection the browser's intent writes, so that
+/// intent is carried out before the detail draws. Then the reports.
+pub(super) fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    let ctx = ui.ctx().clone();
+    let (intent, source_height) = library_browser(ui, cx);
+    if let Some(intent) = intent {
+        apply_library_intent(&ctx, cx, intent);
+    }
+    if cx.state.builtin_models.open {
+        if let Some(intent) = builtin_source(ui, cx, source_height) {
+            apply_library_intent(&ctx, cx, intent);
+        }
+        if let Some(intent) = builtin_detail(ui, cx) {
+            apply_library_intent(&ctx, cx, intent);
+        }
+    } else if let Some(intent) = library_detail(ui, cx) {
+        apply_library_intent(&ctx, cx, intent);
+    }
+    show_library_usage_report(&ctx);
+    show_library_audit_history(&ctx, cx.model);
 }
 
 /// The browser: the selection repaired to a real library, cell and view, the
@@ -888,39 +897,33 @@ fn selected_view(
     ))
 }
 
-fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryIntent) {
+/// Carry out what the reader asked of the page: the feature's own intents
+/// in place, and opening a view or creating a cell raised for the shell,
+/// which answers them once the page returns.
+fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, intent: LibraryIntent) {
     match intent {
-        LibraryIntent::BuiltinModels(intent) => builtin_models::apply(&mut app.state, intent),
+        LibraryIntent::BuiltinModels(intent) => builtin_models::apply(cx, intent),
         LibraryIntent::SelectLibrary(library) => {
-            app.state.project.builtin_models.open = false;
-            app.state.model.library_manager.select_library(&library);
+            cx.state.builtin_models.open = false;
+            cx.model.library_manager.select_library(&library);
         }
         LibraryIntent::SelectCell { library, cell } => {
-            app.state.model.library_manager.select_cell(&library, &cell);
+            cx.model.library_manager.select_cell(&library, &cell);
         }
         LibraryIntent::SelectView(reference) => {
-            app.state.model.library_manager.select_view(
+            cx.model.library_manager.select_view(
                 &reference.library,
                 &reference.cell,
                 &reference.view,
             );
         }
         LibraryIntent::OpenView(reference, view_type) => {
-            app.state.open_workspace_view(reference);
-            // Source views are cell views too: Design shows a Verilog-A
-            // module's editor and states what a SPICE or Verilog view is
-            // bound to.
-            let workspace = match view_type {
-                ViewType::Config => {
-                    app.state.project.project_page = ProjectPage::Configuration;
-                    Workspace::Project
-                }
-                _ => Workspace::Design,
-            };
-            Command::OpenWorkspace(workspace).execute(app);
+            cx.wb
+                .outbox
+                .push(ProjectRequest::OpenView(reference, view_type));
         }
         LibraryIntent::ReportUsage(reference) => {
-            let consumers = library_view_usage(&app.state, &reference);
+            let consumers = library_view_usage(cx.model, &reference);
             let count = consumers.len();
             ctx.data_mut(|data| {
                 data.insert_temp(
@@ -931,93 +934,68 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                     },
                 );
             });
-            app.state.prompt(format!(
+            cx.wb.prompt(format!(
                 "{} has {count} loaded schematic consumer{}.",
                 reference.display_path(),
                 if count == 1 { "" } else { "s" }
             ));
         }
-        LibraryIntent::NewLibrary => {
-            let state = &mut app.state;
-            state.project.open_new_library_dialog(&state.model);
-        }
+        LibraryIntent::NewLibrary => cx.state.open_new_library_dialog(cx.model),
         LibraryIntent::RenameLibrary(library) => {
-            let state = &mut app.state;
-            if let Err(error) = state
-                .project
-                .open_rename_library_dialog(&state.model, &library)
-            {
-                app.state.prompt(error);
+            if let Err(error) = cx.state.open_rename_library_dialog(cx.model, &library) {
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::DeleteLibrary(library) => {
-            let state = &mut app.state;
-            if let Err(error) = state
-                .project
-                .open_delete_library_review(&state.model, &library)
-            {
-                app.state.prompt(error);
+            if let Err(error) = cx.state.open_delete_library_review(cx.model, &library) {
+                cx.wb.prompt(error);
             }
         }
-        LibraryIntent::NewCell => app.execute_command_key(ProjectCommand::NewCell.key()),
+        LibraryIntent::NewCell => cx.execute(ProjectCommand::NewCell.key()),
         LibraryIntent::NewView { library, cell } => {
-            let state = &mut app.state;
-            if let Err(error) =
-                state
-                    .project
-                    .open_new_view_dialog(&state.model, &library, &cell, None)
+            if let Err(error) = cx
+                .state
+                .open_new_view_dialog(cx.model, &library, &cell, None)
             {
-                app.state.prompt(error);
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::CopyCell { library, cell } => {
-            let state = &mut app.state;
-            if let Err(error) = state
-                .project
-                .open_copy_cell_dialog(&state.model, &library, &cell)
-            {
-                app.state.prompt(error);
+            if let Err(error) = cx.state.open_copy_cell_dialog(cx.model, &library, &cell) {
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::RenameCell { library, cell } => {
-            let state = &mut app.state;
-            if let Err(error) = state
-                .project
-                .open_rename_cell_dialog(&state.model, &library, &cell)
-            {
-                app.state.prompt(error);
+            if let Err(error) = cx.state.open_rename_cell_dialog(cx.model, &library, &cell) {
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::DeleteCell { library, cell } => {
-            let state = &mut app.state;
-            if let Err(error) =
-                state
-                    .project
-                    .open_library_cell_deletion_review(&state.model, &library, &cell)
+            if let Err(error) = cx
+                .state
+                .open_library_cell_deletion_review(cx.model, &library, &cell)
             {
-                app.state.prompt(error);
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::RenameView(reference) => {
-            let state = &mut app.state;
-            if let Err(error) = state.project.open_rename_view_dialog(
-                &state.model,
+            if let Err(error) = cx.state.open_rename_view_dialog(
+                cx.model,
                 &reference.library,
                 &reference.cell,
                 &reference.view,
             ) {
-                app.state.prompt(error);
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::DeleteView(reference) => {
-            let state = &mut app.state;
-            if let Err(error) = state.project.open_library_view_deletion_review(
-                &state.model,
+            if let Err(error) = cx.state.open_library_view_deletion_review(
+                cx.model,
                 &reference.library,
                 &reference.cell,
                 &reference.view,
             ) {
-                app.state.prompt(error);
+                cx.wb.prompt(error);
             }
         }
         LibraryIntent::ShowAuditHistory => {
@@ -1026,17 +1004,16 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             });
         }
         LibraryIntent::PublishLibrary => {
-            super::library_publication::open_publication(ctx, &app.state);
+            super::library_publication::open_publication(ctx, cx.model);
         }
         LibraryIntent::RollbackPublication => {
-            super::library_publication::open_rollback(ctx, &app.state);
+            super::library_publication::open_rollback(ctx, cx.model);
         }
     }
 }
 
-fn library_view_usage(state: &AppState, reference: &CellViewRef) -> Vec<String> {
-    state
-        .model
+fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<String> {
+    model
         .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
         .into_iter()
         .map(|usage| format!("{} / {}", usage.schematic.display_path(), usage.instance))
@@ -1083,7 +1060,7 @@ fn show_library_usage_report(ctx: &Context) {
     }
 }
 
-fn show_library_audit_history(ctx: &Context, state: &AppState) {
+fn show_library_audit_history(ctx: &Context, model: &Model) {
     if !ctx.data(|data| {
         data.get_temp::<bool>(egui::Id::new(AUDIT_REPORT_ID))
             .unwrap_or(false)
@@ -1091,13 +1068,8 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
         return;
     }
 
-    let receipts = state
-        .model
-        .workspace
-        .content
-        .project
-        .library_mutation_audit();
-    let publications = state.model.workspace.content.project.library_publications();
+    let receipts = model.workspace.content.project.library_mutation_audit();
+    let publications = model.workspace.content.project.library_publications();
     let description = format!(
         "{} recorded library change{} and {} publication{}.",
         receipts.len(),
@@ -1113,19 +1085,12 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
                 property_row(
                     ui,
                     "Project revision",
-                    &state
-                        .model
-                        .workspace
-                        .content
-                        .project
-                        .revision()
-                        .get()
-                        .to_string(),
+                    &model.workspace.content.project.revision().get().to_string(),
                 );
                 property_row(
                     ui,
                     "Library revision",
-                    &state.model.library_manager.revision().to_string(),
+                    &model.library_manager.revision().to_string(),
                 );
                 property_row(ui, "Retained receipts", &receipts.len().to_string());
                 property_row(ui, "Retained publications", &publications.len().to_string());
@@ -1355,6 +1320,13 @@ mod tests {
             .collect()
     }
 
+    /// Carry `intent` out as the page does, then answer what it raised, as
+    /// the shell does once the page returns.
+    fn apply_and_answer(ctx: &egui::Context, app: &mut RSpiceApp, intent: LibraryIntent) {
+        apply_library_intent(ctx, &mut features::cx(app), intent);
+        app.after_contribution();
+    }
+
     /// A column too narrow for a row's name and its meta keeps the name.
     #[test]
     fn a_narrow_row_gives_up_its_meta_before_printing_over_its_name() {
@@ -1434,7 +1406,7 @@ mod tests {
             let mut app = RSpiceApp::test_instance();
             app.state.workbench.activate(Workspace::Models);
             let reference = app.state.model.workspace.content.active_view.clone();
-            apply_library_intent(
+            apply_and_answer(
                 &egui::Context::default(),
                 &mut app,
                 LibraryIntent::OpenView(reference, view_type),
@@ -1451,7 +1423,7 @@ mod tests {
     fn configuration_views_route_to_the_project_configuration_page() {
         let mut app = RSpiceApp::test_instance();
         let reference = app.state.model.workspace.content.active_view.clone();
-        apply_library_intent(
+        apply_and_answer(
             &egui::Context::default(),
             &mut app,
             LibraryIntent::OpenView(reference, ViewType::Config),
@@ -1470,7 +1442,7 @@ mod tests {
         app.state.model.library_manager.add_library(library);
         let ctx = egui::Context::default();
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::NewView {
@@ -1482,7 +1454,7 @@ mod tests {
         assert_eq!(app.state.project.new_view_library, "intent_test");
         assert_eq!(app.state.project.new_view_cell, "filter");
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::CopyCell {
@@ -1494,7 +1466,7 @@ mod tests {
         assert_eq!(app.state.project.copy_cell_source_library, "intent_test");
         assert_eq!(app.state.project.copy_cell_source_cell, "filter");
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::RenameCell {
@@ -1506,7 +1478,7 @@ mod tests {
         assert_eq!(app.state.project.rename_cell_library, "intent_test");
         assert_eq!(app.state.project.rename_cell_current, "filter");
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::DeleteView(CellViewRef::new("intent_test", "filter", "symbol")),
@@ -1522,7 +1494,7 @@ mod tests {
         );
         app.state.project.library_deletion_review.close();
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::DeleteCell {
@@ -1540,7 +1512,7 @@ mod tests {
             Some("intent_test/filter".to_owned())
         );
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::RenameView(CellViewRef::new("intent_test", "filter", "symbol")),
@@ -1550,10 +1522,10 @@ mod tests {
         assert_eq!(app.state.project.rename_view_cell, "filter");
         assert_eq!(app.state.project.rename_view_current, "symbol");
 
-        apply_library_intent(&ctx, &mut app, LibraryIntent::NewLibrary);
+        apply_and_answer(&ctx, &mut app, LibraryIntent::NewLibrary);
         assert!(app.state.project.new_library_dialog);
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::RenameLibrary("intent_test".to_owned()),
@@ -1561,7 +1533,7 @@ mod tests {
         assert!(app.state.project.rename_library_dialog);
         assert_eq!(app.state.project.rename_library_current, "intent_test");
 
-        apply_library_intent(
+        apply_and_answer(
             &ctx,
             &mut app,
             LibraryIntent::DeleteLibrary("intent_test".to_owned()),
@@ -1597,7 +1569,7 @@ mod tests {
             LibraryIntent::RenameLibrary("missing".to_owned()),
             LibraryIntent::DeleteLibrary("missing".to_owned()),
         ] {
-            apply_library_intent(&ctx, &mut app, intent);
+            apply_and_answer(&ctx, &mut app, intent);
         }
 
         assert!(!app.state.project.new_view_dialog);
@@ -1630,7 +1602,7 @@ mod tests {
             .workspace
             .insert_schematic_editor("work/consumer/schematic".to_owned(), inactive);
 
-        let consumers = library_view_usage(&app.state, &reference);
+        let consumers = library_view_usage(&app.state.model, &reference);
         assert_eq!(consumers.len(), 2);
         assert!(
             consumers
@@ -1644,7 +1616,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let ctx = egui::Context::default();
 
-        apply_library_intent(&ctx, &mut app, LibraryIntent::ShowAuditHistory);
+        apply_and_answer(&ctx, &mut app, LibraryIntent::ShowAuditHistory);
 
         assert!(ctx.data(|data| {
             data.get_temp::<bool>(egui::Id::new(AUDIT_REPORT_ID))
@@ -1657,7 +1629,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let ctx = egui::Context::default();
 
-        apply_library_intent(&ctx, &mut app, LibraryIntent::PublishLibrary);
+        apply_and_answer(&ctx, &mut app, LibraryIntent::PublishLibrary);
         assert!(super::library_publication::publication_dialog_open(&ctx));
         assert!(!super::library_publication::rollback_dialog_open(&ctx));
 
@@ -1671,7 +1643,7 @@ mod tests {
         .expect("publication candidate prepares");
         commit_project_library_publication(&mut app.state, candidate)
             .expect("test-owned durable boundary commits");
-        apply_library_intent(&ctx, &mut app, LibraryIntent::RollbackPublication);
+        apply_and_answer(&ctx, &mut app, LibraryIntent::RollbackPublication);
 
         assert!(!super::library_publication::publication_dialog_open(&ctx));
         assert!(super::library_publication::rollback_dialog_open(&ctx));

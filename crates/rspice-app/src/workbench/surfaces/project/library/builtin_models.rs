@@ -66,16 +66,16 @@ fn select_model(browser: &mut BuiltinModelsBrowser, registry_name: &str) {
 }
 
 /// Answer one of the built-in library's intents.
-pub(super) fn apply(state: &mut AppState, intent: BuiltinModelsIntent) {
+pub(super) fn apply(cx: &mut Cx<'_, ProjectFeature>, intent: BuiltinModelsIntent) {
     if let BuiltinModelsIntent::CopyModel(registry_name) = intent {
-        if let Err(error) = state
-            .project
-            .open_copy_builtin_model_dialog(&state.model, registry_name)
+        if let Err(error) = cx
+            .state
+            .open_copy_builtin_model_dialog(cx.model, registry_name)
         {
-            state.prompt(error);
+            cx.wb.prompt(error);
         }
     } else {
-        browse(&mut state.project.builtin_models, intent);
+        browse(&mut cx.state.builtin_models, intent);
     }
 }
 
@@ -389,6 +389,7 @@ pub(super) fn source_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     fn opened_on_a_model_with_includes() -> (BuiltinModelsBrowser, &'static BuiltinVerilogAModel) {
         let model = BUILTIN_VERILOGA_MODELS
