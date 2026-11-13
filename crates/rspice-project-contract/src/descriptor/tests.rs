@@ -50,87 +50,36 @@ fn project_identity_is_stable_and_rename_is_atomic() {
 }
 
 #[test]
-fn legacy_project_descriptor_identity_migration_is_deterministic() {
-    let original = ProjectDescriptor::default();
-    let mut legacy = serde_json::to_value(&original).expect("descriptor serializes");
-    legacy
-        .as_object_mut()
-        .expect("descriptor is an object")
-        .remove("id");
-    legacy
-        .as_object_mut()
-        .expect("descriptor is an object")
-        .remove("schema_version");
-    legacy
-        .as_object_mut()
-        .expect("descriptor is an object")
-        .remove("revision");
-    let legacy_json = serde_json::to_string(&legacy).expect("legacy descriptor serializes");
-
-    let first: ProjectDescriptor =
-        serde_json::from_str(&legacy_json).expect("legacy descriptor restores");
-    let second: ProjectDescriptor =
-        serde_json::from_str(&legacy_json).expect("legacy descriptor restores again");
-
-    assert_eq!(first.id(), second.id());
-    assert!(!first.id().as_uuid().is_nil());
-    assert_ne!(first.id(), original.id());
-
-    let persisted = serde_json::to_value(&first).expect("migrated descriptor serializes");
-    assert_eq!(
-        persisted.get("id"),
-        Some(&serde_json::to_value(first.id()).expect("identity serializes"))
-    );
-}
-
-#[test]
-fn versioned_or_explicitly_null_project_identity_and_schema_are_rejected() {
+fn missing_null_or_unknown_project_identity_and_schema_are_rejected() {
     let project = ProjectDescriptor::default();
-    let mut missing = serde_json::to_value(&project).expect("descriptor serializes");
-    missing
-        .as_object_mut()
-        .expect("descriptor object")
-        .remove("id");
-    let missing_error = serde_json::from_value::<ProjectDescriptor>(missing)
-        .expect_err("versioned descriptor must retain identity");
-    assert!(
-        missing_error
-            .to_string()
-            .contains("missing its stable identity")
-    );
+    let current = serde_json::to_value(&project).expect("descriptor serializes");
+    for field in ["id", "schema_version"] {
+        let mut missing = current.clone();
+        missing
+            .as_object_mut()
+            .expect("descriptor object")
+            .remove(field);
+        let error = serde_json::from_value::<ProjectDescriptor>(missing)
+            .expect_err("a descriptor names its identity and schema");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("missing field `{field}`"))
+        );
 
-    let mut null = serde_json::to_value(&project).expect("descriptor serializes");
-    null["id"] = serde_json::Value::Null;
-    let null_error = serde_json::from_value::<ProjectDescriptor>(null)
-        .expect_err("explicit null identity is not legacy absence");
-    assert!(
-        null_error
-            .to_string()
-            .contains("must not be explicitly null")
-    );
+        let mut null = current.clone();
+        null[field] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<ProjectDescriptor>(null).is_err());
+    }
 
-    let mut unversioned_null = serde_json::to_value(&project).expect("descriptor serializes");
-    unversioned_null
-        .as_object_mut()
-        .expect("descriptor object")
-        .remove("schema_version");
-    unversioned_null["id"] = serde_json::Value::Null;
-    let unversioned_null_error = serde_json::from_value::<ProjectDescriptor>(unversioned_null)
-        .expect_err("unversioned explicit null is not genuine legacy absence");
+    let mut unknown = current;
+    unknown["schema_version"] = (PROJECT_DESCRIPTOR_SCHEMA_VERSION + 1).into();
+    let error = serde_json::from_value::<ProjectDescriptor>(unknown)
+        .expect_err("another descriptor schema is refused");
     assert!(
-        unversioned_null_error
+        error
             .to_string()
-            .contains("must not be explicitly null")
-    );
-
-    let mut null_schema = serde_json::to_value(&project).expect("descriptor serializes");
-    null_schema["schema_version"] = serde_json::Value::Null;
-    let null_schema_error = serde_json::from_value::<ProjectDescriptor>(null_schema)
-        .expect_err("explicit null schema is not an unversioned descriptor");
-    assert!(
-        null_schema_error
-            .to_string()
-            .contains("schema version must not be explicitly null")
+            .contains("unsupported project descriptor schema")
     );
 }
 
@@ -298,13 +247,13 @@ fn cloud_publication_binding_is_revisioned_idempotent_and_validated() {
     let restored: ProjectDescriptor =
         serde_json::from_value(value.clone()).expect("descriptor round trips");
     assert_eq!(restored.cloud_publication(), Some(&binding));
-    // Legacy descriptors without the field restore to an unbound project.
+    // A descriptor without the field restores to an unbound project.
     value
         .as_object_mut()
         .expect("descriptor object")
         .remove("cloud_publication");
     let unbound: ProjectDescriptor =
-        serde_json::from_value(value).expect("legacy shape deserializes");
+        serde_json::from_value(value).expect("unbound descriptor deserializes");
     assert_eq!(unbound.cloud_publication(), None);
 
     assert!(matches!(

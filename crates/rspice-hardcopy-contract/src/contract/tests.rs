@@ -973,36 +973,14 @@ fn a_receipt_records_each_face_its_text_was_lettered_in_once() {
 }
 
 #[test]
-fn a_schema_1_receipt_still_reads_and_names_no_faces() {
+fn a_receipt_of_another_schema_is_refused() {
     let (plan, outcome) = exported();
     let current = HardcopyReceipt::record(&plan, outcome, Vec::new()).unwrap();
-    // The receipt as schema 1 wrote it: the same fields, sealed under the
-    // schema-1 domain without faces.
-    let sealed = canonical_digest(
-        b"rspice-hardcopy-receipt-v1",
-        &LegacyHardcopyReceiptMaterial {
-            schema_version: 1,
-            id: current.id(),
-            plan_id: current.plan_id(),
-            plan_content_digest: current.plan_content_digest(),
-            source_content_digest: current.source_content_digest(),
-            outcome: current.outcome(),
-        },
-    )
-    .unwrap();
-    let mut legacy = serde_json::to_value(&current).unwrap();
-    assert!(legacy.get("faces_used").is_none());
-    legacy["schema_version"] = 1.into();
-    legacy["content_digest"] = serde_json::to_value(sealed).unwrap();
-    let read: HardcopyReceipt = serde_json::from_value(legacy.clone()).unwrap();
-    assert!(read.faces_used().is_empty());
-    assert_eq!(read.content_digest(), sealed);
-
-    // A schema-1 receipt cannot claim faces it never sealed.
-    legacy["faces_used"] = serde_json::to_value([bundled("IBM Plex Sans", 400, 0x51)]).unwrap();
-    assert!(serde_json::from_value::<HardcopyReceipt>(legacy.clone()).is_err());
-    legacy["schema_version"] = 3.into();
-    assert!(serde_json::from_value::<HardcopyReceipt>(legacy).is_err());
+    let mut wire = serde_json::to_value(&current).unwrap();
+    for schema in [1, 3] {
+        wire["schema_version"] = schema.into();
+        assert!(serde_json::from_value::<HardcopyReceipt>(wire.clone()).is_err());
+    }
 }
 
 #[test]
@@ -1385,7 +1363,7 @@ fn authored_media_resolves_exact_mixed_sheet_size_and_orientation_per_section() 
 }
 
 #[test]
-fn schematic_output_inclusion_contract_round_trips_and_legacy_setups_default() {
+fn schematic_output_inclusion_contract_round_trips_and_is_required() {
     let base = HardcopySetup::default();
     let schematic = SchematicHardcopySetup::new(
         SchematicHardcopyExtent::CompleteSchematicContent,
@@ -1419,11 +1397,7 @@ fn schematic_output_inclusion_contract_round_trips_and_legacy_setups_default() {
     );
 
     encoded.as_object_mut().unwrap().remove("schematic");
-    let restored_legacy = serde_json::from_value::<HardcopySetup>(encoded).unwrap();
-    assert_eq!(
-        restored_legacy.schematic(),
-        SchematicHardcopySetup::default()
-    );
+    assert!(serde_json::from_value::<HardcopySetup>(encoded).is_err());
 }
 
 #[test]

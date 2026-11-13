@@ -48,12 +48,8 @@ Everything is in `src/lib.rs`:
 
 ## Versions and caps
 
-A producer writes `PUBLICATION_SNAPSHOT_SCHEMA_VERSION`. The legacy versions
-named by `PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION`,
-`PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION` and
-`PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION` still decode, because pages sealed
-under them are immutable. A snapshot that declares a legacy version is refused
-if it carries a field a later version introduced.
+A snapshot declares `PUBLICATION_SNAPSHOT_SCHEMA_VERSION` exactly; any other
+version is refused.
 `FIGURE_MANIFEST_SCHEMA_VERSION` versions the manifest and its payloads
 together, and both must declare it exactly.
 

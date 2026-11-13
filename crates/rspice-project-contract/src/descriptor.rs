@@ -21,69 +21,8 @@ use uuid::Uuid;
 /// Persisted schema for project identity metadata.
 pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
 
-/// Versioned identity domain for legacy session descriptors that predate a
-/// persisted [`ProjectId`]. Project-file migration derives its ID from the
-/// complete source bytes before deserialization; this namespace is reserved
-/// for standalone/session descriptor migration.
-const LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE: Uuid =
-    Uuid::from_u128(0xd59a_680f_c781_5f1a_a69f_9a67_64bb_32ac);
-
 fn default_project_name() -> String {
     "Untitled Project".to_owned()
-}
-
-/// Presence-aware project identity used only while decoding persisted data.
-///
-/// `Option<T>` intentionally maps both a missing field (through `default`) and
-/// an explicit JSON `null` to `None`. Those states have different security
-/// semantics for project identity: only a genuinely missing field from an
-/// unversioned legacy descriptor may be migrated.
-#[derive(Debug, Default)]
-enum DeserializedProjectId {
-    #[default]
-    Missing,
-    Null,
-    Value(ProjectId),
-}
-
-#[derive(Debug, Default)]
-enum DeserializedProjectSchemaVersion {
-    #[default]
-    Missing,
-    Null,
-    Value(u16),
-}
-
-impl<'de> Deserialize<'de> for DeserializedProjectSchemaVersion {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if value.is_null() {
-            Ok(Self::Null)
-        } else {
-            serde_json::from_value(value)
-                .map(Self::Value)
-                .map_err(D::Error::custom)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for DeserializedProjectId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if value.is_null() {
-            Ok(Self::Null)
-        } else {
-            serde_json::from_value(value)
-                .map(Self::Value)
-                .map_err(D::Error::custom)
-        }
-    }
 }
 
 pub const PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION: u16 = 1;
@@ -564,16 +503,10 @@ impl ProjectCloudPublicationBinding {
 /// Metadata for the active RSpice project.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectDescriptor {
-    /// Stable product identity. Legacy project files receive an ID exactly
-    /// once during deserialization and retain it on every later save.
+    /// Stable product identity, retained on every save.
     pub(super) id: ProjectId,
     /// Schema of this object, independent of the outer project container.
     pub(super) schema_version: u16,
-    /// True only while a genuinely unversioned descriptor is being restored.
-    /// Session containers replace the descriptor-local migration identity with
-    /// one derived from the complete recoverable session before exposing it.
-    #[serde(skip)]
-    pub(super) migrated_legacy_identity: bool,
     /// Monotonic logical revision. Runtime-only path changes do not alter it.
     #[serde(default)]
     pub(super) revision: ObjectRevision,
@@ -615,10 +548,8 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
     {
         #[derive(Deserialize)]
         struct ProjectDescriptorDe {
-            #[serde(default)]
-            id: DeserializedProjectId,
-            #[serde(default)]
-            schema_version: DeserializedProjectSchemaVersion,
+            id: ProjectId,
+            schema_version: u16,
             #[serde(default)]
             revision: ObjectRevision,
             #[serde(default = "default_project_name")]
@@ -643,65 +574,16 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
         }
 
         let descriptor = ProjectDescriptorDe::deserialize(deserializer)?;
-        if matches!(
-            &descriptor.schema_version,
-            DeserializedProjectSchemaVersion::Null
-        ) {
-            return Err(D::Error::custom(
-                "project schema version must not be explicitly null",
-            ));
+        if descriptor.schema_version != PROJECT_DESCRIPTOR_SCHEMA_VERSION {
+            return Err(D::Error::custom(format!(
+                "unsupported project descriptor schema version {}; this build reads version {PROJECT_DESCRIPTOR_SCHEMA_VERSION}",
+                descriptor.schema_version
+            )));
         }
-        let has_schema_version = matches!(
-            &descriptor.schema_version,
-            DeserializedProjectSchemaVersion::Value(_)
-        );
-        let (id, migrated_legacy_identity) = match descriptor.id {
-            DeserializedProjectId::Null => {
-                return Err(D::Error::custom(
-                    "project identity must not be explicitly null",
-                ));
-            }
-            DeserializedProjectId::Value(id) => (id, false),
-            DeserializedProjectId::Missing if has_schema_version => {
-                return Err(D::Error::custom(
-                    "versioned project descriptor is missing its stable identity",
-                ));
-            }
-            DeserializedProjectId::Missing => {
-                // Serialize the complete identity-bearing descriptor state in
-                // a fixed field order. Project/session containers inject an ID
-                // scoped to their complete artifact before reaching this
-                // fallback; this path covers standalone genuine-legacy
-                // descriptors without inventing random identity.
-                let material = serde_json::to_vec(&(
-                    descriptor.revision,
-                    &descriptor.name,
-                    &descriptor.path,
-                    &descriptor.root_library,
-                    &descriptor.top_cell,
-                    &descriptor.technology,
-                    &descriptor.technology_binding,
-                    &descriptor.technology_change_audit,
-                    &descriptor.description,
-                ))
-                .map_err(D::Error::custom)?;
-                (
-                    ProjectId::from_namespace(LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE, &material),
-                    true,
-                )
-            }
-        };
 
         Ok(Self {
-            id,
-            schema_version: match descriptor.schema_version {
-                DeserializedProjectSchemaVersion::Value(version) => version,
-                DeserializedProjectSchemaVersion::Missing => PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-                DeserializedProjectSchemaVersion::Null => {
-                    unreachable!("explicitly null project schema rejected above")
-                }
-            },
-            migrated_legacy_identity,
+            id: descriptor.id,
+            schema_version: descriptor.schema_version,
             revision: descriptor.revision,
             name: descriptor.name,
             path: descriptor.path,
@@ -724,7 +606,6 @@ impl Default for ProjectDescriptor {
         Self {
             id: ProjectId::new(),
             schema_version: PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-            migrated_legacy_identity: false,
             revision: ObjectRevision::INITIAL,
             name: default_project_name(),
             path: None,
@@ -758,19 +639,6 @@ impl ProjectDescriptor {
     #[must_use]
     pub const fn id(&self) -> ProjectId {
         self.id
-    }
-
-    #[must_use]
-    pub const fn has_descriptor_local_legacy_identity(&self) -> bool {
-        self.migrated_legacy_identity
-    }
-
-    /// Replace a temporary descriptor-local migration identity with the
-    /// identity derived by its owning legacy session artifact.
-    pub fn bind_legacy_session_identity(&mut self, id: ProjectId) {
-        self.id = id;
-        self.schema_version = PROJECT_DESCRIPTOR_SCHEMA_VERSION;
-        self.migrated_legacy_identity = false;
     }
 
     /// Folder that project-relative file references resolve against.
