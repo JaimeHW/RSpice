@@ -55,6 +55,11 @@ const MULTILINE_LINE_H: f32 = 17.0;
 /// A whole-number field: wide enough for four digits and its drag affordance,
 /// narrow enough to leave the bounds beside it on one line.
 const NUMBER_FIELD_W: f32 = 64.0;
+/// A typed number with its unit: a dozen characters of mantissa, exponent and
+/// sign, and room for a short unit inside the field's end.
+const QUANTITY_FIELD_W: f32 = 120.0;
+/// Air between a quantity's digits and the unit set inside its field.
+const UNIT_GAP: f32 = 4.0;
 /// One line of a set of checks or choices, and one entry of a list, under a
 /// fine pointer. These are words beside a mark, not inputs, so they take less
 /// than a field; under a finger every line is a full control tall.
@@ -291,6 +296,71 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// One typed number in a field sized for a number rather than the whole
+    /// control column, its `unit` set inside the field's end, and `note`
+    /// after the field: what an empty field stands for, where the hint inside
+    /// a field that short cannot hold it. An empty `unit` or `note` sets none.
+    pub fn quantity(
+        &mut self,
+        label: &str,
+        id: Id,
+        value: &mut String,
+        hint: &str,
+        unit: &str,
+        note: &str,
+    ) -> Response {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let font = theme::field_mono();
+            let unit_w = if unit.is_empty() {
+                0.0
+            } else {
+                ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(unit.to_owned(), font.clone(), t.color.text_dim)
+                        .size()
+                        .x
+                }) + UNIT_GAP
+            };
+            let response = ui.add_sized(
+                vec2(QUANTITY_FIELD_W.min(width), t.metrics.ctl_h),
+                egui::TextEdit::singleline(value)
+                    .id(id)
+                    .font(font.clone())
+                    .hint_text(hint)
+                    .vertical_align(Align::Center)
+                    .margin(egui::Margin {
+                        left: 8,
+                        right: (8.0 + unit_w).ceil().min(f32::from(i8::MAX)) as i8,
+                        top: 4,
+                        bottom: 4,
+                    }),
+            );
+            if !unit.is_empty() {
+                ui.painter().text(
+                    pos2(response.rect.right() - 8.0, response.rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    unit,
+                    font,
+                    t.color.text_dim,
+                );
+            }
+            form::name_control(ui, &response, label);
+            select_all_on_keyboard_focus(ui, &response, value);
+            if !note.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(note)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    )
+                    .truncate(),
+                );
+            }
+            response
+        })
+    }
+
     /// One bounded whole number, with what the engine will accept stated
     /// after it.
     ///
@@ -395,6 +465,37 @@ impl<'u> FormRows<'u> {
     ) -> bool {
         self.row(label, |ui, _| {
             segmented(ui, id_salt, options, selected, SegmentedWidth::Equal)
+        })
+    }
+
+    /// [`Self::segmented_columns`] cut into `columns` equal segments however
+    /// few options it holds, the options taking the first of them. Related
+    /// rows whose sets differ by an option or two keep each shared option in
+    /// one column, so the eye reads straight down them: an edge type and a
+    /// second edge type that may also be "same".
+    pub fn segmented_in_columns(
+        &mut self,
+        label: &str,
+        id_salt: impl egui::AsIdSalt,
+        options: &[&str],
+        selected: &mut usize,
+        columns: usize,
+    ) -> bool {
+        self.row(label, |ui, width| {
+            let columns = columns.max(options.len()).max(1);
+            let span = width * options.len() as f32 / columns as f32;
+            let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+            ui.allocate_ui_with_layout(
+                vec2(span, height),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.push_id(id_salt, |ui| {
+                        segmented(ui, "segments", options, selected, SegmentedWidth::Equal)
+                    })
+                    .inner
+                },
+            )
+            .inner
         })
     }
 
@@ -519,6 +620,59 @@ impl<'u> FormRows<'u> {
     /// them, such as the conductors a slice resolves to: set in mono.
     pub fn derived_mono(&mut self, text: &str) {
         self.derived_in(text, theme::mono(tokens::FS_0, FontWeight::Regular));
+    }
+
+    /// [`Self::derived`] held to one line: a text longer than the control
+    /// column is cut at its end, with the whole of it on hover. For prose the
+    /// reader reads once, such as what a picked function does, which would
+    /// otherwise spend several lines of every form on it.
+    pub fn derived_line(&mut self, text: &str) {
+        let t = Tokens::get(self.ui.ctx());
+        let indent = self.control_indent();
+        self.gap(DERIVED_GAP);
+        let full_width = self.ui.available_width();
+        let width = (full_width - indent).max(1.0);
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat {
+                font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+                color: t.color.text_faint,
+                ..Default::default()
+            },
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: width,
+            max_rows: 1,
+            break_anywhere: false,
+            overflow_character: Some('…'),
+        };
+        let galley = self.ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let elided = galley.elided;
+        let (rect, response) = self
+            .ui
+            .allocate_exact_size(vec2(full_width, DERIVED_LINE_H), egui::Sense::hover());
+        self.ui.painter().galley(
+            pos2(
+                rect.left() + indent,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            t.color.text_faint,
+        );
+        let value = text.to_owned();
+        self.ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Label);
+            node.set_value(value.clone());
+            node.set_bounds(egui::accesskit::Rect {
+                x0: rect.min.x.into(),
+                y0: rect.min.y.into(),
+                x1: rect.max.x.into(),
+                y1: rect.max.y.into(),
+            });
+        });
+        if elided {
+            response.on_hover_text(text);
+        }
     }
 
     fn derived_in(&mut self, text: &str, font_id: egui::FontId) {
