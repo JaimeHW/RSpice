@@ -1,4 +1,4 @@
-#[path = "../src/engine/builder/version_metadata.rs"]
+#[path = "../../src/engine/builder/version_metadata.rs"]
 mod version_metadata;
 
 use version_metadata::parse_dotted_version_metadata;

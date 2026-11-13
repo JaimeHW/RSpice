@@ -56,7 +56,7 @@ as release evidence. The focused record is necessary but does not replace the
 complete clean-commit product CI gates below.
 
 ```text
-cargo test --locked -p rspice-core --test save_directives
+cargo test --locked -p rspice-core --test engine save_directives::
 cargo test --locked -p rspice-app --lib
 cargo test --locked -p rspice-sheet-publisher
 cargo test --locked -p rspice-app --test module_layering

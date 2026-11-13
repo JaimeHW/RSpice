@@ -27,8 +27,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 use family_src::{family_relative, family_src_roots};
 
