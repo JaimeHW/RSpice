@@ -28,7 +28,9 @@ pub(super) fn columns_height(browser: &BuiltinModelsBrowser, available: f32) -> 
     }
 }
 
-fn selected_model(browser: &BuiltinModelsBrowser) -> Option<&'static BuiltinVerilogAModel> {
+pub(crate) fn selected_model(
+    browser: &BuiltinModelsBrowser,
+) -> Option<&'static BuiltinVerilogAModel> {
     builtin_veriloga_model(browser.model.as_deref()?)
 }
 
@@ -92,7 +94,7 @@ fn follow_selection(browser: &mut BuiltinModelsBrowser) {
     }
 }
 
-fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
+pub(crate) fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
     match intent {
         BuiltinModelsIntent::ShowLibrary => {
             browser.open = true;
@@ -122,7 +124,7 @@ fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
 
 /// What the page's built-in library can ask for.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BuiltinModelsIntent {
+pub(crate) enum BuiltinModelsIntent {
     ShowLibrary,
     SelectModel(&'static str),
     SelectFile(String),
@@ -265,7 +267,7 @@ pub(super) fn view_column(
 /// The band under the columns: what the selected model is, and the two things
 /// a read-only library offers, Copy cell… while `libraries` holds a writable
 /// one. The strip above already names the selection.
-pub(super) fn detail(
+pub(crate) fn detail(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
     libraries: &crate::state::LibraryManager,
@@ -389,7 +391,6 @@ pub(super) fn source_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
 
     fn opened_on_a_model_with_includes() -> (BuiltinModelsBrowser, &'static BuiltinVerilogAModel) {
         let model = BUILTIN_VERILOGA_MODELS
@@ -429,71 +430,6 @@ mod tests {
         );
         assert_eq!(browser.file.as_ref(), Some(&include));
         shown_is_selected(&browser);
-    }
-
-    /// The band's text for `state` on a page `width` wide.
-    fn band_text(state: &AppState, width: f32) -> Vec<String> {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(width, 120.0),
-            )),
-            ..Default::default()
-        };
-        let pass = |ctx: &mut Ui| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let _ = detail(
-                    ui,
-                    &state.project.builtin_models,
-                    &state.model.library_manager,
-                );
-            });
-        };
-        // Two passes: the first builds the fonts the band is measured in.
-        let _ = ctx.run_ui(input(), pass);
-        ctx.run_ui(input(), pass)
-            .shapes
-            .into_iter()
-            .filter_map(|clipped| match clipped.shape {
-                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_band_states_the_summary_and_clips_it_before_the_buttons() {
-        let mut state = AppState::default();
-        browse(
-            &mut state.project.builtin_models,
-            BuiltinModelsIntent::ShowLibrary,
-        );
-        let model = selected_model(&state.project.builtin_models).expect("a selected model");
-
-        let wide = band_text(&state, 1440.0);
-        assert!(wide.iter().any(|text| text == model.summary), "{wide:?}");
-        assert!(wide.iter().any(|text| text == "Open read-only"), "{wide:?}");
-        let version = format!("version {}", model.version);
-        for gone in [model.class.label(), version.as_str(), "read only"] {
-            assert!(
-                !wide.iter().any(|text| text == gone),
-                "{gone:?} in {wide:?}"
-            );
-        }
-
-        let narrow = band_text(&state, 280.0);
-        let clipped = narrow
-            .iter()
-            .filter(|text| *text != "Copy cell\u{2026}")
-            .find_map(|text| text.strip_suffix('\u{2026}'))
-            .unwrap_or_else(|| panic!("no clipped summary in {narrow:?}"));
-        assert!(model.summary.starts_with(clipped), "{clipped:?}");
-        assert!(
-            narrow.iter().any(|text| text == "Open read-only"),
-            "{narrow:?}"
-        );
     }
 
     #[test]

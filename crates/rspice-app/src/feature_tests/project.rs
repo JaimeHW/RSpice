@@ -1,13 +1,17 @@
 //! The project feature's behaviour, observed through a whole application.
 
+mod builtin_models;
 mod configuration_inspector;
 mod configuration_page;
+mod landing;
 mod library_changes;
 mod library_deletion;
 mod new_cell;
 mod new_project;
 mod new_view;
+mod overview;
 mod steps;
+mod surface;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;

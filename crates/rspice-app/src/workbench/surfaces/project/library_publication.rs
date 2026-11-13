@@ -1062,7 +1062,7 @@ fn safe_file_stem(value: &str) -> String {
     }
 }
 
-pub(super) struct ProjectLibraryPublicationCandidate {
+pub(crate) struct ProjectLibraryPublicationCandidate {
     draft: crate::state::workspace::ProjectLibraryPublicationDraft,
     artifact_bytes: Vec<u8>,
     source_project_revision: ObjectRevision,
@@ -1090,7 +1090,7 @@ impl ProjectLibraryPublicationCandidate {
 /// Prepare the exact artifact and receipt candidate without changing live
 /// project state. A native, browser, or repository writer must durably
 /// publish `artifact_bytes()` before commit.
-pub(super) fn prepare_project_library_publication(
+pub(crate) fn prepare_project_library_publication(
     state: &AppState,
     label: impl Into<String>,
     actor_id: impl Into<String>,
@@ -1148,7 +1148,7 @@ pub(super) fn prepare_project_library_publication(
 /// Commit a publication only after its exact artifact was durably
 /// accepted. Any intervening project or catalog change rejects the
 /// candidate and leaves live state untouched.
-pub(super) fn commit_project_library_publication(
+pub(crate) fn commit_project_library_publication(
     state: &mut AppState,
     candidate: ProjectLibraryPublicationCandidate,
 ) -> Result<ProjectLibraryPublicationReceipt, String> {

@@ -19,7 +19,7 @@ use rspice_simulation_contract::run_set::format_bytes;
 /// promise restoring one keeps.
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
      Restoring one saves it as a new project file; your current work is never changed.";
-pub(super) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
+pub(crate) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;

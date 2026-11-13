@@ -66,7 +66,7 @@ enum LandingAction {
 
 /// The landing, drawn in the project feature's context, with what the reader
 /// asked of it carried out by the shell as soon as it has drawn.
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(
         &mut app.state.platform,
         &app.state.model,
@@ -1006,11 +1006,15 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_app_services::workbench::slots::platform::remember_recent_file;
 
-    /// The rows the landing lists for `app`, read from the parts its page
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::project::tests::harness;
+
+    /// The rows the landing lists for `harness`, read from the parts its page
     /// draws from.
-    fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
-        super::recent_project_rows(&app.state.project, &app.state.platform)
+    fn recent_project_rows(harness: &FeatureHarness<ProjectFeature>) -> Vec<RecentProjectRow> {
+        super::recent_project_rows(&harness.state, &harness.platform)
     }
 
     fn project_recent(path: &str, pinned: bool, owner: Option<&str>) -> RecentFile {
@@ -1026,15 +1030,15 @@ mod tests {
 
     #[test]
     fn landing_recents_share_search_pin_and_owner_authority_with_the_launcher() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.platform.recent_files = vec![
+        let mut harness = harness();
+        harness.platform.recent_files = vec![
             project_recent("C:/Engineering/afe.rspiceproj", true, Some("Analog Design")),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, Some("RF Systems")),
         ];
-        app.state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
-        app.state.project.project_launcher_query = "analog".to_owned();
+        harness.state.project_launcher_filter = ProjectLauncherFilter::Pinned;
+        harness.state.project_launcher_query = "analog".to_owned();
 
-        let rows = recent_project_rows(&app);
+        let rows = recent_project_rows(&harness);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "afe");
@@ -1047,22 +1051,30 @@ mod tests {
     /// schematics as the count pushed every project off it.
     #[test]
     fn opening_schematics_never_pushes_a_project_off_the_start_page() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.platform.recent_files.clear();
-        let listed = app.state.model.preferences.recent_files_listed();
+        let mut harness = harness();
+        harness.platform.recent_files.clear();
+        let listed = harness.model.preferences.recent_files_listed();
         let project =
             |index: usize| std::path::PathBuf::from(format!("C:/Work/p{index}.rspiceproj"));
         let schematic = |index: usize| std::path::PathBuf::from(format!("C:/Work/s{index}.rsch"));
         for index in 0..=listed {
-            app.state
-                .remember_recent_file(RecentKind::Project, &project(index));
+            remember_recent_file(
+                &harness.model,
+                &mut harness.platform,
+                RecentKind::Project,
+                &project(index),
+            );
         }
         for index in 0..=listed {
-            app.state
-                .remember_recent_file(RecentKind::Schematic, &schematic(index));
+            remember_recent_file(
+                &harness.model,
+                &mut harness.platform,
+                RecentKind::Schematic,
+                &schematic(index),
+            );
         }
 
-        let shown = recent_project_rows(&app)
+        let shown = recent_project_rows(&harness)
             .into_iter()
             .map(|row| row.recent.path)
             .collect::<Vec<_>>();
@@ -1071,8 +1083,7 @@ mod tests {
             (1..=listed).rev().map(project).collect::<Vec<_>>(),
             "the newest {listed} projects, newest first"
         );
-        let schematics = app
-            .state
+        let schematics = harness
             .platform
             .recent_files
             .iter()
@@ -1083,41 +1094,17 @@ mod tests {
 
     #[test]
     fn landing_shared_filter_uses_portable_unc_identity() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.platform.recent_files = vec![
+        let mut harness = harness();
+        harness.platform.recent_files = vec![
             project_recent("C:/Engineering/afe.rspiceproj", false, None),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, None),
         ];
-        app.state.project.project_launcher_filter = ProjectLauncherFilter::Shared;
+        harness.state.project_launcher_filter = ProjectLauncherFilter::Shared;
 
-        let rows = recent_project_rows(&app);
+        let rows = recent_project_rows(&harness);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "rf_pa");
-    }
-
-    #[test]
-    fn landing_renders_without_project_state_at_all_supported_widths() {
-        for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
-            let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
-            let mut app = RSpiceApp::test_instance();
-            app.state.close_project_session();
-            app.state.platform.recovery_catalog = Default::default();
-
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
-                },
-            );
-
-            assert!(!output.shapes.is_empty(), "{}x{}", size.x, size.y);
-            assert!(!app.state.platform.project_lifecycle.is_open());
-        }
     }
 
     #[test]

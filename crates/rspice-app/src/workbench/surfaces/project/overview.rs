@@ -43,7 +43,7 @@ const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
 /// were a blue and a green over text that was already saying what it said, so
 /// they collapsed into [`Self::Neutral`] along with the colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tone {
+pub(crate) enum Tone {
     Neutral,
     Warn,
     Error,
@@ -52,7 +52,7 @@ enum Tone {
 impl Tone {
     /// The mark that goes in front of this fact, when the reader has to see
     /// one. The mark owns the colour; the words beside it never do.
-    const fn problem(self) -> Option<Problem> {
+    pub(crate) const fn problem(self) -> Option<Problem> {
         match self {
             Self::Neutral => None,
             Self::Warn => Some(Problem::Warning),
@@ -86,19 +86,19 @@ fn paint_tone_mark(ui: &Ui, tone: Tone, left: f32, center_y: f32) -> f32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StatusSnapshot {
-    area: &'static str,
-    state: String,
-    detail: String,
-    action: &'static str,
-    tone: Tone,
-    intent: OverviewIntent,
+pub(crate) struct StatusSnapshot {
+    pub(crate) area: &'static str,
+    pub(crate) state: String,
+    pub(crate) detail: String,
+    pub(crate) action: &'static str,
+    pub(crate) tone: Tone,
+    pub(crate) intent: OverviewIntent,
     enabled: bool,
     disabled_reason: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum OverviewIntent {
+pub(crate) enum OverviewIntent {
     Command(CommandKey),
     CheckProjectRoot,
     OpenProjectRoot,
@@ -109,7 +109,7 @@ enum OverviewIntent {
 impl OverviewIntent {
     /// Ask for what the reader asked of the page: a command runs, and what
     /// only the shell carries out is raised for it, as the page returns.
-    fn raise(self, cx: &mut Cx<'_, ProjectFeature>) {
+    pub(crate) fn raise(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::Command(key) => cx.execute(key),
             Self::CheckProjectRoot => {
@@ -148,13 +148,13 @@ impl OverviewIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ConfigurationSnapshot {
-    configured: bool,
-    state: String,
-    detail: String,
-    root: String,
-    dut: String,
-    tone: Tone,
+pub(crate) struct ConfigurationSnapshot {
+    pub(crate) configured: bool,
+    pub(crate) state: String,
+    pub(crate) detail: String,
+    pub(crate) root: String,
+    pub(crate) dut: String,
+    pub(crate) tone: Tone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,30 +173,30 @@ struct OpenDocumentSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct OperationSnapshot {
-    when: String,
-    event: String,
-    detail: String,
-    tone: Tone,
-    intent: Option<OverviewIntent>,
+pub(crate) struct OperationSnapshot {
+    pub(crate) when: String,
+    pub(crate) event: String,
+    pub(crate) detail: String,
+    pub(crate) tone: Tone,
+    pub(crate) intent: Option<OverviewIntent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ProblemSnapshot {
-    code: String,
-    message: String,
-    path: String,
-    tone: Tone,
+pub(crate) struct ProblemSnapshot {
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) path: String,
+    pub(crate) tone: Tone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DesignObjectSnapshot {
-    key: String,
-    name: String,
-    kind: String,
-    detail: String,
-    tone: Tone,
-    top: bool,
+pub(crate) struct DesignObjectSnapshot {
+    pub(crate) key: String,
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) detail: String,
+    pub(crate) tone: Tone,
+    pub(crate) top: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,14 +217,14 @@ struct SourceDeckSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct OverviewSnapshot {
+pub(crate) struct OverviewSnapshot {
     project_name: String,
     project_id: String,
     project_revision: u64,
     schema_version: u16,
-    path: String,
+    pub(crate) path: String,
     persistence_bound: bool,
-    descriptor_root: String,
+    pub(crate) descriptor_root: String,
     simulation_root: String,
     technology: String,
     technology_attached: bool,
@@ -236,17 +236,17 @@ struct OverviewSnapshot {
     root_sheet_count: usize,
     root_instance_count: usize,
     root_net_count: usize,
-    netlist_first: bool,
+    pub(crate) netlist_first: bool,
     source_deck: Option<SourceDeckSnapshot>,
-    configuration: ConfigurationSnapshot,
-    statuses: Vec<StatusSnapshot>,
-    problem: Option<ProblemSnapshot>,
+    pub(crate) configuration: ConfigurationSnapshot,
+    pub(crate) statuses: Vec<StatusSnapshot>,
+    pub(crate) problem: Option<ProblemSnapshot>,
     open_documents: Vec<OpenDocumentSnapshot>,
-    operations: Vec<OperationSnapshot>,
+    pub(crate) operations: Vec<OperationSnapshot>,
     /// Every retained operation the project holds, counted from the records
     /// rather than from the truncated list above: reporting the shown count as
     /// the retained count would claim a project with thirty runs has five.
-    operation_total: usize,
+    pub(crate) operation_total: usize,
     run_plan_name: String,
     execution_target: String,
 }
@@ -398,7 +398,7 @@ fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
 }
 
 impl OverviewSnapshot {
-    fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
+    pub(crate) fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
         let project = &cx.model.workspace.content.project;
         let dirty_documents =
             dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
@@ -1137,7 +1137,7 @@ fn overview_header(
     intent
 }
 
-fn run_plan_intent() -> OverviewIntent {
+pub(crate) fn run_plan_intent() -> OverviewIntent {
     OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate).key())
 }
 
@@ -1538,7 +1538,7 @@ fn design_register(
     requested
 }
 
-fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
+pub(crate) fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
     fn design_key(identity: &str) -> String {
         let identity = identity.trim().replace('\\', "/");
         for suffix in ["/schematic", "/testbench", "/config", "/symbol"] {
@@ -2004,7 +2004,7 @@ fn checks_snapshot(cx: &Cx<'_, ProjectFeature>) -> HealthCopy {
 }
 
 /// The one project-root finding the status card's strip names, or nothing.
-fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
+pub(crate) fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
     let root_path = format!(
         "{}/{}",
         cx.model.workspace.content.project.root_library,

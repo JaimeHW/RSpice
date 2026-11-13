@@ -13,7 +13,7 @@ use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 
-mod builtin_models;
+pub(crate) mod builtin_models;
 
 const CONTEXT_HEIGHT: f32 = 36.0;
 const DETAIL_HEIGHT: f32 = 40.0;
@@ -24,7 +24,7 @@ const USAGE_REPORT_ID: &str = "workbench.project.library.where-used";
 const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LibraryIntent {
+pub(crate) enum LibraryIntent {
     BuiltinModels(builtin_models::BuiltinModelsIntent),
     SelectLibrary(String),
     SelectCell { library: String, cell: String },

@@ -402,7 +402,7 @@ macro_rules! features {
 
         /// Whether what the feature dialog step `key` names draws is open;
         /// `false` for a key no registered feature draws.
-        pub(super) fn dialog_open(state: &AppState, key: DialogKey) -> bool {
+        pub(crate) fn dialog_open(state: &AppState, key: DialogKey) -> bool {
             $(
                 if let Some(dialog) = <$feature as Registered>::registry().dialog(key) {
                     return (dialog.is_open)(&*state.$slot);

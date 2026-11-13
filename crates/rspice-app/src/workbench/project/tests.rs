@@ -13,7 +13,7 @@ use super::ProjectFeature;
 /// new session starts with (from the empty PDK configuration a test session
 /// reads) and a new session, with every peer answering as a fresh session
 /// does.
-pub(super) fn harness() -> FeatureHarness<ProjectFeature> {
+pub(crate) fn harness() -> FeatureHarness<ProjectFeature> {
     FeatureHarness::with_model(
         Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
         WorkbenchSession::default(),
