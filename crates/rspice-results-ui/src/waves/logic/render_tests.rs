@@ -130,6 +130,7 @@ fn render() -> Render {
             rows: &rows,
             x_range: (0.0, END),
             left_margin: LEFT,
+            name_width: LEFT * 0.6,
             right_margin: RIGHT,
             selected: &[],
             cursor: Some(55.0 * NS),

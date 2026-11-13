@@ -97,7 +97,68 @@ pub trait StackHost {
 pub struct EventLaneFrame {
     pub x_range: (f64, f64),
     pub left_margin: f32,
+    /// The gutter's name column; its value column is the rest of the margin.
+    pub name_width: f32,
     pub right_margin: f32,
+}
+
+/// The name column's width until the reader drags it.
+pub const LANE_NAME_WIDTH: f32 = 96.0;
+const LANE_NAME_MIN: f32 = 28.0;
+const LANE_NAME_MAX: f32 = 420.0;
+/// The value column's floor: the panes' Y tick labels sit in it too.
+const LANE_VALUE_MIN: f32 = 44.0;
+
+/// A name column width the reader dragged to, kept to what the strip can
+/// give it.
+pub fn clamp_name_width(width: f32) -> f32 {
+    width.clamp(LANE_NAME_MIN, LANE_NAME_MAX)
+}
+
+/// A strip's left gutter, as EZwave and Verdi lay it out: a name column the
+/// reader sizes, then a value column wide enough for any value the lanes can
+/// read out, then the time axis. The panes' plot area starts where the lanes'
+/// time axis does, so a strip with lanes is aligned to the pixel. A strip
+/// without lanes keeps the plain Y-axis margin and no name column.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gutter {
+    pub name: f32,
+    pub value: f32,
+}
+
+impl Gutter {
+    pub fn width(self) -> f32 {
+        self.name + self.value
+    }
+}
+
+fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
+    let axis = wave_left_margin(host.session());
+    if host.event_lane_height(model) <= 0.0 {
+        return Gutter {
+            name: 0.0,
+            value: axis,
+        };
+    }
+    let specs =
+        super::lanes::lane_specs(model, host.session().event_lanes.get(&model.analysis_key));
+    let advance = ui
+        .painter()
+        .layout_no_wrap(
+            "0".to_owned(),
+            rspice_ui_kit::theme::mono(
+                rspice_ui_kit::tokens::FS_MICRO,
+                rspice_ui_kit::theme::FontWeight::Regular,
+            ),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x;
+    let chars = super::lanes::value_column_chars(&specs).min(16);
+    Gutter {
+        name: clamp_name_width(host.session().lane_name_width.unwrap_or(LANE_NAME_WIDTH)),
+        value: (chars as f32).mul_add(advance, 8.0).max(LANE_VALUE_MIN),
+    }
 }
 
 // Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
@@ -527,6 +588,7 @@ struct StripFrame<'a> {
     pane_count: usize,
     linked_cursor_domain: Option<&'a CursorDomain>,
     options: StackOptions,
+    gutter: Gutter,
 }
 
 /// Resolve source ownership, then apply the navigator's actions to the app.
@@ -537,6 +599,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         pane_count,
         linked_cursor_domain,
         options,
+        gutter,
     } = frame;
     if height <= 1.0 {
         return;
@@ -550,7 +613,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         full_domain,
         current,
         height,
-        left_margin: wave_left_margin(host.session()),
+        left_margin: gutter.width(),
         quantity_policy: options.quantity,
         cursors: (cursor_owner || linked_cursor).then_some(host.session().cursors),
     };
@@ -606,9 +669,10 @@ fn show_strip_plot(
     let mut exprs = Some(host.resolve_expressions(model, &t));
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
-    let marker_height = event_marker_band(ui, host, model, x_domain, count);
-    let lane_height =
-        marker_height + event_lane_band(ui, host, model, x_domain, count, wanted_lanes, &t);
+    let gutter = strip_gutter(ui, host, model);
+    let marker_height = event_marker_band(ui, host, model, (x_domain, gutter), count);
+    let lane_height = marker_height
+        + event_lane_band(ui, host, model, (x_domain, gutter), count, wanted_lanes, &t);
     let geometry = wave_stack_geometry(available.height() - lane_height, count);
     let frame = StripFrame {
         model,
@@ -616,6 +680,7 @@ fn show_strip_plot(
         pane_count: count,
         linked_cursor_domain,
         options,
+        gutter,
     };
 
     for (ordinal, pane) in panes.iter().enumerate() {
@@ -662,12 +727,13 @@ const EVENT_LANE_SHARE: f32 = 0.5;
 fn event_frame(
     host: &impl StackHost,
     model: &StripModel,
-    x_domain: (f64, f64),
+    (x_domain, gutter): ((f64, f64), Gutter),
     pane_count: usize,
 ) -> EventLaneFrame {
     EventLaneFrame {
         x_range: shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain),
-        left_margin: wave_left_margin(host.session()),
+        left_margin: gutter.width(),
+        name_width: gutter.name,
         right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
     }
 }
@@ -678,7 +744,7 @@ fn event_marker_band(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
-    x_domain: (f64, f64),
+    domain: ((f64, f64), Gutter),
     pane_count: usize,
 ) -> f32 {
     let available = ui.available_rect_before_wrap().height().max(0.0);
@@ -686,7 +752,7 @@ fn event_marker_band(
     if height <= 0.0 {
         return 0.0;
     }
-    let frame = event_frame(host, model, x_domain, pane_count);
+    let frame = event_frame(host, model, domain, pane_count);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),
@@ -704,7 +770,7 @@ fn event_lane_band(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
-    x_domain: (f64, f64),
+    domain: ((f64, f64), Gutter),
     pane_count: usize,
     wanted: f32,
     t: &Tokens,
@@ -722,7 +788,7 @@ fn event_lane_band(
     if height <= 0.0 {
         return 0.0;
     }
-    let frame = event_frame(host, model, x_domain, pane_count);
+    let frame = event_frame(host, model, domain, pane_count);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),
@@ -758,6 +824,7 @@ fn show_unit_pane(
         pane_count,
         linked_cursor_domain,
         options,
+        gutter,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
@@ -806,8 +873,12 @@ fn show_unit_pane(
         log_y,
         log_y_available,
         cursor_a,
+        name_width: (gutter.name > 0.0).then_some(gutter.name),
     };
     let header = host.pane_header(ui, model, pane, ordinal, input);
+    if let Some(width) = header.resize_name {
+        host.session_mut().lane_name_width = Some(clamp_name_width(width));
+    }
     if header.autoscale_y || header.toggle_log_y {
         let view = host.session_mut().analysis_plot_view_pane_mut(
             ResultViewer::Waves,
@@ -870,7 +941,7 @@ fn show_unit_pane(
         auto_y: (auto_y0, auto_y1),
         y_view: pane_view.y,
         log_y,
-        left_margin: wave_left_margin(host.session()),
+        left_margin: gutter.width(),
         readout: presentation,
         quantity: quantity_policy,
         minor_grid: host.session().show_minor_grid,

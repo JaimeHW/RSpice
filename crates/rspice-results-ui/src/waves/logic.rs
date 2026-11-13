@@ -28,7 +28,6 @@ pub use plan::{LaneStroke, TimeMapping, plan_lane};
 pub use real::real_step_trace;
 pub use rspice_results::events::projection::BusRadix;
 
-use super::header::elide;
 use egui::{Color32, Rect, Sense, Ui, pos2, vec2};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -109,6 +108,8 @@ pub struct LaneStackInput<'a> {
     pub x_range: (f64, f64),
     /// The panes' left gutter; lane names and readouts sit in it.
     pub left_margin: f32,
+    /// The gutter's name column, at its left; the value column is the rest.
+    pub name_width: f32,
     /// The panes' right margin, so lane and pane X agree to the pixel.
     pub right_margin: f32,
     /// Row indices the reader selected. The first is the lane the cursor
@@ -150,6 +151,8 @@ pub struct LaneStackResponse {
     pub move_row: Option<(usize, bool)>,
     /// A cross-probe for the host to route.
     pub probe: Option<LaneProbe>,
+    /// The name column's new width, while the reader drags its edge.
+    pub resize_name: Option<f32>,
 }
 
 /// The time mapping of a lane stack occupying `rect`.
@@ -233,42 +236,80 @@ fn paint_chevron(ui: &Ui, centre: egui::Pos2, expanded: bool, color: Color32) {
     ));
 }
 
-/// Paint one row's gutter: its value at the cursor right-aligned, and its
-/// name elided to the space the value leaves.
+/// Where a lane row's gutter columns sit: the name column from the row's
+/// left edge, the value column after it, up to the time axis.
+#[derive(Clone, Copy)]
+struct GutterColumns {
+    name_right: f32,
+    value_left: f32,
+    value_right: f32,
+}
+
+impl GutterColumns {
+    fn of(rect: Rect, input: &LaneStackInput<'_>) -> Self {
+        let name_right = rect.left() + input.name_width.min(input.left_margin);
+        Self {
+            name_right,
+            value_left: name_right,
+            value_right: rect.left() + input.left_margin,
+        }
+    }
+}
+
+/// Paint one row's gutter: its name in the name column from `name_left`,
+/// elided in the middle only when it does not fit, and its value at the
+/// cursor right-aligned in the value column. Returns the name's cell when
+/// the name was elided, so a hover can state it whole.
 fn paint_gutter(
     ui: &Ui,
-    rect: Rect,
-    left: f32,
+    row: Rect,
+    name_left: f32,
+    columns: GutterColumns,
     name: &str,
     readout: Option<&str>,
     tokens: &Tokens,
-) {
+) -> Option<Rect> {
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     let painter = ui.painter();
-    let mut right = rect.right() - GUTTER_PAD;
     if let Some(readout) = readout {
-        let value =
-            painter.layout_no_wrap(readout.to_owned(), font.clone(), tokens.color.canvas_text);
+        let width = (columns.value_right - columns.value_left - 2.0 * GUTTER_PAD).max(0.0);
+        let value = rspice_ui_kit::panels::elide_middle(ui, readout, &font, width);
+        let galley = painter.layout_no_wrap(value, font.clone(), tokens.color.canvas_text);
         let origin = pos2(
-            (right - value.size().x).max(left),
-            rect.center().y - value.size().y * 0.5,
+            columns.value_right - GUTTER_PAD - galley.size().x,
+            row.center().y - galley.size().y * 0.5,
         );
-        right = origin.x - GUTTER_PAD;
-        painter.galley(origin, value, tokens.color.canvas_text);
+        painter.galley(origin, galley, tokens.color.canvas_text);
     }
-    let width = (right - left).max(0.0);
-    let mut galley =
-        painter.layout_no_wrap(name.to_owned(), font.clone(), tokens.color.canvas_text_dim);
-    let chars = name.chars().count().max(1);
-    if galley.size().x > width {
-        // The gutter font is monospaced, so one glyph's advance is the
-        // whole name's over its length.
-        let advance = (galley.size().x / chars as f32).max(1.0);
-        let fit = (width / advance).floor().max(1.0) as usize;
-        galley = painter.layout_no_wrap(elide(name, fit), font, tokens.color.canvas_text_dim);
+    let width = (columns.name_right - GUTTER_PAD - name_left).max(0.0);
+    let shown = rspice_ui_kit::panels::elide_middle(ui, name, &font, width);
+    let elided = shown != name;
+    let galley = painter.layout_no_wrap(shown, font, tokens.color.canvas_text_dim);
+    let top = row.center().y - galley.size().y * 0.5;
+    painter.galley(pos2(name_left, top), galley, tokens.color.canvas_text_dim);
+    elided.then(|| Rect::from_x_y_ranges(name_left..=columns.name_right, row.y_range()))
+}
+
+/// The grip on the name column's edge: a strip a few points wide the
+/// reader drags to size the column. Returns the column's new width.
+pub fn name_column_grip(ui: &Ui, rect: Rect, name_width: f32, id: egui::Id) -> Option<f32> {
+    let edge = rect.left() + name_width;
+    let grip = Rect::from_x_y_ranges(edge - 3.0..=edge + 3.0, rect.y_range());
+    let response = ui.interact(grip, id, Sense::drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        let tokens = Tokens::get(ui.ctx());
+        ui.painter().vline(
+            edge,
+            rect.y_range(),
+            egui::Stroke::new(1.0, tokens.color.canvas_text_faint),
+        );
     }
-    let top = rect.center().y - galley.size().y * 0.5;
-    painter.galley(pos2(left, top), galley, tokens.color.canvas_text_dim);
+    response
+        .dragged()
+        .then(|| response.interact_pointer_pos())
+        .flatten()
+        .map(|pointer| pointer.x - rect.left())
 }
 
 /// Draw the lane stack into the next `stack_height(rows)` points of `ui`.
@@ -282,7 +323,8 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     if !ui.is_rect_visible(rect) {
         return output;
     }
-    let gutter_width = input.left_margin - GUTTER_PAD;
+    let columns = GutterColumns::of(rect, input);
+    let mut elided: Vec<(Rect, &str)> = Vec::new();
     let lane_clip = Rect::from_x_y_ranges(map.left..=map.right, rect.y_range());
     let lane_painter = ui.painter().with_clip_rect(lane_clip);
     let readout = |lane: EventLane<'_>| {
@@ -309,15 +351,17 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         match row {
             LaneRow::Logic { lane, color } => {
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, row_rect.y_range());
-                let gutter =
-                    Rect::from_min_size(row_rect.min, vec2(gutter_width, LOGIC_ROW_HEIGHT));
-                paint_gutter(
-                    ui,
-                    gutter,
-                    gutter.left() + GUTTER_PAD,
-                    lane.name(),
-                    readout(EventLane::Logic(lane)).as_deref(),
-                    &tokens,
+                elided.extend(
+                    paint_gutter(
+                        ui,
+                        row_rect,
+                        row_rect.left() + GUTTER_PAD,
+                        columns,
+                        lane.name(),
+                        readout(EventLane::Logic(lane)).as_deref(),
+                        &tokens,
+                    )
+                    .map(|cell| (cell, lane.name())),
                 );
                 paint_logic_lane(
                     &lane_painter,
@@ -336,29 +380,32 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             } => {
                 let main =
                     Rect::from_min_size(row_rect.min, vec2(row_rect.width(), BUS_ROW_HEIGHT));
-                let gutter = Rect::from_min_size(main.min, vec2(gutter_width, BUS_ROW_HEIGHT));
                 if !members.is_empty() {
                     paint_chevron(
                         ui,
-                        pos2(gutter.left() + GUTTER_PAD + 3.0, gutter.center().y),
+                        pos2(main.left() + GUTTER_PAD + 3.0, main.center().y),
                         *expanded,
                         tokens.color.canvas_text_dim,
                     );
                 }
-                paint_gutter(
-                    ui,
-                    gutter,
-                    // Only a bus with member lanes to show has the control.
-                    gutter.left()
-                        + GUTTER_PAD
-                        + if members.is_empty() {
-                            0.0
-                        } else {
-                            CHEVRON_WIDTH
-                        },
-                    lane.name(),
-                    readout(EventLane::Bus(lane, *radix)).as_deref(),
-                    &tokens,
+                elided.extend(
+                    paint_gutter(
+                        ui,
+                        main,
+                        // Only a bus with member lanes to show has the control.
+                        main.left()
+                            + GUTTER_PAD
+                            + if members.is_empty() {
+                                0.0
+                            } else {
+                                CHEVRON_WIDTH
+                            },
+                        columns,
+                        lane.name(),
+                        readout(EventLane::Bus(lane, *radix)).as_deref(),
+                        &tokens,
+                    )
+                    .map(|cell| (cell, lane.name())),
                 );
                 let style = LaneStyle::new(&tokens, *color);
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, main.y_range());
@@ -370,17 +417,17 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                             rect.x_range(),
                             member_top..=member_top + LOGIC_ROW_HEIGHT,
                         );
-                        let member_gutter = Rect::from_min_size(
-                            member_rect.min,
-                            vec2(gutter_width, LOGIC_ROW_HEIGHT),
-                        );
-                        paint_gutter(
-                            ui,
-                            member_gutter,
-                            member_gutter.left() + GUTTER_PAD + MEMBER_INDENT,
-                            member.name(),
-                            readout(EventLane::Logic(member)).as_deref(),
-                            &tokens,
+                        elided.extend(
+                            paint_gutter(
+                                ui,
+                                member_rect,
+                                member_rect.left() + GUTTER_PAD + MEMBER_INDENT,
+                                columns,
+                                member.name(),
+                                readout(EventLane::Logic(member)).as_deref(),
+                                &tokens,
+                            )
+                            .map(|cell| (cell, member.name())),
                         );
                         let member_lane =
                             Rect::from_x_y_ranges(map.left..=map.right, member_rect.y_range());
@@ -404,6 +451,17 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         }
     }
 
+    output.resize_name = name_column_grip(
+        ui,
+        rect,
+        columns.name_right - rect.left(),
+        response.id.with("grip"),
+    );
+    if let Some(pointer) = response.hover_pos()
+        && let Some((_, name)) = elided.iter().find(|(cell, _)| cell.contains(pointer))
+    {
+        response.clone().on_hover_text_at_pointer(*name);
+    }
     let pointer_row = response
         .interact_pointer_pos()
         .or_else(|| response.hover_pos())

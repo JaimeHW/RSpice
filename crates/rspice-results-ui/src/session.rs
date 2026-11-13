@@ -337,6 +337,10 @@ pub struct ResultViewerState {
     /// the selected rows. Which lanes exist follows the plotted `D()`
     /// columns; this holds what the run cannot say.
     pub event_lanes: HashMap<AnalysisPresentationKey, crate::waves::lanes::EventLaneLayout>,
+    /// The width of the waveform strips' name column, as the reader dragged
+    /// it; `None` until they do. One width for every strip, so stacked strips
+    /// keep their lanes and panes on one edge.
+    pub lane_name_width: Option<f32>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
     /// Signals starred in the results data browser. A deliberate,

@@ -33,6 +33,10 @@ pub struct PaneHeader {
     pub log_y: bool,
     pub log_y_available: bool,
     pub cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
+    /// The strip gutter's name column, when the strip has lanes: the unit
+    /// tag takes exactly that width, so the legend starts on the edge the
+    /// lane names end on.
+    pub name_width: Option<f32>,
 }
 
 pub use rspice_ui_kit::panels::elide_chars as elide;
@@ -61,6 +65,8 @@ fn trace_belongs_to_pane(
 pub struct UnitPaneHeaderResponse {
     pub autoscale_y: bool,
     pub toggle_log_y: bool,
+    /// The name column's new width, while the reader drags its edge here.
+    pub resize_name: Option<f32>,
 }
 
 /// The three regions of a pane header, across its row.
@@ -125,6 +131,7 @@ pub fn show_header(
         log_y,
         log_y_available,
         cursor_a: cursor_a_value,
+        name_width,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -156,7 +163,7 @@ pub fn show_header(
             .size()
             .x
     });
-    let unit_width = (unit_label_width + 28.0).max(46.0);
+    let unit_width = name_width.unwrap_or((unit_label_width + 28.0).max(46.0));
     let PaneHeaderRegions {
         unit: unit_rect,
         legend: legend_rect,
@@ -301,7 +308,18 @@ pub fn show_header(
         },
     );
 
-    let mut output = UnitPaneHeaderResponse::default();
+    let mut output = UnitPaneHeaderResponse {
+        resize_name: name_width.and_then(|width| {
+            super::logic::name_column_grip(
+                ui,
+                rect,
+                width,
+                ui.id()
+                    .with(("pane-name-grip", model.analysis_key, pane.unit)),
+            )
+        }),
+        ..UnitPaneHeaderResponse::default()
+    };
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(actions_rect)

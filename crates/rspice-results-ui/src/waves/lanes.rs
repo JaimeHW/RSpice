@@ -139,6 +139,31 @@ impl LaneSpec {
     }
 }
 
+/// The most characters any row of `specs` can read out at a cursor, so the
+/// gutter's value column fits every value the lanes can show without its
+/// width following the cursor. A bus with an unknown or floating bit reads
+/// out bit by bit, whatever its radix.
+pub fn value_column_chars(specs: &[LaneSpec]) -> usize {
+    specs
+        .iter()
+        .map(|spec| match spec {
+            LaneSpec::Logic { .. } => 1,
+            LaneSpec::Bus { members, view, .. } => {
+                let width = members.len();
+                let decimal = |bits: u32| 2_f64.powi(bits as i32).log10().ceil() as usize;
+                let word = match view.radix {
+                    BusRadix::Binary => width,
+                    BusRadix::Hex => 2 + width.div_ceil(4),
+                    BusRadix::Unsigned => decimal(width as u32),
+                    BusRadix::Signed => 1 + decimal(width.saturating_sub(1) as u32),
+                };
+                word.max(width)
+            }
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// The rows a strip's lane stack shows, top to bottom.
 pub fn lane_specs(model: &StripModel, layout: Option<&EventLaneLayout>) -> Vec<LaneSpec> {
     let Some(lanes) = model.event_lanes.as_deref() else {

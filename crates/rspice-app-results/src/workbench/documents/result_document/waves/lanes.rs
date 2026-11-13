@@ -62,6 +62,7 @@ pub(super) fn show_lanes(
             rows: &rows,
             x_range: frame.x_range,
             left_margin: frame.left_margin,
+            name_width: frame.name_width,
             right_margin: frame.right_margin,
             selected: &selected,
             cursor: cursors.a,
@@ -73,6 +74,9 @@ pub(super) fn show_lanes(
             source_probes: false,
         },
     );
+    if let Some(width) = response.resize_name {
+        session.lane_name_width = Some(rspice_results_ui::waves::stack::clamp_name_width(width));
+    }
     let requests = lanes::apply_response(&mut layout, &specs, response);
     store_layout(session, model.analysis_key, layout);
     if let Some(t) = requests.cursor_to {

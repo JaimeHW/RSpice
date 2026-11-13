@@ -351,6 +351,7 @@ fn lane_frame(
                 rows,
                 x_range: (0.0, 100.0 * NS),
                 left_margin: 64.0,
+                name_width: 40.0,
                 right_margin: 14.0,
                 selected: &[0],
                 cursor,
