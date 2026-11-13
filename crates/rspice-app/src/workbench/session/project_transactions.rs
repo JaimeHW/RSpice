@@ -40,6 +40,10 @@ use crate::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
     OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome, apply_live_project_snapshot,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::ProjectIoError;
+#[cfg(target_arch = "wasm32")]
+use rspice_project::lifecycle::SaveContinuationEvent;
 
 /// Replacing the open project with a new one: the project's phases over its
 /// own parts, with the shell's steps between them, in the order the
@@ -436,6 +440,92 @@ impl AppState {
     pub(crate) fn save_project_copy_in_browser(&mut self) -> bool {
         project_workflow::save_project_copy_in_browser(save_parts(self))
     }
+
+    /// Take the browser save that finished since the last frame, if one
+    /// did, over the save's parts. Returns what the save continues with.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn poll_browser_project_save(&mut self) -> Option<SaveContinuationEvent> {
+        project_workflow::poll_browser_project_save(save_parts(self))
+    }
+}
+
+/// Saving the project as a new file: the inspector's pending edit
+/// committed, a live mirror refused, then the copy written where the reader
+/// picks and opened in place of the project it came from.
+impl AppState {
+    /// Save the open project as a new file and carry on working in it, or
+    /// save a copy through the browser. Returns whether it saved, or, in the
+    /// browser, whether the save started.
+    pub(crate) fn save_project_as(&mut self) -> bool {
+        if !self.commit_pending_inspector_edit() {
+            return false;
+        }
+        if let Some(message) = project_workflow::live_mirror_save_block(&self.model, true) {
+            self.prompt(message);
+            return false;
+        }
+        let default_name =
+            project_workflow::project_save_dialog_default_name(&self.model, &self.platform);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
+            Ok(path) => self.save_project_as_to_path(&path),
+            Err(ProjectIoError::Cancelled) => false,
+            Err(error) => {
+                self.report_failure("Project Save As failed", error.to_string());
+                false
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = default_name;
+            self.save_project_copy_in_browser()
+        }
+    }
+
+    /// Save the project at `path` and carry on working there.
+    ///
+    /// The file is written under the project's copy rules (its own project
+    /// identity, never over the open file), then opened in place of the
+    /// project it came from, so the project location, the recent list, the
+    /// window title and the saved session all name the new file. The file it
+    /// came from keeps what was last saved to it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_project_as_to_path(&mut self, path: &std::path::Path) -> bool {
+        if let Err(error) =
+            crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(self, path)
+        {
+            lifecycle_error(self, error, "Project Save As failed");
+            return false;
+        }
+        if !project_workflow::load_project_from_path(self, path) {
+            return false;
+        }
+        self.record(
+            crate::diagnostics::LogSeverity::Info,
+            crate::diagnostics::LogSource::Studio,
+            format!("Saved the project as {}.", path.display()),
+        );
+        true
+    }
+}
+
+/// Answer a lifecycle refusal on the status bar, or a project that could not
+/// be read or written as a failure the session records, as the project's
+/// report of it says.
+#[cfg(not(target_arch = "wasm32"))]
+fn lifecycle_error(
+    state: &mut AppState,
+    error: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleError,
+    context: &str,
+) {
+    project_workflow::report_lifecycle_error(
+        &mut state.model,
+        &mut state.workbench,
+        error,
+        context,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

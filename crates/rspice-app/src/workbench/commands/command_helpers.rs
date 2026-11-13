@@ -865,8 +865,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             Command::OpenWorkspace(workspace).execute(app);
         }
         ProjectRequest::SaveMigrationCopy => {
-            let saved =
-                crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
+            let saved = app.state.save_project_as();
             if saved {
                 app.state.record(
                     LogSeverity::Info,

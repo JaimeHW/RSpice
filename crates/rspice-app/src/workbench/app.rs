@@ -695,11 +695,7 @@ impl RSpiceApp {
             self.restore_workspace_after_project_load();
         }
         #[cfg(target_arch = "wasm32")]
-        if let Some(event) =
-            crate::workbench::workflows::project_workflow::poll_browser_project_save(
-                &mut self.state,
-            )
-        {
+        if let Some(event) = self.state.poll_browser_project_save() {
             self.handle_save_continuation_event(event);
         }
         #[cfg(target_arch = "wasm32")]

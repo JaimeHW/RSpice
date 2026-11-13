@@ -351,7 +351,7 @@ fn seed_new_project_drawing_sheet_default(
     }
 }
 
-fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
+pub(crate) fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
     model
         .workspace
         .content
@@ -388,7 +388,7 @@ impl SaveRequestOutcome {
 /// A streamed mirror never acquires a canonical local binding implicitly.
 /// Policy may authorize an explicit independent copy through Save As; it
 /// never authorizes ordinary Save/Save All to retain or overwrite the mirror.
-fn live_mirror_save_block(model: &Model, project_copy: bool) -> Option<&'static str> {
+pub(crate) fn live_mirror_save_block(model: &Model, project_copy: bool) -> Option<&'static str> {
     let locks = &model.live_write_locks;
     if !locks.mirror {
         None
@@ -697,15 +697,15 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveContinuationEvent> {
+pub(crate) fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinuationEvent> {
     let completion = BROWSER_PROJECT_SAVE_RESULTS.with(|queue| queue.borrow_mut().pop_front())?;
     let project_copy = completion.prepared.save.is_project_copy();
     let transaction = completion.prepared.save.transaction();
     let saved_scope = completion.prepared.save.scope();
     let saved_document = completion.prepared.save.saved_document().clone();
     if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
-        &state.model,
-        &state.platform,
+        parts.lifecycle.model,
+        parts.lifecycle.platform,
         completion.prepared.save.context(),
     ) {
         let terminal = match &completion.result {
@@ -735,7 +735,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 handle_id,
                 ..
             } => crate::workbench::lifecycle::project_lifecycle::release_browser_handle_if_unowned(
-                &state.platform,
+                parts.lifecycle.platform,
                 *handle_id,
             ),
             crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled
@@ -743,7 +743,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(_) => {}
         }
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            &mut state.platform,
+            parts.lifecycle.platform,
             transaction,
         );
         return (!project_copy).then_some(terminal);
@@ -759,7 +759,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             display_name,
             digest,
         } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
-            state,
+            &mut parts,
             completion.prepared,
             handle_id,
             rspice_project::lifecycle::BrowserSavePublication {
@@ -776,11 +776,11 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
-                    &mut state.platform.browser_project_save_name,
+                    &mut parts.lifecycle.platform.browser_project_save_name,
                     project_copy,
                     &display_name,
                 );
-                state.record(
+                parts.lifecycle.model.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     if project_copy {
@@ -794,7 +794,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 );
                 if !project_copy {
                     continuation = Some(canonical_save_continuation_event(
-                        state,
+                        &parts,
                         transaction,
                         saved_scope,
                         &saved_document,
@@ -803,7 +803,12 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             }
             Err(error) => {
                 let message = error.to_string();
-                lifecycle_error(state, error, "Browser save completion failed");
+                report_lifecycle_error(
+                    parts.lifecycle.model,
+                    parts.workbench,
+                    error,
+                    "Browser save completion failed",
+                );
                 if !project_copy {
                     continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
                         transaction,
@@ -824,7 +829,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             digest,
             persistence_error,
         } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
-            state,
+            &mut parts,
             completion.prepared,
             handle_id,
             rspice_project::lifecycle::BrowserSavePublication {
@@ -841,12 +846,12 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
-                    &mut state.platform.browser_project_save_name,
+                    &mut parts.lifecycle.platform.browser_project_save_name,
                     project_copy,
                     &display_name,
                 );
                 if project_copy {
-                    state.record(
+                    parts.lifecycle.model.record(
                         LogSeverity::Warning,
                         LogSource::Studio,
                         format!(
@@ -855,7 +860,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                         ),
                     );
                 } else {
-                    state.model.report_warning(
+                    parts.lifecycle.model.report_warning(
                         "Project will not reopen on restart",
                         format!(
                             "Saved {display_name}, but browser storage failed: \
@@ -865,7 +870,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 }
                 if !project_copy {
                     continuation = Some(canonical_save_continuation_event(
-                        state,
+                        &parts,
                         transaction,
                         saved_scope,
                         &saved_document,
@@ -874,7 +879,12 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             }
             Err(error) => {
                 let message = error.to_string();
-                lifecycle_error(state, error, "Browser save completion failed");
+                report_lifecycle_error(
+                    parts.lifecycle.model,
+                    parts.workbench,
+                    error,
+                    "Browser save completion failed",
+                );
                 if !project_copy {
                     continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
                         transaction,
@@ -887,7 +897,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         },
         crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
+                parts.lifecycle.platform,
                 transaction,
             );
             if !project_copy {
@@ -898,16 +908,16 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             observed_digest,
         } => {
             crate::workbench::lifecycle::project_lifecycle::record_browser_save_conflict(
-                &state.model,
-                &mut state.platform,
+                parts.lifecycle.model,
+                parts.lifecycle.platform,
                 &completion.prepared,
                 observed_digest,
             );
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
+                parts.lifecycle.platform,
                 transaction,
             );
-            state.report_failure(
+            parts.lifecycle.model.report_failure(
                 "Project save failed",
                 "the project changed outside RSpice; reopen it or save a copy.",
             );
@@ -917,10 +927,13 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         }
         crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
+                parts.lifecycle.platform,
                 transaction,
             );
-            state.report_failure("Project save failed", error.to_string());
+            parts
+                .lifecycle
+                .model
+                .report_failure("Project save failed", error.to_string());
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Failed(
                     transaction,
@@ -934,13 +947,13 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
 
 #[cfg(target_arch = "wasm32")]
 fn canonical_save_continuation_event(
-    state: &AppState,
+    parts: &SaveParts<'_>,
     transaction: crate::product::TransactionId,
     scope: SaveScope,
     saved_document: &crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId,
 ) -> SaveContinuationEvent {
     if crate::workbench::lifecycle::project_lifecycle::saved_snapshot_authorizes_continuation(
-        state,
+        parts,
         scope,
         saved_document,
     ) {
@@ -948,59 +961,6 @@ fn canonical_save_continuation_event(
     } else {
         SaveContinuationEvent::SavedWithNewerChanges(transaction)
     }
-}
-
-pub(crate) fn save_project_as(state: &mut AppState) -> bool {
-    if !state.commit_pending_inspector_edit() {
-        return false;
-    }
-    if let Some(message) = live_mirror_save_block(&state.model, true) {
-        state.prompt(message);
-        return false;
-    }
-    let default_name = project_save_dialog_default_name(&state.model, &state.platform);
-
-    #[cfg(not(target_arch = "wasm32"))]
-    match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
-        Ok(path) => save_project_as_to_path(state, &path),
-        Err(ProjectIoError::Cancelled) => false,
-        Err(error) => {
-            state.report_failure("Project Save As failed", error.to_string());
-            false
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = default_name;
-        state.save_project_copy_in_browser()
-    }
-}
-
-/// Save the project at `path` and carry on working there.
-///
-/// The file is written under the project's copy rules (its own project
-/// identity, never over the open file), then opened in place of the project
-/// it came from, so the project location, the recent list, the window title
-/// and the saved session all name the new file. The file it came from keeps
-/// what was last saved to it.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn save_project_as_to_path(state: &mut AppState, path: &Path) -> bool {
-    if let Err(error) =
-        crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(state, path)
-    {
-        lifecycle_error(state, error, "Project Save As failed");
-        return false;
-    }
-    if !load_project_from_path(state, path) {
-        return false;
-    }
-    state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!("Saved the project as {}.", path.display()),
-    );
-    true
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1996,7 +1956,7 @@ fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: 
 
 /// [`lifecycle_error`] over the two parts it answers through: the model's
 /// log and notices, and the status bar.
-fn report_lifecycle_error(
+pub(crate) fn report_lifecycle_error(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     error: ProjectLifecycleError,

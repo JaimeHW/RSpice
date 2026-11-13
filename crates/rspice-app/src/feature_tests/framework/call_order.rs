@@ -136,7 +136,7 @@ const PREPARE_FRAME: &[Step] = &[
     (
         "5.25",
         &[
-            "project_workflow::poll_browser_project_save(",
+            "self.state.poll_browser_project_save()",
             "self.handle_save_continuation_event(event)",
         ],
     ),
@@ -1986,7 +1986,7 @@ const MIGRATION_COPY_SAVED: &[Step] = &[(
     "SaveMigrationCopy",
     &[
         "ProjectRequest::SaveMigrationCopy => {",
-        "let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);",
+        "let saved = app.state.save_project_as();",
         "if saved {",
         "app.state.record(",
         "\"Saved a migration copy that keeps the current technology; no technology was attached.\",",

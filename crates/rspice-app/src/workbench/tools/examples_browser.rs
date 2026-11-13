@@ -17,7 +17,7 @@ use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::framework::feature::{Cx, ModelsPort};
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::slots::ProjectState;
-use crate::workbench::workflows::project_workflow::{NewProjectParams, save_project_as};
+use crate::workbench::workflows::project_workflow::NewProjectParams;
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 
 /// The name column every row shares.
@@ -46,7 +46,7 @@ fn open_example(state: &mut AppState, name: &str) {
     if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
         && create_example_project(state, example).is_ok()
     {
-        save_project_as(state);
+        state.save_project_as();
     }
 }
 

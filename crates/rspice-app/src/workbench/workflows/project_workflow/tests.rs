@@ -501,7 +501,7 @@ fn mirror_save_copy_policy_gates_every_project_persistence_path() {
             .save_project_scope(SaveScope::AllDocuments)
             .request_started()
     );
-    assert!(!save_project_as(&mut state));
+    assert!(!state.save_project_as());
     assert!(matches!(
         state.save_project_scope(SaveScope::AllDocuments),
         SaveRequestOutcome::Failed(_)
@@ -2146,7 +2146,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     let mut state = AppState::default();
     assert!(state.save_project_to_path(&original));
 
-    assert!(save_project_as_to_path(&mut state, &renamed));
+    assert!(state.save_project_as_to_path(&renamed));
 
     let names_renamed = |path: Option<&Path>| {
         path.and_then(Path::file_name)

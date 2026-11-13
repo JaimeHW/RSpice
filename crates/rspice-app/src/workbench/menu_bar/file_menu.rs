@@ -47,7 +47,7 @@ pub(crate) fn dispatch_file_menu_action(
             crate::workbench::workflows::project_workflow::open_project(state);
         }
         FileMenuAction::SaveProjectAs => {
-            crate::workbench::workflows::project_workflow::save_project_as(state);
+            state.save_project_as();
         }
         FileMenuAction::SaveAll => {
             state.save_project_scope(
