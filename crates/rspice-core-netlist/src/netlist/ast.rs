@@ -1457,11 +1457,6 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
-    /// Create a digital vector from node names
-    pub fn digital_vector(nodes: Vec<String>) -> Self {
-        XspicePort::DigitalVector(nodes)
-    }
-
     /// Check if this is an analog port
     pub fn is_analog(&self) -> bool {
         matches!(

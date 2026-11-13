@@ -647,9 +647,8 @@ fn first_instance(
     }
 }
 
-/// Whether every port of a code model is analog — the trait default
-/// `CodeModel::is_analog_only` reads, answered from the instance's port
-/// contract.
+/// Whether every port of a code model is analog, answered from the
+/// instance's port contract.
 fn xspice_is_analog_only(instance: &crate::xspice::XspiceInstance) -> bool {
     instance
         .ports()

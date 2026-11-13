@@ -208,11 +208,6 @@ impl InputValue {
         }
     }
 
-    /// Get digital vector
-    pub fn digital_vector(&self) -> &[DigitalValue] {
-        self.try_digital_vector().expect("Expected digital vector")
-    }
-
     /// Try to get a real scalar value.
     pub fn try_real(&self) -> Option<Value> {
         match self {

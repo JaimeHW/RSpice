@@ -929,16 +929,6 @@ impl TransientResultCompressed {
         })
     }
 
-    /// Look one channel up by canonical name, ignoring case.
-    pub fn channel_named(&self, canonical_name: &str) -> Option<&TransientCompressedChannel> {
-        self.channels.iter().find(|channel| {
-            channel
-                .descriptor
-                .canonical_name()
-                .eq_ignore_ascii_case(canonical_name)
-        })
-    }
-
     /// The node-voltage channel for a zero-based node index.
     pub fn node_voltage_channel(&self, node_index: usize) -> Option<&TransientCompressedChannel> {
         self.node_channels()

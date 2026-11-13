@@ -360,11 +360,6 @@ impl ControlCircuit {
         }
     }
 
-    /// Consume the completed session for publication without cloning results.
-    pub fn into_datasets(self) -> Vec<ControlNamedDataset> {
-        self.datasets
-    }
-
     fn prepare_command(
         &mut self,
         engine: &Engine,

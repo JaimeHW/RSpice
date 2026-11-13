@@ -126,26 +126,6 @@ impl DigitalState {
             _ => DigitalState::Unknown,
         }
     }
-
-    /// Convert to analog voltage
-    pub fn to_voltage(&self, v_low: f64, v_high: f64, v_unknown: f64) -> f64 {
-        match self {
-            DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => v_low,
-            DigitalState::One | DigitalState::OneR | DigitalState::OneZ => v_high,
-            _ => v_unknown,
-        }
-    }
-
-    /// Create from analog voltage using thresholds
-    pub fn from_voltage(v: f64, v_low: f64, v_high: f64) -> DigitalState {
-        if v <= v_low {
-            DigitalState::Zero
-        } else if v >= v_high {
-            DigitalState::One
-        } else {
-            DigitalState::Unknown
-        }
-    }
 }
 
 impl fmt::Display for DigitalState {

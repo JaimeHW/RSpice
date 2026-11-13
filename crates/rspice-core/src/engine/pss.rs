@@ -2573,7 +2573,7 @@ impl Engine {
         } = coarse;
         drop(qualified_waveform);
         let detected_period = shooting_state.period;
-        let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
+        let mut solver = ShootingNewtonSolver::new(config.tolerance)
             .with_abstol(config.abstol)
             .with_damping(config.damping_factor);
 
@@ -2704,7 +2704,7 @@ impl Engine {
         chord: Option<PssChord<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PssGridSolution, SimulationError> {
-        let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
+        let mut solver = ShootingNewtonSolver::new(config.tolerance)
             .with_abstol(config.abstol)
             .with_damping(config.damping_factor);
 

@@ -3643,7 +3643,7 @@ impl XspiceInstance {
 
     /// Set analog input value for a port
     ///
-    /// Called by CircuitData::evaluate_xspice to provide node voltages.
+    /// Called by CircuitData::evaluate_xspice_with_analysis to provide node voltages.
     pub fn set_input_analog(&mut self, port_idx: usize, value: Value) {
         if let Some(port) = self.ports.get(port_idx) {
             self.context.set_input_analog(&port.name, value);

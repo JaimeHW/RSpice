@@ -1299,20 +1299,6 @@ impl CircuitData {
         &mut self.generated_veriloga_devices
     }
 
-    /// Evaluate all XSPICE code model instances
-    ///
-    /// This calls each XspiceInstance::evaluate() with the current simulation
-    /// state, updating internal context and computing output contributions.
-    ///
-    /// # Arguments
-    /// * `time` - Current simulation time
-    /// * `voltages` - Current MNA solution vector, with node voltages followed by branch currents
-    pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
-        if let Err(e) = self.try_evaluate_xspice(time, voltages) {
-            self.warn_xspice_evaluation(time, &e);
-        }
-    }
-
     /// Log one XSPICE evaluation failure, naming the iterate it happened at,
     /// and not again while the same failure repeats.
     ///
@@ -1361,36 +1347,6 @@ impl CircuitData {
     /// single point.
     pub(crate) fn clear_xspice_evaluation_warning(&mut self) {
         self.xspice_evaluation_warning = None;
-    }
-
-    /// Fallible XSPICE evaluation for callers that must not report success
-    /// after a model fails.
-    pub fn try_evaluate_xspice(
-        &mut self,
-        time: Value,
-        voltages: &[Value],
-    ) -> crate::xspice::CmResult<()> {
-        self.try_evaluate_xspice_with_analysis(
-            time,
-            0.0,
-            voltages,
-            crate::xspice::AnalysisType::Transient,
-        )
-    }
-
-    /// Fallible XSPICE evaluation for transient with explicit timestep.
-    pub fn try_evaluate_xspice_with_timestep(
-        &mut self,
-        time: Value,
-        timestep: Value,
-        voltages: &[Value],
-    ) -> crate::xspice::CmResult<()> {
-        self.try_evaluate_xspice_with_analysis(
-            time,
-            timestep,
-            voltages,
-            crate::xspice::AnalysisType::Transient,
-        )
     }
 
     /// Evaluate all XSPICE code model instances for the requested analysis type.

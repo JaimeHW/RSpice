@@ -45,7 +45,7 @@
 //!   "axes":          [ { "name", "displayName",
 //!                        "kind": "time"|"frequency"|"offset-frequency"|
 //!                                "sweep-value"|"temperature"|"trial-index"|
-//!                                "harmonic-index"|"sideband"|"bin-index"|
+//!                                "harmonic-index"|"bin-index"|
 //!                                "port-index"|"phase"|"index",
 //!                        "unit": <signal unit>,
 //!                        "values": { "representation": "real",    "values": [f64] }
@@ -1453,7 +1453,6 @@ pub enum ResultAxisKind {
     Temperature,
     TrialIndex,
     HarmonicIndex,
-    Sideband,
     BinIndex,
     PortIndex,
     Phase,

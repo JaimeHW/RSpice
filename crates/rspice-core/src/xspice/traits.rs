@@ -708,11 +708,6 @@ pub trait CodeModel: Send + Sync {
         &[]
     }
 
-    /// Check if this model is analog-only (no event-driven ports)
-    fn is_analog_only(&self) -> bool {
-        self.ports().iter().all(|p| p.default_type.is_analog())
-    }
-
     /// Whether transient evaluation may be skipped when event-driven inputs
     /// have the same accepted event/value signature as the previous call.
     ///

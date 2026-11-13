@@ -101,9 +101,6 @@ pub struct ShootingNewtonSolver {
     /// Absolute tolerance for small signals
     abstol: Value,
 
-    /// Maximum iterations
-    max_iterations: usize,
-
     /// Damping factor for Newton updates
     pub damping: Value,
 
@@ -116,11 +113,10 @@ pub struct ShootingNewtonSolver {
 
 impl ShootingNewtonSolver {
     /// Create a new shooting Newton solver
-    pub fn new(tolerance: Value, max_iterations: usize) -> Self {
+    pub fn new(tolerance: Value) -> Self {
         Self {
             tolerance,
             abstol: 1e-12,
-            max_iterations,
             damping: 1.0,
             iteration: 0,
             converged: false,
@@ -176,11 +172,6 @@ impl ShootingNewtonSolver {
         self.converged
     }
 
-    /// Check if maximum iterations exceeded
-    pub fn is_maxed_out(&self) -> bool {
-        self.iteration >= self.max_iterations
-    }
-
     /// Extract a complete Floquet spectrum and retain its canonical residual
     /// certificate, checking cancellation around the atomic eigensolve.
     pub fn compute_floquet_spectrum_with_abort(
@@ -207,7 +198,7 @@ impl ShootingNewtonSolver {
 
 impl Default for ShootingNewtonSolver {
     fn default() -> Self {
-        Self::new(1e-6, 100)
+        Self::new(1e-6)
     }
 }
 
@@ -309,7 +300,7 @@ mod tests {
         state.residual.clear();
         assert!(!solver.check_convergence(&state));
         let state = ShootingState::new(vec![0.0], 1.0);
-        assert!(!ShootingNewtonSolver::new(Value::INFINITY, 10).check_convergence(&state));
+        assert!(!ShootingNewtonSolver::new(Value::INFINITY).check_convergence(&state));
     }
 
     #[test]
