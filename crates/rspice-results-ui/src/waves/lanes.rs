@@ -380,6 +380,7 @@ pub fn lane_readout_rows(
             ReadoutRow {
                 name: spec.label().to_owned(),
                 swatch: spec.color(),
+                swatch_style: None,
                 a: read(lane, cursors.a),
                 b: read(lane, cursors.b),
                 delta: READOUT_ABSENT.to_owned(),
@@ -407,6 +408,7 @@ pub fn lane_readout_rows(
         out.push(ReadoutRow {
             name: lane.source_waveform_name.clone(),
             swatch: lane.color,
+            swatch_style: None,
             a: format(a),
             b: format(b),
             delta: format(a.zip(b).map(|(a, b)| b - a)),

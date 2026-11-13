@@ -1,5 +1,6 @@
 //! Cursor values, branch readings and retained-sample measurements.
 
+use super::pane::SwatchStyle;
 use super::units::as_readout;
 use super::{
     NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind, cursor_interpolation,
@@ -13,7 +14,8 @@ use rspice_ui_kit::plot::sample::{
     sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    CursorPair, SampleInterpolation, XScale, fmt_si_significant, fmt_significant,
+    CursorPair, SampleInterpolation, TraceLook, XScale, fmt_si_significant, fmt_significant,
+    paint_trace_swatch,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -21,7 +23,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
-const READOUT_SWATCH_W: f32 = 16.0;
+const READOUT_SWATCH_W: f32 = 22.0;
 
 /// How many branches of one trace the readout will name separately.
 ///
@@ -83,19 +85,26 @@ pub fn cursor_readout_table(
                     values: [&str; 5],
                     colors: [egui::Color32; 5],
                     font: egui::FontId,
-                    swatch: Option<egui::Color32>| {
+                    swatch: Option<(egui::Color32, Option<SwatchStyle>)>| {
         let top = rect.top() + row_index as f32 * READOUT_ROW_H;
         let row = egui::Rect::from_min_max(
             egui::pos2(rect.left(), top),
             egui::pos2(rect.right(), top + READOUT_ROW_H),
         );
         let painter = ui.painter().with_clip_rect(row);
-        if let Some(color) = swatch {
-            painter.hline(
-                egui::Rangef::new(columns[0], columns[0] + READOUT_SWATCH_W - 6.0),
-                row.center().y,
-                egui::Stroke::new(2.0, color),
+        if let Some((color, style)) = swatch {
+            let rect = egui::Rect::from_x_y_ranges(
+                columns[0]..=columns[0] + READOUT_SWATCH_W - 4.0,
+                row.y_range(),
             );
+            let look = style.map_or(
+                TraceLook {
+                    dash: None,
+                    marker: None,
+                },
+                |style| style.look(t.color_safe_traces),
+            );
+            paint_trace_swatch(&painter, rect, color, look, c.bg_panel);
         }
         for (index, ((text, x), color)) in values.into_iter().zip(columns).zip(colors).enumerate() {
             let x = if index == 0 && swatch.is_some() {
@@ -135,7 +144,7 @@ pub fn cursor_readout_table(
     draw_row(
         1,
         [model.x_label(), &a_x, &b_x, &delta_x, &branch_note],
-        [c.text_dim, c.accent, c.traces[4], c.text, c.text_faint],
+        [c.text_dim, c.accent, c.text, c.text, c.text_faint],
         theme::mono(tokens::FS_0, FontWeight::Regular),
         None,
     );
@@ -150,7 +159,7 @@ pub fn cursor_readout_table(
             [&row.name, &row.a, &row.b, &row.delta, &row.slope],
             [c.text_dim, c.text, c.text, c.text_dim, c.text_dim],
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            Some(row.swatch),
+            Some((row.swatch, row.swatch_style)),
         );
     }
 
@@ -248,6 +257,9 @@ pub const READOUT_ABSENT: &str = "—";
 pub struct ReadoutRow {
     pub name: String,
     pub swatch: egui::Color32,
+    /// The trace's dash and marker, for a swatch that is its curve; `None`
+    /// for an event lane, whose swatch is its colour.
+    pub swatch_style: Option<SwatchStyle>,
     pub a: String,
     pub b: String,
     pub delta: String,
@@ -335,6 +347,7 @@ fn trace_readout_rows(
         return vec![ReadoutRow {
             name: qualifiers(None),
             swatch: trace.color,
+            swatch_style: Some(SwatchStyle::of(trace)),
             a: approximate(cursors.a),
             b: approximate(cursors.b),
             delta: READOUT_ABSENT.to_owned(),
@@ -390,6 +403,7 @@ fn trace_readout_rows(
             ReadoutRow {
                 name: qualifiers(branch),
                 swatch: trace.color,
+                swatch_style: Some(SwatchStyle::of(trace)),
                 a: a_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
                 b: b_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
                 delta: difference.map_or_else(|| READOUT_ABSENT.to_owned(), &format),

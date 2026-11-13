@@ -187,6 +187,10 @@ pub struct Trace<'a> {
     pub dash_style: Option<usize>,
     /// Explicit categorical marker cue from a family presentation policy.
     pub marker_style: Option<usize>,
+    /// The slot of the canvas palette this trace's colour came from. A
+    /// trace past the palette's last hue repeats a colour, and its slot is
+    /// what gives it a dash of its own; see [`Trace::look`].
+    pub palette_slot: Option<usize>,
     /// Paint a neutral point primitive when this trace contains one sample.
     /// This preserves exact isolated family points without assigning a
     /// categorical marker meaning that the policy did not request.
@@ -227,6 +231,7 @@ impl<'a> Trace<'a> {
             dashed: false,
             dash_style: None,
             marker_style: None,
+            palette_slot: None,
             show_single_point: false,
             width: 1.8,
             cache_key: None,
@@ -250,6 +255,13 @@ impl<'a> Trace<'a> {
     /// Apply one deterministic categorical point-marker shape.
     pub fn marker_style(mut self, ordinal: usize) -> Self {
         self.marker_style = Some(ordinal);
+        self
+    }
+
+    /// Place this trace in the canvas palette's cycle at `slot`, the slot its
+    /// colour was taken from.
+    pub fn palette_slot(mut self, slot: usize) -> Self {
+        self.palette_slot = Some(slot);
         self
     }
 

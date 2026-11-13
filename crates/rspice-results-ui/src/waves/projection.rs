@@ -250,6 +250,7 @@ struct TraceSource<'a> {
     base_name: &'a str,
     source_unit: Option<&'a str>,
     signal_color: egui::Color32,
+    palette_slot: Option<usize>,
     kind: TraceKind,
     source_x: &'a SharedWaveformValues,
     source_y: &'a SharedWaveformValues,
@@ -276,6 +277,7 @@ fn append_projected_traces(
         base_name,
         source_unit,
         signal_color,
+        palette_slot,
         kind,
         source_x,
         source_y,
@@ -326,6 +328,8 @@ fn append_projected_traces(
             unit: source_unit.map(str::to_owned),
             signal_color,
             color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
+            palette_slot: palette_slot
+                .filter(|_| family_style.is_none_or(|style| style.color.is_none())),
             x: projection.x,
             y,
             shape,
@@ -498,6 +502,9 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 continue;
             }
             let color = waveform_color(waveform, waveform_index, tokens);
+            // Every trace has its place in the cycle, whoever chose its
+            // colour, so its curve and its legend swatch agree.
+            let palette_slot = Some(waveform_index);
             if let Some(lane) = event_lanes
                 .as_deref()
                 .and_then(|lanes| lane_trace(lanes, waveform, waveform_index, color))
@@ -516,17 +523,19 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 });
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
-                    for (kind, name, signal_color, y) in [
+                    for (kind, name, signal_color, slot, y) in [
                         (
                             TraceKind::Real,
                             format!("re({})", complex.source_name),
                             color,
+                            palette_slot,
                             &complex.real,
                         ),
                         (
                             TraceKind::Imaginary,
                             format!("im({})", complex.source_name),
                             tokens.color.traces[(waveform_index + 1) % tokens.color.traces.len()],
+                            Some(waveform_index + 1),
                             &complex.imag,
                         ),
                     ] {
@@ -540,6 +549,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                                 base_name: &name,
                                 source_unit: waveform.unit.as_deref(),
                                 signal_color,
+                                palette_slot: slot,
                                 kind,
                                 source_x: &waveform.x,
                                 source_y: y,
@@ -598,6 +608,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     base_name: &waveform.name,
                     source_unit: waveform.unit.as_deref(),
                     signal_color: color,
+                    palette_slot,
                     kind,
                     source_x: &waveform.x,
                     source_y: &waveform.y,
@@ -616,6 +627,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     trace.unit.clone(),
                     trace.signal_color,
                     trace.color,
+                    trace.palette_slot,
                     trace.kind,
                     trace.visible,
                     trace.presentation_key,
@@ -672,6 +684,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 signal_unit,
                 signal_color,
                 display_color,
+                palette_slot,
                 signal_kind,
                 signal_visible,
                 presentation_key,
@@ -773,6 +786,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     unit: signal_unit.clone(),
                     signal_color: *signal_color,
                     color: *display_color,
+                    palette_slot: *palette_slot,
                     x: projected.0,
                     y: projected.1,
                     shape,

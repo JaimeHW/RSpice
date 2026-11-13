@@ -110,6 +110,9 @@ pub struct StripTrace {
     /// Ordinary signal color retained for non-family overlay runs.
     pub signal_color: egui::Color32,
     pub color: egui::Color32,
+    /// The trace's place in the canvas palette's cycle, which gives a
+    /// repeated hue its own dash; `None` when a family policy colours it.
+    pub palette_slot: Option<usize>,
     pub x: SharedWaveformValues,
     pub y: SharedWaveformValues,
     /// What this trace's abscissa actually is: one ascending sweep, a reverse

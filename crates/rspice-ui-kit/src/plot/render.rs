@@ -11,7 +11,8 @@ use crate::tokens::Tokens;
 use super::cursor::CursorPair;
 use super::decimate::DecimationCache;
 use super::scale::XScale;
-use super::spec::{MarkerShape, PlotSpec};
+use super::spec::{MarkerShape, PlotSpec, Trace};
+use crate::palette::TRACE_HUES;
 
 /// Interaction contract selected by the owning result surface.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -97,14 +98,17 @@ const MARGIN_TOP: f32 = 12.0;
 const MARGIN_BOTTOM: f32 = 26.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
 
+/// A point marker a curve carries besides its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum TraceMarkerShape {
+pub enum TraceMarkerShape {
     Circle,
     Square,
     Diamond,
     Triangle,
     Cross,
     Plus,
+    TriangleDown,
+    Asterisk,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -113,49 +117,135 @@ struct TraceRedundancy {
     marker: TraceMarkerShape,
 }
 
+/// One (dash, marker) pair per palette hue, so a colour-safe curve is told
+/// apart from the seven others without its colour.
+const COLOR_SAFE_STYLES: [TraceRedundancy; TRACE_HUES] = [
+    TraceRedundancy {
+        dash: None,
+        marker: TraceMarkerShape::Circle,
+    },
+    TraceRedundancy {
+        dash: Some((7.0, 4.0)),
+        marker: TraceMarkerShape::Square,
+    },
+    TraceRedundancy {
+        dash: Some((2.0, 4.0)),
+        marker: TraceMarkerShape::Diamond,
+    },
+    TraceRedundancy {
+        dash: Some((10.0, 4.0)),
+        marker: TraceMarkerShape::Triangle,
+    },
+    TraceRedundancy {
+        dash: Some((5.0, 2.0)),
+        marker: TraceMarkerShape::Cross,
+    },
+    TraceRedundancy {
+        dash: Some((12.0, 3.0)),
+        marker: TraceMarkerShape::Plus,
+    },
+    TraceRedundancy {
+        dash: Some((3.0, 3.0)),
+        marker: TraceMarkerShape::TriangleDown,
+    },
+    TraceRedundancy {
+        dash: Some((9.0, 2.0)),
+        marker: TraceMarkerShape::Asterisk,
+    },
+];
+
+/// The dash each further pass through the palette's hues draws in: solid
+/// first, then dashed, dotted and long-dashed, so the ninth curve is not the
+/// first one again.
+const PASS_DASHES: [Option<(f32, f32)>; 4] =
+    [None, Some((6.0, 4.0)), Some((2.0, 3.0)), Some((12.0, 4.0))];
+
 fn color_safe_trace_style(index: usize, semantic_dashed: bool) -> TraceRedundancy {
-    let mut style = match index % 6 {
-        0 => TraceRedundancy {
-            dash: None,
-            marker: TraceMarkerShape::Circle,
-        },
-        1 => TraceRedundancy {
-            dash: Some((7.0, 4.0)),
-            marker: TraceMarkerShape::Square,
-        },
-        2 => TraceRedundancy {
-            dash: Some((2.0, 4.0)),
-            marker: TraceMarkerShape::Diamond,
-        },
-        3 => TraceRedundancy {
-            dash: Some((10.0, 4.0)),
-            marker: TraceMarkerShape::Triangle,
-        },
-        4 => TraceRedundancy {
-            dash: Some((5.0, 2.0)),
-            marker: TraceMarkerShape::Cross,
-        },
-        _ => TraceRedundancy {
-            dash: Some((12.0, 3.0)),
-            marker: TraceMarkerShape::Plus,
-        },
-    };
+    let mut style = COLOR_SAFE_STYLES[index % TRACE_HUES];
     if semantic_dashed && style.dash.is_none() {
         style.dash = Some((5.0, 4.0));
     }
     style
 }
 
-fn resolved_trace_marker(
-    marker_style: Option<usize>,
-    redundancy: Option<TraceRedundancy>,
-    show_single_point: bool,
-    point_count: usize,
-) -> Option<TraceMarkerShape> {
-    marker_style
-        .map(|ordinal| color_safe_trace_style(ordinal, false).marker)
-        .or_else(|| redundancy.map(|style| style.marker))
-        .or_else(|| (show_single_point && point_count == 1).then_some(TraceMarkerShape::Circle))
+/// How a curve is drawn besides its colour.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TraceLook {
+    /// Dash and gap lengths, in points; `None` is a solid stroke.
+    pub dash: Option<(f32, f32)>,
+    /// The marker the curve carries, if any.
+    pub marker: Option<TraceMarkerShape>,
+}
+
+impl Trace<'_> {
+    /// How this trace is drawn besides its colour, as the `ordinal`-th trace
+    /// of its plot, with color-safe traces on or off.
+    ///
+    /// A trace placed in the palette's cycle takes its look from that slot:
+    /// its marker (color-safe) and, once the hues have all been used, a dash
+    /// of its own pass. A legend draws its swatch from the same answer, so
+    /// the swatch is the curve.
+    pub fn look(&self, ordinal: usize, color_safe: bool) -> TraceLook {
+        let slot = self.palette_slot.unwrap_or(ordinal);
+        let pass = self.palette_slot.map_or(0, |slot| slot / TRACE_HUES);
+        let redundancy = color_safe.then(|| {
+            let mut style = color_safe_trace_style(slot, self.dashed);
+            if pass > 0 {
+                style.dash = COLOR_SAFE_STYLES[(slot + pass) % TRACE_HUES].dash;
+            }
+            style
+        });
+        let dash = self
+            .dash_style
+            .and_then(|ordinal| color_safe_trace_style(ordinal, false).dash)
+            .or_else(|| redundancy.and_then(|style| style.dash))
+            .or_else(|| self.dashed.then_some((5.0, 4.0)))
+            .or_else(|| {
+                if color_safe {
+                    None
+                } else {
+                    PASS_DASHES[pass % PASS_DASHES.len()]
+                }
+            });
+        let marker = self
+            .marker_style
+            .map(|ordinal| color_safe_trace_style(ordinal, false).marker)
+            .or_else(|| redundancy.map(|style| style.marker));
+        TraceLook { dash, marker }
+    }
+}
+
+/// A legend swatch that is the curve it stands for: a short stroke in the
+/// curve's dash, and its marker at the middle.
+pub fn paint_trace_swatch(
+    painter: &egui::Painter,
+    rect: Rect,
+    color: Color32,
+    look: TraceLook,
+    background: Color32,
+) {
+    let y = rect.center().y;
+    let ends = [pos2(rect.left() + 1.0, y), pos2(rect.right() - 1.0, y)];
+    let stroke = Stroke::new(2.0, color);
+    match look.dash {
+        // A swatch is a handful of points long: a long dash shrunk to fit
+        // still reads as a dash, not as a solid line with a gap at its end.
+        Some((dash, gap)) => {
+            let scale = (rect.width() / (2.0 * (dash + gap))).min(1.0);
+            painter.extend(Shape::dashed_line(
+                &ends,
+                stroke,
+                (dash * scale).max(1.5),
+                (gap * scale).max(1.5),
+            ));
+        }
+        None => {
+            painter.line_segment(ends, stroke);
+        }
+    }
+    if let Some(marker) = look.marker {
+        paint_trace_marker(painter, rect.center(), marker, color, background);
+    }
 }
 
 /// How much of its colour a measured band's fill carries. Low enough that the
@@ -254,6 +344,21 @@ fn paint_trace_marker(
                 background,
                 stroke,
             ));
+        }
+        TraceMarkerShape::TriangleDown => {
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(center.x - radius - 0.8, center.y - radius),
+                    pos2(center.x + radius + 0.8, center.y - radius),
+                    pos2(center.x, center.y + radius + 0.8),
+                ],
+                background,
+                stroke,
+            ));
+        }
+        TraceMarkerShape::Asterisk => {
+            paint_trace_marker(painter, center, TraceMarkerShape::Plus, color, background);
+            paint_trace_marker(painter, center, TraceMarkerShape::Cross, color, background);
         }
         TraceMarkerShape::Cross | TraceMarkerShape::Plus => {
             let diagonal = shape == TraceMarkerShape::Cross;
@@ -744,14 +849,8 @@ pub fn show(
                     .map(|(&x, &y)| pos2(mx(x), my(y)))
                     .collect(),
             };
-            let redundancy = t
-                .color_safe_traces
-                .then(|| color_safe_trace_style(trace_index, trace.dashed));
-            let dash = trace
-                .dash_style
-                .and_then(|ordinal| color_safe_trace_style(ordinal, false).dash)
-                .or_else(|| redundancy.and_then(|style| style.dash))
-                .or_else(|| trace.dashed.then_some((5.0, 4.0)));
+            let look = trace.look(trace_index, t.color_safe_traces);
+            let dash = look.dash;
             // Dashing a dense min/max envelope would emit one shape per
             // dash along a path that zig-zags every column — thousands of
             // segments reading as noise. Sparse curves dash normally.
@@ -768,12 +867,9 @@ pub fn show(
                     }
                 }
             }
-            let marker = resolved_trace_marker(
-                trace.marker_style,
-                redundancy,
-                trace.show_single_point,
-                points.len(),
-            );
+            let marker = look.marker.or_else(|| {
+                (trace.show_single_point && points.len() == 1).then_some(TraceMarkerShape::Circle)
+            });
             if let Some(marker) = marker {
                 if points.len() == 1 {
                     let source_point = points[0];
@@ -1279,8 +1375,8 @@ mod tests {
     }
 
     #[test]
-    fn color_safe_trace_cycle_has_six_marker_shapes_and_preserves_phase_dashing() {
-        let styles = (0..6)
+    fn color_safe_trace_cycle_has_a_marker_shape_per_hue_and_preserves_phase_dashing() {
+        let styles = (0..TRACE_HUES)
             .map(|index| color_safe_trace_style(index, false))
             .collect::<Vec<_>>();
         let marker_shapes = styles
@@ -1288,22 +1384,43 @@ mod tests {
             .map(|style| style.marker)
             .collect::<std::collections::HashSet<_>>();
 
-        assert_eq!(marker_shapes.len(), 6);
+        assert_eq!(marker_shapes.len(), TRACE_HUES);
         assert!(styles[0].dash.is_none());
         assert!(styles[1..].iter().all(|style| style.dash.is_some()));
         assert!(color_safe_trace_style(0, true).dash.is_some());
-        assert_eq!(color_safe_trace_style(6, false), styles[0]);
+        assert_eq!(color_safe_trace_style(TRACE_HUES, false), styles[0]);
+    }
+
+    /// The ninth trace takes the first one's hue in a dash of its own, with
+    /// color-safe traces off or on, and a legend reading the same look draws
+    /// the same swatch.
+    #[test]
+    fn a_second_pass_through_the_hues_draws_in_another_dash() {
+        let (x, y) = ([0.0, 1.0], [0.0, 1.0]);
+        let trace = |slot| Trace::new(&x, &y, Color32::RED).palette_slot(slot);
+        for color_safe in [false, true] {
+            let first = trace(0).look(0, color_safe);
+            let ninth = trace(TRACE_HUES).look(0, color_safe);
+            assert_ne!(first.dash, ninth.dash, "color-safe {color_safe}");
+            assert_eq!(first.marker, ninth.marker, "color-safe {color_safe}");
+            for slot in 1..TRACE_HUES {
+                let pass = trace(slot + TRACE_HUES).look(0, color_safe);
+                assert_ne!(trace(slot).look(0, color_safe), pass, "slot {slot}");
+            }
+        }
+        assert_eq!(trace(3).look(0, false).dash, None);
+        assert_eq!(trace(3).look(0, false).marker, None);
     }
 
     #[test]
-    fn isolated_family_point_uses_neutral_marker_without_category_invention() {
+    fn a_family_marker_is_kept_and_none_is_invented() {
+        let (x, y) = ([0.0], [0.0]);
+        assert_eq!(Trace::new(&x, &y, Color32::RED).look(0, false).marker, None);
         assert_eq!(
-            resolved_trace_marker(None, None, true, 1),
-            Some(TraceMarkerShape::Circle)
-        );
-        assert_eq!(resolved_trace_marker(None, None, true, 2), None);
-        assert_eq!(
-            resolved_trace_marker(Some(2), None, true, 1),
+            Trace::new(&x, &y, Color32::RED)
+                .marker_style(2)
+                .look(0, false)
+                .marker,
             Some(TraceMarkerShape::Diamond)
         );
     }

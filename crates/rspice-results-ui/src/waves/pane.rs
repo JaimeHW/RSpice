@@ -13,8 +13,8 @@ use rspice_ui_kit::plot::sample::{
     BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, XScale,
-    fmt_si_significant,
+    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, TraceLook,
+    XScale, fmt_si_significant,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
@@ -61,6 +61,37 @@ pub fn apply_family_trace_style<'a>(
         trace = trace.width(width);
     }
     trace
+}
+
+/// What a swatch needs to draw a strip trace the way its pane draws it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SwatchStyle {
+    pub palette_slot: Option<usize>,
+    pub family_style: Option<FamilyTraceStyle>,
+    pub ordinal: usize,
+}
+
+impl SwatchStyle {
+    pub fn of(trace: &StripTrace) -> Self {
+        Self {
+            palette_slot: trace.palette_slot,
+            family_style: trace.family_style,
+            ordinal: trace.waveform_index,
+        }
+    }
+
+    /// The curve's dash and marker, exactly as its pane resolves them, so a
+    /// legend or readout swatch is the curve.
+    pub fn look(&self, color_safe: bool) -> TraceLook {
+        let mut plot = apply_family_trace_style(
+            Trace::new(&[], &[], egui::Color32::PLACEHOLDER),
+            self.family_style,
+        );
+        if let Some(slot) = self.palette_slot {
+            plot = plot.palette_slot(slot);
+        }
+        plot.look(self.ordinal, color_safe)
+    }
 }
 
 /// How far apart, relative to their size, a fit's extremes may be and still
@@ -414,6 +445,9 @@ pub fn show_plot<'a>(
                 .shape(&trace.shape),
             trace.family_style,
         );
+        if let Some(slot) = trace.palette_slot {
+            plot_trace = plot_trace.palette_slot(slot);
+        }
         if trace.overlay {
             plot_trace = plot_trace.width(input.trace_width * SECONDARY_TRACE_RATIO);
         }

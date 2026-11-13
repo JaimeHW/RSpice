@@ -1,11 +1,12 @@
 //! Waveform pane legend, unit tag, visibility controls and Y-axis actions.
 
+use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
 use crate::strip::HEADER_PADDING_X;
 use egui::Ui;
 use rspice_ui_kit::{
     icons::Icon,
-    plot::sample::sample_at_with_shape,
+    plot::{paint_trace_swatch, sample::sample_at_with_shape},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{IconButton, chip},
@@ -196,11 +197,13 @@ pub fn show_header(
                     for (_, trace) in traces {
                         let selected = host.trace_selected(trace);
                         let (swatch, swatch_response) =
-                            ui.allocate_exact_size(egui::vec2(13.0, 19.0), egui::Sense::click());
-                        ui.painter().hline(
-                            egui::Rangef::new(swatch.left() + 1.0, swatch.right() - 1.0),
-                            swatch.center().y,
-                            egui::Stroke::new(2.0, trace.color),
+                            ui.allocate_exact_size(egui::vec2(18.0, 19.0), egui::Sense::click());
+                        paint_trace_swatch(
+                            ui.painter(),
+                            swatch,
+                            trace.color,
+                            SwatchStyle::of(trace).look(t.color_safe_traces),
+                            c.bg_panel,
                         );
                         swatch_response.widget_info(|| {
                             egui::WidgetInfo::selected(
