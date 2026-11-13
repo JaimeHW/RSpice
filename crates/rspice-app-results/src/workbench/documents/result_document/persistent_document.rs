@@ -511,7 +511,7 @@ pub fn refresh_latest_binding(
         .and_then(|run| {
             latest_successful_authored_analysis(run, authored_analysis_id).map(|analysis| {
                 (
-                    super::create_document::source_dataset(run, analysis),
+                    super::create_document::source_reference(run, analysis),
                     analysis_identity(run, analysis),
                 )
             })
@@ -1286,7 +1286,7 @@ pub(super) fn resolve_binding(
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
     let run = &state.model.simulation.retained.runs[run_index];
-    if run.dataset_content_digest() != binding.dataset.content_digest {
+    if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
         return Err(
             "The run's results no longer match the ones this pane was bound to.".to_owned(),
         );

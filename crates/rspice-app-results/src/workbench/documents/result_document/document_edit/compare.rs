@@ -227,9 +227,11 @@ pub(super) fn commit(
                 for (source_run, source_analysis) in
                     [(baseline, baseline_analysis), (run, analysis)]
                 {
-                    let source =
-                        super::super::create_document::source_dataset(source_run, source_analysis)
-                            .map_err(|error| error.to_string())?;
+                    let source = super::super::create_document::source_reference(
+                        source_run,
+                        source_analysis,
+                    )
+                    .map_err(|error| error.to_string())?;
                     let attached = document
                         .datasets()
                         .iter()

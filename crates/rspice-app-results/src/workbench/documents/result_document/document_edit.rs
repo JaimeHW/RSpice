@@ -319,8 +319,8 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
         .ok_or_else(|| "The selected sheet cannot be kept as a pane.".to_owned())?;
     let definition = viewer_document(viewer_id)
         .ok_or_else(|| "The selected sheet is not a registered viewer.".to_owned())?;
-    let source =
-        super::create_document::source_dataset(run, analysis).map_err(|error| error.to_string())?;
+    let source = super::create_document::source_reference(run, analysis)
+        .map_err(|error| error.to_string())?;
     let binding = PaneDataBinding {
         analysis_id: super::create_document::source_analysis_identity(run, analysis),
         dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),

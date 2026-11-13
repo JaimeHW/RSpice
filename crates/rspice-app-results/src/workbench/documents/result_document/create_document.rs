@@ -18,11 +18,9 @@ use crate::results::viewer_catalog::{
     ViewerReleaseClass, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AxisOrientation, ColumnRole, DocumentEdit, EntityRef, LinkKind, MAX_SOURCE_CELLS_PER_DATASET,
-    MAX_SOURCE_ROWS, MAX_SOURCE_TEXT_BYTES, NewPagePane, NewPane, PageUpdatePolicy,
+    AxisOrientation, DocumentEdit, EntityRef, LinkKind, NewPagePane, NewPane, PageUpdatePolicy,
     PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode,
-    SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
-    VisualizationError,
+    RunSignal, RunSourceAnalysis, SourceDataset, VisualizationDocument, VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
@@ -500,356 +498,57 @@ pub fn source_analysis_identity(
     )
 }
 
-pub(super) fn source_dataset(
+/// How a run reference names its run, for the reader once the run is gone.
+pub(super) fn reference_run_label(run: &SimulationRun) -> String {
+    let label = run.label.trim();
+    if label.is_empty() || label.chars().any(char::is_control) {
+        format!("Run {}", run.id)
+    } else {
+        label.to_owned()
+    }
+}
+
+/// The dataset a document reads one analysis of a retained run through: the
+/// run by identity and content digest, and the signals of the analysis. The
+/// samples stay in the run, so a document is no larger for a larger run.
+pub(super) fn source_reference(
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> Result<SourceDataset, VisualizationError> {
-    let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
-    let analysis_id = source_analysis_identity(run, analysis).to_string();
-
-    // Each trace keeps its own exact coordinate grid. Row predicates on the
-    // canonical Trace entity select one waveform/component from this lossless
-    // long-form source without assuming that every signal shares a sample
-    // count or X grid. Analysis-native payloads use tagged JSON chunk rows in
-    // the same table. Their component is never `display`, so generic trace
-    // provisioning cannot mistake document evidence for plotted samples.
-    let columns = vec![
-        SourceColumn::new(
-            "trace-index",
-            "Trace index",
-            ValueType::Integer,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "trace-name",
-            "Trace",
-            ValueType::Text,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "component",
-            "Component",
-            ValueType::Text,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "sample",
-            "Sample",
-            ValueType::Integer,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None)?,
-        SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None)?,
-        SourceColumn::new(
-            "analysis-id",
-            "Analysis identity",
-            ValueType::Text,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "record-kind",
-            "Record kind",
-            ValueType::Text,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "evidence-chunk",
-            "Data chunk",
-            ValueType::Integer,
-            ColumnRole::Coordinate,
-            None,
-        )?,
-        SourceColumn::new(
-            "evidence-json",
-            "Analysis data (JSON)",
-            ValueType::Text,
-            ColumnRole::Signal,
-            None,
-        )?,
-    ];
-    let artifacts = analysis_evidence_artifacts(analysis)?;
-    let evidence_rows = artifacts.iter().try_fold(0_usize, |total, (_, json)| {
-        total.checked_add(json_chunk_count(json))
-    });
-    let projected_rows = analysis
-        .waveforms
-        .iter()
-        .try_fold(0_usize, |total, waveform| {
-            if waveform.x.len() != waveform.y.len()
-                || waveform.complex.as_ref().is_some_and(|components| {
-                    components.real.len() != waveform.x.len()
-                        || components.imag.len() != waveform.x.len()
-                })
-            {
-                return None;
-            }
-            total.checked_add(waveform.x.len())?.checked_add(
-                waveform
-                    .complex
-                    .as_ref()
-                    .map_or(0, |_| waveform.x.len().saturating_mul(2)),
-            )
-        })
-        .and_then(|rows| rows.checked_add(evidence_rows?));
-    let Some(projected_rows) = projected_rows else {
-        return Err(VisualizationError::InvalidValue {
-            field: "source-dataset.samples",
-            message:
-                "a retained trace has mismatched coordinate, display, or complex sample counts"
-                    .to_owned(),
-        });
-    };
-    let maximum_rows = MAX_SOURCE_ROWS.min(MAX_SOURCE_CELLS_PER_DATASET / columns.len());
-    if projected_rows > maximum_rows {
-        return Err(VisualizationError::InvalidValue {
-            field: "source-dataset.rows",
-            message: format!(
-                "the selected analysis has {projected_rows} rows; this document format supports {maximum_rows}"
-            ),
-        });
-    }
-
-    let mut rows = Vec::with_capacity(projected_rows);
-    for (trace_index, waveform) in analysis.waveforms.iter().enumerate() {
-        append_component_rows(
-            &mut rows,
-            trace_index,
-            &waveform.name,
-            "display",
-            &waveform.x,
-            &waveform.y,
-            &analysis_id,
-        )?;
-        if let Some(complex) = &waveform.complex {
-            append_component_rows(
-                &mut rows,
-                trace_index,
-                &waveform.name,
-                "real",
-                &waveform.x,
-                &complex.real,
-                &analysis_id,
-            )?;
-            append_component_rows(
-                &mut rows,
-                trace_index,
-                &waveform.name,
-                "imag",
-                &waveform.x,
-                &complex.imag,
-                &analysis_id,
-            )?;
-        }
-    }
-    for (kind, json) in artifacts {
-        append_json_artifact_rows(&mut rows, kind, &json, &analysis_id)?;
-    }
-    SourceDataset::new(binding, columns, rows)
+    SourceDataset::run_reference(
+        DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
+        reference_run_label(run),
+        vec![run_source_analysis(run, analysis)?],
+    )
 }
 
-fn analysis_evidence_artifacts(
+/// One analysis of a run as a run reference catalogs it: its identity, its
+/// kind and its signals.
+pub(super) fn run_source_analysis(
+    run: &SimulationRun,
     analysis: &AnalysisResult,
-) -> Result<Vec<(&'static str, String)>, VisualizationError> {
-    let mut artifacts = Vec::new();
-    let waveform_descriptors = analysis
+) -> Result<RunSourceAnalysis, VisualizationError> {
+    let signals = analysis
         .waveforms
         .iter()
-        .map(|waveform| {
-            serde_json::json!({
-                "name": waveform.name,
-                "unit": waveform.unit,
-                "color": waveform.color,
-                "visible_by_default": waveform.visible,
-                "sample_count": waveform.x.len(),
-                "has_complex_source": waveform.complex.is_some(),
-            })
+        .enumerate()
+        .map(|(index, waveform)| {
+            let index = u32::try_from(index).map_err(|_| VisualizationError::InvalidValue {
+                field: "run-source.signals",
+                message: "the analysis holds more signals than a run reference indexes".to_owned(),
+            })?;
+            Ok(RunSignal::new(
+                index,
+                waveform.name.clone(),
+                waveform.complex.is_some(),
+            ))
         })
-        .collect::<Vec<_>>();
-    artifacts.push((
-        "analysis-descriptor",
-        serialize_source_evidence(
-            "analysis descriptor",
-            &serde_json::json!({
-                "id": analysis.id,
-                "analysis_type": analysis_manifest_id(analysis.analysis_type),
-                "label": analysis.label,
-                "timestamp": analysis.timestamp,
-                "success": analysis.success,
-                "error_message": analysis.error_message,
-                "waveforms": waveform_descriptors,
-                "measurement_count": analysis.measurements.len(),
-                "saved_output_receipt_count": analysis.saved_output_receipts.len(),
-            }),
-        )?,
-    ));
-
-    if let Some(dc_op) = &analysis.dc_op {
-        let values = |source: &'static str, values: &[crate::state::OperatingPointValue]| {
-            values
-                .iter()
-                .map(|value| {
-                    serde_json::json!({
-                        "source": source,
-                        "name": value.name,
-                        "value": value.value,
-                        "unit": value.unit,
-                    })
-                })
-                .collect::<Vec<_>>()
-        };
-        artifacts.push((
-            "dc-operating-point",
-            serialize_source_evidence(
-                "DC operating-point results",
-                &serde_json::json!({
-                    "node_voltages": values("node", &dc_op.node_voltages),
-                    "branch_currents": values("branch", &dc_op.branch_currents),
-                    "power_dissipation": values("device", &dc_op.power_dissipation),
-                }),
-            )?,
-        ));
-    }
-    if let Some(report) = &analysis.device_op {
-        let entries = report
-            .entries
-            .iter()
-            .map(|entry| {
-                let params = entry
-                    .params
-                    .iter()
-                    .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
-                    .collect::<Vec<_>>();
-                serde_json::json!({
-                    "name": entry.name,
-                    "device_kind": entry.device_kind,
-                    "region": entry.region,
-                    "params": params,
-                })
-            })
-            .collect::<Vec<_>>();
-        artifacts.push((
-            "device-operating-point",
-            serialize_source_evidence(
-                "device operating-point results",
-                &serde_json::json!({ "entries": entries }),
-            )?,
-        ));
-    }
-    if let Some(metadata) = &analysis.family_metadata {
-        artifacts.push((
-            "analysis-family-metadata",
-            serialize_source_evidence("analysis family metadata", metadata)?,
-        ));
-    }
-    if let Some(payload) = &analysis.result_payload {
-        artifacts.push((
-            "analysis-result-payload",
-            serialize_source_evidence("analysis result payload", payload)?,
-        ));
-    }
-    Ok(artifacts)
-}
-
-fn serialize_source_evidence<T: serde::Serialize + ?Sized>(
-    label: &'static str,
-    value: &T,
-) -> Result<String, VisualizationError> {
-    serde_json::to_string(value).map_err(|error| VisualizationError::InvalidValue {
-        field: "source-dataset.evidence-json",
-        message: format!("could not serialize {label}: {error}"),
-    })
-}
-
-const JSON_CHUNK_BYTES: usize = MAX_SOURCE_TEXT_BYTES - 96;
-
-fn json_chunk_count(value: &str) -> usize {
-    let mut start = 0;
-    let mut count = 0;
-    while start < value.len() {
-        let mut end = (start + JSON_CHUNK_BYTES).min(value.len());
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        start = end;
-        count += 1;
-    }
-    count.max(1)
-}
-
-fn append_json_artifact_rows(
-    rows: &mut Vec<SourceRow>,
-    kind: &'static str,
-    json: &str,
-    analysis_id: &str,
-) -> Result<(), VisualizationError> {
-    let mut start = 0;
-    let mut chunk = 0_usize;
-    while start < json.len() {
-        let mut end = (start + JSON_CHUNK_BYTES).min(json.len());
-        while !json.is_char_boundary(end) {
-            end -= 1;
-        }
-        let chunk_index = i64::try_from(chunk).map_err(|_| VisualizationError::InvalidValue {
-            field: "source-dataset.evidence-chunk",
-            message: "the analysis data needs too many chunks".to_owned(),
-        })?;
-        rows.push(SourceRow::new(vec![
-            TypedValue::Integer(-1),
-            TypedValue::Text("analysis-evidence".to_owned()),
-            TypedValue::Text(kind.to_owned()),
-            TypedValue::Integer(chunk_index),
-            TypedValue::Real(0.0),
-            TypedValue::Real(0.0),
-            TypedValue::Text(analysis_id.to_owned()),
-            TypedValue::Text("typed-evidence".to_owned()),
-            TypedValue::Integer(chunk_index),
-            TypedValue::Text(json[start..end].to_owned()),
-        ]));
-        start = end;
-        chunk += 1;
-    }
-    Ok(())
-}
-
-fn append_component_rows(
-    rows: &mut Vec<SourceRow>,
-    trace_index: usize,
-    trace_name: &str,
-    component: &str,
-    x: &[f64],
-    y: &[f64],
-    analysis_id: &str,
-) -> Result<(), VisualizationError> {
-    let trace_index = i64::try_from(trace_index).map_err(|_| VisualizationError::InvalidValue {
-        field: "source-dataset.trace-index",
-        message: "trace index exceeds the supported signed integer range".to_owned(),
-    })?;
-    for (sample, (&x, &y)) in x.iter().zip(y).enumerate() {
-        rows.push(SourceRow::new(vec![
-            TypedValue::Integer(trace_index),
-            TypedValue::Text(trace_name.to_owned()),
-            TypedValue::Text(component.to_owned()),
-            TypedValue::Integer(i64::try_from(sample).map_err(|_| {
-                VisualizationError::InvalidValue {
-                    field: "source-dataset.sample",
-                    message: "sample index exceeds the supported signed integer range".to_owned(),
-                }
-            })?),
-            TypedValue::Real(x),
-            TypedValue::real_sample(y),
-            TypedValue::Text(analysis_id.to_owned()),
-            TypedValue::Text("waveform-sample".to_owned()),
-            TypedValue::Integer(0),
-            TypedValue::Text("{}".to_owned()),
-        ]));
-    }
-    Ok(())
+        .collect::<Result<Vec<_>, VisualizationError>>()?;
+    Ok(RunSourceAnalysis::new(
+        source_analysis_identity(run, analysis),
+        analysis.analysis_type,
+        signals,
+    ))
 }
 
 pub(super) fn pane_kind(art: ViewerArt) -> PaneKind {
@@ -882,7 +581,7 @@ fn build_document(
     resolved: ResolvedDraft<'_>,
     tracking: ResultDocumentTracking,
 ) -> Result<VisualizationDocument, VisualizationError> {
-    let source = source_dataset(resolved.run, resolved.analysis)?;
+    let source = source_reference(resolved.run, resolved.analysis)?;
     let binding = PaneDataBinding {
         analysis_id: source_analysis_identity(resolved.run, resolved.analysis),
         dataset: source.binding(),
@@ -1075,123 +774,4 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
     state.create_result_document.open = false;
     state.create_result_document.validation_error = None;
     Ok(document_id)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{
-        AnalysisResult, DcOpResult, OperatingPointValue, RetainedTrace, SimulationRun,
-    };
-
-    #[test]
-    fn source_projection_preserves_independent_waveform_grids_without_truncation() {
-        let analysis =
-            AnalysisResult::new(11, AnalysisType::Transient, "analysis").with_waveforms(vec![
-                RetainedTrace::new(
-                    "V(out)",
-                    vec![0.0, 0.5, 1.0],
-                    vec![1.0, 2.0, 3.0],
-                    "#55aaff",
-                ),
-                RetainedTrace::new("I(R1)", vec![10.0, 20.0], vec![0.25, -0.5], "#ffaa55"),
-            ]);
-        let mut run = SimulationRun::new(7);
-        run.add_analysis(analysis);
-        let source = source_dataset(&run, &run.analyses[0]).expect("lossless source projection");
-
-        assert_eq!(source.rows().len(), 6);
-        assert_eq!(source.columns().len(), 10);
-        assert_eq!(source.columns()[4].key(), "x");
-        assert_eq!(source.columns()[4].role(), ColumnRole::Coordinate);
-        assert_eq!(source.columns()[5].key(), "y");
-        assert_eq!(source.columns()[5].role(), ColumnRole::Signal);
-        assert_eq!(
-            source.rows()[4].values(),
-            &[
-                TypedValue::Integer(1),
-                TypedValue::Text("I(R1)".to_owned()),
-                TypedValue::Text("display".to_owned()),
-                TypedValue::Integer(1),
-                TypedValue::Real(20.0),
-                TypedValue::Real(-0.5),
-                TypedValue::Text(source_analysis_identity(&run, &run.analyses[0]).to_string()),
-                TypedValue::Text("waveform-sample".to_owned()),
-                TypedValue::Integer(0),
-                TypedValue::Text("{}".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
-    fn source_projection_retains_unavailable_waveform_samples_as_typed_rows() {
-        let mut run = SimulationRun::new(7);
-        let mut analysis =
-            AnalysisResult::new(11, AnalysisType::Transient, "gaps").with_waveforms(vec![
-                RetainedTrace::new(
-                    "out",
-                    vec![0.0, 1.0, 2.0],
-                    vec![1.0, f64::NAN, -0.0],
-                    "#55aaff",
-                ),
-            ]);
-        analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
-            source_name: "gaps.raw".into(),
-            format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
-            coordinate: None,
-        });
-        analysis.validate_retained_evidence().unwrap();
-        run.add_analysis(analysis);
-        let source = source_dataset(&run, &run.analyses[0]).unwrap();
-        assert_eq!(
-            source.rows()[1].values()[5],
-            TypedValue::Missing(ValueType::Real)
-        );
-        assert_eq!(source.rows()[2].values()[5], TypedValue::Real(-0.0));
-        let document = VisualizationDocument::new("gaps", vec![source]).unwrap();
-        let encoded = serde_json::to_string(&document).unwrap();
-        let restored: VisualizationDocument = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(
-            restored.content_digest().unwrap(),
-            document.content_digest().unwrap()
-        );
-    }
-
-    #[test]
-    fn source_projection_embeds_typed_operating_point_evidence_without_waveforms() {
-        let mut analysis = AnalysisResult::new(12, AnalysisType::DcOp, "OP");
-        analysis.dc_op = Some(DcOpResult {
-            node_voltages: vec![OperatingPointValue {
-                name: "V(out)".to_owned(),
-                value: 1.234_567_890_123_456,
-                unit: "V".to_owned(),
-            }],
-            branch_currents: Vec::new(),
-            power_dissipation: Vec::new(),
-        });
-        let mut run = SimulationRun::new(8);
-        run.add_analysis(analysis);
-
-        let source = source_dataset(&run, &run.analyses[0]).expect("typed source projection");
-        assert!(source.rows().iter().all(|row| {
-            !matches!(row.values().get(7), Some(TypedValue::Text(kind)) if kind == "waveform-sample")
-        }));
-        let json = source
-            .rows()
-            .iter()
-            .find_map(|row| match (row.values().get(2), row.values().get(9)) {
-                (Some(TypedValue::Text(kind)), Some(TypedValue::Text(json)))
-                    if kind == "dc-operating-point" =>
-                {
-                    Some(json)
-                }
-                _ => None,
-            })
-            .expect("embedded DC operating-point artifact");
-        let parsed: serde_json::Value = serde_json::from_str(json).expect("canonical JSON");
-        let retained = parsed["node_voltages"][0]["value"]
-            .as_f64()
-            .expect("retained f64");
-        assert_eq!(retained.to_bits(), 1.234_567_890_123_456_f64.to_bits());
-    }
 }

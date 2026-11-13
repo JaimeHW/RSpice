@@ -2,7 +2,6 @@
 //! family, name and viewer choices, and a commit that the project owns.
 
 use crate::results::visualization_document::ResultDocumentTracking;
-use crate::results::visualization_document::TypedValue;
 use crate::state::AnalysisResult;
 use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::AnalysisResultPayload;
@@ -321,24 +320,21 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             RetainedTrace::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
         ]);
 
-    for (analysis, family, viewer_id, evidence_kind) in [
+    for (analysis, family, viewer_id) in [
         (
             events,
             ResultDocumentFamily::DigitalAndAmsEvents,
             "viewer-digital-events",
-            "analysis-result-payload",
         ),
         (
             soa,
             ResultDocumentFamily::VerificationAndOptimization,
             "viewer-soa",
-            "analysis-result-payload",
         ),
         (
             optimization,
             ResultDocumentFamily::VerificationAndOptimization,
             "viewer-optimization",
-            "analysis-family-metadata",
         ),
     ] {
         let mut app = RSpiceApp::test_instance();
@@ -368,9 +364,15 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             .visualization_document(document_id)
             .expect("workspace owns typed document");
         assert_eq!(document.panes()[0].viewer_id, viewer_id);
-        assert!(document.datasets()[0].rows().iter().any(|row| {
-            matches!(row.values().get(2), Some(TypedValue::Text(kind)) if kind == evidence_kind)
-        }));
+        // The document reads the run it was made from; it holds no copy.
+        let source = &document.datasets()[0];
+        assert_eq!(source.binding().dataset_id, dataset_id);
+        assert!(source.rows().is_empty());
+        assert!(
+            source
+                .run_source()
+                .is_some_and(|run| run.analyses().len() == 1)
+        );
     }
 }
 
