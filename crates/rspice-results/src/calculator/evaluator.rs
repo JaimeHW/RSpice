@@ -161,6 +161,182 @@ pub fn evaluate(
     value?.checked()
 }
 
+/// What unit inference reads about the data an expression names.
+pub trait UnitContext {
+    /// The unit a referenced signal reads in, as written (`V`, `V^2/Hz`), or
+    /// `None` when nothing states one.
+    fn signal_unit(&self, signal: &str, dataset: Option<&str>) -> Option<String>;
+    /// The unit of the coordinate the expression's waveforms run over: `s`
+    /// for a transient, `Hz` for a frequency sweep, the swept source's unit.
+    fn x_unit(&self) -> String;
+}
+
+/// The unit an expression's value reads in, by unit algebra over the units of
+/// the signals it names: a ratio of voltages is a plain number, V·A is W,
+/// `deriv` of volts over time is V/s.
+///
+/// `Err` says why no unit can be stated — volts added to amperes, the
+/// logarithm of volts, a function whose result unit is not known — so a
+/// caller never borrows another value's unit for it.
+pub fn infer_unit(
+    expr: &CalculatorExpr,
+    ctx: &impl UnitContext,
+) -> Result<super::value::Unit, String> {
+    infer(expr, ctx).map(Inferred::into_unit)
+}
+
+/// A unit found so far. A bare number takes the unit of whatever it is
+/// added to, so `V(out) - 2.5` stays in volts.
+#[derive(Debug, Clone, PartialEq)]
+enum Inferred {
+    Literal(f64),
+    Unit(super::value::Unit),
+}
+
+impl Inferred {
+    fn into_unit(self) -> super::value::Unit {
+        match self {
+            Self::Literal(_) => super::value::Unit::none(),
+            Self::Unit(unit) => unit,
+        }
+    }
+}
+
+fn read_unit(text: &str, what: &str) -> Result<super::value::Unit, String> {
+    super::value::Unit::parse(text).ok_or_else(|| format!("{what} reads in “{text}”, not a unit"))
+}
+
+fn infer(expr: &CalculatorExpr, ctx: &impl UnitContext) -> Result<Inferred, String> {
+    use super::value::Unit;
+    Ok(match expr {
+        CalculatorExpr::Number(value) => Inferred::Literal(*value),
+        CalculatorExpr::Constant(CalculatorConstant::Time) => Inferred::Unit(read_unit("s", "")?),
+        CalculatorExpr::Constant(CalculatorConstant::Frequency) => {
+            Inferred::Unit(read_unit("Hz", "")?)
+        }
+        CalculatorExpr::WaveformRef { signal, dataset } => {
+            let text = ctx
+                .signal_unit(signal, dataset.as_deref())
+                .ok_or_else(|| format!("{signal} states no unit"))?;
+            Inferred::Unit(read_unit(&text, signal)?)
+        }
+        CalculatorExpr::UnaryOp {
+            op: UnaryOp::Neg,
+            operand,
+        } => match infer(operand, ctx)? {
+            Inferred::Literal(value) => Inferred::Literal(-value),
+            unit => unit,
+        },
+        CalculatorExpr::BinaryOp { op, left, right } => {
+            let (left, right) = (infer(left, ctx)?, infer(right, ctx)?);
+            match (op, left, right) {
+                (op, Inferred::Literal(left), Inferred::Literal(right)) => {
+                    Inferred::Literal(apply_op_scalar(*op, left, right))
+                }
+                (BinaryOp::Add | BinaryOp::Sub, Inferred::Literal(_), other)
+                | (BinaryOp::Add | BinaryOp::Sub, other, Inferred::Literal(_)) => other,
+                (BinaryOp::Add | BinaryOp::Sub, Inferred::Unit(left), Inferred::Unit(right)) => {
+                    if left != right {
+                        return Err(format!(
+                            "{} and {} cannot be added",
+                            unit_phrase(&left),
+                            unit_phrase(&right)
+                        ));
+                    }
+                    Inferred::Unit(left)
+                }
+                (BinaryOp::Mul, left, right) => {
+                    Inferred::Unit(left.into_unit().times(&right.into_unit()))
+                }
+                (BinaryOp::Div, left, right) => {
+                    Inferred::Unit(left.into_unit().divided_by(&right.into_unit()))
+                }
+                (BinaryOp::Pow, base, Inferred::Literal(exponent)) => {
+                    let base = base.into_unit();
+                    Inferred::Unit(base.powf(exponent).ok_or_else(|| {
+                        format!(
+                            "{} to the power {exponent} is not a unit",
+                            unit_phrase(&base)
+                        )
+                    })?)
+                }
+                (BinaryOp::Pow, base, exponent) => {
+                    let (base, exponent) = (base.into_unit(), exponent.into_unit());
+                    if !base.is_none() || !exponent.is_none() {
+                        return Err(format!(
+                            "{} raised to a signal has no unit",
+                            unit_phrase(&base)
+                        ));
+                    }
+                    Inferred::Unit(Unit::none())
+                }
+            }
+        }
+        CalculatorExpr::FunctionCall { name, args } => {
+            Inferred::Unit(function_unit(&name.to_ascii_lowercase(), args, ctx)?)
+        }
+        CalculatorExpr::Keyword(word) => {
+            return Err(format!("\"{word}\" is an option word, not a value"));
+        }
+    })
+}
+
+fn unit_phrase(unit: &super::value::Unit) -> String {
+    if unit.is_none() {
+        "a plain number".to_owned()
+    } else {
+        unit.label()
+    }
+}
+
+/// The unit of a function's result, from the units of its arguments.
+fn function_unit(
+    name: &str,
+    args: &[CalculatorExpr],
+    ctx: &impl UnitContext,
+) -> Result<super::value::Unit, String> {
+    use super::value::Unit;
+    let argument = |index: usize| -> Result<Unit, String> {
+        let arg = args
+            .get(index)
+            .ok_or_else(|| format!("{name}() is missing an argument"))?;
+        infer(arg, ctx).map(Inferred::into_unit)
+    };
+    let x_unit = || read_unit(&ctx.x_unit(), "The x-axis");
+    let named = |text: &str| read_unit(text, name);
+    match name {
+        // The value itself, or a level of it.
+        "abs" | "mag" | "magnitude" | "re" | "real" | "im" | "imag" | "conj" | "complex"
+        | "clip" | "unwrap" | "avg" | "average" | "rms" | "min" | "max" | "pp" | "yval" => {
+            argument(0)
+        }
+        // A point or a span on the x-axis.
+        "xval" | "cross" | "rise" | "risetime" | "fall" | "falltime" | "delay" | "pulsewidth"
+        | "period" | "settling" | "settlingtime" | "bandwidth" => x_unit(),
+        "freq" | "frequency" => Ok(Unit::none().divided_by(&x_unit()?)),
+        "deriv" | "derivative" | "slewrate" => Ok(argument(0)?.divided_by(&x_unit()?)),
+        "integ" | "integral" => Ok(argument(0)?.times(&x_unit()?)),
+        "duty" | "dutycycle" | "overshoot" | "undershoot" | "thd" => named("%"),
+        "db" | "gainmargin" => named("dB"),
+        "phase" | "phase_deg" | "phasemargin" => named("°"),
+        "phase_rad" => named("rad"),
+        "sqrt" => {
+            let unit = argument(0)?;
+            unit.powf(0.5)
+                .ok_or_else(|| format!("the square root of {} is not a unit", unit.label()))
+        }
+        "exp" | "log" | "ln" | "log10" => {
+            let unit = argument(0)?;
+            if unit.is_none() {
+                Ok(unit)
+            } else {
+                Err(format!("{name}() of {} has no unit", unit.label()))
+            }
+        }
+        _ => Err(format!("the unit of {name}() is not known")),
+    }
+}
+
 fn neg_value(value: CalcValue) -> Result<CalcValue, EvaluationError> {
     match value {
         CalcValue::Real(value) => neg_real_value(value).map(CalcValue::Real),
@@ -273,6 +449,111 @@ mod tests {
             CalcValue::Waveform(left.0.to_vec(), left.1.to_vec()),
             CalcValue::Waveform(right.0.to_vec(), right.1.to_vec()),
         )
+    }
+
+    struct Units {
+        x: &'static str,
+    }
+
+    impl UnitContext for Units {
+        fn signal_unit(&self, signal: &str, _dataset: Option<&str>) -> Option<String> {
+            let unit = match signal.split('(').next()? {
+                "V" => "V",
+                "I" => "A",
+                "onoise" => "V^2/Hz",
+                "inoise" => "A²/Hz",
+                "S21" => "ratio",
+                "temp" => "°C",
+                _ => return None,
+            };
+            Some(unit.to_owned())
+        }
+
+        fn x_unit(&self) -> String {
+            self.x.to_owned()
+        }
+    }
+
+    fn unit_of(text: &str, x: &'static str) -> Result<String, String> {
+        let expr = super::super::parser::try_parse(text, |n| n.parse().map_err(|_| n.to_owned()))
+            .unwrap_or_else(|error| panic!("{text}: {error:?}"));
+        infer_unit(&expr, &Units { x }).map(|unit| unit.label())
+    }
+
+    /// The units engineers write for these expressions.
+    #[test]
+    fn unit_algebra_states_the_unit_an_engineer_writes() {
+        let table: [(&str, &str, &str); 30] = [
+            ("V(out)", "s", "V"),
+            ("V(out)/V(in)", "s", ""),
+            ("V(out)*I(vdd)", "s", "W"),
+            ("I(vdd)*V(out)", "s", "W"),
+            ("V(out)/I(r1)", "s", "Ω"),
+            ("I(r1)/V(out)", "s", "S"),
+            ("deriv(V(out))", "s", "V/s"),
+            ("deriv(I(l1))", "s", "A/s"),
+            ("integ(I(c1))", "s", "C"),
+            ("integ(V(out)*I(vdd))", "s", "J"),
+            ("I(c1)/deriv(V(out))", "s", "F"),
+            ("V(out)/deriv(I(l1))", "s", "H"),
+            ("V(out) - 2.5", "s", "V"),
+            ("2*V(out) + V(in)/2", "s", "V"),
+            ("-V(out)", "s", "V"),
+            ("V(out)^2/1000", "s", "V²"),
+            ("V(out)^2/(V(out)/I(r1))", "s", "W"),
+            ("sqrt(onoise)", "Hz", "V/√Hz"),
+            ("sqrt(inoise)", "Hz", "A/√Hz"),
+            ("onoise", "Hz", "V²/Hz"),
+            ("db(V(out)/V(in))", "Hz", "dB"),
+            ("phase(V(out))", "Hz", "°"),
+            ("deriv(phase(V(out)))", "Hz", "°·s"),
+            ("S21*V(in)", "Hz", "V"),
+            ("rise(V(out))", "s", "s"),
+            ("frequency(V(out))", "s", "Hz"),
+            ("1/period(V(out))", "s", "Hz"),
+            ("overshoot(V(out))", "s", "%"),
+            ("deriv(V(out))", "°C", "V/°C"),
+            ("rms(I(vdd))*avg(V(out))", "s", "W"),
+        ];
+        for (text, x, expected) in table {
+            assert_eq!(unit_of(text, x).as_deref(), Ok(expected), "{text} over {x}");
+        }
+    }
+
+    /// An expression whose unit cannot be stated says why rather than
+    /// borrowing a unit.
+    #[test]
+    fn unit_algebra_refuses_what_has_no_unit() {
+        for (text, reason) in [
+            ("V(out)+I(r1)", "V and A cannot be added"),
+            ("exp(V(out))", "exp() of V has no unit"),
+            ("log10(I(r1))", "log10() of A has no unit"),
+            ("V(out)^V(in)", "V raised to a signal has no unit"),
+            ("V(out)^0.3", "V to the power 0.3 is not a unit"),
+            ("mystery(V(out))", "the unit of mystery() is not known"),
+            ("V(out)/node", "node states no unit"),
+        ] {
+            assert_eq!(unit_of(text, "s"), Err(reason.to_owned()), "{text}");
+        }
+        assert_eq!(unit_of("exp(V(out)/V(in))", "s").as_deref(), Ok(""));
+        assert_eq!(unit_of("2^3 + 1", "s").as_deref(), Ok(""));
+    }
+
+    #[test]
+    fn written_units_read_back_to_one_unit() {
+        use super::super::value::Unit;
+        let read = |text: &str| Unit::parse(text).unwrap();
+        assert_eq!(read("V^2/Hz"), read("V²/Hz"));
+        assert_eq!(read("V²/Hz"), read("V·V·s"));
+        assert_eq!(read("W"), read("V·A"));
+        assert_eq!(read("Ω"), read("ohm"));
+        assert_eq!(read("ratio"), Unit::none());
+        assert_eq!(read("V/√Hz").label(), "V/√Hz");
+        assert_eq!(read("V").divided_by(&read("A·s")).label(), "V/(A·s)");
+        assert_eq!(read("x").divided_by(&read("x")), Unit::none());
+        assert_eq!(Unit::parse("V/A/s"), None);
+        assert_eq!(Unit::parse("V/(A·s)"), None);
+        assert_eq!(read("A·s/V").label(), "F");
     }
 
     #[test]
