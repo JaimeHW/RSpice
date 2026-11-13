@@ -898,10 +898,10 @@ fn a_zoomed_ruler_notches_the_overview_at_each_cursor() {
     }
 }
 
-/// The accent marks spanning the overview track's height: the viewport
-/// thumb and its two grab handles.
-fn thumb_marks(shapes: &[ClippedShape], tokens: &Tokens, track: egui::Rect) -> Vec<egui::Rect> {
-    painted_in(shapes, tokens.color.accent)
+/// The marks spanning the overview track's height in `ink`: the thumb's
+/// frame and its two grab handles.
+fn thumb_marks(shapes: &[ClippedShape], ink: egui::Color32, track: egui::Rect) -> Vec<egui::Rect> {
+    painted_in(shapes, ink)
         .into_iter()
         .filter(|mark| {
             mark.height() >= track.height() - 1.0
@@ -910,13 +910,74 @@ fn thumb_marks(shapes: &[ClippedShape], tokens: &Tokens, track: egui::Rect) -> V
         .collect()
 }
 
-/// At full view the overview is its miniature in a quiet frame of border
-/// ink: no accent thumb outlines the whole track and no handles stand at its
-/// ends. Zoomed in, the thumb takes the accent with a handle at each edge,
-/// over exactly the part of the record the panes show, and the track keeps
-/// its height so the layout never jumps.
+/// The grab handles among a thumb's marks: its narrow bars, left to right.
+fn thumb_handles(marks: &[egui::Rect]) -> Vec<egui::Rect> {
+    let mut handles: Vec<egui::Rect> = marks
+        .iter()
+        .copied()
+        .filter(|mark| mark.width() < 8.0)
+        .collect();
+    handles.sort_by(|a, b| a.left().total_cmp(&b.left()));
+    handles
+}
+
+/// At full view the overview's thumb is still a window with two ends to
+/// pull, as a range slider at full range is: a 1 px frame and a grab handle
+/// just inside each end of the track, in the secondary text ink, with no
+/// accent anywhere on the track. Hovering the track lights the handles in
+/// the accent.
 #[test]
-fn the_overview_thumb_takes_the_accent_only_while_zoomed() {
+fn the_full_view_thumb_is_a_neutral_window_with_two_ends_to_pull() {
+    let mut state = host_on(damped_run());
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let tokens = Tokens::get(&ctx);
+    let (_, track) = ruler_band(&shapes, &tokens);
+    let on_track: Vec<egui::Rect> = painted_in(&shapes, tokens.color.accent)
+        .into_iter()
+        .filter(|mark| track.expand2(egui::vec2(4.0, 2.0)).intersects(*mark))
+        .collect();
+    assert_eq!(on_track, Vec::<egui::Rect>::new(), "no accent on the track");
+    let neutral = thumb_marks(&shapes, tokens.color.text_dim, track);
+    assert!(
+        neutral
+            .iter()
+            .any(|mark| (mark.min - track.min).length() < 0.5
+                && (mark.max - track.max).length() < 0.5),
+        "the thumb is a frame around the whole track: {neutral:?}"
+    );
+    let ends = thumb_handles(&neutral);
+    assert_eq!(ends.len(), 2, "a handle at each end: {neutral:?}");
+    assert!(
+        (ends[0].left() - track.left()).abs() < 0.5
+            && (ends[1].right() - track.right()).abs() < 0.5,
+        "each handle stands just inside its end of {track:?}: {ends:?}"
+    );
+
+    let mut over = Vec::new();
+    for _ in 0..2 {
+        over = whole_frame(
+            &ctx,
+            &mut state.results_parts(),
+            vec![egui::Event::PointerMoved(track.center())],
+        );
+    }
+    let lit = thumb_handles(&thumb_marks(&over, tokens.color.accent, track));
+    assert_eq!(
+        lit.len(),
+        2,
+        "hovering the track lights both handles: {lit:?}"
+    );
+}
+
+/// Zoomed in, the thumb takes the accent over exactly the part of the record
+/// the panes show, a handle at each of its ends, and the track keeps its
+/// height so the layout never jumps.
+#[test]
+fn a_zoomed_thumb_takes_the_accent_over_the_part_shown() {
     let frame = |state: &mut ResultsTestHost| {
         let ctx = theme_context();
         let mut shapes = Vec::new();
@@ -927,26 +988,12 @@ fn the_overview_thumb_takes_the_accent_only_while_zoomed() {
         let (_, track) = ruler_band(&shapes, &tokens);
         (shapes, tokens, track)
     };
-
     let mut state = host_on(damped_run());
-    let (shapes, tokens, full_track) = frame(&mut state);
-    assert_eq!(
-        thumb_marks(&shapes, &tokens, full_track),
-        Vec::<egui::Rect>::new(),
-        "no thumb at full view"
-    );
-    assert!(
-        painted_in(&shapes, tokens.color.border)
-            .iter()
-            .any(|rect| (rect.min - full_track.min).length() < 0.5
-                && (rect.max - full_track.max).length() < 0.5),
-        "the track keeps its quiet frame"
-    );
-
+    let (_, _, full_track) = frame(&mut state);
     zoom_to(&mut state, (1.7e-3, 2.7e-3));
     let (shapes, tokens, track) = frame(&mut state);
     assert!((track.height() - full_track.height()).abs() < 1e-3);
-    let marks = thumb_marks(&shapes, &tokens, track);
+    let marks = thumb_marks(&shapes, tokens.color.accent, track);
     let (left, right) = (
         track.left() + track.width() * 0.34,
         track.left() + track.width() * 0.54,
@@ -957,14 +1004,58 @@ fn the_overview_thumb_takes_the_accent_only_while_zoomed() {
             .any(|mark| (mark.left() - left).abs() < 0.5 && (mark.right() - right).abs() < 0.5),
         "the thumb spans 1.7-2.7 ms of the 5 ms record: {marks:?}"
     );
-    for edge in [left, right] {
+    let ends = thumb_handles(&marks);
+    assert_eq!(ends.len(), 2, "an accent handle at each end: {marks:?}");
+    for (end, edge) in ends.iter().zip([left, right]) {
         assert!(
-            marks
-                .iter()
-                .any(|mark| mark.width() < 8.0 && (mark.center().x - edge).abs() < 0.5),
-            "a handle stands at {edge}: {marks:?}"
+            (end.center().x - edge).abs() < 0.5,
+            "a handle stands at {edge}: {end:?}"
         );
     }
+}
+
+/// Dragging the full view's left handle inward zooms in: the panes then show
+/// from where it was let go to the record's end, which holds.
+#[test]
+fn dragging_a_full_view_handle_inward_zooms_in() {
+    let mut state = host_on(damped_run());
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let tokens = Tokens::get(&ctx);
+    let (_, track) = ruler_band(&shapes, &tokens);
+    let grip = thumb_handles(&thumb_marks(&shapes, tokens.color.text_dim, track))[0].center();
+    let to = egui::pos2(track.left() + track.width() * 0.2, grip.y);
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    for events in [
+        vec![egui::Event::PointerMoved(grip)],
+        vec![button(grip, true)],
+        vec![egui::Event::PointerMoved(grip + egui::vec2(12.0, 0.0))],
+        vec![egui::Event::PointerMoved(to)],
+        vec![button(to, false)],
+        Vec::new(),
+    ] {
+        whole_frame(&ctx, &mut state.results_parts(), events);
+    }
+    let analysis = strip(&mut state)[0].analysis_key;
+    let (from, until) =
+        rspice_results_ui::waves::stack::shared_x_view(&state.results.results.session, analysis, 1)
+            .expect("the drag zoomed the panes in");
+    assert!(
+        (from - 0.2 * STOP).abs() < 0.01 * STOP,
+        "the view starts where the handle was let go: {from}"
+    );
+    assert!(
+        (until - STOP).abs() < 1e-9 * STOP,
+        "the record's end holds: {until}"
+    );
 }
 
 /// On a logarithmic X axis the ruler boxes read each cursor's value in the

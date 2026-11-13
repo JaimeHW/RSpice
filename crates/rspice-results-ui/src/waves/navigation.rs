@@ -65,6 +65,9 @@ const RULER_CARET: f32 = 2.0;
 /// The height of a cursor's notch on the overview track's top edge.
 const RULER_NOTCH: f32 = 3.0;
 
+/// Half the width of a grab handle at either end of the overview's thumb.
+const THUMB_HANDLE_HALF: f32 = 3.0;
+
 /// A cursor's value box on the shared ruler, which is also its drag handle.
 struct RulerFlag {
     drag: SharedXDrag,
@@ -236,12 +239,16 @@ pub fn show_shared_x_axis(
             (rect.top() + SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT).min(rect.bottom()),
         ),
     );
-    // Whether the panes show less than the whole record: only then do the
-    // overview's thumb and its notches have anything to say.
+    // The lane band owns the overview gestures and everything above it
+    // belongs to the flags, so a flag grab never fights a resize handle.
+    let lane_band = egui::Rangef::new(track.top() - 4.0, track.bottom() + 4.0);
+    // Whether the panes show less than the whole record: the thumb takes the
+    // accent and the cursors get their notches only then.
     let (shown_start, shown_end) =
         shared_axis_viewport_fraction(model.x_scale, full_domain, current);
     let zoomed = shown_start > 1.0e-9 || shown_end < 1.0 - 1.0e-9;
     let mut viewport = egui::Rect::NOTHING;
+    let mut handle_centres = [f32::NAN; 2];
     if track.width() > 1.0 {
         painter.rect_filled(track, 0.0, c.canvas_bg);
         painter.rect_stroke(
@@ -313,36 +320,54 @@ pub fn show_shared_x_axis(
                 track.bottom(),
             ),
         );
-        // The thumb takes the accent, with its grab handles, exactly while
-        // the panes show less than the whole record. At full view it would
-        // outline the whole track in the loudest ink on the sheet and say
-        // nothing, so the track's own quiet frame stands alone; its edges
-        // still resize the view when dragged in.
+        // The thumb is a window with two ends to pull at full view too, as
+        // a range slider at full range is. Zoomed in, it takes the accent.
+        // At full view it is a 1 px frame in the secondary text ink, whose
+        // handles take the accent while the pointer is over the track: an
+        // amber thumb across the whole track would say nothing, and no
+        // thumb at all hid that its ends pull in to zoom.
+        let lane_hovered = response
+            .hover_pos()
+            .is_some_and(|pointer| lane_band.contains(pointer.y));
+        let (frame_ink, handle_ink) = if zoomed {
+            (c.accent, c.accent)
+        } else if lane_hovered {
+            (c.text_dim, c.accent)
+        } else {
+            (c.text_dim, c.text_dim)
+        };
         if zoomed {
             painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.14));
-            painter.rect_stroke(
-                viewport,
-                0.0,
-                egui::Stroke::new(1.0, c.accent),
-                egui::StrokeKind::Inside,
+        }
+        painter.rect_stroke(
+            viewport,
+            0.0,
+            egui::Stroke::new(1.0, frame_ink),
+            egui::StrokeKind::Inside,
+        );
+        // A grab handle at each end resizes the visible span in place: drag
+        // one and the opposite end holds. Each stays inside the track, so a
+        // thumb against an end never hangs its handle into the gutter.
+        handle_centres = [viewport.left(), viewport.right()].map(|edge| {
+            edge.clamp(
+                track.left() + THUMB_HANDLE_HALF,
+                (track.right() - THUMB_HANDLE_HALF).max(track.left() + THUMB_HANDLE_HALF),
+            )
+        });
+        for centre in handle_centres {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(centre - THUMB_HANDLE_HALF, track.top() - 1.0),
+                    egui::pos2(centre + THUMB_HANDLE_HALF, track.bottom() + 1.0),
+                ),
+                2.0,
+                handle_ink,
             );
-            // Grab handles at both edges resize the visible span in place:
-            // drag one and the opposite edge holds.
-            for edge_x in [viewport.left(), viewport.right()] {
-                painter.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(edge_x - 3.0, track.top() - 1.0),
-                        egui::pos2(edge_x + 3.0, track.bottom() + 1.0),
-                    ),
-                    2.0,
-                    c.accent,
-                );
-                painter.vline(
-                    edge_x,
-                    egui::Rangef::new(track.top() + 3.0, track.bottom() - 3.0),
-                    egui::Stroke::new(1.0, c.canvas_bg),
-                );
-            }
+            painter.vline(
+                centre,
+                egui::Rangef::new(track.top() + 3.0, track.bottom() - 3.0),
+                egui::Stroke::new(1.0, c.canvas_bg),
+            );
         }
     }
 
@@ -581,16 +606,13 @@ pub fn show_shared_x_axis(
     if response.clicked() {
         response.request_focus();
     }
-    // The lane band owns the overview gestures and everything above it
-    // belongs to the flags, so a flag grab never fights a resize handle.
-    let lane_band = egui::Rangef::new(track.top() - 4.0, track.bottom() + 4.0);
     let handle_at = |pointer: egui::Pos2| {
         if track.width() <= 1.0 || !lane_band.contains(pointer.y) {
             return None;
         }
-        if (pointer.x - viewport.left()).abs() <= 5.0 {
+        if (pointer.x - handle_centres[0]).abs() <= 5.0 {
             Some(SharedXDrag::ResizeStart)
-        } else if (pointer.x - viewport.right()).abs() <= 5.0 {
+        } else if (pointer.x - handle_centres[1]).abs() <= 5.0 {
             Some(SharedXDrag::ResizeEnd)
         } else {
             None
@@ -609,8 +631,13 @@ pub fn show_shared_x_axis(
             .map(|flag| flag.drag)
     };
     let drag_id = shared_x_drag_id(model);
+    // What a drag takes hold of is decided where the button went down: egui
+    // starts a drag only once the pointer has moved past the click distance,
+    // by when it has left a handle's few pixels.
     if response.drag_started()
-        && let Some(pointer) = response.interact_pointer_pos()
+        && let Some(pointer) = ui
+            .input(|input| input.pointer.press_origin())
+            .or_else(|| response.interact_pointer_pos())
     {
         let drag = handle_at(pointer)
             .or_else(|| flag_at(pointer))
@@ -756,7 +783,9 @@ pub fn show_shared_x_axis(
     }
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(
-        "Shared X overview — drag the window or its edges, click to recenter, wheel to zoom, drag A/B, F to fit",
+        "Drag an end to zoom in \u{00b7} drag the window to pan \u{00b7} click to recenter \u{00b7} \
+         wheel to zoom \u{00b7} double-click or F for the full view \u{00b7} drag a cursor's box \
+         to move it",
     );
     output
 }
