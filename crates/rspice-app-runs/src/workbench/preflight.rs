@@ -77,6 +77,43 @@ pub fn check_design(host: &mut impl RunHost) -> Result<rspice_design::drc::DrcRe
     run_design_check(host, root, CheckScope::Design)
 }
 
+/// Check the whole design from the simulation root, under its configuration,
+/// and say what it found, as the design feature's Check design does.
+pub fn check_design_and_record(host: &mut impl RunHost) {
+    let checked = check_design(host);
+    if record_design_check(host.model_mut(), "Design checks", checked) {
+        host.show_problem_findings();
+    }
+}
+
+/// Record what `check` found as one Console line, or why it could not run,
+/// and say whether it found errors the reader is to be taken to.
+pub fn record_design_check(
+    model: &mut Model,
+    check: &str,
+    checked: Result<rspice_design::drc::DrcResult, String>,
+) -> bool {
+    let result = match checked {
+        Ok(result) => result,
+        Err(error) => {
+            model.report_failure(format!("{check} could not run"), error);
+            return false;
+        }
+    };
+    let summary = result.summary();
+    let errors = summary.critical + summary.errors;
+    let advisories = summary.warnings + summary.info;
+    model.record_check_outcome(
+        &result,
+        format!(
+            "{check}: {errors} error{}, {advisories} advisor{}. See Problems.",
+            if errors == 1 { "" } else { "s" },
+            if advisories == 1 { "y" } else { "ies" },
+        ),
+    );
+    !result.passed()
+}
+
 /// Check `subject` as far as `scope` reaches with the slots' facts, stating
 /// what syncing the open drawing into the workspace had to say.
 pub fn run_design_check(

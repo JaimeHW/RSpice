@@ -9,7 +9,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::state::VerificationSessionState;
 
 use super::super::super::design_system::{property_row, section_header};
-use super::flow_row;
+use super::verification_footer::flow_row;
 use crate::state::VerificationPage;
 
 /// Whether a navigator `available_height` tall keeps its scroll bar showing:

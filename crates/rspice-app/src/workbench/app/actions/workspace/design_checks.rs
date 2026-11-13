@@ -79,37 +79,9 @@ fn report(
     check: &str,
     checked: Result<DrcResult, String>,
 ) {
-    if record_check(model, check, checked) {
+    if rspice_app_runs::workbench::preflight::record_design_check(model, check, checked) {
         wb.show_problem_findings();
     }
-}
-
-/// Record what `check` found as one Console line, or why it could not run,
-/// and say whether it found errors the reader is to be taken to.
-pub(crate) fn record_check(
-    model: &mut Model,
-    check: &str,
-    checked: Result<DrcResult, String>,
-) -> bool {
-    let result = match checked {
-        Ok(result) => result,
-        Err(error) => {
-            model.report_failure(format!("{check} could not run"), error);
-            return false;
-        }
-    };
-    let summary = result.summary();
-    let errors = summary.critical + summary.errors;
-    let advisories = summary.warnings + summary.info;
-    model.record_check_outcome(
-        &result,
-        format!(
-            "{check}: {errors} error{}, {advisories} advisor{}. See Problems.",
-            if errors == 1 { "" } else { "s" },
-            if advisories == 1 { "y" } else { "ies" },
-        ),
-    );
-    !result.passed()
 }
 
 impl AppState {

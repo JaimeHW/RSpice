@@ -491,7 +491,7 @@ pub(super) fn commit_simulation_campaign(
     }
     let (mut host, controller) = crate::workbench::simulate::run_host(cx);
     host.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::check_design(&mut host);
+    rspice_app_runs::workbench::preflight::check_design_and_record(&mut host);
     let receipt = controller.prepare_and_start_campaign(&mut host, name, member_ids)?;
     Ok(format!(
         "Campaign {} queued {} plans as {} tasks.",

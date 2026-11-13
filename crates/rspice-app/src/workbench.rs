@@ -142,7 +142,6 @@ pub(crate) mod docks {
         mod verification_footer;
         pub(in crate::workbench) mod verify;
         pub(in crate::workbench) mod veriloga;
-        use verification_footer::*;
     }
 }
 pub(crate) mod documents {
