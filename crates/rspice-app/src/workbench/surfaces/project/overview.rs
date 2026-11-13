@@ -24,7 +24,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::project::{ProjectFeature, lifecycle_view, slot_facts};
+use crate::workbench::project::{ProjectFeature, lifecycle_view};
 use crate::workbench::state::Workspace;
 use rspice_design::drc::DrcSeverity;
 
@@ -1971,7 +1971,7 @@ fn activity_row(
 fn checks_snapshot(cx: &Cx<'_, ProjectFeature>) -> HealthCopy {
     match cx
         .model
-        .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
+        .simulation_root_design_check_status(cx.runs.slot_facts(cx.peers.design().review_markers()))
     {
         DesignCheckStatus::Current(receipt) => {
             let summary = receipt.result.summary();
@@ -2012,7 +2012,7 @@ fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
     );
     let result = match cx
         .model
-        .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
+        .simulation_root_design_check_status(cx.runs.slot_facts(cx.peers.design().review_markers()))
     {
         DesignCheckStatus::Current(receipt) => &receipt.result,
         DesignCheckStatus::NotRun => {

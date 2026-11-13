@@ -33,8 +33,8 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::show_configu
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::features;
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
-use crate::workbench::project::{ProjectFeature, slot_facts};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
@@ -475,8 +475,9 @@ fn project_health_chips(
         let root = cx.model.workspace.content.simulation_root_reference();
         let (checks_label, checks_description, checks_problem) = match cx
             .model
-            .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
-        {
+            .simulation_root_design_check_status(
+                cx.runs.slot_facts(cx.peers.design().review_markers()),
+            ) {
             DesignCheckStatus::Current(receipt) => {
                 let summary = receipt.result.summary();
                 let errors = summary.critical + summary.errors;
