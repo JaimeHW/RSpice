@@ -561,7 +561,15 @@ const AFTER_CONTRIBUTION: &[Step] = &[
             "|app, request: OpenSymbolAuthoring| match request {",
             "crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);",
             "crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);",
+            "crate::workbench::app::open_symbol_parameter_form_dialog_for(\
+             &mut app.state,\
+             target,\
+             );",
             "crate::workbench::app::open_symbol_import_dialog(&mut app.state);",
+            "crate::workbench::app::open_symbol_import_dialog_for(\
+             &mut app.state,\
+             Some(&binding_source),\
+             );",
             "crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(",
             "app.state.models.models_view.note_receipt(result);",
         ],
@@ -875,8 +883,19 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
 /// share, and the page has its own answered as it returns; the inspector has
 /// what it raised answered once it has drawn, before the next point draws.
 /// The navigator and the toolbars raise nothing, so they answer nothing
-/// where they draw.
+/// where they draw. The Library and cellview manager's route has what it
+/// raised, a symbol dialog to open, answered as it returns, so the dialog
+/// draws in the frame that asked for it.
 const PROJECT_CONTRIBUTIONS: &[Step] = &[
+    (
+        "library and cellview manager route",
+        &["== super::SurfaceId::LibraryCellviewManager\
+           {\
+           library_cellview_manager::show(ui, app);\
+           app.after_contribution();\
+           return;\
+           }"],
+    ),
     (
         "workspace surface",
         &[

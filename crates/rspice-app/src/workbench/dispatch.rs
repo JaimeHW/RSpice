@@ -400,11 +400,23 @@ impl RSpiceApp {
                 OpenSymbolAuthoring::ModelBound => {
                     crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
                 }
-                OpenSymbolAuthoring::ParameterForm => {
+                OpenSymbolAuthoring::ParameterForm(None) => {
                     crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
                 }
-                OpenSymbolAuthoring::Import => {
+                OpenSymbolAuthoring::ParameterForm(Some(target)) => {
+                    crate::workbench::app::open_symbol_parameter_form_dialog_for(
+                        &mut app.state,
+                        target,
+                    );
+                }
+                OpenSymbolAuthoring::Import(None) => {
                     crate::workbench::app::open_symbol_import_dialog(&mut app.state);
+                }
+                OpenSymbolAuthoring::Import(Some(binding_source)) => {
+                    crate::workbench::app::open_symbol_import_dialog_for(
+                        &mut app.state,
+                        Some(&binding_source),
+                    );
                 }
                 OpenSymbolAuthoring::SubcircuitBound(source) => {
                     let SubcircuitSymbolSource {

@@ -495,16 +495,19 @@ impl Request for BindComponentModel {
 }
 
 /// Open one of the schematic's symbol-authoring dialogs. Raised by the
-/// models feature's symbol pages and actions, and taken straight after the
-/// call that raised it.
+/// models feature's symbol pages and actions and by the Library and cellview
+/// manager's symbol page, and taken straight after the call that raised it.
 #[derive(Clone, Debug)]
 pub enum OpenSymbolAuthoring {
     /// Create a symbol bound to the model the Models workspace selected.
     ModelBound,
-    /// Design the parameter form of the selected symbol.
-    ParameterForm,
-    /// Import a symbol into a writable design library.
-    Import,
+    /// Design the parameter form of the symbol named; with none, of the
+    /// selected symbol.
+    ParameterForm(Option<crate::state::CellViewRef>),
+    /// Import a symbol into a writable design library. The symbol named, when
+    /// it has a typed definition, is the preferred electrical binding source;
+    /// with none, the selected symbol is.
+    Import(Option<crate::state::CellViewRef>),
     /// Create a symbol bound to one subcircuit's interface. Whether its
     /// dialog opened goes on the Models workspace's banner.
     SubcircuitBound(Box<SubcircuitSymbolSource>),

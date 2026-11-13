@@ -21,12 +21,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::{
-    open_create_model_bound_symbol_dialog, open_symbol_import_dialog_for,
-    open_symbol_parameter_form_dialog_for,
-};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{Problem, paint_problem_mark, problem_line};
+use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
 
@@ -500,7 +497,10 @@ fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
                 create.clone().on_disabled_hover_text(reason);
             }
             if create.clicked() {
-                open_create_model_bound_symbol_dialog(&mut app.state);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(OpenSymbolAuthoring::ModelBound);
             }
             let import = Button::new("Import symbol\u{2026}")
                 .enabled(block.is_none())
@@ -509,7 +509,10 @@ fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
                 import.clone().on_disabled_hover_text(reason);
             }
             if import.clicked() {
-                open_symbol_import_dialog_for(&mut app.state, None);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(OpenSymbolAuthoring::Import(None));
             }
         },
     );
@@ -560,19 +563,25 @@ fn symbol_actions(ui: &mut Ui, app: &mut RSpiceApp, projection: &SymbolProjectio
         node.set_label("Symbol and component form actions");
     });
 
-    match action {
+    // The symbol dialogs are raised for the shell, which opens them as the
+    // manager returns; the form and the importer name the symbol shown.
+    let raised = match action {
         Some(SymbolAction::OpenEditor) => {
             app.state.open_workspace_view(projection.reference.clone());
             Command::OpenWorkspace(Workspace::Design).execute(app);
+            None
         }
-        Some(SymbolAction::EditForm) => {
-            open_symbol_parameter_form_dialog_for(&mut app.state, projection.reference.clone())
-        }
-        Some(SymbolAction::Create) => open_create_model_bound_symbol_dialog(&mut app.state),
-        Some(SymbolAction::Import) => {
-            open_symbol_import_dialog_for(&mut app.state, Some(&projection.reference));
-        }
-        None => {}
+        Some(SymbolAction::EditForm) => Some(OpenSymbolAuthoring::ParameterForm(Some(
+            projection.reference.clone(),
+        ))),
+        Some(SymbolAction::Create) => Some(OpenSymbolAuthoring::ModelBound),
+        Some(SymbolAction::Import) => Some(OpenSymbolAuthoring::Import(Some(
+            projection.reference.clone(),
+        ))),
+        None => None,
+    };
+    if let Some(request) = raised {
+        app.state.workbench.outbox.push(request);
     }
 }
 
@@ -1120,6 +1129,7 @@ mod tests {
         SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, View,
     };
+    use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
     fn typed_symbol() -> ModelBoundSymbolDefinition {
         let pins = vec![
@@ -1288,10 +1298,15 @@ mod tests {
     #[test]
     fn explicit_form_action_targets_the_selected_symbol() {
         let mut app = app_with_typed_symbol();
-        open_symbol_parameter_form_dialog_for(
-            &mut app.state,
-            CellViewRef::new("authoring", "amp", "symbol"),
-        );
+        app.state
+            .workbench
+            .outbox
+            .push(OpenSymbolAuthoring::ParameterForm(Some(CellViewRef::new(
+                "authoring",
+                "amp",
+                "symbol",
+            ))));
+        app.after_contribution();
         assert_eq!(
             app.state
                 .design
@@ -1309,6 +1324,104 @@ mod tests {
                 .as_ref()
                 .map(|form| form.revision),
             Some(4)
+        );
+    }
+
+    /// Press the manager's `button` on the Symbol & form page, in whole frames
+    /// over an open project: the application after the press, and whether the
+    /// frame that drew the press drew the dialog titled `title`.
+    fn press_in_the_manager(button: &str, title: &str) -> (RSpiceApp, bool) {
+        let mut app = app_with_typed_symbol();
+        app.state.open_project_session();
+        app.state
+            .workbench
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
+                RouteTransitionSource::User,
+            )
+            .expect("the manager's route is executable");
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut run = |app: &mut RSpiceApp, pass: u32, events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                    time: Some(f64::from(pass) * 0.1),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut frame),
+            )
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default()
+        };
+        // The fonts exist from the second frame on, and the page lays out
+        // against them on the third.
+        let mut nodes = Vec::new();
+        for pass in 1..=3 {
+            nodes = run(&mut app, pass, Vec::new());
+        }
+        let bounds = nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some(button))
+            .and_then(|node| node.bounds())
+            .unwrap_or_else(|| panic!("the page draws {button:?}"));
+        let at = egui::pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        };
+        let pressed = run(
+            &mut app,
+            4,
+            vec![egui::Event::PointerMoved(at), press(true), press(false)],
+        );
+        let drew = pressed.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Dialog && node.label() == Some(title)
+        });
+        (app, drew)
+    }
+
+    /// Edit component form… raises the form designer for the symbol the page
+    /// shows, and the shell opens it as the manager returns: the frame that
+    /// drew the press draws the dialog.
+    #[test]
+    fn edit_component_form_draws_the_form_designer_in_the_frame_that_pressed_it() {
+        let (app, drew) = press_in_the_manager(
+            "Edit component form\u{2026}",
+            "Open component form designer",
+        );
+        assert!(
+            drew,
+            "the frame that drew the press draws the form designer"
+        );
+        assert_eq!(
+            app.state.design.symbol_parameter_form.target,
+            Some(CellViewRef::new("authoring", "amp", "symbol"))
+        );
+    }
+
+    /// Import symbol… raises the importer bound to the symbol the page shows,
+    /// and the shell opens it as the manager returns: the frame that drew the
+    /// press draws the dialog.
+    #[test]
+    fn import_symbol_draws_the_importer_in_the_frame_that_pressed_it() {
+        let (app, drew) = press_in_the_manager("Import symbol\u{2026}", "Import symbol definition");
+        assert!(drew, "the frame that drew the press draws the importer");
+        assert_eq!(
+            app.state.design.symbol_import.binding_source,
+            Some(CellViewRef::new("authoring", "amp", "symbol"))
         );
     }
 

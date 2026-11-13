@@ -48,10 +48,10 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         |ui| {
             create_symbol_button(ui, app);
             if Button::new("Form designer").show(ui).clicked() {
-                app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm);
+                app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm(None));
             }
             if Button::new("Import symbol").show(ui).clicked() {
-                app.wb.outbox.push(OpenSymbolAuthoring::Import);
+                app.wb.outbox.push(OpenSymbolAuthoring::Import(None));
             }
             if Button::new("Library manager").show(ui).clicked() {
                 navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
@@ -606,7 +606,7 @@ fn symbol_detail(
                                 &row.reference.cell,
                                 &row.reference.view,
                             );
-                            app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm);
+                            app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm(None));
                         }
                     });
                 });

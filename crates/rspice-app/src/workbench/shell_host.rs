@@ -107,7 +107,11 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::LibraryCellviewManager
                 {
+                    // What the manager raised, a symbol dialog to open, is
+                    // answered as it returns, so the dialog draws in the
+                    // frame that asked for it.
                     library_cellview_manager::show(ui, app);
+                    app.after_contribution();
                     return;
                 }
                 match workspace {
