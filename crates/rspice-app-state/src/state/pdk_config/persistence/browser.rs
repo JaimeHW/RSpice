@@ -50,33 +50,14 @@ async fn load_browser_pdk_config(path: &Path) -> Result<BrowserPdkConfigRestore,
         return Ok(BrowserPdkConfigRestore {
             config,
             receipt: Some(receipt),
-            migrated_legacy_record: false,
             storage_status,
         });
     }
 
-    let Some(legacy_text) = legacy_browser_record(path)? else {
-        return Ok(BrowserPdkConfigRestore {
-            config: PdkConfig::default(),
-            receipt: None,
-            migrated_legacy_record: false,
-            storage_status,
-        });
-    };
-    let legacy_config: PdkConfig = serde_json::from_str(&legacy_text)
-        .map_err(|error| ConfigError::Parse(error.to_string()))?;
-    let prepared = prepare_browser_pdk_snapshot(path, &legacy_config, 1)?;
-    let receipt = save_prepared_browser_pdk_snapshot(path, None, &legacy_config, prepared).await?;
-    if let Err(error) = remove_legacy_browser_record(path) {
-        log::warn!(
-            "browser PDK configuration migrated, but the legacy Web Storage record could not be removed: {error}"
-        );
-    }
     Ok(BrowserPdkConfigRestore {
-        config: legacy_config,
-        storage_status: receipt.storage_status,
-        receipt: Some(receipt),
-        migrated_legacy_record: true,
+        config: PdkConfig::default(),
+        receipt: None,
+        storage_status,
     })
 }
 
@@ -327,46 +308,6 @@ async fn indexed_db_get_bytes(key: &str, label: &str) -> Result<Vec<u8>, ConfigE
 fn js_bytes(value: &wasm_bindgen::JsValue, label: &str) -> Result<Vec<u8>, ConfigError> {
     browser_store::bytes(value)
         .ok_or_else(|| ConfigError::Parse(format!("browser {label} is not a byte array")))
-}
-
-fn legacy_storage_key(path: &Path) -> String {
-    format!("rspice:pdk-config:v1:{}", path.to_string_lossy())
-}
-
-fn browser_local_storage() -> Result<web_sys::Storage, ConfigError> {
-    web_sys::window()
-        .ok_or_else(|| ConfigError::Io("browser window is unavailable".to_owned()))?
-        .local_storage()
-        .map_err(|error| ConfigError::Io(browser_store::js_error(error)))?
-        .ok_or_else(|| ConfigError::Io("browser local storage is unavailable".to_owned()))
-}
-
-fn legacy_browser_record(path: &Path) -> Result<Option<String>, ConfigError> {
-    let storage = match browser_local_storage() {
-        Ok(storage) => storage,
-        Err(error) => {
-            log::warn!(
-                "legacy browser PDK migration was skipped because Web Storage is unavailable: {error}"
-            );
-            return Ok(None);
-        }
-    };
-    match storage.get_item(&legacy_storage_key(path)) {
-        Ok(record) => Ok(record),
-        Err(error) => {
-            log::warn!(
-                "legacy browser PDK migration was skipped because Web Storage read was rejected: {}",
-                browser_store::js_error(error)
-            );
-            Ok(None)
-        }
-    }
-}
-
-fn remove_legacy_browser_record(path: &Path) -> Result<(), ConfigError> {
-    browser_local_storage()?
-        .remove_item(&legacy_storage_key(path))
-        .map_err(|error| ConfigError::Io(browser_store::js_error(error)))
 }
 
 async fn browser_storage_status(request_persistence: bool) -> BrowserPdkStorageStatus {

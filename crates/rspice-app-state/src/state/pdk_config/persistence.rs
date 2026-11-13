@@ -87,7 +87,6 @@ impl BrowserPdkStorageStatus {
 pub struct BrowserPdkConfigRestore {
     pub config: PdkConfig,
     pub receipt: Option<BrowserPdkConfigReceipt>,
-    pub migrated_legacy_record: bool,
     pub storage_status: BrowserPdkStorageStatus,
 }
 

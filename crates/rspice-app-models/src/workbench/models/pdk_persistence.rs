@@ -223,14 +223,6 @@ fn finish_browser_pdk_restore(
             if restored_saved_configuration {
                 emit_browser_pdk_storage_warning(parts, ctx, storage_status);
             }
-            if restored.migrated_legacy_record {
-                parts.model.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    "PDK configuration moved from the browser's Web Storage to its IndexedDB \
-                     store.",
-                );
-            }
             if let Err(errors) = validation {
                 for error in errors {
                     parts.model.record(
