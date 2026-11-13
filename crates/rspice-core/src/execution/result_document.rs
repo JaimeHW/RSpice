@@ -237,99 +237,14 @@ use crate::execution::topology::TopologyFingerprint;
 /// Stable schema identifier written into every document.
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
-/// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 22;
-
-/// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
-///
-/// Every schema version this build decodes, oldest first.
+/// Schema version this build produces, and the only one it reads.
 ///
 /// A document in this schema is `deny_unknown_fields` throughout, so a field
-/// cannot be added to it compatibly and adding one costs a version. Version 2
-/// added transient `digitalBuses`; version 3 adds PSTB `probeStateProjection`
-/// and permits a null `probeStateIndex` for a current formed from multiple
-/// independent coordinates. Older documents retain their single index and
-/// decode with an empty projection, without inventing an unrecorded polarity.
-/// Older readers reject newer versions before decoding their fields.
-/// Version 4 requires FFT `status`: `{"kind":"complete"}` or
-/// `{"kind":"incomplete-history","availableStart":f64,"availableStop":f64}`.
-/// Incomplete requests retain their requested window and transform configuration
-/// but have zero document points, no axes or signals, and null metrics. This
-/// includes early model finish and resume without the earlier sample history.
-/// A stop-exclusive FFT is complete once its last required sample is available.
-/// Versions 1–3 omit `status` and retain their completed spectral data unchanged.
-/// Version 5 adds sensitivity availability. Earlier sensitivity documents
-/// require a rerun because their zeros do not distinguish undefined values.
-/// Version 6 adds sparse current impulses. Older transient documents decode
-/// with unavailable impulse history, without asserting that no impulse occurred.
-/// Version 7 names device-lead impulse owners and explicit per-current coverage.
-/// Version-6 rows retain their data with unqualified completeness.
-/// Version 8 states how many `correlate` statements a DC mismatch result
-/// applied, per statistical scope. A version-7 DC-mismatch document decodes
-/// with both counts zero, which is what it meant: the analysis that wrote it
-/// summed its contributions as independent variables and read no `correlate`
-/// statement of the design's `statistics` block at all.
-///
-/// Version 10 adds explicitly ordered current impulse derivatives, with SI
-/// coefficients separate from ordinary integrated charge.
-/// Version 11 adds frequency-table provenance and physical row coordinates.
-/// Version 12 adds explicit pole-zero root and gain units. Earlier documents
-/// keep both units absent; input labels cannot reconstruct the excitation kind.
-/// Version 13 qualifies sensitivity nominal-output units as volts or amperes.
-/// Earlier sensitivity documents used dimensionless/unspecified placeholders;
-/// decoding keeps their numbers and marks placeholder output units unspecified.
-///
-/// Version 14 requires independently measured STB DC return-ratio evidence.
-/// Earlier STB documents mislabeled the first sweep sample as DC; decoding
-/// preserves it as sweep-start gain without claiming a zero-frequency result.
-///
-/// Version 15 records unobserved STB margins as NoCrossover and requires
-/// consistent measured margin/frequency pairs. Multiple crossings are an
-/// observation, not a conditional-stability verdict.
-///
-/// Version 16 adds STB natural circuit modes and typed extraction failures.
-/// Earlier STB documents have no circuit-pole evidence; absence never denotes
-/// a qualified empty spectrum or establishes circuit stability.
-///
-/// Version 17 adds separately typed node-voltage impulses and derivatives.
-/// Absent histories retain the legacy sampled-waveform contract.
-///
-/// Version 18 adds explicit per-variable Monte Carlo output units. Earlier
-/// populations retain unstated units; a probe name never establishes a unit.
-///
-/// Version 19 adds a digital trace's `hdlTimePrecision`, the design time
-/// precision of the HDL that reads or drives the net. Earlier documents carry
-/// none, and a dump of their nets falls back to the femtosecond rule.
-///
-/// Version 20 adds the transient `hdlSources`: where each traced HDL net or
-/// variable was declared and which processes drive it. Earlier documents
-/// carry none, and a reader has nowhere to go from their HDL traces.
-///
-/// Version 21 retires PSTB `numMultipliers`, a display limit no reader
-/// honoured. Earlier documents state it; it is read and dropped.
-///
-/// Version 22 adds a model finish's `task` (`$finish`, `$stop` or `$fatal`),
-/// the `source` line of its call and a `$fatal`'s `message`. Earlier
-/// documents carry none of them and decode as a `$finish` at an unnamed line,
-/// which is the only finish they could record.
-///
-/// A new result *family* costs no version. No document of an existing family
-/// changes shape, and no reader of an earlier version has a document of the
-/// new family to misread: it refuses the unknown `resultKind` tag outright.
-/// Bumping for one would instead make every family's freshly produced
-/// document undecodable by every current reader, which is the compatibility
-/// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 22] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-];
-
-/// First version whose transient payload may declare a digital bus.
-const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
-
-/// First version whose PSTB payload may declare a physical-current projection.
-const FIRST_PSTB_PROJECTION_DOCUMENT_VERSION: u32 = 3;
-
-const FIRST_FFT_STATUS_DOCUMENT_VERSION: u32 = 4;
+/// cannot be added to it compatibly: adding one costs a version, and a reader
+/// refuses every version but its own before decoding any field. A new result
+/// *family* costs no version, since a reader refuses the unknown `resultKind`
+/// tag outright.
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 22;
 
 /// How often long validation and serialization loops poll the abort source.
 const ABORT_POLL_STRIDE: usize = 256;
@@ -376,11 +291,6 @@ impl AnalysisResultDocument {
                 location: "transient voltage impulses",
                 detail,
             };
-            if self.schema_version < 17 {
-                return Err(malformed(
-                    "voltage impulse observations require document version 17".into(),
-                ));
-            }
             let times = self
                 .axes
                 .iter()
@@ -405,27 +315,6 @@ impl AnalysisResultDocument {
             location: "transient current impulses",
             detail,
         };
-        if self.schema_version < 6 {
-            return Err(malformed(
-                "current impulse observations require document version 6".into(),
-            ));
-        }
-        if self.schema_version < 7
-            && traces.iter().any(|trace| {
-                trace.complete
-                    || matches!(trace.owner, crate::CurrentImpulseOwner::DeviceLead { .. })
-            })
-        {
-            return Err(malformed(
-                "device current impulse owners and complete coverage require document version 7"
-                    .into(),
-            ));
-        }
-        if self.schema_version < 10 && traces.iter().any(|trace| !trace.derivatives.is_empty()) {
-            return Err(malformed(
-                "current impulse derivatives require document version 10".into(),
-            ));
-        }
         let times = self
             .axes
             .iter()
@@ -677,117 +566,32 @@ impl AnalysisResultDocument {
                 found: self.schema.clone(),
             });
         }
-        if !DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS.contains(&self.schema_version) {
+        if self.schema_version != ANALYSIS_RESULT_DOCUMENT_VERSION {
             return Err(ResultDocumentError::UnsupportedVersion {
                 found: self.schema_version,
                 current: ANALYSIS_RESULT_DOCUMENT_VERSION,
             });
         }
-        // Earlier sensitivity producers used ambiguous zeros for undefined
-        // quantities. Keep other old studies readable, but require a rerun of
-        // sensitivities rather than certifying those historical values.
-        if self.schema_version < 5 && matches!(self.payload, ResultPayload::Sensitivity(_)) {
-            return Err(ResultDocumentError::Malformed {
-                location: "sensitivity availability",
-                detail: "sensitivity documents before version 5 lack qualified availability; rerun the sensitivity analysis".into(),
-            });
-        }
-        // A defaulted field decodes an older document as one that declares
-        // nothing, which is what makes reading version 1 sound. It also lets a
-        // document declare the older version and carry the newer content, and
-        // that is a document whose version stopped describing it.
-        if self.schema_version < 9
-            && let ResultPayload::PNoise(payload) = &self.payload
-            && payload.sampling.is_some()
-        {
-            return Err(ResultDocumentError::Malformed {
-                location: "sampled PNoise geometry",
-                detail: "sampled PNoise evidence requires document version 9".into(),
-            });
-        }
-        if self.schema_version < FIRST_DIGITAL_BUS_DOCUMENT_VERSION
-            && let ResultPayload::Tran(payload) = &self.payload
-            && !payload.digital_buses.is_empty()
-        {
-            return Err(ResultDocumentError::Malformed {
-                location: "transient digital buses",
-                detail: format!(
-                    "a version-{} document declares {} digital bus(es); buses arrived in version {FIRST_DIGITAL_BUS_DOCUMENT_VERSION}",
-                    self.schema_version,
-                    payload.digital_buses.len()
-                ),
-            });
-        }
-        if self.schema_version < FIRST_PSTB_PROJECTION_DOCUMENT_VERSION
-            && let ResultPayload::Pstb(payload) = &self.payload
-            && (!payload.probe_state_projection.is_empty() || payload.probe_state_index.is_none())
-        {
-            return Err(ResultDocumentError::Malformed {
-                location: "PSTB probe projection",
-                detail: format!(
-                    "a version-{} document declares a projected probe; projections arrived in version {FIRST_PSTB_PROJECTION_DOCUMENT_VERSION}",
-                    self.schema_version,
-                ),
-            });
-        }
         if let ResultPayload::Fft(payload) = &self.payload {
-            if payload.status.is_some()
-                != (self.schema_version >= FIRST_FFT_STATUS_DOCUMENT_VERSION)
-            {
+            let Some(status) = payload.status else {
                 return Err(ResultDocumentError::Malformed {
                     location: "FFT status",
-                    detail: format!(
-                        "FFT status must be present from document version {FIRST_FFT_STATUS_DOCUMENT_VERSION} and absent in earlier versions"
-                    ),
+                    detail: "an FFT document requires its status".into(),
                 });
-            }
-            if payload.status.unwrap_or_default().is_complete() == (self.point_count == 0) {
+            };
+            if status.is_complete() == (self.point_count == 0) {
                 return Err(ResultDocumentError::Malformed {
                     location: "FFT status",
                     detail: "FFT point count does not match its completion status".into(),
                 });
             }
         }
-        if let ResultPayload::PoleZero(payload) = &self.payload {
-            let required = self.schema_version >= 12;
-            if payload.root_unit.is_some() != required || payload.gain_unit.is_some() != required {
-                return Err(ResultDocumentError::Malformed {
-                    location: "pole-zero units",
-                    detail: "pole-zero units must be present from document version 12 and absent in earlier versions".into(),
-                });
-            }
-        }
-        if self.schema_version < 18
-            && let ResultPayload::MonteCarlo(payload) = &self.payload
-            && payload
-                .statistics
-                .iter()
-                .any(|variable| variable.unit.is_some())
+        if let ResultPayload::PoleZero(payload) = &self.payload
+            && (payload.root_unit.is_none() || payload.gain_unit.is_none())
         {
             return Err(ResultDocumentError::Malformed {
-                location: "Monte Carlo units",
-                detail: "Monte Carlo output units require document version 18".into(),
-            });
-        }
-        if self.schema_version < 19
-            && let ResultPayload::Tran(payload) = &self.payload
-            && payload
-                .digital_traces
-                .iter()
-                .any(|trace| trace.hdl_time_precision.is_some())
-        {
-            return Err(ResultDocumentError::Malformed {
-                location: "digital trace HDL time precision",
-                detail: "an HDL time precision requires document version 19".into(),
-            });
-        }
-        if self.schema_version < 20
-            && let ResultPayload::Tran(payload) = &self.payload
-            && !payload.hdl_sources.is_empty()
-        {
-            return Err(ResultDocumentError::Malformed {
-                location: "HDL sources",
-                detail: "an HDL source map requires document version 20".into(),
+                location: "pole-zero units",
+                detail: "a pole-zero document requires its root and gain units".into(),
             });
         }
         if self.payload.result_kind() != self.result_kind {
@@ -843,18 +647,10 @@ impl AnalysisResultDocument {
         let mut count = 0;
         for unit in units {
             check_abort(abort)?;
-            let valid = if self.schema_version >= 13 {
-                matches!(unit, Some(SignalUnit::Volt | SignalUnit::Ampere))
-            } else {
-                matches!(
-                    unit,
-                    Some(SignalUnit::Volt | SignalUnit::Ampere | SignalUnit::Unspecified)
-                )
-            };
-            if !valid {
+            if !matches!(unit, Some(SignalUnit::Volt | SignalUnit::Ampere)) {
                 return Err(ResultDocumentError::Malformed {
                     location: "sensitivity output unit",
-                    detail: "nominal output requires volts or amperes from version 13; legacy placeholders must remain unspecified".into(),
+                    detail: "nominal output requires volts or amperes".into(),
                 });
             }
             count += 1;
@@ -864,45 +660,6 @@ impl AnalysisResultDocument {
                 location: "sensitivity output unit",
                 detail: "sensitivity requires exactly one nominal-output scalar or signal".into(),
             });
-        }
-        Ok(())
-    }
-
-    fn normalize_legacy_sensitivity_units(
-        &mut self,
-        abort: &dyn AbortSignal,
-    ) -> Result<(), ResultDocumentError> {
-        if self.schema_version >= 13 || !matches!(self.payload, ResultPayload::Sensitivity(_)) {
-            return Ok(());
-        }
-        for scalar in &mut self.scalars {
-            check_abort(abort)?;
-            if scalar.name() == "output_value"
-                && matches!(scalar.unit(), None | Some(SignalUnit::Dimensionless))
-            {
-                scalar.set_unit(Some(SignalUnit::Unspecified));
-            }
-        }
-        for signal in &mut self.signals {
-            check_abort(abort)?;
-            let descriptor = &signal.descriptor;
-            if descriptor.canonical_name() == "output"
-                && *descriptor.unit() == SignalUnit::Dimensionless
-            {
-                signal.descriptor = SignalDescriptor::new(
-                    descriptor.canonical_name(),
-                    descriptor.display_name(),
-                    descriptor.kind(),
-                    SignalUnit::Unspecified,
-                    descriptor.value_type(),
-                    descriptor.shape(),
-                    descriptor.owner().clone(),
-                )
-                .map_err(|error| ResultDocumentError::Malformed {
-                    location: "legacy sensitivity output unit",
-                    detail: error.to_string(),
-                })?;
-            }
         }
         Ok(())
     }
@@ -1152,7 +909,7 @@ impl AnalysisResultDocument {
                 found: header.schema,
             });
         }
-        if !DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS.contains(&header.schema_version) {
+        if header.schema_version != ANALYSIS_RESULT_DOCUMENT_VERSION {
             return Err(ResultDocumentError::UnsupportedVersion {
                 found: header.schema_version,
                 current: ANALYSIS_RESULT_DOCUMENT_VERSION,
@@ -1160,15 +917,13 @@ impl AnalysisResultDocument {
         }
         check_abort(abort)?;
         json_admission::check(json, limits, abort)?;
-        let mut document: Self =
+        let document: Self =
             crate::io::json::from_str(json, abort).map_err(|error| match error {
                 crate::io::json::JsonDecodeError::Aborted => ResultDocumentError::Aborted,
                 crate::io::json::JsonDecodeError::Json(error) => {
                     ResultDocumentError::Json(error.to_string())
                 }
             })?;
-        document.normalize_legacy_sensitivity_units(abort)?;
-        stability::normalize_legacy(&mut document, abort)?;
         document.validate_with_limits_and_abort(limits, abort)?;
         Ok(document)
     }

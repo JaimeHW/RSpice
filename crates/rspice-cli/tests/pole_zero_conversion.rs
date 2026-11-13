@@ -300,31 +300,20 @@ fn pole_zero_comparison_checks_identity_and_qualification_independently_of_toler
 }
 
 #[test]
-fn pole_zero_missing_gains_and_legacy_units_are_not_fabricated() {
+fn pole_zero_missing_gains_are_not_fabricated() {
     let directory = common::test_dir("pz_missing_gains");
     let source = original(&directory);
     let mut document = common::read_json(&source);
-    document["schemaVersion"] = json!(11);
     document["payload"]["dcGain"] = Value::Null;
-    document["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("rootUnit");
-    document["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("gainUnit");
-    let legacy = directory.join("legacy.json");
-    std::fs::write(&legacy, document.to_string()).unwrap();
+    let missing = directory.join("missing.json");
+    std::fs::write(&missing, document.to_string()).unwrap();
     for (format, extension) in FORMATS {
         let destination = directory.join(format!("converted.{extension}"));
-        convert(&legacy, &destination, format);
+        convert(&missing, &destination, format);
         let decoded = directory.join("decoded.json");
         convert(&destination, &decoded, "json");
         let table = common::read_json(&decoded);
         assert_eq!(column(&table, "dc_gain")["values"], json!([null]));
-        assert!(column(&table, "dc_gain")["unit"].is_null());
-        assert!(column(&table, "pole(1)")["unit"].is_null());
         let unknown = compare(&destination, &destination, &[]);
         assert_eq!(unknown.status.code(), Some(3), "{format}: {unknown:?}");
         let roots = compare(&destination, &destination, &["--variables", "pole(1)"]);

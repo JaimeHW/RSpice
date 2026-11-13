@@ -243,8 +243,6 @@ fn voltage_actions_round_trip_typed_documents_without_changing_finite_samples() 
         wire["payload"]["voltageImpulses"][0]["points"][0]["voltSeconds"],
         0.002
     );
-    wire["schemaVersion"] = 16.into();
-    assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
     wire["payload"]
         .as_object_mut()
         .unwrap()

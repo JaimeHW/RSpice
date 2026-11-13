@@ -178,21 +178,6 @@ fn retained_stb_spectra_validate_and_legacy_results_stay_indeterminate() {
         panic!()
     };
     assert_eq!(payload.circuit_poles, result.circuit_poles);
-    let mut old_document = serde_json::to_value(&document).unwrap();
-    old_document["schemaVersion"] = serde_json::json!(15);
-    assert!(
-        AnalysisResultDocument::from_json(&serde_json::to_string(&old_document).unwrap()).is_err()
-    );
-    old_document["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("circuitPoles");
-    let old_document =
-        AnalysisResultDocument::from_json(&serde_json::to_string(&old_document).unwrap()).unwrap();
-    let ResultPayload::Stb(old_payload) = old_document.payload() else {
-        panic!()
-    };
-    assert!(old_payload.circuit_poles.is_not_computed());
     json.as_object_mut().unwrap().remove("circuit_poles");
     let legacy: rspice_core::analysis::stb::StbResult = serde_json::from_value(json).unwrap();
     assert_eq!(legacy.stability_verdict(), StabilityVerdict::Indeterminate);

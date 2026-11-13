@@ -378,12 +378,10 @@ pub struct AcPayload {}
 pub struct TransientPayload {
     /// Sparse current charge impulses and higher derivatives, independent of finite samples.
     /// Absent owners have no coverage claim. An empty complete trace proves
-    /// no impulses for its owner. Branch observations require version 6;
-    /// device ownership and complete coverage require version 7; derivatives require version 10.
+    /// no impulses for its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
     /// Sparse node-voltage actions, retained separately from finite samples.
-    /// Requires result document version 17.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voltage_impulses: Option<Vec<crate::VoltageImpulseTrace>>,
 
@@ -423,7 +421,7 @@ pub struct TransientPayload {
     /// drive it, by the trace or bus it was published under.
     ///
     /// Absent from the encoding when empty, so the document of a run with no
-    /// HDL is spelled as before. Requires result document version 20.
+    /// HDL carries no key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hdl_sources: Vec<HdlSourceDocument>,
     /// Identity of each `.FFT` post-process this transient produced. The
@@ -662,12 +660,6 @@ pub struct FftChildReference {
 /// silently ignoring what it does not understand. Adding one therefore costs
 /// a version, and [`crate::execution::ANALYSIS_RESULT_DOCUMENT_VERSION`] is
 /// what a reader gates on.
-///
-/// Version 2's transient payload added [`DigitalEventBus`] declarations, and
-/// version 19 added `hdlTimePrecision` here. An older document is read with
-/// neither; one whose version predates the field it carries is refused rather
-/// than read, because it was written by something that had already stopped
-/// meaning that version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DigitalEventTrace {
@@ -1707,10 +1699,6 @@ pub struct DcMatchPayload {
     /// How many `correlate` statements of the design's `statistics` block
     /// entered the mismatch variance, and how many entered the process
     /// variance. Zero means that scope was summed as independent variables.
-    ///
-    /// Requires version 8. A version-7 document decodes with both zero, which
-    /// is true of every one of them: the analysis that wrote them summed
-    /// squares and read no `correlate` statement at all.
     #[serde(default)]
     pub applied_correlations_mismatch: usize,
     #[serde(default)]
@@ -2050,14 +2038,14 @@ impl From<SensitivityElementTag> for ElementType {
 pub struct PoleZeroPayload {
     pub input: String,
     pub output: String,
-    /// Angular frequency for both root vectors. Absent only in legacy documents.
+    /// Angular frequency for both root vectors. Always present in a valid document.
     #[serde(
         default,
         with = "super::wire::optional_signal_unit",
         skip_serializing_if = "Option::is_none"
     )]
     pub root_unit: Option<SignalUnit>,
-    /// Unit of both gains. Legacy documents did not retain this information.
+    /// Unit of both gains. Always present in a valid document.
     #[serde(
         default,
         with = "super::wire::optional_signal_unit",
@@ -2276,8 +2264,7 @@ impl FourierPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FftPayload {
-    /// Present from document version 4. Older documents describe completed
-    /// spectra and omit this field.
+    /// Whether the spectrum is complete. Always present in a valid document.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<crate::engine::TransientFftStatus>,
     /// Authored probe or braced expression.
@@ -2896,7 +2883,7 @@ impl PxfPayload {
 /// spectrum, the orbit policy it was judged under, the phase mode that was
 /// exempted, and the verdict.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", from = "PstbPayloadWire")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PstbPayload {
     /// Period of the analyzed orbit, in seconds.
     pub period: f64,
@@ -2908,7 +2895,7 @@ pub struct PstbPayload {
     /// combination of independent shooting coordinates.
     pub probe_state_index: Option<usize>,
     /// Sparse physical-current projection `(state index, signed weight)`.
-    /// Legacy documents omit it and use the single coordinate above.
+    /// Empty when the single coordinate above is the probe.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probe_state_projection: Vec<(usize, f64)>,
     /// Exact outer magnitude boundary the modes were classified against.
@@ -2942,54 +2929,6 @@ pub struct PstbPayload {
     /// Iterations the eigensolver reported. Zero means it is atomic and
     /// exposes no count.
     pub iterations: usize,
-}
-
-/// [`PstbPayload`] as a document spells it, with the key version 21 retired.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PstbPayloadWire {
-    period: f64,
-    fundamental_frequency: f64,
-    probe_instance: String,
-    probe_state_index: Option<usize>,
-    #[serde(default)]
-    probe_state_projection: Vec<(usize, f64)>,
-    stability_threshold: f64,
-    detect_subharmonics: bool,
-    /// Retired in version 21: a display limit no reader honoured. Earlier
-    /// documents state it; it is read and dropped.
-    #[serde(default, rename = "numMultipliers")]
-    _num_multipliers: serde::de::IgnoredAny,
-    floquet_evidence: FloquetEvidenceDocument,
-    floquet_orbit_kind: FloquetOrbitTag,
-    trivial_multiplier_index: Option<usize>,
-    stability_classification: PstbStabilityTag,
-    modes: Vec<PstbModeDocument>,
-    num_unstable: usize,
-    subharmonics: Vec<usize>,
-    iterations: usize,
-}
-
-impl From<PstbPayloadWire> for PstbPayload {
-    fn from(wire: PstbPayloadWire) -> Self {
-        Self {
-            period: wire.period,
-            fundamental_frequency: wire.fundamental_frequency,
-            probe_instance: wire.probe_instance,
-            probe_state_index: wire.probe_state_index,
-            probe_state_projection: wire.probe_state_projection,
-            stability_threshold: wire.stability_threshold,
-            detect_subharmonics: wire.detect_subharmonics,
-            floquet_evidence: wire.floquet_evidence,
-            floquet_orbit_kind: wire.floquet_orbit_kind,
-            trivial_multiplier_index: wire.trivial_multiplier_index,
-            stability_classification: wire.stability_classification,
-            modes: wire.modes,
-            num_unstable: wire.num_unstable,
-            subharmonics: wire.subharmonics,
-            iterations: wire.iterations,
-        }
-    }
 }
 
 /// One retained Floquet mode.

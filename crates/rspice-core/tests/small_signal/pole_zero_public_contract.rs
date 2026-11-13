@@ -180,36 +180,7 @@ fn current_and_voltage_gains_keep_their_units_without_rescaling_roots() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn legacy_pole_zero_documents_preserve_absent_units_and_numeric_values() {
-    let original = document(RC, SignalUnit::Ohm);
-    let mut encoded = serde_json::to_value(&original).unwrap();
-    encoded["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("rootUnit");
-    encoded["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("gainUnit");
-    for version in 1..=11 {
-        encoded["schemaVersion"] = version.into();
-        let decoded = AnalysisResultDocument::from_json(&encoded.to_string()).unwrap();
-        let ResultPayload::PoleZero(payload) = decoded.payload() else {
-            panic!("PZ");
-        };
-        assert_eq!(payload.root_unit, None);
-        assert_eq!(payload.gain_unit, None);
-        assert_eq!(payload.dc_gain, Some(1000.0));
-        assert!((payload.poles[0].real + 1000.0).abs() < 1e-8);
-        let restored = serde_json::to_value(&decoded).unwrap();
-        assert!(restored["payload"].get("rootUnit").is_none());
-        assert!(restored["payload"].get("gainUnit").is_none());
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn pole_zero_unit_metadata_cannot_lie_about_its_version_or_quantity() {
+fn pole_zero_unit_metadata_is_required_and_cannot_lie_about_its_quantity() {
     let original = serde_json::to_value(document(RC, SignalUnit::Ohm)).unwrap();
     assert_eq!(original["payload"]["rootUnit"]["unit"], "radian_per_second");
     assert_eq!(original["payload"]["gainUnit"]["unit"], "ohm");
@@ -223,9 +194,6 @@ fn pole_zero_unit_metadata_cannot_lie_about_its_version_or_quantity() {
         encoded["payload"].as_object_mut().unwrap().remove(field);
         assert!(AnalysisResultDocument::from_json(&encoded.to_string()).is_err());
     }
-    let mut encoded = original;
-    encoded["schemaVersion"] = 11.into();
-    assert!(AnalysisResultDocument::from_json(&encoded.to_string()).is_err());
 }
 
 fn final_cancel(source: &str) {

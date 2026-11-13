@@ -58,9 +58,6 @@ fn sampled_pnoise_card_runs_and_publishes_timing_units_and_geometry() {
     );
     let json = document.to_json().unwrap();
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
-    let mut older: serde_json::Value = serde_json::from_str(&json).unwrap();
-    older["schemaVersion"] = 8.into();
-    assert!(AnalysisResultDocument::from_json(&older.to_string()).is_err());
     let mut malformed = exact.clone();
     malformed
         .sampling

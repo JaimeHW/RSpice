@@ -263,54 +263,6 @@ fn nominal_output_units_survive_voltage_and_current_documents() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn legacy_sensitivity_units_remain_unknown_without_changing_numbers() {
-    for sweep in ["", " AC LIN 2 1000 2000"] {
-        let original = document(CIRCUIT, "I(V1)", sweep);
-        let mut raw = serde_json::to_value(&original).unwrap();
-        let mut explicitly_typed_legacy = raw.clone();
-        explicitly_typed_legacy["schemaVersion"] = 12.into();
-        let preserved =
-            AnalysisResultDocument::from_json(&explicitly_typed_legacy.to_string()).unwrap();
-        assert_eq!(
-            serde_json::to_value(preserved).unwrap(),
-            explicitly_typed_legacy
-        );
-        let unit_path = if sweep.is_empty() {
-            "/scalars/0/unit"
-        } else {
-            "/signals/0/descriptor/unit"
-        };
-        *raw.pointer_mut(unit_path).unwrap() = serde_json::json!({"unit": if sweep.is_empty() { "dimensionless" } else { "unspecified" }});
-        for version in 5..=12 {
-            raw["schemaVersion"] = version.into();
-            let restored = AnalysisResultDocument::from_json(&raw.to_string()).unwrap();
-            let mut expected = raw.clone();
-            *expected.pointer_mut(unit_path).unwrap() = serde_json::json!({"unit":"unspecified"});
-            assert_eq!(serde_json::to_value(&restored).unwrap(), expected);
-            assert_eq!(
-                AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
-                restored
-            );
-        }
-        raw["schemaVersion"] = 13.into();
-        assert!(
-            AnalysisResultDocument::from_json(&raw.to_string())
-                .unwrap_err()
-                .to_string()
-                .contains("sensitivity output unit")
-        );
-        raw["schemaVersion"] = 4.into();
-        assert!(
-            AnalysisResultDocument::from_json(&raw.to_string())
-                .unwrap_err()
-                .to_string()
-                .contains("rerun")
-        );
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn sensitivity_nominal_metadata_cannot_claim_invalid_or_missing_units() {
     for sweep in ["", " AC LIN 2 1000 2000"] {
         let original = serde_json::to_value(document(CIRCUIT, "V(out)", sweep)).unwrap();

@@ -145,27 +145,10 @@ fn monte_carlo_rejects_contradictory_campaigns_and_confidence() {
             "accepted {case}"
         );
     }
-    // Legacy absence is supported without fabricating lost identities or units.
-    let mut legacy = original;
-    legacy["schemaVersion"] = json!(17);
-    legacy["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("successfulTrialIndices");
-    for variable in legacy["payload"]["statistics"].as_array_mut().unwrap() {
-        variable.as_object_mut().unwrap().remove("unit");
-    }
-    legacy["scalars"].as_array_mut().unwrap().retain(|scalar| {
-        !scalar["name"]
-            .as_str()
-            .unwrap()
-            .starts_with("mean_confidence")
-    });
-    assert!(AnalysisResultDocument::from_json(&legacy.to_string()).is_ok());
 }
 
 #[test]
-fn monte_carlo_histogram_validation_preserves_missingness_and_legacy_intervals() {
+fn monte_carlo_histogram_validation_preserves_missingness_and_repeated_edges() {
     let document = AnalysisResultDocument::from_monte_carlo_with_units(
         instance(AnalysisKind::MonteCarlo),
         &monte_carlo_result(),
@@ -184,7 +167,6 @@ fn monte_carlo_histogram_validation_preserves_missingness_and_legacy_intervals()
         };
         payload.statistics[0].bin_edges = edges;
         payload.statistics[0].histogram = counts;
-        document.schema_version = 17;
         document.validate().unwrap();
         let ResultPayload::MonteCarlo(payload) = &mut document.payload else {
             panic!("Monte Carlo payload expected");

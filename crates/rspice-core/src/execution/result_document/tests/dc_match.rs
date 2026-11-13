@@ -172,19 +172,8 @@ fn mismatch_validation_rejects_nonzero_products_that_cannot_be_retained() {
 }
 
 #[test]
-fn mismatch_validation_accepts_legacy_independent_reports_and_observes_abort() {
+fn mismatch_validation_observes_abort() {
     let document = document_for(AnalysisResultKind::DcMatch);
-    let mut raw = serde_json::to_value(&document).unwrap();
-    raw["schemaVersion"] = json!(7);
-    raw["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("appliedCorrelationsMismatch");
-    raw["payload"]
-        .as_object_mut()
-        .unwrap()
-        .remove("appliedCorrelationsProcess");
-    AnalysisResultDocument::from_json(&raw.to_string()).unwrap();
     assert_eq!(
         super::super::dc_match::validate(&document, &CountingAbort::new(2)),
         Err(ResultDocumentError::Aborted)

@@ -3,75 +3,6 @@
 use super::*;
 mod curve;
 
-pub(super) fn normalize_legacy(
-    document: &mut AnalysisResultDocument,
-    abort: &dyn AbortSignal,
-) -> Result<(), ResultDocumentError> {
-    if document.schema_version >= 15 || !matches!(document.payload, ResultPayload::Stb(_)) {
-        return Ok(());
-    }
-    for scalar in &mut document.scalars {
-        check_abort(abort)?;
-        if document.schema_version < 14 && scalar.name() == "dc_loop_gain" {
-            return Err(invalid(
-                "zero-frequency evidence requires document version 14",
-            ));
-        }
-        if document.schema_version < 14 && scalar.name() == "dc_loop_gain_db" {
-            // Versions 1-13 called the first AC sample DC. Preserve the
-            // historical number under its actual meaning, never certify it.
-            scalar.rename("sweep_start_gain_db", "Loop gain at sweep start")?;
-        }
-    }
-    // Older margin infinities meant that the sweep located no crossing.
-    // Relabel that absence without inventing a zero-frequency measurement.
-    let mut absent = [true; 2];
-    for scalar in &document.scalars {
-        check_abort(abort)?;
-        let slot = match scalar.name() {
-            "gain_margin_frequency" => &mut absent[0],
-            "phase_margin_frequency" => &mut absent[1],
-            _ => continue,
-        };
-        *slot = !matches!(*scalar.value(), ScalarValue::Real { value: Some(value) } if value.is_finite() && value > 0.0);
-    }
-    for scalar in &document.scalars {
-        check_abort(abort)?;
-        let slot = match scalar.name() {
-            "gain_margin_db" => &mut absent[0],
-            "phase_margin_degrees" => &mut absent[1],
-            _ => continue,
-        };
-        *slot |= matches!(
-            scalar.value(),
-            ScalarValue::Unavailable {
-                reason: ScalarUnavailability::PositiveInfinity
-                    | ScalarUnavailability::NegativeInfinity
-            }
-        );
-    }
-    for scalar in &mut document.scalars {
-        check_abort(abort)?;
-        if scalar.name() == "conditionally_stable" {
-            scalar.rename(
-                "multiple_unity_gain_crossovers",
-                "Multiple unity-gain crossovers",
-            )?;
-        }
-        let missing = match scalar.name() {
-            "gain_margin_db" | "gain_margin_frequency" => absent[0],
-            "phase_margin_degrees" | "phase_margin_frequency" | "unity_gain_bandwidth" => absent[1],
-            _ => continue,
-        };
-        if missing {
-            scalar.set_value(ScalarValue::Unavailable {
-                reason: ScalarUnavailability::NoCrossover,
-            })?;
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn validate(
     document: &AnalysisResultDocument,
     abort: &dyn AbortSignal,
@@ -79,11 +10,6 @@ pub(super) fn validate(
     let ResultPayload::Stb(payload) = &document.payload else {
         return Ok(());
     };
-    if document.schema_version < 16 && !payload.circuit_poles.is_not_computed() {
-        return Err(invalid(
-            "circuit-pole evidence requires document version 16",
-        ));
-    }
     validate_margins(document, abort)?;
     curve::validate(document, payload, abort)?;
     let mut raw = None;
@@ -95,15 +21,6 @@ pub(super) fn validate(
             "dc_loop_gain_db" => db = Some(scalar),
             _ => {}
         }
-    }
-    if document.schema_version < 14 {
-        return if raw.is_some() || db.is_some() {
-            Err(invalid(
-                "legacy STB must retain its first sample as sweep-start gain, not DC",
-            ))
-        } else {
-            Ok(())
-        };
     }
     let (Some(raw), Some(db)) = (raw, db) else {
         return Err(invalid(
@@ -152,9 +69,6 @@ fn validate_margins(
     document: &AnalysisResultDocument,
     abort: &dyn AbortSignal,
 ) -> Result<(), ResultDocumentError> {
-    if document.schema_version < 15 {
-        return Ok(());
-    }
     let mut scalars = [None; 7];
     for scalar in &document.scalars {
         check_abort(abort)?;

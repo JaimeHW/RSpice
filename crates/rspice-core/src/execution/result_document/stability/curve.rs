@@ -166,7 +166,7 @@ pub(super) fn validate(
             let Some(wanted) = expected.phase_deg else {
                 return Err(invalid("zero loop gain has no defined phase"));
             };
-            let agrees = if anchored_phase && document.schema_version >= 15 {
+            let agrees = if anchored_phase {
                 close(actual, wanted, 1.0)
             } else {
                 // Missing source samples leave the unwrap offset unknown.
@@ -189,7 +189,7 @@ pub(super) fn validate(
             anchored_phase = true;
         }
     }
-    if complete && document.schema_version >= 15 {
+    if complete {
         let mut previous_phase = None;
         let points = retained_samples(frequencies, raw, &payload.nyquist).filter_map(
             |(_, frequency, raw, nyquist)| {

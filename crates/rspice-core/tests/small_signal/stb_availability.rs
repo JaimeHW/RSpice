@@ -112,43 +112,12 @@ fn interpolated_crossover_frequencies_stay_inside_extreme_finite_endpoints() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn legacy_margin_sentinels_are_migrated_and_current_pairs_are_validated() {
+fn current_margin_pairs_are_validated() {
     let result = StbAnalyzer::new(StbConfig::default())
         .analyze_with_abort(&[1.0, 2.0], &[Complex64::new(0.5, 0.0); 2], &NoAbort)
         .unwrap();
     let original: serde_json::Value =
         serde_json::from_str(&roundtrip(&result).to_json().unwrap()).unwrap();
-    for version in 1..=14 {
-        let mut legacy = original.clone();
-        legacy["schemaVersion"] = version.into();
-        let scalars = legacy["scalars"].as_array_mut().unwrap();
-        if version < 14 {
-            scalars.retain(|s| s["name"] != "dc_loop_gain");
-        }
-        for scalar in scalars {
-            match scalar["name"].as_str().unwrap() {
-                "gain_margin_db" => scalar["value"]["reason"] = "positive_infinity".into(),
-                "phase_margin_degrees" => scalar["value"]["reason"] = "negative_infinity".into(),
-                "multiple_unity_gain_crossovers" => scalar["name"] = "conditionally_stable".into(),
-                _ => {}
-            }
-        }
-        let decoded = AnalysisResultDocument::from_json(&legacy.to_string()).unwrap();
-        let normalized: serde_json::Value =
-            serde_json::from_str(&decoded.to_json().unwrap()).unwrap();
-        let scalars = normalized["scalars"].as_array().unwrap();
-        for name in ["gain_margin_db", "phase_margin_degrees"] {
-            assert_eq!(
-                scalars.iter().find(|s| s["name"] == name).unwrap()["value"]["reason"],
-                "no_crossover"
-            );
-        }
-        assert!(!scalars.iter().any(|s| s["name"] == "conditionally_stable"));
-        assert_eq!(
-            AnalysisResultDocument::from_json(&decoded.to_json().unwrap()).unwrap(),
-            decoded
-        );
-    }
     for (name, value) in [
         (
             "gain_margin_db",

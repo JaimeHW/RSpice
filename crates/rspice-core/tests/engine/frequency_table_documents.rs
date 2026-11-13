@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rspice_core::analysis::{AcResult, NoiseResult};
 use rspice_core::engine::{FrequencyDataResult, FrequencyDataTarget};
 use rspice_core::execution::result_document::{
-    AnalysisResultDocument, AxisValues, FrequencyTableMetadata, ResultDocumentError, ResultPayload,
+    AnalysisResultDocument, AxisValues, FrequencyTableMetadata, ResultDocumentError,
     SeriesValues,
 };
 use rspice_core::execution::{AnalysisInstanceId, AnalysisKind, SignalUnit};
@@ -161,48 +161,6 @@ fn physical_coordinates_complex_signals_and_noise_round_trip_with_windows() {
         close(
             densities[row].unwrap(),
             4.0 * 1.380649e-23 * (temperature + 273.15) * resistance,
-        );
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn old_documents_have_no_invented_table_and_cannot_claim_new_evidence() {
-    let (ac, noise) = results();
-    for document in [
-        AnalysisResultDocument::from_ac(identity(AnalysisKind::Ac), &ac.points)
-            .unwrap()
-            .build()
-            .unwrap(),
-        AnalysisResultDocument::from_noise(identity(AnalysisKind::Noise), &noise.points)
-            .unwrap()
-            .build()
-            .unwrap(),
-    ] {
-        let mut wire = serde_json::to_value(&document).unwrap();
-        assert!(wire.get("frequencyTable").is_none());
-        for version in 1..=10 {
-            wire["schemaVersion"] = version.into();
-            let restored = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
-            match restored.payload() {
-                ResultPayload::Ac(_) => assert!(restored.frequency_table().is_none()),
-                ResultPayload::Noise(_) => assert!(restored.frequency_table().is_none()),
-                _ => unreachable!(),
-            }
-        }
-    }
-    let document = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
-        .unwrap()
-        .build()
-        .unwrap();
-    let mut wire = serde_json::to_value(&document).unwrap();
-    for version in 1..=10 {
-        wire["schemaVersion"] = version.into();
-        assert!(
-            AnalysisResultDocument::from_json(&wire.to_string())
-                .unwrap_err()
-                .to_string()
-                .contains("version 11")
         );
     }
 }

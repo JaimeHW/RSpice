@@ -118,48 +118,13 @@ fn positive_frequency_samples_do_not_claim_a_dc_measurement() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn saved_dc_evidence_is_validated_and_legacy_first_samples_are_relabelled() {
+fn saved_dc_evidence_is_validated() {
     let netlist = Netlist::parse(SINGLE_POLE).unwrap();
     let result = Engine::default()
         .run_stb(&netlist, StbConfig::new().with_probe("VP"))
         .unwrap();
     let json = document(&result.result).to_json().unwrap();
     let original: serde_json::Value = serde_json::from_str(&json).unwrap();
-    for version in 1..=13 {
-        let mut legacy = original.clone();
-        legacy["schemaVersion"] = version.into();
-        legacy["payload"]
-            .as_object_mut()
-            .unwrap()
-            .remove("circuitPoles");
-        let scalars = legacy["scalars"].as_array_mut().unwrap();
-        scalars.retain(|scalar| scalar["name"] != "dc_loop_gain");
-        let db = scalars
-            .iter_mut()
-            .find(|scalar| scalar["name"] == "dc_loop_gain_db")
-            .unwrap();
-        db["value"]["value"] = 20.0.into(); // historical first AC sample
-        let decoded = AnalysisResultDocument::from_json(&legacy.to_string()).unwrap();
-        let normalized: serde_json::Value =
-            serde_json::from_str(&decoded.to_json().unwrap()).unwrap();
-        let scalars = normalized["scalars"].as_array().unwrap();
-        assert!(
-            !scalars
-                .iter()
-                .any(|scalar| scalar["name"] == "dc_loop_gain_db")
-        );
-        assert_eq!(
-            scalars
-                .iter()
-                .find(|scalar| scalar["name"] == "sweep_start_gain_db")
-                .unwrap()["value"]["value"],
-            20.0
-        );
-        assert_eq!(
-            AnalysisResultDocument::from_json(&decoded.to_json().unwrap()).unwrap(),
-            decoded
-        );
-    }
     for change in 0..3 {
         let mut invalid = original.clone();
         let scalars = invalid["scalars"].as_array_mut().unwrap();

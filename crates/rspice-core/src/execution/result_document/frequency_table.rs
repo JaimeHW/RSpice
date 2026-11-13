@@ -41,18 +41,12 @@ mod finish_wire {
         #[serde(with = "Location")]
         point: crate::ModelFinishPoint,
         diagnostic_level: u8,
-        /// Absent before document version 22, when only `$finish` could end
-        /// a frequency analysis's run.
-        #[serde(with = "Task", default = "finish_task")]
+        #[serde(with = "Task")]
         task: crate::ModelFinishTask,
         #[serde(with = "Source", default, skip_serializing_if = "Option::is_none")]
         source: Option<crate::ModelFinishSource>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-    }
-
-    fn finish_task() -> crate::ModelFinishTask {
-        crate::ModelFinishTask::Finish
     }
 
     #[derive(Serialize, Deserialize)]
@@ -235,9 +229,6 @@ pub(super) fn validate(
     let Some(table) = &document.frequency_table else {
         return Ok(());
     };
-    if document.schema_version < 11 {
-        return Err(malformed("frequency tables require document version 11"));
-    }
     if !matches!(
         document.result_kind,
         AnalysisResultKind::Ac | AnalysisResultKind::Noise
@@ -246,15 +237,6 @@ pub(super) fn validate(
     }
     require_name("frequency table name", &table.table_name)?;
     if let Some(finish) = &table.finish {
-        if document.schema_version < 22
-            && (finish.task != crate::ModelFinishTask::Finish
-                || finish.source.is_some()
-                || finish.message.is_some())
-        {
-            return Err(malformed(
-                "a finish's task, source line and message require document version 22",
-            ));
-        }
         if finish.message.is_some() != (finish.task == crate::ModelFinishTask::Fatal) {
             return Err(malformed("only a $fatal finish carries a message"));
         }

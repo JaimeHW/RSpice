@@ -145,7 +145,7 @@ fn transient_result() -> TransientResult {
 }
 
 #[test]
-fn current_impulse_document_preserves_charge_availability_and_versions() {
+fn current_impulse_document_preserves_charge_availability() {
     let mut result = transient_result();
     let document = |result: &TransientResult| {
         AnalysisResultDocument::from_transient(
@@ -183,27 +183,6 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), recorded);
     assert!(json.contains("chargeCoulombs"));
     assert!(!json.contains("Infinity"));
-    let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
-    legacy["schemaVersion"] = 6.into();
-    let decoded = AnalysisResultDocument::from_json(&legacy.to_string()).unwrap();
-    let ResultPayload::Tran(payload) = decoded.payload() else {
-        panic!("transient")
-    };
-    assert!(!payload.current_impulses.as_ref().unwrap()[0].complete);
-    for version in 1..6 {
-        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
-        old["schemaVersion"] = version.into();
-        assert!(AnalysisResultDocument::from_json(&old.to_string()).is_err());
-        old["payload"]
-            .as_object_mut()
-            .unwrap()
-            .remove("currentImpulses");
-        let decoded = AnalysisResultDocument::from_json(&old.to_string()).unwrap();
-        let ResultPayload::Tran(payload) = decoded.payload() else {
-            panic!("transient")
-        };
-        assert!(payload.current_impulses.is_none());
-    }
     result.current_impulses = Some(Vec::new());
     let empty = document(&result);
     assert_ne!(empty, unavailable);
@@ -220,7 +199,7 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
 }
 
 #[test]
-fn current_impulse_document_requires_version_seven_for_owned_coverage() {
+fn current_impulse_document_round_trips_device_lead_owners() {
     let mut result = transient_result();
     result.current_impulses = Some(vec![
         crate::CurrentImpulseTrace {
@@ -253,19 +232,13 @@ fn current_impulse_document_requires_version_seven_for_owned_coverage() {
     let json = document.to_json().unwrap();
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
     // No finite device-current channel is needed to preserve a lead owner.
-    for trace in result.current_impulses.as_ref().unwrap() {
-        let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
-        wire["payload"]["currentImpulses"] = serde_json::json!([trace]);
-        wire["schemaVersion"] = 6.into();
-        assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
-    }
     let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
     wire["payload"]["currentImpulses"][1]["branchName"] = "v1".into();
     assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
 }
 
 #[test]
-fn current_impulse_derivative_document_requires_version_ten_and_counts_all_terms() {
+fn current_impulse_derivative_document_counts_all_terms() {
     let mut result = transient_result();
     result.current_impulses = Some(vec![crate::CurrentImpulseTrace {
         owner: crate::CurrentImpulseOwner::Branch {
@@ -288,19 +261,12 @@ fn current_impulse_derivative_document_requires_version_ten_and_counts_all_terms
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
     let count = document.total_value_count();
     let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
-    wire["schemaVersion"] = 9.into();
-    assert!(
-        AnalysisResultDocument::from_json(&wire.to_string())
-            .unwrap_err()
-            .to_string()
-            .contains("version 10")
-    );
     wire["payload"]["currentImpulses"][0]
         .as_object_mut()
         .unwrap()
         .remove("derivatives");
-    let legacy = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
-    assert_eq!(legacy.total_value_count() + 3, count);
+    let without = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
+    assert_eq!(without.total_value_count() + 3, count);
 }
 
 fn noise_points() -> Vec<NoiseResult> {
@@ -462,7 +428,7 @@ fn monte_carlo_result() -> MonteCarloResult {
 }
 
 #[test]
-fn monte_carlo_units_are_explicit_versioned_and_shared_by_confidence_bounds() {
+fn monte_carlo_units_are_explicit_and_shared_by_confidence_bounds() {
     use crate::analysis::monte_carlo::MeanConfidenceMethod;
     let mut result = monte_carlo_result();
     result.variables.insert(
@@ -512,35 +478,6 @@ fn monte_carlo_units_are_explicit_versioned_and_shared_by_confidence_bounds() {
             );
         }
     }
-    let mut wire: serde_json::Value = serde_json::from_str(&document.to_json().unwrap()).unwrap();
-    wire["schemaVersion"] = 17.into();
-    assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
-    for variable in wire["payload"]["statistics"].as_array_mut().unwrap() {
-        variable.as_object_mut().unwrap().remove("unit");
-    }
-    for scalar in wire["scalars"].as_array_mut().unwrap() {
-        if scalar["name"]
-            .as_str()
-            .unwrap()
-            .starts_with("mean_confidence_lower:")
-            || scalar["name"]
-                .as_str()
-                .unwrap()
-                .starts_with("mean_confidence_upper:")
-        {
-            scalar["unit"] = serde_json::Value::Null;
-        }
-    }
-    let legacy = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
-    let ResultPayload::MonteCarlo(payload) = legacy.payload() else {
-        panic!("MC");
-    };
-    assert!(
-        payload
-            .statistics
-            .iter()
-            .all(|variable| variable.unit.is_none())
-    );
 }
 
 #[test]
@@ -1741,7 +1678,7 @@ fn sensitivity_transfer_and_pole_zero_documents_have_no_series() {
 }
 
 #[test]
-fn sensitivity_availability_survives_document_round_trip_and_rejects_legacy_zeros() {
+fn sensitivity_availability_survives_document_round_trip_and_rejects_unqualified_zeros() {
     use crate::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
     for (nominal, derivative, output, expected) in [
         (
@@ -1784,15 +1721,7 @@ fn sensitivity_availability_survives_document_round_trip_and_rejects_legacy_zero
         let json = document.to_json().unwrap();
         assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
         let mut raw: serde_json::Value = serde_json::from_str(&json).unwrap();
-        raw["schemaVersion"] = serde_json::json!(4);
-        assert!(
-            AnalysisResultDocument::from_json(&raw.to_string())
-                .unwrap_err()
-                .to_string()
-                .contains("rerun")
-        );
         if expected.reason().is_some() {
-            raw["schemaVersion"] = serde_json::json!(ANALYSIS_RESULT_DOCUMENT_VERSION);
             raw["payload"]["entries"][0]["normalized"] = serde_json::json!(0.0);
             assert!(AnalysisResultDocument::from_json(&raw.to_string()).is_err());
         }
@@ -1920,9 +1849,6 @@ fn incomplete_fft_documents_preserve_status_without_spectral_data() {
     let json = document.to_json().unwrap();
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
     let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
-    value["schemaVersion"] = serde_json::json!(3);
-    assert!(AnalysisResultDocument::from_json(&value.to_string()).is_err());
-    value["schemaVersion"] = serde_json::json!(4);
     value["payload"].as_object_mut().unwrap().remove("status");
     assert!(AnalysisResultDocument::from_json(&value.to_string()).is_err());
     result.status = TransientFftStatus::IncompleteHistory {
@@ -1938,21 +1864,6 @@ fn incomplete_fft_documents_preserve_status_without_spectral_data() {
         )
         .is_err(),
         "an available record must not be labeled incomplete"
-    );
-}
-
-#[test]
-fn legacy_fft_documents_keep_their_complete_spectrum_without_new_status_fields() {
-    let document = document_for(AnalysisResultKind::Fft);
-    let mut value: serde_json::Value = serde_json::from_str(&document.to_json().unwrap()).unwrap();
-    value["schemaVersion"] = serde_json::json!(3);
-    value["payload"].as_object_mut().unwrap().remove("status");
-    let restored = AnalysisResultDocument::from_json(&value.to_string()).unwrap();
-    assert_eq!(restored.point_count(), document.point_count());
-    assert_eq!(restored.signals(), document.signals());
-    assert_eq!(
-        AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
-        restored
     );
 }
 
@@ -2272,54 +2183,35 @@ fn envelope_runner_composes_the_two_authenticated_halves() {
 //=============================================================================
 
 #[test]
-fn a_forward_version_is_rejected_before_any_field_is_decoded() {
+fn any_other_version_is_rejected_before_any_field_is_decoded() {
     let document = document_for(AnalysisResultKind::Ac);
     let json = document.to_json().expect("encode");
-    let next = ANALYSIS_RESULT_DOCUMENT_VERSION + 1;
-    let forward = json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        &format!("\"schemaVersion\":{next}"),
-    );
-    assert_ne!(forward, json, "the version field must be present");
-    // Also add a field this build has never seen, so a decoder that got past
-    // the version check would fail with an unknown-field error instead.
-    let forward = forward.replacen('{', "{\"futureField\":true,", 1);
-    assert_eq!(
-        AnalysisResultDocument::from_json(&forward),
-        Err(ResultDocumentError::UnsupportedVersion {
-            found: next,
-            current: ANALYSIS_RESULT_DOCUMENT_VERSION,
-        })
-    );
+    for other in [
+        ANALYSIS_RESULT_DOCUMENT_VERSION - 1,
+        ANALYSIS_RESULT_DOCUMENT_VERSION + 1,
+    ] {
+        let wire = json.replace(
+            &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+            &format!("\"schemaVersion\":{other}"),
+        );
+        assert_ne!(wire, json, "the version field must be present");
+        // Also add a field this build has never seen, so a decoder that got
+        // past the version check would fail with an unknown-field error instead.
+        let wire = wire.replacen('{', "{\"futureField\":true,", 1);
+        assert_eq!(
+            AnalysisResultDocument::from_json(&wire),
+            Err(ResultDocumentError::UnsupportedVersion {
+                found: other,
+                current: ANALYSIS_RESULT_DOCUMENT_VERSION,
+            })
+        );
+    }
 
     let wrong_schema = json.replace(ANALYSIS_RESULT_DOCUMENT_SCHEMA, "rspice-something-else");
     assert!(matches!(
         AnalysisResultDocument::from_json(&wrong_schema),
         Err(ResultDocumentError::WrongSchema { .. })
     ));
-}
-
-#[test]
-fn a_version_one_document_reads_back_declaring_no_bus() {
-    // The compatible half of the bump: version 1 differs from version 2 in one
-    // field, so a version-1 document is a version-2 document with no bus and is
-    // read rather than refused. Anything else in a version-1 document that this
-    // build cannot decode would still fail, which is what the second half
-    // checks.
-    let document = document_for(AnalysisResultKind::Transient);
-    let json = document.to_json().expect("encode");
-    let version_one = json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        "\"schemaVersion\":1",
-    );
-    assert_ne!(version_one, json, "the version field must be present");
-    let decoded = AnalysisResultDocument::from_json(&version_one)
-        .expect("a version-1 document is still decodable");
-    assert_eq!(decoded.schema_version(), 1);
-    let ResultPayload::Tran(payload) = decoded.payload() else {
-        panic!("the transient fixture carries a transient payload");
-    };
-    assert!(payload.digital_buses.is_empty());
 }
 
 #[test]
@@ -2360,56 +2252,6 @@ fn a_combined_pstb_current_projection_survives_persistence() {
             samples: vec![Some(std::f64::consts::FRAC_1_SQRT_2); 2]
         }
     );
-}
-
-#[test]
-fn legacy_pstb_documents_preserve_their_single_index_without_inventing_polarity() {
-    for version in [1, 2] {
-        let mut wire = serde_json::to_value(document_for(AnalysisResultKind::Pstb)).unwrap();
-        wire["schemaVersion"] = serde_json::json!(version);
-        wire["payload"]
-            .as_object_mut()
-            .unwrap()
-            .remove("probeStateProjection");
-        let restored = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
-        let ResultPayload::Pstb(payload) = restored.payload() else {
-            panic!("the PSTB fixture must retain a PSTB payload")
-        };
-        assert_eq!(payload.probe_state_index, Some(1));
-        assert!(payload.probe_state_projection.is_empty());
-        assert_eq!(
-            AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
-            restored
-        );
-        // Merely changing the version cannot make new projected content an old document.
-        wire["payload"]["probeStateProjection"] = serde_json::json!([[1, -1.0]]);
-        assert!(matches!(
-            AnalysisResultDocument::from_json(&wire.to_string()),
-            Err(ResultDocumentError::Malformed {
-                location: "PSTB probe projection",
-                ..
-            })
-        ));
-    }
-}
-
-/// Version 21 retired PSTB `numMultipliers`, a display limit no reader
-/// honoured. A document written before then still reads, to the payload it
-/// would carry without the key, and a fresh document never writes it.
-#[test]
-fn retired_pstb_nmults_in_an_older_document_reads_as_absent() {
-    let document = document_for(AnalysisResultKind::Pstb);
-    let fresh = serde_json::to_value(&document).unwrap();
-    assert!(fresh["payload"].get("numMultipliers").is_none(), "{fresh}");
-    for version in [3, 20] {
-        let mut wire = fresh.clone();
-        wire["schemaVersion"] = serde_json::json!(version);
-        wire["payload"]["numMultipliers"] = serde_json::json!(10);
-        let restored = AnalysisResultDocument::from_json(&wire.to_string())
-            .unwrap_or_else(|error| panic!("a version-{version} document reads: {error}"));
-        assert_eq!(restored.schema_version(), version);
-        assert_eq!(restored.payload(), document.payload());
-    }
 }
 
 #[test]
@@ -2458,77 +2300,7 @@ fn malformed_pstb_projections_are_refused_at_validation_and_decode() {
 }
 
 #[test]
-fn a_version_one_document_that_declares_a_bus_is_refused() {
-    // A defaulted field is what makes reading version 1 sound; it also lets a
-    // producer stamp the old version on new content. That document's version
-    // has stopped describing it, so it is refused by name rather than read.
-    let mut document = document_for(AnalysisResultKind::Transient);
-    let ResultPayload::Tran(payload) = &mut document.payload else {
-        panic!("the transient fixture carries a transient payload");
-    };
-    payload.digital_traces = vec![
-        DigitalEventTrace {
-            node_name: "d1".to_owned(),
-            points: Vec::new(),
-            hdl_time_precision: None,
-        },
-        DigitalEventTrace {
-            node_name: "d0".to_owned(),
-            points: Vec::new(),
-            hdl_time_precision: None,
-        },
-    ];
-    payload.digital_buses = vec![DigitalEventBus {
-        name: "D".to_owned(),
-        msb: 1,
-        lsb: 0,
-        members: vec!["d1".to_owned(), "d0".to_owned()],
-        source: DigitalBusSourceTag::Import,
-    }];
-    let json = document.to_json().expect("encode");
-    assert!(json.contains("\"digitalBuses\""));
-    let version_one = json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        "\"schemaVersion\":1",
-    );
-    let error = AnalysisResultDocument::from_json(&version_one)
-        .expect_err("version 1 predates the bus table");
-    let ResultDocumentError::Malformed { location, detail } = error else {
-        panic!("a version-1 document carrying a bus is malformed, not unversioned");
-    };
-    assert_eq!(location, "transient digital buses");
-    assert!(detail.contains("version 2"), "{detail}");
-}
-
-#[test]
-fn a_version_eighteen_document_that_carries_an_hdl_precision_is_refused() {
-    let mut document = document_for(AnalysisResultKind::Transient);
-    let ResultPayload::Tran(payload) = &mut document.payload else {
-        panic!("the transient fixture carries a transient payload");
-    };
-    payload.digital_traces = vec![DigitalEventTrace {
-        node_name: "d".to_owned(),
-        points: Vec::new(),
-        hdl_time_precision: Some(1e-12),
-    }];
-    let json = document.to_json().expect("encode");
-    assert!(json.contains("\"hdlTimePrecision\""));
-    AnalysisResultDocument::from_json(&json).expect("the current version carries it");
-    let version_eighteen = json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        "\"schemaVersion\":18",
-    );
-    let error = AnalysisResultDocument::from_json(&version_eighteen)
-        .expect_err("version 18 predates the HDL precision");
-    let ResultDocumentError::Malformed { location, detail } = error else {
-        panic!("a version-18 document carrying the field is malformed, not unversioned");
-    };
-    assert_eq!(location, "digital trace HDL time precision");
-    assert!(detail.contains("version 19"), "{detail}");
-}
-
-#[test]
-fn an_hdl_source_map_round_trips_and_a_version_nineteen_document_carrying_one_is_refused() {
+fn an_hdl_source_map_round_trips() {
     let mut document = document_for(AnalysisResultKind::Transient);
     let ResultPayload::Tran(payload) = &mut document.payload else {
         panic!("the transient fixture carries a transient payload");
@@ -2564,33 +2336,8 @@ fn an_hdl_source_map_round_trips_and_a_version_nineteen_document_carrying_one_is
     assert!(json.contains(
         r#""hdlSources":[{"trace":"xtb.ok","instance":"xtb","identifier":"ok","declaration":{"file":"tb.vams","line":12},"drivers":[{"scope":"xtb","kind":"initial","source":{"file":"tb.vams","line":32}},{"scope":"xtb","kind":"always"}]}]"#
     ));
-    let decoded = AnalysisResultDocument::from_json(&json).expect("version 20 carries it");
+    let decoded = AnalysisResultDocument::from_json(&json).expect("the current version carries it");
     assert_eq!(decoded, document);
-
-    let version_nineteen = json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        "\"schemaVersion\":19",
-    );
-    let error = AnalysisResultDocument::from_json(&version_nineteen)
-        .expect_err("version 19 predates the source map");
-    let ResultDocumentError::Malformed { location, detail } = error else {
-        panic!("a version-19 document carrying the map is malformed, not unversioned");
-    };
-    assert_eq!(location, "HDL sources");
-    assert!(detail.contains("version 20"), "{detail}");
-
-    // Without the map, a version-19 document is read as it always was.
-    let ResultPayload::Tran(payload) = &mut document.payload else {
-        panic!("the transient fixture carries a transient payload");
-    };
-    payload.hdl_sources.clear();
-    let json = document.to_json().expect("encode");
-    assert!(!json.contains("hdlSources"));
-    AnalysisResultDocument::from_json(&json.replace(
-        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-        "\"schemaVersion\":19",
-    ))
-    .expect("a version-19 document without the map decodes");
 }
 
 #[test]
@@ -2616,9 +2363,7 @@ fn an_hdl_source_naming_no_trace_of_the_result_is_refused() {
 
 #[test]
 fn an_empty_bus_table_leaves_no_trace_in_the_encoding() {
-    // The field is skipped when empty, which is what lets a version-2 document
-    // that declares no bus stay byte-comparable with the version-1 document it
-    // would otherwise have been.
+    // The field is skipped when empty, so a document with no bus carries no key.
     let json = document_for(AnalysisResultKind::Transient)
         .to_json()
         .expect("encode");
