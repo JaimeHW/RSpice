@@ -456,14 +456,6 @@ impl ModelDefinitionMetadata {
     }
 
     #[must_use]
-    pub fn statistical_variable(&self, name: &str) -> Option<&StatisticalVariableDefinition> {
-        self.statistics
-            .variables
-            .iter()
-            .find(|variable| identifier_eq(&variable.name, name))
-    }
-
-    #[must_use]
     pub fn temperature_law(&self, quantity: &str) -> Option<&TemperatureLawDefinition> {
         self.temperature_laws
             .iter()
@@ -1723,7 +1715,13 @@ mod tests {
             Some(&"VTH0".to_owned())
         );
         assert!(restored.section("tt").is_some());
-        assert!(restored.statistical_variable("DVTH_GLOBAL").is_some());
+        assert!(
+            restored
+                .statistics
+                .variables
+                .iter()
+                .any(|variable| variable.name == "DVTH_GLOBAL")
+        );
         assert!(restored.temperature_law("MOBILITY").is_some());
     }
 
