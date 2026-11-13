@@ -4,6 +4,7 @@
 //! What it has not registered yet, the shell's legacy tables still serve.
 
 pub(crate) mod commands;
+pub(crate) mod inspector;
 pub(in crate::workbench) mod navigator;
 mod routed;
 pub(in crate::workbench) mod surface;

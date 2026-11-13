@@ -835,7 +835,10 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         property_row(
             ui,
             "Node voltage",
-            &super::super::compact_readout(annotation.voltage, &annotation.unit),
+            &crate::workbench::docks::inspector::compact_readout(
+                annotation.voltage,
+                &annotation.unit,
+            ),
         );
     }
 

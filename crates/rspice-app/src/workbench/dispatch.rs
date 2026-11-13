@@ -383,7 +383,7 @@ impl RSpiceApp {
                  model,
              }| {
                 let result =
-                    crate::workbench::docks::inspector::design::bind_component_model_from_catalog(
+                    crate::workbench::design::inspector::bind_component_model_from_catalog(
                         app,
                         component_id,
                         &library,

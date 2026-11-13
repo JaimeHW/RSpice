@@ -8,11 +8,13 @@
 mod off_sheet_connectors;
 mod veriloga_modules;
 
-use super::super::shared::{checks_status, sheet_floating_net_findings, sheet_open_pin_findings};
 use super::*;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
+};
+use crate::workbench::docks::inspector::shared::{
+    checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
 };
 use crate::workbench::framework::feature::SimulatePort as _;
 use rspice_design::drc::DrcSeverity;

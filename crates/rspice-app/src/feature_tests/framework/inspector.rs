@@ -6,7 +6,7 @@
 
 use crate::state::{Component, ComponentType};
 use crate::workbench::RSpiceApp;
-use crate::workbench::docks::inspector::design::bind_component_model_from_catalog;
+use crate::workbench::design::inspector::bind_component_model_from_catalog;
 use crate::workbench::docks::inspector::*;
 use crate::workbench::state::Workspace;
 

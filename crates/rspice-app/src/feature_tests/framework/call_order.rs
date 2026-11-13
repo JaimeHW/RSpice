@@ -551,7 +551,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "15",
         &[
             "|app, BindComponentModel { component_id, library, model, }|",
-            "crate::workbench::docks::inspector::design::bind_component_model_from_catalog(",
+            "crate::workbench::design::inspector::bind_component_model_from_catalog(",
             "app.state.models.models_view.note_receipt(result);",
         ],
     ),

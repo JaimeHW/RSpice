@@ -303,7 +303,8 @@ impl Host for RSpiceApp {
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
-                use crate::workbench::docks::inspector::{design, stimulus, symbol};
+                use crate::workbench::design::inspector::{self as design, symbol};
+                use crate::workbench::docks::inspector::stimulus;
 
                 match workspace {
                     // What the reader asked of the project inspector is

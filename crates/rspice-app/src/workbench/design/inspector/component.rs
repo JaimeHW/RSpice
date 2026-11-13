@@ -533,7 +533,7 @@ pub(crate) fn bind_component_model_from_catalog(
     model_name: &str,
 ) -> Result<(), String> {
     app.state.commit_inline_component_edit()?;
-    super::super::validate_component_model_catalog_binding(
+    crate::workbench::docks::inspector::validate_component_model_catalog_binding(
         &app.state.model,
         component_id,
         library_name,
@@ -617,7 +617,7 @@ pub(crate) fn apply_bound_model_choice(
         .library
         .clone();
 
-    super::super::validate_component_model_catalog_binding(
+    crate::workbench::docks::inspector::validate_component_model_catalog_binding(
         &app.state.model,
         component_id,
         &library_name,
@@ -1310,7 +1310,7 @@ pub(super) fn operating_point_rows(
     entry: &rspice_core::circuit::DeviceOpEntry,
     policy: crate::quantity::QuantityPresentationPolicy,
 ) -> Vec<(String, String)> {
-    use super::super::compact_readout;
+    use crate::workbench::docks::inspector::compact_readout;
 
     let value = |key: &str| {
         entry

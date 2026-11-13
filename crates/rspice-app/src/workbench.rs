@@ -113,7 +113,6 @@ pub(crate) mod docks {
     pub(crate) mod inspector {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
         pub(in crate::workbench) mod code_workspace;
-        pub(crate) mod design;
         pub(crate) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
@@ -123,7 +122,6 @@ pub(crate) mod docks {
         /// pane beside it: the two docks state the same counts about the same design,
         /// and a review that only ever opened one of them would not see them disagree.
         pub(in crate::workbench) mod stimulus;
-        pub(in crate::workbench) mod symbol;
         pub(in crate::workbench) mod veriloga;
     }
     pub(crate) mod navigator {
