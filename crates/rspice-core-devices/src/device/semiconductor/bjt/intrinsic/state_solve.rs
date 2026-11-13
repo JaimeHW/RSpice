@@ -262,9 +262,21 @@ impl Bjt {
         best.1.is_finite().then_some(best)
     }
 
+    #[cfg(test)]
     pub(in crate::device::semiconductor::bjt) fn evaluate_state_fixed_temperature(
         &self,
         voltages: BjtNodeVoltages,
+    ) -> EvaluatedBjtState {
+        self.evaluate_state_fixed_temperature_with_transport(voltages, None)
+    }
+
+    /// The model evaluated at a fixed temperature. A Gummel-Poon model also
+    /// leaves the transport state its currents were linearized from in
+    /// `transport`, when there is one.
+    pub(in crate::device::semiconductor::bjt) fn evaluate_state_fixed_temperature_with_transport(
+        &self,
+        voltages: BjtNodeVoltages,
+        transport: Option<&Cell<Option<BiasedTransport>>>,
     ) -> EvaluatedBjtState {
         let BjtNodeVoltages {
             vc,
@@ -280,7 +292,7 @@ impl Bjt {
             vsi,
         } = voltages;
         let (linearized, intrinsic) =
-            self.linearize_currents_with_branches(vbi - vei, vbx - vei, vbi - vci);
+            self.linearize_currents_with_transport(vbi - vei, vbx - vei, vbi - vci, transport);
         EvaluatedBjtState {
             linearized,
             ibe: intrinsic.ibe,
@@ -318,17 +330,33 @@ impl Bjt {
         self.evaluate_state_with_rbi_current(voltages, vrth, None)
     }
 
+    #[inline]
     pub(in crate::device::semiconductor::bjt) fn evaluate_state_with_rbi_current(
         &self,
         voltages: BjtNodeVoltages,
         vrth: Value,
         rbi_current: Option<Value>,
     ) -> EvaluatedBjtState {
+        self.evaluate_state_with_rbi_current_and_transport(voltages, vrth, rbi_current, None)
+    }
+
+    /// [`Self::evaluate_state_with_rbi_current`]. A Gummel-Poon evaluation
+    /// also leaves the transport state it linearized its currents from in
+    /// `transport`; a self-heating one, whose transport is a temperature
+    /// variant's, leaves none there.
+    pub(in crate::device::semiconductor::bjt) fn evaluate_state_with_rbi_current_and_transport(
+        &self,
+        voltages: BjtNodeVoltages,
+        vrth: Value,
+        rbi_current: Option<Value>,
+        transport: Option<&Cell<Option<BiasedTransport>>>,
+    ) -> EvaluatedBjtState {
         let BjtNodeVoltages {
             vci, vbx, vbi, vei, ..
         } = voltages;
-        let evaluate = |model: &Bjt| {
-            let mut state = model.evaluate_state_fixed_temperature(voltages);
+        let evaluate_into = |model: &Bjt, transport: Option<&Cell<Option<BiasedTransport>>>| {
+            let mut state =
+                model.evaluate_state_fixed_temperature_with_transport(voltages, transport);
             if let Some(current) = rbi_current {
                 // Its independent current column is stamped by the MNA
                 // owner; all voltage/temperature partials here hold I fixed.
@@ -339,12 +367,17 @@ impl Bjt {
             }
             state
         };
-        let mut evaluated = self.with_temperature_variant(vrth, evaluate);
+        let mut evaluated =
+            self.with_temperature_variant(vrth, |model| evaluate_into(model, transport));
 
         if !self.thermal_model_enabled() {
             return evaluated;
         }
+        if let Some(transport) = transport {
+            transport.set(None);
+        }
 
+        let evaluate = |model: &Bjt| evaluate_into(model, None);
         let h = self.thermal_derivative_step(vrth);
         let plus = self.with_temperature_derivative_variant(vrth + h, vrth, evaluate);
         let minus = self.with_temperature_derivative_variant(vrth - h, vrth, evaluate);

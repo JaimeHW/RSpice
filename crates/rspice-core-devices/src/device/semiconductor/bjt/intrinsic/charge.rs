@@ -128,6 +128,21 @@ impl Bjt {
         vcs: Value,
         forward_limit: bool,
     ) -> LegacyTransientChargeState {
+        self.legacy_transient_charge_state_from(vbe, vbc, vbx, vcs, forward_limit, None)
+    }
+
+    /// [`Self::legacy_transient_charge_state_with_forward_limit`], with the
+    /// transport taken from `transport` when it was computed at this junction
+    /// bias.
+    pub(in crate::device::semiconductor::bjt) fn legacy_transient_charge_state_from(
+        &self,
+        vbe: Value,
+        vbc: Value,
+        vbx: Value,
+        vcs: Value,
+        forward_limit: bool,
+        transport: Option<BiasedTransport>,
+    ) -> LegacyTransientChargeState {
         let p = self.polarity();
         let vbe_eff = p * vbe;
         let vbc_eff = p * vbc;
@@ -135,7 +150,9 @@ impl Bjt {
         let substrate_sign = self.substrate_topology.ngspice_sign();
         let substrate_polarity = p * substrate_sign;
         let vsub_eff = -substrate_polarity * vcs;
-        let transport = self.legacy_transport_charge_state(vbe_eff, vbc_eff);
+        let transport = transport
+            .and_then(|shared| shared.at(vbe_eff, vbc_eff))
+            .unwrap_or_else(|| self.legacy_transport_charge_state(vbe_eff, vbc_eff));
         let forward = vbe_eff > 0.0 || (vbe_eff == 0.0 && forward_limit);
 
         let mut argtf = 0.0;
@@ -519,11 +536,25 @@ impl Bjt {
         (-self.ibbe * (expx - self.ebbe), self.ibbe * dexpx_dbias)
     }
 
+    #[inline]
     pub(in crate::device::semiconductor::bjt) fn linearize_currents_with_branches(
         &self,
         vbe: Value,
         vbex: Value,
         vbc: Value,
+    ) -> (BjtLinearization, BjtIntrinsicBranches) {
+        self.linearize_currents_with_transport(vbe, vbex, vbc, None)
+    }
+
+    /// [`Self::linearize_currents_with_branches`]. A Gummel-Poon model also
+    /// leaves the transport state its currents were linearized from in
+    /// `transport`, when there is one; VBIC leaves it untouched.
+    pub(in crate::device::semiconductor::bjt) fn linearize_currents_with_transport(
+        &self,
+        vbe: Value,
+        vbex: Value,
+        vbc: Value,
+        transport_out: Option<&std::cell::Cell<Option<BiasedTransport>>>,
     ) -> (BjtLinearization, BjtIntrinsicBranches) {
         let p = self.polarity();
         let vbe_eff = p * vbe;
@@ -638,6 +669,13 @@ impl Bjt {
             dqb_dvrth: 0.0,
         };
 
+        if legacy_model && let Some(out) = transport_out {
+            out.set(Some(BiasedTransport {
+                vbe_eff,
+                vbc_eff,
+                state: transport,
+            }));
+        }
         (
             linearized,
             BjtIntrinsicBranches {

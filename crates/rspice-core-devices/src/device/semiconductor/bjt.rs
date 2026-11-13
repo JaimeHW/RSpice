@@ -133,6 +133,36 @@ struct TransportChargeState {
     ditzr_dvbc_eff: Value,
 }
 
+/// A Gummel-Poon transport state with the effective junction biases it was
+/// computed at. A consumer at any other bias computes its own.
+#[derive(Debug, Clone, Copy)]
+struct BiasedTransport {
+    vbe_eff: Value,
+    vbc_eff: Value,
+    state: TransportChargeState,
+}
+
+impl BiasedTransport {
+    /// The transport state, if it was computed at exactly these biases.
+    #[inline]
+    fn at(self, vbe_eff: Value, vbc_eff: Value) -> Option<TransportChargeState> {
+        (self.vbe_eff.to_bits() == vbe_eff.to_bits() && self.vbc_eff.to_bits() == vbc_eff.to_bits())
+            .then_some(self.state)
+    }
+}
+
+/// The external terminal rows `update_mna` summed from the evaluation it
+/// cached. They are a function of that evaluation alone, so they print as
+/// nothing and a device compares equal with or without them.
+#[derive(Clone, Copy, Default)]
+struct MnaTerminalRows(Option<[BranchLinearization; EXTERNAL_DIM]>);
+
+impl std::fmt::Debug for MnaTerminalRows {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MnaTerminalRows")
+    }
+}
+
 /// Early-voltage contribution to thermal-state derivatives. The forward
 /// charge entry differentiates If*(1+QTF*q1)/qb before transit-time modulation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1269,6 +1299,10 @@ pub struct Bjt {
     /// Static linearization at the limited MNA bias, written by
     /// `update_mna` and consumed by the promoted stamp paths.
     mna_eval: Option<EvaluatedBjtState>,
+    /// The terminal rows of `mna_eval`, when `update_mna` set both. Every
+    /// other path that gives `mna_eval` an evaluation clears them, and the
+    /// stamp then sums the rows itself; with no evaluation nothing reads them.
+    mna_terminal_rows: MnaTerminalRows,
     mna_rbi_current: Value,
     /// Solution-vector bias `update_mna` last limited: the four terminal
     /// voltages followed by all ten raw internal state values. Re-limiting
@@ -2213,6 +2247,7 @@ impl Bjt {
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
+            mna_terminal_rows: MnaTerminalRows(None),
             mna_rbi_current: 0.0,
             mna_limited_from: Cell::new(None),
             mna_eval_at_state: false,
@@ -2840,6 +2875,7 @@ impl Bjt {
         self.legacy_initial_junction_pending = true;
         if self.mna_promoted {
             self.mna_eval = None;
+            self.mna_terminal_rows = MnaTerminalRows(None);
             self.mna_limited_from.set(None);
             self.mna_charge_cache_valid.set(false);
         }
@@ -2870,6 +2906,7 @@ impl Bjt {
         self.vxf1 = 0.0;
         self.vxf2 = 0.0;
         self.mna_eval = None;
+        self.mna_terminal_rows = MnaTerminalRows(None);
         self.mna_limited_from.set(None);
         self.mna_charge_cache_valid.set(false);
         self.mna_dissipation_drops = None;

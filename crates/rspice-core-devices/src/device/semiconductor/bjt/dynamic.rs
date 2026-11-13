@@ -900,6 +900,19 @@ impl Bjt {
         internal: [Value; BJT_INTERNAL_STATE_DIM],
         forward_limit: bool,
     ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
+        self.legacy_dynamic_charge_branches_from(external, internal, forward_limit, None)
+    }
+
+    /// [`Self::legacy_dynamic_charge_branches_with_forward_limit`], with the
+    /// transport taken from `transport` when it was computed at this
+    /// junction bias.
+    pub(super) fn legacy_dynamic_charge_branches_from(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+        forward_limit: bool,
+        transport: Option<BiasedTransport>,
+    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
         let mut branches = [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT];
         let vbe = internal[IDX_VBI] - internal[IDX_VEI];
         let vbc = internal[IDX_VBI] - internal[IDX_VCI];
@@ -920,13 +933,8 @@ impl Bjt {
         let vbx = external[EXT_B] - terminal_voltage(collector_terminal);
         let vcs =
             terminal_voltage(substrate_connection_terminal) - terminal_voltage(substrate_terminal);
-        let charges = self.legacy_transient_charge_state_with_forward_limit(
-            vbe,
-            vbc,
-            vbx,
-            vcs,
-            forward_limit,
-        );
+        let charges =
+            self.legacy_transient_charge_state_from(vbe, vbc, vbx, vcs, forward_limit, transport);
 
         // Storage topology belongs to the model, not the current bias. A zero
         // or negative local derivative still owns its accepted charge history;

@@ -596,6 +596,7 @@ impl Bjt {
                 d_external: Self::checkpoint_take_array(values, &mut cursor),
             }
         });
+        self.mna_terminal_rows = MnaTerminalRows(None);
         self.mna_eval = (flags[0] != 0.0).then_some(EvaluatedBjtState {
             linearized,
             ibe,
@@ -1289,10 +1290,12 @@ impl Bjt {
             vbp: state[IDX_VBP],
             vsi: state[IDX_VSI],
         };
-        let mut eval = self.evaluate_state_with_rbi_current(
+        let transport = Cell::new(None);
+        let mut eval = self.evaluate_state_with_rbi_current_and_transport(
             voltages,
             state[IDX_VRTH],
             self.mna_rbi_branch.map(|_| rbi_current),
+            Some(&transport),
         );
         if let Some(drops) = self.mna_dissipation_drops {
             self.anchor_parasitics_at_drops(
@@ -1327,10 +1330,11 @@ impl Bjt {
         self.isub = terminal_currents[EXT_S].current;
         self.intrinsic_linearization = eval.linearized;
         self.mna_eval = Some(eval);
+        self.mna_terminal_rows = MnaTerminalRows(Some(terminal_currents));
         // A parasitic-drop anchor expands the evaluation about drops that
         // are not the state's own.
         self.mna_eval_at_state = self.mna_dissipation_drops.is_none();
-        self.refresh_mna_dynamic_state();
+        self.refresh_mna_dynamic_state(transport.get());
         self.reduced_linearization_cache_valid.set(false);
         self.charge_snapshot_cache_valid.set(false);
     }
@@ -1426,13 +1430,15 @@ impl Bjt {
     }
 
     /// Recompute the dynamic charge branches and excess-phase rows at the
-    /// limited bias just written by `update_mna`.
-    fn refresh_mna_dynamic_state(&mut self) {
+    /// limited bias just written by `update_mna`, from the Gummel-Poon
+    /// transport its evaluation computed when that is at the same bias.
+    fn refresh_mna_dynamic_state(&mut self, transport: Option<BiasedTransport>) {
         let internal = self.mna_internal_state();
         let external = self.mna_external_state();
         if self.uses_legacy_gummel_poon() {
-            self.mna_charge_cache
-                .set(self.legacy_dynamic_charge_branches(external, internal));
+            self.mna_charge_cache.set(
+                self.legacy_dynamic_charge_branches_from(external, internal, false, transport),
+            );
             self.mna_charge_cache_valid.set(true);
             self.mna_delay_branches = [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT];
             self.mna_delay_thermal = BjtCurrentBranch::default();
@@ -2029,8 +2035,23 @@ impl Bjt {
         }
 
         // External terminal rows: current into the device from each terminal,
-        // with collapse-aware branch selection.
-        let terminal_currents = self.external_terminal_branches(eval);
+        // with collapse-aware branch selection. The update that cached this
+        // evaluation summed them already.
+        let terminal_currents = self
+            .mna_terminal_rows
+            .0
+            .unwrap_or_else(|| self.external_terminal_branches(eval));
+        debug_assert!(
+            terminal_currents
+                .iter()
+                .zip(self.external_terminal_branches(eval))
+                .all(
+                    |(kept, summed)| kept.current.to_bits() == summed.current.to_bits()
+                        && same_bits(&kept.d_internal, &summed.d_internal)
+                        && same_bits(&kept.d_external, &summed.d_external)
+                ),
+            "the kept terminal rows are not the cached evaluation's"
+        );
         for row in 0..EXTERNAL_DIM {
             let row_node = external_nodes[row];
             let branch = terminal_currents[row];
@@ -3524,6 +3545,68 @@ mod tests {
             assert_eq!(one_newton, newton, "{}", bjt.name);
             assert_eq!(one_correction.rhs, correction.rhs, "{}", bjt.name);
             assert!(one_correction.matrix.is_empty(), "{}", bjt.name);
+        }
+    }
+
+    /// Collector, base and emitter biases the Gummel-Poon fast paths are held
+    /// to: forward active, saturated, cut off and reverse active.
+    const GUMMEL_POON_REGIONS: [[Value; 3]; 4] = [
+        FORWARD_ACTIVE,
+        [0.1, 0.8, 0.0],
+        [2.0, 0.0, 0.5],
+        [0.0, 0.7, 2.0],
+    ];
+
+    /// Settled and junction-limited promoted Gummel-Poon loads of both
+    /// cards in every region, with the bias each was loaded at.
+    fn gummel_poon_loads_in_every_region() -> Vec<(Bjt, Vec<Value>)> {
+        let mut loads = Vec::new();
+        for card in GUMMEL_POON_CARDS {
+            for region in GUMMEL_POON_REGIONS {
+                let (bjt, bias) = settled_gummel_poon(card, region);
+                let mut limited = bjt.clone();
+                let mut raw = bias.clone();
+                raw[bjt.node_bi - 1] += 0.5;
+                limited.update(&raw);
+                loads.push((bjt, bias));
+                loads.push((limited, raw));
+            }
+        }
+        loads
+    }
+
+    /// The update keeps the terminal rows it summed, and the stamp makes
+    /// exactly the additions it makes when it sums them itself. The charges
+    /// the update computed from its evaluation's transport are bit for bit
+    /// the ones computed from their own.
+    #[test]
+    fn a_gummel_poon_update_shares_its_transport_and_terminal_rows() {
+        for (bjt, anchor) in gummel_poon_loads_in_every_region() {
+            assert!(bjt.mna_terminal_rows.0.is_some());
+            let mut summed = bjt.clone();
+            summed.mna_terminal_rows = MnaTerminalRows(None);
+            let mut kept = Additions::default();
+            bjt.stamp_mna(&mut kept);
+            let mut own = Additions::default();
+            summed.stamp_mna(&mut own);
+            assert_eq!(kept, own, "{anchor:?}");
+            let [mut kept_newton, mut kept_correction] = [(); 2].map(|_| Additions::default());
+            bjt.stamp_mna_with_correction(&mut kept_newton, &mut kept_correction, &anchor);
+            let [mut own_newton, mut own_correction] = [(); 2].map(|_| Additions::default());
+            summed.stamp_mna_with_correction(&mut own_newton, &mut own_correction, &anchor);
+            assert_eq!(kept_newton, own_newton, "{anchor:?}");
+            assert_eq!(kept_correction, own_correction, "{anchor:?}");
+            assert_eq!(
+                format!("{:?}", bjt.mna_charge_cache.get()),
+                format!(
+                    "{:?}",
+                    bjt.legacy_dynamic_charge_branches(
+                        bjt.mna_external_state(),
+                        bjt.mna_internal_state()
+                    )
+                ),
+                "{anchor:?}"
+            );
         }
     }
 }

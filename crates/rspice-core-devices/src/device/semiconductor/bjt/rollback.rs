@@ -217,6 +217,9 @@ impl Bjt {
             self.charge_snapshot_cache.set(image.charge_snapshot_cache);
         }
         self.mna_eval = image.mna_eval;
+        // The image leaves out the terminal rows the update summed from this
+        // evaluation; the next stamp sums them from the restored one.
+        self.mna_terminal_rows = super::MnaTerminalRows(None);
         self.mna_rbi_current = image.mna_rbi_current;
         self.mna_limited_from.set(image.mna_limited_from);
         self.mna_eval_at_state = image.mna_eval_at_state;
@@ -353,6 +356,35 @@ mod tests {
             bias(bjt, nodes, [0.9, 0.81, 0.05]),
             bias(bjt, nodes, [2.0, 0.70, 0.0]),
         ]
+    }
+
+    /// A restore brings back an earlier evaluation without the terminal rows
+    /// the update summed from it, so the next stamp sums the restored
+    /// evaluation's rows instead of reusing those of the load after it.
+    #[test]
+    fn a_stamp_after_a_restore_sums_the_restored_terminal_rows() {
+        let mut bjt = with(&[
+            ("BF", 75.0),
+            ("RB", 100.0),
+            ("RC", 2.0),
+            ("RE", 1.0),
+            ("CJE", 1e-12),
+            ("CJC", 3e-12),
+            ("TF", 1e-10),
+        ]);
+        let nodes = promote(&mut bjt);
+        let [first, second, _] = biases(&bjt, nodes);
+        bjt.update(&first);
+        let mut state = BjtNonlinearState::default();
+        bjt.nonlinear_state_snapshot_into(&mut state);
+        let mut expected = Record::default();
+        bjt.stamp_mna(&mut expected);
+        bjt.update(&second);
+        bjt.restore_nonlinear_state(state);
+        assert!(bjt.mna_terminal_rows.0.is_none());
+        let mut restored = Record::default();
+        bjt.stamp_mna(&mut restored);
+        assert_eq!(restored.0, expected.0);
     }
 
     /// Everything an attempt writes comes back. The state is taken after
