@@ -51,7 +51,10 @@ fn library_cell_batch_preserves_binding_transform_and_undo_across_revisions() {
             .find(|descriptor| descriptor.model_type == "d_lut")
             .unwrap();
         let binding = crate::state::builtin_xspice_library_binding(descriptor).unwrap();
-        crate::workbench::app::arm_library_cell_placement(&mut state, binding.clone());
+        rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+            &mut state.model,
+            binding.clone(),
+        );
         state.model.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
         state.model.schematic.session.editor.preview_mirror_h = true;
         let source = super::super::requests::editor_request_source(&state);
@@ -131,8 +134,8 @@ fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit(
             .design_management
             .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
             .unwrap();
-        crate::workbench::app::arm_library_cell_placement(
-            &mut state,
+        rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+            &mut state.model,
             crate::state::LibraryCellInstance::new("work", "child", "schematic"),
         );
         match change {

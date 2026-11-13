@@ -8,27 +8,23 @@ use rspice_design::schematic::find_replace::{FindField, FindMatch};
 
 use super::nav_row_indented_mono_response;
 use crate::workbench::app::find_replace_matches;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::slots::DesignState;
 
 /// More rows than this are summed up in one, so a pattern that matches
 /// everything cannot bury the rails under it.
 const MAX_ROWS: usize = 200;
 
-pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
-    if !state.design.find_replace.open {
+pub(super) fn find_matches_section(ui: &mut Ui, design: &mut DesignState, model: &mut Model) {
+    if !design.find_replace.open {
         return;
     }
     // A query that cannot run says why in the form, beside the field.
-    let Ok(found) = find_replace_matches(&state.design.find_replace, &state.model) else {
+    let Ok(found) = find_replace_matches(&design.find_replace, model) else {
         return;
     };
-    let active = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let active = model.workspace.content.active_schematic_reference().key();
     let several = found.len() > 1;
     let total: usize = found.iter().map(|document| document.matches.len()).sum();
     let mut shown = 0;
@@ -68,7 +64,7 @@ pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
         }
     }
     if let Some(found) = picked {
-        let selection = &mut state.model.schematic.session.editor.selection;
+        let selection = &mut model.schematic.session.editor.selection;
         match found.field {
             FindField::NetLabel => selection.select_only_net_label(found.object_id),
             _ => selection.select_only_component(found.object_id),

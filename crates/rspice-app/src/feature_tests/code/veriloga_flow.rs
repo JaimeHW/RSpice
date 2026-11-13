@@ -651,8 +651,8 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         assert!(candidate.ready, "{root}: {}", candidate.unavailable_reason);
         user.app.state.open_workspace_view(top.clone());
         user.settle();
-        crate::workbench::app::schematic::placement::arm_library_cell_placement(
-            &mut user.app.state,
+        rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+            &mut user.app.state.model,
             candidate.binding,
         );
         assert_eq!(user.app.state.model.workspace.content.active_view, top);
@@ -775,8 +775,8 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     assert!(candidate.ready, "{}", candidate.unavailable_reason);
     user.app.state.open_workspace_view(top.clone());
     user.settle();
-    crate::workbench::app::schematic::placement::arm_library_cell_placement(
-        &mut user.app.state,
+    rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+        &mut user.app.state.model,
         candidate.binding,
     );
     let canvas = user.expect("Schematic canvas");

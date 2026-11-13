@@ -7,13 +7,12 @@
 //! substring, and the shelf ranks every placeable row by word ([`search`]).
 //!
 //! Almost nothing here takes the whole application. A shelf row arms a tool,
-//! writes a pin, or credits a placement, and all three live in
-//! [`AppState`] — so the handlers take that rather than the application that
-//! holds it. The five that do not are the ones that route somewhere else
-//! entirely: a part the project has not adopted raises the pack confirmation
-//! in the Models workspace, and a pin placement runs the `PlacePin` command.
-//! Those go through the command vocabulary, which is defined over the whole
-//! application.
+//! writes a pin, or credits a placement, and all three live in the model and
+//! the session — so the handlers take those rather than the application that
+//! holds them. A part the project has not adopted raises the pack confirmation
+//! in the Models workspace through the session's outbox. The three that keep
+//! the application are the pin placement, which runs the `PlacePin` command,
+//! and the two that hand a row on to it.
 
 mod library_parts;
 pub(super) mod search;
@@ -47,8 +46,10 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::requests::{ConfirmPackAttach, FocusPlacementSearch};
+use crate::workbench::slots::DesignState;
+use crate::workbench::state::WorkbenchSession;
 use rspice_app_models::veriloga_library::{
     BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, builtin_veriloga_model,
 };
@@ -61,6 +62,7 @@ use crate::workbench::docks::navigator::{
     schematic_nav_row_indented_drag_response, schematic_nav_row_indented_response,
     search_focus_requested,
 };
+use rspice_app_state::workbench::app::schematic::placement::arm_cell_instance;
 use search::{MatchRank, ShelfQuery, ShelfTerms};
 
 /// The family glyph a functional group's row carries.
@@ -274,20 +276,20 @@ fn nav_row_indented_response(
 }
 
 pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
-    observe_placements(ui, &mut app.state);
-    let keys = shelf_search(ui, &mut app.state);
+    observe_placements(ui, &mut app.state.model);
+    let keys = shelf_search(ui, &mut app.state.design, &mut app.state.workbench);
     rail::open(ui.ctx());
     let query = ShelfQuery::new(&app.state.design.placement_query);
-    let library_parts = library_part_rows(app, &query);
-    let cells = cell_candidates(&app.state);
+    let library_parts = library_part_rows(&app.model_hub, &app.state.model, &query);
+    let cells = cell_candidates(&app.state.model);
     if !query.is_empty() {
-        let hits = shelf_hits(&app.state, &query, &library_parts, &cells);
+        let hits = shelf_hits(&app.state.model, &query, &library_parts, &cells);
         let state = &mut app.state;
         let clicked = ScrollArea::vertical()
             .id_salt("workbench.design.component_shelf")
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                let clicked = shelf_results(ui, state, &hits);
+                let clicked = shelf_results(ui, &mut state.model, &hits);
                 let _unmoved = rail::traverse(ui, keys.rows);
                 clicked
             })
@@ -317,13 +319,13 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.design.component_shelf")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            let pinned = pinned_band(ui, state, &library_parts, &cells);
-            band = recent_band(ui, state, &library_parts, &cells).or(pinned);
-            catalog = component_catalog(ui, state);
-            stimulus = stimulus_library_section(ui, state);
-            generated = generated_veriloga_catalog(ui, state);
-            requested_part = library_parts_section(ui, state, &library_parts);
-            cell = project_library(ui, state, &cells);
+            let pinned = pinned_band(ui, &mut state.model, &library_parts, &cells);
+            band = recent_band(ui, &mut state.model, &library_parts, &cells).or(pinned);
+            catalog = component_catalog(ui, &mut state.model);
+            stimulus = stimulus_library_section(ui, &mut state.model);
+            generated = generated_veriloga_catalog(ui, &mut state.model);
+            requested_part = library_parts_section(ui, &mut state.model, &library_parts);
+            cell = project_library(ui, &mut state.model, &cells);
             // Every fold position on the shelf is persisted under its own
             // group row, so the traversal moves all of them itself and has
             // nothing to hand back. Bound rather than discarded, so a row
@@ -338,21 +340,45 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(arm) = band.or(catalog) {
         apply_shelf_arm(app, arm, ui.ctx());
     } else if let Some(name) = stimulus {
-        arm_stimulus_definition(&mut app.state, &name, ui.ctx());
+        arm_stimulus_definition(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            &name,
+            ui.ctx(),
+        );
     } else if let Some(binding) = generated {
-        arm_cell(&mut app.state, binding, ui.ctx());
+        arm_cell(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            binding,
+            ui.ctx(),
+        );
     } else if let Some(binding) = cell {
-        arm_cell(&mut app.state, binding, ui.ctx());
+        arm_cell(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            binding,
+            ui.ctx(),
+        );
     } else if let Some(row) = requested_part {
-        apply_library_part_row(app, row, ui.ctx());
+        apply_library_part_row(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            row,
+            ui.ctx(),
+        );
     }
 }
 
-fn shelf_search(ui: &mut Ui, state: &mut AppState) -> PanelSearchKeys {
-    let mut focus = search_focus_requested::<FocusPlacementSearch>(ui, &mut state.workbench.outbox);
+fn shelf_search(
+    ui: &mut Ui,
+    design: &mut DesignState,
+    wb: &mut WorkbenchSession,
+) -> PanelSearchKeys {
+    let mut focus = search_focus_requested::<FocusPlacementSearch>(ui, &mut wb.outbox);
     panel_search_keys(
         ui,
-        &mut state.design.placement_query,
+        &mut design.placement_query,
         "workbench.design.component_shelf.search",
         "Place component or cell…",
         &mut focus,
@@ -507,9 +533,8 @@ impl ShelfEntry {
 
 /// The pin set's stored keys, with the shipped default standing in for a
 /// profile that has never pinned anything.
-pub(super) fn pinned_keys(state: &AppState) -> Vec<String> {
-    state
-        .model
+pub(super) fn pinned_keys(model: &Model) -> Vec<String> {
+    model
         .preferences
         .component_shelf()
         .pinned
@@ -522,9 +547,9 @@ pub(super) fn pinned_keys(state: &AppState) -> Vec<String> {
         })
 }
 
-pub(super) fn is_pinned(state: &AppState, entry: &ShelfEntry) -> bool {
+pub(super) fn is_pinned(model: &Model, entry: &ShelfEntry) -> bool {
     let key = entry.storage_key();
-    pinned_keys(state).contains(&key)
+    pinned_keys(model).contains(&key)
 }
 
 /// Pin an unpinned entry, or unpin a pinned one.
@@ -534,27 +559,27 @@ pub(super) fn is_pinned(state: &AppState, entry: &ShelfEntry) -> bool {
 /// muscle memory that is the whole reason to have it. The first call also
 /// materializes the shipped default into the reader's own set, which is what
 /// makes that default stop applying.
-pub(super) fn toggle_pin(state: &mut AppState, entry: &ShelfEntry) {
+pub(super) fn toggle_pin(model: &mut Model, entry: &ShelfEntry) {
     let key = entry.storage_key();
-    let mut keys = pinned_keys(state);
+    let mut keys = pinned_keys(model);
     if let Some(at) = keys.iter().position(|held| *held == key) {
         keys.remove(at);
     } else {
         keys.push(key);
     }
-    let mut shelf = state.model.preferences.component_shelf();
+    let mut shelf = model.preferences.component_shelf();
     shelf.pinned = Some(keys);
-    state.model.preferences.set_component_shelf(shelf);
+    model.preferences.set_component_shelf(shelf);
 }
 
 /// Record one placement at the front of the history, deduplicated.
-pub(super) fn record_placement(state: &mut AppState, entry: &ShelfEntry) {
+pub(super) fn record_placement(model: &mut Model, entry: &ShelfEntry) {
     let key = entry.storage_key();
-    let mut shelf = state.model.preferences.component_shelf();
+    let mut shelf = model.preferences.component_shelf();
     shelf.recent.retain(|held| *held != key);
     shelf.recent.insert(0, key);
     shelf.recent.truncate(RECENT_STORED);
-    state.model.preferences.set_component_shelf(shelf);
+    model.preferences.set_component_shelf(shelf);
 }
 
 /// What the shelf last offered the canvas, and how much of the design was
@@ -577,16 +602,15 @@ struct ShelfPlacementWatch {
 }
 
 /// The identity the schematic currently has armed, as a shelf row names it.
-fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
-    if let Some(entry) = armed_supply(state) {
+fn armed_shelf_entry(model: &Model) -> Option<ShelfEntry> {
+    if let Some(entry) = armed_supply(model) {
         return Some(ShelfEntry::Supply(entry.name.to_owned()));
     }
-    let Tool::Place(kind) = state.model.schematic.session.editor.tool else {
+    let Tool::Place(kind) = model.schematic.session.editor.tool else {
         return None;
     };
     if kind == ComponentType::CellInstance {
-        return state
-            .model
+        return model
             .schematic
             .session
             .editor
@@ -598,13 +622,7 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
     // A native device armed from the model library carries that part's card,
     // and the card name is the part's own id in the unified index — so the
     // history names the part the reader picked, not its device family.
-    if let Some(armed) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .pending_part_model
-        .as_ref()
+    if let Some(armed) = model.schematic.session.editor.pending_part_model.as_ref()
         && armed.tool == Tool::Place(kind)
     {
         if let Some(entry) = variant_entry(kind, armed.variant.as_deref(), &armed.model) {
@@ -617,14 +635,7 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
     // recent band with a source the reader never picked, and a key of its own
     // would name a definition that is project state rather than something this
     // build can offer. The Stimulus library section lists it either way.
-    if state
-        .model
-        .schematic
-        .session
-        .editor
-        .pending_stimulus
-        .is_some()
-    {
+    if model.schematic.session.editor.pending_stimulus.is_some() {
         return None;
     }
     Some(ShelfEntry::Primitive(kind))
@@ -658,18 +669,18 @@ fn dragged_shelf_entry(ctx: &egui::Context) -> Option<ShelfEntry> {
 /// This runs while the Component shelf is on screen. A placement made with the
 /// Navigator tab in front is credited on the reader's next visit, in the order
 /// the design grew.
-fn observe_placements(ui: &Ui, state: &mut AppState) {
+fn observe_placements(ui: &Ui, model: &mut Model) {
     let id = egui::Id::new("workbench.design.component-shelf.placements");
     let authority = (
-        state.model.design_execution_epoch,
-        state.model.active_schematic_epoch,
-        state.model.workspace.content.active_view.display_path(),
+        model.design_execution_epoch,
+        model.active_schematic_epoch,
+        model.workspace.content.active_view.display_path(),
     );
     // A supply rail is a net label, so labels count as placements beside
     // components.
-    let document = state.model.schematic.document();
+    let document = model.schematic.document();
     let components = document.components.len() + document.net_labels.len();
-    let live = armed_shelf_entry(state).or_else(|| dragged_shelf_entry(ui.ctx()));
+    let live = armed_shelf_entry(model).or_else(|| dragged_shelf_entry(ui.ctx()));
     // A watch belonging to another design is no watch at all: its objects were
     // placed before this shelf ever looked at them.
     let watched = ui
@@ -686,7 +697,7 @@ fn observe_placements(ui: &Ui, state: &mut AppState) {
         && components > watched.components
         && let Some(entry) = offered.as_ref()
     {
-        record_placement(state, entry);
+        record_placement(model, entry);
         spent = true;
     }
     ui.data_mut(|data| {
@@ -736,15 +747,14 @@ pub(super) enum ShelfArm {
 /// stored key is untouched: the band simply does not paint a door that leads
 /// nowhere.
 fn resolve_shelf_entry(
-    state: &AppState,
+    model: &Model,
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
     entry: &ShelfEntry,
 ) -> Option<ShelfEntryRow> {
     let placing_cell =
-        state.model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
-    let pending = state
-        .model
+        model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
+    let pending = model
         .schematic
         .session
         .editor
@@ -757,7 +767,7 @@ fn resolve_shelf_entry(
             glyph: primitive_shelf_glyph(*kind),
             label: primitive_label(*kind).to_owned(),
             meta: primitive_shelf_meta(*kind),
-            selected: primitive_armed(state, *kind),
+            selected: primitive_armed(model, *kind),
             arm: ShelfArm::Primitive(*kind),
         }),
         ShelfEntry::Variant(label) => {
@@ -770,7 +780,7 @@ fn resolve_shelf_entry(
                 glyph: primitive_shelf_glyph(row.kind),
                 label: row.label.to_owned(),
                 meta: variant_meta(row),
-                selected: variant_armed(state, row),
+                selected: variant_armed(model, row),
                 arm: ShelfArm::Variant(row),
             })
         }
@@ -867,7 +877,7 @@ fn resolve_shelf_entry(
                 glyph: supply_shelf_glyph(supply),
                 label: supply.name.to_owned(),
                 meta: None,
-                selected: armed_supply(state) == Some(supply),
+                selected: armed_supply(model) == Some(supply),
                 arm: ShelfArm::Supply(supply),
             })
         }
@@ -881,19 +891,19 @@ fn resolve_shelf_entry(
 /// claim the reader still holds a set they just emptied.
 fn pinned_band(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
-    let rows = pinned_keys(state)
+    let rows = pinned_keys(model)
         .iter()
         .filter_map(|key| ShelfEntry::from_storage_key(key))
-        .filter_map(|entry| resolve_shelf_entry(state, library_parts, cells, &entry))
+        .filter_map(|entry| resolve_shelf_entry(model, library_parts, cells, &entry))
         .collect::<Vec<_>>();
     if rows.is_empty() {
         return None;
     }
-    let shortcut = state.model.preferences.shortcuts().resolved_label(
+    let shortcut = model.preferences.shortcuts().resolved_label(
         &crate::workbench::commands::vocabulary::CommandRegistry,
         crate::workbench::design::commands::DesignCommand::PlaceInstance.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -904,7 +914,7 @@ fn pinned_band(
         "Pinned",
         (!shortcut.is_empty()).then_some(shortcut.as_str()),
     );
-    shelf_entry_rows(ui, state, &rows)
+    shelf_entry_rows(ui, model, &rows)
 }
 
 /// The Recent band: what this reader last put on a sheet, newest first.
@@ -914,31 +924,30 @@ fn pinned_band(
 /// already given a permanent seat.
 fn recent_band(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
-    let pinned = pinned_keys(state);
-    let rows = state
-        .model
+    let pinned = pinned_keys(model);
+    let rows = model
         .preferences
         .component_shelf()
         .recent
         .iter()
         .filter(|key| !pinned.contains(key))
         .filter_map(|key| ShelfEntry::from_storage_key(key))
-        .filter_map(|entry| resolve_shelf_entry(state, library_parts, cells, &entry))
+        .filter_map(|entry| resolve_shelf_entry(model, library_parts, cells, &entry))
         .take(RECENT_SHOWN)
         .collect::<Vec<_>>();
     if rows.is_empty() {
         return None;
     }
     shelf_section_header(ui, "Recent", Some(&rows.len().to_string()));
-    shelf_entry_rows(ui, state, &rows)
+    shelf_entry_rows(ui, model, &rows)
 }
 
 /// Paint one band's resolved rows on the shelf's own row contract.
-fn shelf_entry_rows(ui: &mut Ui, state: &mut AppState, rows: &[ShelfEntryRow]) -> Option<ShelfArm> {
+fn shelf_entry_rows(ui: &mut Ui, model: &mut Model, rows: &[ShelfEntryRow]) -> Option<ShelfArm> {
     let mut armed = None;
     for row in rows {
         let response = shelf_part_row(
@@ -955,7 +964,7 @@ fn shelf_entry_rows(ui: &mut Ui, state: &mut AppState, rows: &[ShelfEntryRow]) -
         if response.clicked() {
             armed = Some(row.arm.clone());
         }
-        shelf_pin_context_menu(&response, state, &row.entry);
+        shelf_pin_context_menu(&response, model, &row.entry);
     }
     armed
 }
@@ -990,15 +999,15 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
 /// the catalog where the reader finds the part rather than from a separate
 /// editor. Shift+F10 opens it from the keyboard, as the navigator's object
 /// menu does.
-fn shelf_pin_context_menu(response: &Response, state: &mut AppState, entry: &ShelfEntry) {
+fn shelf_pin_context_menu(response: &Response, model: &mut Model, entry: &ShelfEntry) {
     let (popup, _) = row_context_menu(response);
-    let pinned = is_pinned(state, entry);
+    let pinned = is_pinned(model, entry);
     popup.show(|ui| {
         if ui
             .button(if pinned { "Unpin" } else { "Pin to shelf" })
             .clicked()
         {
-            toggle_pin(state, entry);
+            toggle_pin(model, entry);
             ui.close();
         }
     });
@@ -1009,22 +1018,40 @@ fn shelf_pin_context_menu(response: &Response, state: &mut AppState, entry: &She
 fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
     match arm {
         ShelfArm::Primitive(kind) => arm_primitive(app, kind, ctx),
-        ShelfArm::Variant(entry) => arm_variant(&mut app.state, entry, ctx),
+        ShelfArm::Variant(entry) => {
+            arm_variant(&mut app.state.model, &mut app.state.workbench, entry, ctx)
+        }
         ShelfArm::BuiltinXspice(id) => {
-            if let Some(binding) = place_builtin_xspice(&mut app.state, &id) {
-                arm_cell(&mut app.state, binding, ctx);
+            if let Some(binding) = place_builtin_xspice(
+                &mut app.state.design,
+                &mut app.state.model,
+                &mut app.state.workbench,
+                &id,
+            ) {
+                arm_cell(&mut app.state.model, &mut app.state.workbench, binding, ctx);
             }
         }
-        ShelfArm::Cell(binding) => arm_cell(&mut app.state, *binding, ctx),
-        ShelfArm::Part(row) => apply_library_part_row(app, *row, ctx),
-        ShelfArm::Stimulus(name) => arm_stimulus_definition(&mut app.state, &name, ctx),
-        ShelfArm::Supply(entry) => arm_supply(&mut app.state, entry, ctx),
+        ShelfArm::Cell(binding) => arm_cell(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            *binding,
+            ctx,
+        ),
+        ShelfArm::Part(row) => {
+            apply_library_part_row(&mut app.state.model, &mut app.state.workbench, *row, ctx)
+        }
+        ShelfArm::Stimulus(name) => {
+            arm_stimulus_definition(&mut app.state.model, &mut app.state.workbench, &name, ctx)
+        }
+        ShelfArm::Supply(entry) => {
+            arm_supply(&mut app.state.model, &mut app.state.workbench, entry, ctx)
+        }
     }
 }
 
 /// The built-in catalog: every functional group that has rows, each holding
 /// native primitives and code models side by side.
-pub(super) fn component_catalog(ui: &mut Ui, state: &mut AppState) -> Option<ShelfArm> {
+pub(super) fn component_catalog(ui: &mut Ui, model: &mut Model) -> Option<ShelfArm> {
     let mut armed = None;
     shelf_section_header(ui, "Built-in", Some(&catalog_row_count().to_string()));
     for category in ComponentCategory::ALL {
@@ -1042,10 +1069,10 @@ pub(super) fn component_catalog(ui: &mut Ui, state: &mut AppState) -> Option<She
         ) {
             for row in rows {
                 let clicked = match row {
-                    PaletteRow::Primitive(entry) => primitive_row(ui, state, entry, 2),
-                    PaletteRow::Functional(descriptor) => functional_row(ui, state, descriptor, 2),
-                    PaletteRow::Xspice(descriptor) => xspice_row(ui, state, descriptor, 2),
-                    PaletteRow::Supply(entry) => supply_row(ui, state, entry, 2),
+                    PaletteRow::Primitive(entry) => primitive_row(ui, model, entry, 2),
+                    PaletteRow::Functional(descriptor) => functional_row(ui, model, descriptor, 2),
+                    PaletteRow::Xspice(descriptor) => xspice_row(ui, model, descriptor, 2),
+                    PaletteRow::Supply(entry) => supply_row(ui, model, entry, 2),
                 };
                 armed = clicked.or(armed);
             }
@@ -1161,20 +1188,20 @@ pub(super) fn shelf_part_row(
 
 fn primitive_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     entry: &'static ComponentPaletteEntry,
     level: usize,
 ) -> Option<ShelfArm> {
     let (selected, meta, pin, arm) = if entry.variant.is_some() {
         (
-            variant_armed(state, entry),
+            variant_armed(model, entry),
             variant_meta(entry),
             ShelfEntry::Variant(entry.label.to_owned()),
             ShelfArm::Variant(entry),
         )
     } else {
         (
-            primitive_armed(state, entry.kind),
+            primitive_armed(model, entry.kind),
             primitive_shelf_meta(entry.kind),
             ShelfEntry::Primitive(entry.kind),
             ShelfArm::Primitive(entry.kind),
@@ -1193,7 +1220,7 @@ fn primitive_row(
     {
         response.dnd_set_drag_payload(payload);
     }
-    shelf_pin_context_menu(&response, state, &pin);
+    shelf_pin_context_menu(&response, model, &pin);
     response.clicked().then_some(arm)
 }
 
@@ -1255,8 +1282,8 @@ fn placed_by_variant_row(row: &LibraryPartRow) -> bool {
 
 /// Whether the place tool holds this primitive bare, with no card or skin.
 /// The supply rail the Label tool holds from the shelf, if any.
-fn armed_supply(state: &AppState) -> Option<&'static SupplyPaletteEntry> {
-    let editor = &state.model.schematic.session.editor;
+fn armed_supply(model: &Model) -> Option<&'static SupplyPaletteEntry> {
+    let editor = &model.schematic.session.editor;
     if editor.tool != Tool::Label {
         return None;
     }
@@ -1272,26 +1299,26 @@ fn supply_shelf_glyph(entry: &SupplyPaletteEntry) -> ShelfGlyph {
 }
 
 /// Arm the Label tool to place one supply rail on every click.
-pub(super) fn arm_supply(state: &mut AppState, entry: &SupplyPaletteEntry, ctx: &egui::Context) {
-    state.model.schematic.session.editor.pending_library_cell = None;
-    state.model.schematic.arm_tool(Tool::Label);
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .pending_net_label_sequence = Some(
+pub(super) fn arm_supply(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    entry: &SupplyPaletteEntry,
+    ctx: &egui::Context,
+) {
+    model.schematic.session.editor.pending_library_cell = None;
+    model.schematic.arm_tool(Tool::Label);
+    model.schematic.session.editor.pending_net_label_sequence = Some(
         rspice_schematic_editor::session::net_label_sequence::NetLabelSequence::repeating(
             entry.name,
             entry.kind(),
         ),
     );
-    finish_shelf_placement(state, ctx);
+    finish_shelf_placement(wb, ctx);
 }
 
 fn supply_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     entry: &'static SupplyPaletteEntry,
     level: usize,
 ) -> Option<ShelfArm> {
@@ -1299,16 +1326,16 @@ fn supply_row(
         ui,
         supply_shelf_glyph(entry),
         entry.name,
-        armed_supply(state) == Some(entry),
+        armed_supply(model) == Some(entry),
         None,
         level,
     );
-    shelf_pin_context_menu(&response, state, &ShelfEntry::Supply(entry.name.to_owned()));
+    shelf_pin_context_menu(&response, model, &ShelfEntry::Supply(entry.name.to_owned()));
     response.clicked().then_some(ShelfArm::Supply(entry))
 }
 
-fn primitive_armed(state: &AppState, kind: ComponentType) -> bool {
-    let editor = &state.model.schematic.session.editor;
+fn primitive_armed(model: &Model, kind: ComponentType) -> bool {
+    let editor = &model.schematic.session.editor;
     editor.tool == Tool::Place(kind)
         && editor
             .pending_part_model
@@ -1317,8 +1344,8 @@ fn primitive_armed(state: &AppState, kind: ComponentType) -> bool {
 }
 
 /// Whether the place tool holds exactly this variant row's card and skin.
-fn variant_armed(state: &AppState, entry: &ComponentPaletteEntry) -> bool {
-    let editor = &state.model.schematic.session.editor;
+fn variant_armed(model: &Model, entry: &ComponentPaletteEntry) -> bool {
+    let editor = &model.schematic.session.editor;
     editor.tool == Tool::Place(entry.kind)
         && editor.pending_part_model.as_ref().is_some_and(|armed| {
             armed.tool == Tool::Place(entry.kind)
@@ -1329,19 +1356,20 @@ fn variant_armed(state: &AppState, entry: &ComponentPaletteEntry) -> bool {
 
 /// Arm the place tool with a variant row's card and skin.
 pub(super) fn arm_variant(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     entry: &ComponentPaletteEntry,
     ctx: &egui::Context,
 ) {
     let _ = crate::workbench::app::arm_pack_part(
-        &mut state.model,
+        model,
         PartPlacement::NativeDevice {
             component_type: entry.kind,
             variant: entry.variant.map(str::to_owned),
             model: variant_model(entry).to_owned(),
         },
     );
-    finish_shelf_placement(state, ctx);
+    finish_shelf_placement(wb, ctx);
 }
 
 /// The Stimulus library section: every definition this project authored, as a
@@ -1355,8 +1383,8 @@ pub(super) fn arm_variant(
 /// a heading over nothing is a door that leads nowhere.
 ///
 /// Returns the definition a click armed.
-fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String> {
-    let rows = stimulus_library_rows(state);
+fn stimulus_library_section(ui: &mut Ui, model: &mut Model) -> Option<String> {
+    let rows = stimulus_library_rows(model);
     if rows.is_empty() {
         return None;
     }
@@ -1377,8 +1405,7 @@ fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String>
             ui,
             ShelfGlyph::Source,
             &row.name,
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -1409,9 +1436,8 @@ struct StimulusShelfRow {
 }
 
 /// Every definition, in the library's own list order.
-fn stimulus_library_rows(state: &AppState) -> Vec<StimulusShelfRow> {
-    state
-        .model
+fn stimulus_library_rows(model: &Model) -> Vec<StimulusShelfRow> {
+    model
         .workspace
         .content
         .stimulus_library
@@ -1443,14 +1469,15 @@ fn stimulus_library_rows(state: &AppState) -> Vec<StimulusShelfRow> {
 }
 
 /// Arm one definition from the shelf; a refusal answers on the status bar.
-fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context) {
-    match crate::workbench::app::arm_placement_from_definition(
-        &mut state.model,
-        &mut state.workbench,
-        name,
-    ) {
-        Ok(()) => finish_shelf_placement(state, ctx),
-        Err(refusal) => state.prompt(refusal),
+fn arm_stimulus_definition(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    name: &str,
+    ctx: &egui::Context,
+) {
+    match crate::workbench::app::arm_placement_from_definition(model, wb, name) {
+        Ok(()) => finish_shelf_placement(wb, ctx),
+        Err(refusal) => wb.prompt(refusal),
     }
 }
 
@@ -1479,11 +1506,11 @@ fn functional_armed(
 
 fn functional_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     descriptor: &'static FunctionalPartDescriptor,
     level: usize,
 ) -> Option<ShelfArm> {
-    let editor = &state.model.schematic.session.editor;
+    let editor = &model.schematic.session.editor;
     let selected = editor.tool == Tool::Place(ComponentType::CellInstance)
         && functional_armed(
             editor
@@ -1504,7 +1531,7 @@ fn functional_row(
     response.dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
     shelf_pin_context_menu(
         &response,
-        state,
+        model,
         &ShelfEntry::Functional(descriptor.stable_id.to_owned()),
     );
     response
@@ -1514,12 +1541,11 @@ fn functional_row(
 
 fn xspice_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     descriptor: &CatalogXspiceDeviceDescriptor,
     level: usize,
 ) -> Option<ShelfArm> {
-    let selected = state
-        .model
+    let selected = model
         .schematic
         .session
         .editor
@@ -1528,7 +1554,7 @@ fn xspice_row(
         .map(|pending| &pending.binding)
         .and_then(|binding| binding.builtin_xspice.as_ref())
         .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
-        && state.model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
+        && model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
     let response = shelf_part_row(
         ui,
         ShelfGlyph::Event,
@@ -1543,7 +1569,7 @@ fn xspice_row(
             response.dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding));
             shelf_pin_context_menu(
                 &response,
-                state,
+                model,
                 &ShelfEntry::BuiltinXspice(stable_id.to_owned()),
             );
             response
@@ -1564,7 +1590,9 @@ fn xspice_row(
 /// nothing. Shared by the catalog row and the pinned/recent rows so both forks
 /// stay one decision.
 pub(super) fn place_builtin_xspice(
-    state: &mut AppState,
+    design: &mut DesignState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     stable_id: &str,
 ) -> Option<LibraryCellInstance> {
     let descriptor = engine_only_xspice_devices()
@@ -1577,12 +1605,12 @@ pub(super) fn place_builtin_xspice(
                 .iter()
                 .any(|port| port.maximum.is_none_or(|maximum| maximum != port.minimum)) =>
         {
-            state.workbench.close_drawer();
-            state.design.builtin_xspice_placement.open(
+            wb.close_drawer();
+            design.builtin_xspice_placement.open(
                 descriptor.stable_id,
                 descriptor.display_name,
                 vector_ports,
-                crate::workbench::app::schematic_editor_request_source(state),
+                crate::workbench::app::schematic_editor_request_source(model),
             );
             None
         }
@@ -1617,7 +1645,7 @@ pub(super) fn in_library_order<T>(devices: &mut [T], registry_name: impl Fn(&T) 
     });
 }
 
-fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
+fn generated_veriloga_catalog(ui: &mut Ui, model: &mut Model) -> Option<LibraryCellInstance> {
     let descriptors = generated_veriloga_devices();
     if descriptors.is_empty() {
         return None;
@@ -1637,8 +1665,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
     let mut descriptors = descriptors.iter().collect::<Vec<_>>();
     in_library_order(&mut descriptors, |descriptor| descriptor.model_name);
     for descriptor in descriptors {
-        let selected = state
-            .model
+        let selected = model
             .schematic
             .session
             .editor
@@ -1647,8 +1674,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
             .map(|pending| &pending.binding)
             .and_then(|binding| binding.generated_veriloga.as_ref())
             .is_some_and(|binding| binding.model_name == descriptor.model_name)
-            && state.model.schematic.session.editor.tool
-                == Tool::Place(ComponentType::CellInstance);
+            && model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
         let response = shelf_part_row(
             ui,
             ShelfGlyph::Text("VA"),
@@ -1670,7 +1696,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
                 }
                 shelf_pin_context_menu(
                     &response,
-                    state,
+                    model,
                     &ShelfEntry::GeneratedVerilogA(descriptor.model_name.to_owned()),
                 );
             }
@@ -1685,7 +1711,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
 
 fn project_library(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     cells: &[CellCandidate],
 ) -> Option<LibraryCellInstance> {
     let mut grouped = BTreeMap::<String, Vec<CellCandidate>>::new();
@@ -1706,7 +1732,7 @@ fn project_library(
             grouped_cells.len(),
             false,
         ) {
-            armed = cell_rows(ui, state, &grouped_cells, 2).or_else(|| armed.take());
+            armed = cell_rows(ui, model, &grouped_cells, 2).or_else(|| armed.take());
         }
     }
     armed
@@ -1714,7 +1740,7 @@ fn project_library(
 
 fn cell_rows(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     cells: &[CellCandidate],
     level: usize,
 ) -> Option<LibraryCellInstance> {
@@ -1768,7 +1794,7 @@ fn cell_rows(
         }
         shelf_pin_context_menu(
             &response,
-            state,
+            model,
             &ShelfEntry::Cell {
                 library: candidate.library.clone(),
                 cell: candidate.cell.clone(),
@@ -1869,8 +1895,8 @@ fn catalog_group_row(
 
 type CellCandidate = LibraryCellPlacementCandidate;
 
-pub(super) fn cell_candidates(state: &AppState) -> Vec<CellCandidate> {
-    library_cell_placement_candidates(&state.model.library_manager, &state.model.workspace)
+pub(super) fn cell_candidates(model: &Model) -> Vec<CellCandidate> {
+    library_cell_placement_candidates(&model.library_manager, &model.workspace)
 }
 
 pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
@@ -1881,26 +1907,27 @@ pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui
     let state = &mut app.state;
     state.model.schematic.session.editor.pending_library_cell = None;
     state.model.schematic.arm_tool(Tool::Place(kind));
-    finish_shelf_placement(state, ctx);
+    finish_shelf_placement(&mut state.workbench, ctx);
 }
 
 /// Capture the current placement context and return focus to the canvas.
 fn arm_cell(
-    state: &mut crate::workbench::app_state::AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     binding: LibraryCellInstance,
     ctx: &egui::Context,
 ) {
-    let _ = crate::workbench::app::arm_library_cell_placement(state, binding);
-    finish_shelf_placement(state, ctx);
+    let _ = arm_cell_instance(model, binding);
+    finish_shelf_placement(wb, ctx);
 }
 
 /// Hand the canvas back after a shelf click.
 ///
 /// No toast: the armed cursor is the canvas's own answer, and one toast per
 /// shelf click is one per placement.
-fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context) {
+fn finish_shelf_placement(wb: &mut WorkbenchSession, ctx: &egui::Context) {
     // Selecting a part releases the compact shelf's modal input ownership.
-    state.workbench.close_drawer();
+    wb.close_drawer();
     rspice_schematic_editor::view::canvas::request_focus(ctx);
 }
 
@@ -1966,7 +1993,7 @@ pub(super) fn top_hit(hits: &[ShelfHit]) -> Option<&ShelfHit> {
 /// Rows of one rank keep catalog order: primitives, code models, generated
 /// Verilog-A, stimulus definitions, library parts, project cells.
 pub(super) fn shelf_hits(
-    state: &AppState,
+    model: &Model,
     query: &ShelfQuery,
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
@@ -1974,7 +2001,7 @@ pub(super) fn shelf_hits(
     let mut hits = Vec::new();
     let offer = |hits: &mut Vec<ShelfHit>, rank: Option<MatchRank>, entry: ShelfEntry| {
         if let Some(rank) = rank
-            && let Some(row) = resolve_shelf_entry(state, library_parts, cells, &entry)
+            && let Some(row) = resolve_shelf_entry(model, library_parts, cells, &entry)
         {
             hits.push(ShelfHit::of(rank, row));
         }
@@ -2047,15 +2074,14 @@ pub(super) fn shelf_hits(
             ShelfEntry::GeneratedVerilogA(descriptor.model_name.to_owned()),
         );
     }
-    let pending_stimulus = state
-        .model
+    let pending_stimulus = model
         .schematic
         .session
         .editor
         .pending_stimulus
         .as_ref()
         .map(|held| held.definition().to_owned());
-    for row in stimulus_library_rows(state) {
+    for row in stimulus_library_rows(model) {
         let keywords = row.keywords.iter().map(String::as_str).collect::<Vec<_>>();
         let Some(rank) = query.rank(&ShelfTerms {
             label: &row.name,
@@ -2146,7 +2172,7 @@ pub(super) fn shelf_hits(
 ///
 /// The row Enter would place carries the hover fill, so the field's answer to
 /// Enter is on screen before the key is pressed.
-fn shelf_results(ui: &mut Ui, state: &mut AppState, hits: &[ShelfHit]) -> Option<ShelfArm> {
+fn shelf_results(ui: &mut Ui, model: &mut Model, hits: &[ShelfHit]) -> Option<ShelfArm> {
     if hits.is_empty() {
         empty_navigator_row(ui, "No component or cell matches this filter");
         return None;
@@ -2186,7 +2212,7 @@ fn shelf_results(ui: &mut Ui, state: &mut AppState, hits: &[ShelfHit]) -> Option
             armed = Some(hit.arm.clone());
         }
         if let Some(entry) = &hit.pin {
-            shelf_pin_context_menu(&response, state, entry);
+            shelf_pin_context_menu(&response, model, entry);
         }
     }
     armed

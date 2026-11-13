@@ -20,6 +20,7 @@ use crate::state::{
     ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
     engine_only_xspice_devices,
 };
+use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use rspice_app_models::veriloga_library::BUILTIN_VERILOGA_MODELS;
 
@@ -242,7 +243,8 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
         .add_library(retained_model_library("proving_parts"));
 
     let rows = library_part_rows(
-        &app,
+        &app.model_hub,
+        &app.state.model,
         &super::super::shelf::search::ShelfQuery::new("proving_parts"),
     );
     let row = |name: &str| {
@@ -489,7 +491,12 @@ fn a_variant_row_places_its_type_with_its_card_and_skin() {
         .flat_map(|section| section.entries.iter())
         .find(|entry| entry.label == "Zener Diode")
         .expect("the Zener row");
-    arm_variant(&mut app.state, zener, &egui::Context::default());
+    arm_variant(
+        &mut app.state.model,
+        &mut app.state.workbench,
+        zener,
+        &egui::Context::default(),
+    );
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Diode)
@@ -540,7 +547,12 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
             .iter()
             .find(|entry| entry.name == name)
             .expect("a filed rail");
-        arm_supply(&mut app.state, entry, &egui::Context::default());
+        arm_supply(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            entry,
+            &egui::Context::default(),
+        );
         assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
         let before = app.state.model.schematic.document().net_labels.len();
         for y in [0, 20] {
@@ -559,7 +571,7 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
         let armed = ShelfEntry::Supply(name.to_owned());
         assert!(
             shelf_hits(
-                &app.state,
+                &app.state.model,
                 &super::super::shelf::search::ShelfQuery::new(name),
                 &[],
                 &[],
@@ -689,7 +701,7 @@ fn shelf_frame(
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     ui.set_width(260.0);
-                    component_catalog(ui, state);
+                    component_catalog(ui, &mut state.model);
                 });
         },
     );
@@ -914,7 +926,13 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
 
     let mut app = RSpiceApp::test_instance();
     assert!(
-        place_builtin_xspice(&mut app.state, fixed.stable_id).is_some(),
+        place_builtin_xspice(
+            &mut app.state.design,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            fixed.stable_id
+        )
+        .is_some(),
         "{} has nothing left to choose, so it arms straight away",
         fixed.stable_id
     );
@@ -925,7 +943,13 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
 
     app.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
     assert!(
-        place_builtin_xspice(&mut app.state, open.stable_id).is_none(),
+        place_builtin_xspice(
+            &mut app.state.design,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            open.stable_id
+        )
+        .is_none(),
         "{} cannot be armed until its widths are chosen",
         open.stable_id
     );
@@ -997,8 +1021,8 @@ fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
                 .add_library(retained_model_library("proving_parts"));
             shelf.app.state.workbench.drawer = drawer;
             shelf.app.state.workbench.navigator_visible = true;
-            if !is_pinned(&shelf.app.state, &entry) {
-                toggle_pin(&mut shelf.app.state, &entry);
+            if !is_pinned(&shelf.app.state.model, &entry) {
+                toggle_pin(&mut shelf.app.state.model, &entry);
             }
             let mut shelf = shelf.settled();
             let (_, runs) = shelf.frame(Vec::new());
@@ -1187,7 +1211,7 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
     let key = |kind| ShelfEntry::Primitive(kind).storage_key();
 
     assert_eq!(
-        pinned_keys(&app.state),
+        pinned_keys(&app.state.model),
         vec![
             key(ComponentType::Resistor),
             key(ComponentType::Capacitor),
@@ -1206,9 +1230,12 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
     );
 
     // A pin lands at the end: the rail the reader builds keeps its positions.
-    toggle_pin(&mut app.state, &ShelfEntry::Primitive(ComponentType::Diode));
+    toggle_pin(
+        &mut app.state.model,
+        &ShelfEntry::Primitive(ComponentType::Diode),
+    );
     assert_eq!(
-        pinned_keys(&app.state),
+        pinned_keys(&app.state.model),
         vec![
             key(ComponentType::Resistor),
             key(ComponentType::Capacitor),
@@ -1219,11 +1246,11 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
 
     // Unpinning a shipped default removes it for good.
     toggle_pin(
-        &mut app.state,
+        &mut app.state.model,
         &ShelfEntry::Primitive(ComponentType::Resistor),
     );
     assert_eq!(
-        pinned_keys(&app.state),
+        pinned_keys(&app.state.model),
         vec![
             key(ComponentType::Capacitor),
             key(ComponentType::Ground),
@@ -1238,9 +1265,9 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
         ComponentType::Ground,
         ComponentType::Diode,
     ] {
-        toggle_pin(&mut app.state, &ShelfEntry::Primitive(kind));
+        toggle_pin(&mut app.state.model, &ShelfEntry::Primitive(kind));
     }
-    assert_eq!(pinned_keys(&app.state), Vec::<String>::new());
+    assert_eq!(pinned_keys(&app.state.model), Vec::<String>::new());
     assert_eq!(
         app.state.model.preferences.component_shelf().pinned,
         Some(Vec::new()),
@@ -1270,7 +1297,7 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
         "NMOS belongs to a band a fresh install folds: {text}"
     );
     toggle_pin(
-        &mut shelf.app.state,
+        &mut shelf.app.state.model,
         &ShelfEntry::Primitive(ComponentType::Nmos),
     );
     let (text, _) = shelf.frame(Vec::new());
@@ -1285,7 +1312,7 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
         ComponentType::Ground,
         ComponentType::Nmos,
     ] {
-        toggle_pin(&mut shelf.app.state, &ShelfEntry::Primitive(kind));
+        toggle_pin(&mut shelf.app.state.model, &ShelfEntry::Primitive(kind));
     }
     let (text, _) = shelf.frame(Vec::new());
     assert!(
@@ -1309,7 +1336,7 @@ fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
     let row = run_rect(&runs, "Memristor").expect("the Passives band paints a Memristor row");
     let entry = ShelfEntry::Primitive(ComponentType::Memristor);
     assert!(
-        !is_pinned(&shelf.app.state, &entry),
+        !is_pinned(&shelf.app.state.model, &entry),
         "the row starts unpinned"
     );
 
@@ -1323,7 +1350,7 @@ fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
     let pin = run_rect(&runs, "Pin to shelf").expect("the open menu paints its one command");
     let _ = shelf.frame(click_events(pin.center()));
     assert!(
-        is_pinned(&shelf.app.state, &entry),
+        is_pinned(&shelf.app.state.model, &entry),
         "the command pinned the row it was opened on"
     );
 
@@ -1341,7 +1368,7 @@ fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
     let unpin = run_rect(&runs, "Unpin").expect("the open menu paints its one command");
     let _ = shelf.frame(click_events(unpin.center()));
     assert!(
-        !is_pinned(&shelf.app.state, &entry),
+        !is_pinned(&shelf.app.state.model, &entry),
         "and the command takes the row back off the rail"
     );
 }
@@ -1442,7 +1469,7 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
         "the placement is listed: {text}"
     );
 
-    toggle_pin(&mut shelf.app.state, &entry);
+    toggle_pin(&mut shelf.app.state.model, &entry);
     let (text, _) = shelf.frame(Vec::new());
     assert!(
         !paints_line(&text, "Recent"),
@@ -1458,7 +1485,7 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
         "the history keeps it, so unpinning restores its position"
     );
 
-    toggle_pin(&mut shelf.app.state, &entry);
+    toggle_pin(&mut shelf.app.state.model, &entry);
     let (text, _) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "Recent") && paints_line(&text, "Diode"),
@@ -1560,17 +1587,20 @@ fn the_shelf_set_survives_the_restart_boundary_the_workbench_actually_crosses() 
     }
 
     let mut app = RSpiceApp::test_instance();
-    toggle_pin(&mut app.state, &ShelfEntry::Primitive(ComponentType::Diode));
     toggle_pin(
-        &mut app.state,
+        &mut app.state.model,
+        &ShelfEntry::Primitive(ComponentType::Diode),
+    );
+    toggle_pin(
+        &mut app.state.model,
         &ShelfEntry::Primitive(ComponentType::Resistor),
     );
     record_placement(
-        &mut app.state,
+        &mut app.state.model,
         &ShelfEntry::LibraryPart("1N4148".to_owned()),
     );
     record_placement(
-        &mut app.state,
+        &mut app.state.model,
         &ShelfEntry::Cell {
             library: "work".to_owned(),
             cell: "opamp".to_owned(),
@@ -1645,7 +1675,7 @@ fn a_band_row_arms_the_part_it_names_and_says_so() {
     // screen is the pinned one — the click cannot land on a catalog row by
     // accident.
     toggle_pin(
-        &mut shelf.app.state,
+        &mut shelf.app.state.model,
         &ShelfEntry::Primitive(ComponentType::Nmos),
     );
     let (_, runs) = shelf.frame(Vec::new());
@@ -1772,7 +1802,7 @@ fn the_history_outlasts_the_band_and_stops_at_its_own_cap() {
     let mut app = RSpiceApp::test_instance();
     let part = |index: usize| ShelfEntry::LibraryPart(format!("PART{index}"));
     for index in 0..RECENT_STORED + 4 {
-        record_placement(&mut app.state, &part(index));
+        record_placement(&mut app.state.model, &part(index));
     }
 
     let recent = app.state.model.preferences.component_shelf().recent;
@@ -1937,7 +1967,7 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
     let _ = shelf.frame(click_events(pin.center()));
     assert!(
         is_pinned(
-            &shelf.app.state,
+            &shelf.app.state.model,
             &ShelfEntry::Primitive(ComponentType::Memristor)
         ),
         "and the menu acts on the row the keyboard was on"

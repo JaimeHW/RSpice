@@ -3,18 +3,20 @@
 //! confirmation first.
 
 use super::*;
+use crate::services::model_hub::ModelHubService;
 
 /// Complete one click on a library-part row.
 pub(super) fn apply_library_part_row(
-    app: &mut RSpiceApp,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     row: LibraryPartRow,
     ctx: &egui::Context,
 ) {
     match row.action {
-        LibraryPartAction::Arm(placement) => arm_library_part(&mut app.state, *placement, ctx),
+        LibraryPartAction::Arm(placement) => arm_library_part(model, wb, *placement, ctx),
         LibraryPartAction::Review {
             pack_id, version, ..
-        } => request_library_part(app, row.part_id, pack_id, version),
+        } => request_library_part(wb, row.part_id, pack_id, version),
         // A refused row renders disabled, so its click never arrives.
         LibraryPartAction::Refused(_) => {}
     }
@@ -66,11 +68,12 @@ pub(in crate::workbench::design::navigator) enum LibraryPartAction {
 /// project has not adopted sit beside them and go through the pack
 /// confirmation instead.
 pub(in crate::workbench::design::navigator) fn library_part_rows(
-    app: &RSpiceApp,
+    model_hub: &ModelHubService,
+    model: &Model,
     query: &ShelfQuery,
 ) -> Vec<LibraryPartRow> {
-    let libraries = app.state.model.model_library_manager.libraries_sorted();
-    let index = app.model_hub.part_index(&libraries);
+    let libraries = model.model_library_manager.libraries_sorted();
+    let index = model_hub.part_index(&libraries);
     shelf_rows(&index, &libraries, query)
 }
 
@@ -229,7 +232,7 @@ fn holding_library<'a>(
 /// The shelf section for the parts the unified model index lists.
 pub(super) fn library_parts_section(
     ui: &mut Ui,
-    state: &mut AppState,
+    model: &mut Model,
     rows: &[LibraryPartRow],
 ) -> Option<LibraryPartRow> {
     if rows.is_empty() {
@@ -288,7 +291,7 @@ pub(super) fn library_parts_section(
         }
         shelf_pin_context_menu(
             &response,
-            state,
+            model,
             &ShelfEntry::LibraryPart(row.part_id.clone()),
         );
     }
@@ -301,12 +304,13 @@ pub(super) fn library_parts_section(
 /// held part, minus that workspace's operation receipt: this click happened
 /// on the canvas side, so the armed cursor is the whole story.
 fn arm_library_part(
-    state: &mut crate::workbench::app_state::AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     placement: PartPlacement,
     ctx: &egui::Context,
 ) {
-    let _ = crate::workbench::app::arm_pack_part(&mut state.model, placement);
-    finish_shelf_placement(state, ctx);
+    let _ = crate::workbench::app::arm_pack_part(model, placement);
+    finish_shelf_placement(wb, ctx);
 }
 
 /// Raises the pack confirmation for one shelf part.
@@ -316,8 +320,13 @@ fn arm_library_part(
 /// and those are exactly what that workspace is for. The placement is armed
 /// on the cursor when the install completes, so the round trip ends where the
 /// user started.
-fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, version: String) {
-    app.state.workbench.outbox.push(ConfirmPackAttach {
+fn request_library_part(
+    wb: &mut WorkbenchSession,
+    part_id: String,
+    pack_id: String,
+    version: String,
+) {
+    wb.outbox.push(ConfirmPackAttach {
         part_id,
         pack_id,
         version,

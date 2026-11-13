@@ -344,6 +344,7 @@ impl AppState {
     }
 
     /// [`NavigationParts::focus_workspace_breadcrumb`] for the session.
+    #[cfg(test)]
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
         self.navigation().focus_workspace_breadcrumb(index);
     }

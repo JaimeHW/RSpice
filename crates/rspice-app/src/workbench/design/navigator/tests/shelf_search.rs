@@ -7,9 +7,9 @@ use super::*;
 
 fn hits(app: &RSpiceApp, raw: &str) -> Vec<ShelfHit> {
     let query = ShelfQuery::new(raw);
-    let parts = library_part_rows(app, &query);
-    let cells = cell_candidates(&app.state);
-    shelf_hits(&app.state, &query, &parts, &cells)
+    let parts = library_part_rows(&app.model_hub, &app.state.model, &query);
+    let cells = cell_candidates(&app.state.model);
+    shelf_hits(&app.state.model, &query, &parts, &cells)
 }
 
 /// The queries a reader types for the parts they mean, each with the rows

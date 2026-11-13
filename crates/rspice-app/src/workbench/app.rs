@@ -165,7 +165,7 @@ pub(crate) use schematic::conductor_routes::{
 pub(crate) use schematic::edit_authority::{
     SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
 };
-pub(crate) use schematic::placement::{arm_library_cell_placement, arm_schematic_tool};
+pub(crate) use schematic::placement::arm_schematic_tool;
 
 pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,

@@ -13,6 +13,7 @@ use crate::state::{
 use crate::ui::widgets::TreeRow;
 use crate::workbench::RSpiceApp;
 use crate::workbench::docks::navigator::empty_navigator_row;
+use crate::workbench::slots::DesignState;
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
@@ -42,8 +43,8 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .auto_shrink([false, true])
         .show(ui, |ui| {
             pins_section(ui, app, &mut document, &metadata, &ports);
-            body_section(ui, app, &document);
-            attributes_section(ui, app, &metadata);
+            body_section(ui, &mut app.state.design, &document);
+            attributes_section(ui, &mut app.state.design, &metadata);
         });
 }
 
@@ -251,33 +252,25 @@ fn shape_label(shape: &SymbolShape) -> String {
     }
 }
 
-fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
+fn body_section(ui: &mut Ui, design: &mut DesignState, document: &SymbolDocument) {
     // A new symbol's empty list says so with the "0" on its header.
     section_header(ui, "Body geometry", Some(&document.body.len().to_string()));
     let mut select: Option<usize> = None;
     for (index, shape) in document.body.iter().enumerate() {
         let row = TreeRow::new(&shape_label(shape))
             .indent(1)
-            .selected(
-                app.state
-                    .design
-                    .symbol
-                    .editor
-                    .selection
-                    .shapes
-                    .contains(&index),
-            )
+            .selected(design.symbol.editor.selection.shapes.contains(&index))
             .show(ui);
         if row.response.clicked() {
             select = Some(index);
         }
     }
     if let Some(index) = select {
-        app.state.design.symbol.editor.select_shape(index);
+        design.symbol.editor.select_shape(index);
     }
 }
 
-fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorMetadata) {
+fn attributes_section(ui: &mut Ui, design: &mut DesignState, metadata: &SymbolEditorMetadata) {
     // No count: the list is the three keys `SymbolAttributeKind::ALL` holds,
     // in every symbol there is.
     section_header(ui, "Attributes", None);
@@ -297,18 +290,10 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
             .mono()
             .indent(1)
             .meta(meta)
-            .selected(
-                app.state
-                    .design
-                    .symbol
-                    .editor
-                    .selection
-                    .attributes
-                    .contains(&kind),
-            )
+            .selected(design.symbol.editor.selection.attributes.contains(&kind))
             .show(ui);
         if row.response.clicked() {
-            app.state.design.symbol.editor.select_attribute(kind);
+            design.symbol.editor.select_attribute(kind);
         }
     }
 }

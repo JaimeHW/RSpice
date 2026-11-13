@@ -24,7 +24,7 @@ use super::*;
 fn the_ports_rail_lists_the_interface_in_the_order_the_deck_has_it() {
     let app = interface_design();
 
-    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+    let rows = port_rows(&app.state.model, SheetScope::AllSheets, "");
 
     assert_eq!(
         rows.iter()
@@ -60,7 +60,7 @@ fn a_vector_pin_states_the_conductors_its_name_declares() {
         ));
     app.state.sync_active_schematic_to_workspace();
 
-    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+    let rows = port_rows(&app.state.model, SheetScope::AllSheets, "");
 
     assert_eq!(rows[0].meta(), "#1 \u{00b7} in \u{00b7} [8]");
     let tooltip = rows[0].tooltip();
@@ -103,7 +103,7 @@ fn a_port_name_declared_twice_is_marked_on_both_rows() {
         .push(port(407, "CLEAN", Some(3), PortDirection::Out, ""));
     app.state.sync_active_schematic_to_workspace();
 
-    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+    let rows = port_rows(&app.state.model, SheetScope::AllSheets, "");
     assert_eq!(
         rows.iter()
             .map(|row| (row.spec.name.as_str(), row.duplicated))
@@ -171,7 +171,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         .expect("the fixture source is placed");
 
     assert_eq!(
-        placed_object(&app.state, placed.component_id, &placed.reference),
+        placed_object(&app.state.model, placed.component_id, &placed.reference),
         Some(NavigatorObject::Component {
             id: 501,
             label: "VIN".to_owned(),
@@ -188,7 +188,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         .components
         .clear();
     assert_eq!(
-        placed_object(&app.state, placed.component_id, &placed.reference),
+        placed_object(&app.state.model, placed.component_id, &placed.reference),
         None
     );
 }
@@ -593,14 +593,14 @@ fn the_sheet_scope_leaves_the_rows_of_another_occurrence_alone() {
 
     for scope in SheetScope::OPTIONS {
         assert!(
-            derived_row_is_in_scope(&app.state, scope, Some(&elsewhere), 302),
+            derived_row_is_in_scope(&app.state.model, scope, Some(&elsewhere), 302),
             "{scope:?} has no authority over a row drawn in another occurrence"
         );
     }
     // 302 is the source the catalog assigned to the sheet the session is not
     // on, which is exactly the row the scope control does narrow.
     assert!(
-        !derived_row_is_in_scope(&app.state, SheetScope::ActiveSheet, None, 302),
+        !derived_row_is_in_scope(&app.state.model, SheetScope::ActiveSheet, None, 302),
         "a row of the sheet on screen is still the scope control's to narrow"
     );
 }
@@ -617,9 +617,15 @@ fn the_occurrence_in_front_of_the_reader_is_listed_once_and_from_its_buffer() {
     let occurrence = InstancePath::root()
         .child("XA")
         .expect("the fixture instance is nameable");
-    hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
+    hierarchy_tree::open_occurrence(
+        &mut app.state.design,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.runs,
+        &occurrence,
+    );
 
-    let rows = whole_design_sources(&app);
+    let rows = whole_design_sources(&app.state.model);
 
     assert_eq!(
         rows.iter()
@@ -634,7 +640,7 @@ fn the_occurrence_in_front_of_the_reader_is_listed_once_and_from_its_buffer() {
          keeps the row that reaches it"
     );
     assert_eq!(
-        row_is_elsewhere(&app.state, rows[0].occurrence.as_ref()),
+        row_is_elsewhere(&app.state.model, rows[0].occurrence.as_ref()),
         None,
         "the row of the occurrence being edited carries no path in front of it"
     );

@@ -338,14 +338,26 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
         .expect("the fixture instance is nameable");
     let leaf = instance.child("XLEAF").expect("the leaf is nameable");
 
-    hierarchy_tree::open_occurrence(&mut app.state, &leaf);
+    hierarchy_tree::open_occurrence(
+        &mut app.state.design,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.runs,
+        &leaf,
+    );
     assert_eq!(app.state.model.workspace.content.occurrence_path(), leaf);
     assert_eq!(
         app.state.model.workspace.content.active_view,
         CellViewRef::new("work", "leaf", "schematic")
     );
 
-    hierarchy_tree::open_occurrence(&mut app.state, &instance);
+    hierarchy_tree::open_occurrence(
+        &mut app.state.design,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.runs,
+        &instance,
+    );
     assert_eq!(
         app.state.model.workspace.content.occurrence_path(),
         instance
@@ -553,7 +565,13 @@ fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
         "the project's own master is openable"
     );
 
-    hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
+    hierarchy_tree::open_occurrence(
+        &mut app.state.design,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.runs,
+        &occurrence,
+    );
     assert_eq!(
         app.state.model.workspace.content.active_view, root_view,
         "descending into a device leaves the session where it stood"
@@ -686,7 +704,8 @@ fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
     app.state.design.show_component_shelf();
 
     find_navigator_object_references(
-        &mut app.state,
+        &mut app.state.design,
+        &mut app.state.workbench,
         &NavigatorObject::Net {
             name: "VOUT".to_owned(),
             wire_ids: Vec::new(),
@@ -871,12 +890,12 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         .editor
         .net_highlight
         .highlight_named_wires(&net.name, HashSet::new());
-    assert!(navigator_net_selection_matches(&app.state, &net));
+    assert!(navigator_net_selection_matches(&app.state.model, &net));
 
     let session = &mut app.state.model.schematic.session;
     session.editor.selection.select_only_component(10);
     session.editor.net_highlight.clear();
-    assert!(!navigator_net_selection_matches(&app.state, &net));
+    assert!(!navigator_net_selection_matches(&app.state.model, &net));
 }
 
 /// Give the workspace an active configuration that cannot resolve: its

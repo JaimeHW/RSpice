@@ -31,6 +31,10 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::slots::DesignState;
+use crate::workbench::slots::RunsState;
+use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState};
 
 use super::{
@@ -702,9 +706,15 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
 
 /// The Masters group: every cell view this design binds, library then cell
 /// then view, with the number of occurrences that reach each one.
-pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
-    let query = normalized(state.workbench.navigator_filter());
-    let Some(projection) = resolved_projection(ui, state, DesignNavigatorSection::Masters) else {
+pub(super) fn masters_section(
+    ui: &mut Ui,
+    design: &mut DesignState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    runs: &RunsState,
+) {
+    let query = normalized(wb.navigator_filter());
+    let Some(projection) = resolved_projection(ui, model, DesignNavigatorSection::Masters) else {
         return;
     };
     let masters = declared_masters(&projection, &query);
@@ -724,8 +734,8 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
         return;
     }
 
-    let workspace = state.workbench.workspace;
-    let mut tree = std::mem::take(state.workbench.navigator_trees.for_workspace(workspace));
+    let workspace = wb.workspace;
+    let mut tree = std::mem::take(wb.navigator_trees.for_workspace(workspace));
     let mut open = None;
     for (library, cells) in &masters {
         let library_node = NavigatorTreeNode::Master(library.to_ascii_lowercase());
@@ -803,7 +813,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                         mono: false,
                         meta: Some(meta),
                         alert: master.condition.is_some(),
-                        selected: state.model.workspace.content.active_view == reference,
+                        selected: model.workspace.content.active_view == reference,
                     },
                 );
                 // A master that did not resolve says why, and how much of the
@@ -823,7 +833,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                     });
                     continue;
                 }
-                if !authored_view(&state.model.library_manager, &reference) {
+                if !authored_view(&model.library_manager, &reference) {
                     response.row.on_hover_text(DEVICE_MASTER_HINT);
                     continue;
                 }
@@ -841,9 +851,11 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
             }
         }
     }
-    *state.workbench.navigator_trees.for_workspace(workspace) = tree;
+    *wb.navigator_trees.for_workspace(workspace) = tree;
     if let Some(reference) = open {
-        state.open_workspace_view(reference);
+        design
+            .navigation_parts(model, wb, runs)
+            .open_workspace_view(reference);
     }
 }
 
@@ -880,13 +892,14 @@ pub(super) fn occurrence_band_count(
 /// The Occurrences group: the design root and everything unfolded below it.
 pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(app.state.workbench.navigator_filter());
-    let Some(projection) = resolved_projection(ui, &app.state, DesignNavigatorSection::Occurrences)
+    let Some(projection) =
+        resolved_projection(ui, &app.state.model, DesignNavigatorSection::Occurrences)
     else {
         return;
     };
     let workspace = app.state.workbench.workspace;
     let mut tree = std::mem::take(app.state.workbench.navigator_trees.for_workspace(workspace));
-    reveal_canvas_selection(app, &mut tree);
+    reveal_canvas_selection(&app.state.model, &mut tree);
     let rows = occurrence_rows(
         &TreeSource {
             projection: projection.as_ref(),
@@ -1016,14 +1029,26 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
 
     if let Some((occurrence, sheet)) = enter_sheet {
-        open_occurrence(&mut app.state, &occurrence);
+        open_occurrence(
+            &mut app.state.design,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            &app.state.runs,
+            &occurrence,
+        );
         let state = &mut app.state;
         let outcome = state
             .model
             .activate_sheet(sheet, state.design.interaction.drag.let_go());
         let _ = state.workbench.report(outcome);
     } else if let Some(path) = descend {
-        open_occurrence(&mut app.state, &path);
+        open_occurrence(
+            &mut app.state.design,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            &app.state.runs,
+            &path,
+        );
     }
 }
 
@@ -1032,13 +1057,13 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// occurrences the run has no binding for.
 fn resolved_projection(
     ui: &mut Ui,
-    state: &crate::workbench::app_state::AppState,
+    model: &Model,
     section: DesignNavigatorSection,
 ) -> Option<Arc<DesignProjection>> {
-    match state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+    match model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     ) {
         Ok(projection) => Some(projection),
         Err(error) => {
@@ -1082,29 +1107,16 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
 ///
 /// One direction only: the canvas names an occurrence and the tree reveals it.
 /// The other direction is the row click, which descends.
-fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
-    let Some(component) = app
-        .state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
+fn reveal_canvas_selection(model: &Model, tree: &mut NavigatorTreeState) {
+    let Some(component) = model.schematic.session.editor.selection.single_component() else {
+        return;
+    };
+    let Some((instance, _)) =
+        crate::workbench::app::hierarchy_master_for_component(model, component)
     else {
         return;
     };
-    let Some((instance, _)) = app.state.hierarchy_master_for_component(component) else {
-        return;
-    };
-    let Ok(path) = app
-        .state
-        .model
-        .workspace
-        .content
-        .occurrence_path()
-        .child(&instance)
-    else {
+    let Ok(path) = model.workspace.content.occurrence_path().child(&instance) else {
         return;
     };
     if tree.selection() == Some(&path) {
@@ -1134,13 +1146,16 @@ fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
 /// and descending only the rest is what keeps a click on a sibling from
 /// re-entering every level it already stands on.
 pub(super) fn open_occurrence(
-    state: &mut crate::workbench::app_state::AppState,
+    design: &mut DesignState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    runs: &RunsState,
     path: &InstancePath,
 ) {
-    let Ok(projection) = state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+    let Ok(projection) = model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     ) else {
         return;
     };
@@ -1165,29 +1180,34 @@ pub(super) fn open_occurrence(
     }
     drop(projection);
     if let Some((_, terminal)) = steps.last()
-        && !authored_view(&state.model.library_manager, terminal)
+        && !authored_view(&model.library_manager, terminal)
     {
         return;
     }
 
-    let rooted_here = state
-        .model
+    let rooted_here = model
         .workspace
         .content
         .active_occurrence()
         .is_some_and(|occurrence| occurrence.root == root);
-    let current = state.model.workspace.content.occurrence_path();
+    let current = model.workspace.content.occurrence_path();
     let shared = if rooted_here {
         shared_prefix(&current, path)
     } else {
-        state.descend_into_instance(None, root);
+        design
+            .navigation_parts(model, wb, runs)
+            .descend_into_instance(None, root);
         0
     };
     if rooted_here && shared < current.depth() {
-        state.focus_workspace_breadcrumb(shared);
+        design
+            .navigation_parts(model, wb, runs)
+            .focus_workspace_breadcrumb(shared);
     }
     for (instance, master) in steps.into_iter().skip(shared) {
-        state.descend_into_instance(Some(instance), master);
+        design
+            .navigation_parts(model, wb, runs)
+            .descend_into_instance(Some(instance), master);
     }
 }
 
