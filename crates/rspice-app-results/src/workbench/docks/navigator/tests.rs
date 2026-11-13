@@ -3,5 +3,6 @@
 
 mod browser;
 mod drag;
+mod pictures;
 mod sets;
 mod tree;
