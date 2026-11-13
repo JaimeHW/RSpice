@@ -685,6 +685,10 @@ pub struct StripXyPlot {
     /// The span of the sweep drawn; the whole record when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sweep_range: Option<crate::visualization_document::AxisRange>,
+    /// Whether the span follows the window of the sweep the analysis'
+    /// strip shows, in place of `sweep_range`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follow_sweep_view: bool,
 }
 
 /// The unit the reader declared for one expression, which replaces the unit

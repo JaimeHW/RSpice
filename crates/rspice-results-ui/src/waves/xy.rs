@@ -17,6 +17,7 @@ use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::sample_at_with;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, SampleInterpolation, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
+use rspice_ui_kit::widgets::chip;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -436,11 +437,54 @@ fn crowded_member_alpha(members: usize) -> f32 {
 /// The side of the square a cursor point can be taken hold of in.
 const CURSOR_GRIP_SIDE: f32 = 14.0;
 
-/// The width a strip's header leaves for its "t <from> – <to>" field.
-pub(crate) const SWEEP_RANGE_FIELD_WIDTH: f32 = 176.0;
+/// Width of each end's text box in the sweep span field: nine characters
+/// at the field size, `1.2346 ms`, inside the box's margins.
+const SWEEP_RANGE_END_WIDTH: f32 = 80.0;
 
-/// Width of each end's text box in the sweep span field.
-const SWEEP_RANGE_END_WIDTH: f32 = 70.0;
+/// Space between the parts of the sweep span field.
+const SWEEP_RANGE_GAP: f32 = 4.0;
+
+/// The toggle after the span field that has it follow the analysis' strip.
+const FOLLOW: &str = "follow";
+
+/// The sweep the span field names: its axis' label, else "sweep".
+fn sweep_name(model: &StripModel) -> &str {
+    if model.x_label().is_empty() {
+        "sweep"
+    } else {
+        model.x_label()
+    }
+}
+
+/// The width a strip's header leaves for its "t <from> – <to>" field and the
+/// "follow" toggle after it: the sweep's name and the dash at the field size,
+/// both ends' boxes, and the toggle as the kit's chip sizes it.
+pub(crate) fn sweep_range_field_width(ui: &Ui, model: &StripModel) -> f32 {
+    let measure = |text: &str, font: egui::FontId| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
+                .size()
+                .x
+        })
+    };
+    let field = rspice_ui_kit::theme::field_mono();
+    let words = measure(sweep_name(model), field.clone()) + measure("\u{2013}", field);
+    let label = measure(
+        FOLLOW,
+        rspice_ui_kit::theme::mono(
+            rspice_ui_kit::tokens::FS_0,
+            rspice_ui_kit::theme::FontWeight::Regular,
+        ),
+    );
+    let tokens = Tokens::get(ui.ctx());
+    let toggle = (label + 18.0).max(if tokens.metrics.is_touch() {
+        tokens.metrics.touch_target()
+    } else {
+        0.0
+    });
+    words + 2.0 * SWEEP_RANGE_END_WIDTH + toggle + 4.0 * SWEEP_RANGE_GAP
+}
 
 /// `text` read as a sweep value: a number with an optional SPICE scale and
 /// unit, as a deck writes it (`250u`, `1.5ms`), spaces and a micro sign
@@ -480,28 +524,52 @@ pub(crate) fn typed_sweep_range(
     Ok((start > domain.0 || stop < domain.1).then_some((start, stop)))
 }
 
-/// The strip header's "t <from> – <to>" field: the span of the sweep the
-/// strip draws, the whole record by default. An end applies when the reader
-/// presses Enter or leaves it; one that does not read reverts. Returns the
-/// new span (`Some(None)` for the whole record) when the reader changed it.
+/// The span of the sweep `strip` draws, inside the record `domain`: while it
+/// follows, the window its analysis' strip shows; otherwise the span the
+/// reader typed; the whole record when neither narrows it.
+pub(crate) fn drawn_span(
+    results: &crate::session::ResultViewerState,
+    strip: &crate::session::XyStrip,
+    domain: (f64, f64),
+    pane_count: usize,
+) -> (f64, f64) {
+    let span = if strip.follow_view {
+        super::stack::shared_x_view(results, strip.analysis, pane_count)
+    } else {
+        strip.sweep_range
+    };
+    span.map(|(start, stop)| (start.max(domain.0), stop.min(domain.1)))
+        .filter(|(start, stop)| start < stop)
+        .unwrap_or(domain)
+}
+
+/// What the reader did in a strip header's span field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SpanEdit {
+    /// Typed a span (`None` for the whole record), which stops following.
+    Typed(Option<(f64, f64)>),
+    /// Turned following the analysis' strip on or off.
+    Follow(bool),
+}
+
+/// The strip header's "t <from> – <to>" field and its "follow" toggle: the
+/// span of the sweep the strip draws, the whole record by default, or while
+/// following, the window its analysis' strip shows. An end applies when the
+/// reader presses Enter or leaves it; one that does not read reverts.
 pub(crate) fn sweep_range_field(
     ui: &mut Ui,
     rect: egui::Rect,
     model: &StripModel,
-    strip: &crate::session::XyStrip,
+    (strip, span): (&crate::session::XyStrip, (f64, f64)),
     (identity, significant_digits, quantity): (
         u64,
         usize,
         rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ),
-) -> Option<Option<(f64, f64)>> {
+) -> Option<SpanEdit> {
     let domain = model.x_range?;
-    let (start, stop) = strip.sweep_range.unwrap_or(domain);
-    let sweep = if model.x_label().is_empty() {
-        "sweep"
-    } else {
-        model.x_label()
-    };
+    let (start, stop) = span;
+    let sweep = sweep_name(model);
     let t = Tokens::get(ui.ctx());
     // The ends and the words beside them read at the field size, as every
     // input does.
@@ -513,13 +581,14 @@ pub(crate) fn sweep_range_field(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.set_clip_rect(rect);
-            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().item_spacing.x = SWEEP_RANGE_GAP;
             ui.label(
                 egui::RichText::new(sweep)
                     .font(font.clone())
                     .color(t.color.text_dim),
             );
             let mut ends = [String::new(), String::new()];
+            let mut typed = false;
             let mut committed = false;
             for (end, value) in [(0usize, start), (1, stop)] {
                 if end == 1 {
@@ -543,7 +612,7 @@ pub(crate) fn sweep_range_field(
                     )
                     .on_hover_text(format!(
                         "The span of {sweep} the curves are drawn over. Enter applies; an \
-                         empty end is the record's end."
+                         empty end is the record's end. Typing a span stops following."
                     ));
                 if response.lost_focus() {
                     committed = true;
@@ -552,15 +621,26 @@ pub(crate) fn sweep_range_field(
                     ui.data_mut(|data| data.insert_temp(id, text.clone()));
                 } else {
                     ui.data_mut(|data| data.remove::<String>(id));
-                    text = shown;
+                    text = shown.clone();
                 }
+                typed |= text != shown;
                 ends[end] = text;
             }
             if committed
+                && typed
                 && let Ok(range) = typed_sweep_range((&ends[0], &ends[1]), domain)
-                && range != strip.sweep_range
+                && (strip.follow_view || range != strip.sweep_range)
             {
-                changed = Some(range);
+                changed = Some(SpanEdit::Typed(range));
+            }
+            if chip(ui, FOLLOW, strip.follow_view)
+                .on_hover_text(format!(
+                    "Follow the {sweep} window shown above: zooming that strip chooses the span \
+                     drawn here."
+                ))
+                .clicked()
+            {
+                changed = Some(SpanEdit::Follow(!strip.follow_view));
             }
         },
     );
@@ -631,9 +711,10 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
                 })
             })
     };
-    // The strip draws the span of the sweep its header names, the whole
-    // record unless the reader narrowed it.
-    let window_range = strip.sweep_range.unwrap_or(frame.x_domain);
+    // The strip draws the span of the sweep its header names: the whole
+    // record unless the reader narrowed it, or while it follows, the window
+    // its analysis' strip shows.
+    let window_range = drawn_span(host.session(), &strip, frame.x_domain, frame.pane_count);
     let mut refusals: Vec<String> = Vec::new();
     let mut curves: Vec<Curve> = Vec::new();
     let trace_width = frame.options.trace_width;

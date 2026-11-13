@@ -389,6 +389,7 @@ impl ResultsState {
                             rspice_results::visualization_document::AxisRange::new(minimum, maximum)
                                 .ok()
                         }),
+                        follow_sweep_view: strip.follow_view,
                     })
                     .collect()
             },

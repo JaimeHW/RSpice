@@ -1082,13 +1082,14 @@ fn show_xy_strip(
     let t = Tokens::get(ui.ctx());
     let identity = super::stable_hash(&(strip.analysis, &strip.unit, &strip.abscissa));
     let subtitle = format!("vs {}", super::xy::abscissa_label(&strip.abscissa));
+    let field_width = super::xy::sweep_range_field_width(ui, model);
     let header = StripHeader::new(&model.kind_tag, &subtitle, &[])
         .id_salt(("xy-strip", identity))
         .incomplete(model.incomplete)
         .maximizable(false)
         .closable(options.pane_chrome)
         .zoomed(strip.x_view.is_some() || strip.y_view.is_some())
-        .field(super::xy::SWEEP_RANGE_FIELD_WIDTH)
+        .field(field_width)
         .pane_actions(options.pane_chrome)
         .show(ui);
     if ui
@@ -1102,12 +1103,16 @@ fn show_xy_strip(
     if header.close_clicked {
         return true;
     }
-    if let Some(rect) = header.field_rect
-        && let Some(range) = super::xy::sweep_range_field(
+    let panes = model.unit_panes();
+    let span = model
+        .x_range
+        .map(|domain| super::xy::drawn_span(host.session(), &strip, domain, panes.len()));
+    if let (Some(rect), Some(span)) = (header.field_rect, span)
+        && let Some(edit) = super::xy::sweep_range_field(
             ui,
             rect,
             model,
-            &strip,
+            (&strip, span),
             (
                 identity,
                 usize::from(options.readout.displayed_significant_digits().get()),
@@ -1116,10 +1121,23 @@ fn show_xy_strip(
         )
         && let Some(held) = host.session_mut().xy_strips.get_mut(index)
     {
-        held.sweep_range = range;
+        match edit {
+            super::xy::SpanEdit::Typed(range) => {
+                held.sweep_range = range;
+                held.follow_view = false;
+            }
+            super::xy::SpanEdit::Follow(true) => held.follow_view = true,
+            // Let go, the strip keeps the span it was following.
+            super::xy::SpanEdit::Follow(false) => {
+                held.follow_view = false;
+                held.sweep_range = (Some(span) != model.x_range).then_some(span);
+            }
+        }
         // A range read on one span is no view of another.
-        held.x_view = None;
-        held.y_view = None;
+        if edit != super::xy::SpanEdit::Follow(false) {
+            held.x_view = None;
+            held.y_view = None;
+        }
     }
     if header.fit_clicked
         && let Some(held) = host.session_mut().xy_strips.get_mut(index)
@@ -1131,7 +1149,6 @@ fn show_xy_strip(
         well_hint(ui, "No data");
         return false;
     };
-    let panes = model.unit_panes();
     let Some(ordinal) = panes.iter().position(|pane| pane.unit == strip.unit) else {
         well_hint(
             ui,

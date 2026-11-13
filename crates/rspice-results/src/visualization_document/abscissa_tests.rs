@@ -49,6 +49,7 @@ fn plot(pane: PaneId, unit: &str, abscissa: Abscissa) -> XyPlot {
         unit: unit.to_owned(),
         abscissa,
         sweep_range: None,
+        follow_sweep_view: false,
     }
 }
 
@@ -73,6 +74,7 @@ fn a_plot_against_a_signal_and_its_sweep_span_survive_a_save_and_reload() {
     };
     let settled = XyPlot {
         sweep_range: Some(AxisRange::new(1.0e-6, 2.0e-6).unwrap()),
+        follow_sweep_view: true,
         ..plot(pane, "A", expression.clone())
     };
     document
@@ -95,6 +97,12 @@ fn a_plot_against_a_signal_and_its_sweep_span_survive_a_save_and_reload() {
     assert_eq!(
         saved["xy_plots"][1]["sweep_range"],
         serde_json::json!({"minimum": 1.0e-6, "maximum": 2.0e-6})
+    );
+    // Following the pane's window is written only when on.
+    assert!(saved["xy_plots"][0].get("follow_sweep_view").is_none());
+    assert_eq!(
+        saved["xy_plots"][1]["follow_sweep_view"],
+        serde_json::json!(true)
     );
     let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
     assert_eq!(reloaded, document);

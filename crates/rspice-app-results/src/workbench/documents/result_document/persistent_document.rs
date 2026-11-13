@@ -1087,6 +1087,7 @@ pub fn project_pane_presentation(
                     plot.unit.clone(),
                     plot.abscissa.clone(),
                     plot.sweep_range.map(|range| (range.minimum, range.maximum)),
+                    plot.follow_sweep_view,
                 )
             })
             .collect();
@@ -1339,6 +1340,7 @@ pub(super) fn xy_plots_of(pane_id: PaneId, strips: &[XyStrip]) -> Vec<XyPlot> {
             sweep_range: strip
                 .sweep_range
                 .and_then(|(minimum, maximum)| AxisRange::new(minimum, maximum).ok()),
+            follow_sweep_view: strip.follow_view,
         })
         .collect()
 }

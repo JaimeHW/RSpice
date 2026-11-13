@@ -1117,6 +1117,7 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
                         && range.minimum < range.maximum
                 })
                 .map(|range| (range.minimum, range.maximum));
+            strip.follow_view = plot.follow_sweep_view;
             strip
         })
         .collect();

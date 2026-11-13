@@ -281,6 +281,10 @@ pub struct XyStrip {
     pub abscissa: rspice_results::visualization_document::Abscissa,
     /// The span of the sweep drawn; the whole record when `None`.
     pub sweep_range: Option<(f64, f64)>,
+    /// Whether the span follows the window of the sweep its analysis' strip
+    /// shows, as a scope's XY display follows its zoom, in place of
+    /// `sweep_range`.
+    pub follow_view: bool,
     /// The abscissa range shown, when the reader zoomed or panned it.
     pub x_view: Option<(f64, f64)>,
     /// The ordinate range shown, when the reader zoomed or panned it.
@@ -298,6 +302,7 @@ impl XyStrip {
             unit: unit.into(),
             abscissa,
             sweep_range: None,
+            follow_view: false,
             x_view: None,
             y_view: None,
         }
@@ -320,11 +325,13 @@ impl XyStrip {
 pub type XyStrips = Vec<XyStrip>;
 
 /// A strip a document pane keeps drawn against a signal or an expression:
-/// its unit, its abscissa and its sweep span.
+/// its unit, its abscissa, its sweep span, and whether the span follows the
+/// analysis' strip.
 pub type DocumentXyPlot = (
     String,
     rspice_results::visualization_document::Abscissa,
     Option<(f64, f64)>,
+    bool,
 );
 
 /// The quick view's own expressions and X scales, set aside while a result
@@ -997,7 +1004,7 @@ impl ResultViewerState {
     }
 
     /// Show the strips a document pane keeps drawn against a signal or an
-    /// expression, as (unit, abscissa, sweep span). The quick view's own
+    /// expression. The quick view's own
     /// strips are set aside the first time and come back when the document
     /// is left, as its expressions do. A strip the pane keeps keeps the
     /// zoom the reader gave it.
@@ -1016,6 +1023,7 @@ impl ResultViewerState {
                     strip.unit.clone(),
                     strip.abscissa.clone(),
                     strip.sweep_range,
+                    strip.follow_view,
                 )
             })
             .collect();
@@ -1029,13 +1037,14 @@ impl ResultViewerState {
             .cloned()
             .collect();
         self.xy_strips.retain(|strip| strip.analysis != analysis);
-        for (unit, abscissa, sweep_range) in plots {
+        for (unit, abscissa, sweep_range, follow_view) in plots {
             let mut strip = previous
                 .iter()
                 .find(|strip| strip.is(analysis, &unit, &abscissa))
                 .cloned()
                 .unwrap_or_else(|| XyStrip::new(analysis, unit, abscissa));
             strip.sweep_range = sweep_range;
+            strip.follow_view = follow_view;
             self.xy_strips.push(strip);
         }
     }

@@ -1752,6 +1752,10 @@ pub struct XyPlot {
     /// absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sweep_range: Option<AxisRange>,
+    /// Whether the span follows the window of the sweep the pane shows, as
+    /// a scope's XY display follows its zoom, in place of `sweep_range`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follow_sweep_view: bool,
 }
 
 impl XyPlot {

@@ -199,6 +199,7 @@ mod tests {
                 name: "V(in)".to_owned(),
             },
             sweep_range: None,
+            follow_sweep_view: false,
         };
         let presentation = |plot: &StripXyPlot| ResultPresentation {
             xy_plots: vec![plot.clone()],
@@ -215,6 +216,14 @@ mod tests {
         assert_ne!(
             digest(&results, &[], &[], &presentation(&narrowed)).unwrap(),
             whole
+        );
+        let following = StripXyPlot {
+            follow_sweep_view: true,
+            ..narrowed.clone()
+        };
+        assert_ne!(
+            digest(&results, &[], &[], &presentation(&following)).unwrap(),
+            digest(&results, &[], &[], &presentation(&narrowed)).unwrap()
         );
     }
 }

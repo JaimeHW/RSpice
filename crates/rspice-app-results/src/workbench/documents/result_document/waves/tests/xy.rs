@@ -349,22 +349,44 @@ fn the_span_field_clips_the_curve_to_the_time_it_names() {
         "a whole period spans ±1 V"
     );
 
-    // The field's end is the rightmost text of the strip's header row.
-    let header_row = |painted: &[(String, egui::Rect)]| {
-        let mut row: Vec<(String, egui::Rect)> = painted
-            .iter()
-            .filter(|(_, rect)| (rect.center().y - (top + 7.0)).abs() < 10.0)
-            .cloned()
-            .collect();
-        row.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
-        row
-    };
-    let row = header_row(&painted);
-    let end = row
-        .last()
+    let row = header_row(&painted, top);
+    let end = span_end(&row)
         .map(|(_, rect)| rect.center())
         .unwrap_or_else(|| panic!("the header shows the record's end: {row:?}"));
-    click(&ctx, &mut state, end, egui::PointerButton::Primary);
+    type_into(&ctx, &mut state, end, "250u");
+    assert_eq!(strips(&state)[0].sweep_range, Some((0.0, 250.0e-6)));
+    let painted = painted_texts(&ctx, &mut state);
+    assert_eq!(negative_ticks(&painted, top), 0, "{painted:?}");
+    let row = header_row(&painted, top);
+    assert!(
+        span_end(&row).is_some_and(|(text, _)| text.starts_with("250")),
+        "the field reads the span it draws: {row:?}"
+    );
+}
+
+/// The texts of the header row of the strip whose top is `top`, left to
+/// right.
+fn header_row(painted: &[(String, egui::Rect)], top: f32) -> Vec<(String, egui::Rect)> {
+    let mut row: Vec<(String, egui::Rect)> = painted
+        .iter()
+        .filter(|(_, rect)| (rect.center().y - (top + 7.0)).abs() < 10.0)
+        .cloned()
+        .collect();
+    row.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    row
+}
+
+/// The span field's end in a header row: the last text before the "follow"
+/// toggle.
+fn span_end(row: &[(String, egui::Rect)]) -> Option<&(String, egui::Rect)> {
+    let follow = row.iter().position(|(text, _)| text == "follow")?;
+    row[..follow].last()
+}
+
+/// Click the text box at `at`, replace what it holds with `text` and press
+/// Enter.
+fn type_into(ctx: &egui::Context, state: &mut ResultsTestHost, at: egui::Pos2, text: &str) {
+    click(ctx, state, at, egui::PointerButton::Primary);
     let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
         key,
         physical_key: None,
@@ -373,23 +395,83 @@ fn the_span_field_clips_the_curve_to_the_time_it_names() {
         modifiers,
     };
     frame(
-        &ctx,
-        &mut state,
+        ctx,
+        state,
         vec![key(egui::Key::A, egui::Modifiers::COMMAND)],
     );
-    frame(&ctx, &mut state, vec![egui::Event::Text("250u".to_owned())]);
+    frame(ctx, state, vec![egui::Event::Text(text.to_owned())]);
     frame(
-        &ctx,
-        &mut state,
+        ctx,
+        state,
         vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
     );
-    assert_eq!(strips(&state)[0].sweep_range, Some((0.0, 250.0e-6)));
+}
+
+/// Following, the strip draws the window the time strip shows: zoomed to the
+/// first quarter period, where V(a) never goes negative, the strip draws that
+/// quarter and its field reads it. Typing a span stops following, and the
+/// strip draws the span typed.
+#[test]
+fn a_following_strip_draws_the_window_the_time_strip_shows() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    let negative_ticks = |painted: &[(String, egui::Rect)], top: f32| {
+        painted
+            .iter()
+            .filter(|(text, rect)| rect.top() > top && tick(text).is_some_and(|value| value < 0.0))
+            .count()
+    };
+    let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(a)");
+    let row = header_row(&painted, top);
+    let follow = row
+        .iter()
+        .find(|(text, _)| text == "follow")
+        .map(|(_, rect)| rect.center())
+        .unwrap_or_else(|| panic!("the header offers to follow: {row:?}"));
+    assert!(
+        !strips(&state)[0].follow_view,
+        "a new strip does not follow"
+    );
+    click(&ctx, &mut state, follow, egui::PointerButton::Primary);
+    assert!(strips(&state)[0].follow_view);
+
+    let (analysis, pane_count) = {
+        let models = super::lanes::strip(&mut state);
+        (models[0].analysis_key, models[0].unit_panes().len())
+    };
+    rspice_results_ui::waves::stack::set_shared_x_view(
+        &mut state.results.results.session,
+        analysis,
+        pane_count,
+        Some((0.0, 250.0e-6)),
+    );
     let painted = painted_texts(&ctx, &mut state);
     assert_eq!(negative_ticks(&painted, top), 0, "{painted:?}");
-    let row = header_row(&painted);
+    let row = header_row(&painted, top);
     assert!(
-        row.last().is_some_and(|(text, _)| text.starts_with("250")),
-        "the field reads the span it draws: {row:?}"
+        span_end(&row).is_some_and(|(text, _)| text.starts_with("250")),
+        "the field reads the window it follows: {row:?}"
+    );
+    assert_eq!(
+        strips(&state)[0].sweep_range,
+        None,
+        "following keeps no span of its own"
+    );
+
+    // Typed, the span is the strip's own again and it follows no longer.
+    let end = span_end(&row).map(|(_, rect)| rect.center()).unwrap();
+    type_into(&ctx, &mut state, end, "500u");
+    assert!(
+        !strips(&state)[0].follow_view,
+        "typing a span stops following"
+    );
+    assert_eq!(strips(&state)[0].sweep_range, Some((0.0, 500.0e-6)));
+    let painted = painted_texts(&ctx, &mut state);
+    assert!(
+        negative_ticks(&painted, top) > 0,
+        "half a period spans ±1 V"
     );
 }
 
@@ -620,6 +702,7 @@ fn the_project_keeps_a_strip_against_a_signal_and_its_span() {
             sweep_range: Some(
                 rspice_results::visualization_document::AxisRange::new(0.25e-3, 0.75e-3).unwrap()
             ),
+            follow_sweep_view: false,
         }]
     );
     state.results.results.session.xy_strips.clear();
@@ -632,9 +715,10 @@ fn the_project_keeps_a_strip_against_a_signal_and_its_span() {
     assert_eq!(strips(&state), [expected]);
 }
 
-/// A saved view keeps its strip against a signal and the strip's span,
-/// draws them when shown, keeps a change made inside it, and hands the
-/// quick view its own strip back when it is left.
+/// A saved view keeps its strip against a signal, the strip's span and
+/// whether it follows the time strip, draws them when shown, keeps a change
+/// made inside it, and hands the quick view its own strip back when it is
+/// left.
 #[test]
 fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
     use super::super::super::persistent_document::{
@@ -659,18 +743,25 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
                     plot.unit.clone(),
                     plot.abscissa.text().to_owned(),
                     plot.sweep_range.map(|range| (range.minimum, range.maximum)),
+                    plot.follow_sweep_view,
                 )
             })
             .collect::<Vec<_>>()
     };
     assert_eq!(
         kept(&state),
-        [("V".to_owned(), "V(a)".to_owned(), Some((0.0, 0.5e-3)))]
+        [(
+            "V".to_owned(),
+            "V(a)".to_owned(),
+            Some((0.0, 0.5e-3)),
+            false
+        )]
     );
     document_frame(&mut state, document_id);
 
     // Inside the view's frame, between its projection and its capture, the
-    // reader plots against V(b) instead, over the second half period.
+    // reader plots against V(b) instead, over the second half period, and
+    // has the strip follow the time strip's window.
     let pane = projection(state.results_reads(), document_id)
         .expect("the document projects")
         .pages[0]
@@ -684,11 +775,17 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
         let strip = &mut state.results.results.session.xy_strips[0];
         strip.abscissa = signal("V(b)");
         strip.sweep_range = Some((0.5e-3, 1.0e-3));
+        strip.follow_view = true;
     }
     capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
     assert_eq!(
         kept(&state),
-        [("V".to_owned(), "V(b)".to_owned(), Some((0.5e-3, 1.0e-3)))]
+        [(
+            "V".to_owned(),
+            "V(b)".to_owned(),
+            Some((0.5e-3, 1.0e-3)),
+            true
+        )]
     );
     let reloaded: rspice_results::visualization_document::VisualizationDocument =
         serde_json::from_str(
@@ -704,22 +801,32 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
         )
         .unwrap();
     assert_eq!(reloaded.xy_plots()[0].abscissa, signal("V(b)"));
+    assert!(reloaded.xy_plots()[0].follow_sweep_view);
 
     state.results.results.session.leave_persistent_document();
     let held = |state: &ResultsTestHost| {
         strips(state)
             .iter()
-            .map(|strip| (strip.abscissa.text().to_owned(), strip.sweep_range))
+            .map(|strip| {
+                (
+                    strip.abscissa.text().to_owned(),
+                    strip.sweep_range,
+                    strip.follow_view,
+                )
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(
         held(&state),
-        [("V(a)".to_owned(), Some((0.0, 0.5e-3)))],
+        [("V(a)".to_owned(), Some((0.0, 0.5e-3)), false)],
         "the quick view has its strip back"
     );
     // Shown again, the view draws its own.
     document_frame(&mut state, document_id);
-    assert_eq!(held(&state), [("V(b)".to_owned(), Some((0.5e-3, 1.0e-3)))]);
+    assert_eq!(
+        held(&state),
+        [("V(b)".to_owned(), Some((0.5e-3, 1.0e-3)), true)]
+    );
     // The strip closed inside the view, the view forgets it.
     project_pane_presentation(&mut state.results_parts(), &pane, viewer)
         .expect("the pane projects onto its strip");
