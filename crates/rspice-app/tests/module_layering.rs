@@ -62,10 +62,10 @@ const LAYERS: &[(&str, u32)] = &[
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
     // compiles as `rspice-app-workbench`, and the sheets, settings, results,
-    // hardcopy, cloud and models features as `rspice-app-sheets`,
+    // hardcopy, cloud, models and simulate features as `rspice-app-sheets`,
     // `rspice-app-settings`, `rspice-app-results`, `rspice-app-hardcopy`,
-    // `rspice-app-cloud` and `rspice-app-models`, inside `workbench`, where the
-    // interior order below ranks them.
+    // `rspice-app-cloud`, `rspice-app-models` and `rspice-app-simulate`, inside
+    // `workbench`, where the interior order below ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -350,8 +350,8 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// ten split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 11] = [
+/// eleven split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 12] = [
     "rspice-app",
     "rspice-app-cloud",
     "rspice-app-hardcopy",
@@ -361,6 +361,7 @@ const KNOWN_APP_CRATES: [&str; 11] = [
     "rspice-app-services",
     "rspice-app-settings",
     "rspice-app-sheets",
+    "rspice-app-simulate",
     "rspice-app-state",
     "rspice-app-workbench",
 ];
@@ -1061,12 +1062,12 @@ fn workbench_dir() -> PathBuf {
 }
 
 /// The workbench's framework modules compile as `rspice-app-workbench`, and the
-/// sheets, settings, results, hardcopy, cloud and models features as
+/// sheets, settings, results, hardcopy, cloud, models and simulate features as
 /// `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
-/// `rspice-app-hardcopy`, `rspice-app-cloud` and `rspice-app-models`, at the
-/// paths they had here, and keep their rank in the same order: each crate's
-/// `src/workbench` is scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 8] {
+/// `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models` and
+/// `rspice-app-simulate`, at the paths they had here, and keep their rank in
+/// the same order: each crate's `src/workbench` is scanned beside this crate's.
+fn workbench_roots() -> [PathBuf; 9] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
@@ -1076,6 +1077,7 @@ fn workbench_roots() -> [PathBuf; 8] {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench"),
     ]
 }
 
@@ -2197,6 +2199,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-hardcopy/src",
     "rspice-app-cloud/src",
     "rspice-app-models/src",
+    "rspice-app-simulate/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
@@ -2234,6 +2237,20 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-models/src/workbench/surfaces/models/manager/qualification_page.rs::closure_ledger",
     "rspice-app-models/src/workbench/surfaces/models/manager/symbols.rs::detail_table_header",
     "rspice-app-results/src/workbench/docks/inspector/results.rs::trace_colour_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate.rs::analysis_group_header",
+    "rspice-app-simulate/src/workbench/surfaces/simulate.rs::paint_control_row_label",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/analysis_form.rs::named_periodic_source_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/analysis_form.rs::property_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/analysis_form/envelope.rs::envelope_choice_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/catalog.rs::analysis_catalog_window",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/page_kit.rs::card_head_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/page_runset.rs::value_chip",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/page_solver.rs::ladder_stage",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::detail_row",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::section_head",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::table",
+    "rspice-app-simulate/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
+    "rspice-app-simulate/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
     "rspice-app-workbench/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
@@ -2247,21 +2264,7 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/surfaces/project/landing.rs::compact_recent_header",
     "rspice-app/src/workbench/surfaces/project/landing.rs::compact_section_header",
     "rspice-app/src/workbench/surfaces/project/overview.rs::status_rows",
-    "rspice-app/src/workbench/surfaces/simulate.rs::analysis_group_header",
-    "rspice-app/src/workbench/surfaces/simulate.rs::paint_control_row_label",
-    "rspice-app/src/workbench/surfaces/simulate/analysis_form.rs::named_periodic_source_row",
-    "rspice-app/src/workbench/surfaces/simulate/analysis_form.rs::property_row",
-    "rspice-app/src/workbench/surfaces/simulate/analysis_form/envelope.rs::envelope_choice_row",
-    "rspice-app/src/workbench/surfaces/simulate/catalog.rs::analysis_catalog_window",
-    "rspice-app/src/workbench/surfaces/simulate/page_kit.rs::card_head_row",
-    "rspice-app/src/workbench/surfaces/simulate/page_runset.rs::value_chip",
-    "rspice-app/src/workbench/surfaces/simulate/page_solver.rs::ladder_stage",
-    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::detail_row",
-    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::section_head",
-    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::table",
-    "rspice-app/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
     "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
-    "rspice-app/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",

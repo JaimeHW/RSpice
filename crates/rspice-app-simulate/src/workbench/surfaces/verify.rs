@@ -12,10 +12,10 @@ mod histogram;
 mod optimization;
 mod regression_contract;
 mod regression_panel;
-pub(crate) mod safety;
-pub(crate) mod table;
-pub(crate) mod toolbar;
-pub(crate) mod tuning;
+pub mod safety;
+pub mod table;
+pub mod toolbar;
+pub mod tuning;
 mod yield_page;
 
 use egui::{ScrollArea, Ui};
@@ -641,7 +641,7 @@ impl SimulateFeature {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod raster;
+#[cfg(any(test, feature = "test-support"))]
+pub mod raster;
 #[cfg(test)]
 pub(crate) mod tests;

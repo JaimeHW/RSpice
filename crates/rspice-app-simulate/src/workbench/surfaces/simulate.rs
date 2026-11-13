@@ -2,27 +2,27 @@
 
 mod advanced_options;
 mod analysis_form;
-pub(crate) mod catalog;
-pub(crate) mod checkpoint_exchange;
-pub(crate) mod lifecycle;
+pub mod catalog;
+pub mod checkpoint_exchange;
+pub mod lifecycle;
 mod output_evidence;
 mod page_excitations;
-pub(crate) mod page_kit;
-pub(crate) mod page_models;
-pub(crate) mod page_outputs;
-pub(crate) mod page_runset;
-pub(crate) mod page_save;
+pub mod page_kit;
+pub mod page_models;
+pub mod page_outputs;
+pub mod page_runset;
+pub mod page_save;
 mod page_solver;
-pub(crate) mod page_specs;
+pub mod page_specs;
 mod page_variables;
-pub(crate) mod pages;
-pub(crate) mod participation;
+pub mod pages;
+pub mod participation;
 mod plan_issue_wording;
-pub(crate) mod plan_manager;
-pub(crate) mod transient_checkpoint_exchange;
-pub(crate) mod variable_import;
-pub(crate) mod workflows;
-pub(crate) mod workload;
+pub mod plan_manager;
+pub mod transient_checkpoint_exchange;
+pub mod variable_import;
+pub mod workflows;
+pub mod workload;
 
 use catalog::*;
 use lifecycle::*;
@@ -2442,10 +2442,10 @@ pub(crate) fn measurement_in_output_dataset_for_test(
     output_evidence::measurement_in_output_dataset(run, spec).map(|evidence| evidence.value)
 }
 
-#[cfg(test)]
-pub(crate) mod fixtures;
-#[cfg(test)]
-pub(crate) mod page_raster;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod page_raster;
 #[cfg(test)]
 pub(crate) mod page_tests;
 #[cfg(test)]

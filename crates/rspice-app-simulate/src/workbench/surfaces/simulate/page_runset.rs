@@ -29,7 +29,7 @@ use super::page_kit::{
     note_line, pressable_note_line, rule_row,
 };
 
-pub(crate) mod toolbar;
+pub mod toolbar;
 
 /// Rows shown before the point table truncates. A composed run space can be
 /// large; a table that listed all of it would be a scrolling wall rather than a
@@ -1979,7 +1979,7 @@ pub fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, String> {
 /// resolving either expands the declared space. This is that same function with
 /// the two resolutions done for a caller that is not drawing a frame. Not a
 /// second answer — a second way of asking for the one below.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn worst_point_task_cost(model: &Model) -> Option<usize> {
     let participation = super::participation::PlanParticipation::resolve(model);
     let workload = super::workload::PlanWorkload::resolve_with(model, &participation).ok()?;
@@ -2004,7 +2004,7 @@ fn worst_point_task_cost_of(
 /// Test-only, for the same reason as [`worst_point_task_cost`]: the route
 /// prices the workload once at its entry and hands it to
 /// [`plan_run_set_validation_from`], which is the one that runs on a frame.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn plan_run_set_validation(model: &Model) -> RunSetValidation {
     plan_run_set_validation_from(model, &super::workload::PlanWorkload::resolve(model))
 }

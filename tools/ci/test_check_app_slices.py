@@ -34,6 +34,7 @@ def measure_tree(
     feature_hardcopy: dict[str, str] | None = None,
     feature_cloud: dict[str, str] | None = None,
     feature_models: dict[str, str] | None = None,
+    feature_simulate: dict[str, str] | None = None,
 ):
     with tempfile.TemporaryDirectory() as directory:
         trees = {
@@ -48,6 +49,7 @@ def measure_tree(
             "hardcopy": feature_hardcopy or {},
             "cloud": feature_cloud or {},
             "models": feature_models or {},
+            "simulate": feature_simulate or {},
         }
         for tree, contents in trees.items():
             for path, text in contents.items():
@@ -67,6 +69,7 @@ def measure_tree(
                 ("hardcopy", "hardcopy", feature_hardcopy),
                 ("cloud", "cloud", feature_cloud),
                 ("models", "models", feature_models),
+                ("simulate", "simulate", feature_simulate),
             )
             if contents
         }
@@ -492,6 +495,32 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
         values, _, stats = measure_tree(app, state, feature_models=models)
         # The models crate's definition takes its name from results; the glob import remains,
+        # and the crate's files are not measured.
+        self.assertEqual(values["feature->feature"], {"simulate->results": 1})
+        self.assertEqual(stats["files"], 4)
+
+    def test_the_simulate_crate_lends_its_names_to_its_slice(self) -> None:
+        app = {
+            "lib.rs": "pub use rspice_app_state::state;\nmod analysis;\nmod workbench;\n",
+            "workbench.rs": "pub use rspice_app_simulate::workbench::simulate;\nmod surfaces;\n",
+            "analysis.rs": "pub fn strip_label() {}\npub fn binding_label() {}\n",
+            "workbench/surfaces/verify.rs": (
+                "use crate::analysis::*;\n"
+                "pub fn show() {\n"
+                "    strip_label();\n"
+                "    binding_label();\n"
+                "}\n"
+            ),
+        }
+        state = {"lib.rs": "pub mod state;\n", "state.rs": "pub fn strip_label() {}\n"}
+        simulate = {
+            "lib.rs": "pub mod workbench;\n",
+            "workbench.rs": "pub mod simulate;\n",
+            "workbench/simulate.rs": "pub fn binding_label() {}\n",
+        }
+        self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
+        values, _, stats = measure_tree(app, state, feature_simulate=simulate)
+        # The simulate crate's definition takes its name from results; the glob import remains,
         # and the crate's files are not measured.
         self.assertEqual(values["feature->feature"], {"simulate->results": 1})
         self.assertEqual(stats["files"], 4)

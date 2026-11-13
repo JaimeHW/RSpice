@@ -6,6 +6,7 @@
 //! distinction from the canonical surfaces, which do own the route.
 
 pub(crate) mod examples_browser;
-pub(crate) mod jobs_manager;
+#[cfg(test)]
+pub(crate) use rspice_app_simulate::workbench::tools::jobs_manager;
 pub(crate) use rspice_app_workbench::workbench::tools::notification_center;
 pub(crate) mod project_launcher;

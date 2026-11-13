@@ -731,7 +731,7 @@ pub(super) fn tuning(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         egui::pos2(left + width, top + height),
     );
     let _ = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         super::raster::probe(ui, "tuning.variables", variables_rect);
         super::raster::probe(ui, "tuning.response", plot_rect);

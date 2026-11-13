@@ -176,7 +176,7 @@ pub(super) fn paint_histogram(
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "histogram", rect);
     let total = model.counts.iter().sum::<usize>();
     let failing = model

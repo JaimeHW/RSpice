@@ -350,7 +350,7 @@ impl PlanWorkload {
     /// `forecast.cost_ms`. This is the other way of folding the same queue,
     /// and `every_surface_prices_the_same_queue_in_the_same_currency` is what
     /// holds the two to one answer.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn total_duration(&self) -> Result<String, String> {
         self.total_tasks().map(|tasks| {
             run_set::format_duration_ms(run_set::modelled_cost_ms(tasks, self.cost_per_task_ms))

@@ -678,7 +678,7 @@ pub(super) fn yield_page(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         egui::Stroke::new(1.0, t.color.border),
     );
     ui.add_space(1.0);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(
         ui,
         "split",

@@ -20,7 +20,7 @@ pub(crate) use rspice_app_runs::workbench::slots::runs;
 use rspice_app_settings::workbench::slots::settings;
 use rspice_app_sheets::workbench::slots::sheets;
 mod shell;
-mod simulate;
+use rspice_app_simulate::workbench::slots::simulate;
 
 pub(crate) use cloud::CloudState;
 pub(crate) use code::CodeState;

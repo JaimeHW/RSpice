@@ -14,10 +14,10 @@
 mod campaign;
 mod compare;
 mod create;
-pub(crate) mod exchange;
-pub(crate) mod kit;
-pub(crate) mod lifecycle;
-pub(crate) mod records;
+pub mod exchange;
+pub mod kit;
+pub mod lifecycle;
+pub mod records;
 
 use super::*;
 use kit::{ColumnTrack, SplitColumn, TableColumn, TableRow};
@@ -1082,8 +1082,8 @@ pub fn handle_plan_manager_action(
     cx.state.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
 }
 
-#[cfg(test)]
-pub(crate) mod raster;
+#[cfg(any(test, feature = "test-support"))]
+pub mod raster;
 
 #[cfg(test)]
 pub(crate) mod tests;

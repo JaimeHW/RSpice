@@ -147,15 +147,9 @@ pub(crate) use dialogs::symbol_definition::{
 
 pub(crate) use dialogs::hardcopy::HardcopyWorkflow;
 
-pub(crate) use dialogs::plan_removal::{
-    PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
-};
-pub(crate) use dialogs::state::HelpCenterPage;
-
-/// Test-only: the studio pins this against its own hop label, and the dialog
-/// module it lives in is private to the shell.
 #[cfg(test)]
-pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
+pub(crate) use dialogs::plan_removal::PlanRemovalTarget;
+pub(crate) use dialogs::state::HelpCenterPage;
 
 /// Test-only: the command tests read the rename target back, and the dialog
 /// module it lives in is private to the shell.

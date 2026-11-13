@@ -401,7 +401,7 @@ impl<'a> DataTable<'a> {
                 ),
             )
         });
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         super::raster::probe(ui, "table.head", rect);
         if !ui.is_rect_visible(rect) {
             return;
@@ -488,7 +488,7 @@ impl<'a> DataTable<'a> {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), spoken)
             }
         });
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         super::raster::probe(ui, "table.row", rect);
         let mut answered = RowResponse {
             clicked: self.clickable && response.clicked(),
@@ -579,7 +579,7 @@ impl<'a> DataTable<'a> {
                         problem,
                     },
                 );
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 if let Some(text) = _painted
                     && column.align == Align::Right
                 {
@@ -623,7 +623,7 @@ impl<'a> DataTable<'a> {
             state.store(ui.ctx(), id);
         }
         let field = cell.shrink(1.0);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         super::raster::probe(ui, "table.edit", field);
         let response = ui.put(
             field,

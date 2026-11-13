@@ -184,10 +184,16 @@ fn without_visibility(item: &str) -> &str {
 }
 
 /// Where the `#[cfg(test)] mod <name>;` children of `path` would live, whatever
-/// visibility they are declared with.
+/// visibility they are declared with. A feature crate's fixture module that its
+/// `test-support` feature opens to the application's tests is declared
+/// `#[cfg(any(test, feature = "test-support"))]`, and is test-only the same way:
+/// only the tests' dev-dependencies turn that feature on.
 #[cfg(test)]
 pub(crate) fn test_only_roots(path: &std::path::Path, source: &str) -> Vec<std::path::PathBuf> {
-    const ATTRIBUTE: &str = "#[cfg(test)]";
+    const ATTRIBUTES: [&str; 2] = [
+        "#[cfg(test)]",
+        "#[cfg(any(test, feature = \"test-support\"))]",
+    ];
     let stem = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -199,10 +205,15 @@ pub(crate) fn test_only_roots(path: &std::path::Path, source: &str) -> Vec<std::
     let Some(directory) = directory else {
         return Vec::new();
     };
-    source
-        .match_indices(ATTRIBUTE)
-        .filter_map(|(index, _)| {
-            let rest = without_visibility(source[index + ATTRIBUTE.len()..].trim_start());
+    ATTRIBUTES
+        .iter()
+        .flat_map(|attribute| {
+            source
+                .match_indices(attribute)
+                .map(move |(index, _)| index + attribute.len())
+        })
+        .filter_map(|end| {
+            let rest = without_visibility(source[end..].trim_start());
             let declaration = rest.strip_prefix("mod ")?;
             let name = declaration.split(';').next()?.trim();
             (!name.is_empty()
@@ -294,6 +305,7 @@ mod tests {
             "#[cfg(test)]\npub mod fixtures;\n",
             "#[cfg(test)]\npub(crate) mod fixtures;\n",
             "#[cfg(test)]\r\npub(in super::super) mod fixtures;\r\n",
+            "#[cfg(any(test, feature = \"test-support\"))]\npub mod fixtures;\n",
         ] {
             assert_eq!(
                 test_only_roots(parent, declaration),
@@ -307,12 +319,68 @@ mod tests {
             "pub(crate) mod fixtures;\n",
             "#[cfg(test)]\npub(crate) use fixtures::library;\n",
             "#[cfg(test)]\npublished mod fixtures;\n",
+            "#[cfg(feature = \"test-support\")]\npub mod fixtures;\n",
+            "#[cfg(any(test, feature = \"other\"))]\npub mod fixtures;\n",
         ] {
             assert!(
                 test_only_roots(parent, declaration).is_empty(),
                 "{declaration:?}"
             );
         }
+    }
+
+    /// [`test_only_roots`] reads a module under the `test-support` gate as
+    /// test-only because only the tests' dev-dependencies turn that feature on.
+    /// This keeps it true: no application crate's manifest enables another
+    /// crate's `test-support` outside its `[dev-dependencies]`, or a
+    /// `[features]` list, which forwards the feature only while the crate's own
+    /// `test-support` is on.
+    #[test]
+    fn only_dev_dependencies_turn_test_support_on() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut manifests = 0;
+        let mut strays = Vec::new();
+        for entry in std::fs::read_dir(&crates)
+            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+        {
+            let directory = entry.expect("directory entry").path();
+            let manifest = directory.join("Cargo.toml");
+            let application = directory
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("rspice-app"));
+            if !application || !manifest.is_file() {
+                continue;
+            }
+            manifests += 1;
+            let text = std::fs::read_to_string(&manifest)
+                .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
+            let mut table = String::new();
+            for (number, line) in text.lines().enumerate() {
+                let code = line.split('#').next().unwrap_or_default().trim();
+                if code.starts_with('[') {
+                    table = code.trim_matches(|c| c == '[' || c == ']').to_owned();
+                    continue;
+                }
+                let test_only = table == "features"
+                    || table.ends_with("dev-dependencies")
+                    || table.contains("dev-dependencies.");
+                if !test_only && code.contains("\"test-support\"") {
+                    strays.push(format!("{}:{}: {code}", manifest.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            manifests >= 1,
+            "the scan read no rspice-app manifest under {}",
+            crates.display()
+        );
+        assert!(
+            strays.is_empty(),
+            "test-support is turned on outside [dev-dependencies], so a module under its gate \
+             would ship:\n  {}",
+            strays.join("\n  ")
+        );
     }
 
     /// Every shape a `#[cfg(test)]` item takes in this crate, and the one
@@ -485,6 +553,12 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src")
     }
 
+    /// The simulate feature's sources, read by the same scans for the same
+    /// reason.
+    fn simulate_source_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src")
+    }
+
     /// Every authored `.rs` file in the workspace, sorted, with the floors the
     /// whole-workspace scans rest on.
     ///
@@ -580,6 +654,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.push(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
         );
@@ -658,6 +733,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -739,6 +815,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -1024,6 +1101,7 @@ mod tests {
             hardcopy_source_root(),
             cloud_source_root(),
             models_source_root(),
+            simulate_source_root(),
         ];
         let mut found = Vec::new();
         for file in FILES {
@@ -1162,6 +1240,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1356,6 +1435,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1444,6 +1524,7 @@ mod tests {
         rust_sources(&hardcopy_source_root(), &mut paths);
         rust_sources(&cloud_source_root(), &mut paths);
         rust_sources(&models_source_root(), &mut paths);
+        rust_sources(&simulate_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1633,7 +1714,7 @@ mod tests {
     /// under the caret; a document is read at its editor's own size.
     const OWN_SIZE_EDITORS: [(&str, &str); 8] = [
         (
-            "rspice-app/src/workbench/surfaces/verify/table.rs",
+            "rspice-app-simulate/src/workbench/surfaces/verify/table.rs",
             "edit_cell",
         ),
         (

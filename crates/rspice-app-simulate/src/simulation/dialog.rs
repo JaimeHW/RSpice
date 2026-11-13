@@ -25,7 +25,7 @@ pub(crate) mod optimization;
 pub(crate) mod soa;
 
 // Options
-pub(crate) mod options;
+pub mod options;
 
 #[cfg(test)]
 pub use rspice_simulation_contract::config::OpHomotopy;

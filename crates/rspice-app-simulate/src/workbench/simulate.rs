@@ -1,10 +1,10 @@
 //! The simulate feature: the Simulate and Verify workspaces, the plans and
 //! analyses a run is made from, and the runs themselves.
 
-pub(crate) mod chrome;
-pub(crate) mod commands;
+pub mod chrome;
+pub mod commands;
 mod docks;
-pub(crate) mod run_host;
+pub mod run_host;
 #[cfg(test)]
 pub(crate) mod test_host;
 

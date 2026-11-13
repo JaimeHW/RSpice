@@ -403,7 +403,7 @@ fn regression_detail(
     let height = ui.available_height().clamp(DETAIL_MIN_H, DETAIL_MAX_H);
     let pane = egui::Rect::from_min_size(egui::pos2(left, top + 1.0), egui::vec2(width, height));
     let _ = ui.allocate_exact_size(pane.size(), egui::Sense::hover());
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "split", pane);
     ui.painter().rect_filled(pane, 0.0, t.color.bg_panel);
     let waveform = waveforms.iter().find(|pair| pair.target == *target);

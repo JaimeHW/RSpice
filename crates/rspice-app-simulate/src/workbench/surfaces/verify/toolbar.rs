@@ -181,7 +181,7 @@ impl PageToolbar<'_> {
         let height = TOOLBAR_H + if wrapped { SUMMARY_LINE_H } else { 0.0 };
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let row = Rect::from_min_size(rect.min, vec2(width, TOOLBAR_H));
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         super::raster::probe(ui, "toolbar", rect);
         ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
         ui.painter().hline(
@@ -197,7 +197,7 @@ impl PageToolbar<'_> {
             ),
             title.size(),
         );
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         super::raster::probe(ui, "toolbar.title", title_rect);
         let title_response = ui.interact(
             title_rect,
@@ -264,7 +264,7 @@ impl PageToolbar<'_> {
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
             let response = action.button().show(&mut child);
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             super::raster::probe(ui, "toolbar.action", response.rect);
             let response = match action.disabled_reason {
                 Some(reason) => response.on_disabled_hover_text(reason),
@@ -329,7 +329,7 @@ fn paint_summary(ui: &mut Ui, line: Rect, summary: &Summary) {
             ),
         )
     });
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "toolbar.summary", text_rect);
     if let Some(problem) = summary.problem {
         paint_problem_mark(
@@ -352,7 +352,7 @@ pub(super) fn empty_line(ui: &mut Ui, text: &str, action: Option<&str>) -> bool 
     let visible = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     let width = visible.width().max(1.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, EMPTY_LINE_H), Sense::hover());
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "empty", rect);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let button_width = action.map_or(0.0, |label| Button::new(label).measured_width(ui) + 12.0);
@@ -370,7 +370,7 @@ pub(super) fn empty_line(ui: &mut Ui, text: &str, action: Option<&str>) -> bool 
         ),
         galley.size(),
     );
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "empty.text", text_rect);
     let response = ui.interact(text_rect, ui.id().with("verify.empty"), Sense::hover());
     response

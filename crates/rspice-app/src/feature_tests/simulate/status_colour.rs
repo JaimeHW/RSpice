@@ -23,7 +23,8 @@ fn studio_sources() -> Vec<(PathBuf, String)> {
         }
     }
 
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/surfaces");
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench/surfaces");
     let mut paths = vec![root.join("simulate.rs")];
     walk(&root.join("simulate"), &mut paths);
     assert!(
@@ -275,6 +276,8 @@ fn no_surface_paints_a_status_in_colour() {
     let results = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench");
     let cloud = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench");
     let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench");
+    let simulate =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench");
     let mut sites = Vec::new();
     for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
         for file in files {
@@ -285,6 +288,7 @@ fn no_surface_paints_a_status_in_colour() {
                 results.join(file),
                 cloud.join(file),
                 models.join(file),
+                simulate.join(file),
             ]
             .into_iter()
             .find(|path| path.is_file())

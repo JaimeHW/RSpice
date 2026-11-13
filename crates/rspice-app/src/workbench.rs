@@ -74,7 +74,7 @@ pub(crate) mod chrome {
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
         pub(in crate::workbench) mod project;
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
-        pub(in crate::workbench) mod simulate;
+        pub(in crate::workbench) use rspice_app_simulate::workbench::chrome::document_bar::simulate;
     }
     pub(crate) mod status_bar {
         pub use rspice_app_workbench::workbench::chrome::status_bar::*;
@@ -95,8 +95,7 @@ pub(crate) mod chrome {
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
         pub(in crate::workbench) mod project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
-        pub(in crate::workbench) mod run_config_chip;
-        pub(crate) mod simulate;
+        pub(crate) use rspice_app_simulate::workbench::chrome::toolbar::simulate;
     }
 }
 pub(crate) use rspice_app_cloud::workbench::cloud;
@@ -121,13 +120,11 @@ pub(crate) mod docks {
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
-        pub(in crate::workbench) mod simulation;
         /// Visible to the dock layer so the library browser's own gate can render this
         /// pane beside it: the two docks state the same counts about the same design,
         /// and a review that only ever opened one of them would not see them disagree.
         pub(in crate::workbench) mod stimulus;
         pub(in crate::workbench) mod symbol;
-        pub(in crate::workbench) mod verify;
         pub(in crate::workbench) mod veriloga;
     }
     pub(crate) mod navigator {
@@ -135,12 +132,12 @@ pub(crate) mod docks {
         pub(in crate::workbench) mod design;
         pub(in crate::workbench) mod netlist;
         pub(in crate::workbench) mod project;
-        pub(crate) mod simulate;
+        #[cfg(test)]
+        pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
         pub(in crate::workbench) mod source_bundle;
         pub(in crate::workbench) mod stimulus;
         pub(in crate::workbench) mod symbol;
-        mod verification_footer;
-        pub(in crate::workbench) mod verify;
+        pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
         pub(in crate::workbench) mod veriloga;
     }
 }
@@ -214,9 +211,9 @@ mod session {
 pub(crate) use rspice_app_settings::workbench::settings;
 pub(crate) use rspice_app_sheets::workbench::sheets;
 mod shell_host;
-pub(crate) mod simulate;
 #[cfg(test)]
 pub(crate) use rspice_app_settings::workbench::shortcuts;
+pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
@@ -226,9 +223,9 @@ pub(crate) mod surfaces {
     pub(super) mod library_cellview_manager;
     pub(super) mod netlist;
     pub(super) mod project;
-    pub(crate) mod simulate;
+    pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(super) mod stimulus;
-    pub(crate) mod verify;
+    pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
     mod veriloga;
 }
 pub(crate) mod tools;

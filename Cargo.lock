@@ -5185,6 +5185,7 @@ dependencies = [
  "rspice-app-services",
  "rspice-app-settings",
  "rspice-app-sheets",
+ "rspice-app-simulate",
  "rspice-app-state",
  "rspice-app-workbench",
  "rspice-automation-protocol",
@@ -5477,6 +5478,37 @@ dependencies = [
  "rspice-schematic-editor",
  "rspice-ui-kit",
  "uuid",
+]
+
+[[package]]
+name = "rspice-app-simulate"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "log",
+ "rfd",
+ "ron",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-core",
+ "rspice-design",
+ "rspice-formats",
+ "rspice-project",
+ "rspice-results",
+ "rspice-results-ui",
+ "rspice-schematic-editor",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-ui-kit",
+ "rspice-veriloga",
+ "rspice-vocabulary",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

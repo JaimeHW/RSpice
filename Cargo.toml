@@ -33,6 +33,7 @@ members = [
     "crates/rspice-app-hardcopy",
     "crates/rspice-app-cloud",
     "crates/rspice-app-models",
+    "crates/rspice-app-simulate",
     "crates/rspice-app-results",
     "crates/rspice-app-settings",
     "crates/rspice-app-sheets",
@@ -180,6 +181,7 @@ rspice-app-workbench = { path = "crates/rspice-app-workbench", version = "0.1.0"
 rspice-app-hardcopy = { path = "crates/rspice-app-hardcopy", version = "0.1.0" }
 rspice-app-cloud = { path = "crates/rspice-app-cloud", version = "0.1.0" }
 rspice-app-models = { path = "crates/rspice-app-models", version = "0.1.0" }
+rspice-app-simulate = { path = "crates/rspice-app-simulate", version = "0.1.0" }
 rspice-app-results = { path = "crates/rspice-app-results", version = "0.1.0" }
 rspice-app-settings = { path = "crates/rspice-app-settings", version = "0.1.0" }
 rspice-app-sheets = { path = "crates/rspice-app-sheets", version = "0.1.0" }

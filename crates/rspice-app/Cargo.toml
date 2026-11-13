@@ -42,6 +42,7 @@ rspice-app-workbench.workspace = true
 rspice-app-hardcopy.workspace = true
 rspice-app-cloud.workspace = true
 rspice-app-models.workspace = true
+rspice-app-simulate.workspace = true
 rspice-app-results.workspace = true
 rspice-app-settings.workspace = true
 rspice-app-sheets.workspace = true
@@ -107,6 +108,7 @@ rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-app-hardcopy = { workspace = true, features = ["test-support"] }
 rspice-app-cloud = { workspace = true, features = ["test-support"] }
 rspice-app-models = { workspace = true, features = ["test-support"] }
+rspice-app-simulate = { workspace = true, features = ["test-support"] }
 rspice-app-results = { workspace = true, features = ["test-support"] }
 rspice-app-settings = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }

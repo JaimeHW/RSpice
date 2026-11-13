@@ -63,6 +63,7 @@ pub use interaction_state::{ContextTarget, DragType};
 pub(crate) use model::{Model, SlotFacts};
 // The platform services' own state, which they name beside the model.
 pub(in crate::workbench) use crate::workbench::slots::PlatformState;
+#[cfg(not(target_arch = "wasm32"))]
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
@@ -70,12 +71,16 @@ pub(crate) use session::shortcuts::{
 pub(crate) use session::state_init::{
     default_model_library_manager, restore_session_model_library_manager,
 };
-pub use sim_setup::plan_catalog::{
-    SimulationPlanCloneOptions, SimulationPlanLineage, SimulationPlanName,
-};
-pub use sim_setup::{
-    AcSetup, DcSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
-};
+pub use sim_setup::SimSetupState;
+#[cfg(test)]
+pub use sim_setup::TranSetup;
+#[cfg(test)]
+pub use sim_setup::plan_catalog::SimulationPlanCloneOptions;
+pub use sim_setup::plan_catalog::SimulationPlanLineage;
+#[cfg(not(target_arch = "wasm32"))]
+pub use sim_setup::plan_catalog::SimulationPlanName;
+#[cfg(not(target_arch = "wasm32"))]
+pub use sim_setup::{ReferencePvtPoint, SimulationSavePolicy};
 
 /// Main application state container
 #[derive(Clone)]

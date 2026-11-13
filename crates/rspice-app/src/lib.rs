@@ -58,11 +58,6 @@ pub(crate) mod simulation {
     //! complete simulation workflow from netlist generation to result display.
 
     pub(crate) use rspice_app_runs::simulation::controller;
-    pub(crate) use rspice_simulation_contract::accuracy;
-    pub(crate) use rspice_simulation_contract::config;
-    #[cfg(test)]
-    pub(crate) use rspice_simulation_contract::cost_probe;
-    pub(crate) mod dialog;
     #[cfg(test)]
     pub(crate) use rspice_app_runs::simulation::multi_run;
     #[cfg(test)]
@@ -72,11 +67,18 @@ pub(crate) mod simulation {
     pub(crate) use rspice_app_runs::simulation::status;
     #[cfg(test)]
     pub(crate) use rspice_app_runs::simulation::veriloga_tests;
+    #[cfg(test)]
+    pub(crate) use rspice_app_simulate::simulation::dialog;
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
     pub(crate) use rspice_app_state::simulation::table_route;
+    #[cfg(test)]
     pub(crate) use rspice_simulation::execution;
+    #[cfg(test)]
+    pub(crate) use rspice_simulation_contract::config;
+    #[cfg(test)]
+    pub(crate) use rspice_simulation_contract::cost_probe;
 
     // The netlist generator, options translator, and
     // engine bridge are all reached through their own modules; flattening their
