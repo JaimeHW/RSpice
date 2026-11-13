@@ -174,16 +174,13 @@ mod tests {
     }
 
     #[test]
-    fn stored_display_choices_read_back_and_retired_or_invalid_values_resolve() {
+    fn stored_display_choices_read_back_and_invalid_values_are_refused() {
         let values = (digits(), INTERPOLATIONS, COMPLEX);
         let json = serde_json::to_string(&values).unwrap();
         assert_eq!(serde_json::from_str::<(_, _, _)>(&json).unwrap(), values);
         let ron = ron::to_string(&values).unwrap();
         assert_eq!(ron::from_str::<(_, _, _)>(&ron).unwrap(), values);
-        assert_eq!(
-            serde_json::from_str::<ComplexNumberDisplay>(r#""magnitude-phase-radians""#).unwrap(),
-            ComplexNumberDisplay::MagnitudePhaseDegrees
-        );
+        assert!(serde_json::from_str::<ComplexNumberDisplay>(r#""magnitude-phase-radians""#).is_err());
         assert!(serde_json::from_str::<DisplayedSignificantDigits>("2").is_err());
         assert!(serde_json::from_str::<DisplayedSignificantDigits>("18").is_err());
     }

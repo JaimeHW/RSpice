@@ -685,14 +685,4 @@ mod operating_point_serde_tests {
         assert!(decoded.validate().is_err());
     }
 
-    #[test]
-    fn legacy_preview_envelope_extraction_migrates_to_the_named_projection_method() {
-        let decoded: EnvelopeExtractionPath =
-            serde_json::from_str("\"preview\"").expect("legacy extraction path decodes");
-        assert_eq!(decoded, EnvelopeExtractionPath::Projection);
-        assert_eq!(
-            serde_json::to_string(&decoded).expect("current extraction path encodes"),
-            "\"projection\""
-        );
-    }
 }

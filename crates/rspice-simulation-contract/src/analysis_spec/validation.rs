@@ -314,32 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_envelope_spec_migrates_without_inventing_a_source_binding() {
-        let spec: AnalysisSpec = serde_json::from_str(
-            r#"{"Envelope":{"fundamental_freq":1000000.0,"stop_time":0.01,"num_harmonics":9,"max_step":0.000001}}"#,
-        )
-        .expect("legacy Envelope spec deserializes");
-
-        assert_eq!(
-            spec,
-            AnalysisSpec::Envelope {
-                multirate: None,
-                initialization: Default::default(),
-                fundamental_freq: 1.0e6,
-                additional_carrier_tones: Vec::new(),
-                stop_time: 0.01,
-                num_harmonics: 9,
-                envelope_step: Some(1.0e-6),
-                modulation_sources: Vec::new(),
-                initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
-                adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
-                extraction_path: EnvelopeExtractionPath::Projection,
-            }
-        );
-        assert!(spec.validate().is_ok());
-    }
-
-    #[test]
     fn envelope_validation_rejects_duplicate_tones_and_invalid_source_names() {
         let spec = |additional_carrier_tones, modulation_sources| AnalysisSpec::Envelope {
             multirate: None,

@@ -391,29 +391,4 @@ mod tests {
         assert_eq!(state.probe_reference, StbProbeReference::Entered);
     }
 
-    #[test]
-    fn retired_margin_flags_decode_without_reappearing_on_serialize() {
-        let persisted = r#"{
-            "probe_source": "LP",
-            "start_freq": "1",
-            "stop_freq": "1G",
-            "points_per_decade": "25",
-            "gain_margin": true,
-            "phase_margin": false,
-            "crossover_freq": true
-        }"#;
-
-        let state: StbDialogState = serde_json::from_str(persisted).expect("legacy state decodes");
-
-        assert_eq!(state.num_points, "25");
-        assert!(
-            state.compute_nyquist,
-            "Nyquist defaults on for old projects"
-        );
-
-        let encoded = serde_json::to_value(&state).expect("state encodes");
-        for retired in ["gain_margin", "phase_margin", "crossover_freq"] {
-            assert!(encoded.get(retired).is_none(), "{retired}");
-        }
-    }
 }

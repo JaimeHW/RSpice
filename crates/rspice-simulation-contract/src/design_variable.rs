@@ -334,23 +334,15 @@ mod tests {
     }
 
     #[test]
-    fn missing_row_identity_migrates_deterministically_and_null_is_rejected() {
+    fn a_missing_or_null_row_identity_is_rejected() {
         let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
         let mut value = serde_json::to_value(variable).unwrap();
         value.as_object_mut().unwrap().remove("id");
-        let first: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-        let second: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(first.id, second.id);
-
+        assert!(serde_json::from_value::<DesignVariable>(value.clone()).is_err());
         value
             .as_object_mut()
             .unwrap()
             .insert("id".to_owned(), serde_json::Value::Null);
-        assert!(
-            serde_json::from_value::<DesignVariable>(value)
-                .unwrap_err()
-                .to_string()
-                .contains("must not be null")
-        );
+        assert!(serde_json::from_value::<DesignVariable>(value).is_err());
     }
 }

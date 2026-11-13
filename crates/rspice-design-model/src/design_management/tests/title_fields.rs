@@ -440,70 +440,6 @@ fn a_sheet_saved_placing_its_block_elsewhere_loads_upright_in_the_lower_right_co
 }
 
 #[test]
-fn a_sheet_saved_on_the_retired_compact_block_loads_on_its_formats_standard_block() {
-    // The 130 mm compact block predated both standards' forms. A sheet saved
-    // on it, or saved before title blocks were stored and so drawn with it,
-    // loads on its format's standard block: ISO 7200's on an ISO or JIS
-    // sheet or a size started from neither, ASME Y14.1's on an ANSI or ARCH
-    // sheet or a size started from one. Its values and choices stay.
-    for (format, standard_block) in [
-        (
-            SchematicSheetFormat::default(),
-            DrawingSheetTitleBlockTemplate::Standard,
-        ),
-        (
-            SchematicSheetFormat::from_standard(
-                DrawingSheetStandard::JisB4,
-                SchematicPageOrientation::Landscape,
-            ),
-            DrawingSheetTitleBlockTemplate::Standard,
-        ),
-        (
-            SchematicSheetFormat::from_standard(
-                DrawingSheetStandard::AnsiB,
-                SchematicPageOrientation::Landscape,
-            ),
-            DrawingSheetTitleBlockTemplate::AsmeY141,
-        ),
-        (
-            SchematicSheetFormat::from_standard(
-                DrawingSheetStandard::ArchD,
-                SchematicPageOrientation::Landscape,
-            ),
-            DrawingSheetTitleBlockTemplate::AsmeY141,
-        ),
-        (
-            crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap(),
-            DrawingSheetTitleBlockTemplate::AsmeY141,
-        ),
-        (
-            crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::IsoA).unwrap(),
-            DrawingSheetTitleBlockTemplate::Standard,
-        ),
-    ] {
-        let mut saved = serde_json::to_value(&format).unwrap();
-        saved["title_block"]["template"] = serde_json::json!("compact");
-        saved["title_block"]["fields"]["drawn-by"]["value"] = serde_json::json!("J. Whitfield");
-        let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
-        assert_eq!(reopened.title_block.template, standard_block);
-        assert_eq!(
-            reopened.title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value,
-            "J. Whitfield"
-        );
-        let mut legacy = serde_json::to_value(&format).unwrap();
-        legacy.as_object_mut().unwrap().remove("title_block");
-        let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
-        assert_eq!(restored.title_block.template, standard_block);
-    }
-    // A template read on its own, with no sheet to say which standard it
-    // follows, reads as ISO 7200's.
-    assert_eq!(
-        serde_json::from_str::<DrawingSheetTitleBlockTemplate>(r#""compact""#).unwrap(),
-        DrawingSheetTitleBlockTemplate::Standard
-    );
-}
-
-#[test]
 fn the_language_code_is_an_optional_project_field() {
     let field = DrawingSheetTitleFieldId::Language;
     assert!(DrawingSheetTitleFieldId::ALL.contains(&field));
@@ -603,38 +539,6 @@ fn a_revision_index_iso_7200_advises_against_is_flagged_not_refused() {
         ..DrawingSheetDocumentControl::default()
     };
     assert_eq!(draft.revision_advisory(), None);
-}
-
-#[test]
-fn a_sheet_saved_on_the_retired_wide_block_loads_on_the_iso_7200_block() {
-    // The 230 mm block was wider than ISO 7200's 180 mm maximum. Whatever
-    // named it — a sheet, a default, a preset — loads on the standard's block
-    // and is written back under that block's name.
-    assert_eq!(
-        serde_json::from_value::<DrawingSheetTitleBlockTemplate>(serde_json::json!("wide"))
-            .unwrap(),
-        DrawingSheetTitleBlockTemplate::Standard
-    );
-    let format = SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::IsoA3,
-        SchematicPageOrientation::Landscape,
-    );
-    let mut wire = serde_json::to_value(&format).unwrap();
-    wire["title_block"]["template"] = serde_json::json!("wide");
-    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
-    assert_eq!(
-        restored.title_block.template,
-        DrawingSheetTitleBlockTemplate::Standard
-    );
-    restored.validate().unwrap();
-    assert_eq!(
-        restored.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Standard
-    );
-    assert_eq!(
-        serde_json::to_value(&restored).unwrap()["title_block"]["template"],
-        serde_json::json!("standard")
-    );
 }
 
 #[test]
