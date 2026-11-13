@@ -26,15 +26,12 @@ fn canonical_workspace_order_is_stable() {
     );
 }
 
-/// One workspace, one name. Each of the three names has a job — the rail and
-/// menus read `label`, a specialist row names its `owner_label`, and the
-/// context dock is headed by `inspector_title` — so they may differ, but a
-/// workspace whose product name already answers two of them must not coin a
-/// second spelling for the same thing.
+/// One workspace, one name. Each name has a job — the rail and menus read
+/// `label`, and the context dock is headed by `inspector_title` — so they may
+/// differ, but neither may coin a second spelling of the product name.
 #[test]
-fn the_stimulus_library_is_named_once_across_its_three_registers() {
+fn the_stimulus_library_is_named_once_across_its_registers() {
     assert_eq!(Workspace::Stimulus.label(), "Stimulus Library");
-    assert_eq!(Workspace::Stimulus.owner_label(), "Stimulus Library");
     assert_eq!(Workspace::Stimulus.inspector_title(), "Definition details");
 }
 

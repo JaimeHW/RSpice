@@ -55,22 +55,6 @@ impl Workspace {
         }
     }
 
-    pub const fn owner_label(self) -> &'static str {
-        match self {
-            Self::Project => "Project",
-            Self::Design => "Design",
-            Self::Simulate => "Simulation Studio",
-            // The product name is already the owner's name, exactly as the
-            // Netlist & Script Editor's is. Coining a second spelling here
-            // would give one thing two names in one shell.
-            Self::Stimulus => "Stimulus Library",
-            Self::Results => "Result document",
-            Self::Verify => "Verification results",
-            Self::Models => "Model binding",
-            Self::Netlist => "Netlist & Script Editor",
-        }
-    }
-
     pub const fn inspector_title(self) -> &'static str {
         match self {
             Self::Project => "Project details",
