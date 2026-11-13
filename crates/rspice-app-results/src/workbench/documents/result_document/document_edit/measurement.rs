@@ -28,6 +28,8 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         Err(refusal) => {
             return MeasurementPreview {
                 pane: String::new(),
+                signals: Vec::new(),
+                signal_units: Vec::new(),
                 value: Ok(None),
                 refusal: Some(refusal),
             };
@@ -41,7 +43,14 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             .content
             .visualization_document(document_id)?;
         let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
-        Some(format!("{} · {}", document.title(), pane.title))
+        // A signal argument picks from the traces this pane's strip shows.
+        let signals = document
+            .traces()
+            .iter()
+            .filter(|trace| trace.pane_id == pane_id)
+            .map(|trace| trace.label.clone())
+            .collect::<Vec<_>>();
+        Some((format!("{} · {}", document.title(), pane.title), signals))
     });
     let expression = draft.expression.trim();
     let digits = usize::from(
@@ -56,10 +65,44 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         evaluate(analysis, expression).map(|value| Some(fmt_si_significant(value, "", digits)))
     };
     let refusal = pane.is_none().then(|| QUICK_VIEW.to_owned());
+    // A level is typed in its signal's unit, as the strip reads the trace.
+    let unit_of = |name: &str| {
+        let retained = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == name)
+            .and_then(|waveform| waveform.unit.as_deref());
+        super::super::browser_signal_unit(
+            name,
+            retained,
+            super::super::analysis_default_unit(analysis.analysis_type),
+        )
+        .to_owned()
+    };
     // A run's label already names it ("Run 1 (8:31:04 PM)"), as the
-    // navigator shows it; a number in front would name it twice.
+    // navigator shows it; a number in front would name it twice. A quick
+    // view's strip can show any of the analysis's signals, offered by the
+    // names an expression reads them by: `|V(out)|` is `V(out)`, whose
+    // phase comes with it.
+    let (pane, signals) = pane.unwrap_or_else(|| {
+        let mut signals: Vec<String> = Vec::new();
+        for waveform in &analysis.waveforms {
+            let name = waveform.name.as_str();
+            let name = name
+                .strip_prefix('|')
+                .and_then(|inner| inner.strip_suffix('|'))
+                .unwrap_or(name);
+            if !name.starts_with("phase(") && !signals.iter().any(|known| known == name) {
+                signals.push(name.to_owned());
+            }
+        }
+        (format!("{} · {}", run.label, analysis.label), signals)
+    });
+    let signal_units = signals.iter().map(|name| unit_of(name)).collect();
     MeasurementPreview {
-        pane: pane.unwrap_or_else(|| format!("{} · {}", run.label, analysis.label)),
+        pane,
+        signals,
+        signal_units,
         value,
         refusal,
     }
