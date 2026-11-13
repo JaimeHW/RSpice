@@ -307,50 +307,94 @@ fn a_unilateral_device_has_no_reverse_terms_to_divide_by() {
     assert!(device.power_gain_circle(gain * 0.5).is_some());
 }
 
-fn sweep_analysis(with_noise: bool) -> AnalysisResult {
-    let frequencies = vec![1.0e8, 1.4e9];
-    let points = [arar_100_mhz(), arar_1400_mhz()];
+fn complex_waveform(
+    label: String,
+    name: &str,
+    frequencies: &[f64],
+    values: &[Complex64],
+) -> RetainedWaveform {
+    RetainedWaveform::new(
+        label,
+        frequencies.to_vec(),
+        values.iter().map(|value| value.norm()).collect::<Vec<_>>(),
+    )
+    .with_complex_components(
+        name,
+        values.iter().map(|value| value.re).collect::<Vec<_>>(),
+        values.iter().map(|value| value.im).collect::<Vec<_>>(),
+    )
+}
+
+/// Retained two-port noise columns: `Rn` (Ω), `Fmin` (linear) and the
+/// complex `Sopt`, one entry per frequency, at a reference temperature.
+struct RetainedNoise {
+    temperature_kelvin: f64,
+    resistance_ohm: Vec<f64>,
+    minimum_factor: Vec<f64>,
+    optimum: Vec<Complex64>,
+}
+
+/// A two-port sweep in the shape the runner retains it: complex `S11` to
+/// `S22` columns and, with noise, `Rn`, `Fmin` and complex `Sopt`.
+fn retained_sweep(
+    frequencies: &[f64],
+    points: &[TwoPortScattering],
+    references_ohm: [f64; 2],
+    noise: Option<RetainedNoise>,
+) -> AnalysisResult {
     let mut waveforms = Vec::new();
     for (name, pick) in [("S11", 0usize), ("S12", 1), ("S21", 2), ("S22", 3)] {
         let values = points
             .iter()
             .map(|point| [point.s11, point.s12, point.s21, point.s22][pick])
             .collect::<Vec<_>>();
-        waveforms.push(
-            RetainedWaveform::new(
-                format!("|{name}|"),
-                frequencies.clone(),
-                values.iter().map(|value| value.norm()).collect::<Vec<_>>(),
-            )
-            .with_complex_components(
-                name,
-                values.iter().map(|value| value.re).collect::<Vec<_>>(),
-                values.iter().map(|value| value.im).collect::<Vec<_>>(),
-            ),
-        );
+        waveforms.push(complex_waveform(
+            format!("|{name}|"),
+            name,
+            frequencies,
+            &values,
+        ));
     }
-    if with_noise {
+    let temperature = noise.as_ref().map(|noise| noise.temperature_kelvin);
+    if let Some(noise) = noise {
         waveforms.push(RetainedWaveform::new(
             "Rn",
-            frequencies.clone(),
-            vec![20.0, 18.0],
+            frequencies.to_vec(),
+            noise.resistance_ohm,
         ));
         waveforms.push(RetainedWaveform::new(
             "Fmin",
-            frequencies.clone(),
-            vec![1.3, 1.45],
+            frequencies.to_vec(),
+            noise.minimum_factor,
         ));
-        waveforms.push(
-            RetainedWaveform::new("Sopt", frequencies.clone(), vec![0.5, 0.62])
-                .with_complex_components("Sopt", vec![0.0, -0.1077], vec![0.5, 0.6106]),
-        );
+        waveforms.push(complex_waveform(
+            "Sopt".to_owned(),
+            "Sopt",
+            frequencies,
+            &noise.optimum,
+        ));
     }
     AnalysisResult::new(1, AnalysisType::SParameter, "sp", 0.0)
         .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
-            reference_impedances_ohm: vec![50.0, 75.0],
-            noise_reference_temperature_kelvin: with_noise.then_some(290.0),
+            reference_impedances_ohm: references_ohm.to_vec(),
+            noise_reference_temperature_kelvin: temperature,
         })
         .with_waveforms(waveforms)
+}
+
+fn sweep_analysis(with_noise: bool) -> AnalysisResult {
+    let noise = with_noise.then(|| RetainedNoise {
+        temperature_kelvin: 290.0,
+        resistance_ohm: vec![20.0, 18.0],
+        minimum_factor: vec![1.3, 1.45],
+        optimum: vec![Complex64::new(0.0, 0.5), Complex64::new(-0.1077, 0.6106)],
+    });
+    retained_sweep(
+        &[1.0e8, 1.4e9],
+        &[arar_100_mhz(), arar_1400_mhz()],
+        [50.0, 75.0],
+        noise,
+    )
 }
 
 #[test]
@@ -390,5 +434,293 @@ fn a_retained_two_port_sweep_resolves_with_its_noise_parameters() {
     assert!(
         TwoPortSweep::resolve(&partial).is_none(),
         "a matrix without S12 cannot place a circle"
+    );
+}
+
+/// A common-emitter 2N3904 stage (the public Fairchild Gummel-Poon card),
+/// biased through chokes and coupled through capacitors to two 50 Ω ports.
+#[cfg(feature = "engine-evidence")]
+const COMMON_EMITTER_STAGE: &str = "Common-emitter 2N3904 stage\n\
+     VCC vcc 0 DC 9\n\
+     RBIAS vcc b 430k\n\
+     LC vcc c 1m\n\
+     CIN p1 b 100n\n\
+     COUT c p2 100n\n\
+     Q1 c b 0 Q2N3904\n\
+     V1 p1 0 DC 0 AC 1 portnum=1 z0=50\n\
+     V2 p2 0 DC 0 AC 0 portnum=2 z0=50\n\
+     .model Q2N3904 NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259\n\
+     + ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2 ISC=0 IKR=0 RC=1 CJC=3.638p\n\
+     + MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n\n\
+     + TF=301.2p ITF=.4 VTF=4 XTF=2 RB=10)\n\
+     .end\n";
+
+/// Relative agreement to `tolerance`, with an absolute floor for values that
+/// are zero in exact arithmetic.
+#[cfg(feature = "engine-evidence")]
+fn agrees(what: &str, actual: f64, expected: f64, tolerance: f64) {
+    assert!(
+        (actual - expected).abs() <= tolerance * expected.abs().max(1.0e-12),
+        "{what}: {actual} against {expected}"
+    );
+}
+
+#[cfg(feature = "engine-evidence")]
+fn agrees_complex(what: &str, actual: Complex64, expected: Complex64, tolerance: f64) {
+    assert!(
+        (actual - expected).norm() <= tolerance * expected.norm().max(1.0e-12),
+        "{what}: {actual} against {expected}"
+    );
+}
+
+/// The circles a simulated transistor stage gets on the Smith pane are the
+/// engine's own stability analysis of the same S-matrix, and the textbook
+/// formulas (Gonzalez sections 3.3, 3.6 and 4.3) evaluated here from the raw
+/// coefficients. The noise circle is checked against the engine's noise
+/// factor at the port's own 50 Ω, which the engine derives separately from
+/// the correlation matrix.
+#[cfg(feature = "engine-evidence")]
+#[test]
+fn a_simulated_transistor_stage_gets_the_engines_circles() {
+    use rspice_core::analysis::s_param::{GainAnalysis, StabilityAnalysis};
+    use rspice_core::{Engine, Netlist, NoAbort};
+
+    let netlist = Netlist::parse(COMMON_EMITTER_STAGE).expect("deck parses");
+    let frequencies = [1.0e6, 1.0e7, 3.0e7, 1.0e8, 3.0e8, 1.0e9];
+    let run = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &frequencies, true, &NoAbort)
+        .expect(".SP runs");
+    let engine = &run.scattering.data;
+    let noise = run.port_noise.as_ref().expect("noise was requested");
+    let engine_noise = noise
+        .two_port
+        .as_ref()
+        .expect("a two-port has noise parameters");
+    let points = engine
+        .iter()
+        .map(|point| TwoPortScattering {
+            s11: point.s11(),
+            s12: point.s12(),
+            s21: point.s21(),
+            s22: point.s22(),
+        })
+        .collect::<Vec<_>>();
+    let references = [run.scattering.ports[0].z0, run.scattering.ports[1].z0];
+    let analysis = retained_sweep(
+        &frequencies,
+        &points,
+        references,
+        Some(RetainedNoise {
+            temperature_kelvin: noise.reference_temperature_kelvin,
+            resistance_ohm: engine_noise.iter().map(|p| p.noise_resistance).collect(),
+            minimum_factor: engine_noise
+                .iter()
+                .map(|p| p.minimum_noise_factor)
+                .collect(),
+            optimum: engine_noise
+                .iter()
+                .map(|p| p.optimum_source_reflection)
+                .collect(),
+        }),
+    );
+    let sweep = TwoPortSweep::resolve(&analysis).expect("the run resolves as a two-port");
+    assert_eq!(sweep.reference_impedances_ohm, [50.0, 50.0]);
+    let sweep_noise = sweep.noise.as_ref().expect("noise parameters are attached");
+
+    let tolerance = 1.0e-9;
+    let mut potentially_unstable = 0;
+    for (index, device) in sweep.scattering.iter().enumerate() {
+        let f = frequencies[index];
+        let core = StabilityAnalysis::from_s_matrix(&engine[index]);
+        agrees(
+            &format!("K at {f}"),
+            device.rollett_k(),
+            core.k_factor,
+            tolerance,
+        );
+        agrees(
+            &format!("mu at {f}"),
+            device.mu_load(),
+            core.mu_factor,
+            tolerance,
+        );
+        agrees(
+            &format!("mu' at {f}"),
+            device.mu_source(),
+            core.mu_prime,
+            tolerance,
+        );
+        assert_eq!(
+            device.is_unconditionally_stable(),
+            core.unconditionally_stable,
+            "stability verdict at {f}"
+        );
+        let source = device.source_stability_circle().expect("source circle");
+        let load = device.load_stability_circle().expect("load circle");
+        agrees_complex(
+            &format!("source centre at {f}"),
+            source.circle.center,
+            core.input_stability_center,
+            tolerance,
+        );
+        agrees(
+            &format!("source radius at {f}"),
+            source.circle.radius,
+            core.input_stability_radius,
+            tolerance,
+        );
+        agrees_complex(
+            &format!("load centre at {f}"),
+            load.circle.center,
+            core.output_stability_center,
+            tolerance,
+        );
+        agrees(
+            &format!("load radius at {f}"),
+            load.circle.radius,
+            core.output_stability_radius,
+            tolerance,
+        );
+        assert_eq!(
+            source.stable_inside, core.input_stable_inside,
+            "source side at {f}"
+        );
+        assert_eq!(
+            load.stable_inside, core.output_stable_inside,
+            "load side at {f}"
+        );
+
+        // The same figures from the textbook formulas, evaluated here.
+        let (s11, s12, s21, s22) = (device.s11, device.s12, device.s21, device.s22);
+        let delta = s11 * s22 - s12 * s21;
+        let loop_gain = (s12 * s21).norm();
+        let k = (1.0 - s11.norm_sqr() - s22.norm_sqr() + delta.norm_sqr()) / (2.0 * loop_gain);
+        agrees(
+            &format!("textbook K at {f}"),
+            device.rollett_k(),
+            k,
+            tolerance,
+        );
+        let source_denominator = s11.norm_sqr() - delta.norm_sqr();
+        let load_denominator = s22.norm_sqr() - delta.norm_sqr();
+        agrees_complex(
+            &format!("textbook source centre at {f}"),
+            source.circle.center,
+            (s11 - delta * s22.conj()).conj() / source_denominator,
+            tolerance,
+        );
+        agrees(
+            &format!("textbook source radius at {f}"),
+            source.circle.radius,
+            loop_gain / source_denominator.abs(),
+            tolerance,
+        );
+        agrees_complex(
+            &format!("textbook load centre at {f}"),
+            load.circle.center,
+            (s22 - delta * s11.conj()).conj() / load_denominator,
+            tolerance,
+        );
+        agrees(
+            &format!("textbook load radius at {f}"),
+            load.circle.radius,
+            loop_gain / load_denominator.abs(),
+            tolerance,
+        );
+
+        // Gain circles 3 dB below the device's maximum gain.
+        let gains = GainAnalysis::from_s_matrix(&engine[index]);
+        let maximum = device.maximum_gain().expect("a maximum gain");
+        match maximum {
+            MaximumGain::Available(gain) => {
+                agrees(
+                    &format!("MAG at {f}"),
+                    10.0 * gain.log10(),
+                    gains.mag_db,
+                    tolerance,
+                );
+            }
+            MaximumGain::Stable(gain) => {
+                potentially_unstable += 1;
+                agrees(
+                    &format!("MSG at {f}"),
+                    10.0 * gain.log10(),
+                    gains.msg_db,
+                    tolerance,
+                );
+            }
+        }
+        let target = 0.5 * maximum.linear();
+        let gp = target / s21.norm_sqr();
+        let c2 = s22 - delta * s11.conj();
+        let power_scale = 1.0 + gp * load_denominator;
+        let power = device.power_gain_circle(target).expect("power-gain circle");
+        agrees_complex(
+            &format!("textbook power-gain centre at {f}"),
+            power.center,
+            gp * c2.conj() / power_scale,
+            tolerance,
+        );
+        agrees(
+            &format!("textbook power-gain radius at {f}"),
+            power.radius,
+            (1.0 - 2.0 * k * loop_gain * gp + (loop_gain * gp).powi(2)).sqrt() / power_scale.abs(),
+            tolerance,
+        );
+        let ga = target / s21.norm_sqr();
+        let c1 = s11 - delta * s22.conj();
+        let available_scale = 1.0 + ga * source_denominator;
+        let available = device
+            .available_gain_circle(target)
+            .expect("available-gain circle");
+        agrees_complex(
+            &format!("textbook available-gain centre at {f}"),
+            available.center,
+            ga * c1.conj() / available_scale,
+            tolerance,
+        );
+        agrees(
+            &format!("textbook available-gain radius at {f}"),
+            available.radius,
+            (1.0 - 2.0 * k * loop_gain * ga + (loop_gain * ga).powi(2)).sqrt()
+                / available_scale.abs(),
+            tolerance,
+        );
+
+        // Noise: the factor at Γs = 0 is the engine's separately derived F,
+        // and the circle is the textbook one.
+        let parameters = sweep_noise[index];
+        agrees(
+            &format!("F at 50 Ω at {f}"),
+            parameters.noise_factor(Complex64::new(0.0, 0.0)),
+            engine_noise[index].noise_factor,
+            1.0e-6,
+        );
+        let factor = 1.25 * parameters.minimum_noise_factor;
+        let optimum = parameters.optimum_source_reflection;
+        let n = (factor - parameters.minimum_noise_factor)
+            / (4.0 * parameters.noise_resistance_ohm / references[0])
+            * (1.0 + optimum).norm_sqr();
+        let circle = parameters.noise_circle(factor).expect("noise circle");
+        agrees_complex(
+            &format!("textbook noise centre at {f}"),
+            circle.center,
+            optimum / (1.0 + n),
+            tolerance,
+        );
+        agrees(
+            &format!("textbook noise radius at {f}"),
+            circle.radius,
+            (n * n + n * (1.0 - optimum.norm_sqr())).sqrt() / (1.0 + n),
+            tolerance,
+        );
+    }
+    assert!(
+        potentially_unstable > 0,
+        "the stage is potentially unstable somewhere"
+    );
+    assert!(
+        potentially_unstable < frequencies.len(),
+        "and stable somewhere"
     );
 }
