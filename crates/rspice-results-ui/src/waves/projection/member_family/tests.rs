@@ -113,3 +113,124 @@ fn a_transient_that_names_no_member_keeps_its_own_strip() {
     assert_eq!(built[1].traces[0].family_group_ordinal, None);
     assert_eq!(built[0].subtitle, "Transient · 1 trial");
 }
+
+/// One `.STEP` point's analysis of `kind`, naming `c` at its point.
+fn point(
+    id: u64,
+    kind: AnalysisType,
+    index: usize,
+    c: f64,
+    waveforms: Vec<RetainedTrace>,
+) -> AnalysisResult<RetainedTrace> {
+    use rspice_results::provenance::AnalysisResultStepCoordinate;
+    let member = AnalysisResultFamilyMember::StepPoint {
+        index,
+        coordinate: vec![AnalysisResultStepCoordinate {
+            name: "c".to_owned(),
+            value: c,
+        }],
+    };
+    let provenance = AnalysisResultProvenance::new(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([7; 32]),
+        Vec::new(),
+    )
+    .unwrap()
+    .with_family_member(Some(member.clone()))
+    .unwrap();
+    AnalysisResult::new(id, kind, format!("Sweep · {}", member.label()), 0.0)
+        .with_waveforms(waveforms)
+        .with_provenance(provenance)
+}
+
+#[test]
+fn a_stepped_dc_sweep_draws_its_points_as_one_family_on_one_strip() {
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, scale) in [1.0, 2.0, 3.0].into_iter().enumerate() {
+        run.analyses.push(point(
+            index as u64 + 1,
+            AnalysisType::DcSweep,
+            index,
+            scale,
+            vec![RetainedTrace::new(
+                "I(VD)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, scale, scale],
+                "A",
+            )],
+        ));
+    }
+    let built = models(&run, &HashSet::new());
+    let [strip] = built.as_slice() else {
+        panic!("one strip for the family, got {}", built.len());
+    };
+    assert_eq!(strip.subtitle, "Sweep · 3 points");
+    let names: Vec<_> = strip
+        .traces
+        .iter()
+        .map(|trace| trace.name.as_str())
+        .collect();
+    assert_eq!(names, ["I(VD) · c = 1", "I(VD) · c = 2", "I(VD) · c = 3"]);
+    for (index, trace) in strip.traces.iter().enumerate() {
+        assert_eq!(trace.family_group_ordinal, Some(index));
+        assert!(Arc::ptr_eq(&trace.y, &run.analyses[index].waveforms[0].y));
+    }
+}
+
+#[test]
+fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, (c, corner_magnitude)) in [(1e-9, 0.1), (1e-8, 0.01)].into_iter().enumerate() {
+        run.analyses.push(point(
+            index as u64 + 1,
+            AnalysisType::Ac,
+            index,
+            c,
+            vec![
+                RetainedTrace::new("|V(out)|", vec![1.0, 1e3], vec![1.0, corner_magnitude], ""),
+                RetainedTrace::new(
+                    "phase(V(out))",
+                    vec![1.0, 1e3],
+                    vec![0.0, -45.0 * (index + 1) as f64],
+                    "°",
+                ),
+            ],
+        ));
+    }
+    // A member of another analysis kind is not a member of this family.
+    run.analyses.push(point(
+        3,
+        AnalysisType::DcSweep,
+        0,
+        1.0,
+        vec![RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            "V",
+        )],
+    ));
+    let built = models(&run, &HashSet::new());
+    assert_eq!(built.len(), 2, "the AC family and the DC point");
+    let decibels: Vec<_> = built[0]
+        .traces
+        .iter()
+        .filter(|trace| trace.kind == TraceKind::MagnitudeDb)
+        .map(|trace| (trace.name.as_str(), trace.y[1]))
+        .collect();
+    assert_eq!(
+        decibels,
+        [
+            ("|V(out)| · c = 1 n", -20.0),
+            ("|V(out)| · c = 10 n", -40.0)
+        ]
+    );
+    let phases: Vec<_> = built[0]
+        .traces
+        .iter()
+        .filter(|trace| trace.kind == TraceKind::PhaseDeg)
+        .map(|trace| trace.y[1])
+        .collect();
+    assert_eq!(phases, [-45.0, -90.0]);
+}

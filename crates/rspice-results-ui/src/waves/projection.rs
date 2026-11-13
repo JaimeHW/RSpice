@@ -23,7 +23,7 @@ use rspice_ui_kit::tokens::Tokens;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-mod transient_family;
+mod member_family;
 
 fn unique_analysis<'a>(
     mut candidates: impl Iterator<Item = &'a AnalysisResult<RetainedTrace>>,
@@ -400,7 +400,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
     };
     let run = run.as_ref();
     let mut models = Vec::new();
-    let families = transient_family::transient_families(&run.analyses);
+    let families = member_family::member_families(&run.analyses);
 
     for (analysis_index, analysis) in run.analyses.iter().map(AsRef::as_ref).enumerate() {
         let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
@@ -408,8 +408,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             continue;
         }
         let family = match families.get(&analysis_index) {
-            Some(transient_family::FamilyRole::Member) => continue,
-            Some(transient_family::FamilyRole::Host(members)) => Some(members),
+            Some(member_family::FamilyRole::Member) => continue,
+            Some(member_family::FamilyRole::Host(members)) => Some(members),
             None => None,
         };
         let displays_cartesian_complex = (analysis.analysis_type == AnalysisType::Qpnoise
@@ -648,13 +648,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         // host is drawn as that analysis alone.
         let family = family.filter(|_| sample_selection.is_none());
         if let Some(members) = family {
-            traces = transient_family::member_traces(
-                traces,
-                members,
-                &run.analyses,
-                derived,
-                &projection,
-            );
+            traces =
+                member_family::member_traces(traces, members, &run.analyses, derived, &projection);
         }
         let signal_trace_count = traces.len();
         // An overlay run is compared member for member: its first member
@@ -860,7 +855,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         }
 
         let mut subtitle = match family {
-            Some(members) => transient_family::family_subtitle(&analysis.label, members),
+            Some(members) => member_family::family_subtitle(&analysis.label, members),
             None => analysis.label.clone(),
         };
         if overlaid_run_count > 0 {
