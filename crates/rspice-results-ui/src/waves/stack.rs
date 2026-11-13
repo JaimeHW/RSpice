@@ -665,15 +665,44 @@ fn show_strip_plot(
         return;
     }
 
-    // Expression traces participate in the first pane's automatic fit.
+    // Expression traces participate in the first pane's automatic fit, and
+    // only the first pane carries them: an expression has no declared unit,
+    // so it cannot be routed to a unit-owning pane on the evidence available.
+    // A real event lane is placed in a pane, and joins that pane's traces on
+    // its unit axis.
     let mut exprs = Some(host.resolve_expressions(model, &t));
+    let mut pane_exprs: Vec<Vec<ResolvedExpr>> = panes
+        .iter()
+        .enumerate()
+        .map(|(ordinal, pane)| {
+            let mut pane_exprs = if ordinal == 0 {
+                exprs.take().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            pane_exprs.extend(host.real_step_traces(model, pane, &t));
+            pane_exprs
+        })
+        .collect();
+    // A pane with nothing plotted keeps its header row, where its hidden
+    // traces wait to be shown again, and gives its height to the others.
+    let collapsed: Vec<bool> = panes
+        .iter()
+        .zip(&pane_exprs)
+        .map(|(pane, exprs)| pane.traces.is_empty() && exprs.is_empty())
+        .collect();
+    let collapsed_count = collapsed.iter().filter(|collapsed| **collapsed).count();
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
     let gutter = strip_gutter(ui, host, model);
     let marker_height = event_marker_band(ui, host, model, (x_domain, gutter), count);
     let lane_height = marker_height
         + event_lane_band(ui, host, model, (x_domain, gutter), count, wanted_lanes, &t);
-    let geometry = wave_stack_geometry(available.height() - lane_height, count);
+    let expanded_count = count - collapsed_count;
+    let geometry = wave_stack_geometry(
+        available.height() - lane_height - collapsed_count as f32 * (WAVE_PANE_HEADER_HEIGHT + 1.0),
+        expanded_count,
+    );
     let frame = StripFrame {
         model,
         x_domain,
@@ -683,25 +712,25 @@ fn show_strip_plot(
         gutter,
     };
 
+    let mut expanded_ordinal = 0;
     for (ordinal, pane) in panes.iter().enumerate() {
         if ordinal > 0 {
             let (seam, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), geometry.seam_height),
+                egui::vec2(
+                    ui.available_width(),
+                    1.0_f32.min(ui.available_height().max(0.0)),
+                ),
                 egui::Sense::hover(),
             );
             ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
         }
-        let pane_height = geometry.pane_height(ordinal, count);
-        // Only the first pane carries the strip's expressions: an expression
-        // has no declared unit, so it cannot be routed to a unit-owning pane
-        // on the evidence available. A real event lane is placed in a pane,
-        // and joins that pane's traces on its unit axis.
-        let mut pane_exprs = if ordinal == 0 {
-            exprs.take().unwrap_or_default()
+        let pane_height = if collapsed[ordinal] {
+            WAVE_PANE_HEADER_HEIGHT.min(ui.available_height())
         } else {
-            Vec::new()
+            expanded_ordinal += 1;
+            geometry.pane_height(expanded_ordinal - 1, expanded_count)
         };
-        pane_exprs.extend(host.real_step_traces(model, pane, &t));
+        let pane_exprs = std::mem::take(&mut pane_exprs[ordinal]);
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), pane_height),
             egui::Layout::top_down(egui::Align::Min),
@@ -711,7 +740,7 @@ fn show_strip_plot(
             },
         );
     }
-    let shared_x_height = if count == 0 {
+    let shared_x_height = if expanded_count == 0 {
         WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height).max(0.0))
     } else {
         geometry.shared_x_height
@@ -893,7 +922,11 @@ fn show_unit_pane(
     }
 
     let Some((auto_y0, auto_y1)) = auto_y else {
-        well_hint(ui, "No visible traces — enable one in the legend");
+        // A pane with nothing plotted is its header alone; the hint is for a
+        // pane whose plotted traces hold no finite value to fit.
+        if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT {
+            well_hint(ui, "No visible traces — enable one in the legend");
+        }
         return;
     };
     if ui.available_height() < WAVE_MIN_PLOT_HEIGHT {
