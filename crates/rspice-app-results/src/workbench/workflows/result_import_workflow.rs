@@ -15,7 +15,7 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::import::{
-    ResultImportDialogState, ResultImportStage,
+    ResultImportDialogState, ResultImportPlots, ResultImportStage,
 };
 use rspice_formats::result_import::identify_result_import_format;
 use std::sync::Arc;
@@ -129,6 +129,9 @@ pub struct ParsedResultDataset {
     /// read. An imported result carries both, and neither is derived from the
     /// other.
     pub(crate) event_payload: Option<AnalysisResultPayload>,
+    /// The source's other analyses, when it holds several; committed beside
+    /// this one in the same run.
+    pub(crate) plots: Option<Arc<ResultImportPlots>>,
 }
 
 pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
@@ -257,6 +260,7 @@ pub fn stage_imported_result_dataset(
         family_metadata: parsed.family_metadata,
         notes: parsed.notes,
         event_payload: parsed.event_payload,
+        plots: parsed.plots,
         selected_signals: vec![true; signal_count],
         validation_error: None,
     };
@@ -364,6 +368,7 @@ fn parsed_result_from_draft(
         delimiter: draft.delimiter,
         notes: draft.notes.clone(),
         event_payload: draft.event_payload.clone(),
+        plots: draft.plots.clone(),
     })
 }
 
@@ -390,44 +395,42 @@ fn commit_parsed_result_dataset(
     parsed: ParsedResultDataset,
 ) -> Result<(), String> {
     let analysis_type = parsed.analysis_type;
-    let coordinate_name = parsed.coordinate_name.clone();
     let sample_count = parsed.sample_count;
     let signal_count = parsed.waveforms.len();
     let notes = parsed.notes.clone();
-    let analysis_label = match parsed.analysis_type {
-        AnalysisType::Transient => format!("Imported transient · {coordinate_name}"),
-        AnalysisType::Ac => format!("Imported AC · {coordinate_name}"),
-        AnalysisType::DcSweep => format!("Imported DC sweep · {coordinate_name}"),
-        AnalysisType::SParameter => format!("Imported S-parameters · {coordinate_name}"),
-        _ => return Err("import inferred an unsupported analysis domain".to_owned()),
+    let mut bus_count = 0;
+    let mut analyses = Vec::new();
+    let reviewed = ImportedAnalysis {
+        title: parsed.plots.as_ref().map(|plots| plots.reviewed.clone()),
+        analysis_type,
+        coordinate_name: parsed.coordinate_name,
+        coordinate_unit: parsed.coordinate_unit,
+        waveforms: parsed.waveforms,
+        event_payload: parsed.event_payload,
     };
-    let mut analysis =
-        AnalysisResult::new(1, analysis_type, analysis_label).with_waveforms(parsed.waveforms);
+    let mut reviewed = reviewed.retained(source_name, parsed.source_format, &mut bus_count)?;
     if let Some(metadata) = parsed.family_metadata {
         metadata.validate_for(analysis_type)?;
-        analysis = analysis.with_family_metadata(metadata);
+        reviewed = reviewed.with_family_metadata(metadata);
     }
-    // The exact event history goes in whole. It is not a projection of the
-    // columns above and is not narrowed by the signal selection: a bus
-    // declaration over a member the reader had unticked would name a trace
-    // that is not there, and the validator refuses exactly that.
-    let mut bus_count = 0;
-    if let Some(payload) = parsed.event_payload {
-        payload.validate_for(analysis_type)?;
-        if let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload {
-            bus_count = digital_buses.len();
+    reviewed.validate_retained_evidence()?;
+    analyses.push(reviewed);
+    // A source of several analyses lands as one run that holds them all, the
+    // reviewed one first and the rest in source order, each as written.
+    for plot in parsed.plots.iter().flat_map(|plots| &plots.further) {
+        let further = ImportedAnalysis {
+            title: Some(plot.name.clone()),
+            analysis_type: plot.analysis_type,
+            coordinate_name: plot.coordinate_name.clone(),
+            coordinate_unit: plot.coordinate_unit.clone(),
+            waveforms: plot.waveforms.clone(),
+            event_payload: plot.event_payload.clone(),
         }
-        analysis = analysis.with_result_payload(payload);
+        .retained(source_name, parsed.source_format, &mut bus_count)?;
+        further.validate_retained_evidence()?;
+        analyses.push(further);
     }
-    analysis.import_source = Some(ResultImportSource {
-        source_name: source_name.to_owned(),
-        format: parsed.source_format,
-        coordinate: Some(rspice_results::result_import::ResultImportCoordinate {
-            name: coordinate_name,
-            unit: parsed.coordinate_unit,
-        }),
-    });
-    analysis.validate_retained_evidence()?;
+    let further_count = analyses.len() - 1;
 
     let previous_simulation = state.model.simulation.clone();
     let previous_workbench = state.workbench.clone();
@@ -437,7 +440,9 @@ fn commit_parsed_result_dataset(
         run.job_id = None;
         run.execution_target = None;
         run.label = format!("Imported · {source_name}");
-        run.add_analysis(analysis);
+        for analysis in analyses {
+            run.add_analysis(analysis);
+        }
         let run_sequence = run.id;
         let dataset_id = run.dataset_id;
         // Reading a dataset does not establish the foreign solver's lifecycle
@@ -484,12 +489,17 @@ fn commit_parsed_result_dataset(
         LogSource::Studio,
         format!(
             "Imported {source_name} as Run {run_sequence}: {signal_count} signals \u{00d7} \
-             {sample_count} samples ({}){}. It was not simulated by RSpice.",
+             {sample_count} samples ({}){}{}. It was not simulated by RSpice.",
             analysis_domain_label(analysis_type),
             match bus_count {
                 0 => String::new(),
                 1 => ", with 1 digital bus".to_owned(),
                 count => format!(", with {count} digital buses"),
+            },
+            match further_count {
+                0 => String::new(),
+                1 => ", and 1 further analysis".to_owned(),
+                count => format!(", and {count} further analyses"),
             }
         ),
     );
@@ -501,6 +511,66 @@ fn commit_parsed_result_dataset(
         );
     }
     Ok(())
+}
+
+/// One analysis of an import on its way into retained history.
+struct ImportedAnalysis {
+    /// The source's own title, when it names its analyses.
+    title: Option<String>,
+    analysis_type: AnalysisType,
+    coordinate_name: String,
+    coordinate_unit: Option<String>,
+    waveforms: Vec<RetainedTrace>,
+    event_payload: Option<AnalysisResultPayload>,
+}
+
+impl ImportedAnalysis {
+    fn retained(
+        self,
+        source_name: &str,
+        format: ResultImportFormat,
+        bus_count: &mut usize,
+    ) -> Result<AnalysisResult, String> {
+        if !matches!(
+            self.analysis_type,
+            AnalysisType::Transient
+                | AnalysisType::Ac
+                | AnalysisType::DcSweep
+                | AnalysisType::SParameter
+        ) {
+            return Err("import inferred an unsupported analysis domain".to_owned());
+        }
+        let coordinate_name = self.coordinate_name;
+        let label = match (self.title, self.analysis_type) {
+            (Some(title), _) => format!("Imported · {title}"),
+            (None, AnalysisType::Transient) => format!("Imported transient · {coordinate_name}"),
+            (None, AnalysisType::Ac) => format!("Imported AC · {coordinate_name}"),
+            (None, AnalysisType::DcSweep) => format!("Imported DC sweep · {coordinate_name}"),
+            (None, _) => format!("Imported S-parameters · {coordinate_name}"),
+        };
+        let mut analysis =
+            AnalysisResult::new(1, self.analysis_type, label).with_waveforms(self.waveforms);
+        // The exact event history goes in whole. It is not a projection of the
+        // columns above and is not narrowed by the signal selection: a bus
+        // declaration over a member the reader had unticked would name a trace
+        // that is not there, and the validator refuses exactly that.
+        if let Some(payload) = self.event_payload {
+            payload.validate_for(self.analysis_type)?;
+            if let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload {
+                *bus_count += digital_buses.len();
+            }
+            analysis = analysis.with_result_payload(payload);
+        }
+        analysis.import_source = Some(ResultImportSource {
+            source_name: source_name.to_owned(),
+            format,
+            coordinate: Some(rspice_results::result_import::ResultImportCoordinate {
+                name: coordinate_name,
+                unit: self.coordinate_unit,
+            }),
+        });
+        Ok(analysis)
+    }
 }
 
 /// Render the staged external-result import transaction.
@@ -689,6 +759,7 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
             );
             result_import_summary_row(ui, "Signals", &draft.waveforms.len().to_string());
             result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
+            result_import_plot_rows(ui, draft);
         });
     ui.add_space(12.0);
     ui.label(
@@ -698,6 +769,16 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
 
 fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState) {
     ui.heading("Map engineering data");
+    if let Some(plots) = draft.plots.as_deref() {
+        ui.label(
+            egui::RichText::new(format!(
+                "Mapping {}. The source's other analyses import as written.",
+                plots.reviewed
+            ))
+            .small()
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+        );
+    }
     egui::Grid::new("rspice.result-import.mapping")
         .num_columns(2)
         .spacing([18.0, 8.0])
@@ -799,6 +880,7 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             );
             result_import_summary_row(ui, "Included signals", &selected.to_string());
             result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
+            result_import_plot_rows(ui, draft);
             result_import_summary_row(ui, "Saved as", "Read-only · imported, not from a run");
         });
     ui.add_space(12.0);
@@ -810,10 +892,15 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
     }
     match parsed_result_from_draft(draft) {
         Ok(_) => {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.ok,
-                "Validation passed. Import will add one completed retained run and open it in Results.",
-            );
+            let message = match draft.plots.as_deref() {
+                Some(plots) => format!(
+                    "Validation passed. Import will add one completed retained run of {} analyses and open it in Results.",
+                    plots.further.len() + 1
+                ),
+                None => "Validation passed. Import will add one completed retained run and open it in Results."
+                    .to_owned(),
+            };
+            ui.colored_label(Tokens::get(ui.ctx()).color.ok, message);
         }
         Err(error) => {
             ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
@@ -821,6 +908,27 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
     }
     ui.add_space(10.0);
     result_import_preview(ui, draft);
+}
+
+/// The rows that say which analysis of a multi-analysis source is reviewed
+/// and what else the import brings in beside it.
+fn result_import_plot_rows(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+    let Some(plots) = draft.plots.as_deref() else {
+        return;
+    };
+    result_import_summary_row(ui, "Reviewed analysis", &plots.reviewed);
+    for plot in &plots.further {
+        result_import_summary_row(
+            ui,
+            "Also imported",
+            &format!(
+                "{} · {} signals \u{00d7} {} samples, as written",
+                plot.name,
+                plot.waveforms.len(),
+                plot.sample_count
+            ),
+        );
+    }
 }
 
 fn result_import_summary_row(ui: &mut egui::Ui, label: &str, value: &str) {
@@ -1030,6 +1138,7 @@ fn parse_delimited_result_dataset(
         delimiter,
         notes: Vec::new(),
         event_payload: None,
+        plots: None,
     })
 }
 

@@ -42,8 +42,34 @@ pub struct ResultImportDialogState {
     /// file a second time. Committed whole: it is evidence about events, not
     /// a projection of the sampled columns the reader is selecting among.
     pub event_payload: Option<crate::state::AnalysisResultPayload>,
+    /// The source's other analyses, when it holds several (a rawfile of an
+    /// operating point and a transient, say). The fields above review one of
+    /// them; these are committed beside it, as written, in the same run.
+    pub plots: Option<std::sync::Arc<ResultImportPlots>>,
     pub selected_signals: Vec<bool>,
     pub validation_error: Option<String>,
+}
+
+/// The analyses of a source that holds more than one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultImportPlots {
+    /// The source's own title for the analysis the draft reviews.
+    pub reviewed: String,
+    /// Every other analysis, in source order.
+    pub further: Vec<ResultImportPlot>,
+}
+
+/// One further analysis of a multi-analysis source, imported as written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultImportPlot {
+    /// The source's own title for this analysis.
+    pub name: String,
+    pub analysis_type: crate::state::AnalysisType,
+    pub coordinate_name: String,
+    pub coordinate_unit: Option<String>,
+    pub sample_count: usize,
+    pub waveforms: Vec<crate::state::RetainedTrace>,
+    pub event_payload: Option<crate::state::AnalysisResultPayload>,
 }
 
 impl Default for ResultImportDialogState {
@@ -62,6 +88,7 @@ impl Default for ResultImportDialogState {
             family_metadata: None,
             notes: Vec::new(),
             event_payload: None,
+            plots: None,
             selected_signals: Vec::new(),
             validation_error: None,
         }

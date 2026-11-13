@@ -386,6 +386,87 @@ fn matlab_v5_imports_numeric_vectors_and_rejects_truncation() {
     assert!(parse_matlab_v5(&bytes[..140], ResultImportFormat::MatlabV5).is_err());
 }
 
+/// The op-then-tran rawfile ngspice-46 writes under `-r` for an RC divider
+/// stepped from 0.5 V, in its ASCII encoding: its header lines verbatim, cut
+/// to the first three transient rows.
+const NGSPICE_OP_THEN_TRAN: &[u8] = b"Title: rc op then tran\nDate: Fri Nov 13 06:07:38  2026\nCommand: ngspice-46, Build \nPlotname: Operating Point\nFlags: real\nNo. Variables: 3\nNo. Points: 1       \nVariables:\n\t0\tv(in)\tvoltage\n\t1\tv(out)\tvoltage\n\t2\ti(v1)\tcurrent\nValues:\n0\t\t5.000000000000000e-01\n\t3.750000000000000e-01\n\t-1.250000000000000e-04\n\
+Title: rc op then tran\nDate: Fri Nov 13 06:07:38  2026\nCommand: ngspice-46, Build \nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 4\nNo. Points: 3       \nVariables:\n\t0\ttime\ttime\n\t1\tv(in)\tvoltage\n\t2\tv(out)\tvoltage\n\t3\ti(v1)\tcurrent\nValues:\n\
+0\t\t0.000000000000000e+00\n\t5.000000000000000e-01\n\t3.750000000000000e-01\n\t-1.250000000000000e-04\n\
+1\t\t4.000000000000001e-12\n\t5.002000000000000e-01\n\t3.750000799573561e-01\n\t-1.251999200426440e-04\n\
+2\t\t8.000000000000001e-12\n\t5.004000000000000e-01\n\t3.750002398294470e-01\n\t-1.253997601705530e-04\n";
+
+/// Every plot of an ngspice rawfile comes in, one analysis each, in one run:
+/// the transient is the one reviewed, and the operating point lands beside
+/// it as written.
+#[test]
+fn an_ngspice_op_then_tran_rawfile_imports_as_one_run_of_both_analyses() {
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+
+    let parsed = parse_spice_raw(NGSPICE_OP_THEN_TRAN, ResultImportFormat::SpiceRaw)
+        .expect("a multi-plot rawfile imports");
+    assert_eq!(parsed.analysis_type, AnalysisType::Transient);
+    assert_eq!(parsed.sample_count, 3);
+    let plots = parsed
+        .plots
+        .as_deref()
+        .expect("the source holds two analyses");
+    assert_eq!(plots.reviewed, "Transient Analysis");
+    let [op] = plots.further.as_slice() else {
+        panic!("one further analysis, got {}", plots.further.len());
+    };
+    assert_eq!(op.name, "Operating Point");
+    assert_eq!(op.analysis_type, AnalysisType::DcSweep);
+    assert_eq!((op.coordinate_name.as_str(), op.sample_count), ("point", 1));
+
+    let mut state = ResultsTestHost::default();
+    state.platform.project_lifecycle.authority.open_session();
+    stage_imported_result_dataset(
+        &mut state.results_parts(),
+        "optran.raw",
+        NGSPICE_OP_THEN_TRAN,
+    )
+    .unwrap();
+    assert_eq!(state.results.result_import.plots.as_deref(), Some(plots));
+    commit_result_import_draft(&mut state.results_parts()).unwrap();
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the import is shown");
+    let analyses = run
+        .analyses
+        .iter()
+        .map(|analysis| (analysis.label.as_str(), analysis.analysis_type))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        analyses,
+        [
+            ("Imported · Transient Analysis", AnalysisType::Transient),
+            ("Imported · Operating Point", AnalysisType::DcSweep),
+        ]
+    );
+    let op_values = run.analyses[1]
+        .waveforms
+        .iter()
+        .map(|waveform| (waveform.name.as_str(), waveform.y.as_slice()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        op_values,
+        [
+            ("v(in)", [0.5].as_slice()),
+            ("v(out)", [0.375].as_slice()),
+            ("i(v1)", [-0.000125].as_slice()),
+        ]
+    );
+    assert_eq!(run.analyses[0].waveforms[1].name, "v(out)");
+    assert_eq!(
+        run.analyses[0].waveforms[1].y.as_slice(),
+        [0.375, 0.3750000799573561, 0.375000239829447]
+    );
+    let message = &state.model.log_buffer.entries().last().unwrap().message;
+    assert!(message.contains("and 1 further analysis"), "{message}");
+}
+
 #[test]
 fn spice_raw_and_psf_ascii_import_real_waveforms() {
     let raw = b"Title: fixture\nDate: now\nPlotname: Transient Analysis\nFlags: real double\nNo. Variables: 2\nNo. Points: 3\nVariables:\n\t0\ttime\ttime\n\t1\tV(out)\tvoltage\nValues:\n0\t0\n\t1\n1\t1e-9\n\t2\n2\t2e-9\n\t3\n";

@@ -57,6 +57,7 @@ pub(super) fn present_imported_waveforms(
         delimiter: 0,
         notes: Vec::new(),
         event_payload: None,
+        plots: None,
     }
 }
 
@@ -250,9 +251,60 @@ pub(super) fn parse_spice_raw(
     let mut limits = rspice_core::ResourceLimits::default();
     limits.max_external_data_bytes = MAX_RESULT_DATASET_BYTES as usize;
     limits.max_external_data_values = MAX_RESULT_VALUES;
-    let decoded = rspice_formats::spice_raw::decode_spice_raw(bytes, limits)
+    let decoded = rspice_formats::spice_raw::decode_spice_raw_plots(bytes, limits)
         .map_err(|error| adapter_error(format, error))?;
-    finish_numeric_dataset(format, decoded)
+    // A rawfile holds one plot per analysis. The reader reviews the first one
+    // drawn over a coordinate (an operating point is a scalar result, not the
+    // waveform the file was written for) and the rest come in beside it.
+    let reviewed = decoded
+        .iter()
+        .position(|plot| !plot.scalar)
+        .unwrap_or_default();
+    let several = decoded.len() > 1;
+    let mut reviewed_parsed = None;
+    let mut further = Vec::with_capacity(decoded.len().saturating_sub(1));
+    for (index, plot) in decoded.into_iter().enumerate() {
+        let mut parsed = finish_numeric_dataset(format, plot.dataset).map_err(|error| {
+            if several {
+                format!("{} plot: {error}", plot.plot_name)
+            } else {
+                error
+            }
+        })?;
+        parsed.event_payload = plot.events.and_then(|events| {
+            rspice_results::events::imported_event_payload(
+                &rspice_core::execution::VcdEventHistories {
+                    digital_traces: events.digital_traces,
+                    digital_buses: events.digital_buses,
+                    real_traces: events.real_traces,
+                },
+            )
+        });
+        if index == reviewed {
+            reviewed_parsed = Some((plot.plot_name, parsed));
+        } else {
+            further.push(
+                crate::workbench::documents::result_document::import::ResultImportPlot {
+                    name: plot.plot_name,
+                    analysis_type: parsed.analysis_type,
+                    coordinate_name: parsed.coordinate_name,
+                    coordinate_unit: parsed.coordinate_unit,
+                    sample_count: parsed.sample_count,
+                    waveforms: parsed.waveforms,
+                    event_payload: parsed.event_payload,
+                },
+            );
+        }
+    }
+    let (reviewed_name, mut parsed) =
+        reviewed_parsed.ok_or_else(|| adapter_error(format, "rawfile contains no variables"))?;
+    if several {
+        parsed.plots = Some(Arc::new(ResultImportPlots {
+            reviewed: reviewed_name,
+            further,
+        }));
+    }
+    Ok(parsed)
 }
 
 // -------------------------------------------------------------------------
