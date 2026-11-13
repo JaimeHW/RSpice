@@ -165,14 +165,8 @@ fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) ->
         })
 }
 
-pub(crate) fn selected_veriloga_editor_snapshot(
-    app: &RSpiceApp,
-) -> Result<SelectedVerilogAEditorSnapshot, String> {
-    selected_veriloga_editor_snapshot_in(&app.state.model, &app.state.code.code_workspace)
-}
-
-/// [`selected_veriloga_editor_snapshot`], read from the model and the Code
-/// workspace's runtime state alone.
+/// The open Verilog-A view's source and the file its editor shows, read
+/// from the model and the Code workspace's runtime state alone.
 pub(crate) fn selected_veriloga_editor_snapshot_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,

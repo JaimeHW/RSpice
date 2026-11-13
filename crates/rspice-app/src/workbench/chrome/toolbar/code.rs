@@ -1,10 +1,15 @@
 //! The code toolbars: the Verilog-A cell view's build and source tools, and
 //! the Code & Automation workspace's netlist and automation pages.
+//!
+//! They draw their commands through the host, as every toolbar does, and
+//! read the code workspace's state through its session at the point they
+//! draw, after any tool to their left has run.
 
-use crate::workbench::RSpiceApp;
+use crate::workbench::AppState;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 
 use super::{
@@ -24,11 +29,11 @@ use super::{
 /// to act on here.
 pub(in crate::workbench) fn veriloga_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost<Session = AppState>,
     layout: LayoutSpec,
 ) {
     // The control is Cancel until the compile finishes, as Run is Stop.
-    if app.state.code.code_workspace.veriloga.pending.is_some() {
+    if app.session().code.code_workspace.veriloga.pending.is_some() {
         toolbar_text_command(
             ui,
             app,
@@ -83,10 +88,13 @@ pub(in crate::workbench) fn veriloga_tools(
 
 /// The generated deck, in the Netlist workspace: what the design this module
 /// is placed in netlists to.
-fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+fn generated_netlist_tool(
+    ui: &mut egui::Ui,
+    app: &mut impl WorkbenchHost<Session = AppState>,
+    layout: LayoutSpec,
+) {
     let label = app
-        .state
-        .workbench
+        .workbench()
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
     if !take_projected_tool_slot(ui, layout) {
@@ -124,7 +132,7 @@ fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layout
         )
     };
     if response.clicked() {
-        crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
+        crate::workbench::documents::netlist_document::show_generated_deck(app.session_mut());
     }
 }
 
@@ -134,18 +142,26 @@ fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layout
 /// as a reviewable document action — so the tool hands the request to the
 /// visible editor rather than rewriting text itself. Offered only when that
 /// file may be edited.
-fn veriloga_format_tool(ui: &mut egui::Ui, app: &RSpiceApp, layout: LayoutSpec) {
+fn veriloga_format_tool(
+    ui: &mut egui::Ui,
+    app: &impl WorkbenchHost<Session = AppState>,
+    layout: LayoutSpec,
+) {
     use crate::workbench::documents::code_workspace;
 
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
     let language = crate::state::ProjectSourceLanguage::VerilogA;
-    let editor = code_workspace::selected_veriloga_editor_snapshot(app)
+    let state = app.session();
+    let code = &state.code.code_workspace;
+    let editor = code_workspace::selected_veriloga_editor_snapshot_in(&state.model, code)
         .ok()
         .filter(|snapshot| {
-            code_workspace::source_bundle_document_is_editable(
-                app,
+            code_workspace::source_bundle_document_is_editable_in(
+                &state.model,
+                code,
+                &state.platform,
                 language,
                 snapshot.bundle_id(),
                 snapshot.active_path(),
@@ -182,12 +198,12 @@ fn veriloga_format_tool(ui: &mut egui::Ui, app: &RSpiceApp, layout: LayoutSpec) 
 /// two and then ambushed the user on return.
 pub(in crate::workbench) fn netlist_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost<Session = AppState>,
     layout: LayoutSpec,
 ) {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
-    match app.state.code.code_workspace.page {
+    match app.session().code.code_workspace.page {
         CodeWorkspacePage::Netlist => netlist_page_tools(ui, app, layout),
         CodeWorkspacePage::Automation => {
             toolbar_text_command(
@@ -206,7 +222,11 @@ pub(in crate::workbench) fn netlist_tools(
 
 /// The Automation page's source tools: manage the document, search the
 /// closure.
-fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+fn source_page_tools(
+    ui: &mut egui::Ui,
+    app: &mut impl WorkbenchHost<Session = AppState>,
+    layout: LayoutSpec,
+) {
     context_separator(ui, layout);
     toolbar_icon_command(
         ui,
@@ -226,8 +246,12 @@ fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec)
 
 /// The netlist page's set follows the document it is showing: a generated
 /// primary is exported and compared, an owned deck is saved and run.
-fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let generated = app.state.code.netlist.active_document
+fn netlist_page_tools(
+    ui: &mut egui::Ui,
+    app: &mut impl WorkbenchHost<Session = AppState>,
+    layout: LayoutSpec,
+) {
+    let generated = app.session().code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     if generated {
         toolbar_text_command(

@@ -94,9 +94,8 @@ pub(crate) use veriloga::{
     compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_sources,
     invalidate_veriloga_evidence, replace_selected_veriloga_file, request_veriloga_add_files,
     request_veriloga_compile, request_veriloga_import_locate, request_veriloga_source_replacement,
-    selected_veriloga_editor_snapshot, selected_veriloga_editor_snapshot_in,
-    selected_veriloga_source, selected_veriloga_source_in, viewed_veriloga_header,
-    writable_libraries, write_veriloga_build_profile,
+    selected_veriloga_editor_snapshot_in, selected_veriloga_source, selected_veriloga_source_in,
+    viewed_veriloga_header, writable_libraries, write_veriloga_build_profile,
 };
 #[cfg(test)]
 pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
