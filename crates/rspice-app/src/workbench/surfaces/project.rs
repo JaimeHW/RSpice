@@ -33,10 +33,10 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::show_configu
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::features;
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::lifecycle::project_lifecycle::operation_in_progress;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 
-use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
 use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
@@ -467,9 +467,9 @@ fn project_health_chips(
             );
         if project_status_chip(ui, "project-source", &label, &description, problem, true).clicked()
         {
-            *raised = Some(ChromeRaise::Execute(
-                Command::OpenWorkspace(Workspace::Netlist).key(),
-            ));
+            *raised = Some(ChromeRaise::Execute(ids::open_workspace(
+                Workspace::Netlist,
+            )));
         }
     } else {
         let root = cx.model.workspace.content.simulation_root_reference();
@@ -537,11 +537,9 @@ fn project_health_chips(
     {
         // The Configurations command, carried out where the chip is drawn so
         // the band's action after it reads the page it opens. Of the steps
-        // every command passes through, only these two guards act on it.
-        let command = Command::ConfigurationSets;
-        if !command.held_by_project_operation(cx.platform)
-            && !command.lacks_open_project(cx.platform)
-        {
+        // every command passes through, only its two guards act on it: it is
+        // held while a project operation runs, and needs an open project.
+        if !operation_in_progress(cx.platform) && cx.platform.project_lifecycle.is_open() {
             show_configuration_page_in(cx.platform, cx.wb, &mut cx.state.project_page);
         }
     }
@@ -584,9 +582,7 @@ fn project_health_chips(
                 cx.model.is_netlist_first_without_schematic(),
             );
             if cx.model.simulation.select_run(index) {
-                *raised = Some(ChromeRaise::Execute(
-                    Command::OpenWorkspace(destination).key(),
-                ));
+                *raised = Some(ChromeRaise::Execute(ids::open_workspace(destination)));
             }
         }
     } else {

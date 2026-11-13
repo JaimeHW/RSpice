@@ -29,7 +29,6 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::{
 };
 use crate::workbench::app::{open_check_and_save_dialog, open_design_management_dialog};
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -59,10 +58,10 @@ impl Feature for ProjectFeature {
     type Handles = NoHandles;
     /// The Overview offers these, each drawn as the dispatcher answers it.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
-        Command::OpenWorkspace(Workspace::Simulate).key(),
-        Command::OpenWorkspace(Workspace::Results).key(),
-        Command::OpenWorkspace(Workspace::Netlist).key(),
-        Command::ConfigurationSets.key(),
+        ids::open_workspace(Workspace::Simulate),
+        ids::open_workspace(Workspace::Results),
+        ids::open_workspace(Workspace::Netlist),
+        ids::CONFIGURATION_SETS,
         ids::MODELS_CATALOG,
         ids::OPEN_NETLIST,
         ProjectCommand::NewCell.key(),
@@ -282,6 +281,7 @@ fn check_and_save_parts<'c>(cx: &'c mut Cx<'_, ProjectFeature>) -> CheckAndSaveP
         presentation: cx.peers.results().saved_presentation(),
         design: cx.peers.design(),
         code: cx.peers.code(),
+        commands: cx.commands,
     }
 }
 

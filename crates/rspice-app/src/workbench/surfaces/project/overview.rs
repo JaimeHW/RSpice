@@ -17,7 +17,6 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::app_state::{DesignCheckStatus, Model};
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_problem};
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::framework::feature::Cx;
@@ -140,7 +139,7 @@ impl OverviewIntent {
                     cx.model.is_netlist_first_without_schematic(),
                 );
                 if cx.model.simulation.select_run(index) {
-                    cx.execute(Command::OpenWorkspace(destination).key());
+                    cx.execute(ids::open_workspace(destination));
                 }
             }
         }
@@ -443,8 +442,8 @@ impl OverviewSnapshot {
 
         let latest_run_status = cx.model.simulation.retained.runs.first().map_or_else(
             || {
-                let command = Command::OpenWorkspace(run_destination(false, netlist_first));
-                let (enabled, disabled_reason) = command_gate(cx, command.key());
+                let command = ids::open_workspace(run_destination(false, netlist_first));
+                let (enabled, disabled_reason) = command_gate(cx, command);
                 StatusSnapshot {
                     area: "Latest run",
                     state: "No retained run".to_owned(),
@@ -459,7 +458,7 @@ impl OverviewSnapshot {
                         "Open analyses"
                     },
                     tone: Tone::Neutral,
-                    intent: OverviewIntent::Command(command.key()),
+                    intent: OverviewIntent::Command(command),
                     enabled,
                     disabled_reason,
                 }
@@ -472,8 +471,7 @@ impl OverviewSnapshot {
                     .sum();
                 let has_dataset = !run.analyses.is_empty();
                 let destination = run_destination(has_dataset, netlist_first);
-                let (enabled, disabled_reason) =
-                    command_gate(cx, Command::OpenWorkspace(destination).key());
+                let (enabled, disabled_reason) = command_gate(cx, ids::open_workspace(destination));
                 StatusSnapshot {
                     area: "Latest run",
                     state: format!(
@@ -505,11 +503,11 @@ impl OverviewSnapshot {
         );
 
         let (configuration_enabled, configuration_disabled_reason) =
-            command_gate(cx, Command::ConfigurationSets.key());
+            command_gate(cx, ids::CONFIGURATION_SETS);
         let (models_enabled, models_disabled_reason) = command_gate(cx, ids::MODELS_CATALOG);
         let primary_status = if netlist_first {
             let (enabled, disabled_reason) =
-                command_gate(cx, Command::OpenWorkspace(Workspace::Netlist).key());
+                command_gate(cx, ids::open_workspace(Workspace::Netlist));
             source_deck.as_ref().map_or_else(
                 || StatusSnapshot {
                     area: "Source deck",
@@ -517,9 +515,7 @@ impl OverviewSnapshot {
                     detail: "The project has no saved source document".to_owned(),
                     action: "Open deck",
                     tone: Tone::Error,
-                    intent: OverviewIntent::Command(
-                        Command::OpenWorkspace(Workspace::Netlist).key(),
-                    ),
+                    intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
                     enabled,
                     disabled_reason,
                 },
@@ -529,9 +525,7 @@ impl OverviewSnapshot {
                     detail: deck.validation_detail.clone(),
                     action: "Open deck",
                     tone: deck.validation_tone,
-                    intent: OverviewIntent::Command(
-                        Command::OpenWorkspace(Workspace::Netlist).key(),
-                    ),
+                    intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
                     enabled,
                     disabled_reason,
                 },
@@ -557,7 +551,7 @@ impl OverviewSnapshot {
                 detail: configuration.detail.clone(),
                 action: "Manage",
                 tone: configuration.tone,
-                intent: OverviewIntent::Command(Command::ConfigurationSets.key()),
+                intent: OverviewIntent::Command(ids::CONFIGURATION_SETS),
                 enabled: configuration_enabled,
                 disabled_reason: configuration_disabled_reason,
             },
@@ -1057,9 +1051,7 @@ fn overview_header(
                     };
                     if primary.accent().show(ui).clicked() {
                         intent = Some(if snapshot.netlist_first {
-                            OverviewIntent::Command(
-                                Command::OpenWorkspace(Workspace::Netlist).key(),
-                            )
+                            OverviewIntent::Command(ids::open_workspace(Workspace::Netlist))
                         } else {
                             OverviewIntent::OpenProjectRoot
                         });
@@ -1070,8 +1062,8 @@ fn overview_header(
                         } else {
                             format!("Run {}…", snapshot.run_plan_name)
                         };
-                        let command = Command::OpenWorkspace(Workspace::Simulate);
-                        let (enabled, disabled_reason) = command_gate(cx, command.key());
+                        let command = ids::open_workspace(Workspace::Simulate);
+                        let (enabled, disabled_reason) = command_gate(cx, command);
                         let run_plan = Button::new(&run_label).enabled(enabled).show(ui);
                         let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
                             run_plan.on_disabled_hover_text(reason)
@@ -1138,7 +1130,7 @@ fn overview_header(
 }
 
 pub(crate) fn run_plan_intent() -> OverviewIntent {
-    OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate).key())
+    OverviewIntent::Command(ids::open_workspace(Workspace::Simulate))
 }
 
 fn import_deck_intent() -> OverviewIntent {
@@ -1520,9 +1512,9 @@ fn design_register(
                 if library.clicked() {
                     requested = Some(OverviewIntent::Command(library_command.key()));
                 }
-                let configuration_command = Command::ConfigurationSets;
+                let configuration_command = ids::CONFIGURATION_SETS;
                 let (configuration_enabled, configuration_disabled_reason) =
-                    command_gate(cx, configuration_command.key());
+                    command_gate(cx, configuration_command);
                 let configuration = Button::new("Configurations")
                     .enabled(configuration_enabled)
                     .show(ui);
@@ -1531,7 +1523,7 @@ fn design_register(
                         configuration.on_disabled_hover_text(reason)
                     });
                 if configuration.clicked() {
-                    requested = Some(OverviewIntent::Command(configuration_command.key()));
+                    requested = Some(OverviewIntent::Command(configuration_command));
                 }
             });
         });

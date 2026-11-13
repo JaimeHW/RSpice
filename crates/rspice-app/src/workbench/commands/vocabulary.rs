@@ -124,9 +124,14 @@ impl Command {
         self.spec().id
     }
 
-    /// The key a shortcut profile names this command by.
+    /// The key a shortcut profile names this command by. A command a
+    /// feature names by the framework's key returns that key.
     pub const fn key(self) -> CommandKey {
-        CommandKey::new(self.stable_id())
+        match self {
+            Self::OpenWorkspace(workspace) => command_registry::ids::open_workspace(workspace),
+            Self::ConfigurationSets => command_registry::ids::CONFIGURATION_SETS,
+            _ => CommandKey::new(self.stable_id()),
+        }
     }
 
     /// Resolve a stable product identity through the canonical registry.

@@ -305,6 +305,7 @@ impl CommandCatalog for Registry {
 /// registered command, which the registry's check asserts.
 pub mod ids {
     use crate::state::command_catalog::CommandKey;
+    use rspice_app_state::workbench::workspace::Workspace;
 
     macro_rules! ids {
         ($($name:ident = $id:literal;)*) => {
@@ -321,6 +322,20 @@ pub mod ids {
         ALL.iter().map(|&key| ("framework code", key))
     }
 
+    /// The command that opens `workspace`.
+    pub const fn open_workspace(workspace: Workspace) -> CommandKey {
+        match workspace {
+            Workspace::Project => PROJECT_WORKSPACE,
+            Workspace::Design => DESIGN_WORKSPACE,
+            Workspace::Simulate => SIMULATE_WORKSPACE,
+            Workspace::Stimulus => STIMULUS_WORKSPACE,
+            Workspace::Results => RESULTS_WORKSPACE,
+            Workspace::Verify => VERIFY_WORKSPACE,
+            Workspace::Models => MODELS_WORKSPACE,
+            Workspace::Netlist => NETLIST_WORKSPACE,
+        }
+    }
+
     ids! {
         ACCOUNT_ORGANIZATION = "account-organization";
         CALCULATOR = "calculator";
@@ -328,6 +343,7 @@ pub mod ids {
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
         COMPILE_VERILOG_A = "veriloga";
+        CONFIGURATION_SETS = "configuration-sets";
         COPY = "copy-selection";
         CUT = "cut-selection";
         CYCLE_GRID = "cycle-grid";
