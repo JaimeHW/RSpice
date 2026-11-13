@@ -438,6 +438,12 @@ fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
 /// marker repeatedly on one point while the whole return branch got none.
 /// Arc position is the same walk for an ordinary trace and the right one for
 /// every other, and it keeps the count bounded by the pane's width.
+///
+/// Never partway up an edge. A vertical segment is a step's jump between two
+/// held values, and a marker on it would stand at a value the trace never
+/// held: 101 on a 128 → 64 step. A marker the walk puts on one moves to the
+/// nearer end, a sample on the run beside the edge, and one that would then
+/// crowd the marker before it is dropped.
 fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
     const MIN_SPACING: f32 = 96.0;
     if points.len() < 2 || plot_rect.width() < 72.0 {
@@ -472,10 +478,21 @@ fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
         if segment <= 0.0 {
             continue;
         }
+        // Within one pixel column: an edge, not a slope.
+        let edge = (b.x - a.x).abs() < 1.0;
         while next <= travelled + segment {
             let along = ((next - travelled) / segment).clamp(0.0, 1.0);
-            let point = a + (b - a) * along;
-            if bounds.contains(point) {
+            let point = if !edge {
+                a + (b - a) * along
+            } else if along < 0.5 {
+                a
+            } else {
+                b
+            };
+            let crowded = placed
+                .last()
+                .is_some_and(|last: &Pos2| (point - *last).length() < MIN_SPACING * 0.5);
+            if bounds.contains(point) && !crowded {
                 placed.push(point);
             }
             next += spacing;
@@ -2121,6 +2138,93 @@ mod tests {
         let placed = trace_marker_positions(&ramp, plot);
         assert!(placed.len() >= 4 && placed.len() <= 8, "{placed:?}");
         assert!(placed.windows(2).all(|pair| pair[1].x > pair[0].x));
+    }
+
+    /// A staircase's markers stand on its treads, never partway up a riser.
+    /// Read from the frame: every marker a step trace paints sits at one of
+    /// the levels the trace held. Before, the walk along the curve stopped
+    /// wherever its spacing ran out, and a marker stood at 101 on a 128 → 64
+    /// step.
+    #[test]
+    fn a_staircase_carries_its_markers_on_its_treads() {
+        let codes = [
+            128.0, 64.0, 96.0, 32.0, 160.0, 8.0, 200.0, 72.0, 136.0, 24.0,
+        ];
+        let (mut x, mut y) = (Vec::new(), Vec::new());
+        for (step, code) in codes.iter().enumerate() {
+            // Each code holds for one microsecond: two samples, one at each
+            // end of its tread, so the risers are vertical.
+            x.extend([step as f64, step as f64 + 1.0]);
+            y.extend([*code, *code]);
+        }
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, codes.len() as f64, "µs"),
+            XScale::Linear,
+            Axis::linear(0.0, 256.0, ""),
+        );
+        spec.traces
+            .push(Trace::new(&x, &y, Color32::WHITE).marker_style(0));
+        let size = vec2(720.0, 400.0);
+        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
+        let tread = |code: f64| plot.bottom() - (code / 256.0) as f32 * plot.height();
+        let markers: Vec<Pos2> = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Circle(circle) if circle.stroke.color == Color32::WHITE => {
+                    Some(circle.center)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(markers.len() >= 4, "{} markers", markers.len());
+        for marker in &markers {
+            assert!(
+                codes
+                    .iter()
+                    .any(|code| (marker.y - tread(*code)).abs() <= 0.5),
+                "a marker at {marker:?} stands between treads"
+            );
+        }
+    }
+
+    /// The ten-code staircase of the test above, with its markers, on the
+    /// dark canvas, for review. Set `RSPICE_REVIEW_DIR` to choose where.
+    #[test]
+    #[ignore = "writes a PNG for review"]
+    fn write_staircase_marker_png() {
+        let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let codes = [
+            128.0, 64.0, 96.0, 32.0, 160.0, 8.0, 200.0, 72.0, 136.0, 24.0,
+        ];
+        let (mut x, mut y) = (Vec::new(), Vec::new());
+        for (step, code) in codes.iter().enumerate() {
+            x.extend([step as f64, step as f64 + 1.0]);
+            y.extend([*code, *code]);
+        }
+        let theme = crate::Theme {
+            canvas_theme: crate::EngineeringCanvasTheme::Dark,
+            mode: crate::Mode::Dark,
+            ..crate::Theme::default()
+        };
+        let canvas = crate::raster::render_themed(theme, vec2(720.0, 400.0), |ui, _| {
+            let well = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
+            let mut spec = PlotSpec::new(
+                Axis::linear(0.0, codes.len() as f64, "µs"),
+                XScale::Linear,
+                Axis::linear(0.0, 256.0, ""),
+            );
+            spec.traces
+                .push(Trace::new(&x, &y, Tokens::get(ui.ctx()).color.traces[0]).marker_style(0));
+            let mut cache = DecimationCache::default();
+            show(ui, &spec, &mut cache, None, None);
+        });
+        let path = directory.join("staircase-markers.png");
+        std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
+        println!("{}", path.display());
     }
 
     /// A trace with no drawable length carries no markers.
