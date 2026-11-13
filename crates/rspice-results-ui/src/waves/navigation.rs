@@ -54,6 +54,61 @@ pub fn model_x_axis(
     }
 }
 
+/// Space either side of the value inside a cursor's ruler box, and the least
+/// gap between two boxes.
+const RULER_FLAG_PAD: f32 = 4.0;
+
+/// How far a cursor's one-pixel caret hangs under its ruler box, short of
+/// the overview track below.
+const RULER_CARET: f32 = 2.0;
+
+/// The height of a cursor's notch on the overview track's top edge.
+const RULER_NOTCH: f32 = 3.0;
+
+/// A cursor's value box on the shared ruler, which is also its drag handle.
+struct RulerFlag {
+    drag: SharedXDrag,
+    /// Where the cursor itself stands.
+    px: f32,
+    rect: egui::Rect,
+    galley: std::sync::Arc<egui::Galley>,
+    color: egui::Color32,
+}
+
+/// The left edges of the cursors' ruler boxes, each `(cursor x, width)`:
+/// centred under its cursor inside `span`, and two that would touch pushed
+/// apart by halves, an edge holding the one against it while the other takes
+/// the rest.
+fn ruler_flag_lefts(flags: &[(f32, f32)], span: egui::Rangef) -> Vec<f32> {
+    let mut lefts: Vec<f32> = flags
+        .iter()
+        .map(|&(px, width)| (px - width * 0.5).clamp(span.min, (span.max - width).max(span.min)))
+        .collect();
+    if let [(first_px, _), (second_px, _)] = flags {
+        let (first, second) = if first_px <= second_px {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        let overlap = lefts[first] + flags[first].1 + RULER_FLAG_PAD - lefts[second];
+        if overlap > 0.0 {
+            lefts[first] -= overlap * 0.5;
+            lefts[second] += overlap * 0.5;
+            let under = span.min - lefts[first];
+            if under > 0.0 {
+                lefts[first] += under;
+                lefts[second] += under;
+            }
+            let over = lefts[second] + flags[second].1 - span.max;
+            if over > 0.0 {
+                lefts[first] -= over;
+                lefts[second] -= over;
+            }
+        }
+    }
+    lefts
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedXDrag {
     Viewport,
@@ -74,6 +129,8 @@ pub struct SharedXAxis {
     pub height: f32,
     pub left_margin: f32,
     pub quantity_policy: QuantityPresentationPolicy,
+    /// The reader's significant digits, which a cursor's value box reads in.
+    pub significant_digits: usize,
     pub cursors: Option<CursorPair>,
     /// Why the axis cannot be logarithmic, when it cannot.
     pub log_refusal: Option<String>,
@@ -179,6 +236,11 @@ pub fn show_shared_x_axis(
             (rect.top() + SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT).min(rect.bottom()),
         ),
     );
+    // Whether the panes show less than the whole record: only then do the
+    // overview's thumb and its notches have anything to say.
+    let (shown_start, shown_end) =
+        shared_axis_viewport_fraction(model.x_scale, full_domain, current);
+    let zoomed = shown_start > 1.0e-9 || shown_end < 1.0 - 1.0e-9;
     let mut viewport = egui::Rect::NOTHING;
     if track.width() > 1.0 {
         painter.rect_filled(track, 0.0, c.canvas_bg);
@@ -243,41 +305,117 @@ pub fn show_shared_x_axis(
             }
         }
 
-        let (start, end) = shared_axis_viewport_fraction(model.x_scale, full_domain, current);
-        let window_left = track.left() + track.width() * start as f32;
+        let window_left = track.left() + track.width() * shown_start as f32;
         viewport = egui::Rect::from_min_max(
             egui::pos2(window_left, track.top()),
             egui::pos2(
-                (track.left() + track.width() * end as f32).max(window_left + 6.0),
+                (track.left() + track.width() * shown_end as f32).max(window_left + 6.0),
                 track.bottom(),
             ),
         );
-        painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.14));
-        painter.rect_stroke(
-            viewport,
-            0.0,
-            egui::Stroke::new(1.0, c.accent),
-            egui::StrokeKind::Inside,
-        );
-        // Grab handles at both edges are the always-visible affordance for
-        // resizing the visible span in place: drag an edge in from the full
-        // range to zoom, and the opposite edge holds.
-        for edge_x in [viewport.left(), viewport.right()] {
-            painter.rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(edge_x - 3.0, track.top() - 1.0),
-                    egui::pos2(edge_x + 3.0, track.bottom() + 1.0),
-                ),
-                2.0,
-                c.accent,
+        // The thumb takes the accent, with its grab handles, exactly while
+        // the panes show less than the whole record. At full view it would
+        // outline the whole track in the loudest ink on the sheet and say
+        // nothing, so the track's own quiet frame stands alone; its edges
+        // still resize the view when dragged in.
+        if zoomed {
+            painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.14));
+            painter.rect_stroke(
+                viewport,
+                0.0,
+                egui::Stroke::new(1.0, c.accent),
+                egui::StrokeKind::Inside,
             );
-            painter.vline(
-                edge_x,
-                egui::Rangef::new(track.top() + 3.0, track.bottom() - 3.0),
-                egui::Stroke::new(1.0, c.canvas_bg),
-            );
+            // Grab handles at both edges resize the visible span in place:
+            // drag one and the opposite edge holds.
+            for edge_x in [viewport.left(), viewport.right()] {
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(edge_x - 3.0, track.top() - 1.0),
+                        egui::pos2(edge_x + 3.0, track.bottom() + 1.0),
+                    ),
+                    2.0,
+                    c.accent,
+                );
+                painter.vline(
+                    edge_x,
+                    egui::Rangef::new(track.top() + 3.0, track.bottom() - 3.0),
+                    egui::Stroke::new(1.0, c.canvas_bg),
+                );
+            }
         }
     }
+
+    let flag_centre = |value: f64| {
+        // Flags track the viewport like the pane cursor lines above them,
+        // so a cursor zoomed past simply leaves the strip.
+        let fraction = model.x_scale.normalize(value, current.0, current.1);
+        (fraction.is_finite() && (-0.001..=1.001).contains(&fraction))
+            .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
+    };
+    // Each cursor's foot on the ruler is its X value in its own colour, as
+    // EZwave's cursor bar and Verdi's ruler read the cursor time: the pane's
+    // top flag already names the letter. Laid out before the tick row, so a
+    // tick value over a box gives way to it.
+    let flags = cursor_values.map_or_else(Vec::new, |cursors| {
+        let placed: Vec<(SharedXDrag, &str, f32, String, egui::Color32)> = [
+            (SharedXDrag::CursorA, "A", cursors.a, c.canvas_cursor_a),
+            (SharedXDrag::CursorB, "B", cursors.b, c.canvas_cursor_b),
+        ]
+        .into_iter()
+        .filter_map(|(drag, letter, value, color)| {
+            let px = flag_centre(value?)?;
+            let text = model.format_x(value?, input.significant_digits, input.quantity_policy);
+            Some((drag, letter, px, text, color))
+        })
+        .collect();
+        let flag_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+        let lay_out = |tagged: bool| {
+            let galleys: Vec<_> = placed
+                .iter()
+                .map(|(_, letter, _, text, _)| {
+                    let text = if tagged {
+                        format!("{letter} {text}")
+                    } else {
+                        text.clone()
+                    };
+                    painter.layout_no_wrap(text, flag_font.clone(), c.canvas_bg)
+                })
+                .collect();
+            let spans: Vec<(f32, f32)> = placed
+                .iter()
+                .zip(&galleys)
+                .map(|((_, _, px, _, _), galley)| (*px, galley.size().x + 2.0 * RULER_FLAG_PAD))
+                .collect();
+            let lefts = ruler_flag_lefts(&spans, egui::Rangef::new(plot_left, plot_right));
+            let under_its_cursor = spans
+                .iter()
+                .zip(&lefts)
+                .all(|((px, width), left)| (*left..=*left + *width).contains(px));
+            (galleys, spans, lefts, under_its_cursor)
+        };
+        // The letter rides along only while each box still stands under its
+        // own cursor; two cursors close together drop it to make room.
+        let tagged = lay_out(true);
+        let (galleys, spans, lefts, _) = if tagged.3 { tagged } else { lay_out(false) };
+        placed
+            .iter()
+            .zip(galleys)
+            .zip(spans.iter().zip(&lefts))
+            .map(
+                |(((drag, _, px, _, color), galley), ((_, width), left))| RulerFlag {
+                    drag: *drag,
+                    px: *px,
+                    rect: egui::Rect::from_min_max(
+                        egui::pos2(*left, flag_top),
+                        egui::pos2(*left + *width, flag_bottom),
+                    ),
+                    galley,
+                    color: *color,
+                },
+            )
+            .collect::<Vec<_>>()
+    });
 
     // Tick values for the zoomed viewport sit at the top of the strip, right
     // against the panes they describe, and their stubs point up toward the
@@ -314,7 +452,13 @@ pub fn show_shared_x_axis(
         let half = galley.size().x * 0.5 + 2.0;
         let centre = x.clamp(plot_left + half, (plot_right - half).max(plot_left + half));
         let left = centre - galley.size().x * 0.5;
-        if left >= last_right + 6.0 {
+        // A tick value in a cursor box's column gives way to the box: the
+        // two would read as one number.
+        let label = egui::Rangef::new(left, left + galley.size().x);
+        let under_a_flag = flags
+            .iter()
+            .any(|flag| flag.rect.x_range().expand(RULER_FLAG_PAD).intersects(label));
+        if left >= last_right + 6.0 && !under_a_flag {
             last_right = left + galley.size().x;
             painter.galley(egui::pos2(left, label_top), galley, c.text_dim);
         }
@@ -389,54 +533,47 @@ pub fn show_shared_x_axis(
         output.scale_toggled = scale_response.clicked() && !refused;
     }
 
-    let flag_centre = |value: f64| {
-        // Flags track the viewport like the pane cursor lines above them,
-        // so a cursor zoomed past simply leaves the strip.
-        let fraction = model.x_scale.normalize(value, current.0, current.1);
-        (fraction.is_finite() && (-0.001..=1.001).contains(&fraction))
-            .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
-    };
-    if let Some(cursors) = cursor_values {
-        // The same fills and letter ink as the plot's own cursor flags, so
-        // one cursor is one colour everywhere and its letter reads off the
-        // fill whichever interface theme frames the canvas.
-        for (label, value, color) in [
-            ("A", cursors.a, c.canvas_cursor_a),
-            ("B", cursors.b, c.canvas_cursor_b),
+    // The same fills and ink as the plot's own cursor flags, so one cursor
+    // is one colour everywhere and its value reads off the fill whichever
+    // interface theme frames the canvas. The box is all the ruler draws of
+    // a cursor: a line rising from it would read as a cursor on whatever
+    // axis the pane above it draws.
+    for flag in &flags {
+        painter.rect_filled(flag.rect, 2.0, flag.color);
+        painter.galley(
+            flag.rect.center() - flag.galley.size() * 0.5,
+            flag.galley.clone(),
+            c.canvas_bg,
+        );
+        // A one-pixel caret under the box stands at the cursor's exact X, so
+        // a box its neighbour pushed aside still points at its cursor.
+        painter.vline(
+            flag.px,
+            egui::Rangef::new(flag.rect.bottom(), flag.rect.bottom() + RULER_CARET),
+            egui::Stroke::new(1.0, flag.color),
+        );
+    }
+    // The overview's notches say where a cursor stands in the whole record,
+    // which the boxes above already say while the viewport shows all of it:
+    // only a zoomed viewport gets them, each a short tick on the track's top
+    // edge, so a cursor the viewport has left behind is still found.
+    if let Some(cursors) = cursor_values
+        && zoomed
+        && track.width() > 1.0
+    {
+        for (value, color) in [
+            (cursors.a, c.canvas_cursor_a),
+            (cursors.b, c.canvas_cursor_b),
         ] {
             let Some(value) = value else { continue };
-            if let Some(px) = flag_centre(value) {
-                let flag = egui::Rect::from_min_max(
-                    egui::pos2(px - 8.0, flag_top),
-                    egui::pos2(px + 8.0, flag_bottom),
-                );
+            let fraction = model.x_scale.normalize(value, full_domain.0, full_domain.1);
+            if fraction.is_finite() {
+                let notch = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
                 painter.vline(
-                    px,
-                    egui::Rangef::new(rect.top(), flag_top),
+                    notch,
+                    egui::Rangef::new(track.top(), track.top() + RULER_NOTCH),
                     egui::Stroke::new(1.0, color),
                 );
-                painter.rect_filled(flag, 2.0, color);
-                painter.text(
-                    flag.center(),
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    theme::mono(tokens::FS_0, FontWeight::SemiBold),
-                    c.canvas_bg,
-                );
-            }
-            // The overview keeps its own notch at the cursor's absolute
-            // source position, so it still locates a cursor the viewport has
-            // left behind.
-            if track.width() > 1.0 {
-                let fraction = model.x_scale.normalize(value, full_domain.0, full_domain.1);
-                if fraction.is_finite() {
-                    let notch = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
-                    painter.vline(
-                        notch,
-                        egui::Rangef::new(track.top() + 1.0, track.top() + 5.0),
-                        egui::Stroke::new(2.0, color),
-                    );
-                }
             }
         }
     }
@@ -463,16 +600,13 @@ pub fn show_shared_x_axis(
         if pointer.y >= track.top() - 4.0 {
             return None;
         }
-        let cursors = cursor_values?;
-        [
-            (SharedXDrag::CursorA, cursors.a),
-            (SharedXDrag::CursorB, cursors.b),
-        ]
-        .into_iter()
-        .find_map(|(drag, value)| {
-            let px = flag_centre(value?)?;
-            ((pointer.x - px).abs() <= 9.0).then_some(drag)
-        })
+        flags
+            .iter()
+            .find(|flag| {
+                flag.rect.x_range().expand(2.0).contains(pointer.x)
+                    || (pointer.x - flag.px).abs() <= 4.0
+            })
+            .map(|flag| flag.drag)
     };
     let drag_id = shared_x_drag_id(model);
     if response.drag_started()

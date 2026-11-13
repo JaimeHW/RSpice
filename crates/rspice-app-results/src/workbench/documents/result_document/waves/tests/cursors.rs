@@ -632,6 +632,391 @@ fn the_next_crossing_on_a_corpus_transient_is_the_calculators_cross() {
     );
 }
 
+/// Every text the frame painted, with where it stands.
+fn placed_texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(text) => out.push((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+            )),
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The shared ruler under the panes reads each cursor's X value in the
+/// cursor's colour box, as EZwave's cursor bar does: no tick value stands
+/// in a box's column, no cursor line runs through the tick values, and two
+/// cursors close together part their boxes so both stay readable.
+#[test]
+fn the_ruler_flags_read_the_cursor_values_clear_of_the_tick_values() {
+    let mut state = host_on(damped_run());
+    // B stands on the 2 ms tick and A close enough that the boxes must part.
+    let (a, b) = (1.85e-3, 2.0e-3);
+    place_cursors(&mut state, Some(a), Some(b));
+    let models = strip(&mut state);
+    let presentation = state.model.preferences.result_presentation_policy();
+    let digits = usize::from(presentation.displayed_significant_digits().get());
+    let quantity = state.model.preferences.quantity_presentation_policy();
+    let (a_value, b_value) = (
+        models[0].format_x(a, digits, quantity),
+        models[0].format_x(b, digits, quantity),
+    );
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let placed = placed_texts(&shapes);
+    let tick_row = placed
+        .iter()
+        .find(|(text, _)| text == "1m")
+        .expect("the ruler reads its 1 ms tick")
+        .1;
+    let ticks: Vec<&(String, egui::Rect)> = placed
+        .iter()
+        .filter(|(_, rect)| (rect.top() - tick_row.top()).abs() < 0.5)
+        .collect();
+    let flag = |value: &str| {
+        placed
+            .iter()
+            .find(|(text, rect)| {
+                (text == value
+                    || text.strip_prefix("A ").or(text.strip_prefix("B ")) == Some(value))
+                    && rect.top() >= tick_row.bottom() - 0.5
+                    && rect.top() <= tick_row.bottom() + 20.0
+            })
+            .unwrap_or_else(|| panic!("the ruler reads {value} in a box: {placed:?}"))
+            .1
+    };
+    let (a_box, b_box) = (flag(&a_value), flag(&b_value));
+    assert!(
+        a_box.max.x < b_box.min.x,
+        "A's box stands left of B's and clear of it: {a_box:?} {b_box:?}"
+    );
+    assert!(
+        !ticks.iter().any(|(text, _)| text == "2m"),
+        "the 2 ms tick under B gives way to its box: {ticks:?}"
+    );
+    for (text, rect) in &ticks {
+        for flag in [a_box, b_box] {
+            assert!(
+                !rect.x_range().intersects(flag.x_range()),
+                "the tick value {text} stands in a cursor box's column"
+            );
+        }
+    }
+    // The box is all the ruler draws of a cursor: no line rises from the
+    // ruler toward the pane above, nor crosses the tick values.
+    let tokens = Tokens::get(&ctx);
+    let lines = verticals(&shapes);
+    for color in [tokens.color.canvas_cursor_a, tokens.color.canvas_cursor_b] {
+        for line in cursor_lines(&lines, color) {
+            assert!(
+                line.bottom <= tick_row.top() - 6.0 || line.top >= tick_row.bottom() - 0.5,
+                "a cursor line rises out of the ruler or through its tick values: {line:?}"
+            );
+        }
+    }
+}
+
+/// Every rectangle or stroke the frame painted in `color`, by its bounds.
+fn painted_in(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, color: egui::Color32, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.fill == color || rect.stroke.color == color => {
+                out.push(rect.rect);
+            }
+            egui::Shape::LineSegment { points, stroke } if stroke.color == color => {
+                out.push(egui::Rect::from_two_pos(points[0], points[1]));
+            }
+            egui::Shape::Circle(circle) if circle.fill == color || circle.stroke.color == color => {
+                out.push(circle.visual_bounding_rect());
+            }
+            egui::Shape::Path(path)
+                if path.fill == color
+                    || path.stroke.color == egui::epaint::ColorMode::Solid(color) =>
+            {
+                out.push(path.visual_bounding_rect());
+            }
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, color, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, color, &mut out);
+    }
+    out
+}
+
+/// The shared ruler's band and its overview track: the smallest panel fill
+/// holding the overview's "FULL" name, and the canvas fill inside it.
+fn ruler_band(shapes: &[ClippedShape], tokens: &Tokens) -> (egui::Rect, egui::Rect) {
+    let name = placed_texts(shapes)
+        .into_iter()
+        .find(|(text, _)| text == "FULL")
+        .expect("the ruler names its overview")
+        .1;
+    let area = |rect: &egui::Rect| rect.area();
+    let band = painted_in(shapes, tokens.color.bg_panel)
+        .into_iter()
+        .filter(|rect| rect.contains_rect(name))
+        .min_by(|a, b| area(a).total_cmp(&area(b)))
+        .expect("the ruler paints its band");
+    let track = painted_in(shapes, tokens.color.canvas_bg)
+        .into_iter()
+        .filter(|rect| band.contains_rect(*rect) && rect.width() > 100.0)
+        .min_by(|a, b| area(a).total_cmp(&area(b)))
+        .expect("the ruler paints its overview track");
+    (band, track)
+}
+
+/// What the ruler painted in a cursor's colour: its box, and every other
+/// mark inside the band.
+fn ruler_marks(
+    shapes: &[ClippedShape],
+    color: egui::Color32,
+    (band, track): (egui::Rect, egui::Rect),
+) -> (egui::Rect, Vec<egui::Rect>) {
+    let (boxes, rest): (Vec<_>, Vec<_>) = painted_in(shapes, color)
+        .into_iter()
+        .filter(|mark| {
+            mark.max.y > band.min.y + 0.5
+                && mark.min.y < band.max.y - 0.5
+                && band.x_range().contains(mark.center().x)
+        })
+        // The overview's viewport window and its edge handles are drawn in
+        // the accent, which cursor A shares. They span the track's whole
+        // height, which no cursor mark does.
+        .filter(|mark| {
+            !(mark.height() >= track.height() - 1.0
+                && track.expand2(egui::vec2(4.0, 2.0)).contains_rect(*mark))
+        })
+        .partition(|mark| mark.height() > 8.0 && mark.width() > 8.0);
+    assert_eq!(boxes.len(), 1, "one value box per cursor: {boxes:?}");
+    (boxes[0], rest)
+}
+
+/// The pane's own line for a cursor, above the ruler.
+fn pane_cursor_line(shapes: &[ClippedShape], color: egui::Color32, band: egui::Rect) -> f32 {
+    cursor_lines(&verticals(shapes), color)
+        .into_iter()
+        .filter(|line| line.bottom <= band.top() + 0.5)
+        .max_by(|a, b| (a.bottom - a.top).total_cmp(&(b.bottom - b.top)))
+        .expect("the pane draws the cursor's line")
+        .x
+}
+
+/// The ruler draws a cursor as its value box and a one-pixel caret under it
+/// at the cursor's exact X, and nothing else: no line rises toward the pane
+/// or hangs toward the overview, and at full zoom-out the overview carries
+/// no notch, the boxes having located the cursors already. Two boxes pushed
+/// apart keep at least 4 px between them, each caret still under its own
+/// cursor's line.
+#[test]
+fn the_ruler_draws_a_cursor_as_its_value_box_and_caret_alone() {
+    let mut state = host_on(damped_run());
+    place_cursors(&mut state, Some(1.85e-3), Some(2.0e-3));
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let tokens = Tokens::get(&ctx);
+    let ruler = ruler_band(&shapes, &tokens);
+    let mut boxes = Vec::new();
+    for color in [tokens.color.canvas_cursor_a, tokens.color.canvas_cursor_b] {
+        let line = pane_cursor_line(&shapes, color, ruler.0);
+        let (flag, rest) = ruler_marks(&shapes, color, ruler);
+        let [caret] = rest.as_slice() else {
+            panic!("the box's caret is the ruler's only other mark: {rest:?}");
+        };
+        assert!(caret.width() <= 1.0 && caret.height() <= 2.0 + 1e-3);
+        assert!(
+            (caret.top() - flag.bottom()).abs() < 0.5,
+            "{caret:?} under {flag:?}"
+        );
+        assert!(
+            (caret.center().x - line).abs() < 0.5,
+            "the caret stands at the cursor's x {line}: {caret:?}"
+        );
+        boxes.push(flag);
+    }
+    let gap = boxes[1].min.x - boxes[0].max.x;
+    assert!(gap >= 4.0 - 1e-3, "the boxes stand {gap} px apart");
+}
+
+/// With the panes zoomed in, the overview marks where each cursor stands in
+/// the whole record with a tick of at most 3 px on its top edge, apart from
+/// the box's caret above it.
+#[test]
+fn a_zoomed_ruler_notches_the_overview_at_each_cursor() {
+    let mut state = host_on(damped_run());
+    let (a, b) = (1.85e-3, 2.0e-3);
+    place_cursors(&mut state, Some(a), Some(b));
+    zoom_to(&mut state, (1.7e-3, 2.7e-3));
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let tokens = Tokens::get(&ctx);
+    let ruler = ruler_band(&shapes, &tokens);
+    let track = ruler.1;
+    for (value, color) in [
+        (a, tokens.color.canvas_cursor_a),
+        (b, tokens.color.canvas_cursor_b),
+    ] {
+        let (flag, rest) = ruler_marks(&shapes, color, ruler);
+        let (carets, notches): (Vec<_>, Vec<_>) = rest
+            .into_iter()
+            .partition(|mark| (mark.top() - flag.bottom()).abs() < 0.5);
+        let ([caret], [notch]) = (carets.as_slice(), notches.as_slice()) else {
+            panic!("one caret and one notch: {carets:?} {notches:?}");
+        };
+        let at = track.left() + track.width() * (value / STOP) as f32;
+        assert!(
+            notch.width() <= 1.0 && notch.height() <= 3.0 + 1e-3,
+            "{notch:?}"
+        );
+        assert!(
+            (notch.top() - track.top()).abs() < 0.5,
+            "{notch:?} on {track:?}"
+        );
+        assert!(
+            (notch.center().x - at).abs() < 0.5,
+            "the notch stands at {at}: {notch:?}"
+        );
+        assert!((notch.center().x - caret.center().x).abs() > 2.0);
+    }
+}
+
+/// The accent marks spanning the overview track's height: the viewport
+/// thumb and its two grab handles.
+fn thumb_marks(shapes: &[ClippedShape], tokens: &Tokens, track: egui::Rect) -> Vec<egui::Rect> {
+    painted_in(shapes, tokens.color.accent)
+        .into_iter()
+        .filter(|mark| {
+            mark.height() >= track.height() - 1.0
+                && track.expand2(egui::vec2(4.0, 2.0)).contains_rect(*mark)
+        })
+        .collect()
+}
+
+/// At full view the overview is its miniature in a quiet frame of border
+/// ink: no accent thumb outlines the whole track and no handles stand at its
+/// ends. Zoomed in, the thumb takes the accent with a handle at each edge,
+/// over exactly the part of the record the panes show, and the track keeps
+/// its height so the layout never jumps.
+#[test]
+fn the_overview_thumb_takes_the_accent_only_while_zoomed() {
+    let frame = |state: &mut ResultsTestHost| {
+        let ctx = theme_context();
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+        }
+        let tokens = Tokens::get(&ctx);
+        let (_, track) = ruler_band(&shapes, &tokens);
+        (shapes, tokens, track)
+    };
+
+    let mut state = host_on(damped_run());
+    let (shapes, tokens, full_track) = frame(&mut state);
+    assert_eq!(
+        thumb_marks(&shapes, &tokens, full_track),
+        Vec::<egui::Rect>::new(),
+        "no thumb at full view"
+    );
+    assert!(
+        painted_in(&shapes, tokens.color.border)
+            .iter()
+            .any(|rect| (rect.min - full_track.min).length() < 0.5
+                && (rect.max - full_track.max).length() < 0.5),
+        "the track keeps its quiet frame"
+    );
+
+    zoom_to(&mut state, (1.7e-3, 2.7e-3));
+    let (shapes, tokens, track) = frame(&mut state);
+    assert!((track.height() - full_track.height()).abs() < 1e-3);
+    let marks = thumb_marks(&shapes, &tokens, track);
+    let (left, right) = (
+        track.left() + track.width() * 0.34,
+        track.left() + track.width() * 0.54,
+    );
+    assert!(
+        marks
+            .iter()
+            .any(|mark| (mark.left() - left).abs() < 0.5 && (mark.right() - right).abs() < 0.5),
+        "the thumb spans 1.7-2.7 ms of the 5 ms record: {marks:?}"
+    );
+    for edge in [left, right] {
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.width() < 8.0 && (mark.center().x - edge).abs() < 0.5),
+            "a handle stands at {edge}: {marks:?}"
+        );
+    }
+}
+
+/// On a logarithmic X axis the ruler boxes read each cursor's value in the
+/// reader's format, placed by the log scale: a startup transient read over
+/// three decades of time.
+#[test]
+fn a_ruler_flag_on_a_logarithmic_axis_reads_the_cursor_value() {
+    let x: Vec<f64> = (0..=60)
+        .map(|k| 10f64.powf(-6.0 + f64::from(k) / 20.0))
+        .collect();
+    let y: Vec<f64> = x.iter().map(|t| 1.0 - (-t / 1.0e-4).exp()).collect();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = rspice_results::run::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", x, y, "#00aaff").with_unit("V"),
+        ]),
+    );
+    let mut state = host_on(run);
+    let analysis = strip(&mut state)[0].analysis_key;
+    state
+        .results
+        .results
+        .session
+        .x_scales
+        .insert(analysis, XScale::Log10);
+    place_cursors(&mut state, Some(12.5e-6), Some(300.0e-6));
+    assert_eq!(strip(&mut state)[0].x_scale, XScale::Log10);
+    let ctx = theme_context();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    }
+    let placed = placed_texts(&shapes);
+    let at = |wanted: &str| {
+        placed
+            .iter()
+            .find(|(text, _)| text == wanted)
+            .unwrap_or_else(|| panic!("the ruler reads {wanted}"))
+            .1
+    };
+    let (a_box, b_box) = (at("A 12.5 µs"), at("B 300 µs"));
+    // Over the three decades 300 µs stands log10(24)/3 = 0.46 of the plot
+    // width past 12.5 µs; a linear placement would put it 0.29 past.
+    let apart = b_box.center().x - a_box.center().x;
+    assert!(
+        apart > 0.38 * FRAME.x,
+        "the boxes stand {apart} apart, not on the log scale"
+    );
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// A and B on the damped sine with their Δ readouts, a reference marker with
 /// two relative markers, and two horizontal cursors with their ΔY.
@@ -711,4 +1096,28 @@ fn write_the_cursor_pictures() {
     session.set_horizontal_cursor(key.clone(), 0, 0.5);
     session.set_horizontal_cursor(key, 1, -0.25);
     write("horizontal-cursors", &mut state);
+
+    // The cursors' values on the shared X ruler: B stands on the 2 ms tick
+    // and A close enough that the two value boxes must make room.
+    let mut state = host_on(damped_run());
+    place_cursors(&mut state, Some(1.85e-3), Some(2.0e-3));
+    write("x-ruler-full", &mut state);
+
+    // The same cursors with the panes zoomed to 1.7-2.7 ms: the overview
+    // marks where they stand in the whole record.
+    let mut state = host_on(damped_run());
+    place_cursors(&mut state, Some(1.85e-3), Some(2.0e-3));
+    zoom_to(&mut state, (1.7e-3, 2.7e-3));
+    write("x-ruler-zoomed", &mut state);
+}
+
+/// The panes of the damped sine's one strip zoomed to `range`.
+fn zoom_to(state: &mut ResultsTestHost, range: (f64, f64)) {
+    let analysis = strip(state)[0].analysis_key;
+    rspice_results_ui::waves::stack::set_shared_x_view(
+        &mut state.results.results.session,
+        analysis,
+        1,
+        Some(range),
+    );
 }

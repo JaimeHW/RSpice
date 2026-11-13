@@ -673,6 +673,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         height,
         left_margin: gutter.width(),
         quantity_policy: options.quantity,
+        significant_digits: usize::from(options.readout.displayed_significant_digits().get()),
         cursors: (cursor_owner || linked_cursor).then_some(host.session().cursors),
         log_refusal: log_x_refusal(model),
     };
