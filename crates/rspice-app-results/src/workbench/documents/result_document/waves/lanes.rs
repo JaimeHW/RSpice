@@ -68,7 +68,12 @@ pub(super) fn show_lanes(
             cursor: cursors.a,
             cursor_b: cursors.b,
             significant_digits: digits,
-            violations: &[],
+            // An assertion that reads one digital net shades its violations
+            // on that net's lane too.
+            violations: model
+                .event_markers
+                .as_deref()
+                .map_or(&[], |markers| markers.assertions.as_slice()),
             // The retained events do not yet carry where an HDL net was
             // declared or what drives it, so those probes have nowhere to go.
             source_probes: false,
@@ -101,7 +106,7 @@ fn store_layout(
 
 /// Move the cursor placed last (B once placed, A before) to `t`, taking the
 /// cursors to this strip if another held them.
-fn step_cursor(
+pub(super) fn step_cursor(
     session: &mut rspice_results_ui::session::ResultViewerState,
     analysis_index: usize,
     t: f64,

@@ -14,6 +14,7 @@ mod extent;
 mod honest_axes;
 mod interaction;
 mod lanes;
+mod markers;
 mod measurements;
 mod source_cache;
 mod strip_chrome;

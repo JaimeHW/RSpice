@@ -113,6 +113,24 @@ pub fn run_manual_batch_with_lifecycle(
     run_batch(state, controller, expected_lifecycle)
 }
 
+/// [`run_manual_batch_with_lifecycle`] for a deck saved at `path`, so the
+/// data files it names are read from beside it.
+pub fn run_manual_batch_at(
+    source: &str,
+    path: &Path,
+    expected_lifecycle: SimulationRunLifecycle,
+) -> crate::state::SimulationRun {
+    let mut state = RunTestHost::default();
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.workspace.content.netlist_source_path = Some(path.to_path_buf());
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("fixture source passes complete preparation");
+    run_batch(state, controller, expected_lifecycle)
+}
+
 pub fn run_generated_batch(
     mut state: RunTestHost,
     expected_lifecycle: SimulationRunLifecycle,

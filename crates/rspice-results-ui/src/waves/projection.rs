@@ -867,6 +867,12 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             x_range: None,
             event_lanes,
             lane_traces,
+            event_markers: analysis
+                .waveforms
+                .first()
+                .and_then(|waveform| Some((*waveform.x.first()?, *waveform.x.last()?)))
+                .and_then(|axis| super::logic::RunMarkers::of(&analysis.checks, axis))
+                .map(Arc::new),
         };
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);

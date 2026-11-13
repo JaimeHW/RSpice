@@ -539,11 +539,13 @@ fn records_sharing_a_pixel_column_draw_one_glyph_the_most_severe() {
     assert_eq!(glyphs[1].1, 1000);
     assert!((glyphs[1].0 - 80.0).abs() < 1.0e-3);
     let none = MarkerStripInput {
-        hdl: &[],
-        assertions: &[],
+        markers: &RunMarkers::default(),
         x_range: (0.0, 1.0),
         left_margin: 64.0,
+        name_width: 0.0,
         right_margin: 14.0,
+        cursor: None,
+        cursor_b: None,
     };
     assert_eq!(marker_strip_height(&none), 0.0, "no markers, no strip");
 }
@@ -568,7 +570,18 @@ fn clicking_a_marker_moves_the_cursor_and_asks_for_its_source_line() {
         operand: "D(q)".to_owned(),
         label: "q_settled".to_owned(),
         error: true,
+        check: "D(q)==1".to_owned(),
+        message: None,
+        source: Some(SourceLine {
+            file: String::new(),
+            line: 9,
+        }),
     }];
+    let markers = RunMarkers {
+        hdl: hdl.to_vec(),
+        assertions: assertions.to_vec(),
+        stop: None,
+    };
     let frame = |events: Vec<egui::Event>| {
         let mut response = None;
         let input = egui::RawInput {
@@ -580,11 +593,13 @@ fn clicking_a_marker_moves_the_cursor_and_asks_for_its_source_line() {
             response = Some(show_marker_strip(
                 ui,
                 &MarkerStripInput {
-                    hdl: &hdl,
-                    assertions: &assertions,
+                    markers: &markers,
                     x_range: (0.0, 100.0 * NS),
                     left_margin: 64.0,
+                    name_width: 0.0,
                     right_margin: 14.0,
+                    cursor: None,
+                    cursor_b: None,
                 },
                 &|t| format!("{t}"),
             ));
@@ -604,16 +619,24 @@ fn clicking_a_marker_moves_the_cursor_and_asks_for_its_source_line() {
         frame(vec![button(false)])
     };
     // The plot area spans 64..386, so 50 ns is at x = 225 and 80 ns at 321.6.
+    // A click moves the cursor; only a double click leaves for the source.
     let marker = click(225.0);
     assert_eq!(marker.cursor_to, Some(50.0 * NS));
+    assert_eq!(marker.open_source, None);
+    let again = click(225.0);
     assert_eq!(
-        marker.open_source,
+        again.open_source,
         Some(SourceLine {
             file: "tb.v".to_owned(),
             line: 40
         })
     );
+    // Clear of the double click's window.
+    for _ in 0..40 {
+        frame(Vec::new());
+    }
     let span = click(321.6);
     assert_eq!(span.select_assertion, Some(0));
     assert_eq!(span.cursor_to, Some(70.0 * NS));
+    assert_eq!(span.open_source, None);
 }

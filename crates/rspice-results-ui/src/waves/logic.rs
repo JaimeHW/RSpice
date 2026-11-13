@@ -19,8 +19,8 @@ pub mod real;
 
 pub use cursor::{EdgeStep, EventLane, LaneReadout};
 pub use markers::{
-    AssertionSpan, HdlMarker, MarkerSeverity, MarkerStripInput, MarkerStripResponse, SourceLine,
-    marker_strip_height, show_marker_strip,
+    AssertionSpan, HdlMarker, MarkerSeverity, MarkerStripInput, MarkerStripResponse, RunMarkers,
+    SourceLine, StopMark, marker_strip_height, markers_height, show_marker_strip,
 };
 pub use model::{BusLane, BusOrigin, EventLanes, LogicLane, LogicLevel, RealLane};
 pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
@@ -343,8 +343,13 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                 .rect_filled(row_rect, 0.0, tokens.color.accent_dim);
         }
         let signal = lane_signal(row, None);
+        // A deck names a net without regard to case, so the check's operand
+        // does too.
         for span in input.violations.iter().filter(|span| {
-            span.operand == row.name() || signal.as_deref() == Some(span.operand.as_str())
+            span.operand.eq_ignore_ascii_case(row.name())
+                || signal
+                    .as_deref()
+                    .is_some_and(|signal| signal.eq_ignore_ascii_case(&span.operand))
         }) {
             markers::paint_violation_span(&lane_painter, row_rect, span, &map, &tokens);
         }

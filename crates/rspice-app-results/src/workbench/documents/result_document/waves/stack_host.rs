@@ -83,6 +83,17 @@ impl StackHost for WaveStackHost<'_, '_> {
     ) {
         super::lanes::show_lanes(ui, self.0, model, frame);
     }
+    fn event_marker_height(&self, model: &StripModel) -> f32 {
+        super::event_markers::marker_height(model)
+    }
+    fn show_event_markers(
+        &mut self,
+        ui: &mut Ui,
+        model: &StripModel,
+        frame: rspice_results_ui::waves::stack::EventLaneFrame,
+    ) {
+        super::event_markers::show_markers(ui, self.0, model, frame);
+    }
     fn real_step_traces(
         &mut self,
         model: &StripModel,

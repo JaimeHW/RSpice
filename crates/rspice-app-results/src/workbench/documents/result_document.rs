@@ -1418,6 +1418,10 @@ pub(crate) fn analysis_evidence_failure(
 #[derive(Debug, Clone, Default)]
 pub struct ResultsState {
     pub session: rspice_results_ui::session::ResultViewerState,
+    /// The HDL or deck line the reader asked to open from a waveform strip's
+    /// event markers, until the application takes it and opens that file at
+    /// that line. One-shot and transient.
+    pub source_request: Option<rspice_results_ui::waves::logic::SourceLine>,
     /// Explicit runtime boundary reported by the operation that owns it.
     /// Source-derived states such as stale, partial, and corrupted are never
     /// stored here; the operational classifier recomputes those from exact

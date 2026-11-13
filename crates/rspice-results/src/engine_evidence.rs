@@ -16,6 +16,7 @@ pub use rspice_core::analysis::signal_integrity::{
     EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, UiEstimateRejection,
     calculate_eye_measurements, crossing_phase_at, estimate_unit_interval, fold_anchor,
 };
+pub use rspice_core::analysis::{AssertViolation, AssertionReport};
 pub use rspice_core::circuit::{DeviceOpEntry, DeviceOpReport, ModuleOpQuantity, ModuleOpReport};
 pub use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
 pub use rspice_core::engine::{
@@ -27,3 +28,5 @@ pub use rspice_core::execution::{
     BusMemberHistory, bus_events, event_code_to_vcd_bit, split_bus_notation,
 };
 pub use rspice_core::io::VcdBit;
+pub use rspice_core::netlist::AssertLevel;
+pub use rspice_core::{ModelFinish, ModelFinishPoint, ModelFinishSource, ModelFinishTask};

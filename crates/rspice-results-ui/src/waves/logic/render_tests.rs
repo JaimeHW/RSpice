@@ -90,6 +90,9 @@ fn render() -> Render {
         operand: "D(q)".to_owned(),
         label: "q_settled".to_owned(),
         error: true,
+        check: "D(q)==1".to_owned(),
+        message: None,
+        source: None,
     }];
     let (lanes, r, z, w) = scene();
     let q = lanes.logic("q").unwrap();
@@ -142,11 +145,17 @@ fn render() -> Render {
         show_marker_strip(
             ui,
             &MarkerStripInput {
-                hdl: &hdl_markers(),
-                assertions: &violations,
+                markers: &RunMarkers {
+                    hdl: hdl_markers(),
+                    assertions: violations.to_vec(),
+                    stop: None,
+                },
                 x_range: (0.0, END),
                 left_margin: LEFT,
+                name_width: LEFT * 0.6,
                 right_margin: RIGHT,
+                cursor: Some(55.0 * NS),
+                cursor_b: None,
             },
             &|t| format!("{:.0} ns", t / NS),
         );

@@ -54,7 +54,7 @@ pub(super) fn sar_run() -> &'static SimulationRun {
 }
 
 /// A host on `run` with only the `analog` columns on the plot.
-fn host(run: &SimulationRun, analog: &[&str]) -> ResultsTestHost {
+pub(super) fn host(run: &SimulationRun, analog: &[&str]) -> ResultsTestHost {
     let mut run = run.clone();
     for analysis in &mut run.analyses {
         for waveform in &mut analysis.waveforms {
@@ -106,7 +106,10 @@ fn code_at(run: &SimulationRun, net: &str, t: f64) -> Option<u8> {
 /// The SAR strip as reviewed: the analog nodes, SAMP and EOC as logic lanes
 /// and the result bits grouped into one `code` bus read in `radix`, in the
 /// order the reader arranged them.
-fn sar_strip(radix: BusRadix, expanded: bool) -> (ResultsTestHost, AnalysisPresentationKey) {
+pub(super) fn sar_strip(
+    radix: BusRadix,
+    expanded: bool,
+) -> (ResultsTestHost, AnalysisPresentationKey) {
     let mut state = host(sar_run(), &ANALOG);
     let key = strip(&mut state)[0].analysis_key;
     let nets: Vec<String> = ["SAMP", "EOC"]
@@ -143,7 +146,7 @@ pub(super) fn place_cursors(state: &mut ResultsTestHost, a: Option<f64>, b: Opti
 }
 
 /// One frame of the Waves sheet, as the reader's window lays it out.
-fn frame(
+pub(super) fn frame(
     ctx: &egui::Context,
     state: &mut ResultsTestHost,
     events: Vec<egui::Event>,
@@ -159,7 +162,7 @@ fn frame(
     .shapes
 }
 
-fn theme_context() -> egui::Context {
+pub(super) fn theme_context() -> egui::Context {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx

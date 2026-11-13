@@ -210,6 +210,10 @@ pub struct StripModel {
     pub event_lanes: Option<Arc<logic::EventLanes>>,
     /// The analysis' `D()` and `E()` columns drawn from that history.
     pub lane_traces: Vec<LaneTrace>,
+    /// What the run's checks put on the strip's time axis: its HDL severity
+    /// records and finish, its assertion violations, and its stop time when
+    /// expected outputs lie beyond it. `None` when they put nothing there.
+    pub event_markers: Option<Arc<logic::RunMarkers>>,
 }
 
 impl StripModel {
