@@ -661,6 +661,7 @@ impl ConfigurationSetCatalog {
     /// Clone an exact source revision under a new unique name. The clone owns
     /// a new stable identity and starts at revision one while retaining source
     /// identity and revision as immutable lineage.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn clone_configuration(
         &mut self,
         source_id: ConfigurationSetId,
