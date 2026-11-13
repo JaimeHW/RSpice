@@ -155,10 +155,24 @@ pub fn show_header(
     let action_width = 58.0;
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
+    // An expression whose unit cannot be stated has a pane of its own and
+    // says so, with the reason, rather than show a unit it does not have.
+    let unit_chip = if pane.unlabeled { "no unit" } else { pane.unit };
+    let unit_hover = if pane.unlabeled {
+        let reason = model
+            .expression_panes
+            .iter()
+            .filter(|expression| pane.expressions.contains(&expression.slot))
+            .find_map(|expression| expression.unknown.as_deref())
+            .unwrap_or("its unit cannot be stated");
+        format!("No unit: {reason}, so this expression has an axis of its own")
+    } else {
+        format!("{} unit-scoped Y axis", pane.unit)
+    };
     let unit_label_width = ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(
-                pane.unit.to_owned(),
+                unit_chip.to_owned(),
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 c.text,
             )
@@ -178,8 +192,7 @@ pub fn show_header(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.set_clip_rect(unit_rect);
-            let response = chip(ui, pane.unit, active)
-                .on_hover_text(format!("{} unit-scoped Y axis", pane.unit));
+            let response = chip(ui, unit_chip, active).on_hover_text(unit_hover);
             if response.clicked() {
                 host.activate_pane();
             }

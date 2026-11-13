@@ -20,6 +20,8 @@ const EXPR_EDITOR_GAP: f32 = 8.0;
 const EXPR_EDITOR_COMPACT_WIDTH: f32 = 560.0;
 const EXPR_EDITOR_MIN_INLINE_INPUT: f32 = 160.0;
 const EXPR_EDITOR_ERROR_HEIGHT: f32 = 20.0;
+/// The unit override's field: room for `V/√Hz` and its hint.
+const EXPR_EDITOR_UNIT_WIDTH: f32 = 72.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct EditorSpan {
@@ -108,7 +110,17 @@ fn expr_editor_layout(
 
 /// Paint an editor already bound to the host-selected analysis.
 /// Scope describes the exact source selection that the host will evaluate.
-pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> Action {
+///
+/// `unit` is the reader's optional unit override, left empty to take the
+/// unit unit algebra states for the text, which `inferred` shows in its
+/// place (`Err` says why there is none).
+pub fn show(
+    ui: &mut Ui,
+    editor: &mut ExprEditor,
+    unit: &mut String,
+    inferred: Option<Result<String, String>>,
+    scope_note: Option<&str>,
+) -> Action {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -121,7 +133,7 @@ pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> A
         .layout_no_wrap("expr".to_owned(), label_font.clone(), c.text_dim)
         .size()
         .x;
-    let add_width = ui
+    let button_width = ui
         .painter()
         .layout_no_wrap(
             "Add".to_owned(),
@@ -131,6 +143,8 @@ pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> A
         .size()
         .x
         + 20.0;
+    // The unit field sits before the commit action and is laid out with it.
+    let add_width = button_width + EXPR_EDITOR_GAP + EXPR_EDITOR_UNIT_WIDTH;
     let error_width = editor.error.as_ref().map(|error| {
         ui.painter()
             .layout_no_wrap(error.clone(), error_font.clone(), c.err)
@@ -207,7 +221,62 @@ pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> A
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         action = Action::Cancel;
     }
-    let add_rect = span_rect(layout.add);
+    let actions_rect = span_rect(layout.add);
+    let unit_rect = egui::Rect::from_min_size(
+        actions_rect.min,
+        egui::vec2(
+            (actions_rect.width() - button_width - EXPR_EDITOR_GAP).max(0.0),
+            actions_rect.height(),
+        ),
+    );
+    let add_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            (unit_rect.right() + EXPR_EDITOR_GAP).min(actions_rect.right()),
+            actions_rect.top(),
+        ),
+        actions_rect.max,
+    );
+    let (hint, hover) = match &inferred {
+        Some(Ok(unit)) if unit.is_empty() => (
+            "no unit".to_owned(),
+            "Unit: the expression is a plain number. Type a unit to declare one.".to_owned(),
+        ),
+        Some(Ok(unit)) => (
+            unit.clone(),
+            format!("Unit: {unit}, by unit algebra. Type a unit to declare another."),
+        ),
+        Some(Err(reason)) => (
+            "unit?".to_owned(),
+            format!("No unit can be stated: {reason}. Type one to declare it."),
+        ),
+        None => (
+            "unit".to_owned(),
+            "Unit of the expression, inferred when left empty".to_owned(),
+        ),
+    };
+    if unit_rect.width() > 0.0 {
+        let unit_response = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(unit_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| {
+                    ui.set_clip_rect(unit_rect);
+                    ui.add_sized(
+                        unit_rect.size(),
+                        egui::TextEdit::singleline(unit)
+                            .font(theme::field_mono())
+                            .hint_text(hint)
+                            .desired_width(unit_rect.width()),
+                    )
+                },
+            )
+            .inner
+            .on_hover_text(hover);
+        if unit_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            action = Action::Commit;
+        }
+    }
     let add_clicked = ui
         .scope_builder(
             egui::UiBuilder::new()

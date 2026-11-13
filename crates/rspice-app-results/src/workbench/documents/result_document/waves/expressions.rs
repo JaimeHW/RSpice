@@ -42,9 +42,27 @@ pub(super) fn expr_editor_row(
                     }
                 })
         });
-    let Some(editor) = state
+    // The unit the text reads in, shown where the reader may declare one.
+    let inferred = state
         .results
         .session
+        .expr_editor
+        .as_ref()
+        .filter(|editor| editor.analysis == analysis_key && !editor.text.trim().is_empty())
+        .and_then(|editor| {
+            let run = state.model.simulation.active_run()?;
+            let analysis = run.analyses.get(analysis_index)?;
+            let x_unit = state
+                .results
+                .models
+                .last_built()?
+                .iter()
+                .find(|model| model.analysis_key == analysis_key)
+                .map(|model| model.x_unit.clone())?;
+            Some(expression_unit(editor.text.trim(), analysis, &x_unit))
+        });
+    let session = &mut state.results.session;
+    let Some(editor) = session
         .expr_editor
         .as_mut()
         .filter(|editor| editor.analysis == analysis_key)
@@ -52,7 +70,13 @@ pub(super) fn expr_editor_row(
         return;
     };
 
-    let action = rspice_results_ui::waves::expression_editor::show(ui, editor, scope_note);
+    let action = rspice_results_ui::waves::expression_editor::show(
+        ui,
+        editor,
+        &mut session.expr_editor_unit,
+        inferred,
+        scope_note,
+    );
 
     match action {
         Action::None => {}
@@ -91,10 +115,19 @@ pub(super) fn expr_editor_row(
                             series: Ok(series),
                         },
                     );
+                    let declared = state.results.session.expr_editor_unit.trim().to_owned();
+                    let units = &mut state.results.session.expression_units;
+                    let unit_changed = if declared.is_empty() {
+                        units.remove(&(analysis_key, text.clone())).is_some()
+                    } else {
+                        units.insert((analysis_key, text.clone()), declared.clone())
+                            != Some(declared)
+                    };
                     let added = state
                         .results
                         .add_expression_trace(&state.model.simulation, analysis_key, text)
-                        .expect("the expression editor is bound to a retained analysis");
+                        .expect("the expression editor is bound to a retained analysis")
+                        || unit_changed;
                     if added {
                         state.model.workspace.content.visualization_documents_dirty = true;
                     }
@@ -251,6 +284,7 @@ pub(super) fn resolve_strip_exprs(
                 .derived
                 .range_or(cache_key, || super::super::finite_extremes(&y));
             resolved.push(ResolvedExpr {
+                slot,
                 x,
                 shape,
                 y_extremes,
@@ -320,6 +354,95 @@ pub(super) fn bus_reading_fingerprint(lanes: &EventLaneLayout) -> u64 {
         .map(|bus| (&bus.name, &bus.members))
         .collect();
     rspice_results_ui::waves::stable_hash(&(radixes, users))
+}
+
+/// What unit algebra reads about one analysis: the unit each signal it names
+/// reads in, as the strip labels that signal, and the coordinate the strip
+/// runs over.
+struct AnalysisUnits<'a> {
+    analysis: &'a AnalysisResult,
+    x_unit: &'a str,
+}
+
+impl rspice_results::calculator::evaluator::UnitContext for AnalysisUnits<'_> {
+    fn signal_unit(&self, signal: &str, _dataset: Option<&str>) -> Option<String> {
+        let waveform =
+            rspice_results::calculator::retained::find_waveform(&self.analysis.waveforms, signal);
+        let name = waveform.map_or(signal, |waveform| waveform.name.as_str());
+        let unit = rspice_results_ui::waves::browser_signal_unit(
+            name,
+            waveform.and_then(|waveform| waveform.unit.as_deref()),
+            rspice_results_ui::waves::analysis_default_unit(self.analysis.analysis_type),
+        );
+        Some(unit.to_owned())
+    }
+
+    fn x_unit(&self) -> String {
+        self.x_unit.to_owned()
+    }
+}
+
+/// The unit an expression reads in by unit algebra, as its pane names it
+/// (empty for a plain number), or why none can be stated.
+pub(super) fn expression_unit(
+    text: &str,
+    analysis: &AnalysisResult,
+    x_unit: &str,
+) -> Result<String, String> {
+    let expr =
+        calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
+    rspice_results::calculator::evaluator::infer_unit(&expr, &AnalysisUnits { analysis, x_unit })
+        .map(|unit| unit.label())
+}
+
+/// Send each strip's visible expressions to the pane of their unit: the
+/// unit the reader declared, else the one unit algebra states. One whose
+/// unit cannot be stated gets an unlabeled pane of its own. An expression
+/// that failed to evaluate draws nothing, so it opens no pane, and a
+/// `digital()` conversion is a logic lane, not a value on any pane.
+pub(super) fn route_expressions(
+    models: &mut [StripModel],
+    simulation: &SimulationState,
+    exprs: &std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    declared: &std::collections::HashMap<(AnalysisPresentationKey, String), String>,
+    failed: impl Fn(AnalysisPresentationKey, &str) -> bool,
+) {
+    let Some(run) = simulation.active_run() else {
+        return;
+    };
+    for model in models {
+        let (Some(exprs), Some(analysis)) = (
+            exprs.get(&model.analysis_key),
+            run.analyses.get(model.analysis_index),
+        ) else {
+            continue;
+        };
+        model.expression_panes = exprs
+            .iter()
+            .enumerate()
+            .filter(|(_, expr)| {
+                expr.visible
+                    && !draws_as_logic(&expr.text)
+                    && !failed(model.analysis_key, &expr.text)
+            })
+            .map(|(slot, expr)| {
+                let declared = declared.get(&(model.analysis_key, expr.text.clone()));
+                match declared.map_or_else(
+                    || expression_unit(&expr.text, analysis, &model.x_unit),
+                    |unit| Ok(unit.clone()),
+                ) {
+                    Ok(unit) => rspice_results_ui::waves::ExpressionPane {
+                        slot,
+                        unit,
+                        unknown: None,
+                    },
+                    Err(reason) => rspice_results_ui::waves::ExpressionPane::unlabeled(
+                        slot, &expr.text, reason,
+                    ),
+                }
+            })
+            .collect();
+    }
 }
 
 /// Stable decimation-cache identity for an expression trace. The high bit

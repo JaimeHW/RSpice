@@ -594,6 +594,18 @@ pub struct SignalSetMember {
 pub struct ResultExpressionGroup {
     pub analysis: AnalysisPresentationKey,
     pub traces: Vec<ExprTrace>,
+    /// The units the reader declared for some of the group's expressions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub units: Vec<DeclaredExpressionUnit>,
+}
+
+/// The unit the reader declared for one expression, which replaces the unit
+/// unit algebra infers from its text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclaredExpressionUnit {
+    /// The expression, as its trace holds it.
+    pub text: String,
+    pub unit: String,
 }
 
 /// Authored quick-view annotations about retained datasets. These are never

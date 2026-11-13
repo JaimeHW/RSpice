@@ -11,6 +11,7 @@ mod branches;
 mod conversion;
 mod degenerate;
 mod expression_scope;
+mod expression_units;
 mod extent;
 mod frame_cost;
 mod honest_axes;

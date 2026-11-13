@@ -28,6 +28,8 @@ pub fn real_step_trace(
     );
     let shape = Arc::new(SweepShape::of(&x));
     ResolvedExpr {
+        // A real lane is no expression; the pane it is drawn in chose it.
+        slot: usize::MAX,
         x: Arc::new(x),
         y: Arc::new(y),
         shape,

@@ -535,6 +535,14 @@ pub struct ResultViewerState {
     /// into `analysis_exprs` before use; stable state lives there.
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
     pub analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    /// The unit the reader declared for an expression, by its strip and
+    /// text, which replaces the unit unit algebra infers for it. Boxed, as
+    /// the editor's unit is, to keep the results state inside its stack
+    /// budget.
+    pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
+    /// The unit typed in the open expression editor; empty to take the
+    /// inferred one.
+    pub expr_editor_unit: Box<String>,
     /// Bit period the reader has pinned the eye to, per result.
     ///
     /// Absent means the eye recovers the period from the waveform. Project
@@ -1241,6 +1249,8 @@ impl ResultViewerState {
         self.markers.retain(|marker| live(marker.analysis));
         self.log_y_panes.retain(|pane| live(pane.analysis));
         self.analysis_exprs.retain(|analysis, _| live(*analysis));
+        self.expression_units
+            .retain(|(analysis, _), _| live(*analysis));
         self.expr_projection_keys
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));

@@ -21,6 +21,9 @@ pub struct ModelCacheInput<'a> {
     pub viewer: ResultViewer,
     pub projection: ProjectionOptions<'a>,
     pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
+    /// A digest of what routes the reader's expressions to panes: their
+    /// text, visibility and declared units, and which failed to evaluate.
+    pub expressions: u64,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -75,6 +78,7 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
     input.overlay_dataset_ids.hash(&mut h);
     input.viewer.hash(&mut h);
     input.projection.phase_continuous.hash(&mut h);
+    input.expressions.hash(&mut h);
     input.projection.complex_display.hash(&mut h);
     input.projection.ac.hash(&mut h);
     input

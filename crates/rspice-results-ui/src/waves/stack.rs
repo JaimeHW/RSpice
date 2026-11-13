@@ -578,6 +578,9 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
     {
         let removed = (index < list.len()).then(|| list.remove(index));
         if let Some(removed) = removed {
+            host.session_mut()
+                .expression_units
+                .remove(&(analysis, removed.text.clone()));
             host.forget_expression(analysis, removed.text);
         }
         let results = host.session_mut();
@@ -599,6 +602,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
             error: None,
             want_focus: true,
         });
+        host.session_mut().expr_editor_unit.clear();
     }
 }
 
@@ -686,25 +690,25 @@ fn show_strip_plot(
         return;
     }
 
-    // Expression traces participate in the first pane's automatic fit, and
-    // only the first pane carries them: an expression has no declared unit,
-    // so it cannot be routed to a unit-owning pane on the evidence available.
+    // Each expression is drawn in the pane its unit routed it to, and joins
+    // that pane's automatic fit; one whose unit cannot be stated has a pane of
+    // its own. A host that routes no expression keeps them in the first pane.
     // A real event lane is placed in a pane, and joins that pane's traces on
     // its unit axis.
-    let mut exprs = Some(host.resolve_expressions(model, &t));
-    let mut pane_exprs: Vec<Vec<ResolvedExpr>> = panes
-        .iter()
-        .enumerate()
-        .map(|(ordinal, pane)| {
-            let mut pane_exprs = if ordinal == 0 {
-                exprs.take().unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            pane_exprs.extend(host.real_step_traces(model, pane, &t));
-            pane_exprs
-        })
-        .collect();
+    let routed = !model.expression_panes.is_empty();
+    let mut pane_exprs: Vec<Vec<ResolvedExpr>> = panes.iter().map(|_| Vec::new()).collect();
+    for expr in host.resolve_expressions(model, &t) {
+        let ordinal = panes
+            .iter()
+            .position(|pane| pane.expressions.contains(&expr.slot))
+            .or((!routed).then_some(0));
+        if let Some(exprs) = ordinal.and_then(|ordinal| pane_exprs.get_mut(ordinal)) {
+            exprs.push(expr);
+        }
+    }
+    for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
+        exprs.extend(host.real_step_traces(model, pane, &t));
+    }
     // A pane with nothing plotted keeps its header row, where its hidden
     // traces wait to be shown again, and gives its height to the others.
     let collapsed: Vec<bool> = panes

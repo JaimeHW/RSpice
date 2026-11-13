@@ -22,6 +22,9 @@ use std::sync::Arc;
 
 /// One expression trace resolved for plotting.
 pub struct ResolvedExpr {
+    /// The expression's place in the strip's expression list, which is how
+    /// it finds the pane its unit routed it to.
+    pub slot: usize,
     pub x: SharedWaveformValues,
     pub y: SharedWaveformValues,
     /// What the expression's abscissa is, on the same terms as a waveform
@@ -418,8 +421,8 @@ pub fn show_plot<'a>(
 
     let x_axis = model_x_axis(model, x0, x1, quantity_policy);
     let y_axis = if log_y {
-        Axis::log_decades(y0, y1, pane.unit)
-    } else if pane.unit == "°" && input.y_view.is_none() {
+        Axis::log_decades(y0, y1, pane.axis_unit())
+    } else if pane.axis_unit() == "°" && input.y_view.is_none() {
         // An unzoomed degree pane keeps the 45° lattice a Bode phase
         // reading expects; arbitrary zoom depths fall back to plain linear
         // ticks, which stay legible where the lattice would crowd.
@@ -439,16 +442,16 @@ pub fn show_plot<'a>(
             .collect();
         Axis::with_ticks(y0, y1, "°", &ticks)
     } else {
-        Axis::linear(y0, y1, pane.unit)
+        Axis::linear(y0, y1, pane.axis_unit())
     };
-    let y_axis = if pane.unit == "rad" {
+    let y_axis = if pane.axis_unit() == "rad" {
         match quantity_policy.angle_display {
             rspice_vocabulary::quantity::AngleDisplay::Degrees => {
                 y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
             }
             rspice_vocabulary::quantity::AngleDisplay::Radians => y_axis,
         }
-    } else if pane.unit == "°" {
+    } else if pane.axis_unit() == "°" {
         let (scale, offset, unit) = quantity_policy.degree_axis_transform();
         y_axis.with_display_transform(scale, offset, unit)
     } else {
@@ -500,7 +503,7 @@ pub fn show_plot<'a>(
     spec.markers = input.markers;
 
     // 0 dB reference on a log-magnitude pane.
-    if pane.unit == "dB" && y0 < 0.0 && y1 > 0.0 {
+    if pane.axis_unit() == "dB" && y0 < 0.0 && y1 > 0.0 {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 

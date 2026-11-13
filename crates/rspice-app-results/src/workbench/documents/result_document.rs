@@ -1179,6 +1179,7 @@ pub fn restore_log_y_panes(state: &mut ResultsParts<'_>, panes: Vec<WavePanePres
 /// their text to whichever analysis happens to occupy an old ordinal.
 pub fn restore_expression_groups(state: &mut ResultsParts<'_>, groups: Vec<ResultExpressionGroup>) {
     state.results.session.analysis_exprs.clear();
+    state.results.session.expression_units.clear();
     state.results.session.exprs.clear();
     state.results.session.expr_projection_keys.clear();
     state.results.analysis_expr_cache.clear();
@@ -1191,6 +1192,17 @@ pub fn restore_expression_groups(state: &mut ResultsParts<'_>, groups: Vec<Resul
             .iter()
             .any(|run| group.analysis.resolve(run).is_some());
         if retained && !group.traces.is_empty() {
+            for declared in group.units {
+                if group.traces.iter().any(|trace| trace.text == declared.text)
+                    && !declared.unit.trim().is_empty()
+                {
+                    state
+                        .results
+                        .session
+                        .expression_units
+                        .insert((group.analysis, declared.text), declared.unit);
+                }
+            }
             state
                 .results
                 .session

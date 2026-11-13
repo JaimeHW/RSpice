@@ -19,6 +19,41 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         results.models.invalidate();
         results.logic_lanes_source = logic;
     }
+    let failed = |analysis: super::AnalysisPresentationKey, text: &str| {
+        results
+            .analysis_expr_cache
+            .get(&(analysis, text.to_owned()))
+            .is_some_and(|cached| cached.series.is_err())
+    };
+    let expressions = {
+        let mut routed: Vec<_> = results
+            .session
+            .analysis_exprs
+            .iter()
+            .flat_map(|(analysis, exprs)| {
+                exprs.iter().map(|expr| {
+                    (
+                        analysis.order_key(),
+                        expr.text.as_str(),
+                        expr.visible,
+                        results
+                            .session
+                            .expression_units
+                            .get(&(*analysis, expr.text.clone())),
+                        failed(*analysis, &expr.text),
+                    )
+                })
+            })
+            .collect();
+        routed.sort();
+        rspice_results_ui::waves::stable_hash(&routed)
+    };
+    let failed_texts: std::collections::HashSet<_> = results
+        .analysis_expr_cache
+        .iter()
+        .filter(|(_, cached)| cached.series.is_err())
+        .map(|(key, _)| key.clone())
+        .collect();
     let session = &mut results.session;
     results.models.get_or_build(
         ModelCacheInput {
@@ -33,6 +68,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 hidden_family_traces: &session.hidden_family_traces,
             },
             waveform_visibility: &session.waveform_visibility,
+            expressions,
         },
         &simulation.retained.executed_decks,
         t,
@@ -61,6 +97,13 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 &session.analysis_exprs,
                 &session.event_lanes,
                 t,
+            );
+            super::expressions::route_expressions(
+                &mut built,
+                simulation,
+                &session.analysis_exprs,
+                &session.expression_units,
+                |analysis, text| failed_texts.contains(&(analysis, text.to_owned())),
             );
             built
         },

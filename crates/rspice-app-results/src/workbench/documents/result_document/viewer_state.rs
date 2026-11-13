@@ -381,6 +381,21 @@ impl ResultsState {
             .map(|(analysis, traces)| ResultExpressionGroup {
                 analysis: *analysis,
                 traces: traces.clone(),
+                units: traces
+                    .iter()
+                    .filter_map(|trace| {
+                        let unit = self
+                            .session
+                            .expression_units
+                            .get(&(*analysis, trace.text.clone()))?;
+                        Some(
+                            rspice_results::result_presentation::DeclaredExpressionUnit {
+                                text: trace.text.clone(),
+                                unit: unit.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             })
             .collect::<Vec<_>>();
         groups.sort_by(|left, right| left.analysis.order_key().cmp(&right.analysis.order_key()));

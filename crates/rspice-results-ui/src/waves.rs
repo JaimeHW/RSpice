@@ -219,6 +219,38 @@ pub struct StripModel {
     /// records and finish, its assertion violations, and its stop time when
     /// expected outputs lie beyond it. `None` when they put nothing there.
     pub event_markers: Option<Arc<logic::RunMarkers>>,
+    /// Where the reader's visible expressions are drawn, by the unit unit
+    /// algebra states for each. Left empty by [`build_models`] and filled in
+    /// by the host, which owns the expressions.
+    pub expression_panes: Vec<ExpressionPane>,
+}
+
+/// Where one expression trace is drawn.
+///
+/// An expression joins the pane of its unit, or opens one. One whose unit
+/// cannot be stated gets an unlabeled pane of its own: it never borrows
+/// another unit's axis.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExpressionPane {
+    /// The expression's place in the strip's expression list.
+    pub slot: usize,
+    /// The unit as a pane names it, empty for a plain number; for an
+    /// expression with no unit, the pane's identity, which nothing displays.
+    pub unit: String,
+    /// Why no unit can be stated, when none can.
+    pub unknown: Option<String>,
+}
+
+impl ExpressionPane {
+    /// The pane of an expression whose unit cannot be stated, keyed by its
+    /// text so it is the same pane from frame to frame.
+    pub fn unlabeled(slot: usize, text: &str, reason: String) -> Self {
+        Self {
+            slot,
+            unit: format!("{text} \u{2014} no unit"),
+            unknown: Some(reason),
+        }
+    }
 }
 
 impl StripModel {
@@ -429,6 +461,8 @@ impl StripModel {
                 None => panes.push(UnitPane {
                     unit,
                     traces: trace.visible.then_some(index).into_iter().collect(),
+                    expressions: Vec::new(),
+                    unlabeled: false,
                 }),
             }
         }
@@ -444,7 +478,36 @@ impl StripModel {
                 panes.push(UnitPane {
                     unit,
                     traces: Vec::new(),
+                    expressions: Vec::new(),
+                    unlabeled: false,
                 });
+            }
+        }
+        // An expression joins the pane whose unit is its own however the two
+        // are spelled (`W` and `V·A`), else opens the pane of its unit; one
+        // with no unit opens an unlabeled pane of its own.
+        for expression in &self.expression_panes {
+            let unit = expression.unit.as_str();
+            let owner = if expression.unknown.is_some() {
+                None
+            } else {
+                let parsed = rspice_results::calculator::value::Unit::parse(unit);
+                panes.iter().position(|pane| {
+                    !pane.unlabeled
+                        && (pane.unit == unit
+                            || parsed.is_some()
+                                && rspice_results::calculator::value::Unit::parse(pane.unit)
+                                    == parsed)
+                })
+            };
+            match owner {
+                Some(owner) => panes[owner].expressions.push(expression.slot),
+                None => panes.push(UnitPane {
+                    unit,
+                    traces: Vec::new(),
+                    expressions: vec![expression.slot],
+                    unlabeled: expression.unknown.is_some(),
+                }),
             }
         }
         let (quantity, phase): (Vec<_>, Vec<_>) = panes
@@ -587,6 +650,19 @@ pub struct UnitPane<'a> {
     pub unit: &'a str,
     /// Trace indices on this pane's axis.
     pub traces: Vec<usize>,
+    /// The expressions drawn on this pane's axis, by their place in the
+    /// strip's expression list.
+    pub expressions: Vec<usize>,
+    /// Whether this is the pane of an expression whose unit cannot be
+    /// stated: its axis carries no unit, and `unit` is only its identity.
+    pub unlabeled: bool,
+}
+
+impl UnitPane<'_> {
+    /// The unit this pane's axis reads in: none on an unlabeled pane.
+    pub fn axis_unit(&self) -> &str {
+        if self.unlabeled { "" } else { self.unit }
+    }
 }
 
 /// Whether a strip's sample grid is finite and non-decreasing.
