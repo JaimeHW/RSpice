@@ -266,11 +266,6 @@ impl UnitsPreferences {
         }
     }
 
-    /// Whether a saved wire key was explicitly present, including a default value.
-    pub fn contains_wire_key(&self, key: &str) -> bool {
-        self.values.contains_key(key)
-    }
-
     /// Transitional adapter for the existing Preferences renderer. Durable
     /// storage and runtime consumers remain typed; the renderer's ordinal is
     /// converted at this boundary only.

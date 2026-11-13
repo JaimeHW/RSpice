@@ -308,11 +308,6 @@ pub struct ResultsPreferences {
     displayed_significant_digits: DisplayedSignificantDigits,
     cursor_interpolation: CursorInterpolation,
     complex_number_display: ComplexNumberDisplay,
-    /// Retired: every pane keeps each pixel column's extremes. A value an
-    /// older build saved is read and dropped here, so it is neither kept as
-    /// an unknown field nor written back.
-    #[serde(rename = "large-dataset-display", skip_serializing)]
-    _large_dataset_display: serde::de::IgnoredAny,
     engineering_export: EngineeringExportFormat,
     #[serde(flatten)]
     unknown: BTreeMap<String, Value>,
@@ -513,19 +508,6 @@ const EDITOR_FONT_SIZES: [f32; 9] = [9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 16.0, 18
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChoicePreference {
-    /// Retired persisted key from the first Preferences implementation.
-    /// Layout presets were not a single source of truth for dock commands,
-    /// so restored values are accepted for migration and then discarded.
-    #[serde(rename = "workspace-preset")]
-    LegacyWorkspacePreset,
-    /// Retired persisted key. Console visibility is owned by the workbench
-    /// session until a distinct launch-policy owner exists.
-    #[serde(rename = "console-on-launch")]
-    LegacyConsoleOnLaunch,
-    /// Retired persisted key. Schematic grid size is currently document
-    /// presentation state, not a globally enforced new-document policy.
-    #[serde(rename = "schematic-grid")]
-    LegacySchematicGrid,
     InterfaceScale,
     EditorFontSize,
     MinimumTouchTarget,
@@ -558,10 +540,6 @@ pub enum ChoicePreference {
     ComplexNumberDisplay,
     FamilyTraceLabeling,
     DefaultAxisPolicy,
-    /// Retired persisted key. Every pane keeps each pixel column's extremes,
-    /// so a restored value is discarded.
-    #[serde(rename = "large-dataset-display")]
-    LegacyLargeDatasetDisplay,
     MeasurementEvaluation,
     EngineeringExport,
     DefaultComputeTarget,
@@ -605,10 +583,7 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    pub const ALL: [Self; 61] = [
-        Self::LegacyWorkspacePreset,
-        Self::LegacyConsoleOnLaunch,
-        Self::LegacySchematicGrid,
+    pub const ALL: [Self; 57] = [
         Self::InterfaceScale,
         Self::EditorFontSize,
         Self::MinimumTouchTarget,
@@ -640,7 +615,6 @@ impl ChoicePreference {
         Self::ComplexNumberDisplay,
         Self::FamilyTraceLabeling,
         Self::DefaultAxisPolicy,
-        Self::LegacyLargeDatasetDisplay,
         Self::MeasurementEvaluation,
         Self::EngineeringExport,
         Self::DefaultComputeTarget,
@@ -671,9 +645,6 @@ impl ChoicePreference {
 
     pub const fn stable_id(self) -> &'static str {
         match self {
-            Self::LegacyWorkspacePreset => "workspace-preset",
-            Self::LegacyConsoleOnLaunch => "console-on-launch",
-            Self::LegacySchematicGrid => "schematic-grid",
             Self::InterfaceScale => "interface-scale",
             Self::EditorFontSize => "editor-font-size",
             Self::MinimumTouchTarget => "minimum-touch-target",
@@ -705,7 +676,6 @@ impl ChoicePreference {
             Self::ComplexNumberDisplay => "complex-number-display",
             Self::FamilyTraceLabeling => "family-trace-labeling",
             Self::DefaultAxisPolicy => "default-axis-policy",
-            Self::LegacyLargeDatasetDisplay => "large-dataset-display",
             Self::MeasurementEvaluation => "measurement-evaluation",
             Self::EngineeringExport => "engineering-export",
             Self::DefaultComputeTarget => "default-compute-target",
@@ -737,9 +707,7 @@ impl ChoicePreference {
 
     const fn max_value(self) -> u8 {
         match self {
-            Self::LegacyWorkspacePreset
-            | Self::LegacySchematicGrid
-            | Self::UnitSystem
+            Self::UnitSystem
             | Self::TemperatureDisplay
             | Self::LayoutCoordinateDisplay
             | Self::SchematicGrid
@@ -755,7 +723,6 @@ impl ChoicePreference {
             | Self::ComplexNumberDisplay
             | Self::FamilyTraceLabeling
             | Self::DefaultAxisPolicy
-            | Self::LegacyLargeDatasetDisplay
             | Self::EngineeringExport
             | Self::DefaultComputeTarget
             | Self::QueuePriority
@@ -764,8 +731,7 @@ impl ChoicePreference {
             | Self::AutomationSandbox
             | Self::ExtensionPolicy
             | Self::ExtensionUpdates => 2,
-            Self::LegacyConsoleOnLaunch
-            | Self::MinimumTouchTarget
+            Self::MinimumTouchTarget
             | Self::EngineeringSuffixes
             | Self::FrequencyDisplay
             | Self::CopiedValueFormat
@@ -812,11 +778,7 @@ impl ChoicePreference {
     const fn is_runtime_consumed(self) -> bool {
         !matches!(
             self,
-            Self::LegacyWorkspacePreset
-                | Self::LegacyConsoleOnLaunch
-                | Self::LegacySchematicGrid
-                | Self::LegacyLargeDatasetDisplay
-                | Self::FamilyTraceLabeling
+            Self::FamilyTraceLabeling
                 | Self::DefaultAxisPolicy
                 | Self::MeasurementEvaluation
                 // Operating-point annotation is View > Visibility's, and a
@@ -1003,7 +965,7 @@ fn folder_refusal(folder: &std::path::Path) -> Option<&'static str> {
 }
 
 /// User/device overrides consumed by the workbench at runtime. Missing values
-/// read as the reviewed zero/false defaults, keeping legacy sessions valid.
+/// read as the reviewed zero/false defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserPreferences {
@@ -1384,9 +1346,6 @@ impl UserPreferences {
     }
 
     pub fn normalize(&mut self) {
-        self.migrate_legacy_workspace_storage();
-        self.migrate_legacy_units_storage();
-        self.migrate_legacy_results_storage();
         for key in ChoicePreference::ALL {
             if !key.is_runtime_consumed()
                 || self
@@ -1418,76 +1377,6 @@ impl UserPreferences {
             {
                 self.scalars.remove(key.stable_id());
             }
-        }
-    }
-
-    fn migrate_legacy_workspace_storage(&mut self) {
-        let Ok(workspace) = self.workspace.current_mut() else {
-            return;
-        };
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::LegacyWorkspacePreset)
-            && let Ok(value) = WorkspacePreset::from_index(index)
-        {
-            workspace.preset = value;
-        }
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::LegacyConsoleOnLaunch)
-            && let Ok(value) = ConsoleLaunchBehavior::from_index(index)
-        {
-            workspace.console_on_launch = value;
-        }
-    }
-
-    fn migrate_legacy_units_storage(&mut self) {
-        let Ok(units) = self.units.current_mut() else {
-            return;
-        };
-        for key in UNIT_CHOICE_KEYS {
-            let stable_id = key.stable_id();
-            let legacy = self.choices.remove(stable_id);
-            if units.contains_wire_key(stable_id) {
-                continue;
-            }
-            if let Some(index) = legacy
-                .and_then(|value| value.as_u64())
-                .and_then(|value| usize::try_from(value).ok())
-            {
-                let _ = units.set_compatibility_index(stable_id, index);
-            }
-        }
-    }
-
-    fn migrate_legacy_results_storage(&mut self) {
-        let Ok(results) = self.results.current_mut() else {
-            return;
-        };
-        if let Some(value) = self
-            .scalars
-            .remove(ScalarPreference::DisplayedSignificantDigits.stable_id())
-            .and_then(|value| value.as_u64())
-            .and_then(|value| u8::try_from(value).ok())
-            .and_then(|value| DisplayedSignificantDigits::try_from(value).ok())
-        {
-            results.displayed_significant_digits = value;
-        }
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::CursorInterpolation)
-            && let Ok(value) = CursorInterpolation::from_index(index)
-        {
-            results.cursor_interpolation = value;
-        }
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::ComplexNumberDisplay)
-            && let Ok(value) = ComplexNumberDisplay::from_index(index)
-        {
-            results.complex_number_display = value;
-        }
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::EngineeringExport)
-            && let Ok(value) = EngineeringExportFormat::from_runtime_index(index)
-        {
-            results.engineering_export = value;
         }
     }
 
@@ -1705,18 +1594,6 @@ pub struct ComponentShelfPreferences {
     pub recent: Vec<String>,
 }
 
-const UNIT_CHOICE_KEYS: [ChoicePreference; 9] = [
-    ChoicePreference::UnitSystem,
-    ChoicePreference::EngineeringSuffixes,
-    ChoicePreference::FrequencyDisplay,
-    ChoicePreference::TemperatureDisplay,
-    ChoicePreference::CopiedValueFormat,
-    ChoicePreference::AngleDisplay,
-    ChoicePreference::LayoutCoordinateDisplay,
-    ChoicePreference::TimeFrequencyInput,
-    ChoicePreference::DecimalSeparatorInput,
-];
-
 const fn is_units_choice(key: ChoicePreference) -> bool {
     matches!(
         key,
@@ -1730,16 +1607,6 @@ const fn is_units_choice(key: ChoicePreference) -> bool {
             | ChoicePreference::TimeFrequencyInput
             | ChoicePreference::DecimalSeparatorInput
     )
-}
-
-fn take_legacy_choice(
-    choices: &mut BTreeMap<String, Value>,
-    key: ChoicePreference,
-) -> Option<usize> {
-    choices
-        .remove(key.stable_id())
-        .and_then(|value| value.as_u64())
-        .and_then(|value| usize::try_from(value).ok())
 }
 
 #[cfg(test)]
@@ -1890,24 +1757,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_unit_indices_migrate_without_overwriting_a_typed_value() {
-        let mut preferences: UserPreferences = serde_json::from_str(
-            r#"{
-                "choices":{"frequency-display":1,"temperature-display":2},
-                "units":{"frequency-display":"hertz-engineering"}
-            }"#,
-        )
-        .unwrap();
-        preferences.normalize();
-
-        assert_eq!(preferences.choice(ChoicePreference::FrequencyDisplay), 0);
-        assert_eq!(preferences.choice(ChoicePreference::TemperatureDisplay), 2);
-        let encoded = serde_json::to_value(preferences).unwrap();
-        assert!(encoded["choices"].get("frequency-display").is_none());
-        assert!(encoded["choices"].get("temperature-display").is_none());
-    }
-
-    #[test]
     fn incompatible_future_units_root_is_retained_and_fail_closed() {
         let mut preferences: UserPreferences =
             serde_json::from_str(r#"{"units":17,"choices":{"frequency-display":1}}"#).unwrap();
@@ -1974,108 +1823,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_result_indices_migrate_into_typed_storage() {
-        let mut preferences: UserPreferences = serde_json::from_str(
-            r#"{
-                "choices":{
-                    "cursor-interpolation":2,
-                    "complex-number-display":1,
-                    "engineering-export":1
-                },
-                "scalars":{"displayed-significant-digits":13}
-            }"#,
-        )
-        .unwrap();
-        preferences.normalize();
-
-        assert_eq!(
-            preferences.scalar(ScalarPreference::DisplayedSignificantDigits),
-            13
-        );
-        assert_eq!(preferences.choice(ChoicePreference::CursorInterpolation), 2);
-        assert_eq!(
-            preferences.choice(ChoicePreference::ComplexNumberDisplay),
-            1
-        );
-        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 1);
-        let encoded = serde_json::to_value(preferences).unwrap();
-        assert!(encoded["choices"].get("cursor-interpolation").is_none());
-        assert!(
-            encoded["scalars"]
-                .get("displayed-significant-digits")
-                .is_none()
-        );
-    }
-
-    /// Older builds saved the retired large-dataset display setting twice: as
-    /// a numeric choice and in the Results domain. A preferences file holding
-    /// both loads with its other settings intact and is written back without
-    /// either.
-    #[test]
-    fn a_preferences_file_saved_with_the_retired_large_dataset_display_loads() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .set_choice(ChoicePreference::CursorInterpolation, 1)
-            .unwrap();
-        let written = serde_json::to_value(&preferences).unwrap();
-        let mut saved = written.clone();
-        saved["choices"]["large-dataset-display"] = Value::from(2);
-        saved["results"]["large-dataset-display"] = Value::from("no-display-decimation");
-
-        let mut restored: UserPreferences = serde_json::from_value(saved).unwrap();
-        restored.normalize();
-
-        assert_eq!(
-            restored.result_presentation_policy().cursor_interpolation(),
-            CursorInterpolation::Linear
-        );
-        assert_eq!(
-            restored.choice(ChoicePreference::LegacyLargeDatasetDisplay),
-            0
-        );
-        assert!(
-            restored
-                .set_choice(ChoicePreference::LegacyLargeDatasetDisplay, 2)
-                .is_err()
-        );
-        assert_eq!(serde_json::to_value(&restored).unwrap(), written);
-    }
-
-    /// The same settings as an older build's eframe session (RON) carried
-    /// them restore the same way.
-    #[test]
-    fn a_ron_session_saved_with_the_retired_large_dataset_display_restores() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .set_choice(ChoicePreference::CursorInterpolation, 1)
-            .unwrap();
-        let written = ron::ser::to_string(&preferences).unwrap();
-        let neighbour = r#""cursor-interpolation":linear"#;
-        let choices = r#""choices":{}"#;
-        assert_eq!(written.matches(neighbour).count(), 1, "{written}");
-        assert_eq!(written.matches(choices).count(), 1, "{written}");
-        let saved = written
-            .replacen(
-                neighbour,
-                &format!(r##"{neighbour},"large-dataset-display":r#no-display-decimation"##),
-                1,
-            )
-            .replacen(choices, r#""choices":{"large-dataset-display":2}"#, 1);
-
-        let mut restored: UserPreferences = ron::Options::default()
-            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-            .from_str(&saved)
-            .expect("an older session's preferences restore");
-        restored.normalize();
-
-        assert_eq!(
-            restored.result_presentation_policy().cursor_interpolation(),
-            CursorInterpolation::Linear
-        );
-        assert_eq!(ron::ser::to_string(&restored).unwrap(), written);
-    }
-
-    #[test]
     fn incompatible_future_results_root_is_retained_and_fail_closed() {
         let mut preferences: UserPreferences =
             serde_json::from_str(r#"{"results":17,"choices":{"complex-number-display":1}}"#)
@@ -2098,8 +1845,7 @@ mod tests {
     /// A choice stored while HDF5 was reserved names it by the same kebab
     /// case it always did, and now resolves to the encoder instead of falling
     /// back to CSV. HDF5 stays at the end of the picker: the durable file
-    /// stores the name, so moving it would gain nothing and would change what
-    /// a legacy numeric choice meant.
+    /// stores the name, so moving it would gain nothing.
     #[test]
     fn a_stored_hdf5_choice_resolves_to_the_encoder_it_names() {
         let mut preferences: UserPreferences = serde_json::from_str(
@@ -2241,34 +1987,6 @@ mod tests {
         assert!(
             preferences
                 .set_choice(ChoicePreference::MinimumTouchTarget, 2)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn legacy_workspace_indices_migrate_into_the_typed_workspace_domain() {
-        let mut preferences: UserPreferences = serde_json::from_str(
-            r#"{"choices":{"workspace-preset":2,"console-on-launch":1,"schematic-grid":1},"toggles":{}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            preferences.choice(ChoicePreference::LegacyWorkspacePreset),
-            0
-        );
-        preferences.normalize();
-
-        let workspace = preferences.workspace().unwrap();
-        assert_eq!(workspace.preset(), WorkspacePreset::Diagnostics);
-        assert_eq!(workspace.console_on_launch(), ConsoleLaunchBehavior::Open);
-        assert_eq!(preferences.choice(ChoicePreference::LegacySchematicGrid), 0);
-        let encoded = serde_json::to_value(&preferences).unwrap();
-        assert_eq!(encoded["workspace"]["preset"], "diagnostics");
-        assert_eq!(encoded["workspace"]["console-on-launch"], "open");
-        assert!(encoded["choices"].get("workspace-preset").is_none());
-        assert!(
-            preferences
-                .set_choice(ChoicePreference::LegacyWorkspacePreset, 1)
                 .is_err()
         );
     }
