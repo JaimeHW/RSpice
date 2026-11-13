@@ -5,5 +5,4 @@
 mod family_src;
 
 mod module_layering;
-mod public_surface;
 mod qualification_baseline;

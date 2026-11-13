@@ -1,6 +1,10 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use super::family_src::read_family_src;
 use num_complex::Complex64;
+use rspice_core::analysis::harmonic_balance::{
+    DepletionCap, HbSwitchNodes, HbVoltageSwitchModel, NonlinearDeviceInstance,
+};
 use rspice_core::analysis::{HbConfig, HbError, HbFft, HbSolver, HbSolverState};
 use rspice_core::engine::HbOperatingPoint;
 use rspice_core::{Engine, Netlist};
@@ -113,4 +117,101 @@ fn retained_operating_point_reconstruction_authenticates_full_config() {
         .expect("retained-state authentication must never unwind")
         .expect_err("malformed retained configuration must fail");
     assert!(error.to_string().contains("damping"));
+}
+
+#[test]
+fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
+    let mut invalid_devices = Vec::new();
+
+    let mut invalid_junction = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_junction.params.cap_a = DepletionCap::new(1.0e-12, 0.7, 1.01, 0.5);
+    invalid_devices.push((invalid_junction, "grading coefficient"));
+
+    let mut invalid_gate = NonlinearDeviceInstance::nmos(0, 0, 0, 0, 0.7, 1.0e-3, 0.0);
+    invalid_gate.params.cox_wl = -1.0e-15;
+    invalid_devices.push((invalid_gate, "intrinsic gate capacitance"));
+
+    let mut invalid_transit = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_transit.params.tt_f = f64::NAN;
+    invalid_devices.push((invalid_transit, "transit time"));
+
+    let invalid_diode = NonlinearDeviceInstance::diode(0, 0, -1.0, 1.0);
+    invalid_devices.push((invalid_diode, "diode IS"));
+
+    let invalid_mos = NonlinearDeviceInstance::nmos(0, 0, 0, 0, 0.7, -1.0, 0.0);
+    invalid_devices.push((invalid_mos, "MOS KP"));
+
+    let invalid_jfet = NonlinearDeviceInstance::njfet(0, 0, 0, -2.0, -1.0, 0.0, 1.0e-14);
+    invalid_devices.push((invalid_jfet, "JFET BETA"));
+
+    let mut invalid_arity = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_arity.terminals.pop();
+    invalid_devices.push((invalid_arity, "has 1 terminals, expected 2"));
+
+    let invalid_index = NonlinearDeviceInstance::diode(2, 0, 1.0e-14, 1.0);
+    invalid_devices.push((invalid_index, "node index 2 exceeds 1 nodes"));
+
+    for (device, expected) in invalid_devices {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        solver.add_nonlinear_device(device);
+        let mut state = HbSolverState::new(1, 1);
+        let error = solver
+            .solve_dc_operating_point(&mut state)
+            .expect_err("invalid public nonlinear-device parameters must fail before solving");
+        assert!(matches!(error, HbError::InvalidCircuit(_)));
+        assert!(
+            error.to_string().contains(expected),
+            "wrong public-solver parameter diagnostic: {error}"
+        );
+    }
+
+    let mut switch_solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+    switch_solver.add_voltage_switch(
+        HbSwitchNodes {
+            node_pos: 0,
+            node_neg: 0,
+            ctrl_pos: 0,
+            ctrl_neg: 0,
+        },
+        HbVoltageSwitchModel {
+            vt: 0.0,
+            vh: 0.1,
+            ron: 1.0,
+            roff: 1.0e6,
+            smooth: 0.1,
+        },
+    );
+    let mut state = HbSolverState::new(1, 1);
+    let error = switch_solver
+        .solve_dc_operating_point(&mut state)
+        .expect_err("public exact-HB switch API must reject unrepresented hysteresis");
+    assert!(
+        error
+            .to_string()
+            .contains("requires zero finite hysteresis"),
+        "wrong public switch diagnostic: {error}"
+    );
+}
+
+#[test]
+fn public_hb_surface_does_not_advertise_rejected_approximate_kernels() {
+    let solver_source = read_family_src("analysis/harmonic_balance/solver.rs");
+    let device_source = read_family_src("analysis/harmonic_balance/solver/devices.rs");
+    let api_source = read_family_src("analysis/harmonic_balance/solver/nonlinear_api.rs");
+    let combined = format!("{solver_source}\n{device_source}\n{api_source}");
+
+    for stale_name in [
+        "NpnBjt",
+        "PnpBjt",
+        "CurrentSwitch",
+        "npn_bjt",
+        "pnp_bjt",
+        "current_switch",
+        "add_current_switch",
+    ] {
+        assert!(
+            !combined.contains(stale_name),
+            "exact-HB public surface still advertises removed approximate kernel {stale_name}"
+        );
+    }
 }
