@@ -180,6 +180,7 @@ impl super::AppState {
     }
 
     /// [`DragState::in_progress`] for the session.
+    #[cfg(test)]
     pub(crate) fn schematic_drag_in_progress(&self) -> bool {
         self.design.interaction.drag.in_progress(&self.model)
     }

@@ -95,6 +95,10 @@ impl Feature for DesignFeature {
     type State = DesignState;
     type Session = WorkbenchSession;
     type Handles = NoHandles;
+    /// The canvas's touch strip offers Rotate, Mirror, Undo, Redo and Fit as
+    /// the dispatcher answers them, its guards included.
+    const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] =
+        crate::schematic::view::TOUCH_STRIP_ASKED_COMMANDS;
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<DesignCommand>();

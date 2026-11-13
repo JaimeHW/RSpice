@@ -2,7 +2,9 @@
 //! by touch events the way a tablet reports them.
 
 use super::*;
+use crate::schematic::view::canvas_facts;
 use crate::state::{ComponentType, Point, SchematicState};
+use crate::workbench::{RSpiceApp, features};
 use crate::workbench::{app::duplicate_schematic_selection_at, state::Workspace};
 use egui::{Event, Pos2, RawInput, TouchPhase, Vec2};
 use rspice_schematic_editor::view::navigation::ZoomRequest;
@@ -89,7 +91,8 @@ impl Finger {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 *canvas = ui.available_rect_before_wrap();
                 crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
-                show(&ui.ctx().clone(), app, *canvas);
+                show(&ui.ctx().clone(), &mut strip_cx(app), *canvas);
+                app.after_contribution();
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
             },
         );
@@ -254,6 +257,33 @@ impl Finger {
     }
 }
 
+/// The design feature's context, as the surface lends the strip it.
+fn strip_cx(app: &mut RSpiceApp) -> Cx<'_, DesignFeature> {
+    features::surface_cx::<DesignFeature>(app, |_| true)
+}
+
+/// Every button's command the strip asks the dispatcher about is one the
+/// design feature declares it reads; Cancel's is offered while an operation
+/// is live, and the two latches run no command.
+#[test]
+fn the_strip_asks_only_the_answers_the_design_feature_reads() {
+    for action in [
+        MobileCanvasAction::Rotate,
+        MobileCanvasAction::Mirror,
+        MobileCanvasAction::Undo,
+        MobileCanvasAction::Redo,
+        MobileCanvasAction::Fit,
+    ] {
+        let key = product_command(action).expect("a command button");
+        assert!(ASKED_COMMANDS.contains(&key), "{action:?}");
+    }
+    assert!(!ASKED_COMMANDS.contains(&Command::Cancel.key()));
+    assert_eq!(
+        <DesignFeature as crate::workbench::framework::feature::Feature>::FOREIGN_AVAILABILITY,
+        ASKED_COMMANDS
+    );
+}
+
 /// G-12: a landscape iPad is 1180 pt wide, so the old 620 px breakpoint
 /// gave a tablet no touch controls at all. Touch input, not width, decides;
 /// a mouse hides the strip at any width.
@@ -333,14 +363,17 @@ fn the_strip_buttons_run_the_canvas_commands() {
 fn cancel_is_live_only_while_an_operation_is() {
     let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
     finger.tap(finger.canvas.center());
-    assert!(!operation_live(&finger.app));
+    assert!(!operation_live(&canvas_facts(&finger.app.state)));
     finger
         .app
         .state
         .model
         .schematic
         .arm_tool(crate::state::Tool::Wire);
-    assert!(operation_live(&finger.app), "an armed drawing tool is live");
+    assert!(
+        operation_live(&canvas_facts(&finger.app.state)),
+        "an armed drawing tool is live"
+    );
     finger.frame(Vec::new());
     finger.press("Cancel");
     assert_eq!(
@@ -348,7 +381,7 @@ fn cancel_is_live_only_while_an_operation_is() {
         crate::state::Tool::Select,
         "Cancel puts the wire tool down, as Esc does"
     );
-    assert!(!operation_live(&finger.app));
+    assert!(!operation_live(&canvas_facts(&finger.app.state)));
 }
 
 #[test]
@@ -374,7 +407,8 @@ fn touch_requests_recheck_document_route_and_modal_state() {
             "none" => {}
             _ => unreachable!(),
         }
-        execute_action(&Context::default(), &mut app, request);
+        execute_action(&Context::default(), &mut strip_cx(&mut app), request);
+        app.after_contribution();
         assert_eq!(
             app.state
                 .model
@@ -400,7 +434,8 @@ fn fit_executes_the_schematic_camera_command() {
         source: super::super::requests::editor_request_source(&app.state),
         action: MobileCanvasAction::Fit,
     };
-    execute_action(&Context::default(), &mut app, request);
+    execute_action(&Context::default(), &mut strip_cx(&mut app), request);
+    app.after_contribution();
     assert!(
         app.state
             .model

@@ -6,8 +6,9 @@
 
 use crate::state::Tool;
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::RSpiceApp;
 use crate::workbench::SurfaceId;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::{commands::vocabulary::Command, design::commands::DesignCommand};
 use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
@@ -15,24 +16,41 @@ use rspice_schematic_editor::view::mobile_controls::{
 };
 use rspice_schematic_editor::view::pointer_target::canvas_touch_mode;
 
-use super::parts::canvas_application_modal_open;
+use super::parts::{
+    CanvasFacts, canvas_application_modal_open_in, canvas_facts_in, canvas_parts_in,
+};
 use super::shelf_drag::PlacementTransform;
 
-pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
+/// The commands whose dispatcher answers the strip draws its buttons by:
+/// every button's command but Cancel's, which is offered while an operation
+/// is live. The design feature reads them through its context.
+pub(crate) const ASKED_COMMANDS: &[CommandKey] = &[
+    DesignCommand::RotateSelection.key(),
+    DesignCommand::MirrorSelectionHorizontal.key(),
+    Command::Undo.key(),
+    Command::Redo.key(),
+    Command::ZoomFit.key(),
+];
+
+/// Draw the strip in the design feature's context, which holds the
+/// dispatcher's answers for [`ASKED_COMMANDS`] and the modal facts. A
+/// command a button runs is raised through the context, and the shell runs
+/// it once the surface has drawn.
+pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, content_rect: Rect) {
     if !canvas_touch_mode(ctx) {
         return;
     }
-    let source = super::requests::editor_request_source(&app.state);
+    let source = super::requests::editor_request_source(&canvas_facts_in(cx));
     let capabilities = MobileCanvasCapabilities {
-        rotate: action_enabled(app, MobileCanvasAction::Rotate),
-        mirror: action_enabled(app, MobileCanvasAction::Mirror),
-        cancel: action_enabled(app, MobileCanvasAction::Cancel),
-        undo: action_enabled(app, MobileCanvasAction::Undo),
-        redo: action_enabled(app, MobileCanvasAction::Redo),
-        fit: action_enabled(app, MobileCanvasAction::Fit),
+        rotate: action_enabled(cx, MobileCanvasAction::Rotate),
+        mirror: action_enabled(cx, MobileCanvasAction::Mirror),
+        cancel: action_enabled(cx, MobileCanvasAction::Cancel),
+        undo: action_enabled(cx, MobileCanvasAction::Undo),
+        redo: action_enabled(cx, MobileCanvasAction::Redo),
+        fit: action_enabled(cx, MobileCanvasAction::Fit),
     };
     if let Some(request) = mobile_controls::show(ctx, content_rect, &source, capabilities) {
-        execute_action(ctx, app, request);
+        execute_action(ctx, cx, request);
     }
 }
 
@@ -50,8 +68,7 @@ const fn product_command(action: MobileCanvasAction) -> Option<CommandKey> {
 
 /// Whether a route, a move, a placement or a box is live: what Esc would
 /// cancel on the canvas.
-fn operation_live(app: &RSpiceApp) -> bool {
-    let state = &app.state;
+fn operation_live(state: &CanvasFacts<'_>) -> bool {
     let editor = &state.model.schematic.session.editor;
     state.model.schematic.canvas_settings_change_blocked()
         || editor.tool != Tool::Select
@@ -62,16 +79,16 @@ fn operation_live(app: &RSpiceApp) -> bool {
         || state.schematic_drag_in_progress()
 }
 
-fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
+fn action_enabled(cx: &Cx<'_, DesignFeature>, action: MobileCanvasAction) -> bool {
     match action {
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => true,
-        MobileCanvasAction::Cancel => operation_live(app),
+        MobileCanvasAction::Cancel => operation_live(&canvas_facts_in(cx)),
         MobileCanvasAction::Rotate | MobileCanvasAction::Mirror
-            if super::shelf_drag::something_floats(&super::canvas_facts(&app.state)) =>
+            if super::shelf_drag::something_floats(&canvas_facts_in(cx)) =>
         {
             true
         }
-        _ => product_command(action).is_some_and(|key| app.command_key_enabled(key)),
+        _ => product_command(action).is_some_and(|key| cx.foreign_available(key)),
     }
 }
 
@@ -84,26 +101,26 @@ const fn floating_transform(action: MobileCanvasAction) -> Option<PlacementTrans
     }
 }
 
-fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasRequest) {
-    if request.source != super::requests::editor_request_source(&app.state)
-        || app.state.workbench.current_route().surface_id() != SurfaceId::Design
+fn execute_action(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, request: MobileCanvasRequest) {
+    if request.source != super::requests::editor_request_source(&canvas_facts_in(cx))
+        || cx.wb.current_route().surface_id() != SurfaceId::Design
         || !matches!(
-            app.state.model.workspace.content.active_view_type(),
+            cx.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
-        || canvas_application_modal_open(&app.state)
-        || !action_enabled(app, request.action)
+        || canvas_application_modal_open_in(cx)
+        || !action_enabled(cx, request.action)
     {
         return;
     }
     let latches = mobile_controls::touch_latches(ctx);
     match request.action {
-        MobileCanvasAction::SelectBox => app.state.prompt(if latches.select_box {
+        MobileCanvasAction::SelectBox => cx.wb.prompt(if latches.select_box {
             "A drag on empty canvas draws a selection box."
         } else {
             "A drag on empty canvas pans."
         }),
-        MobileCanvasAction::SelectAdd => app.state.prompt(if latches.select_add {
+        MobileCanvasAction::SelectAdd => cx.wb.prompt(if latches.select_add {
             "A tap adds to the selection or takes out of it."
         } else {
             "A tap selects one object."
@@ -112,13 +129,10 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
             // The placement ghost, or the selection Move carries, turns as
             // R and M turn it; the selection on the sheet turns otherwise.
             let floated = floating_transform(action).is_some_and(|transform| {
-                super::shelf_drag::turn_what_floats(
-                    &mut super::canvas_parts(&mut app.state),
-                    transform,
-                )
+                super::shelf_drag::turn_what_floats(&mut canvas_parts_in(cx), transform)
             });
             if !floated && let Some(key) = product_command(action) {
-                app.execute_command_key(key);
+                cx.execute(key);
             }
         }
     }

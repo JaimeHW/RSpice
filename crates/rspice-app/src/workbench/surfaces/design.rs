@@ -11,6 +11,8 @@ use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::features;
 use crate::workbench::framework::feature::CloudSessionPort;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -57,7 +59,15 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if canvas_document
         && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
     {
-        crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
+        // The strip reads its commands' answers only where it draws.
+        let ctx = ui.ctx().clone();
+        crate::schematic::view::show_mobile_canvas_controls(
+            &ctx,
+            &mut features::surface_cx::<DesignFeature>(app, |_| {
+                rspice_schematic_editor::view::pointer_target::canvas_touch_mode(&ctx)
+            }),
+            content_rect,
+        );
     }
 }
 

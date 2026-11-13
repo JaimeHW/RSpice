@@ -119,6 +119,21 @@ pub(crate) fn cx_with_menu_answers<F: Registered>(
     F::cx(app).with_foreign_availability(answers)
 }
 
+/// The context a step of `F`'s surface draws in, as
+/// [`cx_with_foreign_answers`] lends it, holding also whether anything the
+/// dialog gate counts is open and whether anything holding the application
+/// modal is, both taken as the step starts.
+pub(crate) fn surface_cx<F: Registered>(
+    app: &mut RSpiceApp,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) -> Cx<'_, F> {
+    let dialog_modal = app.state.dialog_modal_open();
+    let application_modal = app.state.application_modal_open();
+    cx_with_foreign_answers::<F>(app, reads)
+        .with_dialog_modal(dialog_modal)
+        .with_application_modal(application_modal)
+}
+
 /// The context `F`'s command runs in, as [`cx`] lends it, holding whether
 /// anything the dialog gate counts is open and whether anything holding the
 /// application modal is, both taken as the run starts.

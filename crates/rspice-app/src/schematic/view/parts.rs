@@ -33,7 +33,8 @@ use crate::workbench::{
         veriloga_master_of_component, veriloga_source_for_component,
     },
     app_state::{AppState, DragType, Model, model_design_view},
-    framework::ports::ResultsPort,
+    design::DesignFeature,
+    framework::{feature::Cx, ports::ResultsPort},
     slots::{DesignState, RunsState},
     state::WorkbenchSession,
 };
@@ -74,6 +75,28 @@ pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
         application_modal,
         dialog_modal,
     }
+}
+
+/// The canvas's parts of the design feature's context, with its modal facts
+/// as the shell lent them.
+pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasParts<'a> {
+    let application_modal = canvas_application_modal_open_in(cx);
+    let dialog_modal = cx.dialog_modal_open() || asked_dialog_waits(cx.wb);
+    CanvasParts {
+        design: &mut *cx.state,
+        model: &mut *cx.model,
+        workbench: &mut *cx.wb,
+        runs: &mut *cx.runs,
+        results: cx.peers.results(),
+        application_modal,
+        dialog_modal,
+    }
+}
+
+/// [`canvas_application_modal_open`] in the design feature's context: the
+/// fact the shell lent it, or a dialog the surface asked for that waits.
+pub(crate) fn canvas_application_modal_open_in(cx: &Cx<'_, DesignFeature>) -> bool {
+    cx.application_modal_open() || asked_dialog_waits(cx.wb)
 }
 
 /// Whether the design surface reads a modal dialog as open: one that is,
@@ -119,6 +142,17 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
         runs: &state.runs,
         results: &*state.results,
         probed_trace: probed_trace(&state.workbench),
+    }
+}
+
+/// The canvas's facts from the design feature's context.
+pub(crate) fn canvas_facts_in<'a>(cx: &'a Cx<'_, DesignFeature>) -> CanvasFacts<'a> {
+    CanvasFacts {
+        design: &*cx.state,
+        model: &*cx.model,
+        runs: &*cx.runs,
+        results: cx.peers.results(),
+        probed_trace: probed_trace(&*cx.wb),
     }
 }
 
