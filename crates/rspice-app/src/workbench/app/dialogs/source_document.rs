@@ -24,7 +24,7 @@ use crate::ui::widgets::{
     Button, CommandForm, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
     DialogTransactionTone, Problem, band_header, paint_problem_mark,
 };
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{
     LifecycleAction, NetlistLifecycleAction, SourceDocumentRequest,
 };
@@ -48,19 +48,7 @@ use crate::ui::widgets::{
     PROBLEM_MARK_ADVANCE as INCLUDE_MARK_ADVANCE, PROBLEM_MARK_SIDE as INCLUDE_MARK_SIDE,
 };
 
-/// Bring the lifecycle dialog up for the page that is showing.
-///
-pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
-    open_source_document_dialog_in(
-        state.workbench.workspace,
-        &state.model,
-        &mut state.code.code_workspace,
-        &state.code.netlist,
-        &state.platform,
-    )
-}
-
-/// [`open_source_document_dialog`], over the workspace in front, the model,
+/// The shell's `open_source_document_dialog`, over the workspace in front, the model,
 /// the Code workspace's runtime state, the netlist editor's state and the
 /// platform's state.
 pub(crate) fn open_source_document_dialog_in(
@@ -438,7 +426,7 @@ pub(in crate::workbench) fn close_document_lifecycle(code: &mut CodeWorkspaceRun
 }
 
 /// Close the netlist lifecycle dialog and the transactions it opened.
-fn close_netlist_lifecycle(
+pub(crate) fn close_netlist_lifecycle(
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &mut NetlistDocumentState,
 ) {
@@ -712,145 +700,6 @@ fn render_netlist_source_document_dialog(
     None
 }
 
-/// Carry out a lifecycle choice on the netlist page's deck or include that
-/// the dialog handed the shell, then close the dialog when the same frame
-/// closed it.
-pub(in crate::workbench) fn apply_netlist_lifecycle_action(
-    state: &mut AppState,
-    action: NetlistLifecycleAction,
-    close: bool,
-) {
-    let messages = state.workbench.messages();
-    match action {
-        // Nothing to carry out, or a choice the form applies over the Code
-        // workspace's and the netlist editor's state and the model (Cancel,
-        // OpenHistory, CancelInclude, SetIncludeSearchPaths): the form never
-        // hands these over.
-        NetlistLifecycleAction::None
-        | NetlistLifecycleAction::Cancel
-        | NetlistLifecycleAction::OpenHistory
-        | NetlistLifecycleAction::CancelInclude
-        | NetlistLifecycleAction::SetIncludeSearchPaths(_) => {}
-        NetlistLifecycleAction::Begin(file_action) => {
-            if let Err(error) = netlist_document::begin_netlist_lifecycle_action_in(
-                &state.model,
-                &mut state.code.netlist,
-                file_action,
-            ) {
-                state.prompt(error);
-            }
-        }
-        NetlistLifecycleAction::Commit => {
-            match netlist_document::commit_netlist_lifecycle_action(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-            ) {
-                Ok(message) => {
-                    state.record(LogSeverity::Info, LogSource::Studio, message);
-                }
-                Err(error) => {
-                    if let Some(transaction) =
-                        state.code.netlist.lifecycle_dialog.transaction.as_mut()
-                    {
-                        transaction.error = Some(error);
-                    } else {
-                        state.record(LogSeverity::Error, LogSource::Studio, error);
-                    }
-                }
-            }
-        }
-        NetlistLifecycleAction::SelectDeck(deck_id) => {
-            if let Err(error) = netlist_document::select_retained_top_deck(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-                deck_id,
-            ) {
-                state.prompt(error);
-            }
-        }
-        NetlistLifecycleAction::CopyIncludeOwnership => {
-            match netlist_document::copy_active_dependency_to_project(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-            ) {
-                Ok(_) => {
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        messages.text(MessageId::NetlistCopySucceeded),
-                    );
-                }
-                Err(error) => {
-                    state.record(LogSeverity::Error, LogSource::Studio, error);
-                }
-            }
-        }
-        NetlistLifecycleAction::ReleaseIncludeOwnership => {
-            match netlist_document::release_active_dependency_from_project(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-            ) {
-                Ok(()) => {
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        messages.text(MessageId::NetlistReleaseSucceeded),
-                    );
-                }
-                Err(error) => {
-                    state.record(LogSeverity::Error, LogSource::Studio, error);
-                }
-            }
-        }
-        NetlistLifecycleAction::BeginInclude(file_action) => {
-            if let Err(error) = netlist_document::begin_owned_include_lifecycle_action(
-                &state.model,
-                &mut state.code.netlist,
-                file_action,
-            ) {
-                state.prompt(error);
-            }
-        }
-        NetlistLifecycleAction::CommitInclude => {
-            match netlist_document::commit_owned_include_lifecycle_action(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-            ) {
-                Ok(message) => {
-                    state.record(LogSeverity::Info, LogSource::Studio, message);
-                }
-                Err(error) => {
-                    if let Some(transaction) = state
-                        .code
-                        .netlist
-                        .lifecycle_dialog
-                        .include_transaction
-                        .as_mut()
-                    {
-                        transaction.error = Some(error);
-                    }
-                }
-            }
-        }
-        NetlistLifecycleAction::SaveSourceAs => {
-            netlist_document::open_netlist_save_dialog_in(
-                &state.model,
-                &mut state.code.netlist,
-                true,
-            );
-            state.code.code_workspace.source_document_dialog = false;
-        }
-    }
-    if close {
-        close_netlist_lifecycle(&mut state.code.code_workspace, &mut state.code.netlist);
-    }
-}
-
 /// The transaction that creates the Automation workspace a project has
 /// none of. It is opened straight from the empty state, so it renders
 /// whenever the draft exists rather than waiting for the lifecycle dialog
@@ -996,28 +845,6 @@ fn render_new_top_deck_form(
         DialogChoice::None | DialogChoice::Secondary => {}
     }
     None
-}
-
-/// Create the top deck the creation form drafted, which the form handed the
-/// shell, and close the dialog once it is made; a refusal stays in the
-/// form's footer.
-pub(in crate::workbench) fn commit_new_top_deck(state: &mut AppState) {
-    match netlist_document::commit_netlist_lifecycle_action(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-    ) {
-        Ok(message) => {
-            state.record(LogSeverity::Info, LogSource::Studio, message);
-            state.code.code_workspace.source_document_dialog = false;
-            state.code.netlist.lifecycle_dialog.transaction = None;
-        }
-        Err(error) => {
-            if let Some(transaction) = state.code.netlist.lifecycle_dialog.transaction.as_mut() {
-                transaction.error = Some(error);
-            }
-        }
-    }
 }
 
 /// The sections of a Manage source document dialog, stacked down its flush

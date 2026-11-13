@@ -37,8 +37,8 @@ use crate::state::workspace::{
 use crate::state::{Cell, CellViewRef, PortDirection, PortSpec, ViewType};
 use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::seed_veriloga_view;
-use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{VerilogAWorkbenchState, writable_libraries};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -58,13 +58,7 @@ pub(crate) struct NewVerilogADeviceFormState {
     pub(crate) origin: Option<crate::state::CellViewRef>,
 }
 
-/// Open New Verilog-A device… on the library holding the active design,
-/// remembering the schematic it was opened from.
-pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
-    open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
-}
-
-/// [`open_new_veriloga_device_form`], over the model and the form alone.
+/// The shell's `open_new_veriloga_device_form`, over the model and the form alone.
 pub(crate) fn open_new_veriloga_device_form_in(
     model: &Model,
     form: &mut NewVerilogADeviceFormState,
@@ -107,19 +101,13 @@ pub(crate) enum Draft {
     Ready { cell: String, ports: Vec<PortSpec> },
 }
 
-/// The tests' form of [`draft_in`], over the application state.
-#[cfg(test)]
-pub(crate) fn draft(state: &AppState) -> Draft {
-    draft_in(
-        &state.code.new_veriloga_device,
-        &state.model,
-        &state.workbench.messages(),
-    )
-}
-
 /// The form's draft, measured against the model's catalog and stated in
 /// the reader's messages.
-fn draft_in(form: &NewVerilogADeviceFormState, model: &Model, messages: &MessageCatalog) -> Draft {
+pub(crate) fn draft_in(
+    form: &NewVerilogADeviceFormState,
+    model: &Model,
+    messages: &MessageCatalog,
+) -> Draft {
     if !writable_libraries(&model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
     }

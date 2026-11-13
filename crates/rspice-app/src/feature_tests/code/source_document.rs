@@ -3,12 +3,12 @@
 //! and the properties and rows the frame draws.
 
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::source_document::tests::facts_of;
 use crate::workbench::app::dialogs::source_document::{
     apply_lifecycle_action, begin_new_top_deck_in, netlist_lifecycle_facts,
-    open_source_document_dialog, source_document_dialog_is_available,
+    source_document_dialog_is_available,
 };
+use crate::workbench::app::{RSpiceApp, open_source_document_dialog};
 use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::documents::code_workspace::{CodeSourceFileAction, CodeWorkspacePage};
 use egui::Context;

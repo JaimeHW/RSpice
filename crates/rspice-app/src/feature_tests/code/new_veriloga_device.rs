@@ -4,12 +4,22 @@ use crate::state::{
     Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
 };
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::AppState;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
-    Draft, Line, cell_line, draft, open_new_veriloga_device_form, ports_line,
+    Draft, Line, cell_line, draft_in, ports_line,
 };
+use crate::workbench::app::{RSpiceApp, open_new_veriloga_device_form};
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
+
+/// The tests' form of [`draft_in`], over the application state.
+fn draft(state: &AppState) -> Draft {
+    draft_in(
+        &state.code.new_veriloga_device,
+        &state.model,
+        &state.workbench.messages(),
+    )
+}
 
 const LIBRARY: &str = "behavioral";
 

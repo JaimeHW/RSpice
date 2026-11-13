@@ -118,9 +118,8 @@ pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 
 pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
-pub(crate) use dialogs::library::new_veriloga_device::{
-    new_veriloga_device_available_in, open_new_veriloga_device_form,
-};
+pub(crate) use code_adapters::{open_new_veriloga_device_form, open_source_document_dialog};
+pub(crate) use dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 pub(crate) use dialogs::project::{
     TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
 };
@@ -128,8 +127,7 @@ pub(crate) use dialogs::project::{
 pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
 
 pub(crate) use dialogs::source_document::{
-    begin_new_top_deck_in, open_source_document_dialog, open_source_document_dialog_in,
-    source_document_dialog_is_available,
+    begin_new_top_deck_in, open_source_document_dialog_in, source_document_dialog_is_available,
 };
 
 pub(crate) use dialogs::source_language_tools::navigate_source_bundle;

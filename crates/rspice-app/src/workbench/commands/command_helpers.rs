@@ -778,10 +778,14 @@ fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRe
             }
         }
         SourceDocumentRequest::Netlist { action, close } => {
-            source_document::apply_netlist_lifecycle_action(&mut app.state, action, close);
+            crate::workbench::app::code_adapters::apply_netlist_lifecycle_action(
+                &mut app.state,
+                action,
+                close,
+            );
         }
         SourceDocumentRequest::CreateTopDeck => {
-            source_document::commit_new_top_deck(&mut app.state);
+            crate::workbench::app::code_adapters::commit_new_top_deck(&mut app.state);
         }
     }
 }
