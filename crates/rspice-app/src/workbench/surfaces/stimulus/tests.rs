@@ -6,7 +6,7 @@ use super::*;
 use crate::state::stimulus_library::definition::StimulusFamily;
 use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, ComponentType, Point};
-use crate::workbench::RSpiceApp;
+use crate::workbench::{AppState, RSpiceApp};
 
 /// The two viewports the instrument is held to: the workspace's smallest
 /// supported window, and the ordinary laptop one.
@@ -89,7 +89,7 @@ fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
 }
 
 /// Render the stage at one size and return every string it publishes.
-fn published(state: &mut AppState, size: egui::Vec2) -> Vec<String> {
+fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -99,7 +99,7 @@ fn published(state: &mut AppState, size: egui::Vec2) -> Vec<String> {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.design_cx()));
         },
     );
     output
@@ -119,7 +119,7 @@ fn published(state: &mut AppState, size: egui::Vec2) -> Vec<String> {
 }
 
 /// Every text shape the stage painted, with the clip rectangle it landed in.
-fn painted(state: &mut AppState, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
+fn painted(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
@@ -130,7 +130,7 @@ fn painted(state: &mut AppState, size: egui::Vec2) -> Vec<(String, Rect, Rect)> 
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| show(ui, state));
+                .show(ctx, |ui| show(ui, &mut app.design_cx()));
         },
     );
     let mut lines = Vec::new();
@@ -159,7 +159,7 @@ fn collect_text(shape: &egui::epaint::Shape, clip: Rect, out: &mut Vec<(String, 
 #[test]
 fn an_empty_library_offers_the_one_verb_that_resolves_it() {
     let mut app = RSpiceApp::test_instance();
-    let published = published(&mut app.state, vec2(900.0, 470.0));
+    let published = published(&mut app, vec2(900.0, 470.0));
     assert!(published.contains(&"No stimulus definitions".to_owned()));
     assert!(published.contains(&"New definition".to_owned()));
 }
@@ -170,7 +170,7 @@ fn an_empty_library_offers_the_one_verb_that_resolves_it() {
 fn a_library_with_no_selection_opens_on_its_first_definition() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.stimulus_library = fixtures::library();
-    let published = published(&mut app.state, vec2(900.0, 470.0));
+    let published = published(&mut app, vec2(900.0, 470.0));
     assert_eq!(
         app.state.design.selected_stimulus_definition.as_deref(),
         Some("sensor_diff_1k")
@@ -182,7 +182,7 @@ fn a_library_with_no_selection_opens_on_its_first_definition() {
 #[test]
 fn every_band_publishes_its_own_strings() {
     let mut app = seeded("sensor_diff_1k");
-    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    let published = published(&mut app, vec2(1000.0, 470.0));
     for expected in [
         // Identity.
         "Name",
@@ -218,7 +218,7 @@ fn every_band_publishes_its_own_strings() {
 #[test]
 fn a_noise_definition_states_why_it_has_no_curve() {
     let mut app = seeded("supply_trnoise");
-    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    let published = published(&mut app, vec2(1000.0, 470.0));
     assert!(
         published
             .iter()
@@ -243,7 +243,7 @@ fn a_waveform_centred_on_zero_states_zero_on_its_axis() {
     let size = stage_size(1024.0, 640.0);
     // Axis ticks are painted, not announced, so they are read off the frame's
     // own text shapes rather than out of the accessibility tree.
-    let painted = painted(&mut app.state, size);
+    let painted = painted(&mut app, size);
     let texts = painted
         .iter()
         .map(|(text, ..)| text.as_str())
@@ -270,7 +270,7 @@ fn a_waveform_centred_on_zero_states_zero_on_its_axis() {
 #[test]
 fn a_many_cycle_window_announces_its_band_and_a_curve_does_not() {
     let mut app = many_cycle_train();
-    let band = published(&mut app.state, stage_size(1024.0, 640.0));
+    let band = published(&mut app, stage_size(1024.0, 640.0));
     assert!(
         band.iter().any(|text| text == "500 cycles \u{b7} envelope"),
         "the strip never stated what it is drawing: {band:?}"
@@ -283,7 +283,7 @@ fn a_many_cycle_window_announces_its_band_and_a_curve_does_not() {
     );
 
     let mut app = seeded("sensor_diff_1k");
-    let curve = published(&mut app.state, stage_size(1024.0, 640.0));
+    let curve = published(&mut app, stage_size(1024.0, 640.0));
     assert!(
         !curve.iter().any(|text| text.contains("envelope")),
         "a curve called itself a band: {curve:?}"
@@ -365,7 +365,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
 #[test]
 fn a_finding_lands_on_the_field_its_rule_named() {
     let mut app = seeded("bridge_cal_step");
-    let stage = resolve(&mut app.state).expect("stage");
+    let stage = resolve(&mut app.design_cx()).expect("stage");
     let about_td = stage
         .field_findings("td")
         .map(|finding| finding.message.as_str())
@@ -393,7 +393,7 @@ fn a_name_collision_is_stated_at_the_name_field() {
         &app.state.model,
         "sensor_diff_1k",
     );
-    let stage = resolve(&mut app.state).expect("stage");
+    let stage = resolve(&mut app.design_cx()).expect("stage");
     assert!(
         stage
             .field_findings(crate::workbench::state::NAME_FIELD)
@@ -402,7 +402,7 @@ fn a_name_collision_is_stated_at_the_name_field() {
         "{:?}",
         stage.findings
     );
-    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    let published = published(&mut app, vec2(1000.0, 470.0));
     assert!(
         !published
             .iter()
@@ -416,7 +416,7 @@ fn a_name_collision_is_stated_at_the_name_field() {
 #[test]
 fn the_footer_states_a_specification_rather_than_a_card() {
     let mut app = seeded("bridge_cal_step");
-    let stage = resolve(&mut app.state).expect("stage");
+    let stage = resolve(&mut app.design_cx()).expect("stage");
     assert_eq!(
         stage.spec.as_deref(),
         Ok("PULSE(-10m 10m 100u 1u 1u 500u 1m)"),
@@ -435,7 +435,7 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
         &app.state.model,
         "sensor_diff_1k",
     );
-    let stage = resolve(&mut app.state).expect("stage");
+    let stage = resolve(&mut app.design_cx()).expect("stage");
     assert!(stage.errors() > 0);
     assert!(stage.apply_block().is_some());
 
@@ -445,7 +445,7 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
         &app.state.model,
         "bridge_cal_step_2",
     );
-    let stage = resolve(&mut app.state).expect("stage");
+    let stage = resolve(&mut app.design_cx()).expect("stage");
     assert_eq!(stage.errors(), 0, "{:?}", stage.findings);
     assert!(stage.apply_block().is_none());
 }
@@ -552,7 +552,7 @@ fn every_family_fits_the_stage_at_both_supported_viewports() {
         let size = stage_size(width, height);
         for name in fixtures::names() {
             let mut app = seeded(name);
-            for (text, rect, clip) in painted(&mut app.state, size) {
+            for (text, rect, clip) in painted(&mut app, size) {
                 if !clip.is_positive() {
                     continue;
                 }
@@ -587,9 +587,9 @@ fn the_measured_stage_is_the_column_the_shell_leaves() {
 fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
     let mut app = seeded("sensor_diff_1k");
     let size = stage_size(1024.0, 640.0);
-    let _ = published(&mut app.state, size);
+    let _ = published(&mut app, size);
     let after_first = app.state.design.stimulus_editor.evaluations();
-    let _ = published(&mut app.state, size);
+    let _ = published(&mut app, size);
     assert_eq!(app.state.design.stimulus_editor.evaluations(), after_first);
 
     crate::workbench::app::actions::stimulus::edit_field(
@@ -599,7 +599,7 @@ fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
         "va",
         "9m",
     );
-    let _ = published(&mut app.state, size);
+    let _ = published(&mut app, size);
     assert_eq!(
         app.state.design.stimulus_editor.evaluations(),
         after_first + 1
@@ -649,7 +649,7 @@ fn every_value_tick_is_drawn_at_the_value_it_states() {
         "emi_am_150k",
     ] {
         let mut app = seeded(name);
-        let painted = painted(&mut app.state, stage_size(1440.0, 900.0));
+        let painted = painted(&mut app, stage_size(1440.0, 900.0));
         let mut axis = value_axis(&painted);
         axis.sort_by(|left, right| left.0.total_cmp(&right.0));
         assert!(axis.len() >= 3, "{name}: the axis states {axis:?}");
@@ -673,8 +673,8 @@ fn a_laptop_stage_shows_every_field_without_scrolling() {
     for name in ["sensor_diff_1k", "bridge_cal_step", "supply_trnoise"] {
         let mut app = seeded(name);
         let size = stage_size(1440.0, 900.0);
-        let painted = painted(&mut app.state, size);
-        let stage = resolve(&mut app.state).expect("stage");
+        let painted = painted(&mut app, size);
+        let stage = resolve(&mut app.design_cx()).expect("stage");
         let sheet = app
             .state
             .design
@@ -713,7 +713,7 @@ fn a_laptop_stage_shows_every_field_without_scrolling() {
 fn a_point_table_never_runs_under_the_fields_below_it() {
     for (viewport, width, height) in VIEWPORTS {
         let mut app = seeded("vdd_ramp_1ms");
-        let painted = painted(&mut app.state, stage_size(width, height));
+        let painted = painted(&mut app, stage_size(width, height));
         let visible = |wanted: &dyn Fn(&str) -> bool| {
             painted
                 .iter()
@@ -762,7 +762,7 @@ fn the_identity_band_never_cuts_a_fact_short() {
                 .expect("the library holds more than one definition"),
         );
         for app in [&mut published, &mut refused] {
-            for (text, rect, clip) in painted(&mut app.state, stage_size(1024.0, 640.0)) {
+            for (text, rect, clip) in painted(app, stage_size(1024.0, 640.0)) {
                 if rect.top() >= IDENTITY_HEIGHT {
                     continue;
                 }
@@ -787,7 +787,7 @@ fn the_identity_band_never_cuts_a_fact_short() {
 #[test]
 fn guide_labels_that_would_touch_are_merged() {
     let mut app = seeded("bridge_cal_step");
-    let painted = painted(&mut app.state, stage_size(1024.0, 640.0));
+    let painted = painted(&mut app, stage_size(1024.0, 640.0));
     let labels = painted
         .iter()
         .filter(|(text, ..)| {
@@ -821,7 +821,7 @@ fn a_count_of_one_is_singular() {
         &app.state.model,
         "sensor_diff_1k",
     );
-    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    let published = published(&mut app, vec2(1000.0, 470.0));
     assert!(
         published.iter().any(|text| text == "draft \u{b7} 1 error"),
         "{published:?}"

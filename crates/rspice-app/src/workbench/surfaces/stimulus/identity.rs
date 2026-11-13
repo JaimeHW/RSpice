@@ -11,8 +11,10 @@ use egui::{Pos2, Sense, Ui, Vec2};
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::NAME_FIELD;
-use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
     Problem, WorkbenchIcon, icon_button, labeled_icon_button_sized, paint_problem_mark,
@@ -38,8 +40,13 @@ const CHIP_MARK_GAP: f32 = 5.0;
 /// icon buttons and the spacing between them.
 const VERB_WIDTH: f32 = 250.0;
 
-pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.workbench.messages();
+pub(super) fn show(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    actions: &mut Vec<StageAction>,
+) {
+    let messages = cx.wb.messages();
     let tokens = Tokens::get(ui.ctx());
     let mut trailing = Vec::new();
     super::split_row(
@@ -59,7 +66,7 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
             );
             ui.add_space(6.0);
 
-            name_field(ui, state, stage, actions);
+            name_field(ui, cx, stage, actions);
             ui.add_space(6.0);
             family_combo(
                 ui,
@@ -75,13 +82,13 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
             );
 
             ui.add_space(8.0);
-            lifecycle_chip(ui, state, stage);
+            lifecycle_chip(ui, cx, stage);
             ui.add_space(8.0);
-            adopter_summary(ui, state, stage);
+            adopter_summary(ui, cx, stage);
         },
         |ui| {
             ui.add_space(8.0);
-            apply_button(ui, state, stage, &mut trailing);
+            apply_button(ui, cx, stage, &mut trailing);
             ui.add_space(4.0);
             if icon_button(
                 ui,
@@ -144,13 +151,17 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
 /// name the library already holds is reported by the audit strip and blocks
 /// Apply rather than being refused keystroke by keystroke, because a name is
 /// typed through states that are not yet valid.
-fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.workbench.messages();
+fn name_field(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    actions: &mut Vec<StageAction>,
+) {
+    let messages = cx.wb.messages();
     let label = messages.text(MessageId::StimulusFieldName);
     let editing = stage.editing_field.as_deref() == Some(NAME_FIELD);
     let mut text = if editing {
-        state
-            .design
+        cx.state
             .stimulus_editor
             .field_text(stage.saved.name(), NAME_FIELD)
             .unwrap_or_default()
@@ -246,8 +257,8 @@ fn kind_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<StageAc
 }
 
 /// Where this definition stands: published, edited, or edited and refused.
-fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.workbench.messages();
+fn lifecycle_chip(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, stage: &Stage) {
+    let messages = cx.wb.messages();
     let errors = stage.errors();
     // Each state's fact, then the same fact at the length a narrow band can
     // give it. The short form is the lifecycle word alone, because the detail
@@ -317,8 +328,8 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
 /// fact cut off mid-word (`no ad…`) is worse than the fact missing, and it is
 /// never missing from the instrument — the realization band heads its list
 /// with the same count.
-fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.workbench.messages();
+fn adopter_summary(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, stage: &Stage) {
+    let messages = cx.wb.messages();
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let named = if stage.adopters.is_empty() {
@@ -378,8 +389,13 @@ fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
 }
 
 /// Apply, and the reason it is unavailable when it is.
-fn apply_button(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.workbench.messages();
+fn apply_button(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    actions: &mut Vec<StageAction>,
+) {
+    let messages = cx.wb.messages();
     let label = messages.text(MessageId::StimulusApply);
     let block = stage.apply_block();
     let response = ui

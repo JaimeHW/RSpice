@@ -27,8 +27,10 @@ use crate::state::format_engineering_display;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{ViewOption, view_switch};
+use crate::workbench::MessageId;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::PreviewSpan;
-use crate::workbench::{AppState, MessageId};
 
 use super::{Stage, StageAction};
 
@@ -55,27 +57,32 @@ const ENVELOPE_WIDTH: f32 = 1.4;
 /// Air between a readout's label and its value.
 const READOUT_GAP: f32 = 4.0;
 
-pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
+pub(super) fn show(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    actions: &mut Vec<StageAction>,
+) {
     let band = ui.available_rect_before_wrap();
     let strip = Rect::from_min_max(
         band.min,
         Pos2::new(band.right(), band.top() + STRIP_HEIGHT.min(band.height())),
     );
     let plot = Rect::from_min_max(Pos2::new(band.left(), strip.bottom()), band.max);
-    let hover = plot_body(ui, state, stage, plot, actions);
-    strip_row(ui, state, stage, strip, hover, actions);
+    let hover = plot_body(ui, cx, stage, plot, actions);
+    strip_row(ui, cx, stage, strip, hover, actions);
 }
 
 /// The control strip: spans, readouts, evaluator chip, hover value.
 fn strip_row(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     rect: Rect,
     hover: Option<TraceReading>,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let tokens = Tokens::get(ui.ctx());
     // The strip reads from both ends: spans and derived readouts from the
     // left, the transient the substitutions were made under and the hover
@@ -272,7 +279,7 @@ fn paint_chip_from_right(
 /// The plot itself, and the hovered sample it reports back.
 fn plot_body(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     rect: Rect,
     actions: &mut Vec<StageAction>,
@@ -292,7 +299,7 @@ fn plot_body(
     ui.painter().rect_filled(rect, 0.0, colors.canvas_bg);
     theme::paint_focus_ring(ui, &response, rect);
 
-    let label = accessible_label(state, stage);
+    let label = accessible_label(cx, stage);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Image, ui.is_enabled(), &label)
     });
@@ -308,7 +315,7 @@ fn plot_body(
     else {
         let plot = plot_rect(rect, MINIMUM_VALUE_GUTTER);
         if plot.width() > 1.0 && plot.height() > 1.0 {
-            statement(ui, plot, state, stage);
+            statement(ui, plot, cx, stage);
         }
         return None;
     };
@@ -452,8 +459,8 @@ impl Projector {
 /// A band says so here as well as on the strip: the one thing a reader who
 /// cannot see this surface most needs from it is whether the shape it states is
 /// one curve or the extremes of five hundred of them.
-fn accessible_label(state: &AppState, stage: &Stage) -> String {
-    let messages = state.workbench.messages();
+fn accessible_label(cx: &Cx<'_, DesignFeature>, stage: &Stage) -> String {
+    let messages = cx.wb.messages();
     match stage.realization.defect.as_deref() {
         Some(defect) => defect.to_owned(),
         None => {
@@ -476,8 +483,8 @@ fn accessible_label(state: &AppState, stage: &Stage) -> String {
 }
 
 /// Why there is no curve, stated where the curve would have been.
-fn statement(ui: &mut Ui, plot: Rect, state: &AppState, stage: &Stage) {
-    let messages = state.workbench.messages();
+fn statement(ui: &mut Ui, plot: Rect, cx: &Cx<'_, DesignFeature>, stage: &Stage) {
+    let messages = cx.wb.messages();
     let tokens = Tokens::get(ui.ctx());
     let text = stage
         .realization

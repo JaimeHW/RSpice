@@ -20,8 +20,10 @@ use crate::state::stimulus_library::definition::StimulusKind;
 use crate::state::{PropertySheet, format_engineering_display};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::read_field;
-use crate::workbench::{AppState, MessageId};
 use rspice_schematic_editor::pwl_editor::PwlData;
 
 use super::super::super::design_system::{
@@ -51,12 +53,12 @@ const CELL_GAP: f32 = 6.0;
 /// The authored point table.
 pub(super) fn points_editor(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let text = read_field(&stage.working, POINTS_FIELD);
     let cells = text
         .split_whitespace()
@@ -132,20 +134,20 @@ pub(super) fn points_editor(
     actions.append(&mut trailing);
 
     if is_table(&cells) {
-        table_header(ui, state, stage);
+        table_header(ui, cx, stage);
         egui::ScrollArea::vertical()
             .id_salt("workbench.stimulus.pwl.points")
             .auto_shrink([false, false])
             .max_height(visible_rows(rows) as f32 * ROW_HEIGHT)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                point_rows(ui, state, stage, &cells, actions);
+                point_rows(ui, cx, stage, &cells, actions);
             });
     } else {
-        raw_table(ui, state, stage, &text, actions);
+        raw_table(ui, cx, stage, &text, actions);
     }
     ui.add_space(TABLE_FOOT);
-    field_grid(ui, state, stage, &scalar_fields(sheet), actions);
+    field_grid(ui, cx, stage, &scalar_fields(sheet), actions);
 }
 
 /// What [`points_editor`] will take in a column `width` wide.
@@ -185,16 +187,15 @@ fn scalar_fields(sheet: &PropertySheet) -> Vec<&crate::state::PropertyDefinition
 /// typed reachable, and the audit strip says what is wrong with it.
 fn raw_table(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     text: &str,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let editing = stage.editing_field.as_deref() == Some(POINTS_FIELD);
     let mut buffer = if editing {
-        state
-            .design
+        cx.state
             .stimulus_editor
             .field_text(stage.saved.name(), POINTS_FIELD)
             .unwrap_or_default()
@@ -225,7 +226,7 @@ fn raw_table(
 /// One editable row per breakpoint, plus the slope into it.
 fn point_rows(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     cells: &[String],
     actions: &mut Vec<StageAction>,
@@ -266,7 +267,7 @@ fn point_rows(
         );
         let mut focused = false;
         for (slot, cell) in [(index * 2, columns.time), (index * 2 + 1, columns.level)] {
-            focused |= cell_edit(ui, state, stage, cells, slot, cell, actions);
+            focused |= cell_edit(ui, cx, stage, cells, slot, cell, actions);
         }
         ui.painter().text(
             egui::pos2(columns.slope.right(), row.center().y),
@@ -330,8 +331,8 @@ impl TableColumns {
 }
 
 /// The column heads, over the columns [`TableColumns`] gives every row.
-fn table_header(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.workbench.messages();
+fn table_header(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, stage: &Stage) {
+    let messages = cx.wb.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let font = theme::sans(tokens::FS_MICRO, FontWeight::Medium);
     let (row, _) = ui.allocate_exact_size(
@@ -384,7 +385,7 @@ fn table_header(ui: &mut Ui, state: &AppState, stage: &Stage) {
 /// who tabs into a point is on that point, and the marker above should say so.
 fn cell_edit(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     tokens: &[String],
     slot: usize,
@@ -394,8 +395,7 @@ fn cell_edit(
     let field = format!("{POINTS_FIELD}.{slot}");
     let editing = stage.editing_field.as_deref() == Some(field.as_str());
     let mut text = if editing {
-        state
-            .design
+        cx.state
             .stimulus_editor
             .field_text(stage.saved.name(), &field)
             .unwrap_or_default()
@@ -403,7 +403,7 @@ fn cell_edit(
     } else {
         tokens.get(slot).cloned().unwrap_or_default()
     };
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let label = messages.format(
         if slot.is_multiple_of(2) {
             MessageId::StimulusPwlTimeOf
@@ -502,12 +502,12 @@ fn inserted_point(tokens: &[String], after: usize) -> Vec<String> {
 /// The measured-file shape.
 pub(super) fn file_editor(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let retained = match stage.working.pwl_file.as_ref() {
         Some(file) => messages.format(
@@ -556,14 +556,14 @@ pub(super) fn file_editor(
         },
     );
     actions.append(&mut trailing);
-    field_grid(ui, state, stage, &shape_fields(sheet, stage), actions);
+    field_grid(ui, cx, stage, &shape_fields(sheet, stage), actions);
     note(ui, &messages.text(MessageId::StimulusRetainedNote));
 }
 
 /// What [`file_editor`] will take in a column `width` wide.
 pub(super) fn file_height(
     ui: &Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     width: f32,
@@ -572,10 +572,7 @@ pub(super) fn file_height(
         + grid_height(ui, &shape_fields(sheet, stage), width)
         + note_height(
             ui,
-            &state
-                .workbench
-                .messages()
-                .text(MessageId::StimulusRetainedNote),
+            &cx.wb.messages().text(MessageId::StimulusRetainedNote),
             width,
         )
 }

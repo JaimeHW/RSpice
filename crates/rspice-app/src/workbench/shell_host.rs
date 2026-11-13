@@ -193,7 +193,7 @@ impl Host for RSpiceApp {
                             }),
                         );
                     }
-                    Workspace::Stimulus => stimulus::show(ui, &mut app.state),
+                    Workspace::Stimulus => stimulus::show(ui, &mut features::cx(app)),
                     Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
                     Workspace::Verify => verify::show(ui, &mut features::cx(app)),
                     Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),

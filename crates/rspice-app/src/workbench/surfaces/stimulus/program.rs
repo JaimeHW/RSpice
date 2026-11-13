@@ -30,8 +30,10 @@ use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::state::{PropertyDefinition, PropertySheet, PropertyValue};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::read_field;
-use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
     PANEL_SECTION_H, property_row_combo_labelled, property_row_height,
@@ -68,18 +70,23 @@ const BAND_FOOT: f32 = 2.0;
 /// The same walk [`show`] makes, adding heights instead of painting: the two
 /// must agree to the pixel, because the stage gives the band exactly this and
 /// a row the painter added that this did not count is a row under the seam.
-pub(super) fn content_height(ui: &Ui, state: &AppState, stage: &Stage, width: f32) -> f32 {
-    let Some(sheet) = state
-        .design
+pub(super) fn content_height(
+    ui: &Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    width: f32,
+) -> f32 {
+    let Some(sheet) = cx
+        .state
         .property_registry
         .get(stage.working.component_type())
     else {
         return 0.0;
     };
-    let bias = bias_height(ui, state, sheet, bias_width(width).unwrap_or(width));
+    let bias = bias_height(ui, cx, sheet, bias_width(width).unwrap_or(width));
     let shape = shape_height(
         ui,
-        state,
+        cx,
         stage,
         sheet,
         bias_width(width).map_or(width, |bias| width - bias),
@@ -99,9 +106,14 @@ fn bias_width(width: f32) -> Option<f32> {
         .then(|| (width * BIAS_FRACTION).clamp(MINIMUM_COLUMN, width - MINIMUM_COLUMN))
 }
 
-pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let Some(sheet) = state
-        .design
+pub(super) fn show(
+    ui: &mut Ui,
+    cx: &Cx<'_, DesignFeature>,
+    stage: &Stage,
+    actions: &mut Vec<StageAction>,
+) {
+    let Some(sheet) = cx
+        .state
         .property_registry
         .get(stage.working.component_type())
     else {
@@ -114,8 +126,8 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                bias_column(ui, state, stage, sheet, actions);
-                shape_column(ui, state, stage, sheet, actions);
+                bias_column(ui, cx, stage, sheet, actions);
+                shape_column(ui, cx, stage, sheet, actions);
             });
         return;
     };
@@ -135,10 +147,10 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
     );
     column(ui, bias_rect, "bias", |ui| {
-        bias_column(ui, state, stage, sheet, actions);
+        bias_column(ui, cx, stage, sheet, actions);
     });
     column(ui, shape_rect, "shape", |ui| {
-        shape_column(ui, state, stage, sheet, actions);
+        shape_column(ui, cx, stage, sheet, actions);
     });
 }
 
@@ -299,18 +311,18 @@ fn grid_cells(
 /// [`grid_height`] said it would be whatever a row inside it decides to draw.
 pub(super) fn field_grid(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     fields: &[&PropertyDefinition],
     actions: &mut Vec<StageAction>,
 ) {
-    field_grid_of(ui, state, stage, fields, MAXIMUM_GRID_COLUMNS, actions);
+    field_grid_of(ui, cx, stage, fields, MAXIMUM_GRID_COLUMNS, actions);
 }
 
 /// [`field_grid`] held to `most_columns`.
 fn field_grid_of(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     fields: &[&PropertyDefinition],
     most_columns: usize,
@@ -350,7 +362,7 @@ fn field_grid_of(
             .max(label_width(&child, &label) + LABEL_AIR);
         field_row(
             &mut child,
-            state,
+            cx,
             stage,
             definition,
             &label,
@@ -363,12 +375,12 @@ fn field_grid_of(
 /// The operating point and the small-signal layer.
 fn bias_column(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     section_header(ui, &messages.text(MessageId::StimulusBiasColumn), None);
     ui.add_space(HEAD_GAP);
     let fields = bias_fields(sheet);
@@ -377,7 +389,7 @@ fn bias_column(
     } else {
         // One column whatever the width: three fields side by side would be
         // read as one triple, and they are three separate layers of a source.
-        field_grid_of(ui, state, stage, &fields, 1, actions);
+        field_grid_of(ui, cx, stage, &fields, 1, actions);
     }
 }
 
@@ -390,17 +402,14 @@ fn bias_fields(sheet: &PropertySheet) -> Vec<&PropertyDefinition> {
 }
 
 /// What [`bias_column`] will take.
-fn bias_height(ui: &Ui, state: &AppState, sheet: &PropertySheet, width: f32) -> f32 {
+fn bias_height(ui: &Ui, cx: &Cx<'_, DesignFeature>, sheet: &PropertySheet, width: f32) -> f32 {
     let fields = bias_fields(sheet);
     PANEL_SECTION_H
         + HEAD_GAP
         + if fields.is_empty() {
             note_height(
                 ui,
-                &state
-                    .workbench
-                    .messages()
-                    .text(MessageId::StimulusNoBiasFields),
+                &cx.wb.messages().text(MessageId::StimulusNoBiasFields),
                 width,
             )
         } else {
@@ -411,7 +420,7 @@ fn bias_height(ui: &Ui, state: &AppState, sheet: &PropertySheet, width: f32) -> 
 /// What [`shape_column`] will take.
 fn shape_height(
     ui: &Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     width: f32,
@@ -421,14 +430,11 @@ fn shape_height(
         + match stage.working.family() {
             StimulusFamily::Dc | StimulusFamily::Ac => note_height(
                 ui,
-                &state
-                    .workbench
-                    .messages()
-                    .text(MessageId::StimulusDcShapeNote),
+                &cx.wb.messages().text(MessageId::StimulusDcShapeNote),
                 width,
             ),
             StimulusFamily::Pwl => pwl::points_height(ui, stage, sheet, width),
-            StimulusFamily::PwlFile => pwl::file_height(ui, state, stage, sheet, width),
+            StimulusFamily::PwlFile => pwl::file_height(ui, cx, stage, sheet, width),
             _ => grid_height(ui, &shape_fields(sheet, stage), width),
         }
 }
@@ -436,12 +442,12 @@ fn shape_height(
 /// The waveform's own fields, or the editor that replaces them.
 fn shape_column(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let family = stage.working.family();
     section_header(
         ui,
@@ -456,9 +462,9 @@ fn shape_column(
         StimulusFamily::Dc | StimulusFamily::Ac => {
             note(ui, &messages.text(MessageId::StimulusDcShapeNote));
         }
-        StimulusFamily::Pwl => pwl::points_editor(ui, state, stage, sheet, actions),
-        StimulusFamily::PwlFile => pwl::file_editor(ui, state, stage, sheet, actions),
-        _ => field_grid(ui, state, stage, &shape_fields(sheet, stage), actions),
+        StimulusFamily::Pwl => pwl::points_editor(ui, cx, stage, sheet, actions),
+        StimulusFamily::PwlFile => pwl::file_editor(ui, cx, stage, sheet, actions),
+        _ => field_grid(ui, cx, stage, &shape_fields(sheet, stage), actions),
     }
 }
 
@@ -506,7 +512,7 @@ pub(super) fn shape_fields<'a>(
 /// stage less than the workspace's smallest supported viewport.
 fn field_row(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     definition: &PropertyDefinition,
     label: &str,
@@ -532,9 +538,9 @@ fn field_row(
             enum_row(ui, stage, definition, &label, options, actions);
         }
         PropertyValue::Boolean(_) => {
-            boolean_row(ui, state, stage, definition, &label, actions);
+            boolean_row(ui, cx, stage, definition, &label, actions);
         }
-        _ => text_row(ui, state, stage, definition, &label, actions),
+        _ => text_row(ui, cx, stage, definition, &label, actions),
     }
 }
 
@@ -576,7 +582,7 @@ fn card_word(display_name: &str) -> Option<&str> {
 /// A free-text field, hinted with what the engine does when it is empty.
 fn text_row(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     definition: &PropertyDefinition,
     label: &RowLabel,
@@ -585,8 +591,7 @@ fn text_row(
     let field = definition.name.as_str();
     let editing = stage.editing_field.as_deref() == Some(field);
     let mut text = if editing {
-        state
-            .design
+        cx.state
             .stimulus_editor
             .field_text(stage.saved.name(), field)
             .unwrap_or_default()
@@ -675,13 +680,13 @@ fn enum_row(
 /// A switch, offered as the two words the card is written with.
 fn boolean_row(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     stage: &Stage,
     definition: &PropertyDefinition,
     label: &RowLabel,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.workbench.messages();
+    let messages = cx.wb.messages();
     let field = definition.name.as_str();
     let authored = read_field(&stage.working, field);
     let default_on = matches!(definition.default_value, PropertyValue::Boolean(true));

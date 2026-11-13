@@ -39,9 +39,11 @@ use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
 use crate::ui::tokens::Tokens;
+use crate::workbench::MessageId;
 use crate::workbench::app::actions::stimulus::StimulusAdopter;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::{NAME_FIELD, PreviewSpan};
-use crate::workbench::{AppState, MessageId};
 
 use super::super::design_system::{WorkbenchIcon, empty_state_with_actions, labeled_icon_button};
 
@@ -200,21 +202,21 @@ const IDENTITY_HEIGHT: f32 = 36.0;
 const PROOF_MINIMUM_HEIGHT: f32 = 120.0;
 const SEAM: f32 = 1.0;
 
-pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.model.workspace.content.stimulus_library.is_empty() {
-        show_empty(ui, state);
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    if cx.model.workspace.content.stimulus_library.is_empty() {
+        show_empty(ui, cx);
         return;
     }
-    select_first_if_unresolved(state);
-    let Some(stage) = resolve(state) else {
-        show_empty(ui, state);
+    select_first_if_unresolved(cx);
+    let Some(stage) = resolve(cx) else {
+        show_empty(ui, cx);
         return;
     };
     let mut actions = Vec::new();
-    paint(ui, state, &stage, &mut actions);
-    ask_before_deleting(ui, state);
+    paint(ui, cx, &stage, &mut actions);
+    ask_before_deleting(ui, cx);
     for action in actions {
-        apply(state, &stage, action);
+        apply(cx, &stage, action);
     }
 }
 
@@ -223,21 +225,16 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
 /// A definition nothing has adopted and nothing is editing is removed on the
 /// press; one with adopters or an unapplied draft says what deleting it costs
 /// first, because both of those are work the press throws away.
-fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
+fn ask_before_deleting(ui: &Ui, cx: &mut Cx<'_, DesignFeature>) {
     use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-    let Some(name) = state
-        .design
-        .stimulus_editor
-        .pending_delete()
-        .map(str::to_owned)
-    else {
+    let Some(name) = cx.state.stimulus_editor.pending_delete().map(str::to_owned) else {
         return;
     };
     let consequence = crate::workbench::app::actions::stimulus::delete_needs_confirmation(
-        state.design.selected_stimulus_definition.as_deref(),
-        &state.design.stimulus_editor,
-        &state.model,
+        cx.state.selected_stimulus_definition.as_deref(),
+        &cx.state.stimulus_editor,
+        cx.model,
     )
     .unwrap_or_default();
     let choice = Dialog::new(format!("Delete \u{201c}{name}\u{201d}?"), "Delete")
@@ -249,23 +246,23 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
         });
     match choice {
         DialogChoice::Primary => {
-            state.design.stimulus_editor.take_pending_delete();
+            cx.state.stimulus_editor.take_pending_delete();
             crate::workbench::app::actions::stimulus::delete_definition(
-                &mut state.design.selected_stimulus_definition,
-                &mut state.design.stimulus_editor,
-                &mut state.model,
+                &mut cx.state.selected_stimulus_definition,
+                &mut cx.state.stimulus_editor,
+                cx.model,
             );
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.design.stimulus_editor.take_pending_delete();
+            cx.state.stimulus_editor.take_pending_delete();
         }
         DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 
 /// The empty state, which offers the one verb that resolves it.
-fn show_empty(ui: &mut Ui, state: &mut AppState) {
-    let messages = state.workbench.messages();
+fn show_empty(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    let messages = cx.wb.messages();
     let title = messages.text(MessageId::StimulusLibraryEmpty);
     let detail = messages.text(MessageId::StimulusLibraryEmptyDetail);
     let label = messages.text(MessageId::StimulusNewDefinition);
@@ -275,10 +272,10 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
     });
     if create {
         crate::workbench::app::actions::stimulus::new_definition(
-            &mut state.design.selected_stimulus_definition,
-            &mut state.design.stimulus_editor,
-            &mut state.model,
-            &mut state.workbench,
+            &mut cx.state.selected_stimulus_definition,
+            &mut cx.state.stimulus_editor,
+            cx.model,
+            cx.wb,
         );
     }
 }
@@ -290,18 +287,17 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
 /// an empty definition, and the caller falls back to the empty stage — which
 /// cannot happen after [`select_first_if_unresolved`] except in the single
 /// frame a delete lands on.
-fn resolve(state: &mut AppState) -> Option<Stage> {
-    let name = state.design.selected_stimulus_definition.clone()?;
-    let saved = state
+fn resolve(cx: &mut Cx<'_, DesignFeature>) -> Option<Stage> {
+    let name = cx.state.selected_stimulus_definition.clone()?;
+    let saved = cx
         .model
         .workspace
         .content
         .stimulus_library
         .get(&name)?
         .clone();
-    let timing =
-        crate::workbench::app::actions::property_edit::stimulus_preview_timing(&state.model);
-    let editor = &mut state.design.stimulus_editor;
+    let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(cx.model);
+    let editor = &mut cx.state.stimulus_editor;
     let draft = editor.draft_for(&saved);
     let working = draft.working().clone();
     let dirty = draft.is_dirty();
@@ -312,10 +308,10 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
     let focus_name = editor.take_focus_name();
     let live = editor.live_record(saved.name(), &working);
     let spec = StimulusRealization::spec(&live);
-    let adopters = crate::workbench::app::actions::stimulus::design_adopters(&state.model, &name);
-    let findings = findings(state, &live, &spec);
-    let realization = state
-        .design
+    let adopters = crate::workbench::app::actions::stimulus::design_adopters(cx.model, &name);
+    let findings = findings(cx, &live, &spec);
+    let realization = cx
+        .state
         .stimulus_editor
         .realization(&live, span, timing)
         .clone();
@@ -342,14 +338,13 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
 /// The mockup does this rather than showing a "nothing selected" stage over a
 /// list of definitions: the instrument's subject is a definition, and a
 /// library that holds one always has a first.
-fn select_first_if_unresolved(state: &mut AppState) {
-    let resolved = state
-        .design
+fn select_first_if_unresolved(cx: &mut Cx<'_, DesignFeature>) {
+    let resolved = cx
+        .state
         .selected_stimulus_definition
         .as_deref()
         .is_some_and(|name| {
-            state
-                .model
+            cx.model
                 .workspace
                 .content
                 .stimulus_library
@@ -359,7 +354,7 @@ fn select_first_if_unresolved(state: &mut AppState) {
     if resolved {
         return;
     }
-    state.design.selected_stimulus_definition = state
+    cx.state.selected_stimulus_definition = cx
         .model
         .workspace
         .content
@@ -382,12 +377,12 @@ fn select_first_if_unresolved(state: &mut AppState) {
 /// show a finding to recover the field by looking for its label inside the
 /// sentence, which attached one rule's advisory to every field it mentioned.
 fn findings(
-    state: &AppState,
+    cx: &Cx<'_, DesignFeature>,
     record: &StimulusDefinition,
     spec: &Result<String, Vec<String>>,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for message in name_findings(state, record) {
+    for message in name_findings(cx, record) {
         findings.push(Finding {
             field: Some(NAME_FIELD),
             blocking: true,
@@ -404,7 +399,7 @@ fn findings(
         }
     }
     for finding in crate::workbench::app::actions::stimulus::contract_findings(
-        &state.design.property_registry,
+        &cx.state.property_registry,
         record,
     ) {
         findings.push(Finding {
@@ -418,7 +413,7 @@ fn findings(
 }
 
 /// Why this name cannot be the definition's, if it cannot.
-fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
+fn name_findings(cx: &Cx<'_, DesignFeature>, record: &StimulusDefinition) -> Vec<String> {
     use crate::state::stimulus_library::definition::is_spice_identifier;
 
     let mut findings = Vec::new();
@@ -428,8 +423,8 @@ fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
             "'{name}' is not a SPICE identifier, so no placed source could carry it"
         ));
     }
-    let selected = state.design.selected_stimulus_definition.as_deref();
-    let collides = state
+    let selected = cx.state.selected_stimulus_definition.as_deref();
+    let collides = cx
         .model
         .workspace
         .content
@@ -447,13 +442,13 @@ fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
 }
 
 /// Lay the four bands into the stage and paint them.
-fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
+fn paint(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, stage: &Stage, actions: &mut Vec<StageAction>) {
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let seam_color = Tokens::get(ui.ctx()).color.border_strong;
     let fixed = IDENTITY_HEIGHT + footer::HEIGHT + 3.0 * SEAM;
     let proof_and_program = (rect.height() - fixed).max(PROOF_MINIMUM_HEIGHT);
-    let program = program::content_height(ui, state, stage, rect.width())
+    let program = program::content_height(ui, cx, stage, rect.width())
         .min((proof_and_program - PROOF_MINIMUM_HEIGHT).max(0.0));
     let proof = proof_and_program - program;
 
@@ -480,16 +475,16 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     }
 
     in_band(ui, identity_rect, |ui| {
-        identity::show(ui, state, stage, actions);
+        identity::show(ui, cx, stage, actions);
     });
     in_band(ui, proof_rect, |ui| {
-        proof::show(ui, state, stage, actions);
+        proof::show(ui, cx, stage, actions);
     });
     in_band(ui, program_rect, |ui| {
-        program::show(ui, state, stage, actions);
+        program::show(ui, cx, stage, actions);
     });
     in_band(ui, footer_rect, |ui| {
-        footer::show(ui, state, stage, actions);
+        footer::show(ui, cx, stage, actions);
     });
 }
 
@@ -560,117 +555,116 @@ fn in_band(ui: &mut Ui, rect: Rect, content: impl FnOnce(&mut Ui)) {
 }
 
 /// Carry out one thing the reader asked for.
-fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
+fn apply(cx: &mut Cx<'_, DesignFeature>, stage: &Stage, action: StageAction) {
     use crate::workbench::app::actions::stimulus;
 
     match action {
         StageAction::Rename(name) => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus::edit_name(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 &name,
             );
         }
         StageAction::SetFamily(family) => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus::edit_family(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 family,
             );
         }
         StageAction::SetKind(kind) => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus::edit_kind(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 kind,
             );
         }
         StageAction::TypeField { field, value } => {
             let name = stage.saved.name().to_owned();
-            state
-                .design
+            cx.state
                 .stimulus_editor
                 .set_field_text(&name, &field, value);
         }
         StageAction::CommitField { field, value } => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus::edit_field(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 &field,
                 &value,
             );
         }
         StageAction::SetPoints(points) => {
-            state.design.stimulus_editor.clear_field();
+            cx.state.stimulus_editor.clear_field();
             stimulus::edit_field(
-                state.design.selected_stimulus_definition.as_deref(),
-                &mut state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
                 "pwl_data",
                 &points,
             );
         }
         StageAction::SelectPoint(index) => {
             let name = stage.saved.name().to_owned();
-            state.design.stimulus_editor.select_point(&name, index);
+            cx.state.stimulus_editor.select_point(&name, index);
         }
-        StageAction::SetSpan(span) => state.design.stimulus_editor.span = span,
+        StageAction::SetSpan(span) => cx.state.stimulus_editor.span = span,
         StageAction::Apply => stimulus::apply_draft(
-            &mut state.design.selected_stimulus_definition,
-            &mut state.design.stimulus_editor,
-            &mut state.model,
-            &mut state.workbench,
+            &mut cx.state.selected_stimulus_definition,
+            &mut cx.state.stimulus_editor,
+            cx.model,
+            cx.wb,
         ),
         StageAction::Revert => stimulus::revert_draft(
-            state.design.selected_stimulus_definition.as_deref(),
-            &mut state.design.stimulus_editor,
-            &state.model,
+            cx.state.selected_stimulus_definition.as_deref(),
+            &mut cx.state.stimulus_editor,
+            cx.model,
         ),
         StageAction::Duplicate => stimulus::duplicate_definition(
-            &mut state.design.selected_stimulus_definition,
-            &mut state.model,
-            &mut state.workbench,
+            &mut cx.state.selected_stimulus_definition,
+            cx.model,
+            cx.wb,
         ),
         StageAction::Delete => {
             if stimulus::delete_needs_confirmation(
-                state.design.selected_stimulus_definition.as_deref(),
-                &state.design.stimulus_editor,
-                &state.model,
+                cx.state.selected_stimulus_definition.as_deref(),
+                &cx.state.stimulus_editor,
+                cx.model,
             )
             .is_some()
             {
                 let name = stage.saved.name().to_owned();
-                state.design.stimulus_editor.ask_before_deleting(&name);
+                cx.state.stimulus_editor.ask_before_deleting(&name);
             } else {
                 stimulus::delete_definition(
-                    &mut state.design.selected_stimulus_definition,
-                    &mut state.design.stimulus_editor,
-                    &mut state.model,
+                    &mut cx.state.selected_stimulus_definition,
+                    &mut cx.state.stimulus_editor,
+                    cx.model,
                 );
             }
         }
         StageAction::ImportDataFile => stimulus::import_data_file(
-            state.design.selected_stimulus_definition.as_deref(),
-            &mut state.design.stimulus_editor,
-            &mut state.model,
+            cx.state.selected_stimulus_definition.as_deref(),
+            &mut cx.state.stimulus_editor,
+            cx.model,
         ),
-        StageAction::Copy(text) => state
-            .workbench
+        StageAction::Copy(text) => cx
+            .wb
             .outbox
             .push(crate::workbench::framework::requests::ClipboardText(text)),
         StageAction::Place => stimulus::place_selected_definition(
-            state.design.selected_stimulus_definition.as_deref(),
-            &state.design.stimulus_editor,
-            &mut state.model,
-            &mut state.workbench,
+            cx.state.selected_stimulus_definition.as_deref(),
+            &cx.state.stimulus_editor,
+            cx.model,
+            cx.wb,
         ),
     }
 }
