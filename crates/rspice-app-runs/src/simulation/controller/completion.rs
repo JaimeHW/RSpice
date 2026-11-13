@@ -80,9 +80,17 @@ impl SimulationController {
                     .unwrap_or(AnalysisType::DcOp);
                 let target_run_id = self.target_run_id();
 
+                // A resume bound to this transient takes the checkpoint image
+                // it captured at the resume's time, so the images it published
+                // as it ran travel with its result.
+                let transient_checkpoints = self.runner.take_task_transient_checkpoints();
                 let produced_artifact = self.current_artifact_producer.as_ref()
                     .map_or(Ok(None), |producer| {
-                        producer.capture(&sim_result, &self.pending_analyses)
+                        producer.capture_with_transient_checkpoints(
+                            &sim_result,
+                            &transient_checkpoints,
+                            &self.pending_analyses,
+                        )
                     })
                     .map_err(|error| format!(
                         "{current_label}: the result could not be passed to the analyses that depend on it: {error}"
