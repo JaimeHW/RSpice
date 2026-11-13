@@ -20,7 +20,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::slots::ProjectState;
-use rspice_app_models::veriloga_library::{
+use rspice_app_state::veriloga_library::{
     BUILTIN_VERILOGA_LIBRARY, BuiltinVerilogAModel, builtin_veriloga_model,
     read_builtin_veriloga_model,
 };

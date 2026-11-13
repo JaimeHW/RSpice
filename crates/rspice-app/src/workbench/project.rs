@@ -12,7 +12,7 @@ mod new_project;
 mod revision_history;
 pub(crate) mod workspace_state;
 
-use rspice_app_models::veriloga_library::builtin_veriloga_model;
+use rspice_app_state::veriloga_library::builtin_veriloga_model;
 
 use crate::state::ViewType;
 use crate::state::command_catalog::CommandKey;

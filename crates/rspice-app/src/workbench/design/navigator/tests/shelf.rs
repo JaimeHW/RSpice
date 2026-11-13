@@ -22,7 +22,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::FocusPlacementSearch;
-use rspice_app_models::veriloga_library::BUILTIN_VERILOGA_MODELS;
+use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
 
 /// The shelf's built-in Verilog-A rows read and stand as the Library page
 /// lists them: its name, its device class and its order.

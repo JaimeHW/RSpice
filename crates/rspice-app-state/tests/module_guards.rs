@@ -44,6 +44,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "symbol_contract"),
     ("lib.rs", "table_route"),
     ("lib.rs", "time_compat"),
+    ("lib.rs", "veriloga_library"),
     ("lib.rs", "waivers"),
     ("lib.rs", "workbench"),
     ("lib.rs", "workspace"),

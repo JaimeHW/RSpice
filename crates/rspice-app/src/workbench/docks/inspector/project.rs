@@ -4,7 +4,7 @@
 pub(crate) mod configuration;
 
 use egui::Ui;
-use rspice_app_models::veriloga_library::BuiltinVerilogAModel;
+use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
 use rspice_ui_kit::panels::{Problem, section_header};
 
 use crate::state::command_catalog::CommandKey;

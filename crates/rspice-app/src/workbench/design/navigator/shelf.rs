@@ -51,7 +51,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::{ConfirmPackAttach, FocusPlacementSearch};
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
-use rspice_app_models::veriloga_library::{
+use rspice_app_state::veriloga_library::{
     BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, builtin_veriloga_model,
 };
 

@@ -6,7 +6,7 @@
 //! library. Nothing here is a project object: the library exists only on this
 //! page, so a project that never opens it carries none of it.
 
-use rspice_app_models::veriloga_library::{
+use rspice_app_state::veriloga_library::{
     BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel,
     builtin_veriloga_model, read_builtin_veriloga_model,
 };

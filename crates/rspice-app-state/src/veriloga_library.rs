@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use rspice_app_state::state::workspace::{ImportClosure, resolve_veriloga_import};
+use crate::state::workspace::{ImportClosure, resolve_veriloga_import};
 
 include!(concat!(env!("OUT_DIR"), "/veriloga_sources.rs"));
 

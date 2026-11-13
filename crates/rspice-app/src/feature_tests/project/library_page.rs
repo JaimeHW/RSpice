@@ -35,7 +35,7 @@ fn a_long_selection_is_cut_so_access_stays_on_the_page() {
     let builtin = &mut app.state.project.builtin_models;
     builtin.open = true;
     builtin.model = Some(
-        rspice_app_models::veriloga_library::BUILTIN_VERILOGA_MODELS[0]
+        rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS[0]
             .registry_name
             .to_owned(),
     );

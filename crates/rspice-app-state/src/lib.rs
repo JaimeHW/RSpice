@@ -27,6 +27,7 @@ pub mod results;
 pub mod source_revision;
 pub mod state;
 pub mod time_compat;
+pub mod veriloga_library;
 
 pub mod simulation {
     pub mod placed_sources;

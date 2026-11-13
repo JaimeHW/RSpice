@@ -2,7 +2,7 @@
 //! announces for the open built-in library and for a Verilog-A view.
 
 use egui::Ui;
-use rspice_app_models::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel};
+use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel};
 
 use crate::state::ViewType;
 use crate::workbench::app_state::{AppState, SlotFacts};
