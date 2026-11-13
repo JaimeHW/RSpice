@@ -1,12 +1,17 @@
 //! Review pictures of the data browser beside the strip, on the C12 LDO
-//! testbench: the instance tree, a glob narrowing it, the signal-set menu,
-//! and the Inspector on a selected trace. Written only when `RSPICE_PICTURES`
-//! names a folder.
+//! testbench: the instance tree, the kind list, a glob narrowing the tree,
+//! the signal-set menu, the Inspector on a selected trace, and Add
+//! measurement taking a trace from the strip. Written only when
+//! `RSPICE_PICTURES` names a folder.
 
 use std::path::Path;
 
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
+use rspice_results::calculator::catalogue;
+use rspice_results_ui::document_dialogs::ResultDocumentDialog;
+use rspice_results_ui::document_dialogs::measurement::MeasurementDraft;
 use rspice_results_ui::selection::{ResultBrowserSelectionKey, SelectedResultTrace};
+use rspice_results_ui::session::TracePick;
 
 use crate::state::SimulationRun;
 use crate::workbench::documents::result_document::{
@@ -74,6 +79,7 @@ impl Review {
         let mut host = ResultsTestHost::default();
         host.model.simulation.retained.runs.push(run);
         host.model.simulation.view.active_run_idx = Some(0);
+        host.workbench.workspace = crate::workbench::state::Workspace::Results;
         let ctx = egui::Context::default();
         ctx.set_os(egui::os::OperatingSystem::Nix);
         crate::ui::Theme::default().apply(&ctx);
@@ -119,6 +125,10 @@ impl Review {
             egui::CentralPanel::default().show(ctx, |ui| {
                 waves::show(ui, &mut host.results_parts());
             });
+            crate::workbench::documents::result_document::show_document_dialog(
+                ctx,
+                &mut host.results_parts(),
+            );
         })
     }
 
@@ -187,6 +197,7 @@ fn write_the_browser_pictures() {
     // The regulation loop on the plot: the output, the reference and the
     // feedback node inside the regulator.
     let mut feedback = String::new();
+    let mut output = String::new();
     for analysis in &mut run.analyses {
         for waveform in &mut analysis.waveforms {
             let name = waveform.name.as_str();
@@ -196,6 +207,9 @@ fn write_the_browser_pictures() {
                 .unwrap_or(name);
             if bare == "xldo.FB" {
                 feedback = waveform.name.clone();
+            }
+            if bare == "VOUT" {
+                output = waveform.name.clone();
             }
             waveform.visible = matches!(bare, "VOUT" | "xldo.VREF" | "xldo.FB");
         }
@@ -227,8 +241,10 @@ fn write_the_browser_pictures() {
 
     // The feedback node selected: the Inspector's swatch beside the strip
     // that drew its curve.
-    review.host.results.results.session.selected_trace =
-        Some(SelectedResultTrace::from_identity(analysis, feedback));
+    review.host.results.results.session.selected_trace = Some(SelectedResultTrace::from_identity(
+        analysis,
+        feedback.clone(),
+    ));
     review.inspector = true;
     review.write(
         &directory,
@@ -237,6 +253,32 @@ fn write_the_browser_pictures() {
     );
     review.inspector = false;
     review.host.results.results.session.selected_trace = None;
+
+    // Add measurement's Pick on its signal: the form steps aside for the
+    // strip, and the trace clicked there comes back filled in.
+    *review.host.results_parts().result_document_dialog =
+        Some(ResultDocumentDialog::Measurement(MeasurementDraft {
+            expression: format!("rms({feedback})"),
+            function: catalogue::find("rms"),
+            arguments: vec![feedback.clone()],
+            picking: Some(0),
+            ..MeasurementDraft::default()
+        }));
+    review.write(
+        &directory,
+        "measurement-pick",
+        vec![egui::Event::PointerGone],
+    );
+    review.host.results.results.session.trace_pick = TracePick::Picked {
+        source: output,
+        name: "VOUT".to_owned(),
+    };
+    review.write(
+        &directory,
+        "measurement-picked",
+        vec![egui::Event::PointerGone],
+    );
+    *review.host.results_parts().result_document_dialog = None;
 
     review.host.workbench.set_navigator_filter("*.m[1-4]*");
     review.write(&directory, "browser-glob", vec![egui::Event::PointerGone]);

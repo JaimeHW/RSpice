@@ -109,6 +109,7 @@ fn report(state: &mut ResultsParts<'_>, result: Result<(), String>) {
 /// Draw the open form, if any, and commit what it asks for.
 pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
     let Some(dialog) = state.result_document_dialog.clone() else {
+        trace_pick::arm(state, false);
         return;
     };
     let (dialog, choice) = match dialog {
@@ -125,6 +126,7 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
         }
         ResultDocumentDialog::Measurement(mut draft) => {
             let preview = measurement::preview(state.results_reads(), &draft);
+            trace_pick::follow(state, &mut draft, &preview);
             let choice =
                 rspice_results_ui::document_dialogs::measurement::show(ctx, &mut draft, &preview);
             (ResultDocumentDialog::Measurement(draft), choice)
@@ -142,6 +144,10 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
             (ResultDocumentDialog::Properties(draft), choice)
         }
     };
+    trace_pick::arm(
+        state,
+        matches!(&dialog, ResultDocumentDialog::Measurement(draft) if draft.picking.is_some()),
+    );
     *state.result_document_dialog = Some(dialog);
     match choice {
         DialogChoice::Primary => commit_open_dialog(state),
@@ -560,6 +566,7 @@ pub mod family;
 pub mod links;
 pub mod measurement;
 mod properties;
+mod trace_pick;
 
 pub use compare::{compare_availability, open_compare};
 pub use family::{family_available, open_family, set_family_filter};

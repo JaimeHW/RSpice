@@ -221,6 +221,105 @@ fn an_x_axis_argument_states_the_axis_unit_in_its_field() {
     assert_eq!(axis_frequency_unit(""), "");
 }
 
+/// Every label the frame speaks, over `passes` passes of the form for
+/// `draft`, with `events` on the last.
+fn spoken_labels(
+    draft: &mut MeasurementDraft,
+    passes: usize,
+    events: Vec<egui::Event>,
+) -> Vec<String> {
+    let ctx = Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let preview = preview(Ok(None));
+    let mut labels = Vec::new();
+    for pass in 0..passes {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                events: if pass + 1 == passes {
+                    events.clone()
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            },
+            |ui| {
+                show(ui.ctx(), draft, &preview);
+            },
+        );
+        labels = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect();
+    }
+    labels
+}
+
+/// Each signal argument offers Pick, which takes its trace from the strip.
+/// While the reader picks, the form steps aside for one line saying what
+/// the click will fill, with the way back; Esc takes it too.
+#[test]
+fn a_signal_argument_can_be_picked_from_the_strip() {
+    let mut draft = MeasurementDraft {
+        expression: "delay(V(in), V(out))".to_owned(),
+        ..MeasurementDraft::default()
+    };
+    reread(&mut draft);
+    let labels = spoken_labels(&mut draft, 3, Vec::new());
+    assert_eq!(
+        labels.iter().filter(|label| *label == PICK).count(),
+        2,
+        "{labels:?}"
+    );
+    draft.picking = Some(1);
+    let labels = spoken_labels(&mut draft, 2, Vec::new());
+    assert!(
+        labels.iter().any(|label| label == "Back to form"),
+        "{labels:?}"
+    );
+    assert!(!labels.iter().any(|label| label == PICK), "{labels:?}");
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    spoken_labels(&mut draft, 2, vec![escape]);
+    assert_eq!(draft.picking, None, "Esc goes back to the form");
+}
+
+/// A picked trace fills the argument waiting for it, by the name the pane's
+/// traces give it, and the call is rewritten.
+#[test]
+fn a_picked_trace_fills_the_argument_waiting_for_it() {
+    let mut draft = MeasurementDraft {
+        expression: "delay(V(in), V(out))".to_owned(),
+        ..MeasurementDraft::default()
+    };
+    reread(&mut draft);
+    draft.picking = Some(1);
+    fill_picked(&mut draft, &preview(Ok(None)), "v(IN)", "in");
+    assert_eq!(draft.arguments[..2], ["V(in)", "V(in)"]);
+    assert_eq!(draft.expression, "delay(V(in), V(in))");
+    assert_eq!(draft.picking, None);
+    // A trace the pane does not list is taken by its own name.
+    draft.picking = Some(0);
+    fill_picked(&mut draft, &preview(Ok(None)), "V(fb)", "fb");
+    assert_eq!(draft.expression, "delay(V(fb), V(in))");
+    // Nothing waiting, nothing filled.
+    fill_picked(&mut draft, &preview(Ok(None)), "V(out)", "out");
+    assert_eq!(draft.expression, "delay(V(fb), V(in))");
+}
+
 /// A catalogued call typed into the expression fills the fields; anything
 /// else leaves the fields, except while the same call is still being typed.
 #[test]

@@ -240,6 +240,39 @@ impl MarkerTool {
     }
 }
 
+/// A form waiting for the reader to pick a trace in the strip, as ViVA's
+/// calculator waits for a waveform clicked in the graph: while armed, a
+/// click on a plot takes the curve nearest it, and a click on a legend entry
+/// takes that entry, instead of placing a cursor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TracePick {
+    #[default]
+    Off,
+    Armed,
+    /// The trace the reader clicked: its waveform in the dataset, and the
+    /// name the strip shows it by.
+    Picked {
+        source: String,
+        name: String,
+    },
+}
+
+impl TracePick {
+    pub const fn is_armed(&self) -> bool {
+        matches!(self, Self::Armed)
+    }
+
+    /// Take `trace` when armed; otherwise leave the pick as it is.
+    pub fn take(&mut self, trace: &crate::waves::StripTrace) {
+        if self.is_armed() {
+            *self = Self::Picked {
+                source: trace.source_waveform_name.clone(),
+                name: trace.name.clone(),
+            };
+        }
+    }
+}
+
 /// State of the inline expression editor under a strip header.
 #[derive(Debug, Clone)]
 pub struct ExprEditor {
@@ -315,6 +348,8 @@ pub struct ResultViewerState {
     pub box_violin: Box<crate::box_violin::BoxViolinSheetState>,
     /// The marker tool.
     pub marker_tool: MarkerTool,
+    /// A trace a form is waiting for the reader to click in the strip.
+    pub trace_pick: TracePick,
     /// Primary plot pointer tool shown in the 31 px instrument strip.
     pub plot_tool: ResultPlotTool,
     /// Exact retained waveform selected from a trace chip. This is only an

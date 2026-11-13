@@ -391,6 +391,16 @@ pub fn expression_label(expr: &ExprTrace, complex: bool) -> String {
     }
 }
 
+fn strip_area_id() -> egui::Id {
+    egui::Id::new("rspice.results.strip-area")
+}
+
+/// Where the strip last lay on the screen, for a prompt that must sit over
+/// it without covering a trace the reader is about to click.
+pub(crate) fn last_strip_area(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|data| data.get_temp(strip_area_id()))
+}
+
 pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], options: StackOptions) {
     let t = Tokens::get(ui.ctx());
     let pane_chrome = options.pane_chrome;
@@ -419,6 +429,8 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
     let mut remove_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut open_editor: Option<AnalysisPresentationKey> = None;
     let avail = ui.available_rect_before_wrap();
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(strip_area_id(), avail));
     let n = visible.len();
     let separators = (n.saturating_sub(1)) as f32;
     let strip_height = ((avail.height() - separators) / n as f32).max(140.0);
@@ -1004,6 +1016,7 @@ fn show_unit_pane(
         expressions: exprs,
         family_envelopes,
         find_nearest: host.session().marker_tool.is_armed()
+            || host.session().trace_pick.is_armed()
             || (host.session().cursor_placement_enabled() && host.session().cursor_a_is_next()),
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
@@ -1019,11 +1032,21 @@ fn show_unit_pane(
         host.session_mut().horizontal_cursor = Some(HorizontalWaveCursor { pane: pane_key, y });
     }
 
-    // The marker tool takes the click when armed: one click cannot both
-    // annotate and move a cursor, and the armed chip says which it will do.
-    if let Some(clicked_x) = response.clicked_x
+    // A form waiting for a trace takes the click first: the reader asked to
+    // pick a curve, and a cursor moving under it would be a second answer.
+    if host.session().trace_pick.is_armed() {
+        if response.response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        // The pane finds the nearest curve only for a click.
+        if let Some(trace) = drawn.nearest_trace {
+            host.session_mut().trace_pick.take(trace);
+        }
+    } else if let Some(clicked_x) = response.clicked_x
         && host.session().marker_tool.is_armed()
     {
+        // The marker tool takes the click when armed: one click cannot both
+        // annotate and move a cursor, and the armed chip says which it will do.
         let nearest = drawn.nearest_trace;
         if let Some(trace) = nearest {
             // The pane being drawn owns the marker, and placing one is the

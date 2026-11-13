@@ -23,6 +23,9 @@ pub struct MeasurementDraft {
     pub arguments: Vec<String>,
     /// What the measurement list is narrowed to.
     pub search: String,
+    /// The signal argument waiting for a trace the reader clicks in the
+    /// strip. The form steps aside while it waits.
+    pub picking: Option<usize>,
 }
 
 /// What the host resolved the draft to on this frame.
@@ -57,11 +60,18 @@ const CHOICE_COLUMNS: usize = 4;
 /// The option a second edge type offers for "as the first".
 const SAME: &str = "same";
 
+/// The label of the action that takes a signal argument from the strip.
+const PICK: &str = "Pick";
+
 pub fn show(
     ctx: &Context,
     draft: &mut MeasurementDraft,
     preview: &MeasurementPreview,
 ) -> DialogChoice {
+    if let Some(index) = draft.picking {
+        picking_prompt(ctx, draft, index);
+        return DialogChoice::None;
+    }
     let field = Id::new("rspice.add-measurement.expression");
     let refusal = preview.refusal.as_deref();
     let incomplete = draft
@@ -125,6 +135,88 @@ pub fn show(
             );
             Some(field)
         })
+}
+
+/// While the reader picks a trace for the argument at `index`: the form
+/// steps aside so the strip can be clicked, and one line says what the click
+/// will do and how to come back without one. The line sits at the foot of
+/// the strip, over its time axis, where a status line would read; at the
+/// head it would cover the legend entries a click can also take.
+fn picking_prompt(ctx: &Context, draft: &mut MeasurementDraft, index: usize) {
+    let label = draft
+        .function
+        .and_then(|spec| spec.arguments.get(index))
+        .map_or("the signal", |argument| argument.label);
+    let t = rspice_ui_kit::tokens::Tokens::get(ctx);
+    let mut back =
+        ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let over = crate::waves::stack::last_strip_area(ctx).unwrap_or_else(|| ctx.content_rect());
+    egui::Area::new(Id::new("rspice.add-measurement.picking"))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(egui::pos2(over.center().x, over.bottom() - 12.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(t.color.bg_elevated)
+                .stroke(egui::Stroke::new(1.0, t.color.border_strong))
+                .corner_radius(t.radius)
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        ui.label(
+                            egui::RichText::new(format!("Click a trace in the strip for {label}."))
+                                .font(rspice_ui_kit::theme::sans(
+                                    rspice_ui_kit::tokens::FS_1,
+                                    rspice_ui_kit::theme::FontWeight::Regular,
+                                ))
+                                .color(t.color.text),
+                        );
+                        back |= rspice_ui_kit::widgets::Button::new("Back to form")
+                            .show(ui)
+                            .on_hover_text("Esc")
+                            .clicked();
+                    });
+                });
+        });
+    if back {
+        draft.picking = None;
+    }
+}
+
+/// Fill the argument waiting for a pick with the trace the reader clicked:
+/// `source`, the waveform it draws, as the pane's traces name it, else the
+/// `name` the strip shows it by. The form comes back with the call
+/// rewritten.
+pub fn fill_picked(
+    draft: &mut MeasurementDraft,
+    preview: &MeasurementPreview,
+    source: &str,
+    name: &str,
+) {
+    let Some(index) = draft.picking.take() else {
+        return;
+    };
+    let signal = preview
+        .signals
+        .iter()
+        .find(|signal| *signal == source)
+        .or_else(|| {
+            preview
+                .signals
+                .iter()
+                .find(|signal| signal.eq_ignore_ascii_case(source) || *signal == name)
+        })
+        .map_or_else(|| source.to_owned(), Clone::clone);
+    if let Some(value) = draft.arguments.get_mut(index) {
+        *value = signal;
+    }
+    if let Some(call) = draft
+        .function
+        .and_then(|spec| spec.call(&draft.arguments).ok())
+    {
+        draft.expression = call;
+    }
 }
 
 fn in_group(group: MeasureGroup) -> Vec<&'static MeasureSpec> {
@@ -275,9 +367,15 @@ fn argument_row(
             } else {
                 value.as_str()
             };
-            let picked = rows.select(argument.label, &salt, shown, signals);
+            // A signal picks from the pane's traces here, or from the strip
+            // itself: Pick steps the form aside until a trace is clicked.
+            let (picked, pick) =
+                rows.select_with_action(argument.label, &salt, shown, signals, PICK);
             if let Some(trace) = picked {
                 *value = signals[trace].clone();
+            }
+            if pick {
+                draft.picking = Some(index);
             }
             picked.is_some()
         }

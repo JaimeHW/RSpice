@@ -512,6 +512,34 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// [`Self::select`] with the one action it offers at the row's end, such
+    /// as taking its value from somewhere else on screen. Returns the picked
+    /// index, and whether the action was pressed.
+    pub fn select_with_action(
+        &mut self,
+        label: &str,
+        id_salt: &str,
+        selected: &str,
+        options: &[String],
+        action: &str,
+    ) -> (Option<usize>, bool) {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            ui.allocate_ui_with_layout(
+                vec2(width, t.metrics.ctl_h),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = LABEL_GAP;
+                    let pressed = super::Button::new(action).show(ui).clicked();
+                    let field = ui.available_width().max(1.0);
+                    let picked = select(ui, id_salt, label, selected, options, field);
+                    (picked, pressed)
+                },
+            )
+            .inner
+        })
+    }
+
     /// [`Self::select`] with the control itself, for a form whose only row is
     /// the dropdown and which therefore has to be able to give it the caret.
     pub fn select_with_response(

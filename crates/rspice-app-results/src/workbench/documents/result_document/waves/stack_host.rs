@@ -143,6 +143,9 @@ fn show_unit_pane_header(
         }
 
         fn select_trace(&mut self, trace: &StripTrace) {
+            // A form waiting for a trace takes a legend entry as it takes a
+            // curve clicked in the plot.
+            self.state.results.session.trace_pick.take(trace);
             self.state.results.session.selected_trace = Some(SelectedResultTrace::from_identity(
                 self.model.analysis_key,
                 trace.source_waveform_name.clone(),
