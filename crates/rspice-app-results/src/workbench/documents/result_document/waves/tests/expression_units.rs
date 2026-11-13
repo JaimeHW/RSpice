@@ -206,7 +206,10 @@ fn a_declared_unit_survives_a_save_and_reload() {
 }
 
 /// One frame of a project result document.
-fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultDocumentId) {
+pub(super) fn document_frame(
+    state: &mut ResultsTestHost,
+    document: crate::product::ResultDocumentId,
+) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
@@ -230,6 +233,19 @@ fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultD
     });
 }
 
+/// Save the active analysis as a one-pane view.
+pub(super) fn save_single_pane_view(
+    state: &mut ResultsTestHost,
+) -> crate::product::ResultDocumentId {
+    let mut parts = state.results_parts();
+    super::super::super::create_document::open(&mut parts);
+    parts.create_result_document.layout_id =
+        rspice_results::document_creation::ResultDocumentLayout::SinglePane
+            .id()
+            .to_owned();
+    super::super::super::create_document::commit(&mut parts).expect("the view is saved")
+}
+
 /// A saved view keeps its expressions, as text and the pane's dataset, with
 /// the units declared for them, and the quick view gets its own back.
 #[test]
@@ -247,15 +263,7 @@ fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
         .session
         .expression_units
         .insert((analysis, "V(out)*I(vdd)".to_owned()), "mW".to_owned());
-    let document_id = {
-        let mut parts = state.results_parts();
-        super::super::super::create_document::open(&mut parts);
-        parts.create_result_document.layout_id =
-            rspice_results::document_creation::ResultDocumentLayout::SinglePane
-                .id()
-                .to_owned();
-        super::super::super::create_document::commit(&mut parts).expect("the view is saved")
-    };
+    let document_id = save_single_pane_view(&mut state);
     for _ in 0..2 {
         document_frame(&mut state, document_id);
     }

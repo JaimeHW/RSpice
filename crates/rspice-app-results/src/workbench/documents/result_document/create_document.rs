@@ -18,9 +18,10 @@ use crate::results::viewer_catalog::{
     ViewerReleaseClass, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AxisOrientation, DocumentEdit, EntityRef, LinkKind, NewPagePane, NewPane, PageUpdatePolicy,
-    PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode,
-    RunSignal, RunSourceAnalysis, SourceDataset, VisualizationDocument, VisualizationError,
+    AxisOrientation, AxisScale, DocumentEdit, EntityRef, LinkKind, NewPagePane, NewPane,
+    PageUpdatePolicy, PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking,
+    ResultDocumentTrackingMode, RunSignal, RunSourceAnalysis, SourceDataset, VisualizationDocument,
+    VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
@@ -748,7 +749,37 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
             )
         })
         .collect();
+    // So is the X scale the reader chose for the strip.
+    let x_scale = session.x_scales.get(&analysis_key).map(|scale| {
+        if *scale == crate::ui::plot::XScale::Log10 {
+            AxisScale::Logarithmic
+        } else {
+            AxisScale::Linear
+        }
+    });
     let mut document = build_document(resolved, tracking)?;
+    let bound: Vec<_> = document
+        .panes()
+        .iter()
+        .filter(|pane| pane.binding.is_some())
+        .map(|pane| pane.id)
+        .collect();
+    let scale_edits: Vec<DocumentEdit> = match x_scale {
+        Some(scale) => document
+            .axes()
+            .iter()
+            .filter(|axis| {
+                axis.orientation == AxisOrientation::Horizontal
+                    && axis.scale != scale
+                    && bound.contains(&axis.pane_id)
+            })
+            .map(|axis| DocumentEdit::SetAxisScale {
+                axis_id: axis.id,
+                scale,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     let edits: Vec<DocumentEdit> = document
         .panes()
         .iter()
@@ -766,6 +797,7 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
                 )
             })
         })
+        .chain(scale_edits)
         .collect();
     if !edits.is_empty() {
         document.transact(document.revision(), edits)?;

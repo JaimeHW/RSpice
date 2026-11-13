@@ -273,14 +273,16 @@ impl TracePick {
     }
 }
 
-/// The quick view's own expressions, set aside while a result document's
-/// pane shows the expressions it keeps in their place.
+/// The quick view's own expressions and X scales, set aside while a result
+/// document's pane shows the ones it keeps in their place.
 #[derive(Debug, Clone, Default)]
-pub struct QuickViewExpressions {
+pub struct QuickViewPresentation {
     pub analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
     pub expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
     pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
+    pub x_scales:
+        Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
 }
 
 /// State of the inline expression editor under a strip header.
@@ -558,10 +560,11 @@ pub struct ResultViewerState {
     /// keep the results state inside its stack budget.
     pub x_scales:
         Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
-    /// The quick view's expressions while a document pane shows its own,
-    /// boxed: the results state is built by value before it is boxed, and
-    /// a stash held only while a document is open need not grow it.
-    pub quick_view_expressions: Option<Box<QuickViewExpressions>>,
+    /// The quick view's expressions and X scales while a document pane
+    /// shows its own, boxed: the results state is built by value before it
+    /// is boxed, and a stash held only while a document is open need not
+    /// grow it.
+    pub quick_view_presentation: Option<Box<QuickViewPresentation>>,
     /// Bit period the reader has pinned the eye to, per result.
     ///
     /// Absent means the eye recovers the period from the waveform. Project
@@ -828,6 +831,20 @@ impl ResultViewerState {
             .unwrap_or(dataset_default)
     }
 
+    /// Set the quick view's expressions and X scales aside, the first time a
+    /// document pane shows its own in their place.
+    fn set_quick_view_aside(&mut self) {
+        if self.quick_view_presentation.is_none() {
+            self.quick_view_presentation = Some(Box::new(QuickViewPresentation {
+                analysis_exprs: self.analysis_exprs.clone(),
+                exprs: self.exprs.clone(),
+                expr_projection_keys: self.expr_projection_keys.clone(),
+                expression_units: self.expression_units.clone(),
+                x_scales: self.x_scales.clone(),
+            }));
+        }
+    }
+
     /// Show a document pane's expressions, with the units declared for
     /// them, on its analysis' strip. The quick view's own are set aside the
     /// first time and come back when the document is left.
@@ -838,14 +855,7 @@ impl ResultViewerState {
         traces: Vec<ExprTrace>,
         units: Vec<(String, String)>,
     ) {
-        if self.quick_view_expressions.is_none() {
-            self.quick_view_expressions = Some(Box::new(QuickViewExpressions {
-                analysis_exprs: self.analysis_exprs.clone(),
-                exprs: self.exprs.clone(),
-                expr_projection_keys: self.expr_projection_keys.clone(),
-                expression_units: self.expression_units.clone(),
-            }));
-        }
+        self.set_quick_view_aside();
         let held = self
             .analysis_exprs
             .get(&analysis)
@@ -863,6 +873,22 @@ impl ResultViewerState {
             self.expression_units.insert((analysis, text), unit);
         }
         self.sync_expression_projection(analysis, analysis_index);
+    }
+
+    /// Draw a document pane's analysis strip on the X scale the pane keeps.
+    /// The quick view's own choice is set aside the first time and comes
+    /// back when the document is left, as its expressions do.
+    pub fn project_document_x_scale(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        scale: rspice_ui_kit::plot::XScale,
+    ) {
+        // Set aside even when the two agree: a toggle inside the pane is the
+        // document's, never the quick view's.
+        self.set_quick_view_aside();
+        if self.x_scales.get(&analysis) != Some(&scale) {
+            self.x_scales.insert(analysis, scale);
+        }
     }
 
     pub fn sync_expression_projection(
@@ -950,12 +976,13 @@ impl ResultViewerState {
     /// Leave the persistent projection: the pane context and the retained
     /// marker overlay it scopes both belong to the document that was open.
     pub fn leave_persistent_document(&mut self) {
-        if let Some(quick) = self.quick_view_expressions.take() {
+        if let Some(quick) = self.quick_view_presentation.take() {
             let quick = *quick;
             self.analysis_exprs = quick.analysis_exprs;
             self.exprs = quick.exprs;
             self.expr_projection_keys = quick.expr_projection_keys;
             self.expression_units = quick.expression_units;
+            self.x_scales = quick.x_scales;
         }
         self.persistent_pane_context = None;
         self.document_markers.clear();

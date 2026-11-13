@@ -319,9 +319,13 @@ impl ResultsState {
             expression_groups: self.project_expression_groups(simulation),
             signal_sets: self.signal_sets.clone(),
             x_scales: {
+                // While a document pane shows its own X scale, the project
+                // keeps the quick view's, set aside until it is left.
                 let mut scales: Vec<_> = self
                     .session
-                    .x_scales
+                    .quick_view_presentation
+                    .as_ref()
+                    .map_or(&self.session.x_scales, |quick| &quick.x_scales)
                     .iter()
                     .filter(|(analysis, _)| Self::dataset_is_retained(simulation, **analysis))
                     .map(
@@ -374,7 +378,7 @@ impl ResultsState {
     ) -> Vec<ResultExpressionGroup> {
         // While a document pane shows its own expressions, the project
         // keeps the quick view's, which are set aside until it is left.
-        let quick = self.session.quick_view_expressions.as_ref();
+        let quick = self.session.quick_view_presentation.as_ref();
         let units = quick.map_or(&self.session.expression_units, |quick| {
             &quick.expression_units
         });

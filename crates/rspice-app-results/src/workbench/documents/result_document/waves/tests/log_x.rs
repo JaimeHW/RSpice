@@ -159,3 +159,101 @@ fn a_signed_sweep_refuses_a_logarithmic_axis_and_says_why() {
     assert_eq!(model(&mut state)[0].x_scale, XScale::Linear);
     assert!(frame(&mut state).iter().any(|label| label == "X scale LIN"));
 }
+
+/// A saved view keeps the X scale its strip drew when it was saved and draws
+/// its own while it is shown. The quick view's choice is set aside meanwhile:
+/// the project keeps it, and the strip has it back when the view is left.
+#[test]
+fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back() {
+    use super::super::super::persistent_document::{
+        capture_pane_presentation, project_pane_presentation, projection,
+    };
+    use super::expression_units::{document_frame, save_single_pane_view};
+    use rspice_results::visualization_document::{AxisOrientation, AxisScale};
+    let x = vec![0.0, 1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3];
+    let mut state = strip_host(AnalysisType::Transient, x);
+    let analysis = key(&state);
+    state
+        .results
+        .results
+        .session
+        .x_scales
+        .insert(analysis, XScale::Log10);
+    let document_id = save_single_pane_view(&mut state);
+    let kept = |state: &ResultsTestHost| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project keeps the document")
+            .axes()
+            .iter()
+            .find(|axis| axis.orientation == AxisOrientation::Horizontal)
+            .map(|axis| axis.scale)
+    };
+    assert_eq!(
+        kept(&state),
+        Some(AxisScale::Logarithmic),
+        "the view keeps the scale its strip drew"
+    );
+    document_frame(&mut state, document_id);
+
+    // The reader switches the view's axis to linear: the toggle acts inside
+    // the pane's frame, between its projection and its capture.
+    let pane = projection(state.results_reads(), document_id)
+        .expect("the document projects")
+        .pages[0]
+        .panes[0]
+        .clone();
+    let viewer = crate::workbench::ResultViewer::from_viewer_document_id(&pane.viewer_id)
+        .expect("the pane names a Results viewer");
+    project_pane_presentation(&mut state.results_parts(), &pane, viewer)
+        .expect("the pane projects onto its strip");
+    state
+        .results
+        .results
+        .session
+        .x_scales
+        .insert(analysis, XScale::Linear);
+    capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
+    assert_eq!(kept(&state), Some(AxisScale::Linear));
+    document_frame(&mut state, document_id);
+    assert_eq!(
+        state.results.results.session.x_scales.get(&analysis),
+        Some(&XScale::Linear),
+        "the strip draws the view's scale"
+    );
+    assert_eq!(
+        state
+            .results
+            .results
+            .project_presentation(&state.model.simulation)
+            .x_scales,
+        [rspice_results::result_presentation::StripXScale {
+            analysis,
+            logarithmic: true
+        }],
+        "the project keeps the quick view's choice"
+    );
+
+    state.results.results.session.leave_persistent_document();
+    assert_eq!(
+        state.results.results.session.x_scales.get(&analysis),
+        Some(&XScale::Log10),
+        "the quick view has its choice back"
+    );
+    assert_eq!(model(&mut state)[0].x_scale, XScale::Log10);
+    // Shown again, the view still reads linearly, and leaving it again
+    // hands the quick view its choice back again.
+    document_frame(&mut state, document_id);
+    assert_eq!(
+        state.results.results.session.x_scales.get(&analysis),
+        Some(&XScale::Linear)
+    );
+    state.results.results.session.leave_persistent_document();
+    assert_eq!(
+        state.results.results.session.x_scales.get(&analysis),
+        Some(&XScale::Log10)
+    );
+}

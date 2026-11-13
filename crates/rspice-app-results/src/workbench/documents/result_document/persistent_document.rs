@@ -1065,9 +1065,10 @@ pub fn project_pane_presentation(
         } else {
             crate::ui::plot::XScale::Linear
         };
-        if state.results.session.x_scales.get(&analysis_key) != Some(&scale) {
-            state.results.session.x_scales.insert(analysis_key, scale);
-        }
+        state
+            .results
+            .session
+            .project_document_x_scale(analysis_key, scale);
     }
     state.results.session.project_persistent_plot_view(
         viewer,
