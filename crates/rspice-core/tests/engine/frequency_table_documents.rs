@@ -4,8 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rspice_core::analysis::{AcResult, NoiseResult};
 use rspice_core::engine::{FrequencyDataResult, FrequencyDataTarget};
 use rspice_core::execution::result_document::{
-    AnalysisResultDocument, AxisValues, FrequencyTableMetadata, ResultDocumentError,
-    SeriesValues,
+    AnalysisResultDocument, AxisValues, FrequencyTableMetadata, ResultDocumentError, SeriesValues,
 };
 use rspice_core::execution::{AnalysisInstanceId, AnalysisKind, SignalUnit};
 use rspice_core::{

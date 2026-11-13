@@ -684,5 +684,4 @@ mod operating_point_serde_tests {
         ));
         assert!(decoded.validate().is_err());
     }
-
 }

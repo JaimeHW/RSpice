@@ -180,7 +180,9 @@ mod tests {
         assert_eq!(serde_json::from_str::<(_, _, _)>(&json).unwrap(), values);
         let ron = ron::to_string(&values).unwrap();
         assert_eq!(ron::from_str::<(_, _, _)>(&ron).unwrap(), values);
-        assert!(serde_json::from_str::<ComplexNumberDisplay>(r#""magnitude-phase-radians""#).is_err());
+        assert!(
+            serde_json::from_str::<ComplexNumberDisplay>(r#""magnitude-phase-radians""#).is_err()
+        );
         assert!(serde_json::from_str::<DisplayedSignificantDigits>("2").is_err());
         assert!(serde_json::from_str::<DisplayedSignificantDigits>("18").is_err());
     }

@@ -390,5 +390,4 @@ mod tests {
 
         assert_eq!(state.probe_reference, StbProbeReference::Entered);
     }
-
 }
