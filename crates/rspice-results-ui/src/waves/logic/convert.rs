@@ -128,6 +128,16 @@ pub fn digital_form_of(ui: &mut Ui, reference: &str, values: &[f64]) -> Option<S
     None
 }
 
+/// Whether the expression `text` is a `digital()` conversion as a whole,
+/// which the strip draws as a logic lane rather than a value trace.
+pub fn draws_as_logic(text: &str) -> bool {
+    text.trim_start()
+        .get(..7)
+        .is_some_and(|head| head.eq_ignore_ascii_case("digital"))
+        && rspice_results::calculator::spice_parser::try_parse(text)
+            .is_ok_and(|expr| rspice_results::calculator::functions::is_logic_expression(&expr))
+}
+
 /// The name a `digital()` lane goes by in the gutter and the cursor table:
 /// its signal and thresholds, `V(CLK) ≥ 0.9`, or `V(CLK) 0.6…1.2` with a
 /// band, with its time to X when it has one. Anything else goes by its text.

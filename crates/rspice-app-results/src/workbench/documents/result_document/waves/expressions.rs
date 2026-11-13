@@ -325,15 +325,7 @@ pub(super) fn add_strip_expression(
     }
 }
 
-/// Whether the expression `text` is a `digital()` conversion as a whole,
-/// which the strip draws as a logic lane rather than a value trace.
-pub(super) fn draws_as_logic(text: &str) -> bool {
-    text.trim_start()
-        .get(..7)
-        .is_some_and(|head| head.eq_ignore_ascii_case("digital"))
-        && calculator::parser::try_parse(text)
-            .is_ok_and(|expr| calculator::functions::is_logic_expression(&expr))
-}
+pub(super) use rspice_results_ui::waves::logic::convert::draws_as_logic;
 
 /// What of a strip's lane layout `analog()` reads: each bus's radix and the
 /// reader's buses.

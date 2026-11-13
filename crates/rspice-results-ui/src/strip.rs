@@ -188,6 +188,9 @@ pub struct StripHeaderResponse {
     pub add_expr_clicked: bool,
 }
 
+/// What a legend chip's context menu adds, given the chip's index.
+type ChipMenu<'a> = dyn FnMut(&mut Ui, usize) + 'a;
+
 /// Strip header builder. `StripHeader::new(...).closable(true).show(ui)`.
 pub struct StripHeader<'a> {
     kind: &'a str,
@@ -198,6 +201,7 @@ pub struct StripHeader<'a> {
     zoomed: bool,
     expr_action: bool,
     removable: std::ops::Range<usize>,
+    chip_menu: Option<&'a mut ChipMenu<'a>>,
     pane_actions: bool,
     incomplete: Option<&'a str>,
     id_salt: egui::Id,
@@ -215,6 +219,7 @@ impl<'a> StripHeader<'a> {
             zoomed: false,
             expr_action: false,
             removable: usize::MAX..usize::MAX,
+            chip_menu: None,
             pane_actions: true,
             incomplete: None,
             id_salt: egui::Id::new(kind),
@@ -278,6 +283,14 @@ impl<'a> StripHeader<'a> {
     /// them, which the sheet draws itself, do not.
     pub fn removable(mut self, chips: std::ops::Range<usize>) -> Self {
         self.removable = chips;
+        self
+    }
+
+    /// What a legend chip's context menu offers ahead of Remove, drawn by
+    /// the sheet that knows what the chip stands for: the conversions a
+    /// trace's own menu offers, say.
+    pub fn chip_menu(mut self, menu: &'a mut ChipMenu<'a>) -> Self {
+        self.chip_menu = Some(menu);
         self
     }
 
@@ -428,6 +441,7 @@ impl<'a> StripHeader<'a> {
         // Chips own exactly the remaining clipped width; drag/wheel scrolling
         // keeps every trace reachable without crossing into the action rect.
         let removable = self.removable;
+        let mut chip_menu = self.chip_menu;
         let legend = self.legend;
         let expr_action = self.expr_action;
         let legend_rect = span_rect(layout.legend);
@@ -453,9 +467,16 @@ impl<'a> StripHeader<'a> {
                         if visibility.clicked() {
                             out.legend_visibility_clicked = Some(index);
                         }
-                        if removable.contains(&index) {
+                        let removes = removable.contains(&index);
+                        if removes || chip_menu.is_some() {
                             response.context_menu(|ui| {
-                                if ui.button("Remove expression").clicked() {
+                                if let Some(menu) = chip_menu.as_mut() {
+                                    menu(ui, index);
+                                    if removes {
+                                        ui.separator();
+                                    }
+                                }
+                                if removes && ui.button("Remove expression").clicked() {
                                     out.legend_removed = Some(index);
                                     ui.close();
                                 }

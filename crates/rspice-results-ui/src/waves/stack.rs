@@ -47,6 +47,9 @@ pub trait StackHost {
     fn edit_expression(&mut self, ui: &mut Ui, model: &StripModel);
     fn resolve_expressions(&mut self, model: &StripModel, tokens: &Tokens) -> Vec<ResolvedExpr>;
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String);
+    /// Add an expression to the strip, as a conversion from an expression's
+    /// own menu asks.
+    fn add_expression(&mut self, _model: &StripModel, _text: String) {}
     fn specification_limits(
         &self,
         model: &StripModel,
@@ -492,6 +495,11 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                         let zoomed = host
                             .session()
                             .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
+                        let mut conversions = |ui: &mut Ui, index: usize| {
+                            if let Some(expr) = strip_exprs.get(index) {
+                                expression_conversions(ui, host, model, index, expr, &t);
+                            }
+                        };
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .id_salt(model.analysis_key)
                             .incomplete(model.incomplete)
@@ -500,6 +508,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             .zoomed(zoomed)
                             .expr_action(pane_chrome)
                             .removable_from(0)
+                            .chip_menu(&mut conversions)
                             .pane_actions(pane_chrome)
                             .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
@@ -614,6 +623,42 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
         });
         host.session_mut().expr_editor_unit.clear();
     }
+}
+
+/// The conversions an expression's chip offers, as a trace's or a lane's
+/// menu offers them: a value read as logic with `digital()`, a logic lane
+/// drawn as a staircase with `analog()`.
+fn expression_conversions(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    slot: usize,
+    expr: &ExprTrace,
+    t: &Tokens,
+) {
+    if super::logic::convert::draws_as_logic(&expr.text) {
+        if ui
+            .button("Analog")
+            .on_hover_text("Draw the lane's value as a staircase trace, analog()")
+            .clicked()
+        {
+            host.add_expression(model, format!("analog({})", expr.text));
+            ui.close();
+        }
+        return;
+    }
+    ui.menu_button("Digital", |ui| {
+        // The threshold starts at the middle of what the expression draws.
+        let values = host
+            .resolve_expressions(model, t)
+            .into_iter()
+            .find(|resolved| resolved.slot == slot)
+            .map(|resolved| resolved.y)
+            .unwrap_or_default();
+        if let Some(text) = super::logic::convert::digital_form_of(ui, &expr.text, &values) {
+            host.add_expression(model, text);
+        }
+    });
 }
 
 #[derive(Clone, Copy)]

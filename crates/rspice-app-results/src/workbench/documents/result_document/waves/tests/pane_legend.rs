@@ -257,6 +257,105 @@ fn an_expressions_entry_converts_and_removes_it() {
     );
 }
 
+/// Where the first run of text that reads `wanted` exactly was painted: on
+/// the strip, the strip header's.
+fn first(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
+    texts(&output.shapes)
+        .into_iter()
+        .find(|(text, _)| text == wanted)
+        .map(|(_, rect)| rect)
+}
+
+/// An expression's chip in the strip header offers the conversion a trace's
+/// menu offers, ahead of Remove: Digital, which reads the expression as
+/// typed.
+#[test]
+fn an_expression_chip_offers_digital() {
+    const DOUBLE: &str = "V(TOP)*2";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, DOUBLE);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let chip = first(&output, DOUBLE).expect("the strip header names the expression");
+    click(
+        &ctx,
+        &mut state,
+        chip.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    assert!(
+        text(&menu, "Remove expression").is_some(),
+        "the chip still offers Remove"
+    );
+    let digital = text(&menu, "Digital").expect("the chip's menu offers Digital");
+    run(
+        &ctx,
+        &mut state,
+        vec![egui::Event::PointerMoved(digital.center())],
+    );
+    click(
+        &ctx,
+        &mut state,
+        digital.center(),
+        egui::PointerButton::Primary,
+    );
+    let form = run(&ctx, &mut state, Vec::new());
+    let add = text(&form, "Add digital lane").expect("Digital opens its threshold form");
+    click(&ctx, &mut state, add.center(), egui::PointerButton::Primary);
+    let added = expressions(&state, key);
+    assert!(
+        added.len() == 2 && added[1].starts_with(&format!("digital({DOUBLE}, ")),
+        "Digital reads the expression as typed: {added:?}"
+    );
+}
+
+/// A `digital()` expression's chip offers what a logic lane's menu offers:
+/// Analog, which draws it as a staircase on a plain number's pane.
+#[test]
+fn a_logic_expression_chip_offers_analog() {
+    const CLOCK: &str = "digital(V(CLK), 0.9)";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, CLOCK);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let chip = first(&output, CLOCK).expect("the strip header names the expression");
+    click(
+        &ctx,
+        &mut state,
+        chip.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    assert!(
+        text(&menu, "Digital").is_none(),
+        "a logic expression is not read as logic again"
+    );
+    let analog = text(&menu, "Analog").expect("the chip's menu offers Analog");
+    click(
+        &ctx,
+        &mut state,
+        analog.center(),
+        egui::PointerButton::Primary,
+    );
+    let staircase = format!("analog({CLOCK})");
+    assert_eq!(
+        expressions(&state, key),
+        [CLOCK.to_owned(), staircase.clone()]
+    );
+    // Both names are cut to the strip header's 24 characters.
+    let name = rspice_results_ui::waves::header::elide(&staircase, 24);
+    let output = settled(&ctx, &mut state);
+    assert_eq!(
+        texts(&output.shapes)
+            .iter()
+            .filter(|(text, _)| text == &name)
+            .count(),
+        2,
+        "the staircase is drawn and named in its pane as in the strip header"
+    );
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the staircase named in its own pane beside the DAC, and an expression of
 /// volts named in the volts pane with cursor A's reading, then hidden there.

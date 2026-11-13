@@ -34,6 +34,9 @@ impl StackHost for WaveStackHost<'_, '_> {
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         self.0.results.analysis_expr_cache.remove(&(analysis, text));
     }
+    fn add_expression(&mut self, model: &StripModel, text: String) {
+        super::expressions::add_strip_expression(self.0, model.analysis_key, text);
+    }
     fn specification_limits(
         &self,
         model: &StripModel,
