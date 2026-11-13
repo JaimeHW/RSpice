@@ -824,13 +824,25 @@ fn show_strip_plot(
     for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
         exprs.extend(host.real_step_traces(model, pane, &t));
     }
-    // A pane with nothing plotted keeps its header row, where its hidden
-    // traces wait to be shown again, and gives its height to the others.
+    // A pane with nothing to show keeps its header row, where its hidden
+    // traces wait to be shown again and its plotted ones are named, and gives
+    // its height to the others: nothing is plotted on it, or nothing plotted
+    // on it holds a finite value to draw.
+    let mut extrema_samples = 0;
     let collapsed: Vec<bool> = panes
         .iter()
         .zip(&pane_exprs)
-        .map(|(pane, exprs)| pane.traces.is_empty() && exprs.is_empty())
+        .map(|(pane, exprs)| {
+            let range = pane_y_range(
+                &mut host.session_mut().derived,
+                model,
+                &pane.traces,
+                |count| extrema_samples += count,
+            );
+            pane_auto_y(range, exprs, &[]).is_none()
+        })
         .collect();
+    host.note_sample_reads(0, extrema_samples);
     let collapsed_count = collapsed.iter().filter(|collapsed| **collapsed).count();
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
@@ -1108,6 +1120,8 @@ fn show_unit_pane(
         Vec::new()
     };
     let auto_y = pane_auto_y(pane_range, exprs, &specification_limits);
+    // A pane with nothing to draw has no Y axis for its header to act on.
+    let plotted = pane_auto_y(pane_range, exprs, &[]).is_some();
     let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
     let mut log_y = pane_log_y(host.session(), model, pane) && log_y_available;
     if !log_y_available && log_y {
@@ -1134,6 +1148,7 @@ fn show_unit_pane(
         cursor_a,
         name_width: (gutter.name > 0.0).then_some(gutter.name),
         expressions: pane_expressions(host, model, pane, exprs, cursor_a, &t),
+        plotted,
     };
     let header = host.pane_header(ui, model, pane, ordinal, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);

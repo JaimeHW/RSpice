@@ -64,6 +64,10 @@ pub struct PaneHeader {
     pub name_width: Option<f32>,
     /// The strip's expressions on this pane, drawn ones first.
     pub expressions: Vec<PaneExpression>,
+    /// Whether the pane draws anything. A pane with nothing to draw is its
+    /// header alone, which offers no autoscale and no log toggle for an axis
+    /// it does not draw.
+    pub plotted: bool,
 }
 
 pub use rspice_ui_kit::panels::elide_chars as elide;
@@ -165,6 +169,7 @@ pub fn show_header(
         cursor_a: cursor_a_value,
         name_width,
         expressions,
+        plotted,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -183,7 +188,7 @@ pub fn show_header(
         return UnitPaneHeaderResponse::default();
     }
 
-    let action_width = 58.0;
+    let action_width = if plotted { 58.0 } else { 0.0 };
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
     // An expression whose unit cannot be stated has a pane of its own and
@@ -352,6 +357,9 @@ pub fn show_header(
                 .with(("pane-name-grip", model.analysis_key, pane.unit)),
         )
     });
+    if !plotted {
+        return output;
+    }
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(actions_rect)

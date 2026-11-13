@@ -370,17 +370,15 @@ fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
         super::lanes::place_cursors(&mut state, Some(0.0), None);
         let ctx = theme_context();
         let output = settled(&ctx, &mut state);
-        let panes = texts(&output.shapes)
-            .iter()
-            .filter(|(text, _)| text.ends_with(" hidden"))
-            .count();
+        // The volts pane's Y toggle and the X toggle; the currents' pane
+        // draws nothing and offers no toggle.
         assert_eq!(
             texts(&output.shapes)
                 .iter()
                 .filter(|(text, _)| text == "log")
                 .count(),
-            panes + 1,
-            "each pane's Y toggle and the X toggle read \"log\" (lanes: {lanes})"
+            2,
+            "the Y toggle and the X toggle read \"log\" (lanes: {lanes})"
         );
         assert!(
             texts(&output.shapes)
@@ -432,6 +430,70 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
         .map(|(text, _)| text.clone())
         .expect("the hover readout reads the expression");
     assert!(value.ends_with('V'), "the reading is in volts: {value:?}");
+}
+
+/// A pane with nothing to show is its header alone: the C4 strip's currents,
+/// none plotted, keep the row that offers them, with no autoscale and no log
+/// toggle for an axis the pane does not draw.
+#[test]
+fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
+    let (mut state, _) = sar_strip(BusRadix::Unsigned, false);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let currents = text(&output, "62 hidden").expect("the currents' row offers them");
+    let volts = text(&output, "45 hidden").expect("the volts pane's row");
+    let on_row = |row: egui::Rect, name: &str| {
+        controls(&output)
+            .into_iter()
+            .filter(|(_, label, rect)| {
+                label.as_deref() == Some(name)
+                    && rect.is_some_and(|rect| (rect.center().y - row.center().y).abs() < 6.0)
+            })
+            .count()
+    };
+    for name in ["log", "Autoscale Y to visible traces"] {
+        assert_eq!(on_row(volts, name), 1, "the volts pane offers {name:?}");
+        assert_eq!(
+            on_row(currents, name),
+            0,
+            "the currents' row offers {name:?}"
+        );
+    }
+}
+
+/// A pane whose plotted traces hold no finite value has nothing to draw
+/// either: it is its header, naming them, and no pane-sized well says to
+/// enable a trace the reader has enabled.
+#[test]
+fn a_pane_whose_traces_hold_no_value_is_its_header_alone() {
+    let time = vec![0.0, 1.0e-3, 2.0e-3, 3.0e-3];
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time.clone(), vec![0.0, 1.0, 0.5, 0.25], "#fff"),
+            RetainedTrace::new("I(R1)", time, vec![f64::NAN; 4], "#fff"),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let painted = texts(&output.shapes);
+    assert!(
+        !painted
+            .iter()
+            .any(|(text, _)| text.starts_with("No visible traces")),
+        "no well asks for a trace that is enabled"
+    );
+    let header = exact(&output, "I(R1)").expect("the currents' row names its trace");
+    let axis = text(&output, "TIME").expect("the shared axis labels itself");
+    assert!(
+        axis.top() - header.bottom() < rspice_results_ui::waves::header::WAVE_PANE_HEADER_HEIGHT,
+        "the axis follows the row: row ends at {}, axis starts at {}",
+        header.bottom(),
+        axis.top()
+    );
 }
 
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
