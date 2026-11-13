@@ -44,7 +44,9 @@ pub(super) use model_cache::cached_models;
 mod readout;
 mod viewport;
 
-use expression_evaluation::{evaluate_expression, evaluate_expression_with_policy};
+#[cfg(test)]
+use expression_evaluation::evaluate_expression;
+use expression_evaluation::evaluate_expression_reading;
 pub(crate) use expressions::*;
 pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;

@@ -8,6 +8,7 @@ use super::*;
 use rspice_results::visualization_document::AccessibleColorPalette;
 
 mod branches;
+mod conversion;
 mod degenerate;
 mod expression_scope;
 mod extent;

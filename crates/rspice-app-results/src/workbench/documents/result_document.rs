@@ -1457,6 +1457,9 @@ pub struct ResultsState {
     wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,
     /// Fingerprint-keyed strip-model cache for the waves viewer.
     models: rspice_results_ui::waves::cache::ModelsCache,
+    /// The `digital()` expressions the cached strip models carry as logic
+    /// lanes, fingerprinted, so a change to them rebuilds the models.
+    logic_lanes_source: u64,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
     /// Cached Nyquist stability numbers for the active data version.

@@ -156,6 +156,10 @@ fn show_unit_pane_header(
         fn activate_pane(&mut self) {
             self.state.results.session.active_wave_pane = Some(self.pane_key.clone());
         }
+
+        fn add_expression(&mut self, text: String) {
+            super::expressions::add_strip_expression(self.state, self.model.analysis_key, text);
+        }
     }
     pane_header::show_header(
         ui,

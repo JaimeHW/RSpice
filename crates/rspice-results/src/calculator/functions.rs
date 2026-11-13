@@ -37,7 +37,7 @@ use super::value::RealValue as CalcValue;
 use std::f64::consts::PI;
 
 mod conversion;
-pub use conversion::{EventWord, analog_staircase};
+pub use conversion::{EventWord, analog_staircase, is_logic_expression};
 
 /// Registry of built-in functions
 pub struct FunctionRegistry;

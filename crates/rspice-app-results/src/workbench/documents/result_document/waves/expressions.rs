@@ -11,6 +11,7 @@ use crate::state::ComplexExpressionPolicy;
 use crate::workbench::documents::result_document::ResultsParts;
 use rspice_results_ui::waves::cache::apply_waveform_visibility;
 use rspice_results_ui::waves::expression_editor::Action;
+use rspice_results_ui::waves::lanes::EventLaneLayout;
 pub(super) use rspice_results_ui::waves::stack::{expr_color, expr_palette_slot, expression_label};
 
 /// The inline expression editor row under a strip header (when open for
@@ -69,11 +70,13 @@ pub(super) fn expr_editor_row(
                 return;
             }
             let sample_selection = state.results.session.sample_selection.clone();
-            let series = evaluate_expression(
+            let series = evaluate_expression_reading(
                 &state.model.simulation,
                 analysis_index,
                 &text,
                 sample_selection.as_ref(),
+                ComplexExpressionPolicy::Rectangular,
+                state.results.session.event_lanes.get(&analysis_key),
             );
             match series {
                 Ok(series) => {
@@ -146,13 +149,22 @@ pub(super) fn resolve_strip_exprs(
     }
 
     let sample_selection = state.results.session.sample_selection.clone();
+    let lanes = state
+        .results
+        .session
+        .event_lanes
+        .get(&model.analysis_key)
+        .cloned();
+    // `analog()` reads a bus in its radix's signedness and may name the
+    // reader's own buses, so a change to either evaluates again.
+    let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
             state.model.simulation.view.data_version,
             sample_selection.as_ref(),
             expr.complex_policy,
-        );
+        ) ^ bus_reading.rotate_left(41);
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
             .results
@@ -160,12 +172,13 @@ pub(super) fn resolve_strip_exprs(
             .get(&key)
             .is_some_and(|s| s.version == version);
         if !fresh {
-            let series = evaluate_expression_with_policy(
+            let series = evaluate_expression_reading(
                 &state.model.simulation,
                 model.analysis_index,
                 &expr.text,
                 sample_selection.as_ref(),
                 expr.complex_policy,
+                lanes.as_ref(),
             );
             if let Err(error) = &series {
                 state.record(
@@ -179,7 +192,8 @@ pub(super) fn resolve_strip_exprs(
                 .analysis_expr_cache
                 .insert(key.clone(), ExprSeries { version, series });
         }
-        if !expr.visible {
+        // A `digital()` conversion is a logic lane above the panes.
+        if !expr.visible || draws_as_logic(&expr.text) {
             continue;
         }
         let cached = state
@@ -252,6 +266,60 @@ pub(super) fn resolve_strip_exprs(
         }
     }
     resolved
+}
+
+/// Add `text` to the strip's expressions, as a trace's or lane's menu asks
+/// for a conversion. One already there is not added twice.
+pub(super) fn add_strip_expression(
+    state: &mut ResultsParts<'_>,
+    analysis: AnalysisPresentationKey,
+    text: String,
+) {
+    match state
+        .results
+        .add_expression_trace(&state.model.simulation, analysis, text)
+    {
+        Ok(true) => state.model.workspace.content.visualization_documents_dirty = true,
+        Ok(false) => {}
+        Err(error) => {
+            state.record(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Studio,
+                error,
+            );
+        }
+    }
+}
+
+/// Whether the expression `text` is a `digital()` conversion as a whole,
+/// which the strip draws as a logic lane rather than a value trace.
+pub(super) fn draws_as_logic(text: &str) -> bool {
+    text.trim_start()
+        .get(..7)
+        .is_some_and(|head| head.eq_ignore_ascii_case("digital"))
+        && calculator::parser::try_parse(text)
+            .is_ok_and(|expr| calculator::functions::is_logic_expression(&expr))
+}
+
+/// What of a strip's lane layout `analog()` reads: each bus's radix and the
+/// reader's buses.
+pub(super) fn bus_reading_fingerprint(lanes: &EventLaneLayout) -> u64 {
+    let radixes: Vec<(&String, bool)> = lanes
+        .buses
+        .iter()
+        .map(|(label, view)| {
+            (
+                label,
+                view.radix == rspice_results_ui::waves::logic::BusRadix::Signed,
+            )
+        })
+        .collect();
+    let users: Vec<(&String, &Vec<String>)> = lanes
+        .user_buses
+        .iter()
+        .map(|bus| (&bus.name, &bus.members))
+        .collect();
+    rspice_results_ui::waves::stable_hash(&(radixes, users))
 }
 
 /// Stable decimation-cache identity for an expression trace. The high bit

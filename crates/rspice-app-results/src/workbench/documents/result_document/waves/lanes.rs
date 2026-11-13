@@ -90,6 +90,9 @@ pub(super) fn show_lanes(
     if let Some(LaneProbe::SelectNet { signal }) = requests.probe {
         select_lane_net(state, model, &signal);
     }
+    if let Some(text) = requests.add_expression {
+        super::expressions::add_strip_expression(state, model.analysis_key, text);
+    }
 }
 
 /// Keep `layout` for the strip, writing only when it changed so an idle frame

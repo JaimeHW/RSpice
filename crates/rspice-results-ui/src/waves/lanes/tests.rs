@@ -414,3 +414,25 @@ fn a_named_bus_word_reads_as_its_name() {
     );
     assert!(layout.value_names.is_empty());
 }
+
+/// A row's Analog asks for the staircase of what it draws: a bus by its
+/// `D()` name, a net by its `D()` column.
+#[test]
+fn a_rows_analog_names_what_it_draws() {
+    let model = model(&["D(clk)", "D(q[1])", "D(q[0])"]);
+    let mut layout = EventLaneLayout::default();
+    let specs = lane_specs(&model, Some(&layout));
+    let asked = |layout: &mut EventLaneLayout, index| {
+        apply_response(
+            layout,
+            &specs,
+            LaneStackResponse {
+                analog: Some(index),
+                ..LaneStackResponse::default()
+            },
+        )
+        .add_expression
+    };
+    assert_eq!(asked(&mut layout, 0).as_deref(), Some("analog(D(clk))"));
+    assert_eq!(asked(&mut layout, 1).as_deref(), Some("analog(D(q[1:0]))"));
+}

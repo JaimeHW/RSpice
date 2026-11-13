@@ -24,6 +24,8 @@ pub trait PaneHeaderHost {
     fn toggle_trace_visibility(&mut self, trace: &StripTrace);
     fn select_trace(&mut self, trace: &StripTrace);
     fn activate_pane(&mut self);
+    /// Add an expression to the strip, as a trace's menu asks.
+    fn add_expression(&mut self, _text: String) {}
 }
 
 /// Display state qualified by the host for this pane and its own cursor domain.
@@ -424,13 +426,23 @@ fn legend_chip(
         host.toggle_trace_visibility(trace);
     }
     let selected = host.trace_selected(trace);
-    if ui
+    let label = ui
         .selectable_label(selected, entry.label.as_str())
-        .on_hover_text(&*shown)
-        .clicked()
-    {
+        .on_hover_text(&*shown);
+    if label.clicked() {
         host.select_trace(trace);
     }
+    label.context_menu(|ui| {
+        ui.menu_button("Digital", |ui| {
+            if let Some(text) = super::logic::convert::digital_form(
+                ui,
+                &trace.source_waveform_name,
+                trace.y.as_slice(),
+            ) {
+                host.add_expression(text);
+            }
+        });
+    });
 }
 
 #[cfg(test)]

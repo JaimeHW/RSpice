@@ -134,6 +134,27 @@ impl LogicLane {
         }
     }
 
+    /// The lane `digital()` reads an analog signal as: its step waveform,
+    /// two samples at each edge, with 0 and 1 the levels and a hole the X.
+    /// Any other value is no level and reads as unknown too.
+    pub fn from_levels(name: impl Into<String>, x: &[f64], y: &[f64]) -> Self {
+        let (times, levels) = changes(x.iter().zip(y).map(|(&time, &value)| {
+            let level = if value == 0.0 {
+                LogicLevel::Low
+            } else if value == 1.0 {
+                LogicLevel::High
+            } else {
+                LogicLevel::Unknown
+            };
+            (time, level)
+        }));
+        Self {
+            name: name.into(),
+            times,
+            levels,
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

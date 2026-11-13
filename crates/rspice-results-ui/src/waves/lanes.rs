@@ -487,6 +487,18 @@ pub struct LaneRequests {
     pub cursor_to: Option<f64>,
     /// Cross-probe this `D()` signal.
     pub probe: Option<super::logic::LaneProbe>,
+    /// Add this expression to the strip: a row drawn as a staircase.
+    pub add_expression: Option<String>,
+}
+
+/// The `analog()` expression that draws a row as a staircase: a net by its
+/// `D()` column, a bus by its `D()` name, a `digital()` lane by its own
+/// expression.
+pub fn analog_expression(spec: &LaneSpec) -> String {
+    match spec {
+        LaneSpec::Logic { signal, .. } => format!("analog({signal})"),
+        LaneSpec::Bus { label, .. } => format!("analog(D({label}))"),
+    }
 }
 
 /// Apply what the reader asked of the lane stack to `layout`, whose rows
@@ -587,6 +599,10 @@ pub fn apply_response(
     LaneRequests {
         cursor_to: response.cursor_to,
         probe: response.probe,
+        add_expression: response
+            .analog
+            .and_then(|index| specs.get(index))
+            .map(analog_expression),
     }
 }
 

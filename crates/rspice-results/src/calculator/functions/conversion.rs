@@ -34,9 +34,16 @@
 //! width when its radix is signed. A word with an unknown or high-impedance
 //! bit denotes no integer and is a hole.
 
+use super::super::ast::CalculatorExpr;
 use super::super::evaluator::EvaluationError;
 use super::super::value::RealValue;
 use super::{forward_domain, scalar_arg, series_arg};
+
+/// Whether an expression is a `digital()` conversion as a whole, which the
+/// waveform stack draws as a logic lane rather than as a value trace.
+pub fn is_logic_expression(expr: &CalculatorExpr) -> bool {
+    matches!(expr, CalculatorExpr::FunctionCall { name, .. } if name.eq_ignore_ascii_case("digital"))
+}
 
 /// One level of a converted signal.
 #[derive(Debug, Clone, Copy, PartialEq)]

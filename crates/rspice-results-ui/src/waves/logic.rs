@@ -10,6 +10,7 @@
 //! the visualization document); the widget reports what the reader asked for
 //! in [`LaneStackResponse`] and the host applies it.
 
+pub mod convert;
 pub mod cursor;
 pub mod markers;
 pub mod model;
@@ -161,6 +162,8 @@ pub struct LaneStackResponse {
     pub move_row: Option<(usize, bool)>,
     /// A cross-probe for the host to route.
     pub probe: Option<LaneProbe>,
+    /// Draw this row's value as a staircase trace, `analog()`.
+    pub analog: Option<usize>,
     /// The name column's new width, while the reader drags its edge.
     pub resize_name: Option<f32>,
 }
@@ -806,6 +809,15 @@ fn lane_menu(
     if member.is_some() {
         return;
     }
+    if ui
+        .button("Analog")
+        .on_hover_text("Draw the lane's value as a staircase trace, analog()")
+        .clicked()
+    {
+        output.analog = Some(index);
+        ui.close();
+    }
+    ui.separator();
     if let LaneRow::Bus {
         lane, radix, names, ..
     } = row

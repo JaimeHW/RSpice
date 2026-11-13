@@ -16,9 +16,9 @@ use rspice_results_ui::waves::logic::LOGIC_ROW_HEIGHT;
 use std::sync::OnceLock;
 
 /// The converter's result bits, MSB first.
-const BITS: [&str; 8] = ["B7", "B6", "B5", "B4", "B3", "B2", "B1", "B0"];
+pub(super) const BITS: [&str; 8] = ["B7", "B6", "B5", "B4", "B3", "B2", "B1", "B0"];
 /// The analog nodes the strip plots beside the lanes.
-const ANALOG: [&str; 2] = ["VIN", "TOP"];
+pub(super) const ANALOG: [&str; 2] = ["VIN", "TOP"];
 pub(super) const FRAME: egui::Vec2 = egui::vec2(1200.0, 760.0);
 
 /// A corpus deck with its netlists inlined and its HDL sources made
