@@ -2,6 +2,7 @@
 //! over the authenticated source closure.
 
 use super::*;
+use crate::workbench::code::tests::{CodeHarness, harness};
 
 #[test]
 fn project_index_resolves_cross_file_definitions_and_references_case_insensitively() {
@@ -302,42 +303,42 @@ M1 d g s b nch W={w} L={l*2}\n\
 .param bad={nope*2}\n\
 .end\n";
 
-fn hover_state() -> AppState {
-    let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
-    state
+fn hover_state() -> CodeHarness {
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
+    harness
 }
 
 /// [`value_hover_at_in`] over the parts of `state` it reads.
-fn value_hover_at(state: &mut AppState, deck: &str, at: usize) -> Option<NetlistValueHover> {
-    let netlist = &mut state.code.netlist;
-    value_hover_at_in(netlist, state.workbench.messages(), deck, at)
+fn value_hover_at(harness: &mut CodeHarness, deck: &str, at: usize) -> Option<NetlistValueHover> {
+    let netlist = &mut harness.state.netlist;
+    value_hover_at_in(netlist, harness.wb.messages(), deck, at)
 }
 
-fn hover_at(state: &mut AppState, needle: &str, offset: usize) -> Option<NetlistValueHover> {
+fn hover_at(harness: &mut CodeHarness, needle: &str, offset: usize) -> Option<NetlistValueHover> {
     let index = HOVER_DECK.find(needle).expect("deck contains the token") + offset;
-    value_hover_at(state, HOVER_DECK, index)
+    value_hover_at(harness, HOVER_DECK, index)
 }
 
 #[test]
 fn value_hover_evaluates_a_parameter_definition_and_an_element_expression() {
-    let mut state = hover_state();
+    let mut harness = hover_state();
 
-    let definition = hover_at(&mut state, ".param l=", 7).expect("definition hover");
+    let definition = hover_at(&mut harness, ".param l=", 7).expect("definition hover");
     assert_eq!(definition.token, "l");
     assert_eq!(definition.value.as_deref(), Some("6u"));
     assert_eq!(definition.detail, None, "a definition is one line");
 
-    let expression = hover_at(&mut state, "L={l*2}", 2).expect("expression hover");
+    let expression = hover_at(&mut harness, "L={l*2}", 2).expect("expression hover");
     assert_eq!(expression.token, "{l*2}");
     assert_eq!(expression.value.as_deref(), Some("12u"));
 }
 
 #[test]
 fn value_hover_names_the_line_a_reference_is_defined_on() {
-    let mut state = hover_state();
+    let mut harness = hover_state();
 
-    let reference = hover_at(&mut state, "{w*3}", 1).expect("reference hover");
+    let reference = hover_at(&mut harness, "{w*3}", 1).expect("reference hover");
 
     assert_eq!(reference.token, "w");
     assert_eq!(reference.value.as_deref(), Some("2u"));
@@ -349,11 +350,11 @@ fn value_hover_names_the_line_a_reference_is_defined_on() {
 #[test]
 fn value_hover_over_a_reader_above_a_redefinition_shows_the_final_value() {
     let deck = "hover\n.param w=1u\nM1 d g s b nch W={w}\n.param w=2u\n.end\n";
-    let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = deck.to_owned();
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = deck.to_owned();
     let mut hover = |needle: &str| {
         let index = deck.find(needle).expect("deck contains the token");
-        value_hover_at(&mut state, deck, index).expect("hover")
+        value_hover_at(&mut harness, deck, index).expect("hover")
     };
 
     let reader = hover("w}");
@@ -380,9 +381,9 @@ fn value_hover_over_a_reader_above_a_redefinition_shows_the_final_value() {
 
 #[test]
 fn value_hover_shows_the_raw_number_when_engineering_notation_would_round() {
-    let mut state = hover_state();
+    let mut harness = hover_state();
 
-    let rounded = hover_at(&mut state, ".param third=", 7).expect("hover");
+    let rounded = hover_at(&mut harness, ".param third=", 7).expect("hover");
 
     assert_eq!(rounded.token, "third");
     assert_eq!(
@@ -407,9 +408,9 @@ fn value_hover_shows_a_sub_femto_value_as_the_exponent_that_round_trips() {
 
 #[test]
 fn value_hover_states_why_an_undefined_reference_has_no_value() {
-    let mut state = hover_state();
+    let mut harness = hover_state();
 
-    let undefined = hover_at(&mut state, "{nope*2}", 1).expect("hover");
+    let undefined = hover_at(&mut harness, "{nope*2}", 1).expect("hover");
 
     assert_eq!(undefined.token, "nope");
     assert_eq!(undefined.value, None);
@@ -423,30 +424,30 @@ fn value_hover_states_why_an_undefined_reference_has_no_value() {
 
 #[test]
 fn value_hover_answers_a_repeated_pointer_position_from_retained_state() {
-    let mut state = hover_state();
+    let mut harness = hover_state();
     let definition = HOVER_DECK.find(".param l=").unwrap() + 7;
     let expression = HOVER_DECK.find("L={l*2}").unwrap() + 2;
 
-    let first = value_hover_at(&mut state, HOVER_DECK, definition).expect("hover");
+    let first = value_hover_at(&mut harness, HOVER_DECK, definition).expect("hover");
 
     // Blank the retained span index. A pointer that has not moved must
     // still answer, which it can only do without consulting it.
-    state.code.netlist.value_index.as_mut().unwrap().map =
+    harness.state.netlist.value_index.as_mut().unwrap().map =
         Arc::new(rspice_core::netlist::NetlistSourceMap::default());
     assert_eq!(
-        value_hover_at(&mut state, HOVER_DECK, definition).as_ref(),
+        value_hover_at(&mut harness, HOVER_DECK, definition).as_ref(),
         Some(&first)
     );
     assert_eq!(
-        value_hover_at(&mut state, HOVER_DECK, expression),
+        value_hover_at(&mut harness, HOVER_DECK, expression),
         None,
         "a pointer that moved does read the index, so a blank one answers nothing"
     );
 
     // An edit bumps the revision, which is the only thing that rebuilds it.
-    state.code.netlist.revision += 1;
+    harness.state.netlist.revision += 1;
     assert_eq!(
-        value_hover_at(&mut state, HOVER_DECK, expression)
+        value_hover_at(&mut harness, HOVER_DECK, expression)
             .and_then(|hover| hover.value)
             .as_deref(),
         Some("12u")
@@ -455,10 +456,10 @@ fn value_hover_answers_a_repeated_pointer_position_from_retained_state() {
 
 #[test]
 fn value_hover_declines_a_unified_comparison_document() {
-    let mut state = hover_state();
-    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    let mut harness = hover_state();
+    harness.state.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
 
-    assert_eq!(hover_at(&mut state, ".param l=", 7), None);
+    assert_eq!(hover_at(&mut harness, ".param l=", 7), None);
 }
 
 #[test]
@@ -508,42 +509,43 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
         .unwrap();
     let owned_include =
         crate::state::OwnedNetlistIncludeDescriptor::try_new(&owned.dependencies()[0]).unwrap();
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(root.to_owned());
-    state.model.workspace.content.netlist_document = Some(owned.clone());
-    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-        deck_id: uuid::Uuid::new_v4(),
-        artifact_name: "root.sp".to_owned(),
-        strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-        source_encoding: crate::state::NetlistTextEncoding::Utf8,
-        source_line_ending: crate::state::NetlistLineEnding::Lf,
-        imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-        compatibility_reviewed: true,
-        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-        external_file_sha256: None,
-        save_history: Vec::new(),
-        revision_history: Vec::new(),
-        owned_includes: vec![owned_include],
-    });
-    state.model.netlist_artifacts.generated_document = Some(generated);
-    state.code.netlist.owned_document = Some(owned);
-    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.model.simulation.source.netlist_content = root.to_owned();
-    state.code.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(root.to_owned());
+    harness.model.workspace.content.netlist_document = Some(owned.clone());
+    harness.model.workspace.content.netlist_descriptor =
+        Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "root.sp".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
+            compatibility_reviewed: true,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: vec![owned_include],
+        });
+    harness.model.netlist_artifacts.generated_document = Some(generated);
+    harness.state.netlist.owned_document = Some(owned);
+    harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    harness.model.simulation.source.netlist_content = root.to_owned();
+    harness.state.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
 
-    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
-    state.code.netlist.rename_dialog.replacement = "amplifier".to_owned();
+    begin_rename_at_cursor_in(&harness.model, &mut harness.state.netlist).unwrap();
+    harness.state.netlist.rename_dialog.replacement = "amplifier".to_owned();
     assert_eq!(
         commit_rename(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents
         )
         .unwrap(),
         3
     );
 
-    let document = state
+    let document = harness
         .model
         .workspace
         .content
@@ -567,19 +569,19 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
             .unwrap()
             .contains(".ends amplifier")
     );
-    assert!(super::super::can_undo_netlist_edit(&state.code.netlist));
+    assert!(super::super::can_undo_netlist_edit(&harness.state.netlist));
     super::super::undo_netlist_edit(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
     )
     .unwrap();
     assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
+        harness.model.workspace.content.netlist_source.as_deref(),
         Some(root)
     );
     assert_eq!(
-        state
+        harness
             .model
             .workspace
             .content
@@ -591,19 +593,19 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
         Some(include)
     );
 
-    state.code.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
-    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
-    state.code.netlist.rename_dialog.replacement = "drive".to_owned();
+    harness.state.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
+    begin_rename_at_cursor_in(&harness.model, &mut harness.state.netlist).unwrap();
+    harness.state.netlist.rename_dialog.replacement = "drive".to_owned();
     assert_eq!(
         commit_rename(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents
         )
         .unwrap(),
         4
     );
-    let renamed = state
+    let renamed = harness
         .model
         .workspace
         .content
@@ -615,25 +617,25 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     assert!(renamed.contains("Rgain in 0 drive"));
     assert!(renamed.contains("{shape(drive)}"));
     super::super::undo_netlist_edit(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
     )
     .unwrap();
 
-    state.code.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
-    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
-    state.code.netlist.rename_dialog.replacement = "curve".to_owned();
+    harness.state.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
+    begin_rename_at_cursor_in(&harness.model, &mut harness.state.netlist).unwrap();
+    harness.state.netlist.rename_dialog.replacement = "curve".to_owned();
     assert_eq!(
         commit_rename(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents
         )
         .unwrap(),
         2
     );
-    let renamed = state
+    let renamed = harness
         .model
         .workspace
         .content
@@ -649,7 +651,7 @@ const FIX_DECK: &str = "quick fix\nV1 out 0 1\nR1 out 0 1kk\n.op\n.end\n";
 /// An editable project-owned deck, validated as the editor validates it:
 /// one finding on `1kk` whose fix is bound to this exact revision and
 /// buffer. Returns the finding's identity.
-fn validated_fix_state() -> (AppState, uuid::Uuid) {
+fn validated_fix_state() -> (CodeHarness, uuid::Uuid) {
     let provenance = crate::state::GeneratedProvenance::try_new(
         "language-quick-fix-test",
         crate::state::GenerationInput::new(
@@ -676,28 +678,29 @@ fn validated_fix_state() -> (AppState, uuid::Uuid) {
             generated.content_digest(),
         )
         .unwrap();
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
-    state.model.workspace.content.netlist_document = Some(owned.clone());
-    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-        deck_id: uuid::Uuid::new_v4(),
-        artifact_name: "fix.sp".to_owned(),
-        strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-        source_encoding: crate::state::NetlistTextEncoding::Utf8,
-        source_line_ending: crate::state::NetlistLineEnding::Lf,
-        imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-        compatibility_reviewed: true,
-        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-        external_file_sha256: None,
-        save_history: Vec::new(),
-        revision_history: Vec::new(),
-        owned_includes: Vec::new(),
-    });
-    state.model.netlist_artifacts.generated_document = Some(generated);
-    state.code.netlist.owned_document = Some(owned);
-    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.model.simulation.source.netlist_content = FIX_DECK.to_owned();
-    state.code.netlist.revision = 7;
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
+    harness.model.workspace.content.netlist_document = Some(owned.clone());
+    harness.model.workspace.content.netlist_descriptor =
+        Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "fix.sp".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
+            compatibility_reviewed: true,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
+        });
+    harness.model.netlist_artifacts.generated_document = Some(generated);
+    harness.state.netlist.owned_document = Some(owned);
+    harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    harness.model.simulation.source.netlist_content = FIX_DECK.to_owned();
+    harness.state.netlist.revision = 7;
 
     let start = FIX_DECK.find("1kk").unwrap();
     let mut diagnostic = crate::state::netlist_diagnostics::Diagnostic::error("unknown suffix kk");
@@ -709,14 +712,14 @@ fn validated_fix_state() -> (AppState, uuid::Uuid) {
     let mut diagnostic = diagnostic.with_line(Some(2));
     diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());
     let finding = diagnostic.canonical.diagnostic_id;
-    state.code.netlist.diagnostics = Arc::new(
+    harness.state.netlist.diagnostics = Arc::new(
         crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![diagnostic],
             FIX_DECK,
         )
         .unwrap(),
     );
-    (state, finding)
+    (harness, finding)
 }
 
 /// Pressing a fix twice from the Problems page, with the editor off
@@ -725,20 +728,20 @@ fn validated_fix_state() -> (AppState, uuid::Uuid) {
 /// into the first press's range.
 #[test]
 fn a_quick_fix_pressed_twice_applies_once() {
-    let (mut state, finding) = validated_fix_state();
+    let (mut harness, finding) = validated_fix_state();
 
     apply_quick_fix_for_finding(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
         finding,
     )
     .expect("the fix applies to its own bytes");
     let fixed = FIX_DECK.replace("1kk", "1k");
-    assert_eq!(state.model.simulation.source.netlist_content, fixed);
+    assert_eq!(harness.model.simulation.source.netlist_content, fixed);
     assert!(
-        state
-            .code
+        harness
+            .state
             .netlist
             .diagnostics
             .iter()
@@ -747,15 +750,15 @@ fn a_quick_fix_pressed_twice_applies_once() {
     );
 
     let refused = apply_quick_fix_for_finding(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
         finding,
     )
     .expect_err("a second press has no bytes of its own left to fix");
     assert!(refused.contains("has changed"), "{refused}");
     assert_eq!(
-        state.model.simulation.source.netlist_content, fixed,
+        harness.model.simulation.source.netlist_content, fixed,
         "the refused press leaves the source exactly as the first one left it",
     );
 }
@@ -764,34 +767,34 @@ fn a_quick_fix_pressed_twice_applies_once() {
 /// moves the revision, and one that replaces the bytes without moving it.
 #[test]
 fn a_quick_fix_is_refused_after_an_intervening_edit() {
-    let (mut state, finding) = validated_fix_state();
+    let (mut harness, finding) = validated_fix_state();
     let edited = format!("* note\n{FIX_DECK}");
-    state.model.simulation.source.netlist_content = edited.clone();
-    state.code.netlist.revision += 1;
+    harness.model.simulation.source.netlist_content = edited.clone();
+    harness.state.netlist.revision += 1;
     assert!(
         apply_quick_fix_for_finding(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
             finding
         )
         .is_err()
     );
-    assert_eq!(state.model.simulation.source.netlist_content, edited);
+    assert_eq!(harness.model.simulation.source.netlist_content, edited);
 
-    let (mut state, finding) = validated_fix_state();
-    state.model.simulation.source.netlist_content = edited.clone();
+    let (mut harness, finding) = validated_fix_state();
+    harness.model.simulation.source.netlist_content = edited.clone();
     assert!(
         apply_quick_fix_for_finding(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
             finding
         )
         .is_err(),
         "the digest refuses bytes a writer replaced without moving the revision",
     );
-    assert_eq!(state.model.simulation.source.netlist_content, edited);
+    assert_eq!(harness.model.simulation.source.netlist_content, edited);
 }
 
 /// An edit that moves the revision and leaves the bytes as they were —
@@ -799,17 +802,17 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
 /// it through, so the revision is what refuses it.
 #[test]
 fn a_quick_fix_is_refused_when_only_the_revision_moved() {
-    let (mut state, finding) = validated_fix_state();
-    state.code.netlist.revision += 1;
+    let (mut harness, finding) = validated_fix_state();
+    harness.state.netlist.revision += 1;
     let refused = apply_quick_fix_for_finding(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
         finding,
     )
     .expect_err("the finding was validated at an earlier revision");
     assert!(refused.contains("has changed"), "{refused}");
-    assert_eq!(state.model.simulation.source.netlist_content, FIX_DECK);
+    assert_eq!(harness.model.simulation.source.netlist_content, FIX_DECK);
 }
 
 /// The caret's preferred fix is offered only for the revision it was
@@ -817,12 +820,12 @@ fn a_quick_fix_is_refused_when_only_the_revision_moved() {
 /// it would refuse.
 #[test]
 fn the_preferred_fix_is_withdrawn_when_only_the_revision_moved() {
-    let (mut state, _) = validated_fix_state();
-    state.code.netlist.cursor_line = 2;
+    let (mut harness, _) = validated_fix_state();
+    harness.state.netlist.cursor_line = 2;
     assert!(
-        preferred_quick_fix_available(&state.code.netlist),
+        preferred_quick_fix_available(&harness.state.netlist),
         "precondition: the caret is on the finding's line",
     );
-    state.code.netlist.revision += 1;
-    assert!(!preferred_quick_fix_available(&state.code.netlist));
+    harness.state.netlist.revision += 1;
+    assert!(!preferred_quick_fix_available(&harness.state.netlist));
 }

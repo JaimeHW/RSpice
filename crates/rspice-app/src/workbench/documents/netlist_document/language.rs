@@ -11,8 +11,6 @@ use rspice_core::netlist::{
     NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
 };
 
-#[cfg(test)]
-use super::AppState;
 use super::{ActiveNetlistDocument, Model, NetlistDocumentState, canonical_root_document_in};
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{MessageCatalog, MessageId};

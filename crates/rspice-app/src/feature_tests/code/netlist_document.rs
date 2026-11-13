@@ -4,7 +4,7 @@
 
 use crate::workbench::AppState;
 use crate::workbench::documents::CodeSourceFileAction;
-use crate::workbench::documents::netlist_document::tests::owned_dependency_state;
+use crate::workbench::documents::netlist_document::tests::seed_owned_dependency;
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, active_netlist_source_is_editable_in, begin_netlist_lifecycle_action_in,
     close_run_deck_snapshot, commit_netlist_lifecycle_action, open_run_deck_snapshot_in,
@@ -81,7 +81,8 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
     const RAN: &str = "ran deck\nR1 out 0 1k\n.op\n.end\n";
     const EDITED: &str = "ran deck\nR1 out 0 2k\n.op\n.end\n";
 
-    let mut state = owned_dependency_state();
+    let mut state = AppState::default();
+    seed_owned_dependency(&mut state.model, &mut state.code.netlist);
     state.model.workspace.content.netlist_source = Some(EDITED.to_owned());
     state.model.simulation.source.netlist_content = EDITED.to_owned();
     state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;

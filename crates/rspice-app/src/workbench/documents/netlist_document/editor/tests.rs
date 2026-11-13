@@ -3,16 +3,17 @@
 //! maps back onto the authored lines.
 
 use super::*;
+use crate::workbench::code::tests::{CodeHarness, harness};
 
 /// The editor drawn over the parts of `state` it reads.
-fn show_state(ui: &mut Ui, state: &mut AppState) -> egui::Response {
+fn show_state(ui: &mut Ui, harness: &mut CodeHarness) -> egui::Response {
     show(
         ui,
-        &mut state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
-        &state.runs,
-        &mut state.workbench,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &harness.state.code_workspace.include_resolutions,
+        &harness.runs,
+        &mut harness.wb,
     )
 }
 
@@ -50,11 +51,11 @@ fn hover_rasters(
     egui::Pos2,
     Option<super::super::language::NetlistValueHover>,
 ) {
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
-    state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_document_initialized = true;
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
+    harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.state.netlist.active_document_initialized = true;
 
     let geometry = std::cell::Cell::new((egui::Pos2::ZERO, 0.0_f32));
     let size = egui::vec2(width, 220.0);
@@ -73,7 +74,7 @@ fn hover_rasters(
                         .x
                 });
                 geometry.set((ui.cursor().min, advance));
-                show_state(ui, &mut state);
+                show_state(ui, &mut harness);
             });
     });
 
@@ -86,10 +87,10 @@ fn hover_rasters(
     let hovered = crate::ui::raster::render_with_pointer(size, pointer, |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| show_state(ui, &mut state));
+            .show(ui, |ui| show_state(ui, &mut harness));
     });
-    let resolved = state
-        .code
+    let resolved = harness
+        .state
         .netlist
         .value_index
         .as_ref()
@@ -158,14 +159,14 @@ fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn completion_reaches_a_document_that_has_content_in_it() {
-    let mut state = AppState::default();
+    let mut harness = harness();
     let source = "test deck\n.tr";
-    state.model.workspace.content.netlist_source = Some(source.to_owned());
-    state.model.simulation.source.netlist_content = source.to_owned();
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_document_initialized = true;
+    harness.model.workspace.content.netlist_source = Some(source.to_owned());
+    harness.model.simulation.source.netlist_content = source.to_owned();
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.state.netlist.active_document_initialized = true;
     assert!(
-        super::super::active_netlist_source_is_editable_in(&state.model, &state.code.netlist),
+        super::super::active_netlist_source_is_editable_in(&harness.model, &harness.state.netlist),
         "fixture must be an editable owned document"
     );
 
@@ -183,7 +184,7 @@ fn completion_reaches_a_document_that_has_content_in_it() {
     for frame in 0..3 {
         let _ = context.clone().run_ui(input.clone(), |ui| {
             if frame == 0 {
-                let editor_id = editor_id_in(&state.model, &state.code.netlist);
+                let editor_id = editor_id_in(&harness.model, &harness.state.netlist);
                 ui.ctx()
                     .memory_mut(|memory| memory.request_focus(editor_id));
                 crate::workbench::documents::text_editor_commands::queue_caret_char_index(
@@ -192,12 +193,12 @@ fn completion_reaches_a_document_that_has_content_in_it() {
                     source.chars().count(),
                 );
             }
-            show_state(ui, &mut state);
+            show_state(ui, &mut harness);
         });
     }
 
     assert!(
-        state.code.netlist.completion_open,
+        harness.state.netlist.completion_open,
         "the dot-command popover must open for a caret trailing `.tr` in a non-empty deck"
     );
 }
@@ -493,7 +494,7 @@ fn live_lint_uses_abort_aware_parser_contract() {
 
 /// A parameter override, shown in the editor as its own lines, over a
 /// retained generated base.
-fn parameter_override_state(base: &str, authored: &str) -> AppState {
+fn parameter_override_state(base: &str, authored: &str) -> CodeHarness {
     let provenance = crate::state::GeneratedProvenance::try_new(
         "netlist-editor-override-test",
         crate::state::GenerationInput::new(
@@ -523,27 +524,28 @@ fn parameter_override_state(base: &str, authored: &str) -> AppState {
     owned
         .replace_editable_source(owned.content_digest(), authored.as_bytes().to_vec())
         .unwrap();
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(authored.to_owned());
-    state.model.workspace.content.netlist_document = Some(owned.clone());
-    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-        deck_id: uuid::Uuid::new_v4(),
-        artifact_name: "corner.cir".to_owned(),
-        strategy: crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
-        source_encoding: crate::state::NetlistTextEncoding::Utf8,
-        source_line_ending: crate::state::NetlistLineEnding::Lf,
-        imported_dialect: None,
-        compatibility_reviewed: false,
-        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-        external_file_sha256: None,
-        save_history: Vec::new(),
-        revision_history: Vec::new(),
-        owned_includes: Vec::new(),
-    });
-    state.code.netlist.owned_document = Some(owned);
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.model.simulation.source.netlist_content = authored.to_owned();
-    state
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(authored.to_owned());
+    harness.model.workspace.content.netlist_document = Some(owned.clone());
+    harness.model.workspace.content.netlist_descriptor =
+        Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "corner.cir".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: None,
+            compatibility_reviewed: false,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
+        });
+    harness.state.netlist.owned_document = Some(owned);
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.model.simulation.source.netlist_content = authored.to_owned();
+    harness
 }
 
 /// A parameter override is validated as the deck it executes as — the
@@ -554,17 +556,17 @@ fn parameter_override_state(base: &str, authored: &str) -> AppState {
 fn a_parameter_override_error_is_reported_on_its_own_line() {
     let base = "* generated\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let authored = "* corner\n.temp -273.15\n";
-    let mut state = parameter_override_state(base, authored);
+    let mut harness = parameter_override_state(base, authored);
 
-    let revision = state.code.netlist.revision;
+    let revision = harness.state.netlist.revision;
     validate_visible_source_in(
-        &state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
+        &harness.model,
+        &mut harness.state.netlist,
+        &harness.state.code_workspace.include_resolutions,
         revision,
     );
-    let error = state
-        .code
+    let error = harness
+        .state
         .netlist
         .diagnostics
         .iter()
@@ -579,22 +581,22 @@ fn a_parameter_override_error_is_reported_on_its_own_line() {
 }
 
 /// A deck in the editor, validated the way the editor validates it.
-fn validated(deck: &str) -> AppState {
-    let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = deck.to_owned();
-    let revision = state.code.netlist.revision;
+fn validated(deck: &str) -> CodeHarness {
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = deck.to_owned();
+    let revision = harness.state.netlist.revision;
     validate_visible_source_in(
-        &state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
+        &harness.model,
+        &mut harness.state.netlist,
+        &harness.state.code_workspace.include_resolutions,
         revision,
     );
-    state
+    harness
 }
 
 /// The value hover at the `offset`th byte of the first `needle` in `deck`.
 fn hover_on(
-    state: &mut AppState,
+    harness: &mut CodeHarness,
     deck: &str,
     needle: &str,
     offset: usize,
@@ -602,8 +604,8 @@ fn hover_on(
     let byte = deck.find(needle).expect("deck contains the token") + offset;
     let index = deck[..byte].chars().count();
     super::super::language::value_hover_at_in(
-        &mut state.code.netlist,
-        state.workbench.messages(),
+        &mut harness.state.netlist,
+        harness.wb.messages(),
         deck,
         index,
     )
@@ -622,16 +624,16 @@ fn value_hover_reads_only_the_if_branch_the_parser_takes() {
             "hover\n.param mode={mode}\n.if (mode==1)\n.param vth=0.5\n.else\n\
              .param vth=0.4\n.endif\nV1 a 0 {{vth}}\n.end\n"
         );
-        let mut state = validated(&deck);
+        let mut harness = validated(&deck);
 
-        let reader = hover_on(&mut state, &deck, "{vth}", 1).expect("reader hover");
+        let reader = hover_on(&mut harness, &deck, "{vth}", 1).expect("reader hover");
         assert_eq!(reader.value.as_deref(), Some(value), "mode={mode}");
 
-        let binding = hover_on(&mut state, &deck, taken, 0).expect("binding hover");
+        let binding = hover_on(&mut harness, &deck, taken, 0).expect("binding hover");
         assert_eq!(binding.value.as_deref(), Some(value), "mode={mode}");
         assert!(!binding.not_read);
 
-        let unread = hover_on(&mut state, &deck, skipped, 0).expect("unread hover");
+        let unread = hover_on(&mut harness, &deck, skipped, 0).expect("unread hover");
         assert_eq!(unread.token, "vth");
         assert_eq!(
             unread.value, None,
@@ -655,10 +657,10 @@ fn value_hover_reads_only_the_branch_a_nested_if_takes() {
                 .param vth=0.1\n.elseif (corner==2)\n.param vth=0.2\n.else\n\
                 .param vth=0.3\n.endif\n.else\n.param vth=0.9\n.endif\n\
                 V1 a 0 {vth}\n.end\n";
-    let mut state = validated(deck);
+    let mut harness = validated(deck);
 
     assert_eq!(
-        hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+        hover_on(&mut harness, deck, "{vth}", 1).and_then(|hover| hover.value),
         Some("200m".to_owned())
     );
     for (needle, reason) in [
@@ -666,7 +668,7 @@ fn value_hover_reads_only_the_branch_a_nested_if_takes() {
         ("vth=0.3", "corner==2 is true"),
         ("vth=0.9", "mode==1 is true"),
     ] {
-        let hover = hover_on(&mut state, deck, needle, 0).expect("hover");
+        let hover = hover_on(&mut harness, deck, needle, 0).expect("hover");
         assert_eq!(hover.value, None, "{needle}");
         assert_eq!(
             hover.detail,
@@ -682,13 +684,13 @@ fn value_hover_reads_only_the_branch_a_nested_if_takes() {
 fn value_hover_binds_a_redefinition_after_the_endif_everywhere() {
     let deck = "hover\n.param mode=1\nV2 b 0 {vth}\n.if (mode==1)\n.param vth=0.5\n\
                 .else\n.param vth=0.4\n.endif\n.param vth=0.7\n.end\n";
-    let mut state = validated(deck);
+    let mut harness = validated(deck);
 
-    let reader = hover_on(&mut state, deck, "{vth}", 1).expect("hover");
+    let reader = hover_on(&mut harness, deck, "{vth}", 1).expect("hover");
     assert_eq!(reader.value.as_deref(), Some("700m"));
     assert_eq!(reader.detail.as_deref(), Some("defined line 9"));
     assert_eq!(
-        hover_on(&mut state, deck, "vth=0.4", 0).and_then(|hover| hover.detail),
+        hover_on(&mut harness, deck, "vth=0.4", 0).and_then(|hover| hover.detail),
         Some("not read: in an .if branch not taken (mode==1 is true)".to_owned())
     );
 }
@@ -699,9 +701,9 @@ fn value_hover_binds_a_redefinition_after_the_endif_everywhere() {
 fn value_hover_names_where_a_parameter_only_unread_lines_define_is_written() {
     let deck = "hover\n.param mode=0\n.if (mode==1)\n.param vth=0.5\n.endif\n\
                 .subckt cell a b\nR1 a b {vth}\n.ends\n.end\n";
-    let mut state = validated(deck);
+    let mut harness = validated(deck);
 
-    let reader = hover_on(&mut state, deck, "{vth}", 1).expect("hover");
+    let reader = hover_on(&mut harness, deck, "{vth}", 1).expect("hover");
     assert_eq!(reader.value, None);
     assert_eq!(
         reader.detail.as_deref(),
@@ -715,15 +717,15 @@ fn value_hover_names_where_a_parameter_only_unread_lines_define_is_written() {
 fn value_hover_reads_none_of_a_decks_own_inline_library_sections() {
     let deck = "hover\n.param vth=0.9\n.lib tt\n.param vth=0.5\n.endl tt\n\
                 .lib ss\n.param vth=0.4\n.endl ss\nV1 a 0 {vth}\n.end\n";
-    let mut state = validated(deck);
+    let mut harness = validated(deck);
 
     assert_eq!(
-        hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+        hover_on(&mut harness, deck, "{vth}", 1).and_then(|hover| hover.value),
         Some("900m".to_owned())
     );
     for (needle, section) in [("vth=0.5", "tt"), ("vth=0.4", "ss")] {
         assert_eq!(
-            hover_on(&mut state, deck, needle, 0).and_then(|hover| hover.detail),
+            hover_on(&mut harness, deck, needle, 0).and_then(|hover| hover.detail),
             Some(format!("not read: in .lib section {section}, not selected")),
         );
     }
@@ -735,20 +737,20 @@ fn value_hover_reads_none_of_a_decks_own_inline_library_sections() {
 fn value_hover_waits_for_the_parse_that_decides_the_branches() {
     let deck = "hover\n.param mode=1\n.if (mode==1)\n.param vth=0.5\n.else\n\
                 .param vth=0.4\n.endif\nV1 a 0 {vth}\n.end\n";
-    let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = deck.to_owned();
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = deck.to_owned();
 
-    assert_eq!(hover_on(&mut state, deck, "{vth}", 1), None);
+    assert_eq!(hover_on(&mut harness, deck, "{vth}", 1), None);
 
-    let revision = state.code.netlist.revision;
+    let revision = harness.state.netlist.revision;
     validate_visible_source_in(
-        &state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
+        &harness.model,
+        &mut harness.state.netlist,
+        &harness.state.code_workspace.include_resolutions,
         revision,
     );
     assert_eq!(
-        hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+        hover_on(&mut harness, deck, "{vth}", 1).and_then(|hover| hover.value),
         Some("500m".to_owned()),
         "the arriving parse rebuilds the index the earlier hover built"
     );
@@ -761,10 +763,10 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
 fn the_reference_lint_counts_only_the_branch_the_parser_takes() {
     let deck = "lint\n.param mode=0\n.if (mode==1)\n.model dsel d\nDOFF a 0 dmissing\n\
                 .endif\nD1 a 0 dsel\n.end\n";
-    let state = validated(deck);
+    let harness = validated(deck);
 
-    let unknown = state
-        .code
+    let unknown = harness
+        .state
         .netlist
         .diagnostics
         .iter()
@@ -1181,77 +1183,82 @@ fn diagnostic_strip_text_omits_fix_and_truncates_for_phone_width() {
 
 #[test]
 fn editor_commit_rejects_generated_artifact_mutation() {
-    let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
-    state.code.netlist.revision = 4;
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
+    harness.state.netlist.revision = 4;
 
     assert!(!commit_owned_source_edit(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.workbench,
-        &mut state.runs,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
+        &mut harness.wb,
+        &mut harness.runs,
         "silently edited\n.end\n",
         1,
         2.5
     ));
-    assert!(state.model.workspace.content.netlist_source.is_none());
+    assert!(harness.model.workspace.content.netlist_source.is_none());
     assert_eq!(
-        state.model.simulation.source.netlist_content,
+        harness.model.simulation.source.netlist_content,
         "generated\n.op\n.end\n"
     );
-    assert!(!state.model.workspace.content.netlist_source_dirty);
-    assert_eq!(state.code.netlist.revision, 4);
-    assert!(state.runs.manual_run.edited_lines.is_empty());
+    assert!(!harness.model.workspace.content.netlist_source_dirty);
+    assert_eq!(harness.state.netlist.revision, 4);
+    assert!(harness.runs.manual_run.edited_lines.is_empty());
 }
 
 #[test]
 fn editor_commit_updates_only_an_existing_owned_source() {
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.model.workspace.content.netlist_source_path =
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.model.workspace.content.netlist_source_path =
         Some(std::path::PathBuf::from("imported/owned.cir"));
-    state.model.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
-    state.code.netlist.revision = 9;
+    harness.model.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
+    harness.state.netlist.revision = 9;
 
     assert!(commit_owned_source_edit(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.workbench,
-        &mut state.runs,
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
+        &mut harness.wb,
+        &mut harness.runs,
         "owned\n.tran 1n 1u\n.end\n",
         1,
         7.25
     ));
     assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
+        harness.model.workspace.content.netlist_source.as_deref(),
         Some("owned\n.tran 1n 1u\n.end\n")
     );
     assert_eq!(
-        state.model.simulation.source.netlist_content,
+        harness.model.simulation.source.netlist_content,
         "owned\n.tran 1n 1u\n.end\n"
     );
     assert_eq!(
-        state.model.workspace.content.netlist_source_path.as_deref(),
+        harness
+            .model
+            .workspace
+            .content
+            .netlist_source_path
+            .as_deref(),
         Some(std::path::Path::new("imported/owned.cir"))
     );
-    assert!(state.model.workspace.content.netlist_source_dirty);
-    assert_eq!(state.code.netlist.revision, 10);
-    assert_eq!(state.code.netlist.last_edit_time, 7.25);
-    assert!(state.runs.manual_run.edited_lines.contains(&1));
+    assert!(harness.model.workspace.content.netlist_source_dirty);
+    assert_eq!(harness.state.netlist.revision, 10);
+    assert_eq!(harness.state.netlist.last_edit_time, 7.25);
+    assert!(harness.runs.manual_run.edited_lines.contains(&1));
 }
 
 /// A deck is drawn at the size the source editors are set to.
 #[test]
 fn the_netlist_editor_draws_at_the_preferred_text_size() {
     let deck = "sized deck\nR1 a 0 1k\n.end\n".to_owned();
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(deck.clone());
-    state.model.simulation.source.netlist_content = deck;
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_document_initialized = true;
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(deck.clone());
+    harness.model.simulation.source.netlist_content = deck;
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.state.netlist.active_document_initialized = true;
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);
     crate::workbench::documents::editor_font::publish(&context, 18.0);
@@ -1266,7 +1273,7 @@ fn the_netlist_editor_draws_at_the_preferred_text_size() {
                 ..Default::default()
             },
             |ui| {
-                show_state(ui, &mut state);
+                show_state(ui, &mut harness);
             },
         ));
     }
@@ -1291,18 +1298,18 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         .chain((1..=300).map(|line| format!("R{line} n{line} 0 1k\n")))
         .chain(std::iter::once(".end\n".to_owned()))
         .collect();
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(deck.clone());
-    state.model.simulation.source.netlist_content = deck;
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_document_initialized = true;
-    let editor_id = editor_id_in(&state.model, &state.code.netlist);
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(deck.clone());
+    harness.model.simulation.source.netlist_content = deck;
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.state.netlist.active_document_initialized = true;
+    let editor_id = editor_id_in(&harness.model, &harness.state.netlist);
 
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);
     context.set_os(egui::os::OperatingSystem::Windows);
     let mut time = 0.0;
-    let mut frame = |state: &mut AppState, events: Vec<egui::Event>| {
+    let mut frame = |harness: &mut CodeHarness, events: Vec<egui::Event>| {
         time += 1.0 / 60.0;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1315,12 +1322,12 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         };
         context.run_ui(input, |ui| {
             let _ = ui.button("Before");
-            show_state(ui, state);
+            show_state(ui, harness);
         })
     };
-    let _ = frame(&mut state, Vec::new());
+    let _ = frame(&mut harness, Vec::new());
     context.memory_mut(|memory| memory.request_focus(editor_id));
-    let _ = frame(&mut state, Vec::new());
+    let _ = frame(&mut harness, Vec::new());
     let key = |key| {
         [true, false].map(|pressed| egui::Event::Key {
             key,
@@ -1333,11 +1340,11 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
 
     for press in 1..=60 {
         let [down, up] = key(egui::Key::ArrowDown);
-        let output = frame(&mut state, vec![down]);
-        let _ = frame(&mut state, vec![up]);
+        let output = frame(&mut harness, vec![down]);
+        let _ = frame(&mut harness, vec![up]);
         assert!(output.platform_output.ime.is_some(), "press {press}");
         assert_eq!(context.memory(|memory| memory.focused()), Some(editor_id));
-        assert_eq!(state.code.netlist.cursor_line, press);
+        assert_eq!(harness.state.netlist.cursor_line, press);
         let editor = context
             .read_response(editor_id)
             .expect("the editor is on screen");
@@ -1354,12 +1361,12 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         );
     }
     let [left, up] = key(egui::Key::ArrowLeft);
-    let _ = frame(&mut state, vec![left]);
-    let _ = frame(&mut state, vec![up]);
+    let _ = frame(&mut harness, vec![left]);
+    let _ = frame(&mut harness, vec![up]);
     assert_eq!(context.memory(|memory| memory.focused()), Some(editor_id));
 
     let [escape, up] = key(egui::Key::Escape);
-    let _ = frame(&mut state, vec![escape]);
-    let _ = frame(&mut state, vec![up]);
+    let _ = frame(&mut harness, vec![escape]);
+    let _ = frame(&mut harness, vec![up]);
     assert_eq!(context.memory(|memory| memory.focused()), None);
 }

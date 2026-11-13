@@ -27,8 +27,6 @@ use rspice_core::netlist::IncludeResolution;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::MessageId;
 use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
@@ -1221,11 +1219,12 @@ mod library_folder_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod include_shadow_tests {
     use super::*;
+    use crate::workbench::code::tests::{CodeHarness, harness};
 
     /// Two directories on the chain hold the same relative name. The winner
     /// and the shadow both come from the engine's own walk, so the warning
     /// cannot disagree with the deck that would run.
-    fn shadowed_fixture(label: &str) -> (std::path::PathBuf, AppState) {
+    fn shadowed_fixture(label: &str) -> (std::path::PathBuf, CodeHarness) {
         let root = crate::fixture_root::canonical_temp_dir().join(format!(
             "rspice-include-shadow-{label}-{}-{}",
             std::process::id(),
@@ -1257,21 +1256,21 @@ mod include_shadow_tests {
             .expand_content(source, &deck_path)
             .expect("the chain resolves the include");
 
-        let mut state = AppState::default();
+        let mut harness = harness();
         for dependency in processor.resolved_dependencies() {
-            state.code.code_workspace.include_resolutions.insert(
+            harness.state.code_workspace.include_resolutions.insert(
                 dependency.requested_path().to_owned(),
                 dependency.resolution().clone(),
             );
         }
-        (root, state)
+        (root, harness)
     }
 
     #[test]
     fn a_shadowed_include_becomes_one_warning_bound_to_its_own_card() {
-        let (root, state) = shadowed_fixture("warned");
+        let (root, harness) = shadowed_fixture("warned");
         let diagnostics = shadowed_include_diagnostics(
-            &state.code.code_workspace.include_resolutions,
+            &harness.state.code_workspace.include_resolutions,
             "shadow deck\n.include models.lib\n.end\n",
         );
 
@@ -1293,7 +1292,7 @@ mod include_shadow_tests {
 
     #[test]
     fn an_include_with_one_candidate_produces_no_warning() {
-        let (root, mut state) = shadowed_fixture("quiet");
+        let (root, mut harness) = shadowed_fixture("quiet");
         std::fs::remove_file(root.join("second").join("models.lib")).expect("remove the shadow");
         // Re-walk the chain now that only one candidate holds the name.
         let deck_path = root.join("deck").join("top.cir");
@@ -1306,9 +1305,9 @@ mod include_shadow_tests {
         processor
             .expand_content("shadow deck\n.include models.lib\n.end\n", &deck_path)
             .expect("the chain still resolves the include");
-        state.code.code_workspace.include_resolutions.clear();
+        harness.state.code_workspace.include_resolutions.clear();
         for dependency in processor.resolved_dependencies() {
-            state.code.code_workspace.include_resolutions.insert(
+            harness.state.code_workspace.include_resolutions.insert(
                 dependency.requested_path().to_owned(),
                 dependency.resolution().clone(),
             );
@@ -1316,7 +1315,7 @@ mod include_shadow_tests {
 
         assert!(
             shadowed_include_diagnostics(
-                &state.code.code_workspace.include_resolutions,
+                &harness.state.code_workspace.include_resolutions,
                 "shadow deck\n.include models.lib\n.end\n",
             )
             .is_empty()

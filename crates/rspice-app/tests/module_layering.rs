@@ -833,7 +833,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // The results feature's test host holds the results slot whose parts its
     // tests run against, as the session does.
     ("documents/result_document", "slots"),
-    ("documents/netlist_document", "app_state"),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the
     // session wire naming the bulk-edit filters it keeps, which live with the
@@ -844,10 +843,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app_state", "app"),
     ("app_state", "slots"),
     ("app_state", "workflows/file_workflow"),
-    // The code workspace's tests that only seed and read state run over the
-    // code feature on its own, and the feature builds that harness, as the
-    // models feature builds the model editor's below.
+    // The code workspace's and the netlist document's tests that only seed
+    // and read state run over the code feature on its own, and the feature
+    // builds that harness, as the models feature builds the model editor's
+    // below.
     ("documents/code_workspace", "code"), // retires at the code flip
+    ("documents/netlist_document", "code"), // retires at the code flip
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the

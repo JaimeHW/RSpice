@@ -3,11 +3,12 @@
 
 use super::*;
 use crate::workbench::FolderListPreference;
+use crate::workbench::code::tests::{CodeHarness, harness};
 
 /// The errors the editor last published.
-fn errors(state: &AppState) -> Vec<String> {
-    state
-        .code
+fn errors(harness: &CodeHarness) -> Vec<String> {
+    harness
+        .state
         .netlist
         .diagnostics
         .iter()
@@ -36,40 +37,40 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     let source = "deck\n.include device.inc\nX1 out 0 cell\nV1 out 0 1\n.op\n.end\n";
     std::fs::write(&path, source).expect("write deck");
 
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source_path = Some(path);
-    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.model.simulation.source.netlist_content = source.to_owned();
-    let revision = state.code.netlist.revision;
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source_path = Some(path);
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.model.simulation.source.netlist_content = source.to_owned();
+    let revision = harness.state.netlist.revision;
     validate_visible_source_in(
-        &state.model,
-        &mut state.code.netlist,
-        &state.code.code_workspace.include_resolutions,
+        &harness.model,
+        &mut harness.state.netlist,
+        &harness.state.code_workspace.include_resolutions,
         revision,
     );
     assert!(
-        !errors(&state).is_empty(),
+        !errors(&harness).is_empty(),
         "nothing the deck is searched from holds device.inc"
     );
 
     // Nothing is edited: the folders changing is reason enough to parse the
     // deck again, once the edit debounce has long passed.
-    state
+    harness
         .model
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, vec![shared])
         .expect("a full path");
-    state.code.netlist.last_edit_time = f64::NEG_INFINITY;
+    harness.state.netlist.last_edit_time = f64::NEG_INFINITY;
     let ctx = egui::Context::default();
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
         refresh_diagnostics(
             ui,
-            &state.model,
-            &mut state.code.netlist,
-            &state.code.code_workspace.include_resolutions,
+            &harness.model,
+            &mut harness.state.netlist,
+            &harness.state.code_workspace.include_resolutions,
         );
     });
-    assert_eq!(errors(&state), Vec::<String>::new());
+    assert_eq!(errors(&harness), Vec::<String>::new());
 
     std::fs::remove_dir_all(&directory).ok();
 }
