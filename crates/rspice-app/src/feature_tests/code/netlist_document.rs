@@ -4,7 +4,7 @@
 
 use crate::workbench::AppState;
 use crate::workbench::documents::CodeSourceFileAction;
-use crate::workbench::documents::netlist_document::tests::seed_owned_dependency;
+use crate::workbench::documents::netlist_document::fixtures::seed_owned_dependency;
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, active_netlist_source_is_editable_in, begin_netlist_lifecycle_action_in,
     close_run_deck_snapshot, commit_netlist_lifecycle_action, open_run_deck_snapshot_in,

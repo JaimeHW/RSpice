@@ -2460,4 +2460,6 @@ fn refresh_diff_pips_from_baseline_in(model: &Model, runs: &mut RunsState) {
 }
 
 #[cfg(test)]
-pub(crate) mod tests;
+pub(crate) mod fixtures;
+#[cfg(test)]
+mod tests;
