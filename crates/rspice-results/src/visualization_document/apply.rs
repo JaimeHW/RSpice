@@ -493,12 +493,7 @@ impl VisualizationDocument {
                 ),
             });
         }
-        if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
-            return Err(VisualizationError::InvalidValue {
-                field: "measurement.traces",
-                message: format!("a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"),
-            });
-        }
+        validate_measurement_traces(trace_ids.len(), family.is_some())?;
         for trace_id in &trace_ids {
             self.require_trace_in_pane(*trace_id, pane_id)?;
         }
@@ -1902,14 +1897,7 @@ impl VisualizationDocument {
             if let Some(family) = &measurement.family {
                 family.validate(measurement.value)?;
             }
-            if measurement.trace_ids.is_empty()
-                || measurement.trace_ids.len() > MAX_ENTITY_REFERENCES
-            {
-                return Err(VisualizationError::InvalidValue {
-                    field: "measurement.traces",
-                    message: format!("a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"),
-                });
-            }
+            validate_measurement_traces(measurement.trace_ids.len(), measurement.family.is_some())?;
             for trace in &measurement.trace_ids {
                 self.require_trace_in_pane(*trace, measurement.pane_id)?;
             }

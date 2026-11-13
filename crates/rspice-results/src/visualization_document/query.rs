@@ -40,6 +40,24 @@ pub(super) fn validate_label(field: &'static str, value: &str) -> Result<(), Vis
     Ok(())
 }
 
+/// How many traces a measurement may name. A measurement reads at least one
+/// of its pane's traces, except a family measurement: a Monte Carlo
+/// population's is taken from each trial's own retained values, which are
+/// not traces of the pane, so it may name none.
+pub(super) fn validate_measurement_traces(
+    count: usize,
+    family: bool,
+) -> Result<(), VisualizationError> {
+    let least = usize::from(!family);
+    if count < least || count > MAX_ENTITY_REFERENCES {
+        return Err(VisualizationError::InvalidValue {
+            field: "measurement.traces",
+            message: format!("a measurement requires {least} to {MAX_ENTITY_REFERENCES} traces"),
+        });
+    }
+    Ok(())
+}
+
 pub(super) fn validate_optional_unit(
     field: &'static str,
     unit: Option<&str>,

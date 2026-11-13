@@ -207,10 +207,18 @@ pub(super) fn commit(
     let (_, pane_id) =
         super::super::persistent_document::reading_position(state.results_reads(), document_id)
             .ok_or_else(|| "The result document has no pane.".to_owned())?;
+    // A Monte Carlo population is measured on each trial's own values,
+    // which the pane does not draw as traces.
+    let per_trial = family.is_some()
+        && matches!(
+            analysis.family_metadata,
+            Some(AnalysisResultFamilyMetadata::MonteCarlo { .. })
+        );
     let trace_ids = pane_traces(
         project_document(state.results_reads(), document_id)?,
         pane_id,
         &expression,
+        per_trial,
     )?;
     let edit = match family {
         Some(family) => DocumentEdit::AddFamilyMeasurement {
@@ -444,35 +452,42 @@ fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> 
 }
 
 /// The pane's traces the measurement reads: each signal the expression
-/// names, or the pane's first trace when it names none.
+/// names, or the pane's first trace when it names none. A measurement of
+/// each trial's own values (`per_trial`) keeps the traces it names and may
+/// name none: its signals are the trials' variables and measurements, not
+/// traces of the pane.
 fn pane_traces(
     document: &VisualizationDocument,
     pane_id: PaneId,
     expression: &str,
+    per_trial: bool,
 ) -> Result<Vec<TraceId>, String> {
     let parsed = calculator::parser::try_parse(expression)
         .map_err(|error| format!("Parse error: {error}"))?;
     let mut signals = Vec::new();
     collect_signals(&parsed, &mut signals);
-    if signals.is_empty() {
-        return document
+    let traces = || {
+        document
             .traces()
             .iter()
-            .find(|trace| trace.pane_id == pane_id)
-            .map(|trace| vec![trace.id])
-            .ok_or_else(|| "The selected pane has no trace to keep a measurement on.".to_owned());
+            .filter(move |trace| trace.pane_id == pane_id)
+    };
+    if signals.is_empty() {
+        return match traces().next() {
+            Some(trace) => Ok(vec![trace.id]),
+            None if per_trial => Ok(Vec::new()),
+            None => Err("The selected pane has no trace to keep a measurement on.".to_owned()),
+        };
     }
-    signals
-        .iter()
-        .map(|signal| {
-            document
-                .traces()
-                .iter()
-                .find(|trace| trace.pane_id == pane_id && trace.label == *signal)
-                .map(|trace| trace.id)
-                .ok_or_else(|| format!("{signal} is not a trace of the selected pane."))
-        })
-        .collect()
+    let mut ids = Vec::new();
+    for signal in &signals {
+        match traces().find(|trace| trace.label == *signal) {
+            Some(trace) => ids.push(trace.id),
+            None if per_trial => {}
+            None => return Err(format!("{signal} is not a trace of the selected pane.")),
+        }
+    }
+    Ok(ids)
 }
 
 fn collect_signals(expression: &calculator::ast::CalculatorExpr, signals: &mut Vec<String>) {
@@ -627,5 +642,230 @@ mod tests {
         );
         let sigma = summary.statistic_value().unwrap();
         assert!((sigma - (10.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+    }
+
+    /// Three hundred Monte Carlo trials of an amplifier's `gain_dc`, drawn
+    /// normally about 40 dB with sigma 0.6 dB and retained as the trials'
+    /// sampled variable, in a completed run.
+    fn population_host() -> ResultsTestHost {
+        use crate::state::{MonteCarloVariableMetadata, SimulationRunLifecycle};
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut uniform = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let samples: Vec<f64> = (0..300)
+            .map(|_| {
+                let (u, v) = (uniform().max(f64::MIN_POSITIVE), uniform());
+                40.0 + 0.6 * (-2.0 * u.ln()).sqrt() * (std::f64::consts::TAU * v).cos()
+            })
+            .collect();
+        let n = samples.len() as f64;
+        let mean = samples.iter().sum::<f64>() / n;
+        let spread = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>();
+        let variable = MonteCarloVariableMetadata {
+            mean_confidence: None,
+            name: "gain_dc".to_owned(),
+            min: samples.iter().copied().fold(f64::INFINITY, f64::min),
+            max: samples.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            std_dev: (spread / (n - 1.0)).sqrt(),
+            mean,
+            samples,
+        };
+        let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
+            AnalysisResultFamilyMetadata::MonteCarlo {
+                seed: 40,
+                runs_requested: 300,
+                runs_completed: 300,
+                failures: 0,
+                all_converged: true,
+                variables: vec![variable],
+                member_measurements: Vec::new(),
+            },
+        );
+        let mut host = ResultsTestHost::default();
+        let run = host.model.simulation.start_run();
+        run.add_analysis(analysis);
+        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+            .unwrap();
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        host.model.simulation.complete_run();
+        host.workbench.workspace = Workspace::Results;
+        host
+    }
+
+    /// One frame of the result document, rasterized at twice its size.
+    fn picture(
+        host: &mut ResultsTestHost,
+        document: crate::product::ResultDocumentId,
+        mode: crate::ui::Mode,
+    ) -> (rspice_ui_kit::raster::Canvas, String) {
+        let size = egui::vec2(1100.0, 620.0);
+        let ctx = egui::Context::default();
+        crate::ui::Theme {
+            mode,
+            ..crate::ui::Theme::default()
+        }
+        .apply(&ctx);
+        let mut controller = crate::simulation::SimulationController::new();
+        let mut output = None;
+        for _ in 0..4 {
+            let input = rspice_ui_kit::raster::display_input(size, 2.0);
+            output = Some(ctx.run_ui(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    super::super::super::persistent_document::show(
+                        ui,
+                        &mut host.results_parts(),
+                        &mut controller,
+                        None,
+                        document,
+                    );
+                });
+            }));
+        }
+        let output = output.expect("a frame");
+        let mut text = String::new();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut text);
+        }
+        (rspice_ui_kit::raster::rasterize(&ctx, size, &output), text)
+    }
+
+    fn collect_text(shape: &egui::Shape, text: &mut String) {
+        match shape {
+            egui::Shape::Text(value) => {
+                text.push_str(value.galley.text());
+                text.push('\n');
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, text)),
+            _ => {}
+        }
+    }
+
+    /// The population's result document, one histogram pane of `gain_dc`,
+    /// with the yield against [39, 41.2] dB kept on it through the form.
+    fn kept_yield() -> (ResultsTestHost, crate::product::ResultDocumentId) {
+        use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayout};
+        let mut host = population_host();
+        host.results.analysis.histogram_state.selected = Some("gain_dc".to_owned());
+        host.results.analysis.histogram_state.bin_count = 24;
+        let document = {
+            let mut parts = host.results_parts();
+            super::super::super::create_document::open(&mut parts);
+            let draft = &mut *parts.create_result_document;
+            draft.family_id = ResultDocumentFamily::StatisticsAndYield.id().to_owned();
+            draft.viewer_id = "viewer-histogram".to_owned();
+            draft.layout_id = ResultDocumentLayout::SinglePane.id().to_owned();
+            super::super::super::create_document::commit(&mut parts).expect("a document")
+        };
+        let draft = MeasurementDraft {
+            expression: "gain_dc".to_owned(),
+            statistic: FamilyStatistic::Yield,
+            lower: "39".to_owned(),
+            upper: "41.2".to_owned(),
+            ..MeasurementDraft::default()
+        };
+        let closed = commit(&mut host.results_parts(), &draft);
+        assert!(matches!(closed, Ok(None)), "{:?}", closed.err());
+        (host, document)
+    }
+
+    /// A Monte Carlo pane draws no trace of a trial's variable, and the form
+    /// still keeps the yield it previewed: the document holds the family
+    /// measurement, naming no trace, with the pass count over the trials'
+    /// own samples, and the pane's evidence bar states it.
+    #[test]
+    fn a_monte_carlo_pane_keeps_the_yield_the_form_previewed() {
+        let (mut host, document) = kept_yield();
+        let samples = match &host
+            .model
+            .simulation
+            .active_analysis()
+            .unwrap()
+            .family_metadata
+        {
+            Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) => {
+                variables[0].samples.clone()
+            }
+            _ => unreachable!("a Monte Carlo analysis"),
+        };
+        let passed = samples
+            .iter()
+            .filter(|gain| (39.0..=41.2).contains(*gain))
+            .count() as u32;
+        let kept = host
+            .model
+            .workspace
+            .content
+            .visualization_document(document)
+            .unwrap()
+            .measurements()[0]
+            .clone();
+        assert!(kept.trace_ids.is_empty());
+        let family = kept.family.expect("a family measurement");
+        assert_eq!((family.members, family.measured), (300, 300));
+        assert_eq!(family.passed, Some(passed));
+        let share = 100.0 * f64::from(passed) / 300.0;
+        assert!((kept.value.unwrap() - share).abs() < 1e-12);
+
+        let text = picture(&mut host, document, crate::ui::Mode::Dark).1;
+        let line = format!("yield {passed}/300");
+        assert!(text.contains("gain_dc yield ="), "{text}");
+        assert!(text.contains(&line), "{text}");
+    }
+
+    /// The review pictures, written under `RSPICE_PICTURES` when it is set:
+    /// the population's document with its kept yield, and the same pane with
+    /// one bin's trials picked.
+    #[test]
+    #[ignore = "writes the review pictures"]
+    fn write_the_family_pictures() {
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let (mut host, document) = kept_yield();
+        let modes = [
+            (crate::ui::Mode::Dark, "dark"),
+            (crate::ui::Mode::Light, "light"),
+        ];
+        for (mode, suffix) in modes {
+            let (canvas, _) = picture(&mut host, document, mode);
+            let path = format!("{directory}/family-yield-{suffix}.png");
+            std::fs::write(&path, canvas.png(canvas.height())).expect("the picture is written");
+        }
+
+        // The trials of the bin at 40.5 dB, picked as a click on its bar
+        // picks them.
+        let reads = host.results_reads();
+        let histogram = super::super::super::hist::active_histogram(reads).expect("a histogram");
+        let bin = histogram.bin_of(40.5).expect("40.5 dB is binned");
+        let simulation = &reads.model.simulation;
+        let analysis = simulation.active_analysis().unwrap();
+        let key = super::super::super::AnalysisPresentationKey::new(
+            simulation.active_run().unwrap().dataset_id,
+            analysis,
+        );
+        let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+            &analysis.family_metadata
+        else {
+            unreachable!("a Monte Carlo analysis");
+        };
+        let rows: Vec<usize> = variables[0]
+            .samples
+            .iter()
+            .enumerate()
+            .filter(|(_, sample)| histogram.bin_of(**sample) == Some(bin))
+            .map(|(row, _)| row)
+            .collect();
+        *host.results.results.session.members.on(key) = rows;
+        for (mode, suffix) in modes {
+            let (canvas, _) = picture(&mut host, document, mode);
+            let path = format!("{directory}/histogram-picked-bin-{suffix}.png");
+            std::fs::write(&path, canvas.png(canvas.height())).expect("the picture is written");
+        }
     }
 }
