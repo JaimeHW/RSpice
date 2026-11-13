@@ -17,47 +17,47 @@ pub(crate) const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "11525a810208160953c7b0cc186fb9fd2a9346db366b5217547fdc6f0e8166c9",
+        fingerprint: "68ca5bc00a5de34276433908f9bcda6abcbcad1b32d47e340c147c154074d044",
     },
     StudioBaseline {
         name: "studio-excitations",
         page: SimulationPage::Excitations,
-        fingerprint: "f84375226b79dbd8bed7549779eee7837c155ffcfc447aa233fae84f1ab0f1dc",
+        fingerprint: "9f35eb70395dd23d40520c92e7094110f65176b3d07b986622973a7e13fb8436",
     },
     StudioBaseline {
         name: "studio-variables",
         page: SimulationPage::Variables,
-        fingerprint: "ecd4668ad35ae83b107c984de336572f04c320bfef762dffd3276f4cff0412ed",
+        fingerprint: "d579e82391f8b88503ce1b41ef3b6e549438f47c0799d45b7a2f6d2916dbc76f",
     },
     StudioBaseline {
         name: "studio-outputs",
         page: SimulationPage::Outputs,
-        fingerprint: "69210575d312229df9cf8c5a64691e1e11eb62ee4b8e0f5c315f784d96e796a7",
+        fingerprint: "7727faa5b616929fd0f9eadb1975c263bbb8eab74c89344c5658e7bfe93b2696",
     },
     StudioBaseline {
         name: "studio-specifications",
         page: SimulationPage::Specifications,
-        fingerprint: "eda43e5163dc325b52524075dc53b48a8c29c228b76d8cd6ac860cca7b1c6100",
+        fingerprint: "6b5c7511be459de36fe19331209a7bef37b33e1b2878d376bb6324f41fba74f5",
     },
     StudioBaseline {
         name: "studio-run-set",
         page: SimulationPage::RunSet,
-        fingerprint: "760f3aebb6e5da01ba74336ba3a51f4a1908b6d06a91f262a03c36845020cbd7",
+        fingerprint: "e48c546aa22615783d3c728dcd0d54330e38f28098bfc3567192931f277b6588",
     },
     StudioBaseline {
         name: "studio-models",
         page: SimulationPage::Models,
-        fingerprint: "2c901b6b98338a7da2c72ff6c56ac624a254ca8cc59caead46ebc5f5056d14f7",
+        fingerprint: "a12633e9281a251972c64ef6e998319fca1660e03b21158419c3a0da9f34496c",
     },
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "ba9fb2d2b166e280f8eef76f7a3490d46eacfa6583213cffa6b99b78eb6b9a7c",
+        fingerprint: "0965c98875e854f630c5698a9abb7570c6e3a253d4e27a0394111fc79fbce4c8",
     },
     StudioBaseline {
         name: "studio-save",
         page: SimulationPage::Save,
-        fingerprint: "71820118ead56a1a4b6fd735f4b247e4f14b887c1312a06bf5bd5c160185ca93",
+        fingerprint: "250abe4ae813f366ef7079e0f346c106f14dda1ceeec1072d81f472fc7520d77",
     },
 ];
 
