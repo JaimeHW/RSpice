@@ -322,6 +322,9 @@ fn function_unit(
         "db" | "gainmargin" => named("dB"),
         "phase" | "phase_deg" | "phasemargin" => named("°"),
         "phase_rad" => named("rad"),
+        // A bus word's integer value and the levels 0 and 1 of a logic
+        // signal are plain numbers, whatever the converted signal reads in.
+        "analog" | "digital" => Ok(Unit::none()),
         "sqrt" => {
             let unit = argument(0)?;
             unit.powf(0.5)
@@ -485,7 +488,7 @@ mod tests {
     /// The units engineers write for these expressions.
     #[test]
     fn unit_algebra_states_the_unit_an_engineer_writes() {
-        let table: [(&str, &str, &str); 46] = [
+        let table: [(&str, &str, &str); 48] = [
             ("V(out)", "s", "V"),
             ("V(out)/V(in)", "s", ""),
             ("V(out)*I(vdd)", "s", "W"),
@@ -535,6 +538,9 @@ mod tests {
             ("sqrt(onoise/inoise)", "Hz", "Ω"),
             ("integ(onoise)", "Hz", "V²"),
             ("sqrt(integ(onoise))", "Hz", "V"),
+            // A converted bus word or logic level is a plain number.
+            ("analog(D(code))", "s", ""),
+            ("digital(V(clk), 0.9)", "s", ""),
         ];
         for (text, x, expected) in table {
             assert_eq!(unit_of(text, x).as_deref(), Ok(expected), "{text} over {x}");

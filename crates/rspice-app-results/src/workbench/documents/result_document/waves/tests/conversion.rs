@@ -317,6 +317,48 @@ fn a_traces_menu_reads_it_as_logic() {
     );
 }
 
+/// The staircase is the bus word's integer value, a plain number: it opens a
+/// pane of its own instead of borrowing the volts axis of VIN and TOP or
+/// being flagged as a value with no unit, and the `digital()` lane beside it
+/// is drawn on no pane.
+#[test]
+fn the_staircase_has_a_pane_of_its_own() {
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, "analog(D(code))");
+    add_expression(&mut state, key, CLOCK);
+    let ctx = theme_context();
+    // The first frame evaluates the expressions, the second routes them with
+    // what evaluation found.
+    frame(&ctx, &mut state, Vec::new());
+    frame(&ctx, &mut state, Vec::new());
+    let models = strip(&mut state);
+    let panes: Vec<(String, bool, usize, Vec<usize>)> = models[0]
+        .unit_panes()
+        .iter()
+        .map(|pane| {
+            (
+                pane.axis_unit().to_owned(),
+                pane.unlabeled,
+                pane.traces.len(),
+                pane.expressions.clone(),
+            )
+        })
+        .collect();
+    assert!(
+        panes.contains(&("V".to_owned(), false, 2, vec![])),
+        "VIN and TOP keep the volts pane to themselves: {panes:?}"
+    );
+    let staircase: Vec<_> = panes
+        .iter()
+        .filter(|(.., expressions)| !expressions.is_empty())
+        .collect();
+    assert_eq!(
+        staircase,
+        [&(String::new(), false, 0, vec![0])],
+        "only the staircase is on a pane, and it is a plain number's"
+    );
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the analog clock with its `digital()` lane, the `code` bus as a staircase
 /// beside the DAC's top plate, the bus with named words, and the octal and
