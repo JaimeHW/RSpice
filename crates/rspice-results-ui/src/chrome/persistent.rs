@@ -222,8 +222,9 @@ fn measurement_text(
 }
 
 /// The most failing members a family measurement names before it counts
-/// the rest.
-const NAMED_FAILURES: usize = 4;
+/// the rest: the bar is one line, and the population's own views list
+/// every trial.
+const NAMED_FAILURES: usize = 2;
 
 /// What a family measurement's members added up to, after its value: how
 /// many were measured, the distribution, and the yield against its limits
@@ -249,11 +250,13 @@ fn family_text(family: &FamilyMeasurementSummary, significant_digits: usize) -> 
             (None, Some(upper)) => format!("\u{2264} {}", si(upper)),
             (None, None) => String::new(),
         };
-        parts.push(format!(
-            "yield {passed}/{} ({}) {limits}",
-            family.members,
-            percent(share)
-        ));
+        // A kept yield already leads the line with its percentage.
+        let share = if family.statistic == FamilyStatistic::Yield {
+            String::new()
+        } else {
+            format!(" ({})", percent(share))
+        };
+        parts.push(format!("yield {passed}/{}{share} {limits}", family.members));
         if !family.failing.is_empty() {
             let mut named = family.failing[..family.failing.len().min(NAMED_FAILURES)].join(", ");
             if family.failing.len() > NAMED_FAILURES {
