@@ -9,7 +9,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -66,15 +66,16 @@ struct ActiveExecution {
     receiver: mpsc::Receiver<WorkerEnvelope>,
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 static ACTIVE_EXECUTION: OnceLock<Mutex<Option<ActiveExecution>>> = OnceLock::new();
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn active_execution() -> &'static Mutex<Option<ActiveExecution>> {
     ACTIVE_EXECUTION.get_or_init(|| Mutex::new(None))
 }
 
-/// Under test, every test thread owns its own operation.
+/// Under test, every test thread owns its own operation: in this crate's tests
+/// and in the application's, which build this crate with `test-support`.
 ///
 /// libtest runs each test on its own thread in one process, and every app
 /// frame drawn with the hardcopy dialog closed cancels the active operation.
@@ -82,7 +83,7 @@ fn active_execution() -> &'static Mutex<Option<ActiveExecution>> {
 /// operation another test is asserting on, and a test that then failed while
 /// holding the lock would poison it for every test after. The worker never
 /// touches the owner, so on its own thread a test meets production's contract.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn active_execution() -> &'static Mutex<Option<ActiveExecution>> {
     thread_local! {
         // Leaked once per test thread, so it lends out as `'static` exactly

@@ -10,7 +10,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -189,10 +189,10 @@ struct ActiveFinalization {
     receiver: mpsc::Receiver<WorkerEnvelope>,
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 static ACTIVE_FINALIZATION: OnceLock<Mutex<Option<ActiveFinalization>>> = OnceLock::new();
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn active_finalization() -> &'static Mutex<Option<ActiveFinalization>> {
     ACTIVE_FINALIZATION.get_or_init(|| Mutex::new(None))
 }
@@ -201,7 +201,7 @@ fn active_finalization() -> &'static Mutex<Option<ActiveFinalization>> {
 /// the rendering owner gives: any app frame drawn with the hardcopy dialog
 /// closed cancels the active finalization, and libtest runs each test on its
 /// own thread in one process.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn active_finalization() -> &'static Mutex<Option<ActiveFinalization>> {
     thread_local! {
         static ACTIVE_FINALIZATION: &'static Mutex<Option<ActiveFinalization>> =
