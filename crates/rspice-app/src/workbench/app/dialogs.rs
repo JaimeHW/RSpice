@@ -34,7 +34,7 @@ pub(in crate::workbench) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
 pub(in crate::workbench) mod hierarchy;
-pub(in crate::workbench) mod library;
+pub(crate) mod library;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
 pub(in crate::workbench) mod object_properties;
@@ -53,8 +53,8 @@ pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::revi
 pub(in crate::workbench) mod rule_setup;
 pub(in crate::workbench) mod selection;
 pub(in crate::workbench) mod source_document;
-pub(in crate::workbench) mod source_find;
-pub(in crate::workbench) mod source_language_tools;
+pub(crate) mod source_find;
+pub(crate) mod source_language_tools;
 pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
 pub(in crate::workbench) mod symbol_definition;

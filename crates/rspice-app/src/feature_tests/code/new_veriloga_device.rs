@@ -1,10 +1,13 @@
 //! What New Verilog-A device… refuses, and what it makes when it does not.
 
-use super::*;
 use crate::state::{
-    Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
+    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
+    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
 };
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::library::new_veriloga_device::{
+    Draft, Line, cell_line, draft, open_new_veriloga_device_form, ports_line,
+};
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
 

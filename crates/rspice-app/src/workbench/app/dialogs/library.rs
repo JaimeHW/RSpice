@@ -5,7 +5,7 @@
 //! each is bound to the exact catalog revision it opened against and refuses
 //! to commit against a catalog that moved underneath it.
 
-pub(in crate::workbench) mod new_veriloga_device;
+pub(crate) mod new_veriloga_device;
 mod shared;
 pub(in crate::workbench) use shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 pub(in crate::workbench) mod veriloga_import;

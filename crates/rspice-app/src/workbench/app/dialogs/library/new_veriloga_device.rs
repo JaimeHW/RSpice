@@ -98,7 +98,7 @@ pub(crate) fn new_veriloga_device_available_in(model: &Model) -> bool {
 
 /// What the typed draft is, measured against the live catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Draft {
+pub(crate) enum Draft {
     /// No cell name yet. The primary is off and the form says nothing.
     Empty,
     /// A refusal the reader has to fix.
@@ -109,7 +109,7 @@ enum Draft {
 
 /// The tests' form of [`draft_in`], over the application state.
 #[cfg(test)]
-fn draft(state: &AppState) -> Draft {
+pub(crate) fn draft(state: &AppState) -> Draft {
     draft_in(
         &state.code.new_veriloga_device,
         &state.model,
@@ -208,7 +208,7 @@ fn typed_ports(typed: &str, messages: &MessageCatalog) -> Result<Vec<PortSpec>, 
 
 /// What one field's line says, owned for the frame it is drawn in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Line {
+pub(crate) enum Line {
     /// Nothing declared yet: the slot keeps its height and stays blank.
     Blank,
     Derived(String),
@@ -228,7 +228,11 @@ impl Line {
 /// The line under Cell name: blank while there is none (the footer says
 /// what Create waits for), the module the cell's view will declare, or why
 /// the name is refused.
-fn cell_line(form: &NewVerilogADeviceFormState, model: &Model, messages: &MessageCatalog) -> Line {
+pub(crate) fn cell_line(
+    form: &NewVerilogADeviceFormState,
+    model: &Model,
+    messages: &MessageCatalog,
+) -> Line {
     match typed_cell(form, model, messages) {
         None => Line::Blank,
         Some(Err(refusal)) => Line::Error(refusal),
@@ -241,7 +245,7 @@ fn cell_line(form: &NewVerilogADeviceFormState, model: &Model, messages: &Messag
 
 /// The line under Ports: how many the generated symbol starts with, or the
 /// entry that is refused.
-fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
+pub(crate) fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
     match typed_ports(typed, messages) {
         Err(refusal) => Line::Error(refusal),
         Ok(ports) => Line::Derived(match ports.len() {
@@ -258,7 +262,7 @@ fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
 /// Draw New Verilog-A device… while it is open, over the form, the model and
 /// the reader's messages. Returns whether the reader asked to create a draft
 /// that is ready on this frame's edits.
-pub(in crate::workbench) fn render_new_veriloga_device_form(
+pub(crate) fn render_new_veriloga_device_form(
     form: &mut NewVerilogADeviceFormState,
     model: &Model,
     messages: &MessageCatalog,
@@ -410,6 +414,3 @@ pub(in crate::workbench) fn publish_new_veriloga_device(
         record,
     })
 }
-
-#[cfg(test)]
-mod tests;
