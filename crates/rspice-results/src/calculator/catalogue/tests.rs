@@ -137,7 +137,7 @@ fn a_catalogued_call_reads_back_into_its_fields() {
         "rms(V(a)) * 2",
         "max(V(a)) - min(V(b))",
         "deriv(V(a))",
-        "rms(V(a), 1)",
+        "rms(V(a), 1, 2, 3)",
         "cross(V(a), 1, 1, \"rising)",
     ] {
         assert!(

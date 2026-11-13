@@ -139,6 +139,9 @@ pub fn show(
             }
             if let Some(spec) = draft.function {
                 rows.derived_line(spec.description);
+                // One field per argument, even for a draft a host built with
+                // fewer: a trailing optional argument is an empty field.
+                draft.arguments.resize(spec.arguments.len(), String::new());
                 let mut edited = false;
                 for (index, argument) in spec.arguments.iter().enumerate() {
                     edited |= argument_row(rows, spec, index, argument, draft, preview);

@@ -183,7 +183,8 @@ mod tests {
         );
         let output = frame(&ctx, &mut host, Vec::new());
         let filled = draft(&host);
-        assert_eq!(filled.arguments, ["V(out)"]);
+        // rms's window ends are optional, and stay empty.
+        assert_eq!(filled.arguments, ["V(out)", "", ""]);
         assert_eq!(filled.expression, "rms(V(out))");
         assert_eq!(filled.picking, None);
         assert_eq!(host.results.results.session.trace_pick, TracePick::Off);

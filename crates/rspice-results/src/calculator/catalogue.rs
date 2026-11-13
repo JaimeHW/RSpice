@@ -131,6 +131,19 @@ const fn edge_arguments(initial: &'static str, last: &'static str) -> [ArgumentS
     ]
 }
 
+/// `(x, from, to)`, which the level measures share: the window is the whole
+/// trace unless both ends are given.
+const LEVEL_ARGUMENTS: [ArgumentSpec; 3] = [
+    SIGNAL,
+    arg(
+        "Window from",
+        "from",
+        Number,
+        Derived("the start of the trace"),
+    ),
+    arg("Window to", "to", Number, Derived("the end of the trace")),
+];
+
 const RISE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("signal minimum", "signal maximum");
 const FALL_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("signal maximum", "signal minimum");
 
@@ -141,7 +154,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "mean over the window",
         description: "The mean of the signal, integrated over the window and divided by its width.",
-        arguments: &[SIGNAL],
+        arguments: &LEVEL_ARGUMENTS,
     },
     MeasureSpec {
         name: "rms",
@@ -149,7 +162,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "root mean square",
         description: "The root of the mean square, integrated over the window.",
-        arguments: &[SIGNAL],
+        arguments: &LEVEL_ARGUMENTS,
     },
     MeasureSpec {
         name: "min",
@@ -157,7 +170,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "lowest sample",
         description: "The lowest value the signal takes in the window.",
-        arguments: &[SIGNAL],
+        arguments: &LEVEL_ARGUMENTS,
     },
     MeasureSpec {
         name: "max",
@@ -165,7 +178,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "highest sample",
         description: "The highest value the signal takes in the window.",
-        arguments: &[SIGNAL],
+        arguments: &LEVEL_ARGUMENTS,
     },
     MeasureSpec {
         name: "pp",
@@ -173,7 +186,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "peak to peak",
         description: "The highest value less the lowest.",
-        arguments: &[SIGNAL],
+        arguments: &LEVEL_ARGUMENTS,
     },
     MeasureSpec {
         name: "yval",

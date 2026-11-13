@@ -152,26 +152,47 @@ fn db(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 
 // --- Aggregates over the x-window (Waveform -> Scalar) ---
 
+/// A level measure's window: `(x)` reads the whole trace, `(x, from, to)`
+/// the part of it between two points of the x-axis, its ends interpolated
+/// on the trace as drawn.
+fn level_window(name: &str, args: &[CalcValue]) -> Result<Option<(f64, f64)>, EvaluationError> {
+    match args.len() {
+        1 => Ok(None),
+        3 => Ok(Some((
+            scalar_arg(name, "window start", &args[1])?,
+            scalar_arg(name, "window end", &args[2])?,
+        ))),
+        2 => Err(EvaluationError::MathError(format!(
+            "{name} reads a window between two points; give both its start and its end"
+        ))),
+        actual => Err(EvaluationError::ArgCountMismatch {
+            func: name.to_owned(),
+            expected: 3,
+            actual,
+        }),
+    }
+}
+
 fn avg(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("avg", &args, 1)?;
+    let window = level_window("avg", &args)?;
     match &args[0] {
         CalcValue::Scalar(s) if !s.is_finite() => Err(domain_error("avg", "non-finite value")),
         // A DC value is its own mean.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
         CalcValue::Waveform(x, y) => {
-            interval_statistics("avg", x, y).map(|stats| CalcValue::Scalar(stats.mean))
+            interval_statistics("avg", x, y, window).map(|stats| CalcValue::Scalar(stats.mean))
         }
     }
 }
 
 fn rms(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("rms", &args, 1)?;
+    let window = level_window("rms", &args)?;
     match &args[0] {
         CalcValue::Scalar(s) if !s.is_finite() => Err(domain_error("rms", "non-finite value")),
         // The RMS of a DC value is its magnitude, not the signed value.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(s.abs())),
         CalcValue::Waveform(x, y) => {
-            interval_statistics("rms", x, y).map(|stats| CalcValue::Scalar(stats.rms))
+            interval_statistics("rms", x, y, window).map(|stats| CalcValue::Scalar(stats.rms))
         }
     }
 }
@@ -180,8 +201,9 @@ fn interval_statistics(
     name: &str,
     x: &[f64],
     y: &[f64],
+    window: Option<(f64, f64)>,
 ) -> Result<crate::measurements::IntervalStatistics, EvaluationError> {
-    crate::measurements::measure_interval(x, y, None)
+    crate::measurements::measure_interval(x, y, window)
         .map_err(|error| EvaluationError::MathError(format!("{name}: {error}")))
 }
 // --- Transformations (Waveform -> Waveform) ---
@@ -380,32 +402,42 @@ pub(super) fn extremes(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationEr
     }
 }
 
-fn min(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("min", &args, 1)?;
-    match &args[0] {
-        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
-        CalcValue::Waveform(_, y) => Ok(CalcValue::Scalar(extremes("min", y)?.0)),
+/// The lowest and highest value over a level measure's window: the
+/// retained samples of a whole trace, or a window's samples and its
+/// interpolated ends.
+fn windowed_extremes(
+    name: &str,
+    args: &[CalcValue],
+) -> Result<Option<(f64, f64)>, EvaluationError> {
+    let window = level_window(name, args)?;
+    match (&args[0], window) {
+        (CalcValue::Scalar(_), _) => Ok(None),
+        (CalcValue::Waveform(_, y), None) => extremes(name, y).map(Some),
+        (CalcValue::Waveform(x, y), Some(window)) => {
+            interval_statistics(name, x, y, Some(window)).map(|stats| Some((stats.min, stats.max)))
+        }
     }
 }
 
+fn min(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
+    Ok(CalcValue::Scalar(match windowed_extremes("min", &args)? {
+        Some((low, _)) => low,
+        None => scalar_arg("min", "value", &args[0])?,
+    }))
+}
+
 fn max(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("max", &args, 1)?;
-    match &args[0] {
-        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
-        CalcValue::Waveform(_, y) => Ok(CalcValue::Scalar(extremes("max", y)?.1)),
-    }
+    Ok(CalcValue::Scalar(match windowed_extremes("max", &args)? {
+        Some((_, high)) => high,
+        None => scalar_arg("max", "value", &args[0])?,
+    }))
 }
 
 /// `pp(w)` — peak-to-peak excursion.
 fn pp(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("pp", &args, 1)?;
-    match &args[0] {
-        CalcValue::Scalar(_) => Ok(CalcValue::Scalar(0.0)),
-        CalcValue::Waveform(_, y) => {
-            let (low, high) = extremes("pp", y)?;
-            Ok(CalcValue::Scalar(high - low))
-        }
-    }
+    Ok(CalcValue::Scalar(
+        windowed_extremes("pp", &args)?.map_or(0.0, |(low, high)| high - low),
+    ))
 }
 
 /// Linear interpolation inside the swept range. Callers check the range
@@ -2051,5 +2083,31 @@ mod tests {
                 "{name} of an empty series must be an error"
             );
         }
+    }
+
+    /// A level measure reads a window between two points of the x-axis,
+    /// its ends interpolated: a ramp 0..10 over 0..10 s averages 5 between
+    /// 4 and 6 s, peaks at 6, bottoms at 4 and spans 2, whatever samples
+    /// fall at the ends.
+    #[test]
+    fn level_measures_read_a_window_with_interpolated_ends() {
+        let ramp = || wave(vec![0.0, 3.0, 7.0, 10.0], vec![0.0, 3.0, 7.0, 10.0]);
+        let window = |name: &str| {
+            scalar_of(
+                name,
+                vec![ramp(), CalcValue::Scalar(4.0), CalcValue::Scalar(6.0)],
+            )
+        };
+        assert!((window("avg") - 5.0).abs() < 1e-12);
+        assert!((window("min") - 4.0).abs() < 1e-12);
+        assert!((window("max") - 6.0).abs() < 1e-12);
+        assert!((window("pp") - 2.0).abs() < 1e-12);
+        // sqrt of the mean of t^2 over [4, 6]: (216 - 64) / 3 / 2.
+        assert!((window("rms") - (152.0_f64 / 6.0).sqrt()).abs() < 1e-12);
+        // Without a window the whole trace is read.
+        assert!((scalar_of("avg", vec![ramp()]) - 5.0).abs() < 1e-12);
+        assert!((scalar_of("pp", vec![ramp()]) - 10.0).abs() < 1e-12);
+        // A window needs both its ends.
+        assert!(call("avg", vec![ramp(), CalcValue::Scalar(4.0)]).is_err());
     }
 }

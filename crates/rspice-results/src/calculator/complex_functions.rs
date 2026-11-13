@@ -66,12 +66,20 @@ pub(super) fn dispatch(name: &str, args: Vec<CalcValue>) -> Result<CalcValue, Ev
         )));
     }
     if matches!(name.as_str(), "avg" | "average" | "rms") {
-        count(&name, &args, 1)?;
-        let value = args.into_iter().next().unwrap().into_complex();
+        // The trace, and optionally the window it is read over.
+        if args.len() != 3 {
+            count(&name, &args, 1)?;
+        }
+        let mut args = args.into_iter();
+        let value = args.next().unwrap().into_complex();
+        let window = args
+            .map(CalcValue::into_real)
+            .collect::<Result<Vec<_>, _>>()?;
         let (real, imag) = components(value);
         let component_function = if name == "average" { "avg" } else { &name };
-        let real = FunctionRegistry::dispatch(component_function, vec![real])?;
-        let imag = FunctionRegistry::dispatch(component_function, vec![imag])?;
+        let with_window = |component| std::iter::once(component).chain(window.clone()).collect();
+        let real = FunctionRegistry::dispatch(component_function, with_window(real))?;
+        let imag = FunctionRegistry::dispatch(component_function, with_window(imag))?;
         let (RealValue::Scalar(real), RealValue::Scalar(imag)) = (real, imag) else {
             return Err(EvaluationError::TypeMismatch(
                 "aggregate did not return scalars".to_owned(),
