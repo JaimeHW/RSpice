@@ -12,7 +12,6 @@ rust-version.workspace = true
 # to rspice-core-base, and rspice-core forwards every one of them here.
 [features]
 default = ["faer-parallel", "parallel"]
-wasm = ["rspice-core-base/wasm"]
 parallel = ["rspice-core-base/parallel"]
 faer-parallel = [
     "rspice-veriloga-runtime/faer-parallel",

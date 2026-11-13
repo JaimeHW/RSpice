@@ -69,7 +69,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]

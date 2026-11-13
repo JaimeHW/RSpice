@@ -29,7 +29,6 @@ serde_json.workspace = true
 web-time.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["wasm"] }
 wasm-bindgen.workspace = true
 js-sys.workspace = true
 serde-wasm-bindgen = "0.6"

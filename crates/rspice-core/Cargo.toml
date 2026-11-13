@@ -12,11 +12,6 @@ rust-version.workspace = true
 # configuration both exercise the fast paths;
 # the browser builds opt out via default-features = false.
 default = ["faer-parallel", "parallel"]
-wasm = [
-    "rspice-core-base/wasm",
-    "rspice-core-netlist/wasm",
-    "rspice-core-devices/wasm",
-]
 parallel = [
     "rayon",
     "rspice-core-base/parallel",

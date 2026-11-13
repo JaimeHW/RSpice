@@ -216,9 +216,8 @@ shooting `.PSS` and takes none.
 
 | Flag | Effect |
 | :--- | :--- |
-| `parallel` | On by default. Rayon for the parallel paths in `engine/`, `circuit/` and `device/` |
+| `parallel` | On by default. Rayon for the parallel paths in `engine/`, `circuit/` and `device/`; the browser builds turn it off with `default-features = false` |
 | `faer-parallel` | On by default. faer's Rayon-parallel factorization, forwarded to `rspice-matrix` and `rspice-veriloga-runtime` |
-| `wasm` | States the browser build to every crate of the family. The browser builds enable it with `default-features = false`, which also drops Rayon |
 | `veriloga` | Runtime Verilog-AMS devices through `rspice-veriloga`'s bytecode interpreter: a deck's `.va`, `.veriloga`, `.vams`, `.hdl` or `.verilog` source compiles at elaboration; `define=NAME[=VALUE]` on the line (repeatable) predefines a macro for that source alone, and the same file under other macros compiles again. Native targets cache compiled models on disk under the platform cache directory, or `RSPICE_VERILOGA_CACHE_DIR` |
 | `veriloga-native` | Implies `veriloga`. RSpice's native JIT: a requested native device is fully JIT-compiled or refused with a typed construction error, never run on bytecode |
 | `veriloga-wasm-jit` | Implies `veriloga`. Browser JIT: the owning Web Worker compiles and instantiates the module, while this crate keeps the authenticated artifacts and the synchronous solver integration |
@@ -245,7 +244,7 @@ cargo build -p rspice-core \
 hence the separate `--lib` run, and `doctest = false` leaves rustdoc examples
 checked by review. The WebAssembly suites run under `wasm-bindgen-test-runner`
 with `--target wasm32-unknown-unknown --release --no-default-features
---features wasm,veriloga-wasm-jit`. The solver-kernel benchmark measures
+--features veriloga-wasm-jit`. The solver-kernel benchmark measures
 `rspice-matrix` directly: `cargo run --release -p rspice-bench -- klu`.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

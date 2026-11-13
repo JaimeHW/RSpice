@@ -206,12 +206,11 @@ winresource = "0.1"
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu_no_default_features", "persistence", "web_screen_reader"] }
 wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
 
-# No rayon on wasm; the "wasm" feature states the browser build. The
-# interactive image retains portable Verilog-A artifacts and validation, while
-# secondary-module emission and verification are owned exclusively by the
-# `rspice-worker` package. Keeping that ownership explicit prevents the
+# No rayon on wasm. The interactive image retains portable Verilog-A
+# artifacts and validation, while secondary-module emission and verification
+# are owned exclusively by the `rspice-worker` package. Keeping that ownership explicit prevents the
 # secondary-module emitter and verifier from being duplicated in both images.
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 wasm-bindgen = "0.2"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }

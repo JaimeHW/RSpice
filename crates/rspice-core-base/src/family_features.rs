@@ -20,7 +20,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct FamilyFeatures {
-    pub wasm: bool,
     pub parallel: bool,
     pub faer_parallel: bool,
     pub veriloga: bool,
@@ -122,7 +121,6 @@ macro_rules! family_features {
     };
     ($($dependency:ident),* $(,)?) => {
         $crate::family_features!(@define [$($dependency)*] {
-            wasm "wasm"
             parallel "parallel"
             faer_parallel "faer-parallel"
             veriloga "veriloga"
@@ -262,7 +260,6 @@ mod tests {
     #[test]
     fn the_crate_root_states_the_features_of_this_build() {
         let stated = crate::FAMILY_FEATURES;
-        assert_eq!(stated.wasm, cfg!(feature = "wasm"));
         assert_eq!(stated.parallel, cfg!(feature = "parallel"));
         assert_eq!(stated.faer_parallel, cfg!(feature = "faer-parallel"));
         assert_eq!(stated.veriloga, cfg!(feature = "veriloga"));
@@ -296,8 +293,7 @@ mod tests {
         if cfg!(all(
             feature = "default",
             not(feature = "veriloga"),
-            not(feature = "veriloga-builtins-base"),
-            not(feature = "wasm")
+            not(feature = "veriloga-builtins-base")
         )) {
             assert_eq!(
                 format!("{stated:?}").matches(": true").count(),

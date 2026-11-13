@@ -1001,7 +1001,7 @@ class CiConfigurationTests(unittest.TestCase):
             ("rspice-core-devices", "--no-default-features\n"),
             (
                 "rspice-core",
-                "--no-default-features --features wasm,veriloga,veriloga-wasm-jit",
+                "--no-default-features --features veriloga,veriloga-wasm-jit",
             ),
             ("rspice-conformance", "--no-default-features\n"),
             ("rspice-matrix", "--no-default-features\n"),

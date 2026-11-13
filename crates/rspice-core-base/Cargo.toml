@@ -12,7 +12,6 @@ rust-version.workspace = true
 # one of them here. A feature this crate does not read is an empty list.
 [features]
 default = ["faer-parallel", "parallel"]
-wasm = []
 parallel = []
 faer-parallel = [
     "rspice-matrix/faer-parallel",

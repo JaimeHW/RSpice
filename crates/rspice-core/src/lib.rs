@@ -57,8 +57,8 @@
 //!
 //! ## Feature flags
 //!
-//! `parallel` and `faer-parallel` are on by default. `wasm` and the
-//! Verilog-A features are opt-in: `veriloga`, `veriloga-native`,
+//! `parallel` and `faer-parallel` are on by default. The Verilog-A
+//! features are opt-in: `veriloga`, `veriloga-native`,
 //! `veriloga-wasm-jit`, and the generated built-ins (`veriloga-builtins-base`,
 //! one `veriloga-model-*` flag per model, `veriloga-builtins-noise`, and the
 //! `veriloga-builtins-models` and `veriloga-builtins` umbrellas). The crate
