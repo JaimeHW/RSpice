@@ -2,3 +2,4 @@
 
 mod configuration_inspector;
 mod configuration_page;
+mod library_deletion;

@@ -1194,7 +1194,7 @@ impl AppState {
 /// editor's reload of the schematic now in front, the retirement of
 /// everything run against the previous design, and the Verilog-A compile
 /// evidence that names a source whose owner moved.
-pub(in crate::workbench) fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePruned) {
+pub(crate) fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePruned) {
     let WorkspacePruned {
         prompt,
         restore_active_schematic,
@@ -1215,7 +1215,7 @@ pub(in crate::workbench) fn apply_workspace_pruned(state: &mut AppState, pruned:
 
 /// Drop the Verilog-A compile evidence, the receipt or the compile still
 /// waiting, that names one of `sources`: it no longer describes its source.
-pub(in crate::workbench) fn void_veriloga_evidence(
+pub(crate) fn void_veriloga_evidence(
     state: &mut AppState,
     sources: &[crate::state::ProjectSourceId],
 ) {
@@ -1594,8 +1594,12 @@ mod tests {
                 "state.prompt(prompt)",
                 "state.restore_active_schematic_from_workspace()",
                 "state.clear_design_execution_context()",
-                "*veriloga = Default::default()",
+                "void_veriloga_evidence(state, &voided)",
             ],
+        );
+        assert_runs_in_order(
+            "void_veriloga_evidence",
+            &["*veriloga = Default::default()"],
         );
     }
 

@@ -12,7 +12,7 @@ use super::commands::{ProjectCommand, ProjectRequest};
 
 /// Runs `call` in the project feature's context over `app`, lending it the
 /// application's parts as the frame does.
-pub(super) fn with_cx<R>(
+pub(crate) fn with_cx<R>(
     app: &mut RSpiceApp,
     call: impl FnOnce(&mut Cx<'_, ProjectFeature>) -> R,
 ) -> R {

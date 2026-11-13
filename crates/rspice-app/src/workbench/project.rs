@@ -7,7 +7,7 @@
 
 pub(crate) mod commands;
 pub(crate) mod configuration_state;
-mod library_dialogs;
+pub(crate) mod library_dialogs;
 mod new_project;
 mod revision_history;
 pub(crate) mod workspace_state;
@@ -639,4 +639,4 @@ impl CommandSet for ProjectCommand {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

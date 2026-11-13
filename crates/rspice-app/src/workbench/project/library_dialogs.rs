@@ -3,7 +3,7 @@
 //! what each commits through the model's library catalog.
 
 mod cell_ops;
-mod deletion;
+pub(crate) mod deletion;
 mod library_ops;
 mod new_cell;
 mod new_view;
@@ -15,7 +15,7 @@ pub(super) use new_view::new_view_target;
 /// handed to the shell ends showing what the change carried out in place
 /// did.
 #[cfg(test)]
-fn shown(app: &crate::workbench::RSpiceApp) -> (Option<String>, Vec<String>, String) {
+pub(crate) fn shown(app: &crate::workbench::RSpiceApp) -> (Option<String>, Vec<String>, String) {
     (
         app.state.prompt_text().map(str::to_owned),
         app.state
@@ -31,7 +31,7 @@ fn shown(app: &crate::workbench::RSpiceApp) -> (Option<String>, Vec<String>, Str
 /// What a catalog change published: the project's library receipts, the
 /// catalog's revision and the design's execution epoch.
 #[cfg(test)]
-fn published(
+pub(crate) fn published(
     app: &crate::workbench::RSpiceApp,
 ) -> (Vec<(crate::state::ProjectLibraryMutation, u64)>, u64, u64) {
     let model = &app.state.model;
@@ -57,7 +57,7 @@ fn published(
 /// Beside what [`shown`] holds, the workspace in front, whether the
 /// Verilog-A receipt is kept, and the documents a creation seeded.
 #[cfg(test)]
-fn in_front(
+pub(crate) fn in_front(
     app: &crate::workbench::RSpiceApp,
 ) -> (crate::workbench::state::Workspace, bool, Vec<String>) {
     let mut buffers = app
