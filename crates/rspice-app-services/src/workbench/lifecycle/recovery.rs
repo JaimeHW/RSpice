@@ -32,8 +32,8 @@ use crate::state::write_policy::LocalSafeModeOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::recovery_checkpoint::{
     CheckpointBinding, CheckpointInspection, CheckpointOwnership, SourceSnapshotRelation,
-    autosave_checkpoint_path, discard_bound_checkpoint, inspect_checkpoint, read_bound_checkpoint,
-    read_source_snapshot,
+    discard_bound_checkpoint, inspect_checkpoint, is_checkpoint_generation_of,
+    read_bound_checkpoint, read_source_snapshot,
 };
 
 // Browser builds retain the shared launcher model but intentionally construct
@@ -457,8 +457,7 @@ fn checkpoint_age(modified: std::time::SystemTime) -> String {
 fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let expected = autosave_checkpoint_path(&candidate.original);
-        if expected != candidate.checkpoint {
+        if !is_checkpoint_generation_of(&candidate.original, &candidate.checkpoint) {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
             );
@@ -1079,6 +1078,8 @@ mod tests {
         NetLabel, Point, Wire,
     };
     use crate::workbench::lifecycle::project_lifecycle::test_host::ServicesHost;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::workbench::lifecycle::recovery_checkpoint::checkpoint_generation_path;
 
     /// The diagnostic folder is as private as the support bundle.
     #[test]
@@ -1279,7 +1280,7 @@ mod tests {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let checkpoint = autosave_checkpoint_path(&source);
+        let checkpoint = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
         let candidates =
@@ -1295,15 +1296,35 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn a_generation_candidate_is_bound_to_its_own_source() {
+        let root = unique_temp_dir("recovery-candidate-path");
+        let source = root.join("design.rsch");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
+        let checkpoint = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
+        std::fs::write(&checkpoint, "not schematic json").expect("write checkpoint");
+
+        let mut candidates =
+            discover_candidates(&[source.clone()], &[], &crate::io::NativeFileWorkflowIo);
+        assert_eq!(candidates.len(), 1);
+        let mut candidate = candidates.remove(0);
+        assert_eq!(candidate.checkpoint, checkpoint);
+        assert_eq!(validate_candidate_path(&candidate), Ok(()));
+
+        candidate.original = root.join("other.rsch");
+        assert!(validate_candidate_path(&candidate).is_err());
+
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn discovery_lists_every_generation_even_when_the_source_is_live() {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let legacy = autosave_checkpoint_path(&source);
-        std::fs::write(&legacy, "not schematic json").expect("write malformed legacy point");
-        let mut generated_name = legacy.as_os_str().to_owned();
-        generated_name.push(format!(".generation-{}", uuid::Uuid::new_v4()));
-        let generated = PathBuf::from(generated_name);
+        let malformed = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
+        std::fs::write(&malformed, "not schematic json").expect("write malformed point");
+        let generated = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
         let mut generated_bytes =
             serde_json::to_vec_pretty(&crate::io::SchematicFile::new(SchematicState::default()))
                 .expect("serialize generated point");
@@ -1320,7 +1341,7 @@ mod tests {
         assert!(
             candidates
                 .iter()
-                .any(|candidate| candidate.checkpoint == legacy)
+                .any(|candidate| candidate.checkpoint == malformed)
         );
         assert!(
             candidates

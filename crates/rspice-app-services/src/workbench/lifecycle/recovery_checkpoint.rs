@@ -114,12 +114,18 @@ fn writer_lease_key(checkpoint: &Path) -> Result<PathBuf, String> {
     })
 }
 
-/// Sibling checkpoint path for a schematic file: `design.rsp` →
-/// `design.rsp.autosave`. Native only — the web build has no checkpoints.
-pub fn autosave_checkpoint_path(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(".autosave");
-    PathBuf::from(name)
+/// The name every checkpoint generation of a schematic file extends:
+/// `design.rsp` → `design.rsp.autosave`. Native only — the web build has no
+/// checkpoints.
+fn generation_base_path(path: &Path) -> PathBuf {
+    append_suffix(path, ".autosave")
+}
+
+/// `design.rsp.autosave.generation-`, the file-name prefix of every generation.
+fn generation_name_prefix(base: &Path) -> Option<std::ffi::OsString> {
+    let mut prefix = base.file_name()?.to_os_string();
+    prefix.push(CHECKPOINT_GENERATION_MARKER);
+    Some(prefix)
 }
 
 fn checkpoint_manifest_path(checkpoint: &Path) -> PathBuf {
@@ -136,32 +142,39 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn checkpoint_generation_path(source: &Path, generation_id: Uuid) -> PathBuf {
+pub(crate) fn checkpoint_generation_path(source: &Path, generation_id: Uuid) -> PathBuf {
     append_suffix(
-        &autosave_checkpoint_path(source),
+        &generation_base_path(source),
         &format!("{CHECKPOINT_GENERATION_MARKER}{generation_id}"),
     )
 }
 
-/// Return every exact recovery generation associated with a source. The
-/// unsuffixed path remains readable for checkpoints written by older builds;
-/// current writers publish immutable UUID-named generations beside it.
-pub fn checkpoint_paths_for_source(source: &Path) -> Vec<PathBuf> {
-    let legacy = autosave_checkpoint_path(source);
-    let mut checkpoints = Vec::new();
-    if legacy.exists() {
-        checkpoints.push(legacy.clone());
-    }
+/// Whether `checkpoint` is exactly the path of one of `source`'s immutable
+/// UUID-named generations.
+pub fn is_checkpoint_generation_of(source: &Path, checkpoint: &Path) -> bool {
+    let (Some(name), Some(prefix)) = (
+        checkpoint.file_name(),
+        generation_name_prefix(&generation_base_path(source)),
+    ) else {
+        return false;
+    };
+    generation_id_after_prefix(name, &prefix).is_some_and(|generation_id| {
+        checkpoint_generation_path(source, generation_id) == checkpoint
+    })
+}
 
-    let parent = legacy
+/// Return every exact recovery generation associated with a source: the
+/// immutable UUID-named files writers publish beside it.
+pub fn checkpoint_paths_for_source(source: &Path) -> Vec<PathBuf> {
+    let base = generation_base_path(source);
+    let mut checkpoints = Vec::new();
+    let parent = base
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let Some(legacy_name) = legacy.file_name() else {
+    let Some(prefix) = generation_name_prefix(&base) else {
         return checkpoints;
     };
-    let mut prefix = legacy_name.to_os_string();
-    prefix.push(CHECKPOINT_GENERATION_MARKER);
     let Ok(entries) = std::fs::read_dir(parent) else {
         return checkpoints;
     };
@@ -347,7 +360,7 @@ fn open_and_lock_lease(checkpoint: &Path, create: bool) -> Result<File, String> 
 /// `create_new` on the lease is the namespace CAS: even a UUID collision cannot
 /// cause an existing checkpoint, manifest, or lease to be replaced.
 fn reserve_writer_generation(source: &Path) -> Result<PathBuf, String> {
-    let base = autosave_checkpoint_path(source);
+    let base = generation_base_path(source);
     let parent = base
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -992,41 +1005,6 @@ mod tests {
     }
 
     #[test]
-    fn autosave_never_overwrites_or_retires_preexisting_legacy_bytes() {
-        let root = unique_temp_dir("legacy-preservation");
-        let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let legacy = autosave_checkpoint_path(&source);
-        let legacy_bytes = serialize_checkpoint(&source, &SchematicState::default())
-            .expect("serialize legacy checkpoint");
-        atomic_write(&legacy, &legacy_bytes).expect("publish legacy checkpoint");
-
-        let mut changed = SchematicState::default();
-        changed
-            .document_mut_for_test()
-            .components
-            .push(Component::new(
-                1,
-                ComponentType::Capacitor,
-                Point::new(9, 3),
-            ));
-        let current = write_checkpoint(&source, &changed).expect("publish owned generation");
-
-        assert_ne!(current, legacy);
-        assert_eq!(
-            std::fs::read(&legacy).expect("legacy bytes remain readable"),
-            legacy_bytes
-        );
-        let cleanup = cleanup_checkpoint(&source)
-            .expect_err("clean save must disclose retained foreign evidence");
-        assert!(cleanup.contains("another or earlier session"));
-        assert!(!current.exists(), "owned generation should be retired");
-        assert!(legacy.exists(), "legacy recovery evidence must survive");
-
-        std::fs::remove_dir_all(root).expect("remove fixture");
-    }
-
-    #[test]
     fn successor_autosave_preserves_a_released_managed_recovery_generation() {
         let root = unique_temp_dir("managed-preservation");
         let source = root.join("design.rsch");
@@ -1063,7 +1041,7 @@ mod tests {
     fn cleanup_fails_closed_while_another_owner_holds_the_lease() {
         let root = unique_temp_dir("cleanup-race");
         let source = root.join("design.rsch");
-        let checkpoint = autosave_checkpoint_path(&source);
+        let checkpoint = checkpoint_generation_path(&source, Uuid::new_v4());
         std::fs::write(&source, "saved source").expect("write source");
         std::fs::write(&checkpoint, "recovery bytes").expect("write checkpoint");
         let lease = open_and_lock_lease(&checkpoint, true).expect("hold competing lease");
@@ -1086,7 +1064,7 @@ mod tests {
         let root = unique_temp_dir("no-manifest");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let checkpoint = autosave_checkpoint_path(&source);
+        let checkpoint = checkpoint_generation_path(&source, Uuid::new_v4());
         let bytes = serialize_checkpoint(&source, &SchematicState::default())
             .expect("serialize unmanifested checkpoint");
         atomic_write(&checkpoint, &bytes).expect("write unmanifested checkpoint");
