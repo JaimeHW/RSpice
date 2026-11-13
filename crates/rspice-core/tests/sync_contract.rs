@@ -40,7 +40,7 @@
 //! | 3 | `EventScheduler::run_due_events`'s due-slot loop, plus `schedule_superseding_at` routing to the future tier |
 //! | 4 | `EventScheduler::open_due_slot` |
 //! | 5 | `xspice::models::digital_output`'s `input_transition_time` |
-//! | 6 | `tests/timestep_sequence_goldens.rs` (invariant **I1**) |
+//! | 6 | `tests/timestep_sequence.rs` (invariant **I1**) |
 //!
 //! # Relationship to the neighbouring suites
 //!
@@ -50,13 +50,11 @@
 //! The two overlap deliberately at the ordering guarantee, because that is the
 //! one property both the kernel's own contract and D5 depend on.
 //!
-//! Clause 6 is already pinned, thoroughly, by
-//! [`tests/timestep_sequence_goldens.rs`], whose header states it as invariant
-//! **I1** and whose `golden_decks_stay_free_of_event_driven_content` refuses to
-//! let an event-bearing deck into the fixture set. Rather than duplicate five
-//! bit-exact step-sequence goldens here, this suite cites them and adds the one
-//! variant they cannot express: that a pure-analog deck's accepted sequence is
-//! unchanged by event machinery having run *elsewhere in the same process*.
+//! Clause 6 is pinned by [`tests/timestep_sequence.rs`], whose header states
+//! it as invariant **I1** and whose `decks_stay_free_of_event_driven_content`
+//! keeps its decks pure analog. This suite adds the one variant it cannot
+//! express: that a pure-analog deck's accepted sequence is unchanged by event
+//! machinery having run *elsewhere in the same process*.
 //!
 //! # For P2/P4
 //!
@@ -888,14 +886,13 @@ c1 out 0 1p
 /// **D5 clause 6.** A deck with no event content takes an accepted-step
 /// sequence the event machinery cannot touch.
 ///
-/// The bit-exact form of this clause is
-/// [`tests/timestep_sequence_goldens.rs`], which states it as invariant **I1**
-/// and freezes five decks' `(time, step_size)` pairs as bit patterns — source
-/// breakpoints, junction LTE, oscillatory order switching, a switch
-/// discontinuity, and Gear. Its `golden_decks_stay_free_of_event_driven_content`
-/// keeps those fixtures pure. Nothing here duplicates that.
+/// [`tests/timestep_sequence.rs`] states this clause as invariant **I1** and
+/// requires five pure-analog decks — source breakpoints, junction LTE,
+/// oscillatory order switching, a switch discontinuity, and Gear — to accept
+/// bit-identical `(time, step_size)` sequences run to run. Nothing here
+/// duplicates that.
 ///
-/// What this adds is the variant the goldens cannot express, because each of
+/// What this adds is the variant those decks cannot express, because each of
 /// them runs alone: that a pure-analog deck's accepted sequence is unaffected
 /// by event machinery having run *elsewhere in the same process*. The kernel
 /// the XSPICE path now runs on replaced a queue that tie-broke same-time events

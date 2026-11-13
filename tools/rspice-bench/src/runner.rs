@@ -510,17 +510,11 @@ fn locate_ngspice() -> Result<Option<PathBuf>, BenchError> {
 }
 
 /// The shipped deck set: the hand-written decks plus the generated ones,
-/// written fresh so a run always measures the current generator. A generated
-/// deck that also has a checked-in copy (a test includes it at compile time)
-/// is taken from the generator. Sorted by file name like [`discover_decks`].
+/// written fresh so a run always measures the current generator. Sorted by
+/// file name like [`discover_decks`].
 fn shipped_decks() -> Result<Vec<PathBuf>, BenchError> {
     let generated = generate::write_decks(Path::new(GENERATED_DECKS_DIR))?;
     let mut decks = discover_decks(Path::new(SHIPPED_CIRCUITS_DIR))?;
-    decks.retain(|deck| {
-        generated
-            .iter()
-            .all(|path| path.file_name() != deck.file_name())
-    });
     decks.extend(generated);
     decks.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     Ok(decks)

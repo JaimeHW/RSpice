@@ -1,21 +1,37 @@
-//! Correctness contracts for the checked-in macro-benchmark decks.
+//! Correctness contracts for the macro-benchmark workloads.
 //!
 //! A performance result is meaningless when the measured process exits early.
 //! Keep representative scale decks on the ordinary core path so benchmark
 //! health cannot drift independently from simulator correctness.
 
 use rspice_core::{Engine, Netlist};
+use std::fmt::Write as _;
 
-const RC_LADDER_1K: &str = include_str!("../../../tools/rspice-bench/circuits/rc_ladder_1000.cir");
-const RC_LADDER_10K: &str =
-    include_str!("../../../tools/rspice-bench/circuits/rc_ladder_10000.cir");
+/// The RC ladder `rspice-bench gen` writes (`tools/rspice-bench/src/generate.rs`):
+/// identical 100-ohm / 1 pF sections driven by a PULSE source, printing the
+/// far-end node.
+fn rc_ladder_deck(sections: usize, pulse: &str, tstep: &str, tstop: &str) -> String {
+    let mut deck = format!("* rc_ladder_{sections}\nVIN in 0 DC 0 PULSE({pulse})\n");
+    let mut prev = String::from("in");
+    for section in 1..=sections {
+        let node = format!("n{section}");
+        let _ = writeln!(deck, "R{section} {prev} {node} 100");
+        let _ = writeln!(deck, "C{section} {node} 0 1p");
+        prev = node;
+    }
+    let _ = write!(
+        deck,
+        ".options noacct\n.tran {tstep} {tstop}\n.print tran v({prev})\n.end\n"
+    );
+    deck
+}
 
 fn assert_linear_ladder_runs(source: &str) {
-    let netlist = Netlist::parse(source).expect("checked-in benchmark deck parses");
+    let netlist = Netlist::parse(source).expect("benchmark deck parses");
     let engine = Engine::default();
     let circuit = engine
         .build_circuit(&netlist)
-        .expect("checked-in benchmark circuit builds");
+        .expect("benchmark circuit builds");
     assert!(
         !circuit.has_nonlinear_devices(),
         "an RC ladder must stay on the one-solve linear transient path"
@@ -58,12 +74,12 @@ fn assert_linear_ladder_runs(source: &str) {
 
 #[test]
 fn rc_ladder_1k_remains_a_healthy_linear_benchmark() {
-    assert_linear_ladder_runs(RC_LADDER_1K);
+    assert_linear_ladder_runs(&rc_ladder_deck(1_000, "0 1 0 1n 1n 1.999u 4u", "2n", "20u"));
 }
 
 #[test]
 fn rc_ladder_10k_remains_a_healthy_linear_benchmark() {
-    assert_linear_ladder_runs(RC_LADDER_10K);
+    assert_linear_ladder_runs(&rc_ladder_deck(10_000, "0 1 0 1n 1n 0.999m 2m", "2u", "2m"));
 }
 
 #[test]

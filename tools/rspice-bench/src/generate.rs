@@ -1,10 +1,10 @@
 //! Deterministic generation of the synthetic benchmark decks.
 //!
 //! The parametric RC-ladder and MOS-array decks are generated each time the
-//! shipped deck set runs; the remaining decks in `tools/rspice-bench/circuits/`
-//! are hand-written. The generator is byte-deterministic (fixed formatting,
-//! `\n` newlines, no timestamps), so the copies of generated decks that tests
-//! include from `tools/rspice-bench/circuits/` match what the run measures.
+//! shipped deck set runs; the decks in `tools/rspice-bench/circuits/` are
+//! hand-written. The generator is byte-deterministic (fixed formatting, `\n`
+//! newlines, no timestamps). `rspice-core`'s `macro_benchmark_contract` test
+//! builds the same 1k/10k ladders; keep the two in step.
 
 use crate::error::BenchError;
 use clap::Args;

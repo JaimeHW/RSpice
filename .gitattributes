@@ -82,22 +82,13 @@ crates/rspice-cloud-client/** text eol=lf
 # The vendor manifest fingerprints the reviewed downstream patch verbatim.
 tools/cloud/*.patch text eol=lf
 
-# Benchmark generators and the external comparison script emit LF inputs.
+# Benchmark decks are LF, like the decks the generator writes.
 tools/rspice-bench/circuits/** text eol=lf
-tools/rspice-bench/external/**/*.cir text eol=lf
-tools/rspice-bench/external/**/*.sh text eol=lf
 
 # The loader digests a project file's exact bytes, and a frozen migration
 # fixture is include_str!'d into a test binary. CRLF materialization would
 # change both on Windows alone, so the format is pinned to LF everywhere.
 *.rspiceproj text eol=lf
-
-# Accepted-timestep goldens (AMS invariant I1) are written with LF by the
-# bless path in `tests/timestep_sequence_goldens.rs`. Pinning them keeps a
-# Windows re-bless from rewriting every line as a CRLF-only diff. The reader
-# tolerates either ending, so this is diff hygiene rather than a correctness
-# gate.
-crates/rspice-core/tests/testdata/timestep_goldens/** text eol=lf
 
 # The settle-cost ratchet's pinned deck is `include_str!`'d into the library
 # test binary, and the three counter ceilings it feeds are exact. The parser

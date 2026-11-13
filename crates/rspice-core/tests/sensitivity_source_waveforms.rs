@@ -4,11 +4,10 @@
 //! kind has one, and it enters the DC equations only as the source's
 //! excitation, so the derivative is exact.
 //!
-//! The LDO cases are corpus design C5 (`tests/mixed-corpus/c05-ldo-trim`,
-//! fixtures copied under `testdata/ldo_trim`): a BSIM4 regulator whose output
-//! moves by ~2e-9 V for a 1 nA load step, under the ~1e-11 V each re-solved
-//! operating point carries, so a finite difference of re-solves could not
-//! resolve the load current's row. The reference values are ngspice-46's
+//! The LDO cases are corpus design C5 (`tests/mixed-corpus/c05-ldo-trim/net`):
+//! a BSIM4 regulator whose output moves by ~2e-9 V for a 1 nA load step, under
+//! the ~1e-11 V each re-solved operating point carries, so a finite difference
+//! of re-solves could not resolve the load current's row. The reference values are ngspice-46's
 //! `.sens v(vout)` on the same circuit (trim held at code 0, no ESD junction).
 
 use rspice_core::NoAbort;
@@ -294,7 +293,7 @@ r2 n 0 1e9
 // ---------------------------------------------------------------------------
 
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/ldo_trim")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/mixed-corpus/c05-ldo-trim/net")
 }
 
 /// The C5 load current: zero until a load step.
