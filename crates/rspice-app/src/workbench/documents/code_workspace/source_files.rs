@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
+use super::CodeWorkspaceParts;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
@@ -34,15 +35,10 @@ thread_local! {
 }
 
 pub(crate) fn source_file_mutation_block_reason(
-    app: &RSpiceApp,
+    parts: &CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
 ) -> Option<&'static str> {
-    source_file_mutation_block_reason_in(
-        &app.state.model,
-        &app.state.code.code_workspace,
-        &app.state.platform,
-        language,
-    )
+    source_file_mutation_block_reason_in(parts.model, parts.code, parts.platform, language)
 }
 
 /// [`source_file_mutation_block_reason`], over the model, the Code
@@ -78,14 +74,15 @@ pub(crate) fn source_file_mutation_block_reason_in(
 ///
 /// Automation is the one project-wide source workspace: a Verilog-A source is
 /// a cell view, created with its cell.
-pub(crate) fn open_source_workspace_dialog(app: &mut RSpiceApp) -> Result<(), String> {
+pub(crate) fn open_source_workspace_dialog(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<(), String> {
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
     let owner = ProjectSourceOwner::code_workspace(language);
-    if app
-        .state
+    if parts
         .model
         .workspace
         .content
@@ -98,8 +95,7 @@ pub(crate) fn open_source_workspace_dialog(app: &mut RSpiceApp) -> Result<(), St
             language.label()
         ));
     }
-    let netlist_source_path = app
-        .state
+    let netlist_source_path = parts
         .model
         .workspace
         .content
@@ -107,40 +103,38 @@ pub(crate) fn open_source_workspace_dialog(app: &mut RSpiceApp) -> Result<(), St
         .as_ref()
         .map(|descriptor| descriptor.artifact_name.clone())
         .unwrap_or_else(|| "top.sp".to_owned());
-    app.state.code.code_workspace.source_workspace_dialog =
-        Some(super::CodeSourceWorkspaceDialogState {
-            project_id: app.state.model.workspace.content.project.id(),
-            root_path: "automation.py".to_owned(),
-            run_plan_path: "runplan.yaml".to_owned(),
-            environment_lock_path: "environment.lock".to_owned(),
-            permission_manifest_path: "permissions.toml".to_owned(),
-            netlist_source_path,
-            error: None,
-        });
+    parts.code.source_workspace_dialog = Some(super::CodeSourceWorkspaceDialogState {
+        project_id: parts.model.workspace.content.project.id(),
+        root_path: "automation.py".to_owned(),
+        run_plan_path: "runplan.yaml".to_owned(),
+        environment_lock_path: "environment.lock".to_owned(),
+        permission_manifest_path: "permissions.toml".to_owned(),
+        netlist_source_path,
+        error: None,
+    });
     Ok(())
 }
 
-pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<String, String> {
-    let draft = app
-        .state
+pub(crate) fn commit_source_workspace_dialog(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<String, String> {
+    let draft = parts
         .code
-        .code_workspace
         .source_workspace_dialog
         .clone()
         .ok_or_else(|| "No source-workspace transaction is open.".to_owned())?;
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
-    if draft.project_id != app.state.model.workspace.content.project.id() {
+    if draft.project_id != parts.model.workspace.content.project.id() {
         return Err(
             "The active project changed while the source-workspace transaction was open."
                 .to_owned(),
         );
     }
     let owner = ProjectSourceOwner::code_workspace(language);
-    if app
-        .state
+    if parts
         .model
         .workspace
         .content
@@ -154,15 +148,15 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
 
     let bundle = new_automation_workspace_bundle(&draft)?;
     let root_path = bundle.root().logical_path().to_owned();
-    app.state
+    parts
         .model
         .workspace
         .content
         .insert_project_source_bundle(bundle)
         .map_err(|error| error.to_string())?;
-    app.state.code.code_workspace.automation = Default::default();
-    app.state.code.code_workspace.automation.selected_file = Some(root_path.clone());
-    app.state.code.code_workspace.source_workspace_dialog = None;
+    parts.code.automation = Default::default();
+    parts.code.automation.selected_file = Some(root_path.clone());
+    parts.code.source_workspace_dialog = None;
     // The dialog that commits this records the line.
     Ok(format!(
         "Created a {} source workspace at {root_path}.",
@@ -313,18 +307,17 @@ fn new_automation_workspace_bundle(
 }
 
 pub(crate) fn assign_automation_source_role(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     logical_path: &str,
     role: Option<ProjectSourceRole>,
 ) -> Result<String, String> {
     if let Some(reason) =
-        source_file_mutation_block_reason(app, ProjectSourceLanguage::RSpiceAutomation)
+        source_file_mutation_block_reason(parts, ProjectSourceLanguage::RSpiceAutomation)
     {
         return Err(reason.to_owned());
     }
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -332,26 +325,26 @@ pub(crate) fn assign_automation_source_role(
         .bundle_for_owner(&owner)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
     let bundle_id = bundle.id();
-    let changed = app
-        .state
+    let changed = parts
         .model
         .workspace
         .content
         .set_project_source_bundle_non_entry_role(bundle_id, logical_path, role)
         .map_err(|error| error.to_string())?;
     if changed {
-        super::automation::invalidate_automation_evidence(app);
+        super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
     }
     let role_label = role.map_or("unassigned", ProjectSourceRole::label);
     let message = if changed {
         let message = format!("Set Automation source '{logical_path}' role to {role_label}.");
-        app.state
+        parts
+            .model
             .record(LogSeverity::Info, LogSource::Studio, message.clone());
         message
     } else {
         let message =
             format!("Automation source '{logical_path}' already has the {role_label} role.");
-        app.state.prompt(message.clone());
+        parts.wb.prompt(message.clone());
         message
     };
     Ok(message)
@@ -424,14 +417,14 @@ pub(crate) fn source_bundle_document_is_editable_in(
 /// part of this predicate so find, navigation, and language inspection remain
 /// available in safe mode.
 pub(crate) fn source_bundle_contains_document(
-    app: &RSpiceApp,
+    parts: &CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
     source_bundle_contains_document_in(
-        &app.state.model,
-        &app.state.platform,
+        parts.model,
+        parts.platform,
         language,
         bundle_id,
         logical_path,
@@ -476,31 +469,37 @@ fn source_document_blocks_graph_mutation(
 }
 
 pub(crate) fn open_source_file_dialog(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     action: CodeSourceFileAction,
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
-    let bundle_id = app
-        .state
+    let bundle_id = parts
         .model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_source_file_dialog_in_bundle(app, language, bundle_id, action, source_path, importer_path)
+    open_source_file_dialog_in_bundle(
+        parts,
+        language,
+        bundle_id,
+        action,
+        source_path,
+        importer_path,
+    )
 }
 
 pub(crate) fn open_source_file_dialog_in_bundle(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     action: CodeSourceFileAction,
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
     let authority_path = if action == CodeSourceFileAction::New {
@@ -508,13 +507,12 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     } else {
         source_path
     };
-    if !source_bundle_contains_document(app, language, bundle_id, authority_path) {
+    if !source_bundle_contains_document(parts, language, bundle_id, authority_path) {
         return Err(format!(
             "The selected source file '{authority_path}' no longer belongs to this project source bundle."
         ));
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -554,9 +552,9 @@ pub(crate) fn open_source_file_dialog_in_bundle(
         | CodeSourceFileAction::Move
         | CodeSourceFileAction::Delete => source_path.to_owned(),
     };
-    app.state.code.code_workspace.source_file_dialog = Some(CodeSourceFileDialogState {
+    parts.code.source_file_dialog = Some(CodeSourceFileDialogState {
         action,
-        project_id: app.state.model.workspace.content.project.id(),
+        project_id: parts.model.workspace.content.project.id(),
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -569,24 +567,23 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     Ok(())
 }
 
-pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, String> {
-    let draft = app
-        .state
+pub(crate) fn commit_source_file_dialog(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<String, String> {
+    let draft = parts
         .code
-        .code_workspace
         .source_file_dialog
         .clone()
         .ok_or_else(|| "No source-file transaction is open.".to_owned())?;
-    if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, draft.language) {
         return Err(reason.to_owned());
     }
-    if draft.project_id != app.state.model.workspace.content.project.id() {
+    if draft.project_id != parts.model.workspace.content.project.id() {
         return Err(
             "The active project changed while the source-file transaction was open.".to_owned(),
         );
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -600,7 +597,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     } else {
         draft.source_path.as_str()
     };
-    if !source_bundle_contains_document(app, draft.language, draft.bundle_id, authority_path) {
+    if !source_bundle_contains_document(parts, draft.language, draft.bundle_id, authority_path) {
         return Err(
             "The file change no longer applies to a source bundle in the project.".to_owned(),
         );
@@ -633,7 +630,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
             let file =
                 ProjectSourceFile::try_new(proposed, new_file_template(draft.language, proposed))
                     .map_err(|error| error.to_string())?;
-            app.state
+            parts
                 .model
                 .workspace
                 .content
@@ -649,22 +646,20 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
                 .to_owned();
             let file =
                 ProjectSourceFile::try_new(proposed, content).map_err(|error| error.to_string())?;
-            app.state
+            parts
                 .model
                 .workspace
                 .content
                 .add_project_source_bundle_file(draft.bundle_id, &draft.importer_path, file)
                 .map_err(|error| error.to_string())?
         }
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move => app
-            .state
+        CodeSourceFileAction::Rename | CodeSourceFileAction::Move => parts
             .model
             .workspace
             .content
             .rename_project_source_bundle_file(draft.bundle_id, &draft.source_path, proposed)
             .map_err(|error| error.to_string())?,
-        CodeSourceFileAction::Delete => app
-            .state
+        CodeSourceFileAction::Delete => parts
             .model
             .workspace
             .content
@@ -672,7 +667,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
             .map_err(|error| error.to_string())?,
     };
     if !changed {
-        app.state.code.code_workspace.source_file_dialog = None;
+        parts.code.source_file_dialog = None;
         return Ok("No source-file changes were required.".to_owned());
     }
 
@@ -682,18 +677,22 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     };
     match draft.language {
         ProjectSourceLanguage::VerilogA => {
-            app.state.code.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
+            parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
                 bundle_id: draft.bundle_id,
                 logical_path: selected_path,
             });
-            super::veriloga::invalidate_veriloga_evidence(app, draft.bundle_id);
+            super::veriloga::invalidate_veriloga_evidence_in(
+                parts.model,
+                parts.code,
+                draft.bundle_id,
+            );
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            app.state.code.code_workspace.automation.selected_file = Some(selected_path);
-            super::automation::invalidate_automation_evidence(app);
+            parts.code.automation.selected_file = Some(selected_path);
+            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
         }
     }
-    app.state.code.code_workspace.source_file_dialog = None;
+    parts.code.source_file_dialog = None;
     let message = match draft.action {
         CodeSourceFileAction::New => format!("Created project source '{proposed}'."),
         CodeSourceFileAction::Duplicate => {
@@ -707,39 +706,38 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
         }
         CodeSourceFileAction::Delete => format!("Deleted project source '{}'.", draft.source_path),
     };
-    app.state
+    parts
+        .model
         .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
 
 pub(crate) fn open_source_history(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     source_path: &str,
 ) -> Result<(), String> {
-    let bundle_id = app
-        .state
+    let bundle_id = parts
         .model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_source_history_in_bundle(app, language, bundle_id, source_path)
+    open_source_history_in_bundle(parts, language, bundle_id, source_path)
 }
 
 pub(crate) fn open_source_history_in_bundle(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     source_path: &str,
 ) -> Result<(), String> {
-    if !source_bundle_contains_document(app, language, bundle_id, source_path) {
+    if !source_bundle_contains_document(parts, language, bundle_id, source_path) {
         return Err(format!(
             "The selected source file '{source_path}' no longer belongs to this project source bundle."
         ));
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -751,8 +749,8 @@ pub(crate) fn open_source_history_in_bundle(
             "The selected source file '{source_path}' no longer exists."
         ));
     }
-    app.state.code.code_workspace.source_history = Some(CodeSourceHistoryState {
-        project_id: app.state.model.workspace.content.project.id(),
+    parts.code.source_history = Some(CodeSourceHistoryState {
+        project_id: parts.model.workspace.content.project.id(),
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -768,19 +766,18 @@ pub(crate) fn open_source_history_in_bundle(
 }
 
 pub(crate) fn request_automation_source_import(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     importer_path: &str,
 ) -> Result<(), String> {
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
-    if app.state.code.code_workspace.source_import.is_some() {
+    if parts.code.source_import.is_some() {
         return Err("An Automation source import is already pending.".to_owned());
     }
     let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -796,8 +793,8 @@ pub(crate) fn request_automation_source_import(
                 .to_owned(),
         );
     }
-    app.state.code.code_workspace.source_import = Some(CodeSourceImportState {
-        project_id: app.state.model.workspace.content.project.id(),
+    parts.code.source_import = Some(CodeSourceImportState {
+        project_id: parts.model.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -967,16 +964,16 @@ fn poll_browser_automation_import_completion(
 }
 
 fn apply_automation_source_import(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     request: CodeSourceImportState,
     file_name: String,
     contents: String,
 ) -> Result<String, String> {
     apply_automation_source_import_in(
-        &mut app.state.model,
-        &mut app.state.code.code_workspace,
-        &app.state.platform,
-        &mut app.code,
+        parts.model,
+        parts.code,
+        parts.platform,
+        parts.handles,
         request,
         file_name,
         contents,
@@ -1047,19 +1044,19 @@ fn apply_automation_source_import_in(
 /// why not: one file at a time, its bytes within the source limit and in
 /// UTF-8. Nothing is imported while an application modal is open.
 pub(crate) fn import_dropped_automation_files(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
+    application_modal_open: bool,
     dropped: Vec<egui::DroppedFile>,
 ) {
-    if app.state.application_modal_open() {
+    if application_modal_open {
         return;
     }
     if dropped.len() != 1 {
-        let message = app
-            .state
-            .workbench
+        let message = parts
+            .wb
             .messages()
             .text(crate::workbench::MessageId::AutomationDropOneSource);
-        app.state.prompt(message);
+        parts.wb.prompt(message);
         return;
     }
     let file = &dropped[0];
@@ -1097,10 +1094,10 @@ pub(crate) fn import_dropped_automation_files(
         }
         let contents = String::from_utf8(bytes)
             .map_err(|error| format!("Dropped source is not valid UTF-8: {error}"))?;
-        import_dropped_automation_source(app, name, contents).map(|_| ())
+        import_dropped_automation_source(parts, name, contents).map(|_| ())
     });
     if let Err(error) = result {
-        app.state.record(
+        parts.model.record(
             LogSeverity::Error,
             LogSource::Studio,
             format!("Automation drop import failed: {error}"),
@@ -1109,12 +1106,12 @@ pub(crate) fn import_dropped_automation_files(
 }
 
 fn import_dropped_automation_source(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     file_name: String,
     contents: String,
 ) -> Result<String, String> {
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
     if contents.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
@@ -1124,18 +1121,15 @@ fn import_dropped_automation_source(
         ));
     }
     let owner = ProjectSourceOwner::code_workspace(language);
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
         .project_sources
         .bundle_for_owner(&owner)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    let importer_path = app
-        .state
+    let importer_path = parts
         .code
-        .code_workspace
         .automation
         .selected_file
         .as_deref()
@@ -1143,7 +1137,7 @@ fn import_dropped_automation_source(
         .unwrap_or_else(|| bundle.root().logical_path())
         .to_owned();
     let request = CodeSourceImportState {
-        project_id: app.state.model.workspace.content.project.id(),
+        project_id: parts.model.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -1151,35 +1145,35 @@ fn import_dropped_automation_source(
         importer_path,
         picker_started: true,
     };
-    apply_automation_source_import(app, request, file_name, contents)
+    apply_automation_source_import(parts, request, file_name, contents)
 }
 
-pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<String, String> {
-    let draft = app
-        .state
+pub(crate) fn commit_source_history_restore(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<String, String> {
+    let draft = parts
         .code
-        .code_workspace
         .source_history
         .clone()
         .ok_or_else(|| "No source-history transaction is open.".to_owned())?;
-    if app.state.model.workspace.content.project.id() != draft.project_id {
+    if parts.model.workspace.content.project.id() != draft.project_id {
         return Err("The active project changed while source history was open.".to_owned());
     }
-    if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts, draft.language) {
         return Err(reason.to_owned());
     }
     let retained_revision = draft
         .selected_revision
         .ok_or_else(|| "Select a retained revision to restore.".to_owned())?;
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
-    if !source_bundle_contains_document(app, draft.language, draft.bundle_id, &draft.source_path) {
+    if !source_bundle_contains_document(parts, draft.language, draft.bundle_id, &draft.source_path)
+    {
         return Err(
             "Source history no longer applies to a source bundle in the project.".to_owned(),
         );
@@ -1195,8 +1189,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     let expected_current = bundle.revision();
     let retained_revision = crate::product::ObjectRevision::new(retained_revision)
         .map_err(|error| format!("The retained revision is invalid: {error}"))?;
-    let changed = app
-        .state
+    let changed = parts
         .model
         .workspace
         .content
@@ -1207,12 +1200,11 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
         )
         .map_err(|error| error.to_string())?;
     if !changed {
-        app.state.code.code_workspace.source_history = None;
+        parts.code.source_history = None;
         return Ok("The selected revision already matches the current source graph.".to_owned());
     }
 
-    let restored_bundle = app
-        .state
+    let restored_bundle = parts
         .model
         .workspace
         .content
@@ -1226,24 +1218,29 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     };
     match draft.language {
         ProjectSourceLanguage::VerilogA => {
-            app.state.code.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
+            parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
                 bundle_id: draft.bundle_id,
                 logical_path: selected_path,
             });
-            super::veriloga::invalidate_veriloga_evidence(app, draft.bundle_id);
+            super::veriloga::invalidate_veriloga_evidence_in(
+                parts.model,
+                parts.code,
+                draft.bundle_id,
+            );
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            app.state.code.code_workspace.automation.selected_file = Some(selected_path);
-            super::automation::invalidate_automation_evidence(app);
+            parts.code.automation.selected_file = Some(selected_path);
+            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
         }
     }
-    app.state.code.code_workspace.source_history = None;
+    parts.code.source_history = None;
     let message = format!(
         "Restored {} source bundle revision {} as a new revision.",
         draft.language.label(),
         retained_revision.get()
     );
-    app.state
+    parts
+        .model
         .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
@@ -1433,7 +1430,7 @@ mod tests {
             .unwrap();
 
         open_source_file_dialog_in_bundle(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             bundle_id,
             CodeSourceFileAction::Duplicate,
@@ -1448,7 +1445,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "cell/gain_copy.va".to_owned();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
 
         let exact = app
             .state
@@ -1470,7 +1467,7 @@ mod tests {
             Some(bundle_id)
         );
         open_source_history_in_bundle(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             bundle_id,
             "cell/gain.va",
@@ -1503,7 +1500,7 @@ mod tests {
             .get();
 
         let message = import_dropped_automation_source(
-            &mut app,
+            &mut app.code_workspace_parts(),
             "helpers.py".to_owned(),
             "def characterize():\n    return 42\n".to_owned(),
         )
@@ -1698,7 +1695,7 @@ mod tests {
             CodeSourceFileAction::Delete,
         ] {
             let error = open_source_file_dialog(
-                &mut app,
+                &mut app.code_workspace_parts(),
                 ProjectSourceLanguage::RSpiceAutomation,
                 action,
                 &lock,
@@ -1710,7 +1707,7 @@ mod tests {
         }
 
         let error = open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::RSpiceAutomation,
             CodeSourceFileAction::New,
             &lock,
@@ -1719,12 +1716,13 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("environment lock is read-only"));
 
-        let error = request_automation_source_import(&mut app, &lock).unwrap_err();
+        let error =
+            request_automation_source_import(&mut app.code_workspace_parts(), &lock).unwrap_err();
         assert!(error.contains("cannot own imported project dependencies"));
 
         app.state.code.code_workspace.automation.selected_file = Some(lock.clone());
         let error = import_dropped_automation_source(
-            &mut app,
+            &mut app.code_workspace_parts(),
             "should-not-import.py".to_owned(),
             "value = 1\n".to_owned(),
         )
@@ -1732,7 +1730,7 @@ mod tests {
         assert!(error.contains("read-only managed environment lock"));
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::RSpiceAutomation,
             CodeSourceFileAction::Duplicate,
             &lock,
@@ -1756,7 +1754,7 @@ mod tests {
             .as_mut()
             .expect("duplicate transaction")
             .action = CodeSourceFileAction::Rename;
-        let error = commit_source_file_dialog(&mut app).unwrap_err();
+        let error = commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap_err();
         assert!(error.contains("became read-only"));
         assert_eq!(
             app.state
@@ -1784,7 +1782,7 @@ mod tests {
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
@@ -1798,12 +1796,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "models/helper.va".to_owned();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
         assert!(verilog_a_bundle(&app).contains_file("models/helper.va"));
         assert!(app.state.model.workspace.content.project_sources_dirty);
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Rename,
             "models/helper.va",
@@ -1817,12 +1815,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "models/renamed.va".to_owned();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
         assert!(!verilog_a_bundle(&app).contains_file("models/helper.va"));
         assert!(verilog_a_bundle(&app).contains_file("models/renamed.va"));
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Move,
             "models/renamed.va",
@@ -1836,12 +1834,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "library/renamed.va".to_owned();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
         assert!(!verilog_a_bundle(&app).contains_file("models/renamed.va"));
         assert!(verilog_a_bundle(&app).contains_file("library/renamed.va"));
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Duplicate,
             "library/renamed.va",
@@ -1857,18 +1855,18 @@ mod tests {
             .unwrap()
             .proposed_path
             .clone();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
         assert!(verilog_a_bundle(&app).contains_file(&duplicate));
 
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &duplicate,
             &root,
         )
         .unwrap();
-        commit_source_file_dialog(&mut app).unwrap();
+        commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap();
         assert!(!verilog_a_bundle(&app).contains_file(&duplicate));
     }
 
@@ -1882,7 +1880,7 @@ mod tests {
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         let create = |app: &mut RSpiceApp, path: &str| {
             open_source_file_dialog(
-                app,
+                &mut app.code_workspace_parts(),
                 ProjectSourceLanguage::VerilogA,
                 CodeSourceFileAction::New,
                 &root,
@@ -1896,7 +1894,7 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .proposed_path = path.to_owned();
-            let result = commit_source_file_dialog(app);
+            let result = commit_source_file_dialog(&mut app.code_workspace_parts());
             app.state.code.code_workspace.source_file_dialog = None;
             result
         };
@@ -1918,7 +1916,7 @@ mod tests {
         let bundle_id = verilog_a_bundle(&app).id();
         let before = verilog_a_bundle(&app).closure_digest();
         open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
@@ -1936,7 +1934,7 @@ mod tests {
             )
             .unwrap();
 
-        let error = commit_source_file_dialog(&mut app).unwrap_err();
+        let error = commit_source_file_dialog(&mut app.code_workspace_parts()).unwrap_err();
         assert!(error.contains("changed while the transaction was open"));
         assert_ne!(verilog_a_bundle(&app).closure_digest(), before);
         assert!(!verilog_a_bundle(&app).contains_file("untitled.va"));
@@ -1961,8 +1959,13 @@ mod tests {
             .unwrap();
         let edited_revision = verilog_a_bundle(&app).revision();
 
-        open_source_history(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
-        commit_source_history_restore(&mut app).unwrap();
+        open_source_history(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
+        commit_source_history_restore(&mut app.code_workspace_parts()).unwrap();
 
         assert_eq!(verilog_a_bundle(&app).root().content(), original);
         assert!(verilog_a_bundle(&app).revision().get() > edited_revision.get());
@@ -1986,7 +1989,12 @@ mod tests {
                 "module first; endmodule\n".to_owned(),
             )
             .unwrap();
-        open_source_history(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_history(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         app.state
             .model
             .workspace
@@ -1998,7 +2006,7 @@ mod tests {
             )
             .unwrap();
 
-        let error = commit_source_history_restore(&mut app).unwrap_err();
+        let error = commit_source_history_restore(&mut app.code_workspace_parts()).unwrap_err();
         assert!(error.contains("changed while history was open"));
         assert_eq!(
             verilog_a_bundle(&app).root().content(),
@@ -2012,7 +2020,7 @@ mod tests {
         let mut app = veriloga_view_app();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         let error = open_source_file_dialog(
-            &mut app,
+            &mut app.code_workspace_parts(),
             ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &root,
@@ -2041,10 +2049,10 @@ mod tests {
         let importer = bundle.root().logical_path().to_owned();
         let logical_path = unique_suggestion(bundle, &importer, "analysis_helpers.py");
 
-        request_automation_source_import(&mut app, &importer).unwrap();
+        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
         let request = app.state.code.code_workspace.source_import.take().unwrap();
         let message = apply_automation_source_import(
-            &mut app,
+            &mut app.code_workspace_parts(),
             request,
             "analysis_helpers.py".to_owned(),
             "def gain(value):\n    return value * 2\n".to_owned(),
@@ -2088,7 +2096,7 @@ mod tests {
         let bundle_id = bundle.id();
         let importer = bundle.root().logical_path().to_owned();
 
-        request_automation_source_import(&mut app, &importer).unwrap();
+        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
         let request = app.state.code.code_workspace.source_import.take().unwrap();
         app.state
             .model
@@ -2102,7 +2110,7 @@ mod tests {
             .unwrap();
 
         let error = apply_automation_source_import(
-            &mut app,
+            &mut app.code_workspace_parts(),
             request,
             "stale.py".to_owned(),
             "raise RuntimeError('must not be imported')\n".to_owned(),
@@ -2139,7 +2147,7 @@ mod tests {
         let importer = bundle.root().logical_path().to_owned();
         let before_revision = bundle.revision().get();
 
-        request_automation_source_import(&mut app, &importer).unwrap();
+        request_automation_source_import(&mut app.code_workspace_parts(), &importer).unwrap();
         let request = app.state.code.code_workspace.source_import.take().unwrap();
         app.state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
@@ -2149,7 +2157,7 @@ mod tests {
             String::new(),
         );
         let error = apply_automation_source_import(
-            &mut app,
+            &mut app.code_workspace_parts(),
             request,
             "must-not-import.py".to_owned(),
             "raise RuntimeError('must not commit')\n".to_owned(),
@@ -2252,7 +2260,7 @@ mod tests {
             .content
             .mark_project_sources_clean();
 
-        open_source_workspace_dialog(&mut app).unwrap();
+        open_source_workspace_dialog(&mut app.code_workspace_parts()).unwrap();
         let draft = app
             .state
             .code
@@ -2266,7 +2274,7 @@ mod tests {
         draft.permission_manifest_path = "security/least-privilege.data".to_owned();
         draft.netlist_source_path = "circuits/owned-deck.cir".to_owned();
 
-        commit_source_workspace_dialog(&mut app).unwrap();
+        commit_source_workspace_dialog(&mut app.code_workspace_parts()).unwrap();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
         let bundle = app
             .state
@@ -2345,7 +2353,7 @@ mod tests {
             .get();
 
         assign_automation_source_role(
-            &mut app,
+            &mut app.code_workspace_parts(),
             "environment/next-runtime.data",
             Some(ProjectSourceRole::AutomationEnvironmentLock),
         )

@@ -527,9 +527,10 @@ pub(crate) fn request_veriloga_source_replacement(
     app: &mut RSpiceApp,
     logical_path: &str,
 ) -> Result<(), String> {
-    if let Some(reason) =
-        super::super::source_file_mutation_block_reason(app, ProjectSourceLanguage::VerilogA)
-    {
+    if let Some(reason) = super::super::source_file_mutation_block_reason(
+        &app.code_workspace_parts(),
+        ProjectSourceLanguage::VerilogA,
+    ) {
         return Err(reason.to_owned());
     }
     if app.state.code.code_workspace.veriloga.import_requested {

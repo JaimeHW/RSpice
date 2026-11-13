@@ -75,15 +75,18 @@ pub(crate) struct CodeHandles {
 }
 
 /// What the code workspace's operations read and change, lent for the one
-/// call: the Code & Automation page's state, the runtime the code feature
-/// runs, the model, the session, and the run tier with its controller and
-/// the export IO. Each is one the code feature's context lends as well;
-/// until the shell's arms take a context, the application lends them.
+/// call: the Code & Automation page's state, the deck's, the runtime the
+/// code feature runs, the model, the session, the platform's state, and the
+/// run tier with its controller and the export IO. Each is one the code
+/// feature's context lends as well; until the shell's arms take a context,
+/// the application lends them.
 pub(crate) struct CodeWorkspaceParts<'a> {
     pub(crate) code: &'a mut super::CodeWorkspaceRuntimeState,
+    pub(crate) netlist: &'a mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     pub(crate) handles: &'a mut CodeHandles,
     pub(crate) model: &'a mut Model,
     pub(crate) wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
+    pub(crate) platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
     pub(crate) runs: &'a mut rspice_app_runs::workbench::slots::runs::RunsState,
     pub(crate) run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
     pub(crate) export_io:
@@ -132,13 +135,8 @@ fn python_automation_requires_managed_worker(parts: &CodeWorkspaceParts<'_>) -> 
 }
 
 /// Invalidate every receipt and live worker session derived from an older
-/// Automation closure while retaining only user-authored editor preferences.
-pub(crate) fn invalidate_automation_evidence(app: &mut RSpiceApp) {
-    invalidate_automation_evidence_in(&mut app.state.code.code_workspace, &mut app.code);
-}
-
-/// [`invalidate_automation_evidence`], over the Code & Automation page's
-/// state and what the code feature runs.
+/// Automation closure while retaining only user-authored editor preferences,
+/// over the Code & Automation page's state and what the code feature runs.
 pub(crate) fn invalidate_automation_evidence_in(
     code: &mut super::CodeWorkspaceRuntimeState,
     handles: &mut CodeHandles,

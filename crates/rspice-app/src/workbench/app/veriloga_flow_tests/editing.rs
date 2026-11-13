@@ -66,7 +66,7 @@ fn rename_is_one_undo_across_the_module() {
     let path = selected.document().logical_path().to_owned();
     let caret = original.find("vslew").expect("the name");
     code_workspace::open_language_tools_in_bundle(
-        &mut user.app,
+        &mut user.app.code_workspace_parts(),
         crate::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         &path,
@@ -83,7 +83,8 @@ fn rename_is_one_undo_across_the_module() {
         .expect("the form is open");
     tools.query = "vslew".to_owned();
     tools.replacement = "limited".to_owned();
-    code_workspace::commit_language_rename(&mut user.app).expect("the rename applies");
+    code_workspace::commit_language_rename(&mut user.app.code_workspace_parts())
+        .expect("the rename applies");
     user.settle();
     let renamed = source(&user);
     assert!(!renamed.contains("vslew"));
@@ -101,7 +102,7 @@ fn replace_in_files_is_one_undo_across_the_module() {
     let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     code_workspace::open_source_search_in_bundle(
-        &mut user.app,
+        &mut user.app.code_workspace_parts(),
         crate::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         &path,
@@ -117,7 +118,8 @@ fn replace_in_files_is_one_undo_across_the_module() {
         .expect("the form is open");
     search.query = "vslew".to_owned();
     search.replacement = "limited".to_owned();
-    code_workspace::commit_source_search_replace(&mut user.app).expect("the replace applies");
+    code_workspace::commit_source_search_replace(&mut user.app.code_workspace_parts())
+        .expect("the replace applies");
     user.settle();
     let replaced = source(&user);
     assert!(!replaced.contains("vslew"));

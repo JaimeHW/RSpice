@@ -7,6 +7,7 @@ use std::borrow::Cow;
 
 use sha2::{Digest as _, Sha256};
 
+use super::CodeWorkspaceParts;
 use crate::product::ContentDigest;
 use crate::state::{
     BoundedFindMatches, FindDirection, FindOptions, ProjectSourceBundle,
@@ -14,6 +15,7 @@ use crate::state::{
 };
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::accessibility::counted;
+#[cfg(test)]
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use rspice_app_services::workbench::slots::platform::PlatformState;
@@ -53,33 +55,31 @@ pub(crate) struct CodeSourceSearchResults {
 }
 
 pub(crate) fn open_source_search(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     active_path: &str,
 ) -> Result<(), String> {
-    let bundle_id = app
-        .state
+    let bundle_id = parts
         .model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_source_search_in_bundle(app, language, bundle_id, active_path)
+    open_source_search_in_bundle(parts, language, bundle_id, active_path)
 }
 
 pub(crate) fn open_source_search_in_bundle(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     active_path: &str,
 ) -> Result<(), String> {
-    if !super::source_bundle_contains_document(app, language, bundle_id, active_path) {
+    if !super::source_bundle_contains_document(parts, language, bundle_id, active_path) {
         return Err(format!(
             "The active source file '{active_path}' no longer belongs to this project source bundle."
         ));
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -94,28 +94,19 @@ pub(crate) fn open_source_search_in_bundle(
             )
         })?
         .to_owned();
-    let selection_char_range = app
-        .state
+    let selection_char_range = parts
         .code
-        .code_workspace
         .source_selections
         .get(&(bundle.id(), active_path.clone()))
         .copied()
         .filter(|(start, end)| start < end);
-    if app
-        .state
-        .code
-        .code_workspace
-        .source_search
-        .as_ref()
-        .is_some_and(|search| {
-            search.project_id == app.state.model.workspace.content.project.id()
-                && search.bundle_id == bundle.id()
-                && search.bundle_revision == bundle.revision().get()
-                && search.closure_digest == bundle.closure_digest()
-        })
-    {
-        if let Some(search) = app.state.code.code_workspace.source_search.as_mut() {
+    if parts.code.source_search.as_ref().is_some_and(|search| {
+        search.project_id == parts.model.workspace.content.project.id()
+            && search.bundle_id == bundle.id()
+            && search.bundle_revision == bundle.revision().get()
+            && search.closure_digest == bundle.closure_digest()
+    }) {
+        if let Some(search) = parts.code.source_search.as_mut() {
             search.active_path.clone_from(&active_path);
             search.selection_char_range = selection_char_range;
             if search.scope == CodeSourceSearchScope::Selection
@@ -126,21 +117,14 @@ pub(crate) fn open_source_search_in_bundle(
         }
         return Ok(());
     }
-    app.state.code.code_workspace.source_search = Some(CodeSourceSearchState {
-        project_id: app.state.model.workspace.content.project.id(),
+    parts.code.source_search = Some(CodeSourceSearchState {
+        project_id: parts.model.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
-        generated_reference_revision: app.state.code.netlist.revision,
+        generated_reference_revision: parts.netlist.revision,
         generated_reference_digest: ContentDigest::from_bytes(
-            Sha256::digest(
-                app.state
-                    .model
-                    .netlist_artifacts
-                    .generated_source
-                    .as_bytes(),
-            )
-            .into(),
+            Sha256::digest(parts.model.netlist_artifacts.generated_source.as_bytes()).into(),
         ),
         language,
         active_path,
@@ -159,30 +143,27 @@ pub(crate) fn open_source_search_in_bundle(
     Ok(())
 }
 
-pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), String> {
-    match super::active_source_language(
-        app.state.workbench.workspace,
-        &app.state.model.workspace,
-        app.state.code.code_workspace.page,
-    ) {
+pub(crate) fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
+    match super::active_source_language(parts.wb.workspace, &parts.model.workspace, parts.code.page)
+    {
         None => {
-            app.state.code.netlist.find.open = true;
+            parts.netlist.find.open = true;
             Ok(())
         }
         Some(ProjectSourceLanguage::VerilogA) => {
-            let selected = super::selected_veriloga_editor_snapshot(app)?;
+            let selected =
+                super::veriloga::selected_veriloga_editor_snapshot_in(parts.model, parts.code)?;
             let active_path = selected.active_path().to_owned();
             let bundle_id = selected.bundle_id();
             open_source_search_in_bundle(
-                app,
+                parts,
                 ProjectSourceLanguage::VerilogA,
                 bundle_id,
                 &active_path,
             )
         }
         Some(ProjectSourceLanguage::RSpiceAutomation) => {
-            let bundle = app
-                .state
+            let bundle = parts
                 .model
                 .workspace
                 .content
@@ -191,21 +172,20 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
                     ProjectSourceLanguage::RSpiceAutomation,
                 ))
                 .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-            let active_path = app
-                .state
+            let active_path = parts
                 .code
-                .code_workspace
                 .automation
                 .selected_file
                 .as_deref()
                 .filter(|path| bundle.contains_file(path))
                 .unwrap_or(bundle.root().logical_path())
                 .to_owned();
-            open_source_search(app, ProjectSourceLanguage::RSpiceAutomation, &active_path)
+            open_source_search(parts, ProjectSourceLanguage::RSpiceAutomation, &active_path)
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) fn source_search_results(
     app: &RSpiceApp,
     search: &CodeSourceSearchState,
@@ -219,8 +199,9 @@ pub(crate) fn source_search_results(
     )
 }
 
-/// [`source_search_results`], over the model, the Code workspace's runtime
-/// state, the netlist editor's state and the platform's.
+/// The matches the search finds in its source bundle, over the model, the
+/// Code workspace's runtime state, the netlist editor's state and the
+/// platform's.
 pub(crate) fn source_search_results_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
@@ -292,36 +273,39 @@ pub(crate) fn source_search_results_in(
     Ok(output)
 }
 
-pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String, String> {
-    let search = app
-        .state
+pub(crate) fn commit_source_search_replace(
+    parts: &mut CodeWorkspaceParts<'_>,
+) -> Result<String, String> {
+    let search = parts
         .code
-        .code_workspace
         .source_search
         .clone()
         .ok_or_else(|| "No source search transaction is open.".to_owned())?;
-    if let Some(reason) = super::source_file_mutation_block_reason(app, search.language) {
+    if let Some(reason) = super::source_file_mutation_block_reason(parts, search.language) {
         return Err(reason.to_owned());
     }
-    let results = source_search_results(app, &search)?;
+    let results = source_search_results_in(
+        parts.model,
+        parts.code,
+        parts.netlist,
+        parts.platform,
+        &search,
+    )?;
     if results.truncated {
         return Err(format!(
             "More than {SOURCE_SEARCH_STREAM_LIMIT} matches exist. Narrow the search before replacing so the transaction remains bounded."
         ));
     }
-    let bundle = current_bundle(&app.state.model, &app.state.code.netlist, &search)?;
+    let bundle = current_bundle(parts.model, parts.netlist, &search)?;
     let options = search_options(&search);
     let mut replacements = Vec::new();
     let mut replacement_count = 0_usize;
-    for document in search_documents(
-        &app.state.model,
-        &app.state.code.code_workspace,
-        bundle,
-        &search,
-    )? {
+    for document in search_documents(parts.model, parts.code, bundle, &search)? {
         if !document.editable
-            || !super::source_bundle_document_is_editable(
-                app,
+            || !super::source_files::source_bundle_document_is_editable_in(
+                parts.model,
+                parts.code,
+                parts.platform,
                 search.language,
                 search.bundle_id,
                 document.logical_path,
@@ -385,22 +369,25 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
         });
     }
     let changed_files = {
-        let workbench = &mut app.state;
-        workbench.code.code_workspace.source_edit_history.replace(
-            &mut workbench.model.workspace.content,
+        parts.code.source_edit_history.replace(
+            &mut parts.model.workspace.content,
             search.bundle_id,
             replacements,
         )?
     };
     match search.language {
         ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence(app, search.bundle_id);
+            super::veriloga::invalidate_veriloga_evidence_in(
+                parts.model,
+                parts.code,
+                search.bundle_id,
+            );
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence(app);
+            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
         }
     }
-    app.state.code.code_workspace.source_search = None;
+    parts.code.source_search = None;
     let message = format!(
         "Replaced {} in {}{}.",
         counted(replacement_count, "match", "matches"),
@@ -418,7 +405,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
             )
         }
     );
-    app.state.prompt(message.clone());
+    parts.wb.prompt(message.clone());
     Ok(message)
 }
 
@@ -919,7 +906,12 @@ mod tests {
             .code_workspace
             .source_selections
             .insert((bundle_id, root.clone()), (6, 10));
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         {
             let search = app
                 .state
@@ -939,7 +931,7 @@ mod tests {
         assert_eq!(results.matches[0].byte_end, 10);
         assert_eq!((results.matches[0].line, results.matches[0].column), (1, 7));
 
-        commit_source_search_replace(&mut app).unwrap();
+        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
         let bundle = app
             .state
             .model
@@ -987,7 +979,12 @@ mod tests {
             )
             .unwrap();
 
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, "MODELS/ÉTAGE.VA").unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            "MODELS/ÉTAGE.VA",
+        )
+        .unwrap();
         let search = app
             .state
             .code
@@ -1020,7 +1017,12 @@ mod tests {
             .root()
             .logical_path()
             .to_owned();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &active_path,
+        )
+        .unwrap();
         {
             let search = app
                 .state
@@ -1035,7 +1037,7 @@ mod tests {
         let search = app.state.code.code_workspace.source_search.clone().unwrap();
         let results = source_search_results(&app, &search).unwrap();
         assert!(!results.matches.is_empty());
-        commit_source_search_replace(&mut app).unwrap();
+        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
         let bundle = app
             .state
             .model
@@ -1048,7 +1050,12 @@ mod tests {
         assert!(app.state.model.workspace.content.project_sources_dirty);
         let root = bundle.root().logical_path().to_owned();
 
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &active_path,
+        )
+        .unwrap();
         let bundle_id = app
             .state
             .code
@@ -1067,7 +1074,7 @@ mod tests {
                 "module changed; endmodule\n".to_owned(),
             )
             .unwrap();
-        let error = commit_source_search_replace(&mut app).unwrap_err();
+        let error = commit_source_search_replace(&mut app.code_workspace_parts()).unwrap_err();
         assert!(error.contains("changed after this search began"));
     }
 
@@ -1093,7 +1100,12 @@ mod tests {
             .content
             .replace_project_source_bundle_file(bundle_id, &root, source.to_owned())
             .unwrap();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         {
             let search = app
                 .state
@@ -1117,7 +1129,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(results.total_matches, 2);
-        commit_source_search_replace(&mut app).unwrap();
+        commit_source_search_replace(&mut app.code_workspace_parts()).unwrap();
         assert_eq!(
             app.state
                 .model
@@ -1149,7 +1161,12 @@ mod tests {
             .root()
             .logical_path()
             .to_owned();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &active_path,
+        )
+        .unwrap();
         {
             let search = app
                 .state
@@ -1202,7 +1219,12 @@ mod tests {
             .content
             .replace_project_source_bundle_file(bundle_id, &root, "gain ".repeat(600))
             .unwrap();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         app.state
             .code
             .code_workspace
@@ -1243,7 +1265,12 @@ mod tests {
                 "scale_token ".repeat(SOURCE_SEARCH_STREAM_LIMIT),
             )
             .unwrap();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         app.state
             .code
             .code_workspace
@@ -1266,7 +1293,12 @@ mod tests {
                 "scale_token ".repeat(SOURCE_SEARCH_STREAM_LIMIT + 1),
             )
             .unwrap();
-        open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
+        open_source_search(
+            &mut app.code_workspace_parts(),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
         app.state
             .code
             .code_workspace
@@ -1286,7 +1318,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-        open_active_source_search(&mut app).unwrap();
+        open_active_source_search(&mut app.code_workspace_parts()).unwrap();
         let search = app
             .state
             .code
@@ -1300,7 +1332,7 @@ mod tests {
         app.state.code.code_workspace.source_search = None;
         app.state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        open_active_source_search(&mut app).unwrap();
+        open_active_source_search(&mut app.code_workspace_parts()).unwrap();
         assert!(app.state.code.netlist.find.open);
         assert!(app.state.code.code_workspace.source_search.is_none());
     }

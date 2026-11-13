@@ -424,7 +424,7 @@ fn source_editor(
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
     ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
-        app,
+        &mut app.code_workspace_parts(),
         crate::state::ProjectSourceLanguage::VerilogA,
         bundle_id,
         active_path,
@@ -436,7 +436,7 @@ fn source_editor(
         // Bind the search to source revisions and selection after preceding edits.
         if let Err(error) =
             crate::workbench::documents::code_workspace::open_source_search_in_bundle(
-                app,
+                &mut app.code_workspace_parts(),
                 crate::state::ProjectSourceLanguage::VerilogA,
                 bundle_id,
                 active_path,

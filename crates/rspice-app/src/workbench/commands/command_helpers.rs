@@ -310,7 +310,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
         CodeRequest::FindCodeDocument => {
             if let Err(error) =
-                crate::workbench::documents::code_workspace::open_active_source_search(app)
+                crate::workbench::documents::code_workspace::open_active_source_search(&mut app.code_workspace_parts())
             {
                 app.state.prompt(error);
             }
@@ -394,7 +394,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::ReplaceSourceSearchMatches => {
             if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_source_search_replace(app)
+                crate::workbench::documents::code_workspace::commit_source_search_replace(&mut app.code_workspace_parts())
             {
                 if let Some(search) = app.state.code.code_workspace.source_search.as_mut() {
                     search.error = Some(error);
@@ -406,7 +406,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::SourceDocument(request) => answer_source_document_request(app, request),
         CodeRequest::CommitSymbolRename => {
             if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_language_rename(app)
+                crate::workbench::documents::code_workspace::commit_language_rename(&mut app.code_workspace_parts())
                 && let Some(open) = app.state.code.code_workspace.language_tools.as_mut()
             {
                 open.error = Some(error);
@@ -445,8 +445,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             path,
         } => {
             let opened =
-                crate::workbench::documents::code_workspace::open_source_file_dialog_in_bundle(
-                    app, language, bundle_id, action, &path, &path,
+                crate::workbench::documents::code_workspace::open_source_file_dialog_in_bundle(&mut app.code_workspace_parts(), language, bundle_id, action, &path, &path,
                 )
                 .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
             if let Err(error) = opened {
@@ -577,10 +576,17 @@ fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
 
     match request {
         AutomationRequest::ImportDropped(dropped) => {
-            code_workspace::import_dropped_automation_files(app, dropped);
+            let application_modal_open = app.state.application_modal_open();
+            code_workspace::import_dropped_automation_files(
+                &mut app.code_workspace_parts(),
+                application_modal_open,
+                dropped,
+            );
         }
         AutomationRequest::CreateWorkspace => {
-            if let Err(error) = code_workspace::open_source_workspace_dialog(app) {
+            if let Err(error) =
+                code_workspace::open_source_workspace_dialog(&mut app.code_workspace_parts())
+            {
                 app.state.prompt(error);
             }
         }
@@ -603,7 +609,7 @@ fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
         }
         AutomationRequest::FormatDocument { bundle_id, path } => {
             if let Err(error) = code_workspace::format_language_document(
-                app,
+                &mut app.code_workspace_parts(),
                 crate::state::ProjectSourceLanguage::RSpiceAutomation,
                 bundle_id,
                 &path,
@@ -613,7 +619,7 @@ fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
         }
         AutomationRequest::FindInBundle { path } => {
             if let Err(error) = code_workspace::open_source_search(
-                app,
+                &mut app.code_workspace_parts(),
                 crate::state::ProjectSourceLanguage::RSpiceAutomation,
                 &path,
             ) {
@@ -686,7 +692,9 @@ pub(in crate::workbench) fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
 fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRequest) {
     match request {
         SourceDocumentRequest::CreateWorkspace => {
-            match crate::workbench::documents::code_workspace::commit_source_workspace_dialog(app) {
+            match crate::workbench::documents::code_workspace::commit_source_workspace_dialog(
+                &mut app.code_workspace_parts(),
+            ) {
                 Ok(message) => {
                     app.state
                         .record(LogSeverity::Info, LogSource::Studio, message);

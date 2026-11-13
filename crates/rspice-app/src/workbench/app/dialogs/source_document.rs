@@ -563,7 +563,7 @@ impl RSpiceApp {
             | LifecycleAction::CloseHistory => return,
             LifecycleAction::Begin(file_action) => (
                 code_workspace::open_source_file_dialog(
-                    self,
+                    &mut self.code_workspace_parts(),
                     language,
                     file_action,
                     logical_path,
@@ -572,19 +572,28 @@ impl RSpiceApp {
                 Report::Console,
             ),
             LifecycleAction::Commit => (
-                code_workspace::commit_source_file_dialog(self).map(|_| ()),
+                code_workspace::commit_source_file_dialog(&mut self.code_workspace_parts())
+                    .map(|_| ()),
                 Report::FileTransaction,
             ),
             LifecycleAction::OpenHistory => (
-                code_workspace::open_source_history(self, language, logical_path),
+                code_workspace::open_source_history(
+                    &mut self.code_workspace_parts(),
+                    language,
+                    logical_path,
+                ),
                 Report::Console,
             ),
             LifecycleAction::Restore => (
-                code_workspace::commit_source_history_restore(self).map(|_| ()),
+                code_workspace::commit_source_history_restore(&mut self.code_workspace_parts())
+                    .map(|_| ()),
                 Report::History,
             ),
             LifecycleAction::Import => (
-                code_workspace::request_automation_source_import(self, logical_path),
+                code_workspace::request_automation_source_import(
+                    &mut self.code_workspace_parts(),
+                    logical_path,
+                ),
                 Report::Console,
             ),
             LifecycleAction::ReplaceFromFile => {
@@ -598,7 +607,12 @@ impl RSpiceApp {
                 (outcome, Report::Console)
             }
             LifecycleAction::AssignRole(role) => (
-                code_workspace::assign_automation_source_role(self, logical_path, role).map(|_| ()),
+                code_workspace::assign_automation_source_role(
+                    &mut self.code_workspace_parts(),
+                    logical_path,
+                    role,
+                )
+                .map(|_| ()),
                 Report::Console,
             ),
         };

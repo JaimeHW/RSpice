@@ -637,7 +637,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-        code_workspace::open_active_source_search(&mut app)
+        code_workspace::open_active_source_search(&mut app.code_workspace_parts())
             .expect("the Automation page owns a searchable bundle");
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..3 {
@@ -732,7 +732,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-        code_workspace::open_active_source_search(&mut app)
+        code_workspace::open_active_source_search(&mut app.code_workspace_parts())
             .expect("the Automation page owns a searchable bundle");
         let Some(search) = app.state.code.code_workspace.source_search.as_mut() else {
             panic!("the search opened");
@@ -776,7 +776,7 @@ mod tests {
     fn a_bundle_search_finds_and_replaces_through_the_dialog_entry_points() {
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-        code_workspace::open_active_source_search(&mut app)
+        code_workspace::open_active_source_search(&mut app.code_workspace_parts())
             .expect("the Automation page owns a searchable bundle");
 
         let search = app

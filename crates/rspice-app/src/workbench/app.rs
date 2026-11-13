@@ -305,9 +305,11 @@ impl RSpiceApp {
     ) -> crate::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
         crate::workbench::documents::code_workspace::CodeWorkspaceParts {
             code: &mut self.state.code.code_workspace,
+            netlist: &mut self.state.code.netlist,
             handles: &mut self.code,
             model: &mut self.state.model,
             wb: &mut self.state.workbench,
+            platform: &self.state.platform,
             runs: &mut self.state.runs,
             run_controller: &mut self.simulation_controller,
             export_io: self.export_workflow_io.as_ref(),

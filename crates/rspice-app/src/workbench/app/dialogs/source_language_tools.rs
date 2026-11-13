@@ -93,7 +93,7 @@ pub(crate) fn navigate_active_source(
     // state; the other two borrow it and leave an open form as they found it.
     let previous = app.state.code.code_workspace.language_tools.take();
     if let Err(error) = code_workspace::open_language_tools_in_bundle(
-        app,
+        &mut app.code_workspace_parts(),
         language,
         bundle_id,
         &logical_path,
@@ -429,7 +429,7 @@ helper()
                 .expect("the second file is the lock");
         }
         code_workspace::open_language_tools_in_bundle(
-            &mut app,
+            &mut app.code_workspace_parts(),
             language,
             bundle_id,
             &root,

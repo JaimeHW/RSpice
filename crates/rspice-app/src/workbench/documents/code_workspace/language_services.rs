@@ -10,9 +10,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
+use super::CodeWorkspaceParts;
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::{ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage};
-use crate::workbench::RSpiceApp;
 
 use super::veriloga_catalog::VerilogACatalog;
 use super::veriloga_symbols::{VerilogASymbolKind, VerilogASymbols};
@@ -97,19 +97,18 @@ pub(crate) struct CodeLanguageToolsState {
 }
 
 pub(crate) fn open_language_tools_in_bundle(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     active_path: &str,
     caret_char_index: usize,
 ) -> Result<(), String> {
-    if !super::source_bundle_contains_document(app, language, bundle_id, active_path) {
+    if !super::source_bundle_contains_document(parts, language, bundle_id, active_path) {
         return Err(format!(
             "The active source file '{active_path}' no longer belongs to this project source bundle."
         ));
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -124,13 +123,12 @@ pub(crate) fn open_language_tools_in_bundle(
             )
         })?
         .to_owned();
-    let index =
-        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
+    let index = LanguageServiceIndex::build(parts.model.workspace.content.project.id(), bundle)?;
     let query = index
         .symbol_at(&active_path, caret_char_index)
         .unwrap_or_default()
         .to_owned();
-    app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
+    parts.code.language_tools = Some(CodeLanguageToolsState {
         index,
         active_path,
         caret: caret_char_index,
@@ -141,8 +139,8 @@ pub(crate) fn open_language_tools_in_bundle(
     Ok(())
 }
 
-pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, String> {
-    let state = current_language_transaction(app)?;
+pub(crate) fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+    let state = current_language_transaction(parts)?;
     let replacements = state.index.rename_preview_at(
         &state.active_path,
         state.caret,
@@ -150,8 +148,10 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         &state.replacement,
     )?;
     if let Some((logical_path, _)) = replacements.iter().find(|(logical_path, _)| {
-        !super::source_bundle_document_is_editable(
-            app,
+        !super::source_files::source_bundle_document_is_editable_in(
+            parts.model,
+            parts.code,
+            parts.platform,
             state.index.language,
             state.index.bundle_id,
             logical_path,
@@ -166,19 +166,22 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
             .index
             .rename_extent_at(&state.active_path, state.caret, &state.query);
     let changed_files = {
-        let workbench = &mut app.state;
-        workbench.code.code_workspace.source_edit_history.replace(
-            &mut workbench.model.workspace.content,
+        parts.code.source_edit_history.replace(
+            &mut parts.model.workspace.content,
             state.index.bundle_id,
             replacements,
         )?
     };
     match state.index.language {
         ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence(app, state.index.bundle_id);
+            super::veriloga::invalidate_veriloga_evidence_in(
+                parts.model,
+                parts.code,
+                state.index.bundle_id,
+            );
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence(app);
+            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
         }
     }
     let message = format!(
@@ -188,8 +191,8 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         extent_words(occurrences, changed_files)
     );
     // The rename is the form's one transaction: done, the form is closed.
-    app.state.code.code_workspace.language_tools = None;
-    app.state.prompt(message.clone());
+    parts.code.language_tools = None;
+    parts.wb.prompt(message.clone());
     Ok(message)
 }
 
@@ -202,19 +205,21 @@ pub(crate) fn extent_words(occurrences: usize, files: usize) -> String {
     )
 }
 
-fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsState, String> {
-    let state = app
-        .state
+fn current_language_transaction(
+    parts: &CodeWorkspaceParts<'_>,
+) -> Result<CodeLanguageToolsState, String> {
+    let state = parts
         .code
-        .code_workspace
         .language_tools
         .clone()
         .ok_or_else(|| "No source-language transaction is open.".to_owned())?;
-    if let Some(reason) = super::source_file_mutation_block_reason(app, state.index.language) {
+    if let Some(reason) = super::source_file_mutation_block_reason(parts, state.index.language) {
         return Err(reason.to_owned());
     }
-    if !super::source_bundle_document_is_editable(
-        app,
+    if !super::source_files::source_bundle_document_is_editable_in(
+        parts.model,
+        parts.code,
+        parts.platform,
         state.index.language,
         state.index.bundle_id,
         &state.active_path,
@@ -224,8 +229,7 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
             state.active_path
         ));
     }
-    let bundle = app
-        .state
+    let bundle = parts
         .model
         .workspace
         .content
@@ -234,7 +238,7 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
         .ok_or_else(|| "The indexed source bundle no longer exists.".to_owned())?;
     if !state
         .index
-        .is_current(app.state.model.workspace.content.project.id(), bundle)
+        .is_current(parts.model.workspace.content.project.id(), bundle)
     {
         return Err(
             "The source bundle changed after the language transaction was opened. Reindex the current revision."
@@ -252,21 +256,27 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
 /// there. A read-only source, or one the formatter refuses to touch because
 /// it does not parse, says why instead of changing anything.
 pub(crate) fn format_language_document(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: ProjectSourceId,
     logical_path: &str,
 ) -> Result<String, String> {
-    if let Some(reason) = super::source_file_mutation_block_reason(app, language) {
+    if let Some(reason) = super::source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
     }
-    if !super::source_bundle_document_is_editable(app, language, bundle_id, logical_path) {
+    if !super::source_files::source_bundle_document_is_editable_in(
+        parts.model,
+        parts.code,
+        parts.platform,
+        language,
+        bundle_id,
+        logical_path,
+    ) {
         return Err(format!(
             "{logical_path} is read-only, so it was not formatted."
         ));
     }
-    let source = app
-        .state
+    let source = parts
         .model
         .workspace
         .content
@@ -282,10 +292,10 @@ pub(crate) fn format_language_document(
     let message = if formatted == source {
         format!("{logical_path} is already formatted.")
     } else {
-        write_language_document(app, language, bundle_id, logical_path, formatted)?;
+        write_language_document(parts, language, bundle_id, logical_path, formatted)?;
         format!("Formatted {logical_path}.")
     };
-    app.state.prompt(message.clone());
+    parts.wb.prompt(message.clone());
     Ok(message)
 }
 
@@ -313,24 +323,23 @@ pub(super) fn formatted_verilog_a(logical_path: &str, source: &str) -> Result<St
 }
 
 fn write_language_document(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: ProjectSourceId,
     logical_path: &str,
     replacement: String,
 ) -> Result<(), String> {
-    let workbench = &mut app.state;
-    workbench.code.code_workspace.source_edit_history.replace(
-        &mut workbench.model.workspace.content,
+    parts.code.source_edit_history.replace(
+        &mut parts.model.workspace.content,
         bundle_id,
         vec![(logical_path.to_owned(), replacement)],
     )?;
     match language {
         ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence(app, bundle_id);
+            super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence(app);
+            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
         }
     }
     Ok(())
@@ -1994,7 +2003,7 @@ mod tests {
             error: None,
         });
 
-        let error = commit_language_rename(&mut app).unwrap_err();
+        let error = commit_language_rename(&mut app.code_workspace_parts()).unwrap_err();
         assert!(error.contains(governed_path));
         assert!(error.contains("No project source was changed"));
         let unchanged = app
