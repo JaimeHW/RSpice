@@ -350,3 +350,100 @@ fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
         Some("mW")
     );
 }
+
+/// An expression the reader adds while a document pane is open is written to
+/// that document. The expression editor commits inside the pane's frame,
+/// between the pane's projection and its capture, so the test adds it there;
+/// the quick view's own expressions are left as they were.
+#[test]
+fn an_expression_added_while_a_document_pane_is_open_is_written_to_the_document() {
+    use super::super::super::persistent_document::{
+        capture_pane_presentation, project_pane_presentation, projection,
+    };
+    let mut state = power_fixture();
+    add(&mut state, "V(out)*I(vdd)");
+    let analysis = AnalysisPresentationKey::new(
+        state.model.simulation.retained.runs[0].dataset_id,
+        &state.model.simulation.retained.runs[0].analyses[0],
+    );
+    let document_id = save_single_pane_view(&mut state);
+    for _ in 0..2 {
+        document_frame(&mut state, document_id);
+    }
+    let pane = projection(state.results_reads(), document_id)
+        .expect("the document projects")
+        .pages[0]
+        .panes[0]
+        .clone();
+    let viewer = super::super::super::ResultViewer::from_viewer_document_id(&pane.viewer_id)
+        .expect("the pane names a Results viewer");
+    project_pane_presentation(&mut state.results_parts(), &pane, viewer)
+        .expect("the pane projects onto its strip");
+    add(&mut state, "V(out)-V(in)");
+    state
+        .results
+        .results
+        .session
+        .expression_units
+        .insert((analysis, "V(out)-V(in)".to_owned()), "mV".to_owned());
+    capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
+
+    let held = |state: &ResultsTestHost| -> Vec<(String, Option<String>)> {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project keeps the document")
+            .expression_traces()
+            .iter()
+            .map(|trace| (trace.text.clone(), trace.unit.clone()))
+            .collect()
+    };
+    let expected = vec![
+        ("V(out)*I(vdd)".to_owned(), None),
+        ("V(out)-V(in)".to_owned(), Some("mV".to_owned())),
+    ];
+    assert_eq!(
+        held(&state),
+        expected,
+        "the document keeps the new expression"
+    );
+    // The next frame projects it back from the document and writes nothing.
+    let settled = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .unwrap()
+        .revision();
+    document_frame(&mut state, document_id);
+    assert_eq!(held(&state), expected);
+    assert_eq!(
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .unwrap()
+            .revision(),
+        settled
+    );
+    // The quick view never had it.
+    state.results.results.session.leave_persistent_document();
+    assert_eq!(
+        state.results.results.session.analysis_exprs[&analysis]
+            .iter()
+            .map(|expr| expr.text.as_str())
+            .collect::<Vec<_>>(),
+        ["V(out)*I(vdd)"]
+    );
+    assert!(
+        !state
+            .results
+            .results
+            .session
+            .expression_units
+            .contains_key(&(analysis, "V(out)-V(in)".to_owned()))
+    );
+}
