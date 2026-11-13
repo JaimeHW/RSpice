@@ -180,7 +180,7 @@ impl Host for RSpiceApp {
                             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                                 // The breakpoints reach the debugger before the
                                 // page draws.
-                                sync_automation_debugger(&mut app.automation_parts());
+                                sync_automation_debugger(&mut app.code_workspace_parts());
                                 // The page prepares, putting its editor in
                                 // front, before its context takes the menu's
                                 // answers, which it holds only while the

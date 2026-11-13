@@ -30,21 +30,21 @@ pub(super) fn handle_runtime_host_call(
         .filter(|pending| pending.request_id == request_id)
     else {
         runtime_protocol_failure(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             "A managed Python host call has no owning request ledger.",
         );
         return;
     };
     if pending.session_id != Some(session_id) {
         runtime_protocol_failure(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             "A managed Python host call has the wrong session identity.",
         );
         return;
     }
     if call.call_id != pending.last_call_id.saturating_add(1) {
         runtime_protocol_failure(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             "Managed Python host-call identities are not a strict monotonic sequence.",
         );
         return;
@@ -60,10 +60,11 @@ pub(super) fn handle_runtime_host_call(
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| bundle.id() == pending.bundle_id);
-    if !exact_bundle_is_current || !source_token_is_current(&app.automation_parts(), pending.token)
+    if !exact_bundle_is_current
+        || !source_token_is_current(&app.code_workspace_parts(), pending.token)
     {
         reject_runtime_host_call(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             session_id,
             call.call_id,
             "STALE-SOURCE",
@@ -82,7 +83,7 @@ pub(super) fn handle_runtime_host_call(
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, pending.token))
     else {
         runtime_protocol_failure(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             "The validated Python source is no longer available.",
         );
         return;
@@ -93,7 +94,7 @@ pub(super) fn handle_runtime_host_call(
         .find(|grant| grant.capability == call.capability && grant.token == call.capability_token)
     else {
         reject_runtime_host_call(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             session_id,
             call.call_id,
             "CAPABILITY-DENIED",
@@ -128,7 +129,7 @@ pub(super) fn handle_runtime_host_call(
     };
     if !scope_allowed {
         reject_runtime_host_call(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             session_id,
             call.call_id,
             "CAPABILITY-SCOPE-DENIED",
@@ -180,9 +181,9 @@ pub(super) fn handle_runtime_host_call(
             fail_closed,
         } => {
             let Some(manifest) = manifest.as_ref() else {
-                retain_runtime_execution(&mut app.automation_parts(), pending);
+                retain_runtime_execution(&mut app.code_workspace_parts(), pending);
                 send_runtime_host_response(
-                    &mut app.automation_parts(),
+                    &mut app.code_workspace_parts(),
                     session_id,
                     call.call_id,
                     host_failure(
@@ -306,7 +307,7 @@ pub(super) fn handle_runtime_host_call(
                     "The requested requirement profile differs from the selected run plan.",
                 ));
             } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -342,7 +343,7 @@ pub(super) fn handle_runtime_host_call(
                     "The requested comparison differs from the baseline policy sealed into the run plan.",
                 ));
             } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -387,7 +388,7 @@ pub(super) fn handle_runtime_host_call(
                     "One or more requested artifact formats are not authorized by the selected run plan.",
                 ));
             } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -440,10 +441,10 @@ pub(super) fn handle_runtime_host_call(
             }
         }
     }
-    retain_runtime_execution(&mut app.automation_parts(), pending);
+    retain_runtime_execution(&mut app.code_workspace_parts(), pending);
     if let Some(response) = response {
         send_runtime_host_response(
-            &mut app.automation_parts(),
+            &mut app.code_workspace_parts(),
             session_id,
             call.call_id,
             response,
@@ -452,7 +453,7 @@ pub(super) fn handle_runtime_host_call(
 }
 
 pub(super) fn retain_runtime_execution(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     pending: page::PendingAutomationRuntimeExecution,
 ) {
     if parts
@@ -502,7 +503,7 @@ pub(super) fn host_failure(
 }
 
 pub(super) fn reject_runtime_host_call(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     session_id: uuid::Uuid,
     call_id: u64,
     code: &str,
@@ -525,7 +526,7 @@ pub(super) fn reject_runtime_host_call(
 }
 
 pub(super) fn send_runtime_host_response(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     session_id: uuid::Uuid,
     call_id: u64,
     response: rspice_automation_protocol::HostResponse,
@@ -544,7 +545,7 @@ pub(super) fn send_runtime_host_response(
     }
 }
 
-pub(super) fn runtime_protocol_failure(parts: &mut AutomationParts<'_>, message: &str) {
+pub(super) fn runtime_protocol_failure(parts: &mut CodeWorkspaceParts<'_>, message: &str) {
     let debugging = parts
         .code
         .automation
@@ -564,7 +565,7 @@ pub(super) fn runtime_protocol_failure(parts: &mut AutomationParts<'_>, message:
 }
 
 pub(super) fn completed_run_matches_pending(
-    parts: &AutomationParts<'_>,
+    parts: &CodeWorkspaceParts<'_>,
     pending: &page::PendingAutomationRuntimeExecution,
 ) -> bool {
     matches!(
@@ -584,7 +585,7 @@ pub(super) fn automation_api_artifact_kind(value: &str) -> Option<ArtifactKind> 
 }
 
 pub(super) fn runtime_editor_diagnostic(
-    parts: &AutomationParts<'_>,
+    parts: &CodeWorkspaceParts<'_>,
     diagnostic: &rspice_automation_protocol::RuntimeDiagnostic,
 ) -> CodeEditorDiagnostic {
     let snapshot = parts.code.automation.runtime_snapshot.as_ref();

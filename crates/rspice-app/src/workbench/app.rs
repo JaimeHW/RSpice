@@ -298,12 +298,12 @@ impl RSpiceApp {
         )
     }
 
-    /// The parts of the application the Automation workflow reads and
-    /// changes, lent for the one call.
-    pub(crate) fn automation_parts(
+    /// The parts of the application the code workspace's operations read
+    /// and change, lent for the one call.
+    pub(crate) fn code_workspace_parts(
         &mut self,
-    ) -> crate::workbench::documents::code_workspace::AutomationParts<'_> {
-        crate::workbench::documents::code_workspace::AutomationParts {
+    ) -> crate::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
+        crate::workbench::documents::code_workspace::CodeWorkspaceParts {
             code: &mut self.state.code.code_workspace,
             handles: &mut self.code,
             model: &mut self.state.model,
@@ -624,7 +624,7 @@ impl RSpiceApp {
         self.poll_code(ctx);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(
-            &mut self.automation_parts(),
+            &mut self.code_workspace_parts(),
         );
         crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
         let automation = &self.state.code.code_workspace.automation;

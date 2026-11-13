@@ -15,7 +15,7 @@ use super::*;
 /// the first enabled breakpoint. The adapter exposes only values produced by
 /// the versioned RSpice API; secret-bearing environment values are never
 /// materialized in the debugger model.
-pub fn start_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn start_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     if parts.code.automation.execution.is_active() {
         return;
     }
@@ -29,23 +29,23 @@ pub fn start_automation_debugger(parts: &mut AutomationParts<'_>) {
     start_managed_python_workflow(parts, AutomationRuntimeLaunchMode::Debug);
 }
 
-pub fn continue_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn continue_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     send_debug_control(parts, rspice_automation_protocol::DebugControl::Continue);
 }
 
-pub fn step_over_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn step_over_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     send_debug_control(parts, rspice_automation_protocol::DebugControl::StepOver);
 }
 
-pub fn step_into_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn step_into_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     send_debug_control(parts, rspice_automation_protocol::DebugControl::StepIn);
 }
 
-pub fn step_out_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn step_out_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     send_debug_control(parts, rspice_automation_protocol::DebugControl::StepOut);
 }
 
-pub fn restart_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn restart_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     if active_debug_session(parts).is_some() {
         send_debug_control(parts, rspice_automation_protocol::DebugControl::Restart);
     } else {
@@ -55,13 +55,13 @@ pub fn restart_automation_debugger(parts: &mut AutomationParts<'_>) {
 
 /// Request a debugger pause. Governed simulation dispatch is an atomic host
 /// call, so the pause is honored at its next safe completion boundary.
-pub fn pause_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn pause_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     if send_debug_control(parts, rspice_automation_protocol::DebugControl::Pause) {
         parts.code.automation.debug.pause_requested = true;
     }
 }
 
-pub fn stop_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn stop_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     if active_debug_session(parts).is_some() {
         let _ = send_debug_control(parts, rspice_automation_protocol::DebugControl::Stop);
         return;
@@ -79,7 +79,7 @@ pub fn stop_automation_debugger(parts: &mut AutomationParts<'_>) {
     );
 }
 
-pub fn toggle_automation_breakpoint(parts: &mut AutomationParts<'_>, line: usize) {
+pub fn toggle_automation_breakpoint(parts: &mut CodeWorkspaceParts<'_>, line: usize) {
     let Some((document_id, source_path)) = active_automation_python_document(parts) else {
         debug_fail(
             parts,
@@ -105,7 +105,7 @@ pub fn toggle_automation_breakpoint(parts: &mut AutomationParts<'_>, line: usize
 }
 
 pub fn remove_automation_breakpoint(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     document_id: uuid::Uuid,
     line: usize,
 ) {
@@ -118,7 +118,7 @@ pub fn remove_automation_breakpoint(
     synchronize_runtime_breakpoints(parts);
 }
 
-pub fn select_automation_debug_frame(parts: &mut AutomationParts<'_>, frame_id: u64) {
+pub fn select_automation_debug_frame(parts: &mut CodeWorkspaceParts<'_>, frame_id: u64) {
     if parts.code.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
@@ -153,7 +153,7 @@ pub fn select_automation_debug_frame(parts: &mut AutomationParts<'_>, frame_id: 
     refresh_automation_debugger(parts);
 }
 
-pub fn refresh_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn refresh_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     if parts.code.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
@@ -199,11 +199,11 @@ pub fn refresh_automation_debugger(parts: &mut AutomationParts<'_>) {
     }
 }
 
-pub fn sync_automation_debugger(parts: &mut AutomationParts<'_>) {
+pub fn sync_automation_debugger(parts: &mut CodeWorkspaceParts<'_>) {
     synchronize_runtime_breakpoints(parts);
 }
 
-pub(super) fn active_debug_session(parts: &AutomationParts<'_>) -> Option<(uuid::Uuid, u64)> {
+pub(super) fn active_debug_session(parts: &CodeWorkspaceParts<'_>) -> Option<(uuid::Uuid, u64)> {
     parts
         .code
         .automation
@@ -218,7 +218,7 @@ pub(super) fn active_debug_session(parts: &AutomationParts<'_>) -> Option<(uuid:
 }
 
 pub(super) fn send_debug_control(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     control: rspice_automation_protocol::DebugControl,
 ) -> bool {
     let Some((session_id, _)) = active_debug_session(parts) else {
@@ -270,7 +270,7 @@ pub(super) fn send_debug_control(
 }
 
 pub(super) fn active_automation_python_document(
-    parts: &AutomationParts<'_>,
+    parts: &CodeWorkspaceParts<'_>,
 ) -> Option<(uuid::Uuid, String)> {
     let bundle = parts
         .model
@@ -294,7 +294,7 @@ pub(super) fn active_automation_python_document(
 }
 
 pub(super) fn runtime_breakpoints(
-    parts: &AutomationParts<'_>,
+    parts: &CodeWorkspaceParts<'_>,
     snapshot: &rspice_automation_protocol::SourceSnapshot,
 ) -> Vec<rspice_automation_protocol::Breakpoint> {
     use rspice_automation_protocol::{Breakpoint, BreakpointKind};
@@ -341,7 +341,7 @@ pub(super) fn runtime_breakpoints(
 }
 
 pub(super) fn runtime_exception_policy(
-    parts: &AutomationParts<'_>,
+    parts: &CodeWorkspaceParts<'_>,
 ) -> rspice_automation_protocol::ExceptionPolicy {
     match parts.code.automation.debug.exception_policy {
         AutomationExceptionPolicy::All => rspice_automation_protocol::ExceptionPolicy::All,
@@ -352,7 +352,7 @@ pub(super) fn runtime_exception_policy(
     }
 }
 
-pub(super) fn synchronize_runtime_breakpoints(parts: &mut AutomationParts<'_>) {
+pub(super) fn synchronize_runtime_breakpoints(parts: &mut CodeWorkspaceParts<'_>) {
     let Some((session_id, _)) = active_debug_session(parts) else {
         return;
     };
@@ -377,7 +377,7 @@ pub(super) fn synchronize_runtime_breakpoints(parts: &mut AutomationParts<'_>) {
     }
 }
 
-pub(super) fn request_debug_stack(parts: &mut AutomationParts<'_>, session_id: uuid::Uuid) {
+pub(super) fn request_debug_stack(parts: &mut CodeWorkspaceParts<'_>, session_id: uuid::Uuid) {
     match parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::StackTrace {
             session_id,
@@ -393,7 +393,7 @@ pub(super) fn request_debug_stack(parts: &mut AutomationParts<'_>, session_id: u
 }
 
 pub(super) fn apply_debug_stack(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     request_id: Option<u64>,
     frames: Vec<rspice_automation_protocol::StackFrame>,
 ) {
@@ -463,7 +463,7 @@ pub(super) fn apply_debug_stack(
 }
 
 pub(super) fn request_debug_variables(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     reference: u64,
     scope: AutomationDebugVariableScope,
 ) {
@@ -494,7 +494,7 @@ pub(super) fn request_debug_variables(
 }
 
 pub(super) fn apply_debug_variables(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     request_id: Option<u64>,
     values: Vec<rspice_automation_protocol::Variable>,
 ) {
@@ -533,7 +533,7 @@ pub(super) fn apply_debug_variables(
 }
 
 pub(super) fn apply_debug_evaluation(
-    parts: &mut AutomationParts<'_>,
+    parts: &mut CodeWorkspaceParts<'_>,
     request_id: Option<u64>,
     expression: &str,
     result: rspice_automation_protocol::Variable,
@@ -580,7 +580,7 @@ pub(super) fn apply_debug_evaluation(
     }
 }
 
-pub(super) fn debug_fail(parts: &mut AutomationParts<'_>, message: &str) {
+pub(super) fn debug_fail(parts: &mut CodeWorkspaceParts<'_>, message: &str) {
     let debug = &mut parts.code.automation.debug;
     debug.phase = AutomationDebugPhase::Failed;
     debug.last_error = Some(message.to_owned());
