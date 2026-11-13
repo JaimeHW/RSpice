@@ -10,6 +10,7 @@ use egui::Ui;
 use rspice_results::family_projection::FamilyTraceStyle;
 use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
 use rspice_results::waveform::SharedWaveformValues;
+use rspice_ui_kit::palette::TRACE_HUES;
 use rspice_ui_kit::plot::sample::{
     BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
@@ -91,15 +92,33 @@ impl SwatchStyle {
     /// The curve's dash and marker, exactly as its pane resolves them, so a
     /// legend or readout swatch is the curve.
     pub fn look(&self, color_safe: bool) -> TraceLook {
-        let mut plot = apply_family_trace_style(
+        strip_trace_cues(
             Trace::new(&[], &[], egui::Color32::PLACEHOLDER),
+            self.palette_slot,
             self.family_style,
-        );
-        if let Some(slot) = self.palette_slot {
-            plot = plot.palette_slot(slot);
-        }
-        plot.look(self.ordinal, color_safe)
+            self.ordinal,
+        )
+        .look(self.ordinal, color_safe)
     }
+}
+
+/// A strip trace's plot curve with the cues its swatch reads: its family
+/// style and a palette slot.
+///
+/// A curve whose colour came from its family's own policy has no slot in the
+/// palette, and its colour-safe marker would otherwise come from its place in
+/// the pane's draw order, which its legend chip cannot know: the curve drew
+/// one symbol and its chip another. It takes its waveform's place in the hue
+/// cycle instead, inside the first pass, so it draws solid when color-safe
+/// traces are off.
+fn strip_trace_cues(
+    plot: Trace<'_>,
+    palette_slot: Option<usize>,
+    family_style: Option<FamilyTraceStyle>,
+    waveform_index: usize,
+) -> Trace<'_> {
+    apply_family_trace_style(plot, family_style)
+        .palette_slot(palette_slot.unwrap_or(waveform_index % TRACE_HUES))
 }
 
 /// How far apart, relative to their size, a fit's extremes may be and still
@@ -716,16 +735,15 @@ pub fn show_plot<'a>(
         // reverse sweep vanished the moment it was zoomed — every window it
         // was asked for came back empty — and a hysteresis loop lost whichever
         // branch fell outside one contiguous index window.
-        let mut plot_trace = apply_family_trace_style(
+        let mut plot_trace = strip_trace_cues(
             Trace::new(&trace.x, &trace.y, color)
                 .width(input.trace_width)
                 .cache_key(trace_key(model, trace))
                 .shape(&trace.shape),
+            trace.palette_slot,
             trace.family_style,
+            trace.waveform_index,
         );
-        if let Some(slot) = trace.palette_slot {
-            plot_trace = plot_trace.palette_slot(slot);
-        }
         if trace.overlay {
             plot_trace = plot_trace.width(input.trace_width * SECONDARY_TRACE_RATIO);
         }
@@ -833,5 +851,46 @@ pub fn show_plot<'a>(
     PanePlotResponse {
         response,
         nearest_trace,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A curve coloured by its family's policy has no palette slot. With
+    /// color-safe traces on, its pane draws it with the symbol its legend
+    /// chip shows wherever it falls in the pane's draw order, and with them
+    /// off it draws solid.
+    #[test]
+    fn a_curve_without_a_palette_slot_draws_the_symbol_its_chip_shows() {
+        let style = FamilyTraceStyle {
+            color: None,
+            dash_ordinal: None,
+            marker_ordinal: None,
+            width_points: Some(1.2),
+        };
+        for waveform_index in 0..12 {
+            let chip = SwatchStyle {
+                palette_slot: None,
+                family_style: Some(style),
+                ordinal: waveform_index,
+            };
+            for draw_index in 0..12 {
+                let curve = strip_trace_cues(
+                    Trace::new(&[], &[], egui::Color32::RED),
+                    None,
+                    Some(style),
+                    waveform_index,
+                );
+                assert_eq!(
+                    curve.look(draw_index, true),
+                    chip.look(true),
+                    "waveform {waveform_index} drawn {draw_index}th"
+                );
+                let solid = curve.look(draw_index, false);
+                assert_eq!((solid.dash, solid.marker), (None, None));
+            }
+        }
     }
 }
