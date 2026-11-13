@@ -334,6 +334,12 @@ fn write_the_conversion_pictures() {
     let run = sar_run();
     let eoc = history(run, "EOC");
     let samp = history(run, "SAMP");
+    // The first conversion ends where eoc first rises.
+    let done = eoc
+        .iter()
+        .find(|(_, code)| *code == 1)
+        .expect("the first conversion ends")
+        .0;
     let write = |name: &str, state: &mut ResultsTestHost| {
         let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
             super::lanes::well(ui);
@@ -353,6 +359,21 @@ fn write_the_conversion_pictures() {
     add_expression(&mut state, key, "digital(V(CLK), 1.2, 0.6, 0.2n)");
     super::lanes::place_cursors(&mut state, Some(150.5 * NS), Some(250.5 * NS));
     write("digital-clock", &mut state);
+    // One rising edge up close, cursors on the two thresholds: the
+    // hysteresis lane holds 0 for its time to X after V(CLK) enters the band
+    // at 0.6 V, reads X, and goes high where V(CLK) crosses 1.2 V.
+    set_shared_x_view(
+        &mut state.results.results.session,
+        key,
+        1,
+        Some((99.9 * NS, 101.1 * NS)),
+    );
+    super::lanes::place_cursors(
+        &mut state,
+        Some((100.0 + 1.0 / 3.0) * NS),
+        Some((100.0 + 2.0 / 3.0) * NS),
+    );
+    write("digital-clock-edge", &mut state);
 
     // The code bus as a staircase beside the DAC's top plate.
     let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
@@ -372,14 +393,14 @@ fn write_the_conversion_pictures() {
             history(run, net)
                 .iter()
                 .rev()
-                .find(|(time, _)| *time <= eoc[0].0)
+                .find(|(time, _)| *time <= done)
                 .map(|(_, code)| *code)
         })
         .collect();
     let result = rspice_results::events::projection::word_unsigned(&result)
         .expect("the first conversion ends on a resolved code");
     named(&mut state, key, result);
-    super::lanes::place_cursors(&mut state, Some(eoc[0].0 + 1e-9), None);
+    super::lanes::place_cursors(&mut state, Some(done + 1e-9), None);
     write("value-names", &mut state);
 
     // The octal and ASCII radixes.
@@ -388,31 +409,29 @@ fn write_the_conversion_pictures() {
         ("radix-ascii", BusRadix::Ascii),
     ] {
         let (mut state, _) = sar_strip(radix, false);
-        super::lanes::place_cursors(&mut state, Some(eoc[0].0 + 1e-9), None);
+        super::lanes::place_cursors(&mut state, Some(done + 1e-9), None);
         write(name, &mut state);
     }
 }
 
-/// Names for the code words a conversion starts from, first tries and ends
-/// on (`result`).
+/// Names for the code words a conversion starts from and tries first, and
+/// the one it ends on (`result`).
 fn named(state: &mut ResultsTestHost, key: AnalysisPresentationKey, result: u64) {
-    let mut names = vec![
-        BusValueName {
-            value: 0x00,
-            name: "CLEAR".to_owned(),
-        },
-        BusValueName {
-            value: 0x80,
-            name: "MSB TRIAL".to_owned(),
-        },
-    ];
-    if result != 0x00 && result != 0x80 {
+    let mut names: Vec<BusValueName> =
+        [(0x00, "ZERO"), (0x01, "LSB"), (0x40, "QTR"), (0x80, "MID")]
+            .into_iter()
+            .map(|(value, name)| BusValueName {
+                value,
+                name: name.to_owned(),
+            })
+            .collect();
+    if !names.iter().any(|name| name.value == result) {
         names.push(BusValueName {
             value: result,
             name: "RESULT".to_owned(),
         });
+        names.sort_by_key(|name| name.value);
     }
-    names.sort_by_key(|name| name.value);
     let layout = state
         .results
         .results
