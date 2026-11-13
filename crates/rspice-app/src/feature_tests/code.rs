@@ -8,7 +8,14 @@ use crate::workbench::app::dialogs::library::new_veriloga_device::render_new_ver
 use crate::workbench::app::{dialogs, navigate_source_bundle, veriloga_interface_tests};
 
 #[cfg(not(target_arch = "wasm32"))]
+mod netlist_document;
+mod netlist_generation;
+mod netlist_search;
+mod netlist_surface;
+mod netlist_toolbar;
+mod netlist_transfer;
 mod netlist_validation;
+mod netlist_workflow;
 mod new_veriloga_device;
 mod source_editor_commands;
 mod source_find;

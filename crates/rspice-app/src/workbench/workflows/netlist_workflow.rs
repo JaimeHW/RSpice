@@ -13,7 +13,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-mod bundle;
+pub(crate) mod bundle;
 mod external_change;
 mod find;
 mod import;
