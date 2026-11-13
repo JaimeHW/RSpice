@@ -11,6 +11,8 @@
 //! evicts every other entry in the process, and its tests take turns for the
 //! same reason.
 
+#![cfg(feature = "veriloga")]
+
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

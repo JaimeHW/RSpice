@@ -198,9 +198,10 @@ jobs:
       # a runner of their own: the feature changes the core's resolved graph,
       # so sharing the core lane's runner would mean a second full rspice-core
       # build inside that job's budget rather than beside it. Most of them
-      # build into the `veriloga` folder target; the four named beside it stand
+      # build into the `veriloga` folder target; the seven named beside it stand
       # alone because another step runs them without the rest of the folder, or
-      # because they change process-wide state.
+      # because they change or read process-wide state: the working directory,
+      # or the Verilog-A cache's shared byte budget and counters.
       #
       # `tools/ci/test_ci_configuration.py` scans the test directory and fails
       # if a gated file is not run by this job or by the matching pair of steps
@@ -218,9 +219,12 @@ jobs:
           cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga --no-fail-fast
           --lib
           --test veriloga
+          --test hdl_waveform_signals
           --test transient_noise_veriloga
           --test veriloga_include_resolution
           --test veriloga_mixed_signal_hardening
+          --test veriloga_session_holds
+          --test veriloga_source_defines
           --test veriloga_transient
       # A second invocation rather than one more target above: the suites in
       # the `tri_family` folder need a generated model compiled in, and adding
@@ -385,9 +389,12 @@ jobs:
           cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga-native --no-fail-fast
           --lib
           --test veriloga
+          --test hdl_waveform_signals
           --test transient_noise_veriloga
           --test veriloga_include_resolution
           --test veriloga_mixed_signal_hardening
+          --test veriloga_session_holds
+          --test veriloga_source_defines
           --test veriloga_transient
           -- --test-threads=1
       # The generated-model half of the interpreter lane's pair, same reason.

@@ -7,7 +7,10 @@
 //! The cache counters are process-wide, so this binary holds exactly one test
 //! that compiles a model.
 
-use super::veriloga_source_fixture as fixture;
+#![cfg(feature = "veriloga")]
+
+#[path = "common/veriloga_source_fixture.rs"]
+mod fixture;
 
 use fixture::Fixture;
 use rspice_core::abort_signal::NoAbort;

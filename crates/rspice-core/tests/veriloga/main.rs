@@ -33,8 +33,6 @@ mod expression_stack_safety;
 #[cfg(feature = "veriloga")]
 mod hdl_external_paths;
 #[cfg(feature = "veriloga")]
-mod hdl_waveform_signals;
-#[cfg(feature = "veriloga")]
 mod measure_event_operands;
 #[cfg(feature = "veriloga")]
 mod mixed_bit_aliases;
@@ -89,10 +87,6 @@ mod veriloga_operating_points;
 mod veriloga_project_runtime_batch;
 #[cfg(feature = "veriloga")]
 mod veriloga_project_virtual_identity;
-#[cfg(feature = "veriloga")]
-mod veriloga_session_holds;
-#[cfg(feature = "veriloga")]
-mod veriloga_source_defines;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 mod veriloga_source_dependencies;
 #[cfg(feature = "veriloga")]

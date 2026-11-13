@@ -1,3 +1,4 @@
+#![cfg(feature = "veriloga")]
 //! HDL signals in a run's waveforms, on the C12 testbench (`full`): the
 //! internal variables `.ESAVE` names, published as ordinary traces under
 //! their instance paths.
