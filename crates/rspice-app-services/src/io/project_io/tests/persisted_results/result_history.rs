@@ -782,63 +782,41 @@ fn project_load_rejects_unsupported_descriptor_schema() {
     let error = load_project_text(&contents, None)
         .expect_err("future project descriptor schema must fail closed");
 
-    assert!(matches!(error, ProjectIoError::InvalidData(_)));
-    assert!(error.to_string().contains("project schema version"));
+    assert!(matches!(error, ProjectIoError::ParseError(_)));
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported project descriptor schema version")
+    );
 }
 
 #[test]
-fn project_load_rejects_missing_or_null_identity_on_a_versioned_descriptor() {
+fn project_load_rejects_a_descriptor_without_its_identity_or_schema() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let project = ProjectSnapshot::new(workspace, libraries);
     let value = serde_json::to_value(project).expect("project converts to JSON");
 
-    let mut missing = value.clone();
-    missing["workspace"]["project"]
-        .as_object_mut()
-        .expect("project descriptor object")
-        .remove("id");
-    let missing_error = load_project_text(&missing.to_string(), None)
-        .expect_err("versioned descriptor cannot lose its identity");
-    assert!(
-        missing_error
-            .to_string()
-            .contains("missing its stable identity")
-    );
+    for field in ["id", "schema_version"] {
+        let mut missing = value.clone();
+        missing["workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove(field);
+        let error = load_project_text(&missing.to_string(), None)
+            .expect_err("a descriptor cannot lose a required field");
+        assert!(
+            error.to_string().contains(&format!("missing field `{field}`")),
+            "{error}"
+        );
 
-    let mut null = value.clone();
-    null["workspace"]["project"]["id"] = serde_json::Value::Null;
-    let null_error = load_project_text(&null.to_string(), None)
-        .expect_err("explicit null identity is never a legacy migration");
-    assert!(
-        null_error
-            .to_string()
-            .contains("must not be explicitly null")
-    );
-
-    let mut unversioned_null_id = value.clone();
-    unversioned_null_id["workspace"]["project"]
-        .as_object_mut()
-        .expect("project descriptor object")
-        .remove("schema_version");
-    unversioned_null_id["workspace"]["project"]["id"] = serde_json::Value::Null;
-    let unversioned_null_error = load_project_text(&unversioned_null_id.to_string(), None)
-        .expect_err("unversioned explicit null identity is not legacy absence");
-    assert!(
-        unversioned_null_error
-            .to_string()
-            .contains("must not be explicitly null")
-    );
-
-    let mut null_schema = value;
-    null_schema["workspace"]["project"]["schema_version"] = serde_json::Value::Null;
-    let null_schema_error = load_project_text(&null_schema.to_string(), None)
-        .expect_err("explicit null schema cannot trigger legacy migration");
-    assert!(
-        null_schema_error
-            .to_string()
-            .contains("schema version must not be explicitly null")
-    );
+        let mut null = value.clone();
+        null["workspace"]["project"][field] = serde_json::Value::Null;
+        assert!(
+            load_project_text(&null.to_string(), None).is_err(),
+            "an explicit null {field} is refused"
+        );
+    }
 }
 
 #[test]

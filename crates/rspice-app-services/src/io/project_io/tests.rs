@@ -637,51 +637,6 @@ fn legacy_project_without_execution_context_remains_compatible() {
 }
 
 #[test]
-fn unversioned_execution_context_migrates_to_sorted_legacy_order() {
-    let project = project_with_execution_context();
-    let json = serialize_project_file(&project).expect("project serializes");
-    let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-    let context = value["execution_context"]
-        .as_object_mut()
-        .expect("execution object");
-    context.remove("schema_version");
-    let simulation_plan = context["simulation_plan"]
-        .as_object_mut()
-        .expect("simulation plan");
-    simulation_plan.remove("analysis_plan");
-    simulation_plan.insert("enabled".to_owned(), serde_json::json!([4, 1, 2]));
-
-    let loaded = load_project_text(
-        &serde_json::to_string(&value).expect("fixture serializes"),
-        None,
-    )
-    .expect("legacy context migrates");
-    let context = loaded.file.execution_context.expect("context retained");
-
-    assert_eq!(
-        context.schema_version,
-        crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
-    );
-    let enabled = context
-        .simulation_plan
-        .stable_analysis_plan()
-        .expect("legacy singleton plan migrates")
-        .instances()
-        .iter()
-        .filter(|instance| instance.enabled())
-        .map(|instance| instance.kind())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        enabled,
-        vec![
-            AnalysisKind::Transient,
-            AnalysisKind::Ac,
-            AnalysisKind::Noise,
-        ]
-    );
-}
-
-#[test]
 fn malformed_execution_context_is_never_silently_defaulted() {
     let project = project_with_execution_context();
     let json = serialize_project_file(&project).expect("project serializes");
