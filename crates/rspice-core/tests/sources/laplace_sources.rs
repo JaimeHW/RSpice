@@ -3,8 +3,7 @@
 //! response. The parse-time state-space realization must behave exactly
 //! like the transfer function it encodes.
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use op_point::op_voltage;
 use rspice_core::engine::{Engine, SimulationConfig};

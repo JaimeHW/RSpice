@@ -2,8 +2,7 @@
 //! analysis domain against closed forms and QSPICE (the authority wherever it
 //! implements the function; `absdelay` is LTspice-only).
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use num_complex::Complex64;
 use op_point::op_voltage;

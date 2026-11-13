@@ -3,8 +3,7 @@
 //! input through unscaled, as QSPICE does; the transient runs a stable
 //! rational fit of the entries from the operating point.
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use num_complex::Complex64;
 use op_point::op_voltage;
