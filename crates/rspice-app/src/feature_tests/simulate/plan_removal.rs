@@ -14,8 +14,8 @@ use crate::state::{
     SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
 };
 use crate::workbench::surfaces::simulate::AnalysisAction;
+use crate::workbench::surfaces::simulate::fixtures::plan_id;
 use crate::workbench::surfaces::simulate::lifecycle;
-use crate::workbench::surfaces::simulate::page_tests::plan_id;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::vec2;
 

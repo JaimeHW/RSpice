@@ -5,47 +5,9 @@
 //! to, and the receipt an edit writes are all the same answer. The helpers they
 //! need — rendering a page, naming the active plan — come from the parent.
 
+use super::super::fixtures::seed_capture_group;
 use super::plan_id;
-use crate::workbench::app_state::Model;
 use crate::workbench::simulate::test_host::SimulateTestHost;
-
-/// Seed one plan with two outputs in different scopes and a group over the
-/// first, and hand back the group's identity.
-pub(crate) fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
-    use crate::state::{
-        CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
-        SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    };
-
-    let id = plan_id(model);
-    for (name, expression) in [("core_n", "V(x1.n)"), ("edge_n", "V(x2.n)")] {
-        let output = SavedOutput::new(
-            SavedOutputKind::RawVoltageOrCurrent,
-            name,
-            expression,
-            SavedOutputCompatibility::AllCompatibleAnalyses,
-            SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
-            SavedOutputStreaming::StoreOnly,
-        )
-        .expect("valid saved output");
-        model
-            .workspace
-            .content
-            .add_saved_output(id, output)
-            .expect("the plan accepts the output");
-    }
-    let mut group = CaptureGroup::new("Core rails").expect("group name");
-    group.rules.push(CaptureGroupRule::for_scope(
-        InstancePath::parse_legacy("/x1").expect("scope"),
-    ));
-    group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
-    model
-        .workspace
-        .content
-        .add_capture_group(id, group)
-        .expect("the plan accepts the group")
-}
 
 /// Membership is a function of the registry, so a registry edit can move
 /// outputs between groups without anybody editing a group. The receipt for

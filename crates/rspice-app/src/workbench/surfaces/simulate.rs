@@ -2443,6 +2443,8 @@ pub(crate) fn measurement_in_output_dataset_for_test(
 }
 
 #[cfg(test)]
+pub(crate) mod fixtures;
+#[cfg(test)]
 pub(crate) mod page_raster;
 #[cfg(test)]
 pub(crate) mod page_tests;

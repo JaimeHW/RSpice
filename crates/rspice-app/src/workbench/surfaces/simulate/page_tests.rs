@@ -13,22 +13,13 @@ mod solver_options;
 
 use egui::{Rect, vec2};
 
+use super::fixtures::plan_id;
 use super::page_kit::column_rects;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::OptionsDialogState;
-use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::simulate::test_host::SimulateTestHost;
-
-/// The active plan's identity, for tests that seed plan-owned records.
-pub(crate) fn plan_id(model: &Model) -> crate::product::SimulationPlanId {
-    model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("the test instance has a stable plan")
-        .id()
-}
 
 /// The two temperature buffers are separate values with separate meanings, and
 /// the page commits each through the same transaction the rest of the card set

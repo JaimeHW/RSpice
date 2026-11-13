@@ -6,8 +6,8 @@
 
 use super::stage::show_on_stage;
 use crate::state::SimulationPage;
+use crate::workbench::surfaces::simulate::fixtures::plan_id;
 use crate::workbench::surfaces::simulate::page_outputs;
-use crate::workbench::surfaces::simulate::page_tests::plan_id;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::{Rect, vec2};
 

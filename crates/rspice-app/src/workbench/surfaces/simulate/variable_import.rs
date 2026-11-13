@@ -1090,39 +1090,15 @@ fn override_policy_choices() -> Vec<(&'static str, usize)> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::fixtures::{open, plan};
     use super::*;
-    use crate::workbench::app_state::Model;
     use crate::workbench::framework::feature::harness::FeatureHarness;
     use crate::workbench::simulate::test_host::SimulateTestHost;
-    use crate::workbench::slots::SimulateState;
 
     const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,sweep role,override policy,description\n\
          RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,project,sweep,override,Output load\n\
          CFILT,Capacitance,4.7 nF,1 nF,10 nF,testbench,fixed,inherit,Filter cap\n\
          VBIAS,Voltage,1.8 V,,,,,,\n";
-
-    pub(crate) fn plan(model: &Model) -> SimulationPlanId {
-        model
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("the test instance owns a stable plan")
-            .id()
-    }
-
-    /// Drive the real entry point and hand back the draft it opened on.
-    pub(crate) fn open(
-        model: &Model,
-        simulate: &mut SimulateState,
-        plan_id: SimulationPlanId,
-        sheet: &str,
-    ) -> DesignVariableImportDraft {
-        let draft = import_draft_for_sheet(model, simulate, plan_id, "spec.csv", sheet);
-        simulate.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariableImport(draft));
-        match simulate.simulation_workflow.clone() {
-            Some(SimulationWorkflowDialog::DesignVariableImport(draft)) => draft,
-            other => panic!("the import dialog must open, got {other:?}"),
-        }
-    }
 
     fn registry(
         harness: &FeatureHarness<SimulateFeature>,

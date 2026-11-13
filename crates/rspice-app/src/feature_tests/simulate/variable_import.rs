@@ -4,7 +4,7 @@
 
 use super::workflow_dialogs;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::variable_import::tests::{open, plan};
+use crate::workbench::surfaces::simulate::fixtures::{open, plan};
 
 /// A refusal sentence is bounded by the pane it is printed in.
 ///
