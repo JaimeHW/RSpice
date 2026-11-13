@@ -9,8 +9,7 @@
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
 
-#[path = "common/log_capture.rs"]
-mod log_capture;
+use super::log_capture;
 
 /// Run `body` with the warnings it logs on this thread collected.
 fn warnings_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {

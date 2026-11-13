@@ -1,6 +1,5 @@
 //! Natural circuit modes do not depend on a transfer port or its gain range.
-#[path = "common/stop_at_completion.rs"]
-mod stop_at_completion;
+use super::stop_at_completion;
 
 use rspice_core::analysis::pole_zero::StabilityVerdict;
 use rspice_core::{Engine, Netlist, SimulationError};

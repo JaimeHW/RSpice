@@ -20,32 +20,32 @@ struct Case {
 const CASES: [Case; 5] = [
     Case {
         name: "linear PTF21",
-        source: include_str!("testdata/gp_feedback_linear_p21_ngspice46.cir"),
-        reference: include_str!("testdata/gp_feedback_linear_p21_ngspice46.tsv"),
+        source: include_str!("../testdata/gp_feedback_linear_p21_ngspice46.cir"),
+        reference: include_str!("../testdata/gp_feedback_linear_p21_ngspice46.tsv"),
         startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "linear PTF90",
-        source: include_str!("testdata/gp_feedback_linear_p90_ngspice46.cir"),
-        reference: include_str!("testdata/gp_feedback_linear_p90_ngspice46.tsv"),
+        source: include_str!("../testdata/gp_feedback_linear_p90_ngspice46.cir"),
+        reference: include_str!("../testdata/gp_feedback_linear_p90_ngspice46.tsv"),
         startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "nonlinear PTF21",
-        source: include_str!("testdata/gp_feedback_nonlinear_p21_ngspice46.cir"),
-        reference: include_str!("testdata/gp_feedback_nonlinear_p21_ngspice46.tsv"),
+        source: include_str!("../testdata/gp_feedback_nonlinear_p21_ngspice46.cir"),
+        reference: include_str!("../testdata/gp_feedback_nonlinear_p21_ngspice46.tsv"),
         startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "nonlinear PTF90",
-        source: include_str!("testdata/gp_feedback_nonlinear_p90_ngspice46.cir"),
-        reference: include_str!("testdata/gp_feedback_nonlinear_p90_ngspice46.tsv"),
+        source: include_str!("../testdata/gp_feedback_nonlinear_p90_ngspice46.cir"),
+        reference: include_str!("../testdata/gp_feedback_nonlinear_p90_ngspice46.tsv"),
         startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "nonlinear PTF90 UIC",
-        source: include_str!("testdata/gp_feedback_nonlinear_p90_uic_ngspice46.cir"),
-        reference: include_str!("testdata/gp_feedback_nonlinear_p90_uic_ngspice46.tsv"),
+        source: include_str!("../testdata/gp_feedback_nonlinear_p90_uic_ngspice46.cir"),
+        reference: include_str!("../testdata/gp_feedback_nonlinear_p90_uic_ngspice46.tsv"),
         startup: TransientStartupMode::Uic,
     },
 ];

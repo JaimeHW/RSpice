@@ -130,7 +130,7 @@ struct Case {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn fft_window_derivatives_match_independent_high_precision_coefficients() {
     let data: Oracle = serde_json::from_str(include_str!(
-        "testdata/qualification/fft-window-derivative-oracle.json"
+        "../testdata/qualification/fft-window-derivative-oracle.json"
     ))
     .unwrap();
     assert_eq!(data.cases.len(), 400);

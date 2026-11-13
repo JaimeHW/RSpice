@@ -7,8 +7,7 @@ use rspice_core::analysis::pss::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())

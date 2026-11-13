@@ -1,6 +1,5 @@
 //! DISTO scripts retain every spectrum and use the direct solver's physical units.
-#[path = "common/stop_at_completion.rs"]
-mod stop_at_completion;
+use super::stop_at_completion;
 
 use rspice_core::analysis::{DistortionAnalysisResult, DistortionProduct};
 use rspice_core::engine::{

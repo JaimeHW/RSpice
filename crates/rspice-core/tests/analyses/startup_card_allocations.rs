@@ -1,10 +1,8 @@
 //! Bound allocation growth for long startup cards, without timing assumptions.
-#![cfg(not(target_arch = "wasm32"))]
 
 use std::fmt::Write;
 
-#[path = "common/allocations.rs"]
-mod allocations;
+use super::allocations;
 
 fn source(count: usize, directive: &str, scoped: bool) -> String {
     let mut source = String::from("Long startup card\n");

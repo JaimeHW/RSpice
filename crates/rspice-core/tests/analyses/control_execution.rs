@@ -36,7 +36,7 @@ fn drive(
 
 #[test]
 fn original_foreach_bjt_script_runs_six_biases_against_independent_complex_currents() {
-    let source = include_str!("../../../tests/paranoia/control_structs/foreach_bjt_ft.sp");
+    let source = include_str!("../../../../tests/paranoia/control_structs/foreach_bjt_ft.sp");
     let engine = Engine::new(SimulationConfig {
         convergence_config: ConvergenceConfig::robust(),
         ..SimulationConfig::default()
@@ -49,7 +49,7 @@ fn original_foreach_bjt_script_runs_six_biases_against_independent_complex_curre
         netlist.options.vntol = Some(1e-12);
         netlist.options.gmin = Some(0.0);
     });
-    let reference = include_str!("testdata/gp_bfs17_ptf_ngspice46.tsv");
+    let reference = include_str!("../testdata/gp_bfs17_ptf_ngspice46.tsv");
     assert_eq!(circuit.datasets().len(), 6);
     for (index, (dataset, bias)) in circuit
         .datasets()
@@ -115,7 +115,7 @@ fn original_foreach_bjt_script_runs_six_biases_against_independent_complex_curre
 
 #[test]
 fn original_memristor_script_changes_frequency_and_restarts_each_uic_analysis() {
-    let source = include_str!("../../../tests/paranoia/memristor/memristor.sp");
+    let source = include_str!("../../../../tests/paranoia/memristor/memristor.sp");
     let engine = Engine::new(SimulationConfig {
         convergence_config: ConvergenceConfig::robust(),
         ..SimulationConfig::default()

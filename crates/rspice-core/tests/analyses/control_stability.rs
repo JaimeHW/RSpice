@@ -1,6 +1,5 @@
 //! Control STB retains the direct solver's sweep, evidence and determinations.
-#[path = "common/stop_at_completion.rs"]
-mod stop_at_completion;
+use super::stop_at_completion;
 
 use rspice_core::analysis::StbConfig;
 use rspice_core::config::ExpressionDialect;

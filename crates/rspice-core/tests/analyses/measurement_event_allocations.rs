@@ -1,8 +1,6 @@
 //! Selecting a single event must not materialize every crossing of a waveform.
-#![cfg(not(target_arch = "wasm32"))]
 
-#[path = "common/allocations.rs"]
-mod allocations;
+use super::allocations;
 
 use rspice_core::analysis::MeasureEngine;
 use std::collections::HashMap;
