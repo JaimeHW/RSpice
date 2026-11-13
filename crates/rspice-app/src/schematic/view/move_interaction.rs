@@ -1,14 +1,11 @@
 //! Validate move canvas requests and retain the app-owned undo transaction.
 
 use super::{
-    SchematicSymbolContext, requests::editor_request_source,
+    SchematicSymbolContext, parts::CanvasParts, requests::editor_request_source,
     sheet_visibility::with_active_wire_topology, viewport::Viewport,
 };
 use crate::state::{Component, MoveSelectionMode, Point, Tool};
-use crate::workbench::{
-    app::{armed_move_selection_authority, cancel_armed_move_selection},
-    app_state::AppState,
-};
+use crate::workbench::app::{armed_move_selection_authority, cancel_armed_move_selection_in};
 use egui::{Response, Ui};
 use rspice_schematic_editor::view::{
     move_interaction::{self, MoveInputRequest, MoveInputView},
@@ -18,7 +15,7 @@ use rspice_schematic_editor::view::{
 pub(super) fn handle_armed_move_selection(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
@@ -28,9 +25,10 @@ pub(super) fn handle_armed_move_selection(
     {
         return;
     }
-    if let Err(message) = armed_move_selection_authority(state) {
+    if let Err(message) = armed_move_selection_authority(&state.design.move_selection, state.model)
+    {
         state.prompt(format!("Move cancelled: {message}"));
-        cancel_armed_move_selection(state);
+        cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         return;
     }
     if let Some(transition) = move_interaction::input(
@@ -39,7 +37,7 @@ pub(super) fn handle_armed_move_selection(
         viewport,
         symbol_context,
         MoveInputView {
-            design: super::schematic_design_view(state),
+            design: state.design_view(),
             canvas: &state.design.move_selection.canvas,
             selection: &state.model.schematic.session.editor.selection,
             filter: state.design.schematic_selection_filter,
@@ -52,7 +50,7 @@ pub(super) fn handle_armed_move_selection(
     }
 }
 
-fn capture(state: &AppState, transition: TransformInputTransition) -> MoveInputRequest {
+fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> MoveInputRequest {
     MoveInputRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
@@ -62,7 +60,7 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> MoveInputR
     }
 }
 
-fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveInputRequest) {
+fn apply(state: &mut CanvasParts<'_>, symbols: &SchematicSymbolContext, request: MoveInputRequest) {
     let draft = &state.design.move_selection;
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
@@ -72,7 +70,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveIn
         || state.model.schematic.session.editor.tool != Tool::MoveSelection
         || !draft.armed
         || state.application_modal_open()
-        || armed_move_selection_authority(state).is_err()
+        || armed_move_selection_authority(&state.design.move_selection, state.model).is_err()
     {
         return;
     }
@@ -83,25 +81,26 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveIn
 }
 
 pub(super) fn commit_armed_move_selection(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Err(message) = armed_move_selection_authority(state) {
+    if let Err(message) = armed_move_selection_authority(&state.design.move_selection, state.model)
+    {
         state.prompt(format!("Move cancelled: {message}"));
-        cancel_armed_move_selection(state);
+        cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         return;
     }
     let delta = state.design.move_selection.canvas.preview_delta;
     let mode = state.design.move_selection.mode;
     if delta == Point::origin() {
         state.prompt("Nothing moved.");
-        cancel_armed_move_selection(state);
+        cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         return;
     }
     state.model.schematic.begin_operation("move selection");
     // A wire end on another sheet can share a selected pin's coordinates;
     // the rubber band and its cleanup must not reach it.
-    let movement = with_active_wire_topology(state, |schematic, scope| {
+    let movement = with_active_wire_topology(state.model, |schematic, scope| {
         let movement = schematic.move_selection_with_mode_resolved(
             delta,
             mode,
@@ -139,12 +138,12 @@ pub(super) fn commit_armed_move_selection(
             } else {
                 "Nothing moved.".to_owned()
             });
-            cancel_armed_move_selection(state);
+            cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         }
         Ok(false) => {
             state.model.schematic.cancel_operation();
             state.prompt("Nothing moved.");
-            cancel_armed_move_selection(state);
+            cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         }
         Err(error) => {
             state.model.schematic.cancel_operation();
@@ -158,6 +157,7 @@ pub(super) fn commit_armed_move_selection(
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Wire};
@@ -236,7 +236,13 @@ mod tests {
                             zoom: 1.0,
                             bounds,
                         };
-                        handle_armed_move_selection(ui, &response, &mut state, &viewport, &symbols);
+                        handle_armed_move_selection(
+                            ui,
+                            &response,
+                            &mut crate::schematic::view::canvas_parts(&mut state),
+                            &viewport,
+                            &symbols,
+                        );
                     });
                 },
             );
@@ -317,7 +323,10 @@ mod tests {
         state.design.move_selection.canvas.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_move_selection(&mut state, &symbols);
+        commit_armed_move_selection(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+        );
 
         assert_eq!(
             state.model.schematic.document().components[0].pos,
@@ -364,7 +373,10 @@ mod tests {
         state.design.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_move_selection(&mut state, &symbols);
+        commit_armed_move_selection(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+        );
 
         let moved = Point::new(pin.x + 30, pin.y + 20);
         let wires = &state.model.schematic.document().wires;
@@ -397,7 +409,10 @@ mod tests {
         state.design.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_move_selection(&mut state, &symbols);
+        commit_armed_move_selection(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+        );
 
         assert_eq!(
             state.model.schematic.document().components[1].pos,
@@ -467,7 +482,7 @@ mod tests {
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
         state.design.move_selection.canvas.preview_delta = Point::new(40, 10);
 
-        crate::workbench::app::cancel_armed_move_selection(&mut state);
+        cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
 
         assert_eq!(
             state.model.schematic.document().components[0].pos,
@@ -516,7 +531,7 @@ mod tests {
             let mut next = expected.clone();
             next.preview_delta = Point::new(100, 0);
             let request = capture(
-                &state,
+                &crate::schematic::view::canvas_parts(&mut state),
                 TransformInputTransition {
                     expected,
                     next,
@@ -532,7 +547,10 @@ mod tests {
                 "read-only" => state.model.schematic.session.read_only = true,
                 "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
-                    cancel_armed_move_selection(&mut state);
+                    cancel_armed_move_selection_in(
+                        &mut state.design.move_selection,
+                        &mut state.model,
+                    );
                     arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
                     assert_eq!(
                         request.transition.expected,
@@ -546,7 +564,11 @@ mod tests {
             }
             let canvas = state.design.move_selection.canvas.clone();
             let symbols = schematic_symbol_context(&state);
-            apply(&mut state, &symbols, request);
+            apply(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &symbols,
+                request,
+            );
             if change == "none" {
                 assert_eq!(
                     state.model.schematic.document().components[0].pos,

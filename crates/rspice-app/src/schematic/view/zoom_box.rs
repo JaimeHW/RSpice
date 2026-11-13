@@ -7,8 +7,9 @@
 use egui::{Painter, PointerButton, Pos2, Rect, Response, Stroke, Ui};
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
+use super::parts::CanvasParts;
 use super::viewport::Viewport;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// A box narrower or shorter than this on screen is a slip of the pointer,
 /// not a rectangle to frame.
@@ -28,7 +29,7 @@ fn screen_to_world(viewport: &Viewport, pos: Pos2) -> (f64, f64) {
 pub(super) fn handle_zoom_box(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
 ) {
     let zoom_box = &mut state.model.schematic.session.editor.zoom_box;
@@ -62,9 +63,8 @@ pub(super) fn handle_zoom_box(
 }
 
 /// Outline the box being dragged.
-pub(super) fn paint_zoom_box(painter: &Painter, state: &AppState, viewport: &Viewport) {
-    let Some((min_x, min_y, max_x, max_y)) =
-        state.model.schematic.session.editor.zoom_box.world_rect()
+pub(super) fn paint_zoom_box(painter: &Painter, model: &Model, viewport: &Viewport) {
+    let Some((min_x, min_y, max_x, max_y)) = model.schematic.session.editor.zoom_box.world_rect()
     else {
         return;
     };

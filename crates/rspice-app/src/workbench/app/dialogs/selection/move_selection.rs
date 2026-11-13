@@ -97,28 +97,29 @@ pub(crate) fn arm_move_selection_in(
     model.schematic.arm_tool(Tool::MoveSelection);
 }
 
-fn validate_draft(state: &AppState) -> Result<(), String> {
-    if state.schematic_edit_read_only() {
+fn validate_draft(draft: &MoveSelectionDialogState, model: &Model) -> Result<(), String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let draft = &state.design.move_selection;
     let Some(authority) = draft.authority.as_ref() else {
         return Err("Move is not armed.".to_owned());
     };
-    authority.validate(state, COMMAND)?;
-    if !state.model.schematic.has_live_movable_selection() {
+    authority.validate(model, COMMAND)?;
+    if !model.schematic.has_live_movable_selection() {
         return Err("No movable selected object remains.".to_owned());
     }
     Ok(())
 }
 
 /// Fail-closed authority check used again at the canvas commit boundary.
-pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), String> {
-    let draft = &state.design.move_selection;
-    if !draft.armed || state.model.schematic.session.editor.tool != Tool::MoveSelection {
+pub(crate) fn armed_move_selection_authority(
+    draft: &MoveSelectionDialogState,
+    model: &Model,
+) -> Result<(), String> {
+    if !draft.armed || model.schematic.session.editor.tool != Tool::MoveSelection {
         return Err("Move is not armed.".to_owned());
     }
-    validate_draft(state)
+    validate_draft(draft, model)
 }
 
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
@@ -175,7 +176,7 @@ mod tests {
         assert!(baseline.is_equal(&SchematicSnapshot::capture(
             state.model.schematic.document()
         )));
-        assert!(armed_move_selection_authority(&state).is_ok());
+        assert!(armed_move_selection_authority(&state.design.move_selection, &state.model).is_ok());
     }
 
     #[test]
@@ -202,7 +203,7 @@ mod tests {
         let mut state = selected_resistor();
         arm_move_selection(&mut state);
         state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
-        assert!(validate_draft(&state).is_err());
+        assert!(validate_draft(&state.design.move_selection, &state.model).is_err());
     }
 
     /// Nothing to move is a refusal, not an armed tool waiting for a drag.

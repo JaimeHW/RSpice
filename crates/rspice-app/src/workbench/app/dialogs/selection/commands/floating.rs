@@ -158,50 +158,64 @@ pub(super) fn float_schematic_objects(
 }
 
 impl AppState {
-    /// Land the floating copy where it sits now. Returns whether anything
-    /// was placed.
+    /// [`place_floating_paste`] for the session.
+    #[cfg(test)]
     pub(crate) fn place_floating_paste(&mut self) -> bool {
-        let Some(floating) = self.design.floating_paste.take() else {
-            return false;
-        };
-        if let Err(reason) = floating_scope(self, &floating) {
-            self.prompt(format!("{} cancelled: {reason}.", floating.origin.verb()));
-            return false;
-        }
-        let pasted = self.paste_schematic_objects_at(&floating.objects, floating.at());
-        let placed = matches!(pasted, Ok(true));
-        self.prompt(match (pasted, floating.origin) {
-            (Ok(true), FloatingPasteOrigin::Paste) => {
-                format!("Pasted {}.", object_count(floating.objects.count()))
-            }
-            (
-                Ok(true),
-                FloatingPasteOrigin::Duplicate {
-                    count,
-                    kept,
-                    unresolved_nets,
-                },
-            ) => {
-                if unresolved_nets {
-                    format!(
-                        "Duplicated {}; named-net connections could not be resolved.",
-                        object_count(count)
-                    )
-                } else if kept == 0 {
-                    format!("Duplicated {}.", object_count(count))
-                } else {
-                    format!(
-                        "Duplicated {}; kept {}.",
-                        object_count(count),
-                        named_net_connections(kept)
-                    )
-                }
-            }
-            (Ok(false), origin) => format!("Nothing was {}.", origin.participle()),
-            (Err(reason), _) => reason,
-        });
-        placed
+        place_floating_paste(
+            &mut self.design.floating_paste,
+            &mut self.model,
+            &mut self.workbench,
+        )
     }
+}
+
+/// Land the floating copy where it sits now. Returns whether anything was
+/// placed.
+pub(crate) fn place_floating_paste(
+    floating: &mut Option<FloatingPaste>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) -> bool {
+    let Some(floating) = floating.take() else {
+        return false;
+    };
+    if let Err(reason) = floating_scope(model, &floating) {
+        wb.prompt(format!("{} cancelled: {reason}.", floating.origin.verb()));
+        return false;
+    }
+    let pasted = super::paste_schematic_objects_at(model, wb, &floating.objects, floating.at());
+    let placed = matches!(pasted, Ok(true));
+    wb.prompt(match (pasted, floating.origin) {
+        (Ok(true), FloatingPasteOrigin::Paste) => {
+            format!("Pasted {}.", object_count(floating.objects.count()))
+        }
+        (
+            Ok(true),
+            FloatingPasteOrigin::Duplicate {
+                count,
+                kept,
+                unresolved_nets,
+            },
+        ) => {
+            if unresolved_nets {
+                format!(
+                    "Duplicated {}; named-net connections could not be resolved.",
+                    object_count(count)
+                )
+            } else if kept == 0 {
+                format!("Duplicated {}.", object_count(count))
+            } else {
+                format!(
+                    "Duplicated {}; kept {}.",
+                    object_count(count),
+                    named_net_connections(kept)
+                )
+            }
+        }
+        (Ok(false), origin) => format!("Nothing was {}.", origin.participle()),
+        (Err(reason), _) => reason,
+    });
+    placed
 }
 
 impl FloatingPasteOrigin {
@@ -263,10 +277,18 @@ impl FloatingPaste {
 
 /// Let the floating copy go.
 pub(crate) fn cancel_floating_paste(state: &mut AppState) -> bool {
-    let Some(floating) = state.design.floating_paste.take() else {
+    cancel_floating_paste_in(&mut state.design.floating_paste, &mut state.workbench)
+}
+
+/// [`cancel_floating_paste`] over the copy and the session.
+pub(crate) fn cancel_floating_paste_in(
+    floating: &mut Option<FloatingPaste>,
+    wb: &mut WorkbenchSession,
+) -> bool {
+    let Some(floating) = floating.take() else {
         return false;
     };
-    state.prompt(format!("{} cancelled.", floating.origin.verb()));
+    wb.prompt(format!("{} cancelled.", floating.origin.verb()));
     true
 }
 
@@ -286,21 +308,24 @@ pub(crate) fn turn_floating_paste(
 
 /// Why the floating copy can no longer land where it was asked for, if it
 /// cannot: it was bound to one cell view and one sheet.
-pub(crate) fn floating_paste_scope(state: &AppState) -> Result<(), String> {
-    match state.design.floating_paste.as_ref() {
-        Some(floating) => floating_scope(state, floating),
+pub(crate) fn floating_paste_scope(
+    floating: &Option<FloatingPaste>,
+    model: &Model,
+) -> Result<(), String> {
+    match floating.as_ref() {
+        Some(floating) => floating_scope(model, floating),
         None => Ok(()),
     }
 }
 
-fn floating_scope(state: &AppState, floating: &FloatingPaste) -> Result<(), String> {
-    if state.schematic_edit_read_only() {
+fn floating_scope(model: &Model, floating: &FloatingPaste) -> Result<(), String> {
+    if model.schematic_edit_read_only() {
         return Err("the schematic is read-only".to_owned());
     }
-    if floating.view_path != state.model.workspace.content.active_view.display_path() {
+    if floating.view_path != model.workspace.content.active_view.display_path() {
         return Err("another cell view is open".to_owned());
     }
-    if floating.sheet != active_sheet(&state.model) {
+    if floating.sheet != active_sheet(model) {
         return Err("another sheet is open".to_owned());
     }
     Ok(())

@@ -1,6 +1,7 @@
 //! App-owned preview orchestration and canonical transform candidates.
 
 use super::super::symbols::SymbolLibrary;
+use super::{DesignState, Model, model_design_view};
 use super::{
     SchematicShelfDragPayload, SchematicSymbolContext, array_interaction::array_placement,
     snap_resolution::resolve_grid_pointer, viewport::Viewport,
@@ -12,24 +13,24 @@ use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
 use std::sync::Arc;
 
-pub(super) fn preview_view(state: &AppState) -> PreviewView<'_> {
+pub(super) fn preview_view<'a>(model: &'a Model, design: &DesignState) -> PreviewView<'a> {
     PreviewView {
-        design: super::schematic_design_view(state),
-        editor: &state.model.schematic.session.editor,
-        can_edit: !state.schematic_edit_read_only(),
+        design: model_design_view(model, design.schematic_visibility.review_markers),
+        editor: &model.schematic.session.editor,
+        can_edit: !model.schematic_edit_read_only(),
     }
 }
 
 pub(super) fn transform_preview_style<'a>(
-    state: &AppState,
+    design: &DesignState,
     symbol_context: &'a SchematicSymbolContext,
     symbol_library: Option<&'a SymbolLibrary>,
 ) -> TransformPreviewStyle<'a> {
     TransformPreviewStyle {
         symbol_library,
         symbol_context,
-        parameter_labels: state.design.schematic_visibility.parameter_labels,
-        hover_wire_vertex: state.design.interaction.hover_wire_vertex,
+        parameter_labels: design.schematic_visibility.parameter_labels,
+        hover_wire_vertex: design.interaction.hover_wire_vertex,
     }
 }
 
@@ -52,7 +53,7 @@ pub(super) fn draw_interaction_previews(
     super::floating_paste::draw_floating_paste_preview(
         painter,
         response,
-        state,
+        &mut super::canvas_parts(state),
         viewport,
         symbol_context,
         symbol_library,
@@ -68,7 +69,7 @@ pub(super) fn draw_interaction_previews(
     );
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
-    let view = preview_view(state);
+    let view = preview_view(&state.model, &state.design);
     preview::draw_bus_tap_preview(painter, response, &view, viewport);
     preview::draw_junction_preview(painter, response, &view, viewport);
     preview::draw_net_label_preview(painter, response, &view, viewport, symbol_context);
@@ -85,7 +86,7 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     preview::draw_selection_rect(painter, &view, viewport);
-    super::zoom_box::paint_zoom_box(painter, state, viewport);
+    super::zoom_box::paint_zoom_box(painter, &state.model, viewport);
     draw_placement_badge(painter, response, state);
 }
 
@@ -157,9 +158,9 @@ fn draw_move_selection_preview(
         preview::draw_move_diff(
             painter,
             viewport,
-            &preview_view(state),
+            &preview_view(&state.model, &state.design),
             diff,
-            &transform_preview_style(state, symbol_context, symbol_library),
+            &transform_preview_style(&state.design, symbol_context, symbol_library),
             || state.model.workspace.content.active_view.display_path(),
         );
     }
@@ -389,7 +390,7 @@ fn draw_array_selection_preview(
         }
         return;
     }
-    let placement = match array_placement(state) {
+    let placement = match array_placement(&state.design.array_selection) {
         Ok(placement) => placement,
         Err(message) => {
             state.design.array_selection.canvas.preview_error = Some(message.to_owned());
@@ -397,7 +398,11 @@ fn draw_array_selection_preview(
             return;
         }
     };
-    let plan = match crate::workbench::app::armed_array_selection_plan(state, placement) {
+    let plan = match crate::workbench::app::armed_array_selection_plan(
+        &state.design.array_selection,
+        &state.model,
+        placement,
+    ) {
         Ok(plan) => plan,
         Err(message) => {
             state.design.array_selection.canvas.preview_error = Some(message.clone());
@@ -452,9 +457,9 @@ fn draw_array_selection_preview(
     preview::draw_array_candidate(
         painter,
         viewport,
-        &preview_view(state),
+        &preview_view(&state.model, &state.design),
         preview,
-        &transform_preview_style(state, symbol_context, symbol_library),
+        &transform_preview_style(&state.design, symbol_context, symbol_library),
         || state.model.workspace.content.active_view.display_path(),
     );
 
@@ -486,7 +491,7 @@ fn draw_bus_preview(
         return;
     }
     if let Some(hover) = response.hover_pos() {
-        let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
+        let position = resolve_grid_pointer(&state.model, viewport, hover).snapped_position;
         state
             .model
             .schematic
@@ -496,7 +501,11 @@ fn draw_bus_preview(
             .update_preview(position);
     }
 
-    preview::draw_bus_preview(painter, &preview_view(state), viewport);
+    preview::draw_bus_preview(
+        painter,
+        &preview_view(&state.model, &state.design),
+        viewport,
+    );
 }
 
 fn draw_wire_preview(
@@ -514,7 +523,7 @@ fn draw_wire_preview(
     let snap_feedback = if wire_active {
         response.hover_pos().and_then(|hover_pos| {
             let result = preview::resolve_wire_preview_snap(
-                &preview_view(state),
+                &preview_view(&state.model, &state.design),
                 symbol_context,
                 viewport,
                 hover_pos,
@@ -544,7 +553,7 @@ fn draw_wire_preview(
 
     preview::draw_wire_preview(
         painter,
-        &preview_view(state),
+        &preview_view(&state.model, &state.design),
         viewport,
         snap_feedback.as_ref(),
     );
@@ -561,7 +570,7 @@ pub(super) fn draw_shelf_drag_preview(
 ) {
     preview::draw_shelf_drag_preview(
         painter,
-        &preview_view(state),
+        &preview_view(&state.model, &state.design),
         viewport,
         preview::ShelfPreview {
             component_type: payload.component_type(),
@@ -787,7 +796,7 @@ mod tests {
 
         assert_eq!(
             preview::resolve_wire_preview_snap(
-                &preview_view(&state),
+                &preview_view(&state.model, &state.design),
                 &symbol_context,
                 &viewport,
                 egui::pos2(near_terminal.x as f32, near_terminal.y as f32),

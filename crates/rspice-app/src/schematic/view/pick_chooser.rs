@@ -3,7 +3,9 @@
 //! one that will be; a long click on a spot two or more objects claim opens
 //! a chooser that lists them in pick order.
 
-use super::{AppState, SchematicSymbolContext, viewport::Viewport};
+use super::{
+    AppState, DesignState, Model, SchematicSymbolContext, model_design_view, viewport::Viewport,
+};
 use crate::state::Point;
 use egui::{Context, Id, Pos2, Response};
 use rspice_design::connectivity::summary::projection_nets;
@@ -52,19 +54,20 @@ fn chooser_id() -> Id {
 /// Every object under `query`, in pick order.
 pub(super) fn candidates_at(
     ctx: &Context,
-    state: &AppState,
+    model: &Model,
+    design: &DesignState,
     query: PointerQuery,
     symbol_context: &SchematicSymbolContext,
     viewport: &Viewport,
 ) -> Vec<PointerTarget> {
     pointer_target::pointer_targets_all(
-        &super::schematic_design_view(state),
+        &model_design_view(model, design.schematic_visibility.review_markers),
         query,
-        state.design.schematic_selection_filter,
+        design.schematic_selection_filter,
         symbol_context,
         ctx,
         viewport,
-        || state.model.workspace.content.active_view.display_path(),
+        || model.workspace.content.active_view.display_path(),
     )
 }
 
@@ -95,13 +98,14 @@ fn cycle_index(
 /// any cycle; a plain click again on the same spot takes the next object.
 pub(super) fn click_target(
     ctx: &Context,
-    state: &AppState,
+    model: &Model,
+    design: &DesignState,
     query: PointerQuery,
     symbol_context: &SchematicSymbolContext,
     viewport: &Viewport,
     additive: bool,
 ) -> Option<PointerTarget> {
-    let candidates = candidates_at(ctx, state, query, symbol_context, viewport);
+    let candidates = candidates_at(ctx, model, design, query, symbol_context, viewport);
     if additive || candidates.is_empty() {
         ctx.data_mut(|data| data.remove::<PickCycle>(cycle_id()));
         return candidates.first().copied();
@@ -223,7 +227,14 @@ pub(super) fn open_chooser_at(
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
-    let candidates = candidates_at(ctx, state, query, symbol_context, viewport);
+    let candidates = candidates_at(
+        ctx,
+        &state.model,
+        &state.design,
+        query,
+        symbol_context,
+        viewport,
+    );
     if candidates.len() < 2 {
         return;
     }
@@ -269,7 +280,7 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
                 alt_held: false,
             },
         };
-        super::requests::apply_editor_request(state, request);
+        super::requests::apply_editor_request(&mut super::canvas_parts(state), request);
     }
 }
 

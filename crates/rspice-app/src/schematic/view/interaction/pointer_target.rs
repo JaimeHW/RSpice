@@ -1,12 +1,12 @@
 //! Compose visible app-owned design inputs for the editor's pointer queries.
 
+use super::super::parts::CanvasParts;
 use super::super::{SchematicSymbolContext, viewport::Viewport};
-use crate::workbench::app_state::AppState;
 pub(in crate::schematic::view) use pointer_target::{PointerHit, PointerTarget};
 use rspice_schematic_editor::view::pointer_target::{self, PointerQuery};
 
 pub(in crate::schematic::view) fn pointer_target(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
@@ -27,7 +27,7 @@ pub(in crate::schematic::view) fn pointer_target(
 }
 
 pub(super) fn pointer_target_with_filter(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
@@ -37,7 +37,7 @@ pub(super) fn pointer_target_with_filter(
     filter: crate::state::SchematicSelectionFilter,
 ) -> Option<PointerTarget> {
     pointer_target::pointer_target(
-        &super::super::schematic_design_view(state),
+        &state.design_view(),
         PointerQuery {
             hit,
             radius: hit_radius,

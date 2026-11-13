@@ -20,14 +20,20 @@ fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
         ));
 
     assert_eq!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::WaveformHidden
     );
     assert!(!state.model.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 
     assert_eq!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.model.simulation.view.waveforms[0].visible);
@@ -50,7 +56,10 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
         ));
 
     assert_eq!(
-        request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal_visible(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::WaveformAlreadyVisible
     );
     assert!(state.model.simulation.view.waveforms[0].visible);
@@ -58,7 +67,10 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
 
     state.model.simulation.view.waveforms[0].visible = false;
     assert_eq!(
-        request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal_visible(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.model.simulation.view.waveforms[0].visible);
@@ -96,7 +108,10 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
             .is_none(),
         "the fixture must not depend on retained simulation cross-probe data"
     );
-    assert_eq!(live_wire_probe_net_name(&state, 91).as_deref(), Some("OUT"));
+    assert_eq!(
+        live_wire_probe_net_name(&crate::schematic::view::canvas_parts(&mut state), 91).as_deref(),
+        Some("OUT")
+    );
 }
 
 #[test]
@@ -114,7 +129,12 @@ fn component_probe_never_fabricates_a_voltage_node_from_instance_identity() {
     let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 17, Point::origin(), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            17,
+            Point::origin(),
+            &symbols
+        ),
         None,
         "an unresolved terminal must fail closed instead of inventing V(XAMP)"
     );
@@ -135,7 +155,12 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
     let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 23, Point::origin(), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            23,
+            Point::origin(),
+            &symbols
+        ),
         Some(ComponentProbe::Current {
             drawn: "VBIAS".to_owned(),
             engine: "VBIAS".to_owned(),
@@ -158,7 +183,12 @@ fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage
     let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 24, Point::origin(), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            24,
+            Point::origin(),
+            &symbols
+        ),
         Some(ComponentProbe::Current {
             drawn: "RLOAD".to_owned(),
             engine: "RLOAD".to_owned(),
@@ -191,21 +221,36 @@ fn component_current_probe_asks_for_the_element_the_engine_knows() {
     let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 27, Point::origin(), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            27,
+            Point::origin(),
+            &symbols
+        ),
         Some(ComponentProbe::Current {
             drawn: "C4".to_owned(),
             engine: "RC4".to_owned(),
         })
     );
     assert_eq!(
-        component_probe_expression(&state, 26, Point::new(400, 0), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            26,
+            Point::new(400, 0),
+            &symbols
+        ),
         Some(ComponentProbe::Current {
             drawn: "E1".to_owned(),
             engine: "B1".to_owned(),
         })
     );
     assert_eq!(
-        component_probe_expression(&state, 28, Point::new(800, 0), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            28,
+            Point::new(800, 0),
+            &symbols
+        ),
         Some(ComponentProbe::Current {
             drawn: "MR1".to_owned(),
             engine: "YMEMRISTOR!MR1".to_owned(),
@@ -228,7 +273,12 @@ fn exact_component_terminal_probe_requests_its_node_voltage() {
     let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 25, Point::new(-20, 0), &symbols),
+        component_probe_expression(
+            &crate::schematic::view::canvas_parts(&mut state),
+            25,
+            Point::new(-20, 0),
+            &symbols
+        ),
         Some(ComponentProbe::Voltage("net1".to_owned()))
     );
 }
@@ -256,7 +306,12 @@ fn synthesized_and_multi_port_component_bodies_fail_closed() {
         let symbols = schematic_symbol_context(&state);
 
         assert_eq!(
-            component_probe_expression(&state, id, Point::origin(), &symbols),
+            component_probe_expression(
+                &crate::schematic::view::canvas_parts(&mut state),
+                id,
+                Point::origin(),
+                &symbols
+            ),
             None,
             "{kind:?} must not fabricate a single body-current observable"
         );
@@ -274,7 +329,10 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
         .revision();
 
     assert!(matches!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     let after_first_revision = state
@@ -307,7 +365,10 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     );
 
     assert!(matches!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("v(out)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("v(out)")
+        ),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 1);
@@ -334,7 +395,10 @@ fn probe_without_stable_plan_fails_closed() {
         .clone();
     state.model.sim_setup.analysis_plan = None;
 
-    let outcome = request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)"));
+    let outcome = request_probe_signal(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+    );
 
     assert!(matches!(outcome, ProbeSignalOutcome::Rejected { .. }));
     assert_eq!(

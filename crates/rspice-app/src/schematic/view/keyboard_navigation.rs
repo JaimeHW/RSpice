@@ -38,7 +38,7 @@ pub(super) fn handle_keyboard_object_navigation(
         KeyboardNavigationOutcome::Ignored => false,
         KeyboardNavigationOutcome::Consumed => true,
         KeyboardNavigationOutcome::Request(request) => {
-            apply_editor_request(state, *request);
+            apply_editor_request(&mut super::canvas_parts(state), *request);
             true
         }
     }
@@ -513,9 +513,15 @@ mod tests {
         assert_eq!(delete.source.content_version, current.content_version);
         assert_eq!(delete.source.topology_version, current.topology_version);
         assert_ne!(delete.source.occurrence, current.occurrence);
-        apply_editor_request(&mut state, delete);
-        apply_editor_request(&mut state, focus);
-        apply_editor_request(&mut state, pointer);
+        apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            delete,
+        );
+        apply_editor_request(&mut crate::schematic::view::canvas_parts(&mut state), focus);
+        apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            pointer,
+        );
         assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
             state
@@ -537,7 +543,10 @@ mod tests {
             .editor
             .selection
             .select_only_component(33);
-        apply_editor_request(&mut state, delete);
+        apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            delete,
+        );
         assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
             state
@@ -553,12 +562,18 @@ mod tests {
 
         let delete = capture(&state, EditorAction::DeleteSelection);
         state.model.schematic.session.read_only = true;
-        apply_editor_request(&mut state, delete);
+        apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            delete,
+        );
         assert_eq!(state.model.schematic.document().components, components());
         assert!(!state.model.schematic.can_undo());
         state.model.schematic.session.read_only = false;
         let delete = capture(&state, EditorAction::DeleteSelection);
-        apply_editor_request(&mut state, delete);
+        apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            delete,
+        );
         assert_eq!(state.model.schematic.document().components.len(), 2);
         assert_eq!(
             state.model.schematic.undo_description(),

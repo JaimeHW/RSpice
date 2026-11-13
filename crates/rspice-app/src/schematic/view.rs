@@ -9,7 +9,7 @@ use egui::Ui;
 
 use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
 use crate::workbench::app_state::{AppState, Model, model_design_view};
-use crate::workbench::state::WorkbenchSession;
+use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
 use super::symbols::SymbolLibrary;
 
@@ -30,6 +30,7 @@ mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
 mod move_interaction;
+mod parts;
 mod pick_chooser;
 mod preview;
 #[cfg(test)]
@@ -72,6 +73,7 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
+pub(crate) use self::parts::canvas_parts;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -284,7 +286,7 @@ fn full_crosshair_at(
     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     Some(
         if state.model.schematic.session.editor.tool.cursor() == egui::CursorIcon::Crosshair {
-            let snapped = snap_resolution::resolve_grid_pointer(state, viewport, pointer);
+            let snapped = snap_resolution::resolve_grid_pointer(&state.model, viewport, pointer);
             viewport.schematic_to_screen(snapped.snapped_position)
         } else {
             pointer
@@ -401,7 +403,8 @@ pub fn render_schematic_view(
             .is_empty();
     if let (Some(payload), Some(position)) = (dropped_payload.as_deref(), shelf_drag_position) {
         let drop_position =
-            snap_resolution::resolve_grid_pointer(state, &viewport, position).snapped_position;
+            snap_resolution::resolve_grid_pointer(&state.model, &viewport, position)
+                .snapped_position;
         match commit_shelf_drop(state, payload, drop_position) {
             // The canvas shows the part where it was dropped.
             ShelfDropOutcome::Placed => {}
@@ -422,7 +425,13 @@ pub fn render_schematic_view(
             pick_chooser::open_chooser_at(ui.ctx(), state, position, &symbol_context, &viewport);
         }
         pick_chooser::show_chooser(ui.ctx(), state);
-        handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
+        handle_tool_interactions(
+            ui,
+            &response,
+            &mut canvas_parts(state),
+            &viewport,
+            &symbol_context,
+        );
     }
     refresh_symbol_context_after_interactions(state, &mut symbol_context);
     context_menu::handle_context_menu(

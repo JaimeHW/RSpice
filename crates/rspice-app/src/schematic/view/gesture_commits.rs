@@ -17,25 +17,35 @@ use rspice_schematic_editor::view::selection_drag::SelectionDragAction;
 /// A click with the placement tool for `component_type` armed, landing at
 /// `at` on the grid.
 pub(crate) fn place_component(state: &mut AppState, component_type: ComponentType, at: Point) {
-    interaction::place_component(state, component_type, at);
+    interaction::place_component(
+        &mut crate::schematic::view::canvas_parts(state),
+        component_type,
+        at,
+    );
 }
 
 /// A click with the junction tool at `at`: it adds a dot where two
 /// conductors meet, or takes away the one already there.
 pub(crate) fn click_junction(state: &mut AppState, at: Point) {
-    interaction::handle_junction_click(state, at);
+    interaction::handle_junction_click(&mut crate::schematic::view::canvas_parts(state), at);
 }
 
 /// Enter on an armed Move whose preview stands at its current delta.
 pub(crate) fn commit_move(state: &mut AppState) {
     let symbols = schematic_symbol_context(state);
-    move_interaction::commit_armed_move_selection(state, &symbols);
+    move_interaction::commit_armed_move_selection(
+        &mut crate::schematic::view::canvas_parts(state),
+        &symbols,
+    );
 }
 
 /// Enter on an armed Stretch whose preview stands at its current delta.
 pub(crate) fn commit_stretch(state: &mut AppState) {
     let symbols = schematic_symbol_context(state);
-    stretch_interaction::commit_armed_stretch_selection(state, &symbols);
+    stretch_interaction::commit_armed_stretch_selection(
+        &mut crate::schematic::view::canvas_parts(state),
+        &symbols,
+    );
 }
 
 /// Press on `target` at `from`, drag through each of `steps` (offsets from
@@ -52,7 +62,7 @@ pub(crate) fn drag_selection(
         target,
         position: from,
     };
-    selection_drag::dispatch(state, ctx, &symbols, begin);
+    selection_drag::dispatch(&mut super::canvas_parts(state), ctx, &symbols, begin);
     let Some(operation_id) = state.model.schematic.pending_operation_id() else {
         return;
     };
@@ -65,9 +75,9 @@ pub(crate) fn drag_selection(
             delta: Point::new(position.x - last.x, position.y - last.y),
             position,
         };
-        selection_drag::dispatch(state, ctx, &symbols, movement);
+        selection_drag::dispatch(&mut super::canvas_parts(state), ctx, &symbols, movement);
         last = position;
     }
     let finish = SelectionDragAction::Finish { operation_id };
-    selection_drag::dispatch(state, ctx, &symbols, finish);
+    selection_drag::dispatch(&mut super::canvas_parts(state), ctx, &symbols, finish);
 }

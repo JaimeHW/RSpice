@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use super::super::AppState;
 use super::*;
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
@@ -55,7 +56,11 @@ fn library_cell_batch_preserves_binding_transform_and_undo_across_revisions() {
         state.model.schematic.session.editor.preview_mirror_h = true;
         let source = super::super::requests::editor_request_source(&state);
         for position in [Point::new(40, 20), Point::new(80, 20)] {
-            place_component(&mut state, ComponentType::CellInstance, position);
+            place_component(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                ComponentType::CellInstance,
+                position,
+            );
             let document = state.model.schematic.document();
             let placed = document.components.last().unwrap();
             assert_eq!(placed.library_cell.as_ref(), Some(&binding));
@@ -87,7 +92,11 @@ fn library_cell_batch_preserves_binding_transform_and_undo_across_revisions() {
         state.model.schematic.undo();
         state.sync_active_schematic_to_workspace();
         assert_eq!(state.model.schematic.document().components.len(), 1);
-        place_component(&mut state, ComponentType::CellInstance, Point::new(120, 20));
+        place_component(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            ComponentType::CellInstance,
+            Point::new(120, 20),
+        );
         assert_eq!(state.model.schematic.document().components.len(), 2);
         state.model.schematic.undo();
         assert_eq!(state.model.schematic.document().components.len(), 1);
@@ -171,7 +180,11 @@ fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit(
         }
         let content = state.model.schematic.content_version();
         let topology = state.model.schematic.topology_version();
-        place_component(&mut state, ComponentType::CellInstance, Point::new(40, 20));
+        place_component(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            ComponentType::CellInstance,
+            Point::new(40, 20),
+        );
         assert!(
             state.model.schematic.document().components.is_empty(),
             "{change}"
@@ -218,7 +231,11 @@ fn saved_outputs(state: &AppState) -> &[SavedOutput] {
 fn empty_canvas_double_click_ascends_only_from_a_descended_context() {
     let mut state = AppState::default();
     assert_eq!(
-        select_double_click_action(&state, None, true),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            None,
+            true
+        ),
         SelectDoubleClickAction::None
     );
 
@@ -228,11 +245,19 @@ fn empty_canvas_double_click_ascends_only_from_a_descended_context() {
         ViewType::Schematic,
     );
     assert_eq!(
-        select_double_click_action(&state, None, true),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            None,
+            true
+        ),
         SelectDoubleClickAction::Ascend
     );
     assert_eq!(
-        select_double_click_action(&state, None, false),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            None,
+            false
+        ),
         SelectDoubleClickAction::None,
         "a filtered or otherwise non-empty hit must not masquerade as empty canvas"
     );
@@ -289,11 +314,19 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
         );
 
     assert_eq!(
-        select_double_click_action(&state, Some(PointerTarget::Component(41)), false),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            Some(PointerTarget::Component(41)),
+            false
+        ),
         SelectDoubleClickAction::Descend(41)
     );
     assert_eq!(
-        select_double_click_action(&state, Some(PointerTarget::Component(42)), false),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            Some(PointerTarget::Component(42)),
+            false
+        ),
         SelectDoubleClickAction::OpenProperties,
         "a Verilog-A-looking view without its exact source owner must fail closed"
     );
@@ -316,7 +349,11 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
         )
         .unwrap();
     assert_eq!(
-        select_double_click_action(&state, Some(PointerTarget::Component(42)), false),
+        select_double_click_action(
+            &crate::schematic::view::canvas_parts(&mut state),
+            Some(PointerTarget::Component(42)),
+            false
+        ),
         SelectDoubleClickAction::OpenVerilogA(42)
     );
     use crate::workbench::{SurfaceId, state::Workspace};
@@ -351,7 +388,10 @@ fn ground_probe_is_reference_only_and_never_creates_output() {
         .revision();
 
     assert_eq!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim(" v ( 0 ) ")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim(" v ( 0 ) ")
+        ),
         ProbeSignalOutcome::GroundReference
     );
     assert!(saved_outputs(&state).is_empty());
@@ -371,16 +411,20 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
     let mut state = AppState::default();
     state.model.schematic.arm_tool(Tool::Wire);
     with_test_ui(|ui| {
-        state.start_canvas_wire(ui.ctx(), Point::origin());
+        crate::schematic::view::canvas_parts(&mut state)
+            .start_canvas_wire(ui.ctx(), Point::origin());
         state.model.schematic.extend_wire(Point::new(20, 0));
-        assert!(finish_active_route(ui, &mut state));
+        assert!(finish_active_route(
+            ui,
+            &mut crate::schematic::view::canvas_parts(&mut state)
+        ));
     });
     assert!(!state.model.schematic.session.editor.wire_drawing.active);
     assert_eq!(state.model.schematic.document().wires.len(), 1);
 
     state.model.schematic.arm_tool(Tool::Bus);
     with_test_ui(|ui| {
-        state
+        crate::schematic::view::canvas_parts(&mut state)
             .start_canvas_bus(
                 ui.ctx(),
                 Point::new(0, 20),
@@ -388,7 +432,10 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
             )
             .unwrap();
         state.model.schematic.extend_bus(Point::new(20, 20));
-        assert!(finish_active_route(ui, &mut state));
+        assert!(finish_active_route(
+            ui,
+            &mut crate::schematic::view::canvas_parts(&mut state)
+        ));
     });
     assert!(!state.model.schematic.session.editor.bus_drawing.active);
     assert_eq!(state.model.schematic.document().buses.len(), 1);
@@ -423,7 +470,10 @@ fn preexisting_equivalent_output_prevents_duplicate_probe_output() {
         .expect("fixture output commits");
 
     assert!(matches!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 1);
@@ -459,7 +509,10 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
         .expect("fixture output commits");
 
     assert!(matches!(
-        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        request_probe_signal(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+        ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 2);
@@ -495,7 +548,11 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
     let mut state = AppState::default();
     arm_pins(&mut state, &["BIAS_EN"], PortDirection::In);
 
-    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(20, 30),
+    );
 
     assert_eq!(state.model.schematic.document().components.len(), 1);
     let placed = state.model.schematic.document().components[0].clone();
@@ -546,7 +603,7 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
 
     for (index, expected) in ["INP", "INN", "OUT"].into_iter().enumerate() {
         place_component(
-            &mut state,
+            &mut crate::schematic::view::canvas_parts(&mut state),
             ComponentType::Port,
             Point::new(20 * (index as i32 + 1), 30),
         );
@@ -604,7 +661,11 @@ fn rotation_and_mirror_of_the_ghost_land_on_the_placed_pin() {
     state.model.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
     state.model.schematic.session.editor.preview_mirror_h = true;
 
-    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(20, 30),
+    );
 
     let placed = &state.model.schematic.document().components[0];
     assert_eq!(placed.rotation, crate::state::Rotation::R90);
@@ -631,7 +692,11 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
         .place_pending_port(Point::origin(), taken)
         .unwrap();
 
-    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(20, 30),
+    );
 
     assert_eq!(
         state.model.schematic.document().components.len(),
@@ -654,10 +719,18 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
         Some("EN")
     );
     assert!(state.model.schematic.undo(), "free the conflicting name");
-    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(20, 30),
+    );
     assert_eq!(state.model.schematic.document().components.len(), 1);
     assert_eq!(state.model.schematic.document().components[0].value, "EN");
-    place_component(&mut state, ComponentType::Port, Point::new(40, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(40, 30),
+    );
     assert_eq!(state.model.schematic.document().components.len(), 2);
     assert_eq!(state.model.schematic.document().components[1].value, "OUT");
     assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
@@ -678,7 +751,10 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
     state.model.schematic.session.editor.pending_design_note = Some(pending);
     state.model.schematic.session.editor.tool = Tool::DesignNote;
 
-    place_pending_design_note(&mut state, Point::new(20, 30));
+    place_pending_design_note(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        Point::new(20, 30),
+    );
 
     assert_eq!(state.model.schematic.document().design_notes.len(), 1);
     assert_eq!(
@@ -750,7 +826,11 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
 
         for (index, point) in points.iter().copied().enumerate() {
             let finish = finish_on_last_click && index + 1 == points.len();
-            handle_documentation_shape_click(&mut state, point, finish);
+            handle_documentation_shape_click(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                point,
+                finish,
+            );
         }
 
         assert_eq!(
@@ -947,7 +1027,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                             handle_documentation_shape_keyboard(
                                 ui,
                                 &response,
-                                &mut state,
+                                &mut crate::schematic::view::canvas_parts(&mut state),
                                 &pointer_viewport(),
                                 grid,
                             );
@@ -955,7 +1035,11 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                     },
                 );
             } else {
-                handle_documentation_shape_click(&mut state, Point::new(0, 0), true);
+                handle_documentation_shape_click(
+                    &mut crate::schematic::view::canvas_parts(&mut state),
+                    Point::new(0, 0),
+                    true,
+                );
             }
 
             assert!(
@@ -1027,7 +1111,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
         next.keyboard_cursor = Some(Point::new(10, 0));
         next.keyboard_active = true;
         let request = capture_shape_input(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             ShapeInputTransition {
                 expected,
                 next,
@@ -1086,7 +1170,10 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
             .editor
             .pending_documentation_shape
             .clone();
-        apply_shape_input(&mut state, request.clone());
+        apply_shape_input(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            request.clone(),
+        );
         if change == "none" {
             assert_eq!(
                 state.model.schematic.document().documentation_shapes.len(),
@@ -1172,7 +1259,13 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
                     egui::Sense::click_and_drag(),
                 );
                 let viewport = pointer_viewport();
-                handle_documentation_shape_keyboard(ui, &response, state, &viewport, grid);
+                handle_documentation_shape_keyboard(
+                    ui,
+                    &response,
+                    &mut crate::schematic::view::canvas_parts(state),
+                    &viewport,
+                    grid,
+                );
             });
         });
     };
@@ -1331,7 +1424,10 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
             .documentation_shapes
             .clone();
 
-        place_pending_design_note(&mut state, Point::new(20, 30));
+        place_pending_design_note(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(20, 30),
+        );
 
         assert!(
             state.model.schematic.document().design_notes.is_empty(),
@@ -1361,7 +1457,11 @@ fn port_placement_without_a_current_validated_contract_fails_closed() {
     let mut state = AppState::default();
     state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Port);
 
-    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(20, 30),
+    );
 
     assert!(state.model.schematic.document().components.is_empty());
     assert!(!state.model.schematic.can_undo());
@@ -1398,7 +1498,11 @@ fn a_topology_change_alone_does_not_end_the_sequence() {
         .place_pending_design_note(Point::origin(), note)
         .unwrap();
 
-    place_component(&mut state, ComponentType::Port, Point::new(40, 10));
+    place_component(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        ComponentType::Port,
+        Point::new(40, 10),
+    );
 
     assert_eq!(state.model.schematic.document().components.len(), 1);
     assert_eq!(state.model.schematic.document().components[0].value, "OUT");
@@ -1488,7 +1592,11 @@ fn a_changed_document_ends_the_sequence_without_placing() {
             _ => unreachable!(),
         }
         let content = state.model.schematic.content_version();
-        place_component(&mut state, ComponentType::Port, Point::new(40, 10));
+        place_component(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            ComponentType::Port,
+            Point::new(40, 10),
+        );
 
         assert!(
             state.model.schematic.document().components.is_empty(),
@@ -1572,7 +1680,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
 
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1585,7 +1693,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
     state.design.schematic_selection_filter.instances = false;
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1605,7 +1713,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         .clear();
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1623,7 +1731,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         .clear();
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1641,7 +1749,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         .clear();
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1654,7 +1762,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
     state.model.schematic.document_mut_for_test().buses.clear();
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1715,7 +1823,7 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
 
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1776,7 +1884,7 @@ fn inactive_sheet_probe_cannot_block_active_probe_hit() {
 
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(point, point),
             1,
             &context,
@@ -1825,7 +1933,7 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
     let screen_point = egui::pos2(10.0, 0.0);
 
     open_object_properties(
-        &mut state,
+        &mut crate::schematic::view::canvas_parts(&mut state),
         PointerHit::new(Point::new(10, 0), Point::new(10, 0)),
         1,
         &symbol_context,
@@ -1883,7 +1991,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
 
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(label.pos, label.pos),
             1,
             &symbol_context,
@@ -1895,7 +2003,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
     );
 
     open_object_properties(
-        &mut state,
+        &mut crate::schematic::view::canvas_parts(&mut state),
         PointerHit::new(label.pos, label.pos),
         1,
         &symbol_context,
@@ -1918,7 +2026,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
         .clear();
     assert_eq!(
         pointer_target(
-            &state,
+            &crate::schematic::view::canvas_parts(&mut state),
             PointerHit::new(label.pos, label.pos),
             1,
             &symbol_context,
@@ -1949,7 +2057,11 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
             .unwrap(),
         );
     let ctx = egui::Context::default();
-    assert!(activate_requirement_link(&mut state, 32, &ctx));
+    assert!(activate_requirement_link(
+        &mut crate::schematic::view::canvas_parts(&mut state),
+        32,
+        &ctx
+    ));
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Results
@@ -1975,7 +2087,11 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
             .unwrap(),
         );
     let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        assert!(activate_requirement_link(&mut state, 33, ctx));
+        assert!(activate_requirement_link(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            33,
+            ctx
+        ));
     });
     assert!(
         output
@@ -2008,7 +2124,10 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
         .highlight_wires([1].into_iter().collect());
 
     assert_eq!(
-        commit_explicit_junction(&mut state, Point::new(20, 20)),
+        commit_explicit_junction(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(20, 20)
+        ),
         JunctionPlacementOutcome::Placed(Point::new(20, 20))
     );
     assert!(state.model.schematic.has_junction(Point::new(20, 20)));
@@ -2028,7 +2147,10 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
     assert!(!state.model.schematic.has_junction(Point::new(20, 20)));
 
     assert_eq!(
-        commit_explicit_junction(&mut state, Point::new(100, 100)),
+        commit_explicit_junction(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(100, 100)
+        ),
         JunctionPlacementOutcome::NoIntersection
     );
     assert!(!state.model.schematic.can_undo());
@@ -2051,7 +2173,10 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
         .highlight_wires([1, 2].into_iter().collect());
 
     assert_eq!(
-        commit_explicit_junction(&mut state, Point::new(20, 20)),
+        commit_explicit_junction(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(20, 20)
+        ),
         JunctionPlacementOutcome::Removed(Point::new(20, 20))
     );
     assert!(!state.model.schematic.has_junction(Point::new(20, 20)));
@@ -2223,7 +2348,7 @@ fn automatic_t_marker_is_not_an_explicit_junction_toggle_target() {
     state.model.schematic.add_junction(point);
 
     assert_eq!(
-        commit_explicit_junction(&mut state, point),
+        commit_explicit_junction(&mut crate::schematic::view::canvas_parts(&mut state), point),
         JunctionPlacementOutcome::NoIntersection
     );
     assert!(state.model.schematic.has_junction(point));

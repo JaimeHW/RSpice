@@ -18,9 +18,12 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
     let mut state = AppState::default();
     crossing(&mut state, 1, 2);
 
-    assert!(label_anchor_on_unmarked_crossing(&state, Point::origin()));
+    assert!(label_anchor_on_unmarked_crossing(
+        &crate::schematic::view::canvas_parts(&mut state),
+        Point::origin()
+    ));
     assert!(!label_anchor_on_unmarked_crossing(
-        &state,
+        &crate::schematic::view::canvas_parts(&mut state),
         Point::new(40, 0)
     ));
 
@@ -31,7 +34,10 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
         .junctions
         .push(Junction::new(3, Point::origin()));
     assert!(
-        !label_anchor_on_unmarked_crossing(&state, Point::origin()),
+        !label_anchor_on_unmarked_crossing(
+            &crate::schematic::view::canvas_parts(&mut state),
+            Point::origin()
+        ),
         "a junction says the wires are one net"
     );
 }
@@ -57,7 +63,7 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
     state.model.schematic.init_undo_history();
 
     place_component(
-        &mut state,
+        &mut crate::schematic::view::canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
@@ -103,7 +109,7 @@ fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
     state.model.schematic.init_undo_history();
 
     place_component(
-        &mut state,
+        &mut crate::schematic::view::canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
@@ -120,7 +126,7 @@ fn a_part_dropped_on_an_unmarked_crossing_splits_neither_wire() {
     crossing(&mut state, 1, 2);
 
     place_component(
-        &mut state,
+        &mut crate::schematic::view::canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
@@ -153,7 +159,7 @@ fn a_route_drawn_along_another_sheets_wire_is_not_folded_into_it() {
 
     state.model.schematic.start_wire(Point::new(20, 0));
     state.model.schematic.extend_wire(Point::new(60, 0));
-    finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+    finish_wire_on_active_sheet(&mut state.model).expect("the route is drawn");
 
     let wires = &state.model.schematic.document().wires;
     assert_eq!(wires.iter().find(|wire| wire.id == 1), Some(&hidden));
@@ -167,7 +173,10 @@ fn another_sheets_wire_makes_no_crossing_for_the_label_tool() {
     let mut state = two_sheet_state(&[1], &[2]);
     crossing(&mut state, 1, 2);
 
-    assert!(!label_anchor_on_unmarked_crossing(&state, Point::origin()));
+    assert!(!label_anchor_on_unmarked_crossing(
+        &crate::schematic::view::canvas_parts(&mut state),
+        Point::origin()
+    ));
 }
 
 /// One frame of the armed tool at `time` seconds with `events`, on a focused
@@ -199,7 +208,13 @@ fn canvas_frame(ctx: &egui::Context, state: &mut AppState, time: f64, events: Ve
                 );
                 response.request_focus();
                 let symbols = schematic_symbol_context(state);
-                handle_tool_interactions(ui, &response, state, &viewport, &symbols);
+                handle_tool_interactions(
+                    ui,
+                    &response,
+                    &mut crate::schematic::view::canvas_parts(state),
+                    &viewport,
+                    &symbols,
+                );
             });
         },
     );

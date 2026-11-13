@@ -18,8 +18,10 @@ use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, Point, Tool}
 use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app::actions::workspace::sync_active_schematic;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app::actions::workspace::{deny_read_only_edit, sync_active_schematic};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// Isolated draft for one snapped, typed net-label placement.
@@ -120,27 +122,44 @@ impl DraftValidation {
 ///
 /// Returning `false` means the active document does not currently own edit
 /// authority or another application modal already owns the interaction.
+#[cfg(test)]
 pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> bool {
-    if state.dialog_modal_open() {
+    let dialog_modal_open = state.dialog_modal_open();
+    open_net_label_placement_in(
+        &mut state.design.net_label_placement,
+        &mut state.model,
+        &mut state.workbench,
+        dialog_modal_open,
+        anchor,
+    )
+}
+
+/// [`open_net_label_placement`] over the entry's draft, the model and the
+/// session, with whether the dialog gate was held.
+pub(crate) fn open_net_label_placement_in(
+    dialog: &mut NetLabelPlacementDialogState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    dialog_modal_open: bool,
+    anchor: Point,
+) -> bool {
+    if dialog_modal_open {
         return false;
     }
-    if state.schematic_edit_read_only() {
-        state.deny_read_only_edit();
+    if model.schematic_edit_read_only() {
+        deny_read_only_edit(model, wb);
         return false;
     }
 
-    let kind = if state.model.schematic.session.editor.tool == Tool::OffSheetConnector {
+    let kind = if model.schematic.session.editor.tool == Tool::OffSheetConnector {
         NetLabelKind::OffSheet {
             direction: CrossSheetPortDirection::default(),
         }
     } else {
         NetLabelKind::Local
     };
-    let authority = SchematicEditAuthority::capture(state);
-    state
-        .design
-        .net_label_placement
-        .open(anchor, authority, kind);
+    let authority = SchematicEditAuthority::capture(&*model);
+    dialog.open(anchor, authority, kind);
     true
 }
 
@@ -271,9 +290,26 @@ fn anchor_on_bus(model: &Model, anchor: Point) -> bool {
 /// Place the name an armed sequence holds next at `anchor`, as one undo
 /// step, and arm the one after it. Returns whether a sequence answered the
 /// click; with none armed, the click opens the entry.
+#[cfg(test)]
 pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> bool {
-    let Some(mut sequence) = state
-        .model
+    let dialog_modal_open = state.dialog_modal_open();
+    place_sequenced_net_label_in(
+        &mut state.model,
+        &mut state.workbench,
+        dialog_modal_open,
+        anchor,
+    )
+}
+
+/// [`place_sequenced_net_label`] over the model and the session, with
+/// whether the dialog gate was held.
+pub(crate) fn place_sequenced_net_label_in(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    dialog_modal_open: bool,
+    anchor: Point,
+) -> bool {
+    let Some(mut sequence) = model
         .schematic
         .session
         .editor
@@ -283,30 +319,20 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
         return false;
     };
     let Some(name) = sequence.next_name() else {
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .pending_net_label_sequence = None;
+        model.schematic.session.editor.pending_net_label_sequence = None;
         return false;
     };
-    if state.dialog_modal_open() {
+    if dialog_modal_open {
         return true;
     }
-    if state.schematic_edit_read_only() {
-        state.deny_read_only_edit();
+    if model.schematic_edit_read_only() {
+        deny_read_only_edit(model, wb);
         return true;
     }
-    let policy = state.model.schematic.document().document_policy.net_naming;
+    let policy = model.schematic.document().document_policy.net_naming;
     if let Err(reason) = NetLabel::validate_name(&name, policy) {
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .pending_net_label_sequence = None;
-        state.prompt(format!("{name}: net name: {reason}."));
+        model.schematic.session.editor.pending_net_label_sequence = None;
+        wb.prompt(format!("{name}: net name: {reason}."));
         return true;
     }
     let kind = sequence.kind;
@@ -315,20 +341,16 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
     } else {
         "place net label"
     };
-    let placed = state.model.schematic.with_undo(undo_label, |schematic| {
+    let placed = model.schematic.with_undo(undo_label, |schematic| {
         schematic.add_net_label_with_kind(anchor, name.clone(), kind);
     });
     if !placed {
-        state.prompt(format!("{name} was not placed."));
+        wb.prompt(format!("{name} was not placed."));
         return true;
     }
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .pending_net_label_sequence = sequence.advance().then_some(sequence);
-    state.sync_active_schematic_to_workspace();
+    model.schematic.session.editor.pending_net_label_sequence =
+        sequence.advance().then_some(sequence);
+    sync_active_schematic(model, wb);
     true
 }
 

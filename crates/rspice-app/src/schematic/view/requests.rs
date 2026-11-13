@@ -1,6 +1,10 @@
 //! Validate editor request targets and route cross-feature effects through app owners.
 
-use crate::workbench::{app::delete_schematic_selection, app_state::AppState};
+use super::parts::CanvasParts;
+use crate::workbench::{
+    app::{delete_schematic_selection, hierarchy_master_for_component},
+    app_state::Model,
+};
 use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
@@ -13,12 +17,12 @@ pub(super) use crate::workbench::app::schematic_editor_request_source as editor_
 /// leaves a net highlight lit, so the descent (the descend key, the second
 /// click of a double-click, or the menu's Descend) carries it into the
 /// instance and back out.
-pub(super) fn picks_instance_to_descend(state: &AppState, target: Option<PointerTarget>) -> bool {
+pub(super) fn picks_instance_to_descend(model: &Model, target: Option<PointerTarget>) -> bool {
     matches!(target, Some(PointerTarget::Component(id))
-        if state.hierarchy_master_for_component(id).is_some())
+        if hierarchy_master_for_component(model, id).is_some())
 }
 
-pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest) {
+pub(super) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
         || state.model.schematic.session.editor.tool != crate::state::Tool::Select
@@ -29,7 +33,7 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
     match request.action {
         EditorAction::DeleteSelection => {
             if !state.model.schematic.session.read_only && !state.active_view_read_only() {
-                delete_schematic_selection(&mut state.model, &mut state.workbench);
+                delete_schematic_selection(state.model, state.workbench);
             }
         }
         EditorAction::Focus(object) => {
@@ -43,7 +47,7 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
             additive,
             alt_held,
         } => {
-            let kept = (!additive && picks_instance_to_descend(state, target))
+            let kept = (!additive && picks_instance_to_descend(state.model, target))
                 .then(|| state.model.schematic.session.editor.net_highlight.clone());
             if let PointerSelectionEffect::HighlightWire(id) = select_pointer_target(
                 &mut state.model.schematic.session.editor,
@@ -51,7 +55,7 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
                 additive,
                 alt_held,
             ) {
-                super::interaction::highlight_canvas_net(&mut state.model, |net| {
+                super::interaction::highlight_canvas_net(state.model, |net| {
                     net.wire_ids.contains(&id)
                 });
             }

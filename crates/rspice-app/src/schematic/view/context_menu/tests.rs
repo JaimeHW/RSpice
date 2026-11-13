@@ -1822,7 +1822,10 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
                 alt_held: false,
             },
         };
-        super::super::requests::apply_editor_request(state, request);
+        super::super::requests::apply_editor_request(
+            &mut crate::schematic::view::canvas_parts(state),
+            request,
+        );
     }
 
     let reference = hierarchy_reference::build();

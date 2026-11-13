@@ -881,7 +881,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                 let label = format!("Plot {display}");
                 if Button::new(&label).icon(Icon::Results).show(ui).clicked() {
                     let configuration_changed = crate::schematic::view::toggle_probe_with_feedback(
-                        &mut app.state,
+                        &mut crate::schematic::view::canvas_parts(&mut app.state),
                         &net_name,
                         &display,
                     );

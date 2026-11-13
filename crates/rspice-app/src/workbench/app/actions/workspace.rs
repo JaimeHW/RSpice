@@ -359,6 +359,7 @@ impl AppState {
     }
 
     /// [`NavigationParts::ascend_workspace_level`] for the session.
+    #[cfg(test)]
     pub(crate) fn ascend_workspace_level(&mut self) {
         self.navigation().ascend_workspace_level();
     }
@@ -381,13 +382,9 @@ impl AppState {
         hierarchy_master_for_component(&self.model, component_id)
     }
 
-    /// [`veriloga_source_for_component`] for the session's model.
-    pub(crate) fn veriloga_source_for_component(&self, component_id: u64) -> Option<CellViewRef> {
-        veriloga_source_for_component(&self.model, component_id)
-    }
-
     /// [`NavigationParts::open_veriloga_source_for_component`] for the
     /// session.
+    #[cfg(test)]
     pub(crate) fn open_veriloga_source_for_component(&mut self, component_id: u64) -> bool {
         self.navigation()
             .open_veriloga_source_for_component(component_id)
@@ -400,7 +397,7 @@ impl AppState {
 
     /// The Verilog-A view one instance is bound to, whether or not that view
     /// resolves to a module yet. This says what kind of master the instance
-    /// has; [`Self::veriloga_source_for_component`] says whether it can be
+    /// has; [`veriloga_source_for_component`] says whether it can be
     /// opened.
     pub(crate) fn veriloga_master_of_component(&self, component_id: u64) -> Option<CellViewRef> {
         let binding = self

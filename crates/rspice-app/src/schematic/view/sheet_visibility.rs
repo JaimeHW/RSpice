@@ -19,7 +19,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::{AppState, Model};
 
-use super::{SchematicSymbolContext, SelectionWindow};
+use super::{SchematicSymbolContext, SelectionWindow, parts::CanvasParts};
 
 /// How much of a cell view a dock lists.
 ///
@@ -64,15 +64,10 @@ pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
 }
 
 /// The active cell view's sheet catalog, however many sheets it holds.
-pub(crate) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    state
-        .model
+pub(crate) fn active_sheet_catalog(state: &impl AsRef<Model>) -> Option<&SheetCatalog> {
+    let model = state.as_ref();
+    let key = model.workspace.content.active_schematic_reference().key();
+    model
         .workspace
         .content
         .design_management
@@ -81,7 +76,7 @@ pub(crate) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
 
 /// The sheet the canvas is showing, as a run's net geometry keys its sheets:
 /// `None` for a cell view with no sheet catalog.
-pub(crate) fn active_sheet_id(state: &AppState) -> Option<crate::state::SheetId> {
+pub(crate) fn active_sheet_id(state: &impl AsRef<Model>) -> Option<crate::state::SheetId> {
     active_sheet_catalog(state).and_then(SheetCatalog::active_sheet_id)
 }
 
@@ -116,18 +111,6 @@ fn object_is_on_active_sheet_in_workspace(
         workspace.content.design_management.sheet_catalog(&key),
         object_id,
     )
-}
-
-/// Return candidates in their authored z-order, excluding objects owned by a
-/// different sheet before any nearest/first-hit resolver runs.
-///
-/// The borrowed fast path keeps legacy single-sheet projects allocation-free.
-pub(super) fn objects_on_active_sheet<'a, T: Clone>(
-    state: &AppState,
-    objects: &'a [T],
-    id: impl Fn(&T) -> u64,
-) -> Cow<'a, [T]> {
-    super::schematic_design_view(state).objects_on_active_sheet(objects, id)
 }
 
 /// Build a live selection containing only objects owned by the active sheet.
@@ -423,13 +406,13 @@ pub(crate) fn objects_of_kind_on_active_sheet(
 }
 
 pub(super) fn select_in_rect_on_active_sheet(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
     window: SelectionWindow,
     add_to_selection: bool,
 ) -> usize {
     if add_to_selection {
-        retain_selection_on_active_sheet(state);
+        retain_selection_on_active_sheet_in(state.model);
     }
     let selected_before = if add_to_selection {
         state.model.schematic.session.editor.selection.count()
@@ -438,7 +421,7 @@ pub(super) fn select_in_rect_on_active_sheet(
     };
     let (document, editor) = state.model.schematic.document_and_editor();
     symbol_context.select_in_rect(document, &mut editor.selection, window, add_to_selection);
-    retain_selection_on_active_sheet(state);
+    retain_selection_on_active_sheet_in(state.model);
     state
         .design
         .schematic_selection_filter
@@ -456,9 +439,6 @@ pub(super) fn select_in_rect_on_active_sheet(
 pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
     super::schematic_design_view(state).active_wire_at(point)
 }
-pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
-    super::schematic_design_view(state).active_junction_at(point)
-}
 
 /// Run a topology operation with hidden-sheet conductors removed from the
 /// mutable working set, then restore them unchanged. Operations such as
@@ -466,13 +446,12 @@ pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -
 /// this boundary gives those mature algorithms exactly one sheet to operate
 /// on without weakening their single-sheet behavior.
 pub(crate) fn with_active_wire_topology<R>(
-    state: &mut AppState,
+    model: &mut Model,
     operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,
 ) -> R {
-    state
-        .model
+    model
         .schematic
-        .with_active_wire_topology(off_active_sheet(&state.model.workspace), operation)
+        .with_active_wire_topology(off_active_sheet(&model.workspace), operation)
 }
 
 /// Whether an object belongs to one of the cell view's other sheets.
@@ -559,11 +538,10 @@ pub(crate) fn with_active_wire_topology_in<R>(
 /// Finish the route being drawn on the active sheet. Conductors on the cell
 /// view's other sheets share its coordinates; they are kept out of reach so
 /// the route can neither split nor dot them.
-pub(crate) fn finish_wire_on_active_sheet(state: &mut AppState) -> Option<u64> {
-    state
-        .model
+pub(crate) fn finish_wire_on_active_sheet(model: &mut Model) -> Option<u64> {
+    model
         .schematic
-        .finish_wire(off_active_sheet(&state.model.workspace))
+        .finish_wire(off_active_sheet(&model.workspace))
 }
 
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
@@ -739,7 +717,7 @@ mod tests {
         ];
 
         select_in_rect_on_active_sheet(
-            &mut state,
+            &mut crate::schematic::view::canvas_parts(&mut state),
             &SchematicSymbolContext::default(),
             SelectionWindow::new(0, 0, 20, 20, false),
             false,
@@ -847,9 +825,10 @@ mod tests {
         let hidden_wire = state.model.schematic.document().wires[0].clone();
         let hidden_junction = state.model.schematic.document().junctions[0];
 
-        assert!(with_active_wire_topology(&mut state, |schematic, scope| {
-            schematic.move_all_vertices_at(origin, destination, scope)
-        }));
+        assert!(with_active_wire_topology(
+            &mut state.model,
+            |schematic, scope| { schematic.move_all_vertices_at(origin, destination, scope) }
+        ));
 
         assert_eq!(
             state
@@ -905,7 +884,7 @@ mod tests {
 
         state.model.schematic.start_wire(Point::new(100, 0));
         state.model.schematic.extend_wire(Point::new(100, 100));
-        let drawn = finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+        let drawn = finish_wire_on_active_sheet(&mut state.model).expect("the route is drawn");
 
         let wires = &state.model.schematic.document().wires;
         assert_eq!(wires.iter().find(|wire| wire.id == 20), Some(&hidden));
@@ -930,9 +909,10 @@ mod tests {
             hidden.clone(),
         ];
 
-        assert!(with_active_wire_topology(&mut state, |schematic, scope| {
-            schematic.join_collinear_wires(scope)
-        }));
+        assert!(with_active_wire_topology(
+            &mut state.model,
+            |schematic, scope| { schematic.join_collinear_wires(scope) }
+        ));
 
         let wires = &state.model.schematic.document().wires;
         assert_eq!(wires.len(), 2, "{wires:?}");
@@ -973,7 +953,7 @@ mod tests {
             .model
             .schematic
             .extend_wire(Point::new(pin.x, pin.y + 40));
-        finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+        finish_wire_on_active_sheet(&mut state.model).expect("the route is drawn");
 
         assert!(state.model.schematic.document().junctions.is_empty());
         assert_eq!(state.model.schematic.document().components.len(), 1);

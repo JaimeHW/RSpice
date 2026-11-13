@@ -1,6 +1,6 @@
 //! Placement and document authority for a named pin sequence.
 
-use super::{AppState, Point};
+use super::{CanvasParts, Point};
 use crate::state::PendingPortSequence;
 
 /// Place the next name of the armed sequence, and stay armed until the names
@@ -10,7 +10,7 @@ use crate::state::PendingPortSequence;
 /// keeps the sequence: the reader can undo whatever took the name, or click
 /// again somewhere the model accepts. A *document* change ends it, because the
 /// pins were named for a cell that is no longer the one on screen.
-pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
+pub(super) fn place_pending_port(state: &mut CanvasParts<'_>, grid_pos: Point) {
     let Some(sequence) = state
         .model
         .schematic
@@ -61,7 +61,7 @@ pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
 }
 
 /// `true` when the armed sequence names the document the click landed in.
-fn placement_authority_matches(state: &AppState, sequence: &PendingPortSequence) -> bool {
+fn placement_authority_matches(state: &CanvasParts<'_>, sequence: &PendingPortSequence) -> bool {
     sequence.authority.as_ref().is_some_and(|authority| {
         authority.matches(&super::super::requests::editor_request_source(state))
     })

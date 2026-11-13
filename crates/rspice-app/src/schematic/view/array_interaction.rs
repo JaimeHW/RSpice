@@ -1,8 +1,13 @@
 //! Bind array canvas requests to the app-owned checked transaction.
 
-use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
+use super::{
+    SchematicSymbolContext, parts::CanvasParts, requests::editor_request_source, viewport::Viewport,
+};
 use crate::state::{SchematicArrayPlacement, Tool};
-use crate::workbench::{app::armed_array_selection_authority, app_state::AppState};
+use crate::workbench::app::{
+    ArraySelectionDialogState, armed_array_selection_authority, armed_array_selection_plan,
+    cancel_armed_array_selection_in,
+};
 use egui::{Response, Ui};
 use rspice_schematic_editor::view::array_interaction::{self, ArrayInputRequest, ArrayInputView};
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
@@ -10,7 +15,7 @@ use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 pub(super) fn handle_armed_array_selection(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     grid_size: i32,
     symbol_context: &SchematicSymbolContext,
@@ -21,9 +26,11 @@ pub(super) fn handle_armed_array_selection(
     {
         return;
     }
-    if let Err(message) = armed_array_selection_authority(state) {
+    if let Err(message) =
+        armed_array_selection_authority(&state.design.array_selection, state.model)
+    {
         state.prompt(format!("Create array cancelled: {message}"));
-        crate::workbench::app::cancel_armed_array_selection(state);
+        cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         return;
     }
     if let Some(transition) = array_interaction::input(
@@ -42,7 +49,7 @@ pub(super) fn handle_armed_array_selection(
     }
 }
 
-fn capture(state: &AppState, transition: TransformInputTransition) -> ArrayInputRequest {
+fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> ArrayInputRequest {
     let draft = &state.design.array_selection;
     ArrayInputRequest {
         source: editor_request_source(state),
@@ -55,7 +62,11 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> ArrayInput
     }
 }
 
-fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: ArrayInputRequest) {
+fn apply(
+    state: &mut CanvasParts<'_>,
+    symbols: &SchematicSymbolContext,
+    request: ArrayInputRequest,
+) {
     let draft = &state.design.array_selection;
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
@@ -67,7 +78,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: ArrayI
         || state.model.schematic.session.editor.tool != Tool::ArraySelection
         || !draft.armed
         || state.application_modal_open()
-        || armed_array_selection_authority(state).is_err()
+        || armed_array_selection_authority(&state.design.array_selection, state.model).is_err()
     {
         return;
     }
@@ -77,23 +88,28 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: ArrayI
     }
 }
 
-pub(super) fn array_placement(state: &AppState) -> Result<SchematicArrayPlacement, &'static str> {
-    array_interaction::array_placement(
-        state.design.array_selection.kind,
-        &state.design.array_selection.canvas,
-    )
+pub(super) fn array_placement(
+    draft: &ArraySelectionDialogState,
+) -> Result<SchematicArrayPlacement, &'static str> {
+    array_interaction::array_placement(draft.kind, &draft.canvas)
 }
 
-fn commit_armed_array_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
-    if let Err(message) = armed_array_selection_authority(state) {
+fn commit_armed_array_selection(
+    state: &mut CanvasParts<'_>,
+    symbol_context: &SchematicSymbolContext,
+) {
+    if let Err(message) =
+        armed_array_selection_authority(&state.design.array_selection, state.model)
+    {
         state.prompt(format!("Create array cancelled: {message}"));
-        crate::workbench::app::cancel_armed_array_selection(state);
+        cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         return;
     }
-    let plan = match array_placement(state)
+    let plan = match array_placement(&state.design.array_selection)
         .map_err(str::to_owned)
-        .and_then(|placement| crate::workbench::app::armed_array_selection_plan(state, placement))
-    {
+        .and_then(|placement| {
+            armed_array_selection_plan(&state.design.array_selection, state.model, placement)
+        }) {
         Ok(plan) => plan,
         Err(message) => {
             state.design.array_selection.canvas.reset_candidate();
@@ -122,7 +138,7 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
         Ok(impact) => {
             state.sync_active_schematic_to_workspace();
             state.prompt(format!("Created {} array members.", impact.replicas));
-            crate::workbench::app::cancel_armed_array_selection(state);
+            cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         }
         Err(error) => {
             state.design.array_selection.canvas.preview_error = Some(error.to_string());
@@ -134,6 +150,7 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Point};
@@ -208,7 +225,12 @@ mod tests {
                         };
                         let grid_size = state.model.schematic.document().grid_size;
                         handle_armed_array_selection(
-                            ui, &response, &mut state, &viewport, grid_size, &symbols,
+                            ui,
+                            &response,
+                            &mut crate::schematic::view::canvas_parts(&mut state),
+                            &viewport,
+                            grid_size,
+                            &symbols,
                         );
                     });
                 },
@@ -245,7 +267,7 @@ mod tests {
         state.design.array_selection.canvas.preview_delta = pitch;
         state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(state);
-        commit_armed_array_selection(state, &symbols);
+        commit_armed_array_selection(&mut crate::schematic::view::canvas_parts(state), &symbols);
     }
 
     #[test]
@@ -340,7 +362,10 @@ mod tests {
         state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_array_selection(&mut state, &symbols);
+        commit_armed_array_selection(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+        );
 
         assert_eq!(state.model.schematic.document().components.len(), 1);
         assert!(state.design.array_selection.armed);
@@ -439,7 +464,7 @@ mod tests {
             let mut next = expected.clone();
             next.preview_delta = Point::new(100, 0);
             let request = capture(
-                &state,
+                &crate::schematic::view::canvas_parts(&mut state),
                 TransformInputTransition {
                     expected,
                     next,
@@ -476,7 +501,11 @@ mod tests {
             }
             let canvas = state.design.array_selection.canvas.clone();
             let symbols = schematic_symbol_context(&state);
-            apply(&mut state, &symbols, request);
+            apply(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &symbols,
+                request,
+            );
             if change == "none" {
                 assert_eq!(state.model.schematic.document().components.len(), 8);
                 assert_eq!(

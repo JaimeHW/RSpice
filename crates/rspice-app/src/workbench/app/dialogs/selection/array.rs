@@ -404,24 +404,25 @@ fn validate_draft(draft: &ArraySelectionDialogState, model: &Model) -> DraftVali
     }
 }
 
-pub(crate) fn armed_array_selection_authority(state: &AppState) -> Result<(), String> {
-    if !state.design.array_selection.armed
-        || state.model.schematic.session.editor.tool != Tool::ArraySelection
-    {
+pub(crate) fn armed_array_selection_authority(
+    draft: &ArraySelectionDialogState,
+    model: &Model,
+) -> Result<(), String> {
+    if !draft.armed || model.schematic.session.editor.tool != Tool::ArraySelection {
         return Err("Create array is not armed.".to_owned());
     }
-    match validate_draft(&state.design.array_selection, &state.model) {
+    match validate_draft(draft, model) {
         DraftValidation::Valid => Ok(()),
         DraftValidation::Invalid(errors) => Err(errors.messages.join(" ")),
     }
 }
 
 pub(crate) fn armed_array_selection_plan(
-    state: &AppState,
+    draft: &ArraySelectionDialogState,
+    model: &Model,
     placement: SchematicArrayPlacement,
 ) -> Result<SchematicArrayPlan, String> {
-    armed_array_selection_authority(state)?;
-    let draft = &state.design.array_selection;
+    armed_array_selection_authority(draft, model)?;
     SchematicArrayPlan::parse(draft.kind, &draft.count, &draft.naming, placement)
         .map_err(|error| error.to_string())
 }

@@ -125,19 +125,18 @@ pub(crate) fn arm_stretch_selection_in(
     model.schematic.arm_tool(Tool::StretchSelection);
 }
 
-fn validate_draft(state: &AppState) -> Result<(), String> {
-    if state.schematic_edit_read_only() {
+fn validate_draft(draft: &StretchSelectionDialogState, model: &Model) -> Result<(), String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let draft = &state.design.stretch_selection;
     let Some(authority) = draft.authority.as_ref() else {
         return Err("Stretch is not armed.".to_owned());
     };
-    authority.validate(state, COMMAND)?;
+    authority.validate(model, COMMAND)?;
     let Some(target) = draft.canvas.target else {
         return Err("Stretch is not armed.".to_owned());
     };
-    if !state.model.schematic.is_stretch_target_eligible(target) {
+    if !model.schematic.is_stretch_target_eligible(target) {
         return Err(
             "What this stretch was armed on is no longer there. Select it again.".to_owned(),
         );
@@ -145,12 +144,14 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), String> {
-    let draft = &state.design.stretch_selection;
-    if !draft.armed || state.model.schematic.session.editor.tool != Tool::StretchSelection {
+pub(crate) fn armed_stretch_selection_authority(
+    draft: &StretchSelectionDialogState,
+    model: &Model,
+) -> Result<(), String> {
+    if !draft.armed || model.schematic.session.editor.tool != Tool::StretchSelection {
         return Err("Stretch is not armed.".to_owned());
     }
-    validate_draft(state)
+    validate_draft(draft, model)
 }
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {

@@ -12,7 +12,7 @@ use crate::state::{
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
 };
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_schematic_editor::view::documentation_shape_input::{
     self, ShapeInputAction, ShapeInputRequest, ShapeInputTransition, ShapeInputView,
@@ -23,10 +23,10 @@ use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
+use super::parts::CanvasParts;
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
-    active_junction_at, active_wire_at, finish_wire_on_active_sheet, objects_on_active_sheet,
-    retain_selection_on_active_sheet, with_active_wire_topology_in,
+    finish_wire_on_active_sheet, retain_selection_on_active_sheet_in, with_active_wire_topology_in,
 };
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
@@ -47,7 +47,7 @@ pub(super) use pointer_target::{PointerHit, PointerTarget, pointer_target};
 pub(super) fn handle_tool_interactions(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
@@ -57,7 +57,7 @@ pub(super) fn handle_tool_interactions(
     if state.reconcile_conductor_route(ui.ctx()) {
         return;
     }
-    retain_selection_on_active_sheet(state);
+    retain_selection_on_active_sheet_in(state.model);
     if primary_pan_gesture_active(ui, response) {
         return;
     }
@@ -71,7 +71,10 @@ pub(super) fn handle_tool_interactions(
     // A floating copy owns the canvas until it lands; a tool chosen since
     // it began is the next command, and the copy is let go.
     if state.design.floating_paste.is_some() && current_tool != Tool::Select {
-        crate::workbench::app::cancel_floating_paste(state);
+        crate::workbench::app::cancel_floating_paste_in(
+            &mut state.design.floating_paste,
+            state.workbench,
+        );
     }
     if super::floating_paste::handle_floating_paste(ui, response, state, viewport) {
         return;
@@ -138,7 +141,7 @@ pub(super) fn handle_tool_interactions(
     }
 
     if let Some(pos) = input.shape_double_click {
-        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+        let position = resolve_grid_pointer(state.model, viewport, pos).snapped_position;
         handle_documentation_shape_click(state, position, true);
     }
 
@@ -160,7 +163,7 @@ pub(super) fn handle_tool_interactions(
                 Some(wire_pos) if state.model.schematic.session.editor.wire_drawing.active => {
                     state.model.schematic.extend_wire(wire_pos);
                     if ends_route {
-                        let _ = finish_wire_on_active_sheet(state);
+                        let _ = finish_wire_on_active_sheet(state.model);
                     }
                 }
                 Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
@@ -208,10 +211,22 @@ pub(super) fn handle_tool_interactions(
             // The armed tool determines whether the naming transaction makes
             // a local label or an off-sheet connector at this shared anchor.
             ToolPointerAction::NetLabel(anchor) => {
+                let dialog_modal_open = state.dialog_modal_open();
                 if label_anchor_on_unmarked_crossing(state, anchor) {
                     refuse_label_on_unmarked_crossing(ui, state, anchor);
-                } else if !crate::workbench::app::place_sequenced_net_label(state, anchor) {
-                    crate::workbench::app::open_net_label_placement(state, anchor);
+                } else if !crate::workbench::app::place_sequenced_net_label_in(
+                    state.model,
+                    state.workbench,
+                    dialog_modal_open,
+                    anchor,
+                ) {
+                    crate::workbench::app::open_net_label_placement_in(
+                        &mut state.design.net_label_placement,
+                        state.model,
+                        state.workbench,
+                        dialog_modal_open,
+                        anchor,
+                    );
                 }
             }
         }
@@ -306,20 +321,20 @@ pub(super) fn handle_tool_interactions(
     }
 }
 
-fn tool_pointer_view(state: &AppState) -> ToolPointerView<'_> {
+fn tool_pointer_view<'a>(state: &'a CanvasParts<'_>) -> ToolPointerView<'a> {
     ToolPointerView {
-        design: super::schematic_design_view(state),
+        design: state.design_view(),
         snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
 }
 
-fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
+fn finish_active_route(ui: &Ui, state: &mut CanvasParts<'_>) -> bool {
     if state.reconcile_conductor_route(ui.ctx()) {
         return false;
     }
     if state.model.schematic.session.editor.wire_drawing.active {
-        return finish_wire_on_active_sheet(state).is_some();
+        return finish_wire_on_active_sheet(state.model).is_some();
     }
     if state.model.schematic.session.editor.bus_drawing.active {
         return match state.model.schematic.finish_bus() {
@@ -344,7 +359,7 @@ enum SelectDoubleClickAction {
 }
 
 fn select_double_click_action(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     target: Option<PointerTarget>,
     canvas_is_empty_at_pointer: bool,
 ) -> SelectDoubleClickAction {
@@ -371,7 +386,11 @@ fn select_double_click_action(
     }
 }
 
-fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Context) -> bool {
+fn activate_requirement_link(
+    state: &mut CanvasParts<'_>,
+    note_id: u64,
+    ctx: &egui::Context,
+) -> bool {
     let target = state
         .model
         .schematic
@@ -401,7 +420,7 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
     }
 }
 
-fn handle_bus_tap_click(state: &mut AppState, requested: Point, hit_radius: i32) {
+fn handle_bus_tap_click(state: &mut CanvasParts<'_>, requested: Point, hit_radius: i32) {
     if state.schematic_edit_read_only() {
         state.deny_read_only_edit();
         state.model.schematic.cancel_tool();
@@ -463,25 +482,29 @@ fn handle_bus_tap_click(state: &mut AppState, requested: Point, hit_radius: i32)
     }
 }
 
-fn report_bus_candidate_error(state: &mut AppState, error: BusTapCandidateError) {
+fn report_bus_candidate_error(state: &mut CanvasParts<'_>, error: BusTapCandidateError) {
     state.prompt(error.message());
 }
 
-fn report_unrepresentable_conductor_attachment(state: &mut AppState) {
+fn report_unrepresentable_conductor_attachment(state: &mut CanvasParts<'_>) {
     state.prompt("No schematic point can be attached to that conductor; the wire was not started.");
 }
 
 /// Whether a label dropped at `anchor` would sit exactly where two of this
 /// sheet's wires cross with no junction, naming neither of them.
-fn label_anchor_on_unmarked_crossing(state: &AppState, anchor: Point) -> bool {
+fn label_anchor_on_unmarked_crossing(state: &CanvasParts<'_>, anchor: Point) -> bool {
     let document = state.model.schematic.document();
-    let wires = objects_on_active_sheet(state, &document.wires, |wire| wire.id);
-    let junctions = objects_on_active_sheet(state, &document.junctions, |junction| junction.id);
+    let wires = state
+        .design_view()
+        .objects_on_active_sheet(&document.wires, |wire| wire.id);
+    let junctions = state
+        .design_view()
+        .objects_on_active_sheet(&document.junctions, |junction| junction.id);
     rspice_design::schematic::junction_edit::CrossingIndex::new(&wires, &junctions)
         .is_unmarked_crossing(anchor)
 }
 
-fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Point) {
+fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut CanvasParts<'_>, anchor: Point) {
     let message = format!(
         "A label at ({}, {}) would sit where two wires cross with no junction, and would join \
          neither. Place a junction there to join the wires, or drop the label onto one wire.",
@@ -522,7 +545,7 @@ fn connect_pins_inside_wires(
 }
 
 pub(super) fn place_component(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     component_type: ComponentType,
     grid_pos: Point,
 ) {
@@ -555,7 +578,7 @@ pub(super) fn place_component(
                 return;
             }
             let library_cell = pending.binding.clone();
-            let symbols = super::schematic_symbol_context(state);
+            let symbols = state.model.schematic_symbol_context();
             let workspace = &state.model.workspace;
             let changed = state
                 .model
@@ -570,7 +593,7 @@ pub(super) fn place_component(
         }
         // An armed stimulus definition is placed as an adopter in this undo group.
         _ => {
-            let symbols = super::schematic_symbol_context(state);
+            let symbols = state.model.schematic_symbol_context();
             let workspace = &state.model.workspace;
             let changed = state.model.schematic.with_undo(
                 format!("place {}", component_type.display_name()),
@@ -586,7 +609,7 @@ pub(super) fn place_component(
     }
 }
 
-fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
+fn place_pending_design_note(state: &mut CanvasParts<'_>, grid_pos: Point) {
     let Some(pending) = state
         .model
         .schematic
@@ -626,7 +649,11 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
     }
 }
 
-fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finish_polygon: bool) {
+fn handle_documentation_shape_click(
+    state: &mut CanvasParts<'_>,
+    grid_pos: Point,
+    finish_polygon: bool,
+) {
     state
         .model
         .schematic
@@ -681,7 +708,7 @@ fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finis
     }
 }
 
-fn shape_input_view(state: &AppState) -> ShapeInputView<'_> {
+fn shape_input_view<'a>(state: &'a CanvasParts<'_>) -> ShapeInputView<'a> {
     ShapeInputView {
         drawing: &state
             .model
@@ -705,7 +732,7 @@ fn shape_input_view(state: &AppState) -> ShapeInputView<'_> {
 fn handle_documentation_shape_keyboard(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     grid_size: i32,
 ) {
@@ -721,7 +748,10 @@ fn handle_documentation_shape_keyboard(
     }
 }
 
-fn capture_shape_input(state: &AppState, transition: ShapeInputTransition) -> ShapeInputRequest {
+fn capture_shape_input(
+    state: &CanvasParts<'_>,
+    transition: ShapeInputTransition,
+) -> ShapeInputRequest {
     ShapeInputRequest {
         source: super::requests::editor_request_source(state),
         kind: state
@@ -736,7 +766,7 @@ fn capture_shape_input(state: &AppState, transition: ShapeInputTransition) -> Sh
     }
 }
 
-fn apply_shape_input(state: &mut AppState, request: ShapeInputRequest) {
+fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest) {
     if request.source != super::requests::editor_request_source(state)
         || request.kind
             != state
@@ -783,7 +813,7 @@ fn apply_shape_input(state: &mut AppState, request: ShapeInputRequest) {
     }
 }
 
-fn finish_documentation_polygon(state: &mut AppState) {
+fn finish_documentation_polygon(state: &mut CanvasParts<'_>) {
     let Some(kind) = state
         .model
         .schematic
@@ -800,7 +830,10 @@ fn finish_documentation_polygon(state: &mut AppState) {
     }
 }
 
-fn finish_documentation_shape(state: &mut AppState, kind: crate::state::DocumentationShapeKind) {
+fn finish_documentation_shape(
+    state: &mut CanvasParts<'_>,
+    kind: crate::state::DocumentationShapeKind,
+) {
     let geometry = match state
         .model
         .schematic
@@ -861,7 +894,7 @@ fn finish_documentation_shape(state: &mut AppState, kind: crate::state::Document
 }
 
 fn report_documentation_shape_error(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     error: crate::state::DocumentationShapeError,
 ) {
     state.prompt(format!("Shape not placed: {error}"));
@@ -881,11 +914,16 @@ enum JunctionPlacementOutcome {
 /// Whether the active sheet's wires and pins make a dot due at `point`
 /// whether or not one is placed there: a T, three wire ends or wires on a
 /// pin, as opposed to a crossing that only a placed dot joins.
-fn dot_required_on_active_sheet(state: &AppState, point: Point) -> bool {
+fn dot_required_on_active_sheet(state: &CanvasParts<'_>, point: Point) -> bool {
     let document = state.model.schematic.document();
     let sheet = rspice_design::schematic::document::SchematicDocument {
-        wires: objects_on_active_sheet(state, &document.wires, |wire| wire.id).into_owned(),
-        components: objects_on_active_sheet(state, &document.components, |part| part.id)
+        wires: state
+            .design_view()
+            .objects_on_active_sheet(&document.wires, |wire| wire.id)
+            .into_owned(),
+        components: state
+            .design_view()
+            .objects_on_active_sheet(&document.components, |part| part.id)
             .into_owned(),
         ..Default::default()
     };
@@ -893,22 +931,26 @@ fn dot_required_on_active_sheet(state: &AppState, point: Point) -> bool {
         .dot_belongs(point, false)
 }
 
-fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
+fn commit_explicit_junction(
+    state: &mut CanvasParts<'_>,
+    requested: Point,
+) -> JunctionPlacementOutcome {
     let grid_size = state.model.schematic.document().grid_size;
-    let Some(target) =
-        super::schematic_design_view(state).nearest_junction_candidate(requested, grid_size)
+    let Some(target) = state
+        .design_view()
+        .nearest_junction_candidate(requested, grid_size)
     else {
         return JunctionPlacementOutcome::NoIntersection;
     };
 
-    let buses = objects_on_active_sheet(state, &state.model.schematic.document().buses, |item| {
-        item.id
-    });
+    let buses = state
+        .design_view()
+        .objects_on_active_sheet(&state.model.schematic.document().buses, |item| item.id);
     if buses.iter().any(|bus| bus.contains_point(target)) {
         return JunctionPlacementOutcome::MixedBus;
     }
 
-    if let Some(junction_id) = active_junction_at(state, target) {
+    if let Some(junction_id) = state.design_view().active_junction_at(target) {
         let automatic = state.model.schematic.session.editor.automatic_junctions;
         if automatic && dot_required_on_active_sheet(state, target) {
             return JunctionPlacementOutcome::Required(target);
@@ -933,7 +975,7 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     JunctionPlacementOutcome::Placed(target)
 }
 
-pub(super) fn handle_junction_click(state: &mut AppState, requested: Point) {
+pub(super) fn handle_junction_click(state: &mut CanvasParts<'_>, requested: Point) {
     let message = match commit_explicit_junction(state, requested) {
         JunctionPlacementOutcome::Placed(point) => {
             format!("Added a junction at ({}, {}).", point.x, point.y)
@@ -957,7 +999,7 @@ pub(super) fn handle_junction_click(state: &mut AppState, requested: Point) {
 
 fn handle_select_click(
     ui: &Ui,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
@@ -979,7 +1021,8 @@ fn handle_select_click(
     }
     let target = super::pick_chooser::click_target(
         ui.ctx(),
-        state,
+        state.model,
+        state.design,
         rspice_schematic_editor::view::pointer_target::PointerQuery {
             hit,
             radius: hit_radius,
@@ -1017,7 +1060,7 @@ enum ProbeSignalOutcome {
 /// Comparing visibility before and after the simulation state's canonical
 /// resolver keeps this path correct for every supported waveform alias,
 /// including bare net names and generated numeric node names.
-fn toggle_materialized_waveform(state: &mut AppState, probe_name: &str) -> Option<bool> {
+fn toggle_materialized_waveform(state: &mut CanvasParts<'_>, probe_name: &str) -> Option<bool> {
     let before = state
         .model
         .simulation
@@ -1070,7 +1113,7 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
     unreachable!("one more generated name than existing outputs must be available")
 }
 
-fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
+fn select_materialized_probe_trace(state: &mut CanvasParts<'_>, probe_name: &str) {
     let selected = {
         let run = state.model.simulation.active_run();
         let analysis = state.model.simulation.active_analysis();
@@ -1103,7 +1146,7 @@ struct ProbeOutputBinding {
 }
 
 fn ensure_plan_probe_output(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> Result<ProbeOutputBinding, String> {
     let mut setup = state.model.sim_setup.clone();
@@ -1154,8 +1197,8 @@ fn ensure_plan_probe_output(
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )?
     .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
-    let preflight = crate::simulation::SimulationController::new()
-        .saved_output_preflight(&state.model, &output);
+    let preflight =
+        crate::simulation::SimulationController::new().saved_output_preflight(state.model, &output);
     if let rspice_simulation::output_contract::SavedOutputSemanticStatus::Invalid { reason } =
         preflight.semantic_status()
     {
@@ -1199,7 +1242,7 @@ fn ensure_plan_probe_output(
 /// That expression is the engine's, never the reader's: two instances of one
 /// master show the same `V(n1)` and request two different nodes.
 fn request_probe_signal(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
     let engine = spelling.engine();
@@ -1230,7 +1273,7 @@ fn request_probe_signal(
 }
 
 fn request_probe_signal_visible(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
     let engine = spelling.engine();
@@ -1266,7 +1309,7 @@ fn request_probe_signal_visible(
 /// `I(name)`; anything else — a marker's stored expression, an authored
 /// quantity — already names an exact node and is used as written.
 fn probe_spelling_for(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     name: &str,
     display: &str,
 ) -> Result<OccurrenceProbeSpelling, String> {
@@ -1290,7 +1333,7 @@ fn unspellable_occurrence(occurrence: &crate::state::InstancePath) -> String {
 /// its own name, which a prefix, a behavioural lowering or a keyword makes
 /// differ from the drawn one.
 fn commit_element_current(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     drawn: &str,
     engine: &str,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
@@ -1315,10 +1358,10 @@ fn commit_element_current(
 /// result to the reader, and the reader is owed the design's address rather
 /// than the flattened node the engine answered on.
 fn commit_probe_request(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     name: &str,
     display: &str,
-    request: fn(&mut AppState, &OccurrenceProbeSpelling) -> ProbeSignalOutcome,
+    request: fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling) -> ProbeSignalOutcome,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     match probe_spelling_for(state, name, display) {
         Ok(spelling) => {
@@ -1338,7 +1381,11 @@ fn commit_probe_request(
 /// transaction, so a net can never be "plotted" by one surface and absent
 /// from the other. Materialized data plots immediately; otherwise the active
 /// simulation plan receives an idempotent saved-output contract.
-pub(crate) fn toggle_probe_with_feedback(state: &mut AppState, name: &str, display: &str) -> bool {
+pub(crate) fn toggle_probe_with_feedback(
+    state: &mut CanvasParts<'_>,
+    name: &str,
+    display: &str,
+) -> bool {
     let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
@@ -1348,7 +1395,7 @@ pub(crate) fn toggle_probe_with_feedback(state: &mut AppState, name: &str, displ
 /// Inspector/navigation action: reveal a probe without ever toggling a
 /// currently visible trace off.
 pub(crate) fn ensure_probe_visible_with_feedback(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     name: &str,
     display: &str,
 ) -> bool {
@@ -1363,7 +1410,7 @@ pub(crate) fn ensure_probe_visible_with_feedback(
 /// path keeps cross-probing useful for read-only library/testbench views while
 /// preserving their write boundary.
 pub(crate) fn ensure_retained_probe_visible_with_feedback(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     name: &str,
     display: &str,
 ) -> bool {
@@ -1401,7 +1448,7 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
     shown
 }
 
-fn report_probe_outcome(state: &mut AppState, display: &str, outcome: ProbeSignalOutcome) {
+fn report_probe_outcome(state: &mut CanvasParts<'_>, display: &str, outcome: ProbeSignalOutcome) {
     state.prompt(match outcome {
         ProbeSignalOutcome::WaveformShown => format!("{display} added to the plot."),
         ProbeSignalOutcome::WaveformHidden => format!("{display} removed from the plot."),
@@ -1419,7 +1466,7 @@ fn report_probe_outcome(state: &mut AppState, display: &str, outcome: ProbeSigna
     });
 }
 
-fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
+fn probe_edit_identity_is_current(state: &CanvasParts<'_>) -> Result<(), String> {
     if !matches!(
         state.model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
@@ -1441,7 +1488,7 @@ fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
 }
 
 fn current_probe_output_binding(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     expression: &str,
 ) -> Option<(
     crate::product::SimulationPlanId,
@@ -1470,7 +1517,7 @@ fn current_probe_output_binding(
 /// the engine's, because the label is read on the drawing while the expression
 /// is matched against a plan's saved outputs.
 fn retain_probe_flag(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     position: Point,
     spelling: Option<&OccurrenceProbeSpelling>,
     binding: Option<(
@@ -1676,30 +1723,30 @@ fn exactly_one_net_name<'a>(mut matches: impl Iterator<Item = &'a DesignNet>) ->
 /// requiring a retained simulation run. Retained cross-probe data is only a
 /// compatibility fallback when the live netlist projection cannot resolve a
 /// source identity.
-fn live_wire_probe_net_name(state: &AppState, wire_id: u64) -> Option<String> {
-    let nets = live_design_nets(&state.model);
+fn live_wire_probe_net_name(state: &CanvasParts<'_>, wire_id: u64) -> Option<String> {
+    let nets = live_design_nets(state.model);
     exactly_one_net_name(nets.iter().filter(|net| net.wire_ids.contains(&wire_id)))
 }
 
 fn live_terminal_probe_net_name(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     component_id: u64,
     pin: &str,
     position: Point,
 ) -> Option<String> {
-    let nets = live_design_nets(&state.model);
+    let nets = live_design_nets(state.model);
     exactly_one_net_name(nets.iter().filter(|net| {
         net.terminals
             .iter()
             .any(|terminal| terminal.component_id == component_id && terminal.pin == pin)
     }))
     .or_else(|| {
-        let wire_id = active_wire_at(state, position)?;
+        let wire_id = state.design_view().active_wire_at(position)?;
         exactly_one_net_name(nets.iter().filter(|net| net.wire_ids.contains(&wire_id)))
     })
 }
 
-fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> {
+fn retained_probe_net_name(state: &CanvasParts<'_>, position: Point) -> Option<String> {
     state
         .model
         .simulation
@@ -1708,7 +1755,7 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .net_at_in(
             &state.model.workspace.content.active_view,
             state.model.schematic.topology_version(),
-            super::sheet_visibility::active_sheet_id(state),
+            super::sheet_visibility::active_sheet_id(state.model),
             position,
         )
         .cloned()
@@ -1729,7 +1776,7 @@ enum ComponentProbe {
 /// The occurrence is applied later, at the request boundary: what the drawing
 /// knows is `n1` and `R2`, and what makes those addresses is the tab.
 fn component_probe_expression(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     component_id: u64,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
@@ -1792,7 +1839,7 @@ fn component_probe_expression(
 }
 
 fn handle_probe_click(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
@@ -1805,7 +1852,7 @@ fn handle_probe_click(
         return;
     }
 
-    if let Some(wire_id) = active_wire_at(state, grid_pos) {
+    if let Some(wire_id) = state.design_view().active_wire_at(grid_pos) {
         if let Some(net_name) = live_wire_probe_net_name(state, wire_id)
             .or_else(|| retained_probe_net_name(state, grid_pos))
         {
@@ -1831,9 +1878,7 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
             {
-                highlight_canvas_net(&mut state.model, |net| {
-                    net.name.eq_ignore_ascii_case(&net_name)
-                });
+                highlight_canvas_net(state.model, |net| net.name.eq_ignore_ascii_case(&net_name));
             }
         } else {
             log::info!(
@@ -1843,11 +1888,9 @@ fn handle_probe_click(
             state.prompt("Nothing probed: this wire does not resolve to one net.");
         }
     } else {
-        let components = objects_on_active_sheet(
-            state,
-            &state.model.schematic.document().components,
-            |item| item.id,
-        );
+        let components = state
+            .design_view()
+            .objects_on_active_sheet(&state.model.schematic.document().components, |item| item.id);
         let Some(comp_id) =
             symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
         else {
@@ -1865,7 +1908,7 @@ fn handle_probe_click(
 }
 
 fn handle_component_probe(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     comp_id: u64,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
@@ -1917,7 +1960,7 @@ fn handle_component_probe(
 }
 
 fn open_object_properties(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
@@ -1947,7 +1990,11 @@ fn open_object_properties(
         Some(PointerTarget::Bus(id)) => selection.select_only_bus(id),
         Some(PointerTarget::Junction(_)) | Some(PointerTarget::Wire(_)) | None => return,
     }
-    crate::workbench::app::open_selected_object_properties(state);
+    crate::workbench::app::open_selected_object_properties_in(
+        &mut state.design.property_form_parts(),
+        state.model,
+        state.workbench,
+    );
 }
 
 #[cfg(test)]

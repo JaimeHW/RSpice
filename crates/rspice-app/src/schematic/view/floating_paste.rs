@@ -6,9 +6,9 @@ use super::super::symbols::SymbolLibrary;
 use super::preview::{preview_view, transform_preview_style};
 use super::sheet_visibility::{off_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
-use super::{AppState, SchematicSymbolContext, viewport::Viewport};
+use super::{SchematicSymbolContext, parts::CanvasParts, viewport::Viewport};
 use crate::state::Point;
-use crate::workbench::app::{cancel_floating_paste, floating_paste_scope, on_grid};
+use crate::workbench::app::{cancel_floating_paste_in, floating_paste_scope, on_grid};
 use egui::{Key, Modifiers, Painter, PointerButton, Response, Ui};
 use rspice_schematic_editor::view::preview;
 
@@ -18,7 +18,7 @@ use rspice_schematic_editor::view::preview;
 pub(super) fn handle_floating_paste(
     ui: &Ui,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
 ) -> bool {
     if state.design.floating_paste.is_none() {
@@ -27,15 +27,15 @@ pub(super) fn handle_floating_paste(
     if state.application_modal_open() {
         return true;
     }
-    if let Err(reason) = floating_paste_scope(state) {
-        cancel_floating_paste(state);
+    if let Err(reason) = floating_paste_scope(&state.design.floating_paste, state.model) {
+        cancel_floating_paste_in(&mut state.design.floating_paste, state.workbench);
         state.prompt(format!("Paste cancelled: {reason}."));
         return true;
     }
     let grid = state.model.schematic.document().grid_size;
     let on_canvas = |position| {
         on_grid(
-            resolve_grid_pointer(state, viewport, position).snapped_position,
+            resolve_grid_pointer(state.model, viewport, position).snapped_position,
             grid,
         )
     };
@@ -85,7 +85,7 @@ fn consume_keyboard(input: &mut egui::InputState, grid: i32) -> (Point, bool) {
 pub(super) fn draw_floating_paste_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
@@ -144,9 +144,9 @@ pub(super) fn draw_floating_paste_preview(
         preview::draw_move_diff(
             painter,
             viewport,
-            &preview_view(state),
+            &preview_view(state.model, state.design),
             &preview_state.diff,
-            &transform_preview_style(state, symbol_context, symbol_library),
+            &transform_preview_style(state.design, symbol_context, symbol_library),
             || state.model.workspace.content.active_view.display_path(),
         );
     }

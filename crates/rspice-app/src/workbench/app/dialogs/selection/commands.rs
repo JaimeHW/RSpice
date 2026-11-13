@@ -31,7 +31,9 @@ use crate::workbench::app::actions::workspace::{
 use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingCopyParts, FloatingPasteOrigin, float_schematic_objects,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 pub(in crate::workbench) mod floating;
@@ -281,44 +283,40 @@ pub(crate) fn select_all_schematic_objects(
     true
 }
 
-impl AppState {
-    /// Paste `objects` at `anchor` into the active cell view as one undo step,
-    /// joined to the wiring they land on. The pasted objects become the
-    /// selection.
-    fn paste_schematic_objects_at(
-        &mut self,
-        objects: &ClipboardData,
-        anchor: Point,
-    ) -> Result<bool, String> {
-        if self.schematic_edit_read_only() {
-            return Ok(false);
-        }
-        let objects = bound_to_active_cell(&self.model, objects)?;
-        let symbols = self.model.schematic_symbol_context();
-        // The undo step opens with every sheet present; the cell view's other
-        // sheets, which share these coordinates, step out of reach only while
-        // the pasted wires and pins are joined to this one. The paste itself
-        // names its parts against every sheet and places its dots on this one.
-        self.model.schematic.begin_operation("paste");
-        let pasted = self.model.schematic.paste_at_checked(
-            &objects,
-            anchor,
-            off_active_sheet(&self.model.workspace),
-        );
-        if matches!(pasted, Ok(true)) {
-            with_active_wire_topology(self, |schematic, scope| {
-                schematic.connect_pasted_selection(
-                    |component| symbols.terminal_points(component),
-                    scope,
-                );
-            });
-        }
-        self.model.schematic.end_operation();
-        if matches!(pasted, Ok(true)) {
-            self.sync_active_schematic_to_workspace();
-        }
-        pasted
+/// Paste `objects` at `anchor` into the active cell view as one undo step,
+/// joined to the wiring they land on. The pasted objects become the
+/// selection.
+pub(super) fn paste_schematic_objects_at(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    objects: &ClipboardData,
+    anchor: Point,
+) -> Result<bool, String> {
+    if model.schematic_edit_read_only() {
+        return Ok(false);
     }
+    let objects = bound_to_active_cell(model, objects)?;
+    let symbols = model.schematic_symbol_context();
+    // The undo step opens with every sheet present; the cell view's other
+    // sheets, which share these coordinates, step out of reach only while
+    // the pasted wires and pins are joined to this one. The paste itself
+    // names its parts against every sheet and places its dots on this one.
+    model.schematic.begin_operation("paste");
+    let pasted =
+        model
+            .schematic
+            .paste_at_checked(&objects, anchor, off_active_sheet(&model.workspace));
+    if matches!(pasted, Ok(true)) {
+        with_active_wire_topology(model, |schematic, scope| {
+            schematic
+                .connect_pasted_selection(|component| symbols.terminal_points(component), scope);
+        });
+    }
+    model.schematic.end_operation();
+    if matches!(pasted, Ok(true)) {
+        sync_active_schematic(model, wb);
+    }
+    pasted
 }
 
 /// Join Collinear Wires on the active sheet, as one undo step: every pair of

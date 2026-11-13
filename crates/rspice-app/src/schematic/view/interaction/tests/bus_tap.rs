@@ -53,7 +53,11 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         let mut state = armed_bus_tap_state(sheets);
         let source = requests::editor_request_source(&state);
         for x in [20, 60] {
-            handle_bus_tap_click(&mut state, Point::new(x, 0), 6);
+            handle_bus_tap_click(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                Point::new(x, 0),
+                6,
+            );
             let tap = state.model.schematic.document().bus_taps.last().unwrap();
             assert_eq!(tap.bus_point, Point::new(x, 0));
             assert_eq!(tap.connection_point, Point::new(x, 20));
@@ -95,13 +99,21 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
             )
             .unwrap();
         let version = state.model.schematic.content_version();
-        handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
+        handle_bus_tap_click(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(100, 0),
+            6,
+        );
         assert_eq!(state.model.schematic.document().bus_taps.len(), 1);
         assert_eq!(state.model.schematic.content_version(), version);
         assert_eq!(state.model.schematic.session.editor.tool, Tool::BusTap);
         assert!(state.model.schematic.undo());
         state.sync_active_schematic_to_workspace();
-        handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
+        handle_bus_tap_click(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(100, 0),
+            6,
+        );
         assert_eq!(state.model.schematic.document().bus_taps.len(), 2);
         assert!(state.model.schematic.undo());
         assert!(state.model.schematic.undo());
@@ -175,7 +187,11 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
         }
         let content = state.model.schematic.content_version();
         let topology = state.model.schematic.topology_version();
-        handle_bus_tap_click(&mut state, Point::new(20, 0), 6);
+        handle_bus_tap_click(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            Point::new(20, 0),
+            6,
+        );
         assert!(
             state.model.schematic.document().bus_taps.is_empty(),
             "{change}"

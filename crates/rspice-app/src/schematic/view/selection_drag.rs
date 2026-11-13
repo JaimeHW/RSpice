@@ -3,20 +3,21 @@
 use super::{
     SchematicSymbolContext, SelectionWindow,
     navigation::primary_pan_gesture_active,
+    parts::CanvasParts,
     requests::editor_request_source,
     sheet_visibility::{select_in_rect_on_active_sheet, with_active_wire_topology},
     viewport::Viewport,
 };
 use crate::state::DragRubberBand;
-use crate::workbench::app_state::{AppState, DragType};
+use crate::workbench::app_state::DragType;
 use rspice_schematic_editor::view::selection_drag::{
     self, SelectionDragAction, SelectionDragRequest, SelectionDragView, select_drag_can_start,
     select_drag_is_authorized, select_drag_target,
 };
 
-fn view<'a>(state: &'a AppState, ctx: &egui::Context) -> SelectionDragView<'a> {
+fn view<'a>(state: &'a CanvasParts<'_>, ctx: &egui::Context) -> SelectionDragView<'a> {
     SelectionDragView {
-        design: super::schematic_design_view(state),
+        design: state.design_view(),
         editor: &state.model.schematic.session.editor,
         filter: state.design.schematic_selection_filter,
         drag: state.schematic_drag_snapshot(ctx),
@@ -26,7 +27,7 @@ fn view<'a>(state: &'a AppState, ctx: &egui::Context) -> SelectionDragView<'a> {
 pub(super) fn handle_select_dragging(
     ui: &egui::Ui,
     response: &egui::Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbols: &SchematicSymbolContext,
 ) {
@@ -69,7 +70,7 @@ pub(super) fn handle_select_dragging(
     }
 }
 
-fn capture(state: &AppState, action: SelectionDragAction) -> SelectionDragRequest {
+fn capture(state: &CanvasParts<'_>, action: SelectionDragAction) -> SelectionDragRequest {
     SelectionDragRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
@@ -79,7 +80,7 @@ fn capture(state: &AppState, action: SelectionDragAction) -> SelectionDragReques
 }
 
 pub(super) fn dispatch(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     ctx: &egui::Context,
     symbols: &SchematicSymbolContext,
     action: SelectionDragAction,
@@ -89,7 +90,7 @@ pub(super) fn dispatch(
 }
 
 fn apply(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     ctx: &egui::Context,
     symbols: &SchematicSymbolContext,
     request: SelectionDragRequest,
@@ -154,7 +155,7 @@ fn apply(
             {
                 return;
             }
-            if with_active_wire_topology(state, |schematic, scope| {
+            if with_active_wire_topology(state.model, |schematic, scope| {
                 schematic.move_all_vertices_at(from, position, scope)
             }) {
                 state
@@ -190,7 +191,7 @@ fn apply(
             } else {
                 DragRubberBand::Direct
             };
-            with_active_wire_topology(state, |schematic, scope| {
+            with_active_wire_topology(state.model, |schematic, scope| {
                 schematic.move_selection_with_rubber_band_resolved(
                     delta,
                     rubber_band,
@@ -217,7 +218,7 @@ fn apply(
                 .selection
                 .components
                 .clone();
-            with_active_wire_topology(state, |schematic, scope| {
+            with_active_wire_topology(state.model, |schematic, scope| {
                 // A pin dropped inside a wire is connected there; the vertex
                 // it gets is what lets the next move carry the wire. A pin
                 // dragged off a pin it touched keeps the connection with a
@@ -254,7 +255,7 @@ fn apply(
 }
 
 fn owns_operation(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     ctx: &egui::Context,
     operation_id: u64,
     kind: Option<DragType>,
@@ -267,6 +268,7 @@ fn owns_operation(
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::state::{CellViewRef, ComponentType, Point, ViewType};
     use rspice_schematic_editor::view::pointer_target::PointerTarget;
@@ -288,7 +290,7 @@ mod tests {
         let symbols = super::super::schematic_symbol_context(&state);
 
         dispatch(
-            &mut state,
+            &mut crate::schematic::view::canvas_parts(&mut state),
             &ctx,
             &symbols,
             SelectionDragAction::BeginWireVertex(junction),
@@ -303,7 +305,7 @@ mod tests {
         for step in 1..=3 {
             let position = Point::new(junction.x, junction.y - step * 10);
             dispatch(
-                &mut state,
+                &mut crate::schematic::view::canvas_parts(&mut state),
                 &ctx,
                 &symbols,
                 SelectionDragAction::MoveWireVertex {
@@ -336,7 +338,7 @@ mod tests {
         delta: Point,
     ) {
         dispatch(
-            state,
+            &mut crate::schematic::view::canvas_parts(state),
             ctx,
             symbols,
             SelectionDragAction::BeginSelection {
@@ -351,7 +353,7 @@ mod tests {
             .expect("a gesture");
         let position = Point::new(from.x + delta.x, from.y + delta.y);
         dispatch(
-            state,
+            &mut crate::schematic::view::canvas_parts(state),
             ctx,
             symbols,
             SelectionDragAction::MoveSelection {
@@ -362,7 +364,7 @@ mod tests {
             },
         );
         dispatch(
-            state,
+            &mut crate::schematic::view::canvas_parts(state),
             ctx,
             symbols,
             SelectionDragAction::Finish { operation_id },
@@ -380,7 +382,7 @@ mod tests {
         steps: &[Point],
     ) {
         dispatch(
-            state,
+            &mut crate::schematic::view::canvas_parts(state),
             ctx,
             symbols,
             SelectionDragAction::BeginSelection {
@@ -397,7 +399,7 @@ mod tests {
         for step in steps {
             let position = Point::new(from.x + step.x, from.y + step.y);
             dispatch(
-                state,
+                &mut crate::schematic::view::canvas_parts(state),
                 ctx,
                 symbols,
                 SelectionDragAction::MoveSelection {
@@ -410,7 +412,7 @@ mod tests {
             last = position;
         }
         dispatch(
-            state,
+            &mut crate::schematic::view::canvas_parts(state),
             ctx,
             symbols,
             SelectionDragAction::Finish { operation_id },
@@ -757,7 +759,7 @@ mod tests {
                 target: PointerTarget::Component(id),
                 position: Point::new(100, 100),
             };
-            let request = capture(&state, action);
+            let request = capture(&crate::schematic::view::canvas_parts(&mut state), action);
             match change {
                 0 => {
                     state.model.workspace.ascend_one().unwrap();
@@ -782,7 +784,12 @@ mod tests {
                 _ => state.model.schematic.session.read_only = true,
             }
             let before = state.model.schematic.document().components.clone();
-            apply(&mut state, &ctx, &symbols, request);
+            apply(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &ctx,
+                &symbols,
+                request,
+            );
             assert!(
                 !state.model.schematic.has_pending_operation(),
                 "change {change}"
@@ -791,7 +798,12 @@ mod tests {
             assert!(state.model.schematic.session.editor.selection.is_empty());
 
             state.model.schematic.session.read_only = false;
-            dispatch(&mut state, &ctx, &symbols, action);
+            dispatch(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &ctx,
+                &symbols,
+                action,
+            );
             let operation_id = state
                 .model
                 .schematic
@@ -803,7 +815,7 @@ mod tests {
             assert_ne!(replacement, Some(operation_id));
             // Capture current source revisions to isolate the operation-token guard.
             dispatch(
-                &mut state,
+                &mut crate::schematic::view::canvas_parts(&mut state),
                 &ctx,
                 &symbols,
                 SelectionDragAction::MoveSelection {
@@ -814,7 +826,7 @@ mod tests {
                 },
             );
             dispatch(
-                &mut state,
+                &mut crate::schematic::view::canvas_parts(&mut state),
                 &ctx,
                 &symbols,
                 SelectionDragAction::Finish { operation_id },

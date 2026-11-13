@@ -659,8 +659,14 @@ fn touch_target(
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
-    let candidates =
-        super::pick_chooser::candidates_at(ctx, state, query, symbol_context, viewport);
+    let candidates = super::pick_chooser::candidates_at(
+        ctx,
+        &state.model,
+        &state.design,
+        query,
+        symbol_context,
+        viewport,
+    );
     let choices = if candidates.len() >= 2 {
         super::pick_chooser::chooser_rows(state, &candidates)
     } else {
@@ -697,7 +703,7 @@ fn choose_target(
             alt_held: false,
         },
     };
-    super::requests::apply_editor_request(state, request);
+    super::requests::apply_editor_request(&mut super::canvas_parts(state), request);
 }
 
 fn select_pointer_target(
@@ -710,7 +716,7 @@ fn select_pointer_target(
     pointer_pos: egui::Pos2,
 ) -> ContextTarget {
     let target = pointer_target(
-        state,
+        &super::canvas_parts(state),
         hit,
         hit_radius,
         symbol_context,
@@ -728,7 +734,7 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
     let Some(target) = target else {
         return ContextTarget::Canvas;
     };
-    if !super::requests::picks_instance_to_descend(state, Some(target)) {
+    if !super::requests::picks_instance_to_descend(&state.model, Some(target)) {
         state.model.schematic.session.editor.net_highlight.clear();
     }
     match target {

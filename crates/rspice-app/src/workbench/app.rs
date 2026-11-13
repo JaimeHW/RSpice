@@ -157,6 +157,9 @@ pub(crate) use dialogs::state::HelpCenterPage;
 pub(in crate::workbench) use dialogs::selection::rename::RenameSelectionTarget;
 
 pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
+pub(crate) use schematic::conductor_routes::{
+    reconcile_conductor_route, start_canvas_bus, start_canvas_wire,
+};
 pub(crate) use schematic::edit_authority::{
     SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
 };
@@ -178,23 +181,32 @@ pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open
 
 pub(crate) use actions::property_edit::{
     PropertyFormParts, authoritative_component_property_sheet, open_property_editor,
-    open_selected_object_properties, selected_object_properties_available,
+    open_selected_object_properties, open_selected_object_properties_in,
+    selected_object_properties_available,
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
-pub(crate) use actions::workspace::{copy_active_schematic_selection, sync_active_schematic};
+pub(crate) use actions::workspace::{
+    copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
+    sync_active_schematic, veriloga_source_for_component,
+};
 pub(crate) use dialogs::find_replace::find_replace_matches;
+#[cfg(test)]
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
+};
+pub(crate) use dialogs::placement::net_label::{
+    open_net_label_placement_in, place_sequenced_net_label_in,
 };
 #[cfg(test)]
 pub(crate) use dialogs::selection::array::open_array_selection_dialog;
 pub(crate) use dialogs::selection::array::{
-    ArraySelectionPreviewCache, armed_array_selection_authority, armed_array_selection_plan,
-    cancel_armed_array_selection,
+    ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,
+    armed_array_selection_plan, cancel_armed_array_selection, cancel_armed_array_selection_in,
 };
 pub(crate) use dialogs::selection::commands::floating::{
-    FloatingCopyParts, cancel_floating_paste, floating_paste_scope, on_grid, turn_floating_paste,
+    FloatingCopyParts, cancel_floating_paste, cancel_floating_paste_in, floating_paste_scope,
+    on_grid, place_floating_paste, turn_floating_paste,
 };
 pub(crate) use dialogs::selection::commands::{
     cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
@@ -205,12 +217,13 @@ pub(crate) use dialogs::selection::commands::{
 #[cfg(test)]
 pub(crate) use dialogs::selection::move_selection::arm_move_selection;
 pub(crate) use dialogs::selection::move_selection::{
-    armed_move_selection_authority, cancel_armed_move_selection,
+    armed_move_selection_authority, cancel_armed_move_selection, cancel_armed_move_selection_in,
 };
 #[cfg(test)]
 pub(crate) use dialogs::selection::stretch::arm_stretch_selection;
 pub(crate) use dialogs::selection::stretch::{
     armed_stretch_selection_authority, cancel_armed_stretch_selection,
+    cancel_armed_stretch_selection_in,
 };
 pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,

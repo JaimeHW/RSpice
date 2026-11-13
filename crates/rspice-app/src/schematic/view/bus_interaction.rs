@@ -1,16 +1,17 @@
 //! App inputs for the editor's shared bus-tap preview and click query.
 
-use crate::{state::Point, workbench::app_state::AppState};
+use super::parts::CanvasParts;
+use crate::state::Point;
 pub(super) use rspice_schematic_editor::view::bus_interaction::BusTapCandidateError;
 use rspice_schematic_editor::view::bus_interaction::{self, BusTapCandidate};
 
 pub(super) fn resolve_bus_tap_candidate_on_active_sheet(
-    state: &AppState,
+    state: &CanvasParts<'_>,
     requested: Point,
     source_hit_radius: i32,
 ) -> Result<BusTapCandidate, BusTapCandidateError> {
     bus_interaction::resolve_bus_tap_candidate(
-        &super::schematic_design_view(state),
+        &state.design_view(),
         state
             .model
             .schematic
@@ -26,6 +27,7 @@ pub(super) fn resolve_bus_tap_candidate_on_active_sheet(
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::state::{Bus, BusDeclaration, BusSlice, BusTapOrientation, Wire};
     #[test]
@@ -60,8 +62,12 @@ mod tests {
             ),
         );
 
-        let candidate =
-            resolve_bus_tap_candidate_on_active_sheet(&state, Point::new(5, 2), 6).unwrap();
+        let candidate = resolve_bus_tap_candidate_on_active_sheet(
+            &crate::schematic::view::canvas_parts(&mut state),
+            Point::new(5, 2),
+            6,
+        )
+        .unwrap();
         assert_eq!(candidate.bus_point, Point::new(10, 3));
         assert!(state.model.schematic.document().buses[0].contains_point(candidate.bus_point));
         assert!(
