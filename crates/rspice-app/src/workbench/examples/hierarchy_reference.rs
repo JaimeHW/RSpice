@@ -714,4 +714,4 @@ mod tests;
 mod check_currency_tests;
 
 #[cfg(test)]
-pub(in crate::workbench) mod check_scope_tests;
+pub(crate) mod check_scope_tests;

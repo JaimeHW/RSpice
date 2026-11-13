@@ -212,7 +212,7 @@ const SOURCE_LOOP: &str = "DRC-SOURCE-TO-SOURCE";
 /// occurrence of `amp` places it again, so the copies close a loop through
 /// the global that only a walk of the whole design can see: `amp` alone
 /// holds one source, and one source closes nothing.
-pub(in crate::workbench) fn draw_supply_source(state: &mut AppState) {
+pub(crate) fn draw_supply_source(state: &mut AppState) {
     let schematic = &mut state.model.schematic;
     let id = schematic.add_component(ComponentType::VoltageSource, Point::new(3000, 3000));
     let terminals = schematic
@@ -238,7 +238,7 @@ pub(in crate::workbench) fn draw_supply_source(state: &mut AppState) {
 }
 
 /// The source-loop rows the page lists, unwaived and current.
-pub(in crate::workbench) fn source_loop_errors(state: &AppState) -> usize {
+pub(crate) fn source_loop_errors(state: &AppState) -> usize {
     let listed = listing::listing(state);
     (0..listed.len())
         .filter_map(|index| listed.row(index))

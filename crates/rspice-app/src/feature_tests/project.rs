@@ -2,17 +2,21 @@
 
 mod builtin_models;
 mod cellview_manager;
+mod check_and_save;
+mod check_and_save_validation;
 mod configuration_inspector;
 mod configuration_page;
 mod landing;
 mod library_changes;
 mod library_deletion;
+mod library_inspector;
 mod library_page;
 mod new_cell;
 mod new_project;
 mod new_view;
 mod overview;
 mod publication;
+mod rails;
 mod steps;
 mod surface;
 
