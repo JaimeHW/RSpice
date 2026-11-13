@@ -106,6 +106,48 @@ fn the_direct_newton_fails_and_gmin_stepping_finds_the_operating_point_before_so
     );
 }
 
+/// A diode-law behavioural current at a node fed from 5 V through 1 Ohm.
+/// The direct Newton overshoots into the exponential, and the GMIN walk's
+/// first stage must move: its line search judged trial steps by the
+/// tolerance-scaled residual, which tied or rose on every trial, so each
+/// stage kept its starting point and source stepping solved the deck.
+/// LTspice 26.1.1 fails its direct Newton and solves the deck by GMIN
+/// stepping, ngspice-46 by dynamic GMIN: both read V(b) = 0.8682959357378663,
+/// QSPICE 0.8682959378.
+#[test]
+fn gmin_stepping_solves_an_exponential_at_a_stiff_node_before_source_stepping() {
+    let netlist = Netlist::parse(
+        "exponential at a stiff node\nV1 a 0 5\nR1 a b 1\n\
+         B1 b 0 I=1e-14*(exp(V(b)/0.0258)-1)\n.op\n.end\n",
+    )
+    .expect("the deck parses");
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op_with_abort(&netlist, &NoAbort)
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        let aids: Vec<ContinuationAid> = collector
+            .take()
+            .into_iter()
+            .filter_map(|recorded| match recorded.notice {
+                EngineNotice::ConvergenceAid(aid) => Some(aid),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(aids, [ContinuationAid::GminStepping], "{dialect:?}");
+        let b = result.try_voltage_named("b").expect("V(b)");
+        assert!(
+            (b - 0.868_295_935_737_866_3).abs() <= 1e-9,
+            "{dialect:?}: V(b) = {b}, LTspice 26.1.1 and ngspice-46 0.8682959357378663"
+        );
+    }
+}
+
 /// A diode clamp the direct Newton solves on its own.
 const DIODE_CLAMP: &str = "diode clamp\n\
     v1 in 0 5\n\

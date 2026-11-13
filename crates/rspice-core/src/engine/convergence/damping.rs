@@ -474,7 +474,18 @@ impl Engine {
             alpha *= Self::LINE_SEARCH_BACKTRACK;
         }
 
-        best_solution
+        // No trial lowered the merit. The old iterate would hand the corrector
+        // the same Newton step again, which it would repeat until its
+        // iterations ran out. NOX's backtracking takes its recovery step, the
+        // full step by default, and continues. Near a root the residual norm
+        // sits at its rounding floor, where a step the convergence test still
+        // needs can raise it: GMIN stages on floating SOI bodies froze there,
+        // at 1.6e-12 A, with a 0.16 mV body correction outstanding.
+        if best_merit < base_merit || !proposal_merit.is_finite() {
+            best_solution
+        } else {
+            proposal.to_vec()
+        }
     }
 
     /// Whether per-device iterate-replacement junction limiting governs the
@@ -821,6 +832,23 @@ mod tests {
         let alpha = 1.0_f64.next_down();
         let near_end = Engine::interpolate_solution(&[1e308], &[0.0], alpha)[0];
         assert_eq!(near_end, (1.0 - alpha) * 1e308);
+    }
+
+    /// A step that raises the merit at every trial is taken whole: keeping
+    /// the old iterate would repeat the same step on every iteration.
+    #[test]
+    fn line_search_takes_the_full_step_when_no_trial_lowers_the_merit() {
+        let mut merit = |values: &[Value]| Some(values[0] * values[0] + 1.0);
+        assert_eq!(
+            Engine::line_search_step(&[0.0], &[1.0], &mut merit),
+            vec![1.0]
+        );
+        // A trial that lowers it is still taken over the full step.
+        let mut merit = |values: &[Value]| Some((values[0] - 0.2).abs() + 1.0);
+        assert_eq!(
+            Engine::line_search_step(&[0.0], &[1.0], &mut merit),
+            vec![0.25]
+        );
     }
 
     #[test]

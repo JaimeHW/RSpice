@@ -1168,23 +1168,22 @@ impl Engine {
                 };
             }
 
-            if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
-                // NOX globalization compares the physical residual norm.
-                // A tolerance-normalized residual asymptotes to 1/RELTOL for
-                // every large disequilibrium, which makes substantially better
-                // trial steps appear tied and can pin line search at its old
-                // iterate on large current-driven networks.
-                // NOX's line-search merit is Group::getNormF(), the
-                // Euclidean residual norm. Its convergence status separately
-                // applies the unscaled infinity norm checked above.
-                probe
-                    .raw_residual_norms(solution, rhs)
-                    .ok()
-                    .map(|(_, l2_norm)| l2_norm)
-                    .filter(|norm| norm.is_finite())
-            } else {
-                self.residual_inf_norm(circuit, probe, solution, rhs)
-            }
+            // Line search compares the physical residual norm in every
+            // dialect, as NOX's does (Group::getNormF(), the Euclidean
+            // norm); the convergence test keeps the tolerance-scaled one.
+            // The scaled infinity norm asymptotes to 1/RELTOL for every large
+            // disequilibrium, so better trial steps tie with the old iterate,
+            // and its iterate-dependent row weights leave the Newton step no
+            // descent direction for it. Either way every trial failed Armijo
+            // and the search kept the old iterate: a GMIN stage never moved,
+            // and an exponential source at a stiff node fell through both
+            // GMIN walks to source stepping, where LTspice's GMIN stepping
+            // and ngspice's dynamic GMIN solve it.
+            probe
+                .raw_residual_norms(solution, rhs)
+                .ok()
+                .map(|(_, l2_norm)| l2_norm)
+                .filter(|norm| norm.is_finite())
         });
         circuit.restore_nonlinear_state(snapshot);
         merit
