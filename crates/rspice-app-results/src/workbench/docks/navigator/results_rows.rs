@@ -4,7 +4,7 @@
 use egui::{Response, ScrollArea, Ui};
 
 use crate::state::bus_notations;
-use crate::ui::accessibility::counted;
+use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsParts};
@@ -88,13 +88,18 @@ pub fn retained_result_artifacts(
         // How much is in it and what it is in. The kind word used to be
         // printed twice over — "Array / array[12] / V" — and the row's own
         // glyph column already says which kind it is.
-        let shape = match kind {
-            ResultArtifactKind::Scalar => String::new(),
-            ResultArtifactKind::Array => format!("{} values", grouped_count(count)),
-            ResultArtifactKind::EventStream => format!("{} events", grouped_count(count)),
-            ResultArtifactKind::Contribution => {
-                format!("{} contributions", grouped_count(count))
-            }
+        // A bus row counts its width; its members are the rows beside it.
+        let noun = match kind {
+            _ if canonical.starts_with(BUS_ROW_PREFIX) => "bit",
+            ResultArtifactKind::Scalar => "",
+            ResultArtifactKind::Array => "value",
+            ResultArtifactKind::EventStream => "event",
+            ResultArtifactKind::Contribution => "contribution",
+        };
+        let shape = if noun.is_empty() {
+            String::new()
+        } else {
+            format!("{} {noun}{}", grouped_count(count), plural_suffix(count))
         };
         let unit_dimension = unit.to_owned();
         let meta = match (shape.is_empty(), unit.is_empty()) {
