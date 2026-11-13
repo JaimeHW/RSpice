@@ -159,6 +159,124 @@ impl PartialEq for AnalysisResultTransientState {
 
 impl Eq for AnalysisResultTransientState {}
 
+/// The member of a deck's Monte Carlo study or `.STEP` sweep a transient
+/// result solved, when its task was lowered to exactly one.
+///
+/// A study or sweep of a transient runs as one transient task per member, and
+/// each keeps its full result; this is what says which member a result is,
+/// so the members of one run read back as one family.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "member", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnalysisResultFamilyMember {
+    /// Trial `index` of the deck's `.MC` study, in the card's own numbering.
+    MonteCarloTrial { index: usize },
+    /// Point `index` of the deck's `.STEP` sweep, in sweep order, with the
+    /// value each swept axis takes there.
+    StepPoint {
+        index: usize,
+        coordinate: Vec<AnalysisResultStepCoordinate>,
+    },
+}
+
+/// The value one swept axis takes at a `.STEP` point: `r = 2000`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisResultStepCoordinate {
+    pub name: String,
+    pub value: f64,
+}
+
+/// Bitwise, like [`AnalysisResultPvtPoint`], so the record is `Eq`; attaching
+/// it refuses a non-finite coordinate.
+impl PartialEq for AnalysisResultFamilyMember {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::MonteCarloTrial { index: left }, Self::MonteCarloTrial { index: right }) => {
+                left == right
+            }
+            (
+                Self::StepPoint {
+                    index: left,
+                    coordinate: left_coordinate,
+                },
+                Self::StepPoint {
+                    index: right,
+                    coordinate: right_coordinate,
+                },
+            ) => {
+                left == right
+                    && left_coordinate.len() == right_coordinate.len()
+                    && left_coordinate
+                        .iter()
+                        .zip(right_coordinate)
+                        .all(|(a, b)| a.name == b.name && a.value.to_bits() == b.value.to_bits())
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AnalysisResultFamilyMember {}
+
+impl AnalysisResultFamilyMember {
+    /// The member's position in its family: the trial number or the point's
+    /// place in the sweep.
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        match self {
+            Self::MonteCarloTrial { index } | Self::StepPoint { index, .. } => *index,
+        }
+    }
+
+    /// Whether `other` is a member of the same kind of family.
+    #[must_use]
+    pub const fn same_family_kind(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::MonteCarloTrial { .. }, Self::MonteCarloTrial { .. })
+                | (Self::StepPoint { .. }, Self::StepPoint { .. })
+        )
+    }
+
+    /// The member spelled the way a legend names it: `trial 3`, or the swept
+    /// values, `r = 2k`, with engineering prefixes.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::MonteCarloTrial { index } => format!("trial {index}"),
+            Self::StepPoint { index, coordinate } if coordinate.is_empty() => {
+                format!("point {index}")
+            }
+            Self::StepPoint { coordinate, .. } => coordinate
+                .iter()
+                .map(|axis| {
+                    format!(
+                        "{} = {}",
+                        axis.name,
+                        crate::number_format::fmt_si_readout(axis.value, "", 4)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if let Self::StepPoint { index, coordinate } = self {
+            for axis in coordinate {
+                if axis.name.trim().is_empty() || !axis.value.is_finite() {
+                    return Err(format!(
+                        "point {index} of a .STEP sweep names axis '{}' with value {}, which is \
+                         not a named finite coordinate",
+                        axis.name, axis.value
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Immutable identity of the prepared analysis task that produced a result.
 ///
 /// A result created by the current execution pipeline always carries this
@@ -178,6 +296,8 @@ pub struct AnalysisResultProvenance {
     pvt_point: Option<AnalysisResultPvtPoint>,
     /// The transient state a small-signal result was linearized around.
     transient_state: Option<AnalysisResultTransientState>,
+    /// The Monte Carlo trial or `.STEP` point this transient solved.
+    family_member: Option<AnalysisResultFamilyMember>,
 }
 
 impl AnalysisResultProvenance {
@@ -247,6 +367,7 @@ impl AnalysisResultProvenance {
             dependency_ids,
             pvt_point: None,
             transient_state: None,
+            family_member: None,
         })
     }
 
@@ -282,6 +403,26 @@ impl AnalysisResultProvenance {
     #[must_use]
     pub const fn transient_state(&self) -> Option<&AnalysisResultTransientState> {
         self.transient_state.as_ref()
+    }
+
+    /// Attach the Monte Carlo trial or `.STEP` point the producing transient
+    /// task solved. A coordinate must be named and finite.
+    pub fn with_family_member(
+        mut self,
+        member: Option<AnalysisResultFamilyMember>,
+    ) -> Result<Self, String> {
+        if let Some(member) = &member {
+            member.validate()?;
+        }
+        self.family_member = member;
+        Ok(self)
+    }
+
+    /// The trial or point this result solved, or `None` when the producing
+    /// task solved the deck as it stands.
+    #[must_use]
+    pub const fn family_member(&self) -> Option<&AnalysisResultFamilyMember> {
+        self.family_member.as_ref()
     }
 
     /// Attach the PVT point the producing task was expanded to.

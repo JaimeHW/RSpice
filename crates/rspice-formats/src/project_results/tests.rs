@@ -48,6 +48,46 @@ fn a_transient_state_survives_the_project_file() {
     assert_eq!(restored.transient_state(), Some(&state));
 }
 
+/// A transient that solved one point of a `.STEP` sweep keeps the point and
+/// its coordinate through the project file, bit for bit; a result that names
+/// no member writes no field.
+#[test]
+fn a_family_member_survives_the_project_file() {
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    let member = AnalysisResultFamilyMember::StepPoint {
+        index: 1,
+        coordinate: vec![AnalysisResultStepCoordinate {
+            name: "r".into(),
+            value: 2e3,
+        }],
+    };
+    let provenance = state_provenance(AnalysisInstanceId::new(), None)
+        .and_then(|provenance| provenance.with_family_member(Some(member.clone())))
+        .expect("the provenance builds");
+    let text = serde_json::to_string(&ProjectAnalysisResultProvenance::from(&provenance))
+        .expect("the provenance writes");
+    assert!(text.contains("\"family_member\""), "{text}");
+    let read: ProjectAnalysisResultProvenance =
+        serde_json::from_str(&text).expect("the provenance reads");
+    read.validate().expect("the read provenance validates");
+    let restored = read.into_provenance().expect("the provenance restores");
+    assert_eq!(restored.family_member(), Some(&member));
+    assert_eq!(restored, provenance);
+
+    let plain = state_provenance(AnalysisInstanceId::new(), None).unwrap();
+    let text = serde_json::to_string(&ProjectAnalysisResultProvenance::from(&plain)).unwrap();
+    assert!(!text.contains("family_member"), "{text}");
+
+    let unnamed = AnalysisResultFamilyMember::StepPoint {
+        index: 0,
+        coordinate: vec![AnalysisResultStepCoordinate {
+            name: "r".into(),
+            value: f64::NAN,
+        }],
+    };
+    assert!(plain.with_family_member(Some(unnamed)).is_err());
+}
+
 /// A project written before results named a transient state reads as it
 /// always did: every result in it was linearized at the operating point, and
 /// a result that names no state writes no field.

@@ -20,8 +20,8 @@ use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
 use rspice_results::noise::{NoiseContributorRow, NoiseSummary};
 use rspice_results::operating_point::{DcOpResult, OperatingPointValue};
 use rspice_results::provenance::{
-    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
-    AnalysisResultTransientState,
+    AnalysisResultFamilyMember, AnalysisResultProvenance, AnalysisResultPvtPoint,
+    AnalysisResultSourceDomain, AnalysisResultTransientState,
 };
 use rspice_results::result_digest::ResultDigestEncoding;
 use rspice_results::run::{ExecutionTarget, RunRetention, SimulationRun, SimulationRunLifecycle};
@@ -1081,6 +1081,11 @@ impl ProjectSimulationResultsData {
                             "runs[{run_idx}].analyses[{analysis_idx}].provenance.transient_state was introduced after schema v{source_schema}"
                         ));
                     }
+                    if provenance.family_member.is_some() {
+                        return Err(format!(
+                            "runs[{run_idx}].analyses[{analysis_idx}].provenance.family_member was introduced after schema v{source_schema}"
+                        ));
+                    }
                 }
             }
         }
@@ -1837,6 +1842,11 @@ pub struct ProjectAnalysisResultProvenance {
     /// the operating point, which is every result written before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transient_state: Option<AnalysisResultTransientState>,
+    /// The Monte Carlo trial or `.STEP` point a transient result solved.
+    /// Absent for every result that solved its deck as it stands, which is
+    /// every result written before members were recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_member: Option<AnalysisResultFamilyMember>,
 }
 
 /// Project-file representation of one attributed PVT point.
@@ -1909,7 +1919,8 @@ impl ProjectAnalysisResultProvenance {
             self.dependency_ids,
         )?
         .with_pvt_point(pvt_point)
-        .with_transient_state(self.transient_state)
+        .with_transient_state(self.transient_state)?
+        .with_family_member(self.family_member)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -1928,7 +1939,8 @@ impl ProjectAnalysisResultProvenance {
             self.prepared_snapshot_digest,
             self.dependency_ids.clone(),
         )?
-        .with_transient_state(self.transient_state)
+        .with_transient_state(self.transient_state)?
+        .with_family_member(self.family_member.clone())
         .map(|_| ())
     }
 }
@@ -1948,6 +1960,7 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
                 .pvt_point()
                 .map(ProjectAnalysisResultPvtPoint::from),
             transient_state: provenance.transient_state().copied(),
+            family_member: provenance.family_member().cloned(),
         }
     }
 }
