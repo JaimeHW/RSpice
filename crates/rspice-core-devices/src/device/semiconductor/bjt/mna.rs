@@ -139,6 +139,22 @@ trait MnaLoadTargets {
         }
         values
     }
+
+    /// `branch`'s source about each lane's voltages: what
+    /// `self.lanes(|lane| branch.source(internal[lane], &external[lane]))`
+    /// returns, with both lanes summed in one pass.
+    fn sources(
+        &self,
+        branch: &BranchLinearization,
+        internal: [&[Value; INTERNAL_DIM]; 2],
+        external: &[[Value; EXTERNAL_DIM]; 2],
+    ) -> [Value; 2] {
+        if Self::LANES == 2 {
+            branch.source_pair(internal, [&external[0], &external[1]])
+        } else {
+            [branch.source(internal[0], &external[0]), 0.0]
+        }
+    }
 }
 
 /// One stamper takes the Jacobian and the right-hand side about `anchor`.
@@ -1797,7 +1813,7 @@ impl Bjt {
         let external_rbi_port = self.mna_rbi_matrix_node != 0;
         self.visit_internal_kcl_terms(
             state,
-            eval,
+            &eval,
             self.mna_external_state(),
             external_rbi_port,
             self.mna_dissipation_drops,
@@ -1960,7 +1976,7 @@ impl Bjt {
     }
 
     fn stamp_mna_unprojected<T: MnaLoadTargets>(&self, targets: &mut T, exact: bool) {
-        let Some(eval) = self.mna_eval else {
+        let Some(eval) = self.mna_eval.as_ref() else {
             return;
         };
         // The load consumes this iterate's cached evaluation. A voltage
@@ -2002,37 +2018,36 @@ impl Bjt {
                 }
             }
         }
-        let static_internal = |lane: usize| -> &[Value; INTERNAL_DIM] {
-            internal[lane][..INTERNAL_DIM].try_into().unwrap()
-        };
+        let static_internal: [&[Value; INTERNAL_DIM]; 2] =
+            [0, 1].map(|lane| internal[lane][..INTERNAL_DIM].try_into().unwrap());
 
         // Active internal KCL rows (residual orientation, flipped onto the
-        // MNA leaving-current convention).
-        let (g_ii, g_ie, z_i) = self.internal_kcl_linearization_from_eval_with_source(
+        // MNA leaving-current convention), in row order, each stamped as it
+        // is summed.
+        self.visit_internal_kcl_terms(
             state,
             eval,
             [vc, vb, ve, vs],
+            false,
             self.mna_dissipation_drops,
-            |row| targets.lanes(|lane| row.source(static_internal(lane), &external[lane])),
+            |row, terms| {
+                let branch = Self::sum_branch_terms(terms);
+                let sign = Self::vbic_residual_row_sign(row);
+                let row_node = internal_nodes[row];
+                for (&node, &derivative) in internal_nodes.iter().zip(&branch.d_internal) {
+                    if derivative != 0.0 {
+                        targets.stamp(row_node, node, sign * derivative);
+                    }
+                }
+                for (&node, &derivative) in external_nodes.iter().zip(&branch.d_external) {
+                    if derivative != 0.0 {
+                        targets.stamp(row_node, node, sign * derivative);
+                    }
+                }
+                let source = targets.sources(&branch, static_internal, &external);
+                targets.stamp_rhs_lanes(row_node, source.map(|source| sign * source));
+            },
         );
-        for row in 0..INTERNAL_DIM {
-            if !self.mna_internal_row_active(row) {
-                continue;
-            }
-            let sign = Self::vbic_residual_row_sign(row);
-            let row_node = internal_nodes[row];
-            for col in 0..INTERNAL_DIM {
-                if g_ii[row][col] != 0.0 {
-                    targets.stamp(row_node, internal_nodes[col], sign * g_ii[row][col]);
-                }
-            }
-            for col in 0..EXTERNAL_DIM {
-                if g_ie[row][col] != 0.0 {
-                    targets.stamp(row_node, external_nodes[col], sign * g_ie[row][col]);
-                }
-            }
-            targets.stamp_rhs_lanes(row_node, z_i[row].map(|source| sign * source));
-        }
 
         // External terminal rows: current into the device from each terminal,
         // with collapse-aware branch selection. The update that cached this
@@ -2040,11 +2055,11 @@ impl Bjt {
         let terminal_currents = self
             .mna_terminal_rows
             .0
-            .unwrap_or_else(|| self.external_terminal_branches(eval));
+            .unwrap_or_else(|| self.external_terminal_branches(*eval));
         debug_assert!(
             terminal_currents
                 .iter()
-                .zip(self.external_terminal_branches(eval))
+                .zip(self.external_terminal_branches(*eval))
                 .all(
                     |(kept, summed)| kept.current.to_bits() == summed.current.to_bits()
                         && same_bits(&kept.d_internal, &summed.d_internal)
@@ -2055,8 +2070,7 @@ impl Bjt {
         for row in 0..EXTERNAL_DIM {
             let row_node = external_nodes[row];
             let branch = terminal_currents[row];
-            let source =
-                targets.lanes(|lane| branch.source(static_internal(lane), &external[lane]));
+            let source = targets.sources(&branch, static_internal, &external);
             for (&node, &derivative) in internal_nodes.iter().zip(&branch.d_internal) {
                 if derivative != 0.0 {
                     targets.stamp(row_node, node, derivative);
@@ -3595,6 +3609,249 @@ mod tests {
                 format!("{all:?}"),
                 "{bias:?}"
             );
+        }
+    }
+
+    /// The promoted stamp as it was before it stamped each internal row as it
+    /// summed it and took both lanes' sources in one pass: the reference the
+    /// stamp is held to, addition for addition.
+    fn reference_stamp<T: MnaLoadTargets>(bjt: &Bjt, targets: &mut T) {
+        let Some(eval) = bjt.mna_eval else {
+            return;
+        };
+        bjt.mna_limited_from.set(None);
+        let state = IntrinsicTerminalState {
+            vcx: bjt.vcx,
+            vci: bjt.vci,
+            vbx: bjt.vbx,
+            vbi: bjt.vbi,
+            vei: bjt.vei,
+            vbp: bjt.vbp,
+            vsi: bjt.vsi,
+            vrth: bjt.vrth,
+        };
+        let [vc, vb, ve, vs] = bjt.mna_external_state();
+        let internal_nodes: [NodeId; INTERNAL_DIM] = [
+            bjt.node_cx,
+            bjt.node_ci,
+            bjt.node_bx,
+            bjt.node_bi,
+            bjt.node_ei,
+            bjt.node_bp,
+            bjt.node_si,
+            bjt.node_rth,
+        ];
+        let external_nodes = bjt.external_terminal_nodes();
+        let mut internal = [bjt.mna_internal_state(); 2];
+        let mut external = [[vc, vb, ve, vs]; 2];
+        for lane in 0..T::LANES {
+            if let Some(anchor) = targets.anchor(lane) {
+                for (index, voltage) in internal[lane].iter_mut().enumerate() {
+                    *voltage -= Bjt::node_voltage(anchor, bjt.mna_internal_node(index));
+                }
+                for (voltage, node) in external[lane].iter_mut().zip(external_nodes) {
+                    *voltage -= Bjt::node_voltage(anchor, node);
+                }
+            }
+        }
+        let static_internal = |lane: usize| -> &[Value; INTERNAL_DIM] {
+            internal[lane][..INTERNAL_DIM].try_into().unwrap()
+        };
+        let (g_ii, g_ie, z_i) = bjt.internal_kcl_linearization_from_eval_with_source(
+            state,
+            eval,
+            [vc, vb, ve, vs],
+            bjt.mna_dissipation_drops,
+            |row| targets.lanes(|lane| row.source(static_internal(lane), &external[lane])),
+        );
+        for row in 0..INTERNAL_DIM {
+            if !bjt.mna_internal_row_active(row) {
+                continue;
+            }
+            let sign = Bjt::vbic_residual_row_sign(row);
+            let row_node = internal_nodes[row];
+            for col in 0..INTERNAL_DIM {
+                if g_ii[row][col] != 0.0 {
+                    targets.stamp(row_node, internal_nodes[col], sign * g_ii[row][col]);
+                }
+            }
+            for col in 0..EXTERNAL_DIM {
+                if g_ie[row][col] != 0.0 {
+                    targets.stamp(row_node, external_nodes[col], sign * g_ie[row][col]);
+                }
+            }
+            targets.stamp_rhs_lanes(row_node, z_i[row].map(|source| sign * source));
+        }
+        let terminal_currents = bjt.external_terminal_branches(eval);
+        for row in 0..EXTERNAL_DIM {
+            let row_node = external_nodes[row];
+            let branch = terminal_currents[row];
+            let source =
+                targets.lanes(|lane| branch.source(static_internal(lane), &external[lane]));
+            for (&node, &derivative) in internal_nodes.iter().zip(&branch.d_internal) {
+                if derivative != 0.0 {
+                    targets.stamp(row_node, node, derivative);
+                }
+            }
+            for (&node, &derivative) in external_nodes.iter().zip(&branch.d_external) {
+                if derivative != 0.0 {
+                    targets.stamp(row_node, node, derivative);
+                }
+            }
+            targets.stamp_rhs_lanes(row_node, source);
+        }
+        if bjt.mna_rbi_matrix_node != 0 {
+            bjt.stamp_mna_rbi_current(targets, eval.linearized, &internal, &external, false);
+        }
+        if bjt.td > 0.0 {
+            for branch in &bjt.mna_delay_branches {
+                bjt.stamp_vbic_residual_branch(targets, branch, &internal, &external);
+            }
+            if bjt.thermal_model_enabled() {
+                bjt.stamp_vbic_residual_branch(
+                    targets,
+                    &bjt.mna_delay_thermal,
+                    &internal,
+                    &external,
+                );
+            }
+        }
+    }
+
+    /// [`reference_stamp`] of the Newton load and its correction at `anchor`,
+    /// through the tied-terminal projection as the device applies it.
+    fn reference_stamp_with_correction(
+        bjt: &Bjt,
+        newton: &mut Additions,
+        correction: &mut Additions,
+        anchor: &[Value],
+    ) {
+        match bjt.promoted_tied_terminal_reference() {
+            Some(reference) => reference_stamp(
+                bjt,
+                &mut NewtonAndCorrection {
+                    newton: &mut bjt.tied_terminal_projection(newton, reference),
+                    correction: &mut bjt.tied_terminal_projection(correction, reference),
+                    anchor,
+                },
+            ),
+            None => reference_stamp(
+                bjt,
+                &mut NewtonAndCorrection {
+                    newton,
+                    correction,
+                    anchor,
+                },
+            ),
+        }
+    }
+
+    /// Promoted loads with each feature the stamp handles: both Gummel-Poon
+    /// cards in every region, settled and junction-limited; Gummel-Poon cards
+    /// with quasi-saturation, excess phase and an IRB branch in every region;
+    /// a pending OFF load; tied terminals; and VBIC loads with a substrate
+    /// resistor, excess phase and self-heating.
+    fn promoted_loads_with_every_feature() -> Vec<(Bjt, Vec<Value>)> {
+        let mut loads = gummel_poon_loads_in_every_region();
+        let quasi_saturation: &[(&str, Value)] = &[
+            ("BF", 75.0),
+            ("RB", 100.0),
+            ("RC", 10.0),
+            ("RCO", 50.0),
+            ("QCO", 1e-12),
+            ("VO", 2.0),
+            ("GAMMA", 1e-11),
+            ("CJC", 3e-12),
+        ];
+        let excess_phase: &[(&str, Value)] = &[
+            ("BF", 75.0),
+            ("RB", 100.0),
+            ("RE", 1.0),
+            ("TF", 1e-10),
+            ("PTF", 30.0),
+            ("CJE", 1e-12),
+        ];
+        let irb: &[(&str, Value)] = &[
+            ("BF", 75.0),
+            ("RB", 100.0),
+            ("RBM", 10.0),
+            ("IRB", 1e-4),
+            ("CJE", 1e-12),
+        ];
+        for card in [quasi_saturation, excess_phase, irb] {
+            for region in GUMMEL_POON_REGIONS {
+                loads.push(settled_gummel_poon(card, region));
+            }
+        }
+        assert!(loads.last().unwrap().0.mna_rbi_matrix_node != 0);
+
+        let params = GUMMEL_POON_CARDS[1]
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value))
+            .collect();
+        let mut off = Bjt::new_npn("qoff".into(), 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&[("OFF".to_string(), 1.0)]);
+        let mut nodes = 4;
+        off.assign_mna_internal_nodes(|_| {
+            nodes += 1;
+            nodes
+        });
+        let bias = promoted_bias(&off, nodes, 1.4, 0.76, 0.02);
+        off.update(&bias);
+        loads.push((off, bias));
+
+        let mut tied = Bjt::new_npn("qtied".into(), 1, 1, 2).with_params(&params);
+        let mut nodes = 2;
+        tied.assign_mna_internal_nodes(|_| {
+            nodes += 1;
+            nodes
+        });
+        assert!(tied.promoted_tied_terminal_reference().is_some());
+        let bias = promoted_bias(&tied, nodes, 0.8, 0.8, 0.0);
+        tied.update(&bias);
+        loads.push((tied, bias));
+
+        for level in [4.0, 11.0, 12.0] {
+            let mut bjt = diffamp_pnp(level);
+            // LEVEL=11 is the three-terminal VBIC, with no substrate resistor.
+            assert!(bjt.td > 0.0 && (level == 11.0 || bjt.has_substrate_resistance()));
+            let bias = promoted_bias(&bjt, 13, 2.0, 2.6, 3.3);
+            bjt.update(&bias);
+            loads.push((bjt, bias));
+        }
+        let (mut bjt, n) = self_heating_vbic();
+        let bias = promoted_bias(&bjt, n, 2.0, 0.8, 0.0);
+        bjt.update(&bias);
+        loads.push((bjt, bias));
+        loads
+    }
+
+    /// The stamp makes the reference stamp's additions, value for value and
+    /// in order, for the Newton load, the correction, and both at once.
+    #[test]
+    fn the_promoted_stamp_makes_the_reference_stamps_additions() {
+        for (bjt, anchor) in promoted_loads_with_every_feature() {
+            let mut newton = Additions::default();
+            bjt.stamp_mna(&mut newton);
+            let mut expected = Additions::default();
+            reference_stamp(
+                &bjt,
+                &mut SingleLoad {
+                    stamper: &mut expected,
+                    anchor: None,
+                },
+            );
+            if bjt.promoted_tied_terminal_reference().is_none() {
+                assert_eq!(newton, expected, "{} {anchor:?}", bjt.name);
+            }
+            let [mut one_newton, mut one_correction] = [(); 2].map(|_| Additions::default());
+            bjt.stamp_mna_with_correction(&mut one_newton, &mut one_correction, &anchor);
+            let [mut ref_newton, mut ref_correction] = [(); 2].map(|_| Additions::default());
+            reference_stamp_with_correction(&bjt, &mut ref_newton, &mut ref_correction, &anchor);
+            assert_eq!(one_newton, ref_newton, "{} {anchor:?}", bjt.name);
+            assert_eq!(one_correction, ref_correction, "{} {anchor:?}", bjt.name);
+            assert_eq!(one_newton, newton, "{} {anchor:?}", bjt.name);
         }
     }
 

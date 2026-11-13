@@ -272,28 +272,80 @@ impl BranchLinearization {
     /// Form J*v-I without losing small junction currents to the products
     /// of a large series conductance and absolute terminal voltages.
     fn source(&self, internal: &[Value; INTERNAL_DIM], external: &[Value; EXTERNAL_DIM]) -> Value {
-        let mut sum = -self.current;
-        let mut tail = 0.0;
+        let mut sum = CompensatedSource::new(self.current);
         for (&derivative, &voltage) in self
             .d_internal
             .iter()
             .zip(internal)
             .chain(self.d_external.iter().zip(external))
         {
-            if derivative == 0.0 {
-                continue;
+            if derivative != 0.0 {
+                sum.add(derivative, voltage);
             }
-            let product = derivative * voltage;
-            let product_error = derivative.mul_add(voltage, -product);
-            let next = sum + product;
-            let addend = next - sum;
-            let error = (sum - (next - addend)) + (product - addend);
-            let carry = tail + product_error + error;
-            let refined = next + carry;
-            tail = carry - (refined - next);
-            sum = refined;
         }
-        sum + tail
+        sum.value()
+    }
+
+    /// [`Self::source`] about two voltage vectors at once: each lane makes
+    /// exactly the operations its own call makes, and the two independent
+    /// sums interleave.
+    fn source_pair(
+        &self,
+        internal: [&[Value; INTERNAL_DIM]; 2],
+        external: [&[Value; EXTERNAL_DIM]; 2],
+    ) -> [Value; 2] {
+        let mut sums = [CompensatedSource::new(self.current); 2];
+        let first = internal[0].iter().chain(external[0]);
+        let second = internal[1].iter().chain(external[1]);
+        for ((&derivative, &v0), &v1) in self
+            .d_internal
+            .iter()
+            .chain(&self.d_external)
+            .zip(first)
+            .zip(second)
+        {
+            if derivative != 0.0 {
+                sums[0].add(derivative, v0);
+                sums[1].add(derivative, v1);
+            }
+        }
+        sums.map(CompensatedSource::value)
+    }
+}
+
+/// `-current + sum(derivative * voltage)`, accumulated with an error-free
+/// product and a two-sum carry.
+#[derive(Clone, Copy)]
+struct CompensatedSource {
+    sum: Value,
+    tail: Value,
+}
+
+impl CompensatedSource {
+    #[inline(always)]
+    fn new(current: Value) -> Self {
+        Self {
+            sum: -current,
+            tail: 0.0,
+        }
+    }
+
+    #[inline(always)]
+    fn add(&mut self, derivative: Value, voltage: Value) {
+        let product = derivative * voltage;
+        let product_error = derivative.mul_add(voltage, -product);
+        let next = self.sum + product;
+        let addend = next - self.sum;
+        let error = (self.sum - (next - addend)) + (product - addend);
+        let carry = self.tail + product_error + error;
+        let refined = next + carry;
+        self.tail = carry - (refined - next);
+        self.sum = refined;
+    }
+
+    #[inline(always)]
+    fn value(self) -> Value {
+        self.sum + self.tail
     }
 }
 

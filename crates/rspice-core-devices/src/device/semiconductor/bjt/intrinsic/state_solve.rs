@@ -1055,7 +1055,7 @@ impl Bjt {
         }
         self.visit_internal_kcl_terms(
             state,
-            eval,
+            &eval,
             external,
             false,
             dissipation_drops,
@@ -1076,13 +1076,13 @@ impl Bjt {
     pub(in crate::device::semiconductor::bjt) fn visit_internal_kcl_terms(
         &self,
         state: IntrinsicTerminalState,
-        eval: EvaluatedBjtState,
+        eval: &EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
         external_rbi_port: bool,
         dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
         mut visit: impl FnMut(usize, &[BranchLinearization]),
     ) {
-        let [collector, base, emitter] = self.intrinsic_terminal_branches(&eval);
+        let [collector, base, emitter] = self.intrinsic_terminal_branches(eval);
         let negative = |branch| Self::scale_branch(branch, -1.0);
         let rbi = if external_rbi_port {
             BranchLinearization::default()
@@ -1094,7 +1094,7 @@ impl Bjt {
                 IDX_VCX,
                 &[
                     eval.ircx,
-                    self.parasitic_base_collector_branch(&eval),
+                    self.parasitic_base_collector_branch(eval),
                     eval.igcx,
                     negative(if Self::series_active(self.rci) {
                         eval.irci
@@ -1138,7 +1138,7 @@ impl Bjt {
         }
         if self.thermal_model_enabled() {
             let power = self.thermal_power_branch_about(
-                eval,
+                *eval,
                 external,
                 [
                     state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
