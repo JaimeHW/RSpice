@@ -58,8 +58,8 @@ jobs:
       # package to one rustfmt process, and rspice-core declares enough targets
       # to exceed the 32767-byte command line, so a violation in the engine was
       # undetectable outside CI. The script drives rustfmt in batches that fit a
-      # command line, reports every offending file in one pass, and asserts the
-      # member-count floor itself.
+      # command line, reports every offending file in one pass, and fails when
+      # cargo did not describe every member Cargo.toml declares.
       - name: Format
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: python3 tools/ci/check_formatting.py

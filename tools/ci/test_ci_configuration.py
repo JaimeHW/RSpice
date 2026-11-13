@@ -867,15 +867,6 @@ class CiConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(package, covered)
 
-        floor = re.search(r"^MINIMUM_MEMBERS = (\d+)$", gate, re.MULTILINE)
-        self.assertIsNotNone(floor, "the format gate must assert a member-count floor")
-        self.assertEqual(
-            int(floor.group(1)),
-            len(covered),
-            "the format gate's floor must equal the number of hand-written members, "
-            "so an enumeration that silently collapses fails instead of passing",
-        )
-
     def test_every_quality_check_reports_even_after_one_has_failed(self) -> None:
         """A red job must say which of its checks failed, not just the first.
 

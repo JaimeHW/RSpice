@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,11 +16,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # not asked to own.
 EXCLUDED_MEMBERS = {"rspice-veriloga-models"}
 EXCLUDED_MEMBER_PREFIXES = ("rspice-veriloga-model-",)
-
-# The workspace has not had fewer members than this since the application
-# crates were extracted. Without the floor, a metadata read that returned a
-# handful of packages would report success for having checked almost nothing.
-MINIMUM_MEMBERS = 53
 
 # Windows caps a command line at 32767 bytes for the whole line, and cargo fmt
 # hands every target of a package to one rustfmt process. rspice-core declares
@@ -35,6 +31,31 @@ DIFF_LINE = re.compile(r"^Diff in (.+?):\d+:$")
 def excluded(member: str) -> bool:
     """Report whether the workflow has always skipped this member."""
     return member in EXCLUDED_MEMBERS or member.startswith(EXCLUDED_MEMBER_PREFIXES)
+
+
+def missing_members(described: dict, root: Path = ROOT) -> list[str]:
+    """The workspace members `Cargo.toml` declares that cargo did not describe.
+
+    The declared set is read from the manifest's `members` globs, not from
+    cargo, so a metadata read that returned a handful of packages cannot report
+    success for having checked almost nothing.
+    """
+    workspace = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8")).get(
+        "workspace", {}
+    )
+    skipped = {(root / entry).resolve() for entry in workspace.get("exclude", [])}
+    declared = {
+        directory.resolve()
+        for pattern in workspace.get("members", [])
+        for directory in root.glob(pattern)
+        if (directory / "Cargo.toml").is_file()
+    } - skipped
+    found = {
+        Path(package["manifest_path"]).resolve().parent for package in described["packages"]
+    }
+    return sorted(
+        directory.relative_to(root.resolve()).as_posix() for directory in declared - found
+    )
 
 
 def entry_points(metadata: dict) -> dict[tuple[str, str], list[str]]:
@@ -201,17 +222,21 @@ def main() -> int:
     arguments = parser.parse_args()
 
     try:
-        grouped = entry_points(metadata())
+        described = metadata()
     except subprocess.CalledProcessError as refusal:
         reason = (refusal.stderr or "").strip() or f"exit status {refusal.returncode}"
         print(f"cargo could not describe the workspace:\n{reason}")
         return 1
+    missing = missing_members(described)
+    if missing:
+        print("cargo metadata did not describe these workspace members:")
+        for member in missing:
+            print(f"  {member}")
+        return 1
+    grouped = entry_points(described)
     members = {member for member, _ in grouped}
-    if len(members) < MINIMUM_MEMBERS:
-        print(
-            f"cargo metadata named {len(members)} formattable member(s), "
-            f"fewer than the {MINIMUM_MEMBERS} this workspace has"
-        )
+    if not members:
+        print("cargo metadata named no formattable workspace member")
         return 1
 
     unformatted, failures, targets = format_members(grouped, write=arguments.write)

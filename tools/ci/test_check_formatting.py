@@ -10,14 +10,17 @@ from unittest import mock
 import check_formatting
 from check_formatting import (
     ARGUMENT_BUDGET,
-    MINIMUM_MEMBERS,
     batches,
     entry_points,
     excluded,
     metadata,
+    missing_members,
     offenders,
     reportable,
 )
+
+# Members in the synthetic workspaces `main` is run against below.
+MEMBERS = 3
 
 
 def package(name: str, *targets: tuple[str, str]) -> dict:
@@ -157,23 +160,23 @@ class ReportingTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
-    """The gate's floor and its reason for existing, against real metadata."""
+    """The gate's coverage and its reason for existing, against real metadata."""
 
-    def test_the_member_floor_equals_the_hand_written_member_count(self) -> None:
-        """A gate that enumerates can collapse; the floor is what catches it.
+    def test_cargo_describes_every_declared_member(self) -> None:
+        """A gate that enumerates can collapse; the declared members catch it.
 
         The step this replaced asserted `test "$checked" -ge 41` for the same
         reason: an enumeration that silently returned a handful of packages
         would otherwise report success for checking almost nothing.
         """
-        grouped = entry_points(metadata())
-        members = {member for member, _ in grouped}
-        self.assertEqual(
-            MINIMUM_MEMBERS,
-            len(members),
-            "MINIMUM_MEMBERS must equal the number of hand-written members, so "
-            "adding a crate raises the floor instead of leaving it behind",
-        )
+        self.assertEqual(missing_members(metadata()), [])
+
+    def test_a_member_cargo_did_not_describe_is_named(self) -> None:
+        described = metadata()
+        described["packages"] = [
+            package for package in described["packages"] if package["name"] != "rspice-core"
+        ]
+        self.assertEqual(missing_members(described), ["crates/rspice-core"])
 
     def test_the_engine_crate_cannot_be_formatted_in_one_invocation(self) -> None:
         """Why this script exists rather than `cargo fmt -p <member>`.
@@ -238,6 +241,22 @@ class WorkspaceDescriptionTests(unittest.TestCase):
         self.assertIn("could not describe the workspace", printed)
         self.assertIn("exit status 101", printed)
 
+    def test_a_description_missing_a_member_fails_before_formatting(self) -> None:
+        printed = io.StringIO()
+        with (
+            mock.patch.object(check_formatting, "metadata", return_value={"packages": []}),
+            mock.patch.object(
+                check_formatting, "missing_members", return_value=["crates/rspice-core"]
+            ),
+            mock.patch.object(check_formatting.subprocess, "run") as run,
+            mock.patch.object(sys, "argv", ["check_formatting.py"]),
+            contextlib.redirect_stdout(printed),
+        ):
+            code = check_formatting.main()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/rspice-core", printed.getvalue())
+        run.assert_not_called()
+
 
 class RustfmtOutcomeTests(unittest.TestCase):
     """What one rustfmt run's exit status and output make of the gate."""
@@ -246,12 +265,13 @@ class RustfmtOutcomeTests(unittest.TestCase):
         workspace = {
             "packages": [
                 package(f"member-{index:02}", ("2024", f"/w/member-{index:02}/src/lib.rs"))
-                for index in range(MINIMUM_MEMBERS)
+                for index in range(MEMBERS)
             ]
         }
         printed = io.StringIO()
         with (
             mock.patch.object(check_formatting, "metadata", return_value=workspace),
+            mock.patch.object(check_formatting, "missing_members", return_value=[]),
             mock.patch.object(check_formatting.subprocess, "run", return_value=completed),
             mock.patch.object(sys, "argv", ["check_formatting.py"]),
             contextlib.redirect_stdout(printed),
@@ -265,7 +285,7 @@ class RustfmtOutcomeTests(unittest.TestCase):
     def test_a_clean_run_passes(self) -> None:
         code, printed = self.run_main(self.outcome(0))
         self.assertEqual(code, 0)
-        self.assertIn(f"checked {MINIMUM_MEMBERS} target(s)", printed)
+        self.assertIn(f"checked {MEMBERS} target(s)", printed)
 
     def test_a_diff_names_the_file_and_fails(self) -> None:
         code, printed = self.run_main(
@@ -366,10 +386,10 @@ class FormattingLoopTests(unittest.TestCase):
         workspace = {
             "packages": [
                 package(f"member-{index:02}", ("2024", f"/w/member-{index:02}/src/lib.rs"))
-                for index in range(MINIMUM_MEMBERS)
+                for index in range(MEMBERS)
             ]
         }
-        answers = [(0, "", "")] * MINIMUM_MEMBERS
+        answers = [(0, "", "")] * MEMBERS
         answers[0] = (1, "", "error: expected item")
         answers[1] = (1, "Diff in /w/member-01/src/lib.rs:1:\n", "")
         answers[2] = (1, "", "error: file not found for module `gone`")
@@ -377,6 +397,7 @@ class FormattingLoopTests(unittest.TestCase):
         printed = io.StringIO()
         with (
             mock.patch.object(check_formatting, "metadata", return_value=workspace),
+            mock.patch.object(check_formatting, "missing_members", return_value=[]),
             mock.patch.object(check_formatting, "run_rustfmt", runner),
             mock.patch.object(sys, "argv", ["check_formatting.py"]),
             contextlib.redirect_stdout(printed),
