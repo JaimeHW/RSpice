@@ -1311,16 +1311,6 @@ fn show_property_field_toned(
     response
 }
 
-/// Editable property row with caller-owned identity and single-line editor options.
-pub fn property_row_text_edit(
-    ui: &mut Ui,
-    label: &str,
-    edit: egui::TextEdit<'_>,
-    invalid: bool,
-) -> Response {
-    property_row_text_edit_in(ui, label, edit, None, invalid, None, None)
-}
-
 /// A [`FieldText`]'s layout, handed to the field's editor.
 type FieldLayout<'t> =
     &'t mut dyn FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley>;
