@@ -88,7 +88,7 @@ struct EventImage {
 }
 
 impl SchedulerCheckpoint {
-    #[cfg(any(feature = "veriloga", feature = "test-support", test))]
+    #[cfg(any(feature = "veriloga", test))]
     #[doc(hidden)]
     pub fn targets(&self) -> &[EventTarget] {
         &self.targets
@@ -98,7 +98,7 @@ impl SchedulerCheckpoint {
     pub(crate) fn target_count(&self) -> usize {
         self.targets.len()
     }
-    #[cfg(any(feature = "veriloga", feature = "test-support", test))]
+    #[cfg(any(feature = "veriloga", test))]
     #[doc(hidden)]
     pub fn live_events(
         &self,

@@ -18,7 +18,7 @@ use crate::{NodeId, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[cfg(any(feature = "veriloga", feature = "test-support", test))]
+#[cfg(any(feature = "veriloga", test))]
 #[doc(hidden)]
 pub mod checkpoint;
 
@@ -183,7 +183,7 @@ impl XspiceEventScheduler {
     ///
     /// Test-only: a code model dates every output from the time it was
     /// evaluated at, which is what keys it ([`Self::schedule_delayed`]).
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn schedule(
         &mut self,
@@ -425,14 +425,14 @@ impl XspiceEventScheduler {
     }
 
     /// Number of pending events.
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn len(&self) -> usize {
         self.inner.pending()
     }
 
     /// Whether any event is pending.
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn is_empty(&self) -> bool {
         self.inner.pending() == 0

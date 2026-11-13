@@ -66,14 +66,13 @@ use std::sync::Arc;
 /// with [`counts`].
 ///
 /// The *readers* are test-only — this type, [`reset`] and [`counts`] compile
-/// under `cfg(test)`, and under the `test-support` feature for the engine's
-/// tests — while the writers below are not. That split is deliberate and it is
+/// under `cfg(test)` — while the writers below are not. That split is deliberate and it is
 /// the only one: the increments ship, so the build a ratchet measures is the
 /// build that runs, and a `make_mut` added on a hot path is counted wherever it
 /// is added rather than only under a test cfg. Nothing outside a test has any
 /// use for the total, so exporting a getter into release builds would be dead
 /// code, and this crate does not ship dead code.
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct XspiceSettleCounts {
@@ -122,7 +121,7 @@ pub struct XspiceSettleCounts {
     pub device_state_snapshots: u64,
 }
 
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 impl XspiceSettleCounts {
     /// Deep copies of the event world, which the two cells describe together.
     ///
@@ -224,7 +223,7 @@ pub fn note_device_state_snapshot() {
 /// `-1` the tests share a thread and run in sequence, so a reset immediately
 /// before the run still leaves the run alone in the window; under the default
 /// each test owns its thread and its counters outright.
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 #[doc(hidden)]
 pub fn reset() {
     COUNTERS.with(|counters| {
@@ -239,7 +238,7 @@ pub fn reset() {
 }
 
 /// This thread's tally since the last [`reset`].
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 #[doc(hidden)]
 pub fn counts() -> XspiceSettleCounts {
     COUNTERS.with(|counters| XspiceSettleCounts {

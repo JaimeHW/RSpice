@@ -1662,7 +1662,7 @@ impl EventScheduler {
         }
     }
 
-    #[cfg(any(feature = "veriloga", feature = "test-support", test))]
+    #[cfg(any(feature = "veriloga", test))]
     #[doc(hidden)]
     pub fn limits(&self) -> SchedulerLimits {
         self.limits

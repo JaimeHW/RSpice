@@ -131,7 +131,7 @@ pub use data_file::{
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub(crate) use event::EventNodeMap;
 pub use event::EventValue;
-#[cfg(any(feature = "veriloga", feature = "test-support", test))]
+#[cfg(any(feature = "veriloga", test))]
 #[doc(hidden)]
 pub use event::checkpoint as event_checkpoint;
 #[doc(hidden)]

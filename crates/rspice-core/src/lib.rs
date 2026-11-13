@@ -209,8 +209,8 @@ pub type ComplexValue = Complex64;
 mod family_features_tests {
     use std::collections::BTreeSet;
 
-    /// Every feature this crate's manifest declares, `default` and
-    /// `test-support` aside: neither is a flag.
+    /// Every feature this crate's manifest declares, `default` aside: it is
+    /// not a flag.
     fn manifest_features() -> BTreeSet<String> {
         let mut in_features = false;
         let mut features = BTreeSet::new();
@@ -223,7 +223,6 @@ mod family_features_tests {
             }
         }
         features.remove("default");
-        features.remove("test-support");
         features
     }
 

@@ -23,7 +23,7 @@ pub struct EventTraceJournal {
 impl EventTraceJournal {
     /// Trace retention is immutable checkpoint identity. Publications belong
     /// to the result sink and must be delivered before capture or replacement.
-    #[cfg(any(feature = "veriloga", feature = "test-support", test))]
+    #[cfg(any(feature = "veriloga", test))]
     #[doc(hidden)]
     pub fn checkpoint_retention(&self) -> Result<&[bool], String> {
         if !self.points.is_empty() {

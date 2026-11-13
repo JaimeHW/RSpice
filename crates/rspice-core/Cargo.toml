@@ -563,13 +563,6 @@ veriloga-builtins = [
     "rspice-core-netlist/veriloga-builtins",
     "rspice-core-devices/veriloga-builtins",
 ]
-# Test helpers a crate built on this one compiles into its own unit tests.
-# Additive only: it adds hidden items and changes no behaviour.
-test-support = [
-    "rspice-core-base/test-support",
-    "rspice-core-netlist/test-support",
-    "rspice-core-devices/test-support",
-]
 
 [lib]
 test = false
