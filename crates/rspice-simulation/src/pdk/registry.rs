@@ -24,8 +24,6 @@ use rspice_model_library::pdk::{
 };
 use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
-#[cfg(target_arch = "wasm32")]
-use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -108,48 +106,6 @@ impl PdkTechnologyRegistry {
     #[cfg(target_arch = "wasm32")]
     pub(super) fn take_worker_validated_packages(&mut self) -> Vec<ValidatedPdkTechnologyPackage> {
         std::mem::take(&mut self.validated_packages)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(super) fn restore_worker_validated_packages(
-        &mut self,
-        packages: Vec<ValidatedPdkTechnologyPackage>,
-    ) -> Result<(), PdkTechnologyError> {
-        if !self.validated_packages.is_empty() || !self.validation_errors.is_empty() {
-            return Err(PdkTechnologyError::NotRuntimeValidated(
-                "worker package publication requires an empty runtime validation cache".to_owned(),
-            ));
-        }
-        if packages.len() != self.archives.len() {
-            return Err(PdkTechnologyError::NotRuntimeValidated(format!(
-                "worker validated {} packages for {} installed archives",
-                packages.len(),
-                self.archives.len()
-            )));
-        }
-        let mut identities = BTreeSet::new();
-        for package in &packages {
-            let binding = package.binding();
-            if !identities.insert((
-                binding.package_id.to_ascii_lowercase(),
-                binding.revision.clone(),
-                binding.manifest_digest,
-            )) {
-                return Err(PdkTechnologyError::NotRuntimeValidated(
-                    "worker returned duplicate validated package identities".to_owned(),
-                ));
-            }
-            if !self.audit.iter().any(|receipt| {
-                receipt.target == binding && receipt.archive_digest == package.archive_digest()
-            }) {
-                return Err(PdkTechnologyError::NotRuntimeValidated(format!(
-                    "worker package {} {} has no matching authenticated installation receipt",
-                    binding.package_id, binding.revision
-                )));
-            }
-        }
-        self.validated_packages = packages;
-        Ok(())
     }
 
     #[must_use]
