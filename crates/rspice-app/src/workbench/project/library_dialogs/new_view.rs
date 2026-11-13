@@ -768,7 +768,7 @@ fn validate_unique_ports(source: &str, ports: &[crate::state::PortSpec]) -> Resu
 mod tests {
     use super::*;
     use crate::state::{Cell, Library, View, ViewType};
-    use crate::workbench::project::test_host::harness;
+    use crate::workbench::project::tests::harness;
 
     #[test]
     fn new_view_entry_point_resolves_exact_writable_cell_before_opening() {

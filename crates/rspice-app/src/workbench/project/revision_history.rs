@@ -1166,8 +1166,7 @@ mod tests {
     use crate::state::{
         ComponentType, Point, PreflightReport, ValidatedRevisionRequest, ValidationFindingCounts,
     };
-    use crate::workbench::RSpiceApp;
-    use crate::workbench::project::tests::with_cx;
+    use crate::workbench::project::tests::harness;
 
     fn append(state: &mut crate::state::SchematicState, note: &str) {
         let digest = state
@@ -1389,22 +1388,22 @@ mod tests {
     #[test]
     fn a_revision_restored_in_the_project_context_ends_where_the_restore_in_place_did() {
         for journal_moved in [false, true] {
-            let mut app = RSpiceApp::test_instance();
-            let schematic = &mut app.state.model.schematic;
+            let mut harness = harness();
+            let schematic = &mut harness.model.schematic;
             let baseline_components = schematic.document().components.len();
             append(schematic, "Baseline");
             let baseline = schematic.document().validated_revisions.records()[0].id();
             let read_at_open = schematic.document().validated_revisions.clone();
             schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
             append(schematic, "Add resistor");
-            app.state.project.project_revision_history = ProjectRevisionHistoryDialogState {
+            harness.state.project_revision_history = ProjectRevisionHistoryDialogState {
                 open: true,
                 selected: vec![schematic_row_key(baseline)],
-                authority: Some(SchematicEditAuthority::capture(&app.state.model)),
+                authority: Some(SchematicEditAuthority::capture(&harness.model)),
                 expected_journal: if journal_moved {
                     read_at_open
                 } else {
-                    app.state
+                    harness
                         .model
                         .schematic
                         .document()
@@ -1415,11 +1414,11 @@ mod tests {
                 ..ProjectRevisionHistoryDialogState::default()
             };
             let digest = ContentDigest::from_bytes([7; 32]);
-            app.state
+            harness
                 .model
                 .netlist_artifacts
                 .current_generation_input_digest = Some(digest);
-            app.state.runs.preflight.report = Some(PreflightReport {
+            harness.runs.preflight.report = Some(PreflightReport {
                 project_revision: 1,
                 topology_root: "user/top/schematic".to_owned(),
                 topology_revision: 1,
@@ -1431,11 +1430,11 @@ mod tests {
                 prepared: None,
             });
 
-            let rows = project_audit_rows(&app.state.model);
-            with_cx(&mut app, |cx| restore_selected_revision(cx, &rows));
+            let rows = project_audit_rows(&harness.model);
+            restore_selected_revision(&mut harness.cx(), &rows);
 
-            let dialog = &app.state.project.project_revision_history;
-            let model = &app.state.model;
+            let dialog = &harness.state.project_revision_history;
+            let model = &harness.model;
             assert!(
                 !dialog.restore_confirmation,
                 "journal moved {journal_moved}"
@@ -1455,7 +1454,7 @@ mod tests {
                     model.netlist_artifacts.current_generation_input_digest,
                     Some(digest)
                 );
-                assert!(app.state.runs.preflight.report.is_some());
+                assert!(harness.runs.preflight.report.is_some());
             } else {
                 assert_eq!(dialog.error, None);
                 assert_eq!(
@@ -1471,7 +1470,7 @@ mod tests {
                     model.netlist_artifacts.current_generation_input_digest,
                     None
                 );
-                assert!(app.state.runs.preflight.report.is_none());
+                assert!(harness.runs.preflight.report.is_none());
             }
         }
     }

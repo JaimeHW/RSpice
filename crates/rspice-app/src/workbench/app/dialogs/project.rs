@@ -8,7 +8,7 @@
 
 pub(in crate::workbench) mod configuration;
 pub(in crate::workbench) mod configuration_dialogs;
-pub(in crate::workbench) mod new_project;
+pub(crate) mod new_project;
 
 /// Retained draft for the mockup-owned project technology transaction.
 /// Selection remains isolated until the primary action verifies every pinned

@@ -17,9 +17,9 @@ use crate::workbench::project::library_dialogs::new_view::{
     CREATABLE_VIEW_TYPES, NEW_VIEW_NAME_MISSING, NameLine, create_new_view, new_view_name_line,
     seeded_symbol_view, view_type_label,
 };
-use crate::workbench::project::library_dialogs::{in_front, published, shown};
-use crate::workbench::project::tests::with_cx;
 use crate::workbench::{ChoicePreference, RSpiceApp};
+
+use super::{in_front, published, shown, with_cx};
 
 /// Create the view the dialog names in the feature's context, with
 /// what it raised answered as the dialog step answers it, and whether

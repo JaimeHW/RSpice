@@ -3,7 +3,7 @@
 use super::*;
 use crate::state::{Cell, Library, View};
 use crate::workbench::framework::feature::harness::FeatureHarness;
-use crate::workbench::project::test_host::harness;
+use crate::workbench::project::tests::harness;
 
 fn harness_with_amplifier_schematic() -> FeatureHarness<ProjectFeature> {
     let mut harness = harness();

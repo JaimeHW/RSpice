@@ -12,9 +12,9 @@ use crate::workbench::project::library_dialogs::library_ops::{
     commit_delete_library_review, commit_rename_library_dialog,
 };
 use crate::workbench::project::library_dialogs::rename_view::commit_rename_view_dialog;
-use crate::workbench::project::library_dialogs::{published, shown};
-use crate::workbench::project::tests::with_cx;
 use crate::workbench::{AppState, RSpiceApp};
+
+use super::{published, shown, with_cx};
 
 /// The reference design with its active cell's rename typed into the
 /// dialog, and the active cell.

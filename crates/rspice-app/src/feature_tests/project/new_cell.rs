@@ -9,9 +9,9 @@ use crate::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::new_cell::create_new_cell;
-use crate::workbench::project::library_dialogs::{in_front, published, shown};
-use crate::workbench::project::tests::with_cx;
 use crate::workbench::{ChoicePreference, RSpiceApp};
+
+use super::{in_front, published, shown, with_cx};
 
 /// Create the cell the dialog names in the feature's context, with
 /// what it raised answered as the dialog step answers it, and whether

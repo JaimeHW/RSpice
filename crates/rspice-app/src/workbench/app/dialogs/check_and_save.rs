@@ -372,7 +372,7 @@ impl RSpiceApp {
     /// Save the validated revision the open dialog reviewed, once its report
     /// is re-derived as the reader reviewed it.
     // The shell runs this until the save runs over the lifecycle's parts.
-    pub(in crate::workbench) fn commit_check_and_save(&mut self) {
+    pub(crate) fn commit_check_and_save(&mut self) {
         // A cancelled destination, a transient publication failure, or a stale
         // validation receipt must remain retryable without forcing the user to
         // manufacture an edit to the revision note first.

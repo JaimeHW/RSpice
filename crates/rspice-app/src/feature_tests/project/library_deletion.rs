@@ -10,14 +10,14 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::deletion::library_deletion_impact;
-use crate::workbench::project::library_dialogs::{in_front, published, shown};
-use crate::workbench::project::tests::with_cx;
 use crate::workbench::project::workspace_state::{
     DeletionInstanceResolution, LibraryDeletionTarget,
 };
 use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };
+
+use super::{in_front, published, shown, with_cx};
 
 fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

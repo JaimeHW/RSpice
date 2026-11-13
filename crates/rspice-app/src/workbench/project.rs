@@ -179,7 +179,7 @@ impl ProjectFeature {
     /// Keep browser-restored manager routes and the transient egui dialog
     /// owner synchronized. Commands open both in one transaction; this hook
     /// covers deep links, Back/Forward, and restored application sessions.
-    pub(in crate::workbench) fn synchronize_design_management_route(cx: &mut Cx<'_, Self>) {
+    pub(crate) fn synchronize_design_management_route(cx: &mut Cx<'_, Self>) {
         let route_active = cx.wb.current_route().surface_id() == SurfaceId::DesignManagement;
         if route_active && !cx.state.design_management.open {
             open_design_management_dialog(
@@ -639,6 +639,4 @@ impl CommandSet for ProjectCommand {
 }
 
 #[cfg(test)]
-mod test_host;
-#[cfg(test)]
-pub(crate) mod tests;
+mod tests;

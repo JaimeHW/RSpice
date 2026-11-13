@@ -517,7 +517,7 @@ impl ProjectFeature {
 mod tests {
     use super::*;
     use crate::state::{Cell, Library};
-    use crate::workbench::project::test_host::harness;
+    use crate::workbench::project::tests::harness;
 
     #[test]
     fn rename_cell_dialog_starts_with_the_exact_active_cell_identity() {
