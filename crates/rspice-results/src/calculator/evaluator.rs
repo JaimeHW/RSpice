@@ -173,7 +173,9 @@ pub trait UnitContext {
 
 /// The unit an expression's value reads in, by unit algebra over the units of
 /// the signals it names: a ratio of voltages is a plain number, V·A is W,
-/// `deriv` of volts over time is V/s.
+/// `deriv` of volts over time is V/s. The unit keeps the reading its
+/// composition gives it: `deriv` of amperes over a frequency sweep is A/Hz,
+/// never the coulomb that shares its dimensions.
 ///
 /// `Err` says why no unit can be stated — volts added to amperes, the
 /// logarithm of volts, a function whose result unit is not known — so a
@@ -182,7 +184,7 @@ pub fn infer_unit(
     expr: &CalculatorExpr,
     ctx: &impl UnitContext,
 ) -> Result<super::value::Unit, String> {
-    infer(expr, ctx).map(Inferred::into_unit)
+    infer(expr, ctx).map(|inferred| inferred.into_unit().reading_reciprocal_seconds_as_hertz())
 }
 
 /// A unit found so far. A bare number takes the unit of whatever it is
@@ -483,7 +485,7 @@ mod tests {
     /// The units engineers write for these expressions.
     #[test]
     fn unit_algebra_states_the_unit_an_engineer_writes() {
-        let table: [(&str, &str, &str); 30] = [
+        let table: [(&str, &str, &str); 46] = [
             ("V(out)", "s", "V"),
             ("V(out)/V(in)", "s", ""),
             ("V(out)*I(vdd)", "s", "W"),
@@ -506,7 +508,7 @@ mod tests {
             ("onoise", "Hz", "V²/Hz"),
             ("db(V(out)/V(in))", "Hz", "dB"),
             ("phase(V(out))", "Hz", "°"),
-            ("deriv(phase(V(out)))", "Hz", "°·s"),
+            ("deriv(phase(V(out)))", "Hz", "°/Hz"),
             ("S21*V(in)", "Hz", "V"),
             ("rise(V(out))", "s", "s"),
             ("frequency(V(out))", "s", "Hz"),
@@ -514,6 +516,25 @@ mod tests {
             ("overshoot(V(out))", "s", "%"),
             ("deriv(V(out))", "°C", "V/°C"),
             ("rms(I(vdd))*avg(V(out))", "s", "W"),
+            // Units that share dimensions keep the reading their composition
+            // gives them.
+            ("deriv(I(r1))", "Hz", "A/Hz"),
+            ("deriv(V(out))", "Hz", "V/Hz"),
+            ("integ(V(out)^2)", "s", "V²·s"),
+            ("integ(I(r1)^2)", "s", "A²·s"),
+            ("V(out)*frequency(V(out))", "s", "V/s"),
+            ("V(out)*I(vdd)/freq", "Hz", "W/Hz"),
+            // A spectral density reads as one however it is composed.
+            ("inoise", "Hz", "A²/Hz"),
+            ("sqrt(onoise)^2", "Hz", "V²/Hz"),
+            ("onoise*V(out)^2/V(in)^2", "Hz", "V²/Hz"),
+            ("sqrt(onoise)/(V(out)/V(in))", "Hz", "V/√Hz"),
+            ("onoise/(V(out)/I(r1))", "Hz", "W/Hz"),
+            ("inoise*(V(out)/I(r1))", "Hz", "W/Hz"),
+            ("sqrt(onoise*inoise)", "Hz", "W/Hz"),
+            ("sqrt(onoise/inoise)", "Hz", "Ω"),
+            ("integ(onoise)", "Hz", "V²"),
+            ("sqrt(integ(onoise))", "Hz", "V"),
         ];
         for (text, x, expected) in table {
             assert_eq!(unit_of(text, x).as_deref(), Ok(expected), "{text} over {x}");
@@ -544,7 +565,14 @@ mod tests {
         use super::super::value::Unit;
         let read = |text: &str| Unit::parse(text).unwrap();
         assert_eq!(read("V^2/Hz"), read("V²/Hz"));
-        assert_eq!(read("V²/Hz"), read("V·V·s"));
+        assert_ne!(read("V²/Hz"), read("V·V·s"));
+        assert_ne!(read("A/Hz"), read("A·s"));
+        assert_eq!(read("A/Hz").label(), "A/Hz");
+        assert_eq!(read("A·s").label(), "C");
+        assert_eq!(read("V²·s").label(), "V²·s");
+        assert_eq!(read("V·A/Hz").label(), "W/Hz");
+        assert_eq!(read("Hz·s"), Unit::none());
+        assert_eq!(read("V/Hz").times(&read("s")), read("V·s²"));
         assert_eq!(read("W"), read("V·A"));
         assert_eq!(read("Ω"), read("ohm"));
         assert_eq!(read("ratio"), Unit::none());

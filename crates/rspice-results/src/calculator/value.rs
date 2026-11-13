@@ -97,11 +97,16 @@ impl CalcValue {
 /// The unit a value reads in, as a product of powers of named units.
 ///
 /// SI's electrical units are reduced to volts, amperes and seconds, so V·A is
-/// W and V/A is Ω whichever way an expression spells them. Exponents are kept
-/// in halves, which is what a noise density's √Hz needs. A unit the algebra
-/// does not know (a degree, a decibel, a percent, a swept parameter's own
-/// unit) is a symbol of its own: it still multiplies and cancels, and two
-/// values in it still add. No symbols at all is a plain number.
+/// W and V/A is Ω whichever way an expression spells them. Hertz stays a
+/// factor of its own rather than a reciprocal second: A/Hz is a current
+/// density over frequency, not the coulomb A·s is, and V²·s is not the
+/// V²/Hz of a noise density, so a value keeps the reading its composition
+/// gives it. Only a unit that holds both hertz and seconds folds them into
+/// seconds. Exponents are kept in halves, which is what a noise density's
+/// √Hz needs. A unit the algebra does not know (a degree, a decibel, a
+/// percent, a swept parameter's own unit) is a symbol of its own: it still
+/// multiplies and cancels, and two values in it still add. No symbols at all
+/// is a plain number.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Unit {
     /// Each symbol with its exponent in halves, never zero, in symbol order.
@@ -110,7 +115,7 @@ pub struct Unit {
 
 /// The SI units that reduce to volts, amperes and seconds, with their
 /// exponents in halves.
-const DERIVED_UNITS: [(&str, &[(&str, i8)]); 10] = [
+const DERIVED_UNITS: [(&str, &[(&str, i8)]); 9] = [
     ("W", &[("V", 2), ("A", 2)]),
     ("Ω", &[("V", 2), ("A", -2)]),
     ("ohm", &[("V", 2), ("A", -2)]),
@@ -119,17 +124,20 @@ const DERIVED_UNITS: [(&str, &[(&str, i8)]); 10] = [
     ("H", &[("V", 2), ("s", 2), ("A", -2)]),
     ("C", &[("A", 2), ("s", 2)]),
     ("J", &[("V", 2), ("A", 2), ("s", 2)]),
-    ("Hz", &[("s", -2)]),
     ("ratio", &[]),
 ];
 
 /// The names a reader expects for a reduced unit, tried before the reduced
-/// product is spelled out.
-/// A product two names share (A·s is C and A/Hz) takes the first.
+/// product is spelled out. Because hertz is kept apart from seconds, no two
+/// of these name the same unit.
 const NAMED_UNITS: [&str; 17] = [
     "V", "A", "s", "W", "Ω", "S", "F", "H", "C", "J", "Hz", "V/s", "A/s", "V²/Hz", "A²/Hz",
     "V/√Hz", "A/√Hz",
 ];
+
+/// The names a density's numerator may take in front of its hertz: W/Hz,
+/// Ω/√Hz.
+const DENSITY_NUMERATORS: [&str; 3] = ["W", "Ω", "S"];
 
 impl Unit {
     /// A plain number: a ratio, a count, a gain.
@@ -198,6 +206,24 @@ impl Unit {
         if *entry == 0 {
             self.factors.remove(symbol);
         }
+        // Hz·s reads as nothing a reader writes; a unit holding both keeps
+        // seconds, Hz^n being s^-n.
+        if self.factors.contains_key("s")
+            && let Some(hertz) = self.factors.remove("Hz")
+        {
+            self.add_exponent("s", -hertz);
+        }
+    }
+
+    /// A reciprocal second on its own is a frequency, so `1/period(V(out))`
+    /// reads in Hz as `frequency(V(out))` does. Within a product it stays a
+    /// rate: V/s.
+    pub(super) fn reading_reciprocal_seconds_as_hertz(mut self) -> Self {
+        if self.factors.len() == 1 && self.factors.get("s") == Some(&-2) {
+            self.factors.clear();
+            self.factors.insert("Hz".to_owned(), 2);
+        }
+        self
     }
 
     pub fn times(&self, other: &Self) -> Self {
@@ -239,17 +265,33 @@ impl Unit {
     }
 
     /// The unit as a reader writes it: a named unit when it is one (`W`, not
-    /// `A·V`), else its factors, positive powers first.
+    /// `A·V`), a density with a named numerator (`W/Hz`), else its factors,
+    /// positive powers first (`V²·s`, `A/Hz`).
     pub fn label(&self) -> String {
-        if let Some(name) = NAMED_UNITS
-            .iter()
-            .find(|name| Self::parse(name).as_ref() == Some(self))
-        {
-            return (*name).to_owned();
+        if let Some(name) = Self::named(self) {
+            return name.to_owned();
+        }
+        if let Some(hertz) = self.factors.get("Hz").copied() {
+            let mut numerator = self.clone();
+            numerator.factors.remove("Hz");
+            if let Some(name) =
+                Self::named(&numerator).filter(|name| DENSITY_NUMERATORS.contains(name))
+            {
+                let power = power_label("Hz", hertz.unsigned_abs());
+                return if hertz < 0 {
+                    format!("{name}/{power}")
+                } else {
+                    format!("{name}·{power}")
+                };
+            }
         }
         // A unit of its own (°, dB, a swept parameter's unit) leads, then
-        // volts, amperes and seconds: `°·s`, `V·s`.
-        let rank = |symbol: &str| ["V", "A", "s"].iter().position(|base| *base == symbol);
+        // volts, amperes, seconds and hertz: `°·s`, `V·s`, `A/Hz`.
+        let rank = |symbol: &str| {
+            ["V", "A", "s", "Hz"]
+                .iter()
+                .position(|base| *base == symbol)
+        };
         let mut factors: Vec<(&String, &i8)> = self.factors.iter().collect();
         factors.sort_by_key(|(symbol, _)| (rank(symbol), (*symbol).clone()));
         let spell = |positive: bool| {
@@ -269,6 +311,13 @@ impl Unit {
             }
             (false, false) => format!("{numerator}/{denominator}"),
         }
+    }
+
+    fn named(unit: &Self) -> Option<&'static str> {
+        NAMED_UNITS
+            .iter()
+            .find(|name| Self::parse(name).as_ref() == Some(unit))
+            .copied()
     }
 }
 
