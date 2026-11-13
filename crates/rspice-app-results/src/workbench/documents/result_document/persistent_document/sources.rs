@@ -6,15 +6,22 @@
 //! bound to, the document says so plainly, keeps every page and pane, and
 //! offers the retained runs with the same signals to read instead. It never
 //! draws another run's data as the original's.
+//!
+//! An archived document holds each run's own record. Opened without the run,
+//! it brings the run back into the history, after checking that the restored
+//! run has the bound identity and digest.
+
+use std::collections::HashSet;
 
 use egui::{Sense, Ui, pos2, vec2};
+use rspice_formats::project_results::ProjectSimulationRun;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets;
 
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{
-    AnalysisRepoint, DocumentEdit, SourceDataset, VisualizationDocument,
+    AnalysisRepoint, DocumentEdit, RunArchive, SourceDataset, VisualizationDocument,
 };
 use crate::state::SimulationRun;
 
@@ -23,6 +30,10 @@ use super::super::create_document::{
 };
 use super::super::{ResultsParts, ResultsReads, retained_dataset_digest};
 use super::renderer_supports_analysis;
+
+/// The encoding an archived run's record is written in: the run exactly as
+/// a project writes it among its results.
+const RUN_ARCHIVE_ENCODING: &str = "rspice-project-run";
 
 /// Why the run history cannot give a document one of the runs it reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +69,15 @@ impl UnavailableSource {
             ),
         }
     }
+}
+
+/// Whether Archive into document can run on a document, and why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArchiveAvailability {
+    Available,
+    /// The document already holds every sample it shows.
+    Archived,
+    Unavailable(String),
 }
 
 /// Every dataset the document's panes and traces read; a dataset only a
@@ -291,17 +311,172 @@ pub fn repoint(
     Ok(())
 }
 
+/// Bring back each archived run the document reads that the run history no
+/// longer holds. A run is restored only when it has the bound identity and
+/// digest; a refusal is remembered so it is not re-attempted every frame.
+pub fn restore_archived_runs(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) {
+    let pending = {
+        let reads = state.results_reads();
+        let Some(document) = reads
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+        else {
+            return;
+        };
+        consumed_bindings(document)
+            .into_iter()
+            .filter(|binding| {
+                retained_run(reads, binding.dataset_id).is_none()
+                    && reads.results.archive_restore_failure(*binding).is_none()
+            })
+            .filter_map(|binding| {
+                let archive = dataset(document, binding)?.run_source()?.archive()?.clone();
+                Some((binding, archive))
+            })
+            .collect::<Vec<_>>()
+    };
+    for (binding, archive) in pending {
+        if let Err(reason) = restore_archived_run(state, binding, &archive) {
+            state
+                .results
+                .record_archive_restore_failure(binding, reason);
+        }
+    }
+}
+
+fn restore_archived_run(
+    state: &mut ResultsParts<'_>,
+    binding: DatasetBinding,
+    archive: &RunArchive,
+) -> Result<(), String> {
+    if archive.encoding() != RUN_ARCHIVE_ENCODING {
+        return Err(format!(
+            "The document archives its run as '{}', which this version of RSpice does not read.",
+            archive.encoding()
+        ));
+    }
+    let record: ProjectSimulationRun = serde_json::from_str(archive.record())
+        .map_err(|error| format!("The document's archived run does not read back: {error}."))?;
+    let restored = rspice_app_services::io::restore_project_run(record)?;
+    if restored.dataset_id != binding.dataset_id
+        || restored.dataset_content_digest() != binding.content_digest
+    {
+        return Err(
+            "The document's archived run is not the run it was made from, so it is not restored."
+                .to_owned(),
+        );
+    }
+    let simulation = &mut state.model.simulation;
+    let slot = simulation.start_imported_run()?;
+    let sequence = slot.id;
+    *slot = restored;
+    slot.id = sequence;
+    simulation.complete_run();
+    Ok(())
+}
+
+/// Whether Archive into document can run on `document_id`.
+pub fn archive_availability(
+    state: ResultsReads<'_>,
+    document_id: ResultDocumentId,
+) -> ArchiveAvailability {
+    let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+    else {
+        return ArchiveAvailability::Unavailable(
+            "The result document is no longer in the project.".to_owned(),
+        );
+    };
+    if document.is_archived() {
+        return ArchiveAvailability::Archived;
+    }
+    for dataset in document.datasets() {
+        if dataset.is_self_contained() {
+            continue;
+        }
+        let binding = dataset.binding();
+        if source_problem(state, binding).is_some() {
+            return ArchiveAvailability::Unavailable(format!(
+                "{} is not in the run history with the results this document was made from, so its samples cannot be archived.",
+                run_label(document, binding)
+            ));
+        }
+    }
+    ArchiveAvailability::Available
+}
+
+/// Embed every run the document reads, so it stands alone: shared without
+/// the project's run history, it still shows what it showed.
+pub fn archive_document(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+) -> Result<(), String> {
+    match archive_availability(state.results_reads(), document_id) {
+        ArchiveAvailability::Available => {}
+        ArchiveAvailability::Archived => {
+            return Err("This document already holds its runs' samples.".to_owned());
+        }
+        ArchiveAvailability::Unavailable(reason) => return Err(reason),
+    }
+    let reads = state.results_reads();
+    let document = reads
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .ok_or_else(|| "The result document is no longer in the project.".to_owned())?;
+    let mut edits = Vec::new();
+    let mut archived = HashSet::new();
+    for dataset in document.datasets() {
+        let binding = dataset.binding();
+        if dataset.is_self_contained() || !archived.insert(binding) {
+            continue;
+        }
+        let run = retained_run(reads, binding.dataset_id)
+            .ok_or_else(|| "A run this document reads left the run history.".to_owned())?;
+        let record = serde_json::to_string(&ProjectSimulationRun::from(run))
+            .map_err(|error| format!("The run could not be written into the document: {error}."))?;
+        let archive =
+            RunArchive::new(RUN_ARCHIVE_ENCODING, record).map_err(|error| error.to_string())?;
+        edits.push(DocumentEdit::ArchiveDataset { binding, archive });
+    }
+    let revision = document.revision();
+    state
+        .model
+        .workspace
+        .content
+        .transact_visualization_document(document_id, revision, edits)
+        .map_err(|error| error.to_string())?;
+    state.workbench.prompt(
+        "The result document now holds its runs' samples and reads without the run history.",
+    );
+    Ok(())
+}
+
 /// Say which runs the document cannot read, and offer the runs that could
-/// stand in for each.
+/// stand in for each. Bring archived runs back first.
 pub(super) fn show_banner(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
 ) {
+    restore_archived_runs(state, document_id);
     let sources = unavailable_sources(state.results_reads(), document_id);
     let mut chosen = None;
     for source in &sources {
-        if let Some(dataset_id) = banner_row(ui, &source.reason(), &source.candidates) {
+        let reason = state
+            .results
+            .archive_restore_failure(source.binding)
+            .map_or_else(
+                || source.reason(),
+                |failure| format!("{} {failure}", source.reason()),
+            );
+        if let Some(dataset_id) = banner_row(ui, &reason, &source.candidates) {
             chosen = Some((source.binding, dataset_id));
         }
     }

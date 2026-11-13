@@ -62,14 +62,74 @@ pub fn offered_tool_groups(state: ResultsReads<'_>) -> impl Iterator<Item = Tool
     .flatten()
 }
 
-/// The tracking control of the saved result document Results shows: Historical
-/// when no completed run matches the current design, otherwise the Latest /
-/// Pinned toggle. Whether it drew anything, for the rule after it.
+/// The controls of the saved result document Results shows: its tracking
+/// (Historical when no completed run matches the current design, otherwise
+/// the Latest / Pinned toggle) and Archive into document. Whether it drew
+/// anything, for the rule after it.
 pub fn results_tracking_button(
     ui: &mut egui::Ui,
     state: &mut ResultsParts<'_>,
     layout: LayoutSpec,
 ) -> bool {
+    let tracking = tracking_control(ui, state, layout);
+    let archive = archive_control(ui, state, layout);
+    tracking || archive
+}
+
+/// Archive into document: embed the runs the document reads so it stands
+/// alone. An archived document says so instead.
+fn archive_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: LayoutSpec) -> bool {
+    use crate::workbench::documents::result_document::persistent_document::sources::{
+        ArchiveAvailability, archive_availability, archive_document,
+    };
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = state
+        .workbench
+        .documents
+        .active(Workspace::Results)
+        .cloned()
+    else {
+        return false;
+    };
+    if !take_projected_tool_slot(ui, layout) {
+        return true;
+    }
+    let availability = archive_availability(state.results_reads(), document_id);
+    let archived = availability == ArchiveAvailability::Archived;
+    let label = if archived { "Archived" } else { "Archive" };
+    let enabled = !matches!(availability, ArchiveAvailability::Unavailable(_));
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            labeled_icon_button_sized(
+                ui,
+                WorkbenchIcon::Save,
+                label,
+                archived,
+                explicit_label_width(label),
+                layout.toolbar_control_height,
+            )
+        })
+        .inner;
+    let response = match &availability {
+        ArchiveAvailability::Available => response.on_hover_text(
+            "Archive into document: embed the samples of the runs this document reads, so it reads without the run history.",
+        ),
+        ArchiveAvailability::Archived => response.on_hover_text(
+            "Archived: this document holds its runs' samples and reads without the run history.",
+        ),
+        ArchiveAvailability::Unavailable(reason) => response.on_disabled_hover_text(reason.as_str()),
+    };
+    if response.clicked()
+        && availability == ArchiveAvailability::Available
+        && let Err(error) = archive_document(state, document_id)
+    {
+        state.workbench.prompt(error);
+    }
+    true
+}
+
+fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: LayoutSpec) -> bool {
     use crate::results::visualization_document::{
         DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
     };

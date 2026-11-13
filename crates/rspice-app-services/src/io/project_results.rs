@@ -98,6 +98,12 @@ pub fn restore_simulation_results(
     state.retained.imported_transient_checkpoints = data.imported_transient_checkpoints;
     Ok(())
 }
+/// Restore one run from its project record, exactly as a project restores
+/// each run of its history.
+pub fn restore_project_run(run: ProjectSimulationRun) -> Result<SimulationRun, String> {
+    run.into_run_with(restore_analysis)
+        .map(SimulationRun::from_restored)
+}
 fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, String> {
     let data = analysis.into_analysis_with_waveforms(|mut waveform| {
         let color = std::mem::take(&mut waveform.color);

@@ -463,6 +463,25 @@ impl ResultsState {
             .insert(document_id, (candidate, reason));
     }
 
+    /// Why the archived run behind `binding` could not be restored, if it
+    /// already could not.
+    pub(crate) fn archive_restore_failure(
+        &self,
+        binding: crate::product::DatasetBinding,
+    ) -> Option<&str> {
+        self.archive_restore_failures
+            .get(&binding)
+            .map(String::as_str)
+    }
+
+    pub(crate) fn record_archive_restore_failure(
+        &mut self,
+        binding: crate::product::DatasetBinding,
+        reason: String,
+    ) {
+        self.archive_restore_failures.insert(binding, reason);
+    }
+
     pub(crate) fn clear_latest_retarget_failure(
         &mut self,
         document_id: crate::product::ResultDocumentId,

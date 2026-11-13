@@ -1436,6 +1436,10 @@ pub struct ResultsState {
     /// refused, so a genuinely new run is still tried once. Transient.
     latest_retarget_failures:
         std::collections::HashMap<crate::product::ResultDocumentId, (DatasetId, String)>,
+    /// Why an archived run could not be brought back from the document that
+    /// holds it, keyed by the exact binding. Decoding an archive reads the
+    /// whole run, so a refusal is not re-attempted every frame. Transient.
+    archive_restore_failures: std::collections::HashMap<crate::product::DatasetBinding, String>,
     network_matrix: network_matrix::NetworkMatrixState,
     /// Exact retained history and display version behind waveform caches.
     wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,

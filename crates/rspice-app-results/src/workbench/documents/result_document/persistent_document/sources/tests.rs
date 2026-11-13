@@ -1,6 +1,6 @@
 //! Saved views that reference their runs: large results save, reopen,
 //! compare and refresh; a deleted or changed run is named and never drawn as
-//! the original.
+//! the original; an archived view reopens with its run gone.
 
 use std::collections::HashSet;
 
@@ -321,5 +321,84 @@ fn a_run_whose_results_changed_is_never_shown_as_the_original() {
         super::super::resolve_binding(state.results_reads(), pane_binding(&saved))
             .unwrap_err()
             .contains("no longer match"),
+    );
+    assert!(matches!(
+        archive_availability(state.results_reads(), document_id),
+        ArchiveAvailability::Unavailable(_)
+    ));
+}
+
+#[test]
+fn an_archived_view_reopens_with_its_run_deleted() {
+    let original = run(1, 3, 256, 0.0);
+    let mut state = host(&[&original]);
+    let document_id = save_view(&mut state);
+    assert_eq!(
+        archive_availability(state.results_reads(), document_id),
+        ArchiveAvailability::Available
+    );
+    archive_document(&mut state.results_parts(), document_id).expect("the view is archived");
+    assert_eq!(
+        archive_availability(state.results_reads(), document_id),
+        ArchiveAvailability::Archived
+    );
+    let archived = document(&state, document_id);
+    assert!(archived.is_archived());
+
+    // Opening the document in a session without the run brings it back.
+    let (mut reopened, reopened_id, _) = reopen(&archived, &[]);
+    let restored = reopened
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == original.dataset_id)
+        .expect("the archived run is back in the history");
+    assert_eq!(
+        restored.dataset_content_digest(),
+        original.dataset_content_digest()
+    );
+    assert!(unavailable_sources(reopened.results_reads(), reopened_id).is_empty());
+    assert!(
+        super::super::resolve_binding(
+            reopened.results_reads(),
+            pane_binding(&document(&reopened, reopened_id))
+        )
+        .is_ok()
+    );
+    // Restoring again with the run back brings no second copy.
+    restore_archived_runs(&mut reopened.results_parts(), reopened_id);
+    assert_eq!(reopened.model.simulation.retained.runs.len(), 1);
+}
+
+#[test]
+fn an_archive_that_is_not_the_bound_run_is_refused() {
+    let original = run(1, 2, 32, 0.0);
+    let mut state = host(&[&original]);
+    let document_id = save_view(&mut state);
+    archive_document(&mut state.results_parts(), document_id).expect("archived");
+    let mut archived = serde_json::to_value(document(&state, document_id)).unwrap();
+    // Swap the archived run for another one under the same binding.
+    let impostor = run(1, 2, 32, 0.5);
+    let record = serde_json::to_string(&ProjectSimulationRun::from(&{
+        let mut impostor = impostor;
+        impostor.dataset_id = original.dataset_id;
+        impostor
+    }))
+    .unwrap();
+    archived["datasets"][0]["run"]["archive"]["record"] = serde_json::Value::String(record);
+    let archived: VisualizationDocument = serde_json::from_value(archived).unwrap();
+
+    let (mut reopened, reopened_id, _) = reopen(&archived, &[]);
+    restore_archived_runs(&mut reopened.results_parts(), reopened_id);
+    assert!(reopened.model.simulation.retained.runs.is_empty());
+    let binding = pane_binding(&archived).dataset;
+    assert!(
+        reopened
+            .results_reads()
+            .results
+            .archive_restore_failure(binding)
+            .is_some_and(|reason| reason.contains("not the run it was made from"))
     );
 }

@@ -574,10 +574,12 @@ pub fn refresh_latest_binding(
     LatestBinding::Current
 }
 
-/// Open `document_id` onto its selected page and pane. A pane whose run is
-/// gone or changed still opens: the document then names the problem and
-/// offers a re-point, and the pane draws no run in its place.
+/// Open `document_id` onto its selected page and pane. An archived run the
+/// history no longer holds is restored first. A pane whose run is gone or
+/// changed still opens: the document then names the problem and offers a
+/// re-point, and the pane draws no run in its place.
 pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) -> bool {
+    sources::restore_archived_runs(state, document_id);
     let Some(document) = state
         .model
         .workspace
