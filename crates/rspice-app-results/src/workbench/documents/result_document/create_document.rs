@@ -757,6 +757,14 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
             AxisScale::Linear
         }
     });
+    // And what its unit axes are drawn against.
+    let mut abscissas: Vec<(String, rspice_results::visualization_document::Abscissa)> = session
+        .unit_abscissas
+        .iter()
+        .filter(|(axis, _)| axis.analysis == analysis_key)
+        .map(|(axis, choice)| (axis.unit.clone(), choice.abscissa.clone()))
+        .collect();
+    abscissas.sort_by(|a, b| a.0.cmp(&b.0));
     let mut document = build_document(resolved, tracking)?;
     let bound: Vec<_> = document
         .panes()
@@ -798,6 +806,15 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
             })
         })
         .chain(scale_edits)
+        .chain(bound.iter().flat_map(|pane_id| {
+            abscissas
+                .iter()
+                .map(move |(unit, abscissa)| DocumentEdit::SetUnitAbscissa {
+                    pane_id: *pane_id,
+                    unit: unit.clone(),
+                    abscissa: Some(abscissa.clone()),
+                })
+        }))
         .collect();
     if !edits.is_empty() {
         document.transact(document.revision(), edits)?;

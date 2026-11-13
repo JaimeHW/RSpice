@@ -15,9 +15,9 @@ use crate::product::{
 };
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
-    Annotation, Axis, AxisOrientation, AxisRange, AxisScale, Cursor, DocumentEdit, ExpressionTrace,
-    Marker, Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement,
-    Trace, TypedValue, VisualizationDocument,
+    Abscissa, Annotation, Axis, AxisOrientation, AxisRange, AxisScale, Cursor, DocumentEdit,
+    ExpressionTrace, Marker, Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId,
+    PanePlacement, Trace, TypedValue, VisualizationDocument,
 };
 use crate::simulation::SimulationController;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
@@ -1070,6 +1070,24 @@ pub fn project_pane_presentation(
             .session
             .project_document_x_scale(analysis_key, scale);
     }
+    // So are the signals or expressions its unit axes are drawn against.
+    if let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+    {
+        let choices = document
+            .unit_abscissas()
+            .iter()
+            .filter(|choice| choice.pane_id == pane.id)
+            .map(|choice| (choice.unit.clone(), choice.abscissa.clone()))
+            .collect();
+        state
+            .results
+            .session
+            .project_document_abscissas(analysis_key, choices);
+    }
     state.results.session.project_persistent_plot_view(
         viewer,
         axis_range(AxisOrientation::Horizontal),
@@ -1259,6 +1277,7 @@ pub fn capture_pane_presentation(
     }
     edits.extend(expression_edits(state, document, pane));
     edits.extend(x_scale_edit(state, document, pane));
+    edits.extend(abscissa_edits(state, document, pane));
     if edits.is_empty() {
         return;
     }
@@ -1300,6 +1319,58 @@ fn x_scale_edit(
         axis_id: axis.id,
         scale,
     })
+}
+
+/// The edits that make the pane keep what its strip's unit axes are drawn
+/// against: each choice the strip has and the pane does not, and the
+/// sweep again for each the pane has and the strip no longer does.
+fn abscissa_edits(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane: &PaneProjection,
+) -> Vec<DocumentEdit> {
+    let (Some(run), Some(analysis)) = (
+        state.model.simulation.active_run(),
+        state.model.simulation.active_analysis(),
+    ) else {
+        return Vec::new();
+    };
+    let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let mut chosen: Vec<(&str, &Abscissa)> = state
+        .results
+        .session
+        .unit_abscissas
+        .iter()
+        .filter(|(axis, _)| axis.analysis == analysis_key)
+        .map(|(axis, choice)| (axis.unit.as_str(), &choice.abscissa))
+        .collect();
+    chosen.sort_by_key(|(unit, _)| *unit);
+    let held: Vec<_> = document
+        .unit_abscissas()
+        .iter()
+        .filter(|choice| choice.pane_id == pane.id)
+        .collect();
+    let set = chosen
+        .iter()
+        .filter(|(unit, abscissa)| {
+            !held
+                .iter()
+                .any(|choice| choice.unit == *unit && choice.abscissa == **abscissa)
+        })
+        .map(|(unit, abscissa)| DocumentEdit::SetUnitAbscissa {
+            pane_id: pane.id,
+            unit: (*unit).to_owned(),
+            abscissa: Some((*abscissa).clone()),
+        });
+    let cleared = held
+        .iter()
+        .filter(|choice| !chosen.iter().any(|(unit, _)| *unit == choice.unit))
+        .map(|choice| DocumentEdit::SetUnitAbscissa {
+            pane_id: pane.id,
+            unit: choice.unit.clone(),
+            abscissa: None,
+        });
+    set.chain(cleared).collect()
 }
 
 /// The edits that make the pane keep the expressions its strip draws: each

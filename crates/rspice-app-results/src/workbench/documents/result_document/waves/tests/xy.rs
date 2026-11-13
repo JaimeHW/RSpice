@@ -279,3 +279,105 @@ fn the_project_keeps_what_a_pane_is_drawn_against() {
         })
     );
 }
+
+/// A saved view keeps what its volts axis is drawn against, draws it so
+/// when shown, keeps a change made inside it, and hands the quick view its
+/// own choice back when it is left.
+#[test]
+fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
+    use super::super::super::persistent_document::{
+        capture_pane_presentation, project_pane_presentation, projection,
+    };
+    use super::expression_units::{document_frame, save_single_pane_view};
+    let mut state = lissajous_host();
+    draw_against(&mut state, "V(a)");
+    let pane_key = volts_pane(&mut state);
+    let document_id = save_single_pane_view(&mut state);
+    let kept = |state: &ResultsTestHost| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project keeps the document")
+            .unit_abscissas()
+            .iter()
+            .map(|choice| (choice.unit.clone(), choice.abscissa.text().to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kept(&state), [("V".to_owned(), "V(a)".to_owned())]);
+    document_frame(&mut state, document_id);
+
+    // The reader draws the view's pane against V(b) instead, inside the
+    // pane's frame, between its projection and its capture.
+    let pane = projection(state.results_reads(), document_id)
+        .expect("the document projects")
+        .pages[0]
+        .panes[0]
+        .clone();
+    let viewer = crate::workbench::ResultViewer::from_viewer_document_id(&pane.viewer_id)
+        .expect("the pane names a Results viewer");
+    project_pane_presentation(&mut state.results_parts(), &pane, viewer)
+        .expect("the pane projects onto its strip");
+    let against_b = Abscissa::Signal {
+        name: "V(b)".to_owned(),
+    };
+    state
+        .results
+        .results
+        .session
+        .unit_abscissas
+        .insert(pane_key.clone(), UnitAbscissaChoice::new(against_b.clone()));
+    capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
+    assert_eq!(kept(&state), [("V".to_owned(), "V(b)".to_owned())]);
+    let reloaded: rspice_results::visualization_document::VisualizationDocument =
+        serde_json::from_str(
+            &serde_json::to_string(
+                state
+                    .model
+                    .workspace
+                    .content
+                    .visualization_document(document_id)
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(reloaded.unit_abscissas()[0].abscissa, against_b);
+
+    state.results.results.session.leave_persistent_document();
+    assert_eq!(
+        state
+            .results
+            .results
+            .session
+            .unit_abscissas
+            .get(&pane_key)
+            .map(|choice| choice.abscissa.text()),
+        Some("V(a)"),
+        "the quick view has its choice back"
+    );
+    // Shown again, the view draws against V(b).
+    document_frame(&mut state, document_id);
+    assert_eq!(
+        state
+            .results
+            .results
+            .session
+            .unit_abscissas
+            .get(&pane_key)
+            .map(|choice| &choice.abscissa),
+        Some(&against_b)
+    );
+    // Back on the sweep inside the view, the view forgets the choice.
+    project_pane_presentation(&mut state.results_parts(), &pane, viewer)
+        .expect("the pane projects onto its strip");
+    state
+        .results
+        .results
+        .session
+        .unit_abscissas
+        .remove(&pane_key);
+    capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
+    assert!(kept(&state).is_empty());
+}
