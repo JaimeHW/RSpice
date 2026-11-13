@@ -357,22 +357,6 @@ fn legend_entry(
         }
         None => name,
     };
-    // A corner family draws one chip for the whole group, so the chip states
-    // how many traces it stands for.
-    let family = trace.family_group_ordinal.map(|_| {
-        model
-            .traces
-            .iter()
-            .filter(|candidate| {
-                candidate.presentation_key == trace.presentation_key
-                    && candidate.family_group_ordinal.is_some()
-            })
-            .count()
-    });
-    let label = match family {
-        Some(count) if count > 1 => format!("{label}  ×{count}"),
-        _ => label,
-    };
     let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
     LegendEntry { label, width }
 }
