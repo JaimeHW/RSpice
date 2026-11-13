@@ -162,12 +162,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // TranSetup}` and `documents::result_document::{ResultMarker, ExprTrace,
     // AnalysisPresentationKey}`. They retire the way `state -> workbench` did
     // — by moving the persisted contract down, not by narrowing a signature.
-    ("schematic", "workbench", 108),
+    ("schematic", "workbench", 99),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
-    ("services", "simulation", 7),
+    ("services", "simulation", 1),
 ];
 
 /// Whole-application mutable access, frozen at its current level.
@@ -993,12 +993,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // They retire as the frame loop stops calling and starts setting state
     // that the called module reads — the pattern `frame` already follows.
     ("app", "workflows/project_workflow", 17),
-    ("app", "commands", 7),
+    ("app", "commands", 1),
     ("app", "chrome", 12),
     ("app", "workflows/file_workflow", 1),
     ("app", "browser/navigation", 7),
     ("app", "workflows/file_actions", 2),
-    ("app", "frame", 5),
+    ("app", "frame", 4),
     ("app", "cross_probe", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
@@ -1024,7 +1024,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // What still reaches the application root rather than the session data.
     // These name `RSpiceApp` itself, so they retire with the `&mut RSpiceApp`
     // burndown, not with a module move.
-    ("documents/code_workspace", "app", 5),
+    ("documents/code_workspace", "app", 4),
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the
@@ -1034,7 +1034,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
-    ("commands", "menu_bar", 5),
+    ("commands", "menu_bar", 4),
     ("surfaces", "preflight", 1),
     // The shell's own persisted state reaching up into the window session.
     // This is the same inversion the top-level `state -> *` entries describe,
@@ -1052,7 +1052,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // lives with the frame pass that synchronizes it.
     ("slots", "cross_probe", 1),
     // Artifacts reaching sideways into the workflows.
-    ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
+    ("shortcuts/artifacts", "shortcuts/profile_workflow", 1),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),
