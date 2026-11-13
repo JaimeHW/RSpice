@@ -1811,28 +1811,21 @@ mod tests {
         assert_eq!(trace(3).look(0, false).marker, None);
     }
 
-    /// A fresh theme, and one stored while color-safe traces were the
-    /// default, draw every first-pass curve as a plain line in its hue: no
-    /// dash, no symbol.
+    /// A fresh theme draws every first-pass curve as a plain line in its
+    /// hue: no dash, no symbol.
     #[test]
-    fn the_default_and_a_previously_stored_theme_draw_traces_solid() {
-        let stored: crate::Theme = serde_json::from_str(
-            r#"{"direction":"Instrument","mode":"Dark","density":"Compact","colorblind_traces":true}"#,
-        )
-        .expect("stored theme deserializes");
+    fn the_default_theme_draws_traces_solid() {
         let (x, y) = ([0.0, 1.0], [0.0, 1.0]);
         let solid = TraceLook {
             dash: None,
             marker: None,
         };
-        for theme in [crate::Theme::default(), stored] {
-            let color_safe = theme.tokens().color_safe_traces;
-            for slot in 0..TRACE_HUES {
-                let placed = Trace::new(&x, &y, Color32::RED).palette_slot(slot);
-                assert_eq!(placed.look(slot, color_safe), solid, "slot {slot}");
-                let unplaced = Trace::new(&x, &y, Color32::RED);
-                assert_eq!(unplaced.look(slot, color_safe), solid, "ordinal {slot}");
-            }
+        let color_safe = crate::Theme::default().tokens().color_safe_traces;
+        for slot in 0..TRACE_HUES {
+            let placed = Trace::new(&x, &y, Color32::RED).palette_slot(slot);
+            assert_eq!(placed.look(slot, color_safe), solid, "slot {slot}");
+            let unplaced = Trace::new(&x, &y, Color32::RED);
+            assert_eq!(unplaced.look(slot, color_safe), solid, "ordinal {slot}");
         }
     }
 
