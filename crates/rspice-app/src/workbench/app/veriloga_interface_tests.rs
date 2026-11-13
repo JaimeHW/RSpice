@@ -129,7 +129,7 @@ pub(crate) fn compile_and_publish(app: &mut RSpiceApp) {
 }
 
 /// Replace the open view's root source with `source`.
-pub(super) fn edit_source(app: &mut RSpiceApp, source: &str) {
+pub(crate) fn edit_source(app: &mut RSpiceApp, source: &str) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
     let path = selected.document().logical_path().to_owned();
     assert!(

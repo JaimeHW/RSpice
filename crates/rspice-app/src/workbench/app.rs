@@ -85,7 +85,7 @@ pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
-mod schematic;
+pub(crate) mod schematic;
 
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::pack_persistence;
@@ -1239,7 +1239,7 @@ mod veriloga_placement_tests;
 #[cfg(test)]
 mod run_flow_tests;
 #[cfg(test)]
-pub(in crate::workbench) mod veriloga_flow_tests;
+pub(crate) mod veriloga_flow_tests;
 #[cfg(test)]
 mod veriloga_import_tests;
 
