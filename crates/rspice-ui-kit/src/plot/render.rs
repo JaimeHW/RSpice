@@ -430,30 +430,304 @@ fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
         .filter(|run| !run.is_empty())
 }
 
-/// Where a trace's categorical markers sit: evenly spaced along the curve.
+/// The distance between one trace's markers along X, in points: about an
+/// inch of screen, so a pane carries a handful per curve.
+const MARKER_PITCH: f32 = 96.0;
+
+/// The least distance between the markers of two staggered traces. A pane
+/// with more marked curves than fit in [`MARKER_PITCH`] widens its pitch.
+const MARKER_STAGGER_MIN: f32 = 12.0;
+
+/// Half a marker's width with its outline and its background halo, and a
+/// point of air: a transition nearer than this to a marker's centre runs
+/// under or against the glyph.
+const MARKER_CLEARANCE: f32 = 5.5;
+
+/// Half the width of a marker's centre. On a tread narrower than the glyph
+/// — a fast clock zoomed out — no position clears both risers, and the
+/// marker stands at the tread's middle with this much of it on the tread.
+const MARKER_CORE: f32 = 1.5;
+
+/// The farthest a marker leaves its slot to clear a transition, in points:
+/// far enough to step off a riser a few columns wide onto the tread beside
+/// it, and a small part of a pitch, so the rhythm still reads.
+const MARKER_REACH: u8 = 8;
+
+/// The rise across one pixel column, in points, above which the curve there
+/// is a transition rather than a slope: steeper than about 72°.
+const EDGE_SLOPE: f32 = 3.0;
+
+/// The least height a run of steep columns spans to be a transition. A
+/// smaller step lies under the glyph wherever the marker stands on it.
+const EDGE_MIN_RISE: f32 = 6.0;
+
+/// Where on its pane's X grid one trace's markers stand.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MarkerSlots {
+    /// The screen X of one of this trace's slots; the rest lie whole
+    /// pitches either side of it.
+    origin: f32,
+    /// The distance between this trace's slots.
+    pitch: f32,
+}
+
+impl MarkerSlots {
+    /// The slots of each of `spec`'s traces, in order: `None` for a trace
+    /// that carries no marker.
+    fn for_pane(spec: &PlotSpec<'_>, plot_rect: Rect, color_safe: bool) -> Vec<Option<Self>> {
+        let marked: Vec<bool> = spec
+            .traces
+            .iter()
+            .enumerate()
+            .map(|(index, trace)| {
+                !trace.x.is_empty() && trace.look(index, color_safe).marker.is_some()
+            })
+            .collect();
+        let count = marked.iter().filter(|marked| **marked).count();
+        let mut rank = 0;
+        marked
+            .into_iter()
+            .map(|marked| {
+                marked.then(|| {
+                    rank += 1;
+                    Self::on_pane(spec, plot_rect, rank - 1, count)
+                })
+            })
+            .collect()
+    }
+
+    /// The slots of the `rank`-th of a pane's `marked` marked traces.
+    ///
+    /// Every trace's slots are the pane's one grid, shifted by an even share
+    /// of a pitch per rank: the curves' markers interleave instead of
+    /// stacking, and each curve's stand in one regular rhythm. The grid is
+    /// pinned to the data, not to the pane — X = 0, or 1 on a log axis, is a
+    /// grid line — so a pan carries the markers with their curves instead of
+    /// sliding the curves under them.
+    fn on_pane(spec: &PlotSpec<'_>, plot_rect: Rect, rank: usize, marked: usize) -> Self {
+        let marked = marked.max(1);
+        let pitch = MARKER_PITCH.max(MARKER_STAGGER_MIN * marked as f32);
+        let anchor = match spec.x_scale {
+            XScale::Linear => 0.0,
+            XScale::Log10 => 1.0,
+        };
+        let anchor =
+            spec.x_scale.normalize(anchor, spec.x.min, spec.x.max) * f64::from(plot_rect.width());
+        let phase = if anchor.is_finite() {
+            anchor.rem_euclid(f64::from(pitch)) as f32
+        } else {
+            0.0
+        };
+        Self {
+            origin: plot_rect.left() + phase + pitch * (rank % marked) as f32 / marked as f32,
+            pitch,
+        }
+    }
+}
+
+/// Where a trace's categorical markers sit.
+///
+/// On an ordinary left-to-right curve, at its slots on the pane's X grid
+/// (see [`MarkerSlots`]), so every marked curve carries its symbols in one
+/// visible rhythm. Spacing them by arc length, as this once did, reads as
+/// random on a stepped or digital trace: risers are long and treads short,
+/// so symbols crowded the edges and thinned out on the flats.
+///
+/// Never on a transition. A riser is a step's jump between two held values,
+/// and a marker on it stands at a value the trace never held: 101 on a
+/// 128 → 64 step. Any run of pixel columns steeper than [`EDGE_SLOPE`] is a
+/// transition however many columns it spans, not only one narrower than a
+/// column. A marker whose glyph would cover one moves along the tread beside
+/// it, at most [`MARKER_REACH`] points; on treads narrower than the glyph it
+/// stands at a tread's middle; with no tread in reach it is left out.
+///
+/// A locus — Smith, Nyquist, an XY loop — doubles back on X, so it has no X
+/// grid to stand on; its markers are spaced along the curve instead.
+fn trace_marker_positions(points: &[Pos2], plot_rect: Rect, slots: MarkerSlots) -> Vec<Pos2> {
+    if points.len() < 2 || plot_rect.width() < 72.0 {
+        return Vec::new();
+    }
+    if doubles_back(points) {
+        locus_marker_positions(points, plot_rect)
+    } else {
+        abscissa_marker_positions(points, plot_rect, slots)
+    }
+}
+
+fn finite_point(point: Pos2) -> bool {
+    point.x.is_finite() && point.y.is_finite()
+}
+
+/// Whether a projected curve runs right to left anywhere, by more than half
+/// a pixel. A min/max envelope keeps each column's samples in encounter
+/// order, which never steps back.
+fn doubles_back(points: &[Pos2]) -> bool {
+    points
+        .windows(2)
+        .any(|pair| finite_point(pair[0]) && finite_point(pair[1]) && pair[1].x < pair[0].x - 0.5)
+}
+
+/// A left-to-right curve's markers, one per slot that has a tread within
+/// reach: the nearest position whose whole glyph clears every transition,
+/// or failing that, on treads narrower than the glyph, the nearest whose
+/// centre stands on one.
+fn abscissa_marker_positions(points: &[Pos2], plot_rect: Rect, slots: MarkerSlots) -> Vec<Pos2> {
+    let profile = ColumnProfile::of(points, plot_rect);
+    let bounds = plot_rect.shrink(4.0);
+    let offsets = std::iter::once(0.0).chain((1..=2 * MARKER_REACH).flat_map(|step| {
+        let offset = f32::from(step) * 0.5;
+        [-offset, offset]
+    }));
+    let mut placed = Vec::new();
+    let mut cursor = 0;
+    let mut slot =
+        slots.origin - ((slots.origin - bounds.left()) / slots.pitch).floor() * slots.pitch;
+    while slot <= bounds.right() {
+        let nearest = |clearance: f32| {
+            offsets
+                .clone()
+                .map(|offset| slot + offset)
+                .find(|x| bounds.x_range().contains(*x) && profile.clear_at(*x, clearance))
+        };
+        let clear = nearest(MARKER_CLEARANCE).or_else(|| nearest(MARKER_CORE));
+        if let Some(x) = clear
+            && let Some(y) = height_at(points, &mut cursor, x)
+            && bounds.y_range().contains(y)
+        {
+            placed.push(pos2(x, y));
+        }
+        slot += slots.pitch;
+    }
+    placed
+}
+
+/// The curve's height at screen X `x`, read along a left-to-right polyline
+/// from `cursor`, which only moves forward. `None` in a hole in the data.
+fn height_at(points: &[Pos2], cursor: &mut usize, x: f32) -> Option<f32> {
+    while *cursor + 1 < points.len() {
+        let (a, b) = (points[*cursor], points[*cursor + 1]);
+        if finite_point(a) && finite_point(b) {
+            if a.x > x {
+                return None;
+            }
+            if b.x >= x && b.x > a.x {
+                return Some(a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x));
+            }
+        }
+        *cursor += 1;
+    }
+    None
+}
+
+/// Which pixel columns of a plot a left-to-right curve passes through, and
+/// which of those belong to a transition.
+struct ColumnProfile {
+    left: f32,
+    covered: Vec<bool>,
+    edge: Vec<bool>,
+}
+
+impl ColumnProfile {
+    fn of(points: &[Pos2], plot_rect: Rect) -> Self {
+        let left = plot_rect.left();
+        let columns = plot_rect.width().ceil().max(0.0) as usize;
+        let mut low = vec![f32::INFINITY; columns];
+        let mut high = vec![f32::NEG_INFINITY; columns];
+        let last = columns.saturating_sub(1) as f32;
+        for pair in points.windows(2) {
+            let (mut a, mut b) = (pair[0], pair[1]);
+            if !(finite_point(a) && finite_point(b)) {
+                continue;
+            }
+            if b.x < a.x {
+                std::mem::swap(&mut a, &mut b);
+            }
+            let (from, to) = (a.x - left, b.x - left);
+            if columns == 0 || to < 0.0 || from >= columns as f32 {
+                continue;
+            }
+            let height = |x: f32| {
+                if to > from {
+                    a.y + (b.y - a.y) * (x - from) / (to - from)
+                } else if x > from {
+                    b.y
+                } else {
+                    a.y
+                }
+            };
+            let first = from.floor().clamp(0.0, last) as usize;
+            let final_column = to.floor().clamp(0.0, last) as usize;
+            for column in first..=final_column {
+                // A vertical segment is all of its rise inside one column.
+                let (x0, x1) = if to > from {
+                    ((column as f32).max(from), (column as f32 + 1.0).min(to))
+                } else {
+                    (from, from + 1.0)
+                };
+                let (y0, y1) = (height(x0), height(x1));
+                low[column] = low[column].min(y0.min(y1));
+                high[column] = high[column].max(y0.max(y1));
+            }
+        }
+        let covered: Vec<bool> = low
+            .iter()
+            .zip(&high)
+            .map(|(low, high)| low <= high)
+            .collect();
+        let steep = |column: usize| covered[column] && high[column] - low[column] > EDGE_SLOPE;
+        let mut edge = vec![false; columns];
+        let mut column = 0;
+        while column < columns {
+            if !steep(column) {
+                column += 1;
+                continue;
+            }
+            let start = column;
+            let (mut top, mut bottom) = (f32::INFINITY, f32::NEG_INFINITY);
+            while column < columns && steep(column) {
+                top = top.min(low[column]);
+                bottom = bottom.max(high[column]);
+                column += 1;
+            }
+            if bottom - top >= EDGE_MIN_RISE {
+                edge[start..column].fill(true);
+            }
+        }
+        Self {
+            left,
+            covered,
+            edge,
+        }
+    }
+
+    /// Whether the columns within `clearance` of screen X `x` all carry the
+    /// curve and none of them belongs to a transition.
+    fn clear_at(&self, x: f32, clearance: f32) -> bool {
+        let first = (x - clearance - self.left).floor();
+        let last = (x + clearance - self.left).floor();
+        if !(first >= 0.0 && last < self.covered.len() as f32) {
+            return false;
+        }
+        (first as usize..=last as usize).all(|column| self.covered[column] && !self.edge[column])
+    }
+}
+
+/// A locus's markers, evenly spaced along the curve.
 ///
 /// Along the curve, not along the X axis. Walking X assumes the drawn path
 /// advances left to right, which a locus does not — it doubles back, so the
 /// search that only ever moved forward stuck at the turn and stamped the same
 /// marker repeatedly on one point while the whole return branch got none.
-/// Arc position is the same walk for an ordinary trace and the right one for
-/// every other, and it keeps the count bounded by the pane's width.
+/// Arc position keeps the count bounded by the pane's width.
 ///
-/// Never partway up an edge. A vertical segment is a step's jump between two
-/// held values, and a marker on it would stand at a value the trace never
-/// held: 101 on a 128 → 64 step. A marker the walk puts on one moves to the
-/// nearer end, a sample on the run beside the edge, and one that would then
-/// crowd the marker before it is dropped.
-fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
-    const MIN_SPACING: f32 = 96.0;
-    if points.len() < 2 || plot_rect.width() < 72.0 {
-        return Vec::new();
-    }
-    let finite = |point: &Pos2| point.x.is_finite() && point.y.is_finite();
+/// A marker the walk puts on a vertical segment moves to the nearer end, and
+/// one that would then crowd the marker before it is dropped.
+fn locus_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
+    const MIN_SPACING: f32 = MARKER_PITCH;
     let length = |a: Pos2, b: Pos2| (b - a).length();
     let total: f32 = points
         .windows(2)
-        .filter(|pair| finite(&pair[0]) && finite(&pair[1]))
+        .filter(|pair| finite_point(pair[0]) && finite_point(pair[1]))
         .map(|pair| length(pair[0], pair[1]))
         .sum();
     // Only finite pairs contribute, so every term is a non-negative real and
@@ -471,7 +745,7 @@ fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
     let mut next = spacing * 0.5;
     for pair in points.windows(2) {
         let (a, b) = (pair[0], pair[1]);
-        if !(finite(&a) && finite(&b)) {
+        if !(finite_point(a) && finite_point(b)) {
             continue;
         }
         let segment = length(a, b);
@@ -506,11 +780,12 @@ fn paint_trace_markers(
     painter: &egui::Painter,
     points: &[Pos2],
     plot_rect: Rect,
+    slots: MarkerSlots,
     shape: TraceMarkerShape,
     color: Color32,
     background: Color32,
 ) {
-    for point in trace_marker_positions(points, plot_rect) {
+    for point in trace_marker_positions(points, plot_rect, slots) {
         paint_trace_marker(painter, point, shape, color, background);
     }
 }
@@ -858,6 +1133,7 @@ pub fn show(
         // A parametric reduction quantizes both axes, so it needs the vertical
         // resolution too. Bucketed for the same reason as `columns`.
         let rows = (plot_rect.height().ceil() as usize).next_multiple_of(64);
+        let marker_slots = MarkerSlots::for_pane(spec, plot_rect, t.color_safe_traces);
         for (trace_index, trace) in spec.traces.iter().enumerate() {
             if trace.x.is_empty() {
                 continue;
@@ -936,6 +1212,8 @@ pub fn show(
                         &clipped,
                         &points,
                         plot_rect,
+                        marker_slots[trace_index]
+                            .unwrap_or_else(|| MarkerSlots::on_pane(spec, plot_rect, 0, 1)),
                         marker,
                         trace.color,
                         c.canvas_bg,
@@ -2133,10 +2411,18 @@ mod tests {
         );
     }
 
-    /// Markers follow the curve, not the abscissa. On a locus the X walk
-    /// stalled at the first turn and stamped one point over and over.
+    /// One trace's slots on a pane of its own, starting at its left edge.
+    fn slots(plot: Rect) -> MarkerSlots {
+        MarkerSlots {
+            origin: plot.left(),
+            pitch: MARKER_PITCH,
+        }
+    }
+
+    /// A locus's markers follow the curve, not the abscissa. On a locus an X
+    /// walk stalled at the first turn and stamped one point over and over.
     #[test]
-    fn trace_markers_walk_the_curve_rather_than_the_abscissa() {
+    fn trace_markers_walk_a_locus_rather_than_its_abscissa() {
         let plot = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
         let circle: Vec<Pos2> = (0..=720)
             .map(|step: u16| {
@@ -2144,7 +2430,7 @@ mod tests {
                 plot.center() + vec2(angle.cos(), angle.sin()) * 150.0
             })
             .collect();
-        let placed = trace_marker_positions(&circle, plot);
+        let placed = trace_marker_positions(&circle, plot, slots(plot));
 
         assert!(placed.len() >= 4, "{} markers on a locus", placed.len());
         for pair in placed.windows(2) {
@@ -2156,13 +2442,177 @@ mod tests {
         }
         assert!(placed.iter().all(|point| plot.contains(*point)));
 
-        // An ordinary left-to-right trace keeps its even cadence.
+        // An ordinary left-to-right trace stands its markers one pitch apart.
         let ramp: Vec<Pos2> = (0..=600u16)
             .map(|step| pos2(f32::from(step), 200.0 + f32::from(step) * 0.1))
             .collect();
-        let placed = trace_marker_positions(&ramp, plot);
+        let placed = trace_marker_positions(&ramp, plot, slots(plot));
         assert!(placed.len() >= 4 && placed.len() <= 8, "{placed:?}");
-        assert!(placed.windows(2).all(|pair| pair[1].x > pair[0].x));
+        assert!(
+            placed
+                .windows(2)
+                .all(|pair| (pair[1].x - pair[0].x - MARKER_PITCH).abs() < 1.0e-3),
+            "{placed:?}"
+        );
+    }
+
+    /// A step trace whose transitions each span three pixel columns carries
+    /// no marker on any of them, wherever the grid falls: every marker stands
+    /// on a tread, at a level the trace held, with its glyph clear of both
+    /// risers, and within reach of its slot. The guard this replaced only
+    /// knew a riser narrower than one column, so a marker stood partway up
+    /// every wider one the walk happened to stop on.
+    #[test]
+    fn markers_stay_off_transitions_three_columns_wide() {
+        let plot = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 300.0));
+        let levels = [
+            250.0f32, 60.0, 180.0, 40.0, 220.0, 100.0, 260.0, 80.0, 200.0, 120.0, 240.0, 50.0,
+        ];
+        let (tread, riser) = (77.0f32, 3.0f32);
+        let mut points = Vec::new();
+        let mut risers = Vec::new();
+        for (index, level) in levels.iter().enumerate() {
+            let start = index as f32 * (tread + riser);
+            points.extend([pos2(start, *level), pos2(start + tread, *level)]);
+            if index + 1 < levels.len() {
+                risers.push((start + tread, start + tread + riser));
+            }
+        }
+        for phase in 0..80u8 {
+            let slots = MarkerSlots {
+                origin: f32::from(phase),
+                pitch: MARKER_PITCH,
+            };
+            let placed = trace_marker_positions(&points, plot, slots);
+            assert!(placed.len() >= 6, "phase {phase}: {placed:?}");
+            for marker in &placed {
+                assert!(
+                    levels.iter().any(|level| (marker.y - level).abs() < 1.0e-3),
+                    "phase {phase}: a marker at {marker:?} stands between levels"
+                );
+                assert!(
+                    risers.iter().all(|(start, end)| {
+                        marker.x + MARKER_CLEARANCE <= *start || marker.x - MARKER_CLEARANCE >= *end
+                    }),
+                    "phase {phase}: a marker at {marker:?} covers a riser"
+                );
+                let from_slot = (marker.x - slots.origin).rem_euclid(MARKER_PITCH);
+                assert!(
+                    from_slot.min(MARKER_PITCH - from_slot) <= f32::from(MARKER_REACH),
+                    "phase {phase}: a marker at {marker:?} left its slot"
+                );
+            }
+        }
+    }
+
+    /// A clock zoomed out until its half-periods are narrower than a glyph
+    /// still carries its markers, each at the middle of a high or low tread,
+    /// never on an edge. Clearing the whole glyph alone would have left the
+    /// curve with none while its legend swatch showed one.
+    #[test]
+    fn a_clock_narrower_than_a_glyph_carries_markers_mid_tread() {
+        let plot = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 300.0));
+        let (tread, edge, high, low) = (5.0f32, 1.0f32, 60.0f32, 240.0f32);
+        let mut points = Vec::new();
+        let mut edges = Vec::new();
+        let mut start = 0.0f32;
+        let mut level = high;
+        while start < plot.width() {
+            points.extend([pos2(start, level), pos2(start + tread, level)]);
+            edges.push((start + tread, start + tread + edge));
+            start += tread + edge;
+            level = if level == high { low } else { high };
+        }
+        for phase in 0..12u8 {
+            let slots = MarkerSlots {
+                origin: f32::from(phase) * 0.5,
+                pitch: MARKER_PITCH,
+            };
+            let placed = trace_marker_positions(&points, plot, slots);
+            assert!(placed.len() >= 8, "phase {phase}: {placed:?}");
+            for marker in &placed {
+                assert!(
+                    marker.y == high || marker.y == low,
+                    "phase {phase}: a marker at {marker:?} is off both levels"
+                );
+                assert!(
+                    edges.iter().all(|(start, end)| {
+                        marker.x + MARKER_CORE <= *start || marker.x - MARKER_CORE >= *end
+                    }),
+                    "phase {phase}: a marker at {marker:?} stands on an edge"
+                );
+            }
+        }
+    }
+
+    /// Two marked curves on one pane stand their markers on one X grid, the
+    /// second half a pitch after the first, so neither curve's symbols stack
+    /// on the other's and each keeps one rhythm. Read from the frame.
+    #[test]
+    fn two_marked_curves_share_one_staggered_grid() {
+        let x = [0.0, 10.0];
+        let (low, high) = ([1.0, 1.0], [3.0, 3.0]);
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 10.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 4.0, "V"),
+        );
+        spec.traces
+            .push(Trace::new(&x, &low, Color32::RED).marker_style(0));
+        spec.traces
+            .push(Trace::new(&x, &high, Color32::GREEN).marker_style(1));
+        let (shapes, _) = plot_frames(&spec, vec2(960.0, 360.0), &[Vec::new()]);
+        let mut circles = Vec::new();
+        let mut squares = Vec::new();
+        for clipped in &shapes {
+            match &clipped.shape {
+                Shape::Circle(circle) if circle.stroke.color == Color32::RED => {
+                    circles.push(circle.center.x);
+                }
+                Shape::Rect(rect) if rect.stroke.color == Color32::GREEN => {
+                    squares.push(rect.rect.center().x);
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            circles.len() >= 6 && squares.len() >= 6,
+            "{circles:?} {squares:?}"
+        );
+        let pitch = |marks: &[f32]| {
+            marks
+                .windows(2)
+                .all(|pair| (pair[1] - pair[0] - MARKER_PITCH).abs() < 1.0e-3)
+        };
+        assert!(pitch(&circles), "{circles:?}");
+        assert!(pitch(&squares), "{squares:?}");
+        for square in &squares {
+            let after = (square - circles[0]).rem_euclid(MARKER_PITCH);
+            assert!(
+                (after - MARKER_PITCH / 2.0).abs() < 1.0e-3,
+                "a square at {square} is {after} after the circles' grid"
+            );
+        }
+    }
+
+    /// The grid is pinned to the data, so a pan carries the markers with
+    /// their curves: moving the view ten columns moves every slot ten.
+    #[test]
+    fn a_pan_carries_the_marker_grid_with_the_data() {
+        let plot = Rect::from_min_size(pos2(40.0, 0.0), vec2(960.0, 300.0));
+        let origin = |min: f64| {
+            let spec = PlotSpec::new(
+                Axis::linear(min, min + 9.6, "s"),
+                XScale::Linear,
+                Axis::linear(0.0, 1.0, "V"),
+            );
+            MarkerSlots::on_pane(&spec, plot, 0, 1).origin
+        };
+        let moved = (origin(0.0) - origin(0.1)).rem_euclid(MARKER_PITCH);
+        assert!(
+            (moved - 10.0).abs() < 1.0e-2,
+            "the slots moved {moved} for a ten-column pan"
+        );
     }
 
     /// A staircase's markers stand on its treads, never partway up a riser.
@@ -2267,12 +2717,12 @@ mod tests {
 
         // Every sample on one spot: the walk has nowhere to advance.
         let stacked = vec![plot.center(); 64];
-        assert!(trace_marker_positions(&stacked, plot).is_empty());
+        assert!(trace_marker_positions(&stacked, plot, slots(plot)).is_empty());
 
         // Every sample undefined: nothing survives the finite filter, so the
         // sum is the empty sum rather than a NaN.
         let undefined = vec![pos2(f32::NAN, f32::NAN); 64];
-        assert!(trace_marker_positions(&undefined, plot).is_empty());
+        assert!(trace_marker_positions(&undefined, plot, slots(plot)).is_empty());
 
         // Real positions, but every segment straddles a hole, so no pair
         // contributes and the total is still zero.
@@ -2285,13 +2735,13 @@ mod tests {
                 }
             })
             .collect();
-        assert!(trace_marker_positions(&straddled, plot).is_empty());
+        assert!(trace_marker_positions(&straddled, plot, slots(plot)).is_empty());
 
         // The guard has not swallowed the ordinary case.
         let ramp: Vec<Pos2> = (0..=600u16)
             .map(|step| pos2(f32::from(step), 200.0))
             .collect();
-        assert!(!trace_marker_positions(&ramp, plot).is_empty());
+        assert!(!trace_marker_positions(&ramp, plot, slots(plot)).is_empty());
     }
 
     /// No gesture may store a view a later gesture cannot undo.
