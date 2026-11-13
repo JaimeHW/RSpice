@@ -333,9 +333,6 @@ impl TransientCheckpointCapability {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum IntegrationContinuation {
-    /// Legacy formats omitted or incompletely recorded the accepted
-    /// controller state, so in-flight resume must fail closed.
-    Unavailable,
     /// Authenticated PSS/HB state at exact +0 before a transient controller
     /// has proposed its first interval.
     SyntheticOrigin,
@@ -373,9 +370,6 @@ const LIVELOCK_STREAK_RESTART: usize = 32;
 /// continuation phase.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum AcceptedIntegrationRuntime {
-    /// An arbitrary in-flight continuation from a legacy file cannot prove
-    /// its controller state and must fail closed.
-    UnavailableLegacy,
     /// Synthetic origins, deliberate endpoints, and post-breakpoint proposals
     /// intentionally start from normalized order-one integration state.
     RestartNormalized(RestartNormalizedIntegrationRuntimeCheckpoint),
@@ -4478,9 +4472,6 @@ fn write_accepted_integration_runtime(
 ) -> Result<(), SimulationError> {
     check_checkpoint_abort(abort)?;
     match runtime {
-        AcceptedIntegrationRuntime::UnavailableLegacy => {
-            out.push_str("accepted_integration_runtime unavailable-legacy\n");
-        }
         AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
             out.push_str(&format!(
                 "accepted_integration_runtime restart-normalized {}\n",
@@ -4823,14 +4814,6 @@ fn read_accepted_integration_runtime(
     let kind = header_fields
         .next()
         .ok_or_else(|| "accepted integration runtime header is missing its kind".to_string())?;
-    if kind == "unavailable-legacy" {
-        if header_fields.next().is_some() {
-            return Err(format!(
-                "accepted integration runtime header has extra fields: '{header}'"
-            ));
-        }
-        return Ok(AcceptedIntegrationRuntime::UnavailableLegacy);
-    }
     let version = header_fields
         .next()
         .ok_or_else(|| "accepted integration runtime header is missing its version".to_string())?
@@ -5266,7 +5249,6 @@ fn accepted_integration_runtime_retained_value_count(
             .saturating_add(2_usize.saturating_mul(usize::from(damped_status)))
     };
     match runtime {
-        AcceptedIntegrationRuntime::UnavailableLegacy => 1,
         AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
             1_usize.saturating_add(policy_count(
                 runtime.resume_blockers.len(),
@@ -5358,10 +5340,6 @@ impl TransientCheckpoint {
             );
         }
         match &self.accepted_integration_runtime {
-            AcceptedIntegrationRuntime::UnavailableLegacy => push(
-                TransientCheckpointBlockerSource::Structural,
-                "accepted integration runtime is unavailable".to_string(),
-            ),
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
                 for blocker in &runtime.resume_blockers {
                     push(
@@ -5407,13 +5385,6 @@ impl TransientCheckpoint {
             (
                 self.integration_max_step.is_none(),
                 "captured segment maximum step is unavailable",
-            ),
-            (
-                matches!(
-                    self.integration_continuation,
-                    IntegrationContinuation::Unavailable
-                ),
-                "integration continuation state is unavailable",
             ),
         ] {
             if missing {
@@ -5496,7 +5467,6 @@ impl TransientCheckpoint {
             );
         }
         match self.integration_continuation {
-            IntegrationContinuation::Unavailable => {}
             IntegrationContinuation::SyntheticOrigin
                 if self.time.to_bits() == 0.0_f64.to_bits() => {}
             IntegrationContinuation::SyntheticOrigin => {
@@ -5592,16 +5562,6 @@ impl TransientCheckpoint {
                 AcceptedIntegrationRuntime::Exact(runtime),
             ) => runtime.validate_numeric_state(&self.solution, self.time)?,
             (
-                IntegrationContinuation::Proposed {
-                    xyce_breakpoint_restart_pending: false,
-                    ..
-                },
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => {
-                // Legacy v<=19 files remain parseable so the resume boundary
-                // can issue a targeted fail-closed diagnostic.
-            }
-            (
                 IntegrationContinuation::SyntheticOrigin
                 | IntegrationContinuation::BreakpointRestart
                 | IntegrationContinuation::Proposed {
@@ -5610,22 +5570,6 @@ impl TransientCheckpoint {
                 },
                 AcceptedIntegrationRuntime::RestartNormalized(runtime),
             ) => runtime.validate_numeric_state(self.time)?,
-            (
-                IntegrationContinuation::SyntheticOrigin
-                | IntegrationContinuation::BreakpointRestart
-                | IntegrationContinuation::Proposed {
-                    xyce_breakpoint_restart_pending: true,
-                    ..
-                },
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => {
-                // Legacy normalized phases remain parseable but cannot prove
-                // persistent trajectory policy on resume.
-            }
-            (
-                IntegrationContinuation::Unavailable,
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => {}
             _ => {
                 return Err(
                     "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
@@ -6432,16 +6376,11 @@ impl TransientCheckpoint {
                 accepted_junction_history.resume_blockers.join("; ")
             );
         }
-        let accepted_integration_resume_blockers = match &accepted_integration_runtime {
-            AcceptedIntegrationRuntime::UnavailableLegacy => None,
-            AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
-                Some(&runtime.resume_blockers)
-            }
-            AcceptedIntegrationRuntime::Exact(runtime) => Some(&runtime.resume_blockers),
+        let blockers = match &accepted_integration_runtime {
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => &runtime.resume_blockers,
+            AcceptedIntegrationRuntime::Exact(runtime) => &runtime.resume_blockers,
         };
-        if let Some(blockers) = accepted_integration_resume_blockers
-            && !blockers.is_empty()
-        {
+        if !blockers.is_empty() {
             log::warn!(
                 "transient checkpoint at t={time:.6e}: accepted integration runtime is not fully resumable; this checkpoint will be refused for resume: {}",
                 blockers.join("; ")
@@ -7156,12 +7095,6 @@ impl TransientCheckpoint {
             );
         }
         match &self.accepted_integration_runtime {
-            AcceptedIntegrationRuntime::UnavailableLegacy => {
-                return Err(
-                    "legacy transient checkpoint does not record accepted integration runtime state required for exact resume"
-                        .to_string(),
-                );
-            }
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
                 if !runtime.resume_blockers.is_empty() {
                     return Err(format!(
@@ -7280,8 +7213,8 @@ impl TransientCheckpoint {
 
     /// Return the authenticated proposal for the first interval after this
     /// accepted point. Synthetic origins and deliberate endpoint breakpoint
-    /// restarts legitimately request fresh startup sizing; incomplete legacy
-    /// state is distinguishable and fails closed.
+    /// restarts legitimately request fresh startup sizing; a phase that does
+    /// not match its accepted runtime contract fails closed.
     pub(super) fn validated_integration_continuation(
         &self,
     ) -> Result<Option<ProposedIntegrationContinuation>, String> {
@@ -7323,21 +7256,6 @@ impl TransientCheckpoint {
                 | IntegrationContinuation::BreakpointRestart,
                 AcceptedIntegrationRuntime::RestartNormalized(_),
             ) => Ok(None),
-            (IntegrationContinuation::Unavailable, _) => Err(
-                "legacy transient checkpoint does not record complete integration continuation state"
-                    .to_string(),
-            ),
-            (
-                IntegrationContinuation::Proposed { .. },
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => Err(
-                "legacy transient checkpoint does not record exact accepted integration runtime for its proposed interval"
-                    .to_string(),
-            ),
-            (_, AcceptedIntegrationRuntime::UnavailableLegacy) => Err(
-                "legacy transient checkpoint does not record persistent restart-normalized integration policy state"
-                    .to_string(),
-            ),
             _ => Err(
                 "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
                     .to_string(),
@@ -7382,32 +7300,6 @@ impl TransientCheckpoint {
                     runtime,
                 ))
             }
-            (
-                IntegrationContinuation::Proposed {
-                    xyce_breakpoint_restart_pending: false,
-                    ..
-                },
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => Err(
-                "legacy transient checkpoint does not record exact accepted integration runtime for an arbitrary proposed interval"
-                    .to_string(),
-            ),
-            (
-                IntegrationContinuation::SyntheticOrigin
-                | IntegrationContinuation::BreakpointRestart
-                | IntegrationContinuation::Proposed {
-                    xyce_breakpoint_restart_pending: true,
-                    ..
-                },
-                AcceptedIntegrationRuntime::UnavailableLegacy,
-            ) => Err(
-                "legacy transient checkpoint does not record persistent restart-normalized integration policy state"
-                    .to_string(),
-            ),
-            (IntegrationContinuation::Unavailable, _) => Err(
-                "legacy transient checkpoint does not record complete integration continuation state"
-                    .to_string(),
-            ),
             _ => Err(
                 "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
                     .to_string(),
@@ -7897,7 +7789,6 @@ impl TransientCheckpoint {
         out.push_str(&format!(
             "integration_continuation {}\n",
             match self.integration_continuation {
-                IntegrationContinuation::Unavailable => "unavailable".to_string(),
                 IntegrationContinuation::SyntheticOrigin => "synthetic-origin".to_string(),
                 IntegrationContinuation::BreakpointRestart => "breakpoint-restart".to_string(),
                 IntegrationContinuation::Proposed {
@@ -8804,7 +8695,6 @@ impl TransientCheckpoint {
             let fields =
                 collect_checkpoint_fields(field, "integration continuation fields", budget)?;
             match fields.as_slice() {
-                ["unavailable"] => IntegrationContinuation::Unavailable,
                 ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
                 ["breakpoint-restart"] => IntegrationContinuation::BreakpointRestart,
                 [
@@ -12099,14 +11989,14 @@ mod tests {
                 .contains("must not exceed")
         );
 
-        let mut unavailable_origin = checkpoint.clone();
-        unavailable_origin.integration_continuation = IntegrationContinuation::Unavailable;
-        unavailable_origin.time = 0.0;
-        unavailable_origin.integration_max_step = None;
+        let mut restart_origin = checkpoint.clone();
+        restart_origin.integration_continuation = IntegrationContinuation::BreakpointRestart;
+        restart_origin.time = 0.0;
+        restart_origin.integration_max_step = None;
         assert!(
-            unavailable_origin
+            restart_origin
                 .bind_authenticated_synthetic_origin_max_step(1.0e-9)
-                .expect_err("an unavailable t=0 continuation is not a synthetic origin")
+                .expect_err("a breakpoint restart at t=0 is not a synthetic origin")
                 .contains("does not carry synthetic integration state")
         );
     }
@@ -12353,12 +12243,6 @@ mod tests {
             )),
             10,
             "normalized runtime retains its discriminant, version, blocker count, and seven policy controls"
-        );
-        assert_eq!(
-            accepted_integration_runtime_retained_value_count(
-                &AcceptedIntegrationRuntime::UnavailableLegacy
-            ),
-            1
         );
         let mut with_direct_q = without_direct_q.clone();
         let AcceptedIntegrationRuntime::Exact(runtime) =

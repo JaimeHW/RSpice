@@ -6564,8 +6564,7 @@ impl Engine {
                         runtime.xyce_static_residual.is_some(),
                         runtime.direct_dae_static_residual.is_some(),
                     )),
-                    AcceptedIntegrationRuntime::UnavailableLegacy
-                    | AcceptedIntegrationRuntime::RestartNormalized(_) => None,
+                    AcceptedIntegrationRuntime::RestartNormalized(_) => None,
                 },
             )
             .unwrap_or((false, false));
