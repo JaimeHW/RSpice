@@ -139,7 +139,7 @@ const LAUNCHER_HEADER_HEIGHT: f32 = 48.0;
 const LAUNCHER_COMPACT_HEADER_HEIGHT: f32 = 52.0;
 /// The launcher names the release. The build hash behind it is Help ▸ About's
 /// to give, where a reader goes to quote it in a report.
-const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
 const LAUNCHER_NAV_WIDTH: f32 = 184.0;
 const LAUNCHER_COMPACT_NAV_HEIGHT: f32 = 42.0;
 const LAUNCHER_PAGE_FOOTER_MIN_HEIGHT: f32 = 51.0;
@@ -230,12 +230,12 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
 const SAFE_MODE_OPTION_HORIZONTAL_INSET: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct LauncherLayout {
-    surface: Rect,
+pub(crate) struct LauncherLayout {
+    pub(crate) surface: Rect,
     edge_to_edge: bool,
-    compact: bool,
+    pub(crate) compact: bool,
     phone: bool,
-    header_height: f32,
+    pub(crate) header_height: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -278,7 +278,7 @@ impl LauncherPageRegions {
 }
 
 impl LauncherLayout {
-    fn resolve(viewport: Rect) -> Self {
+    pub(crate) fn resolve(viewport: Rect) -> Self {
         let edge_to_edge = viewport.width() <= LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH;
         let surface = if edge_to_edge {
             viewport
@@ -311,7 +311,7 @@ impl LauncherLayout {
 /// The launcher, drawn in the project feature's context, with what the
 /// reader asked of it carried out by the shell as soon as it has drawn and
 /// before its focus is handed back.
-pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
+pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.project.project_launcher_open {
         show_discard_confirmation(ctx, &mut app.state.platform);
         return;
@@ -558,7 +558,7 @@ fn launcher(
 /// Close the modal presentation and leave its canonical route in the same
 /// transaction. Keeping those two state owners synchronized prevents a
 /// browser-back traversal from immediately reopening a dismissed launcher.
-fn dismiss_launcher(app: &mut RSpiceApp) {
+pub(crate) fn dismiss_launcher(app: &mut RSpiceApp) {
     app.state.project.project_launcher_open = false;
     if app.state.workbench.current_route().surface_id()
         != crate::workbench::SurfaceId::ProjectLauncher
@@ -2035,88 +2035,6 @@ mod tests {
     }
 
     #[test]
-    fn launcher_dismissal_returns_through_canonical_history() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.activate(Workspace::Results);
-        crate::workbench::project::open_project_launcher(
-            &mut app.state.project,
-            &mut app.state.workbench,
-            &mut app.state.platform,
-        );
-
-        assert_eq!(
-            app.state.workbench.current_route().surface_id(),
-            crate::workbench::SurfaceId::ProjectLauncher
-        );
-        assert!(app.state.project.project_launcher_open);
-
-        dismiss_launcher(&mut app);
-
-        assert_eq!(
-            app.state.workbench.current_route().surface_id(),
-            crate::workbench::SurfaceId::Results
-        );
-        assert!(!app.state.project.project_launcher_open);
-    }
-
-    #[test]
-    fn deep_linked_launcher_without_history_dismisses_to_owning_workspace() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .workbench
-            .replace_route(
-                crate::workbench::SurfaceRoute::surface(
-                    crate::workbench::SurfaceId::ProjectLauncher,
-                ),
-                crate::workbench::RouteTransitionSource::BrowserPop,
-            )
-            .expect("Project Launcher has a canonical executor");
-        app.state.project.project_launcher_open = true;
-
-        dismiss_launcher(&mut app);
-
-        assert_eq!(
-            app.state.workbench.current_route().surface_id(),
-            crate::workbench::SurfaceId::Design
-        );
-        assert!(!app.state.project.project_launcher_open);
-    }
-
-    #[test]
-    fn dismissing_with_no_project_open_replaces_the_launcher_with_the_landing() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.clear_browser_history_effects();
-        app.state.workbench.activate(Workspace::Results);
-        assert!(matches!(
-            app.state.workbench.take_browser_history_effect(),
-            Some(crate::workbench::BrowserHistoryEffect::Push(_))
-        ));
-        crate::workbench::project::open_project_launcher(
-            &mut app.state.project,
-            &mut app.state.workbench,
-            &mut app.state.platform,
-        );
-        assert!(matches!(
-            app.state.workbench.take_browser_history_effect(),
-            Some(crate::workbench::BrowserHistoryEffect::Push(_))
-        ));
-        app.state.close_project_session();
-
-        dismiss_launcher(&mut app);
-
-        let destination =
-            crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
-        assert_eq!(app.state.workbench.current_route(), destination);
-        assert_eq!(app.state.workbench.workspace, Workspace::Project);
-        assert_eq!(
-            app.state.workbench.take_browser_history_effect(),
-            Some(crate::workbench::BrowserHistoryEffect::Replace(destination))
-        );
-        assert!(app.state.workbench.take_browser_history_effect().is_none());
-        assert!(!app.state.project.project_launcher_open);
-    }
-
-    #[test]
     fn desktop_launcher_matches_the_mockup_surface_contract() {
         let viewport = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1440.0, 900.0));
         let layout = LauncherLayout::resolve(viewport);
@@ -2242,149 +2160,6 @@ mod tests {
         assert!(!narrow_tablet.phone);
         assert_eq!(desktop.header_height, LAUNCHER_HEADER_HEIGHT);
         assert_eq!(compact.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
-    }
-
-    /// Every string one launcher page paints, with the rect it was painted in.
-    fn painted_launcher_page(
-        size: Vec2,
-        safe_mode: bool,
-        page: ProjectLauncherPage,
-    ) -> Vec<(String, Rect)> {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        crate::workbench::project::open_project_launcher(
-            &mut app.state.project,
-            &mut app.state.workbench,
-            &mut app.state.platform,
-        );
-        app.state.project.project_launcher_page = page;
-        app.state.model.safe_mode.active = safe_mode;
-        let mut output = None;
-        for _ in 0..3 {
-            output = Some(ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ui| show(ui.ctx(), &mut app),
-            ));
-        }
-        output
-            .expect("three passes ran")
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::epaint::Shape::Text(text) => Some((
-                    text.galley.text().to_owned(),
-                    Rect::from_min_size(text.pos, text.galley.size()),
-                )),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// With no project the list area keeps the launcher's size and holds its
-    /// message and the two ways to a project in its middle, not two lines at
-    /// the top of an empty shell.
-    #[test]
-    fn an_empty_project_list_centres_its_message_and_actions() {
-        let size = vec2(1440.0, 900.0);
-        let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
-        let painted = painted_launcher_page(size, false, ProjectLauncherPage::Projects);
-        let rects = |wanted: &str| {
-            painted
-                .iter()
-                .filter(|(text, _)| text == wanted)
-                .map(|(_, rect)| *rect)
-                .collect::<Vec<_>>()
-        };
-        let message = rects("No recent projects");
-        assert_eq!(message.len(), 1, "{painted:?}");
-        let message = message[0];
-        let body = layout.surface.y_range();
-        assert!(
-            message.center().y > body.min + 0.35 * body.span()
-                && message.center().y < body.min + 0.65 * body.span(),
-            "the message stands at {message:?} in a surface over {body:?}"
-        );
-        // The heading's actions, and the empty list's under its message.
-        for action in ["Browse\u{2026}", "New project"] {
-            let under = rects(action)
-                .into_iter()
-                .filter(|rect| rect.top() > message.bottom())
-                .collect::<Vec<_>>();
-            assert_eq!(under.len(), 1, "{action} under the message: {painted:?}");
-        }
-    }
-
-    #[test]
-    fn launcher_header_names_the_product_and_states_safe_mode_only_while_active() {
-        for size in [vec2(1280.0, 800.0), vec2(390.0, 844.0)] {
-            let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
-            let header_bottom = layout.surface.top() + layout.header_height;
-            for safe_mode in [false, true] {
-                let painted = painted_launcher_page(size, safe_mode, ProjectLauncherPage::Projects);
-                let context = format!("{}x{}, safe mode {safe_mode}: {painted:?}", size.x, size.y);
-                let header: Vec<&str> = painted
-                    .iter()
-                    .filter(|(_, rect)| rect.center().y < header_bottom)
-                    .map(|(text, _)| text.as_str())
-                    .collect();
-
-                assert!(header.contains(&"RSpice"), "{context}");
-                assert_eq!(header.contains(&"Safe mode"), safe_mode, "{context}");
-                assert_eq!(
-                    header.contains(&LAUNCHER_VERSION_LABEL),
-                    !layout.compact,
-                    "{context}"
-                );
-                assert!(
-                    painted
-                        .iter()
-                        .any(|(text, rect)| text == "Projects" && rect.center().y > header_bottom),
-                    "{context}"
-                );
-                for (text, _) in &painted {
-                    for retired in [
-                        "Continue without a project",
-                        "Activation required",
-                        "COMMERCIAL",
-                        "Start RSpice",
-                        "Open engineering work",
-                    ] {
-                        assert!(!text.contains(retired), "{retired:?} painted; {context}");
-                    }
-                }
-            }
-        }
-    }
-
-    /// The Safe mode page states its launch scope in one line under a plain
-    /// title, and never offers to start safe mode while it is already on.
-    #[test]
-    fn safe_mode_page_heading_is_one_title_and_its_start_is_truthful() {
-        for size in [vec2(1280.0, 800.0), vec2(390.0, 844.0)] {
-            for active in [false, true] {
-                let painted = painted_launcher_page(size, active, ProjectLauncherPage::SafeMode);
-                let context = format!("{}x{}, active {active}: {painted:?}", size.x, size.y);
-                let shows = |wanted: &str| painted.iter().any(|(text, _)| text == wanted);
-
-                assert!(shows("Changes apply to this launch only."), "{context}");
-                assert_eq!(shows("Safe mode active"), active, "{context}");
-                assert_eq!(shows("Start RSpice in safe mode"), !active, "{context}");
-                for (text, _) in &painted {
-                    for retired in [
-                        "STARTUP ISOLATION",
-                        "Start with optional subsystems disabled",
-                        "Safe mode is active for this launch",
-                        "crash isolation",
-                    ] {
-                        assert!(!text.contains(retired), "{retired:?} painted; {context}");
-                    }
-                }
-            }
-        }
     }
 
     #[test]
