@@ -60,62 +60,6 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
             "altered DC evidence accepted: {path}"
         );
     }
-    for schema in 1..22 {
-        let mut historic = snapshot.clone();
-        historic.schema_version = schema;
-        assert!(
-            historic
-                .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
-                .unwrap_err()
-                .contains("DC curve evidence")
-        );
-    }
-}
-
-#[test]
-fn schema_21_dc_history_authenticates_without_inventing_traversal() {
-    let mut legacy = retain(solve(nested_config()));
-    legacy.result_payload = None;
-    let digest = legacy.result_data_digest();
-    let old_digest = legacy
-        .result_data_ref()
-        .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
-    let history = history(legacy);
-    let old_dataset_digest = history.retained.runs[0]
-        .data
-        .dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V12,
-        );
-    let mut snapshot = crate::io::capture_simulation_results(&history);
-    snapshot.schema_version = 21;
-    snapshot.runs[0].analyses[0].result_data_digest =
-        crate::io::project_io::PersistedField::Value(old_digest);
-    snapshot.runs[0].dataset_content_digest =
-        crate::io::project_io::PersistedField::Value(old_dataset_digest);
-    let mut corrupt = serde_json::to_value(&snapshot).unwrap();
-    corrupt["runs"][0]["analyses"][0]["waveforms"][0]["name"] = serde_json::json!("changed");
-    let mut corrupt: crate::io::project_io::ProjectSimulationResults =
-        serde_json::from_value(corrupt).unwrap();
-    assert!(
-        corrupt
-            .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
-            .unwrap_err()
-            .contains("digest")
-    );
-    snapshot
-        .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
-        .unwrap();
-    let mut restored = crate::state::SimulationState::default();
-    crate::io::restore_simulation_results(snapshot, &mut restored).unwrap();
-    assert!(
-        restored.retained.runs[0].analyses[0]
-            .result_payload
-            .is_none()
-    );
-    assert_eq!(
-        restored.retained.runs[0].analyses[0].result_data_digest(),
-        digest
-    );
 }
 
 #[test]

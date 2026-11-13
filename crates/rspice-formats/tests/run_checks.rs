@@ -12,7 +12,6 @@ use rspice_results::analysis_result::{AnalysisResult, HdlDiagnostic, RunChecks};
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::run::{ExecutionTarget, SimulationRun, SimulationRunLifecycle};
 use rspice_results::run_receipt::SimulationRunProvenance;
-use rspice_vocabulary::product::ProjectId;
 
 fn checks() -> RunChecks {
     RunChecks {
@@ -103,35 +102,6 @@ fn run_checks_survive_the_project_file_and_are_sealed_into_the_result_digest() {
     // A result without checks writes no field.
     let json = serde_json::to_string(&without).unwrap();
     assert!(!json.contains("\"checks\":"), "{json}");
-}
-
-#[test]
-fn checks_relabelled_as_a_legacy_document_are_refused_and_a_v44_one_migrates() {
-    for version in [1, 30, 43, 44] {
-        let mut project = ProjectSimulationResults::from(ProjectSimulationResultsData {
-            schema_version: version,
-            runs: vec![persisted(checks())],
-            ..Default::default()
-        });
-        let error = project.migrate_to_current(ProjectId::new()).unwrap_err();
-        assert!(error.contains("run checks"), "v{version}: {error}");
-        assert_eq!(project.schema_version, version, "the refusal is atomic");
-    }
-    // A v44 document has no checks, and its digests stay valid.
-    let legacy = persisted(RunChecks::default());
-    let mut project = ProjectSimulationResults::from(ProjectSimulationResultsData {
-        schema_version: 44,
-        runs: vec![legacy.clone()],
-        next_run_id: 1,
-        ..Default::default()
-    });
-    project.migrate_to_current(ProjectId::new()).unwrap();
-    project.validate().unwrap();
-    assert_eq!(project.schema_version, 45);
-    assert_eq!(
-        project.runs[0].dataset_content_digest,
-        legacy.dataset_content_digest
-    );
 }
 
 #[test]

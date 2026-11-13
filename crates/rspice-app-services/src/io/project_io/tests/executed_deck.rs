@@ -271,17 +271,3 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
         "and nothing from a refused file is installed"
     );
 }
-
-#[test]
-fn executed_decks_on_a_file_claiming_an_older_schema_are_refused() {
-    let mut written = crate::io::capture_simulation_results(&swept_state());
-    written.schema_version = 14;
-
-    let error = written
-        .migrate_to_current(ProjectId::new())
-        .expect_err("a schema that never retained decks cannot be carrying them");
-    assert!(
-        error.contains("executed decks introduced by schema v15"),
-        "{error}"
-    );
-}

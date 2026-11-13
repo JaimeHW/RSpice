@@ -203,26 +203,3 @@ impl ProjectExecutedDecks {
         Ok(())
     }
 }
-
-/// Executed decks are retained only from schema v15 onward.
-///
-/// Nothing is reconstructed for an older file, and that is the whole rule: a
-/// run recorded before the decks were kept executed a source nobody saved, and
-/// deriving one from today's design would attribute a deck to a run that never
-/// read it. A file claiming an older schema while carrying decks is refused
-/// rather than trusted.
-pub(super) fn reject_executed_decks_before_schema_v15(
-    results: &ProjectSimulationResultsData,
-    source_schema: u32,
-) -> Result<(), String> {
-    if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    if !results.executed_decks.is_empty() {
-        return Err(format!(
-            "schema-v{source_schema} simulation results contain executed decks introduced by \
-             schema v15"
-        ));
-    }
-    Ok(())
-}

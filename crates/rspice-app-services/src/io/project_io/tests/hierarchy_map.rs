@@ -1,12 +1,8 @@
 //! What the run receipt's hierarchy map does to a project file.
 //!
-//! Two facts are pinned here, and they pull in opposite directions. A run
-//! sealed today records the exact occurrence map its deck emitted, down to the
-//! engine scope each occurrence was spelled with, because that map is the only
-//! way a stored result can be read back as a design instance. A run recorded
-//! before schema v15 records none, and migration leaves it that way: rows
-//! reconstructed from today's design would attribute a deck to a run that
-//! never emitted it.
+//! A run records the exact occurrence map its deck emitted, down to the engine
+//! scope each occurrence was spelled with, because that map is the only way a
+//! stored result can be read back as a design instance.
 
 use super::*;
 
@@ -140,46 +136,4 @@ fn a_persisted_engine_prefix_that_does_not_name_its_occurrence_is_refused() {
         .validate()
         .expect_err("a prefix that names another occurrence cannot be trusted");
     assert!(error.contains("rather than 'X1.X2'"), "{error}");
-}
-
-#[test]
-fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
-    let mut older = sealed_results(Vec::new());
-    older.schema_version = 14;
-    downgrade_result_digests_to_v6(&mut older);
-    let document = serde_json::to_value(older).expect("results serialize");
-    assert!(
-        !document.to_string().contains("hierarchy_map"),
-        "a run with no occurrence map writes no map field at all"
-    );
-    let mut persisted = serde_json::from_value::<ProjectSimulationResults>(document)
-        .expect("a schema-v14 document deserializes");
-    persisted
-        .migrate_to_current(ProjectId::new())
-        .expect("an authentic schema-v14 document migrates");
-
-    assert_eq!(persisted.schema_version, 45);
-    assert!(
-        restored_receipt(&persisted).hierarchy_map().is_empty(),
-        "migration never invents an occurrence the run did not emit"
-    );
-    let rewritten = serde_json::to_string(&persisted).expect("the migrated document serializes");
-    assert!(
-        !rewritten.contains("hierarchy_map"),
-        "an empty map is written as absence, exactly as the older build wrote it:\n{rewritten}"
-    );
-}
-
-#[test]
-fn a_schema_v14_document_cannot_smuggle_a_hierarchy_map() {
-    let mut smuggled = sealed_results(reference_map());
-    smuggled.schema_version = 14;
-
-    let error = smuggled
-        .migrate_to_current(ProjectId::new())
-        .expect_err("schema v14 predates the hierarchy map");
-    assert!(
-        error.contains("contains a hierarchy map introduced by schema v15"),
-        "{error}"
-    );
 }

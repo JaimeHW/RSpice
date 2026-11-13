@@ -1,4 +1,4 @@
-//! Migration coverage for retained simulation-result history and corrupted payload recovery.
+//! Retained simulation-result history through the project file, and recovery from corrupted payloads.
 
 use super::*;
 use crate::state::{SensitivityResultMode, SensitivityResultRow};
@@ -64,130 +64,6 @@ fn sensitivity_availability_survives_project_results_serialization_and_authentic
             "changing availability changes authenticated evidence"
         );
     }
-}
-
-#[test]
-fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
-    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
-    let (run, mut legacy) = sensitivity_history(0.0.into());
-    legacy.schema_version = 25;
-    legacy.runs[0].analyses[0].result_data_digest = PersistedField::Value(
-        run.analyses[0]
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V14),
-    );
-    legacy.runs[0].dataset_content_digest =
-        PersistedField::Value(run.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V14,
-        ));
-    let mut migrated: ProjectSimulationResults =
-        serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
-    migrated.migrate_to_current(ProjectId::new()).unwrap();
-    migrated.validate().unwrap();
-    assert_eq!(migrated.schema_version, 45);
-    assert_eq!(
-        migrated.runs[0].analyses[0].result_payload,
-        legacy.runs[0].analyses[0].result_payload
-    );
-    assert_ne!(
-        migrated.runs[0].dataset_content_digest,
-        legacy.runs[0].dataset_content_digest
-    );
-
-    for replacement in [
-        1.0.into(),
-        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-    ] {
-        let mut tampered = legacy.clone();
-        let PersistedField::Value(AnalysisResultPayload::Sensitivity { rows, .. }) =
-            &mut tampered.runs[0].analyses[0].result_payload
-        else {
-            panic!("sensitivity payload")
-        };
-        rows[0].normalized = replacement;
-        let before = tampered.clone();
-        assert!(tampered.migrate_to_current(ProjectId::new()).is_err());
-        assert_eq!(tampered, before, "failed migration must be transactional");
-    }
-}
-
-#[test]
-fn current_impulse_project_history_round_trips_and_authenticates_charge() {
-    let mut run = SimulationRun::new(1);
-    run.mark_running().unwrap();
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .unwrap();
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
-            AnalysisResultPayload::TransientEvents {
-                voltage_impulses: None,
-                digital_traces: vec![],
-                real_traces: vec![],
-                digital_buses: vec![],
-                current_impulses: Some(crate::state::current_impulse_history_fixture()),
-            },
-        ),
-    );
-    seal_legacy_unattributed(&mut run);
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run.clone()].into();
-    simulation.retained.next_run_id = 1;
-    let saved = crate::io::capture_simulation_results(&simulation);
-    let mut libraries = LibraryManager::with_primitives();
-    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, saved.clone());
-    let loaded = load_project_text(&serialize_project_file(&project).unwrap(), None).unwrap();
-    assert!(loaded.file.simulation_results_warning.is_none());
-    let restored =
-        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
-    assert_eq!(
-        restored.retained.runs[0].analyses[0].result_payload,
-        run.analyses[0].result_payload
-    );
-    let mut tampered = saved.clone();
-    let PersistedField::Value(AnalysisResultPayload::TransientEvents {
-        current_impulses: Some(history),
-        ..
-    }) = &mut tampered.runs[0].analyses[0].result_payload
-    else {
-        panic!("impulses")
-    };
-    history.traces[0].points[0].charge_coulombs *= -1.0;
-    assert!(tampered.validate().is_err());
-    let mut disguised = saved;
-    disguised.schema_version = 26;
-    assert!(disguised.migrate_to_current(ProjectId::new()).is_err());
-}
-
-#[test]
-fn current_impulse_schema_migration_authenticates_v26_before_resealing() {
-    let (run, mut legacy) = sensitivity_history(0.0.into());
-    legacy.schema_version = 26;
-    legacy.runs[0].analyses[0].result_data_digest = PersistedField::Value(
-        run.analyses[0]
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V15),
-    );
-    legacy.runs[0].dataset_content_digest =
-        PersistedField::Value(run.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V15,
-        ));
-    let mut migrated: ProjectSimulationResults =
-        serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
-    migrated.migrate_to_current(ProjectId::new()).unwrap();
-    migrated.validate().unwrap();
-    assert_eq!(migrated.schema_version, 45);
-    assert_ne!(
-        migrated.runs[0].dataset_content_digest,
-        legacy.runs[0].dataset_content_digest
-    );
-    let PersistedField::Value(AnalysisResultPayload::Sensitivity { rows, .. }) =
-        &mut legacy.runs[0].analyses[0].result_payload
-    else {
-        panic!("sensitivity")
-    };
-    rows[0].raw = 1.0.into();
-    assert!(legacy.migrate_to_current(ProjectId::new()).is_err());
 }
 
 #[test]
@@ -300,171 +176,6 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
             .contains("not eligible")
     );
     serialize_project_file(&loaded).expect("cleaned project reserializes");
-}
-
-#[test]
-fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseline() {
-    let mut project = project_with_execution_context();
-    let (plan_id, source_id, source_revision, dependencies) = {
-        let plan = project
-            .file
-            .execution_context
-            .as_ref()
-            .expect("execution context")
-            .simulation_plan
-            .stable_analysis_plan()
-            .expect("stable plan");
-        let source = plan
-            .instances()
-            .iter()
-            .find(|instance| instance.kind() == AnalysisKind::Noise)
-            .expect("noise fixture instance");
-        (
-            plan.id(),
-            source.id(),
-            source.modified_revision(),
-            source
-                .dependencies()
-                .iter()
-                .map(|dependency| dependency.target())
-                .collect::<Vec<_>>(),
-        )
-    };
-    let snapshot = ContentDigest::from_bytes([0xd1; 32]);
-    let summary = NoiseSummary {
-        input_quantity: None,
-        conversion: None,
-        noise_figure: None,
-        rows: vec![NoiseContributorRow {
-            device: "R1".to_owned(),
-            mechanism: "thermal".to_owned(),
-            power: 2.5e-12,
-            share_pct: 100.0,
-        }],
-        total_rms: Some(1.25e-6),
-        input_rms: None,
-        band: (1.0, 1.0e6),
-    };
-    let mut run = SimulationRun::new(72);
-    run.mark_running().expect("fixture run starts");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("fixture run completes");
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
-            .with_noise_summary(summary.clone())
-            .with_provenance(
-                AnalysisResultProvenance::new(source_id, source_revision, snapshot, dependencies)
-                    .expect("noise provenance"),
-            ),
-    );
-    seal_prepared_run(
-        &mut run,
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
-        project.file.workspace.project.revision(),
-        ContentDigest::from_bytes([0xd2; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xd3; 32])),
-        &[AnalysisKind::Noise.canonical_kind().tag()],
-    );
-    let baseline_id = run.run_id;
-    let legacy_analysis_digest = run.analyses[0]
-        .result_data_ref()
-        .digest(rspice_results::result_digest::ResultDigestEncoding::V4);
-    let legacy_dataset_digest = run.dataset_content_digest_with_encoding(
-        rspice_results::result_digest::ResultDigestEncoding::V4,
-    );
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 72;
-    simulation.view.active_run_idx = Some(0);
-    simulation.view.active_analysis_idx = Some(0);
-    assert!(simulation.set_run_retention(baseline_id, RunRetention::GoldenBaseline));
-    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
-    assert_eq!(
-        project.file.simulation_results.runs[0].retention,
-        RunRetention::GoldenBaseline,
-        "the persisted fixture must retain the runtime baseline pin",
-    );
-    project
-        .file
-        .workspace
-        .plan_data_mut(plan_id)
-        .expect("active plan payload")
-        .regression_baseline_run = Some(baseline_id);
-
-    let current_json = serialize_project_file(&project).expect("current project serializes");
-    let mut v11: serde_json::Value = serde_json::from_str(&current_json).expect("project JSON");
-    v11["simulation_results"]["schema_version"] = serde_json::json!(11);
-    v11["simulation_results"]["runs"][0]["analyses"][0]["result_data_digest"] =
-        serde_json::to_value(legacy_analysis_digest).expect("legacy analysis digest");
-    v11["simulation_results"]["runs"][0]["dataset_content_digest"] =
-        serde_json::to_value(legacy_dataset_digest).expect("legacy dataset digest");
-    v11["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]
-        .as_object_mut()
-        .expect("noise summary object")
-        .remove("input_rms");
-    v11["simulation_results"]["runs"][0]
-        .as_object_mut()
-        .expect("persisted run object")
-        .remove("retention");
-    clear_v14_specification_fields_json(&mut v11["simulation_results"]);
-
-    let loaded = load_project_text(&v11.to_string(), None)
-        .expect("authentic schema-v11 project remains loadable");
-
-    assert_eq!(loaded.file.simulation_results.schema_version, 45);
-    assert_eq!(loaded.file.simulation_results.runs.len(), 1);
-    assert!(loaded.file.simulation_results_warning.is_none());
-    assert_eq!(
-        loaded
-            .file
-            .workspace
-            .plan_data(plan_id)
-            .expect("active plan payload")
-            .regression_baseline_run,
-        Some(baseline_id)
-    );
-    let restored = loaded.file.simulation_results.runs[0]
-        .clone()
-        .into_run()
-        .expect("migrated result restores");
-    assert!(
-        restored.retention().is_pinned(),
-        "a restored regression baseline must be repaired into a non-pruneable retention class"
-    );
-    assert_eq!(restored.analyses[0].noise_summary, Some(summary));
-    assert_ne!(
-        restored.analyses[0]
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::CURRENT),
-        legacy_analysis_digest,
-        "v11 evidence must be resealed in the current digest domain"
-    );
-    serialize_project_file(&loaded).expect("migrated project reserializes");
-
-    let mut tampered_v11 = v11;
-    tampered_v11["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["total_rms"] =
-        serde_json::json!(1.250_000_000_000_000_3e-6_f64);
-    let rejected = load_project_text(&tampered_v11.to_string(), None)
-        .expect("a bad result digest must not reject unrelated project documents");
-    assert!(rejected.file.simulation_results.is_empty());
-    assert!(
-        rejected
-            .file
-            .workspace
-            .plan_data(plan_id)
-            .expect("active plan payload")
-            .regression_baseline_run
-            .is_none()
-    );
-    assert!(
-        rejected
-            .file
-            .simulation_results_warning
-            .as_deref()
-            .unwrap_or_default()
-            .contains("schema-v11 analysis 1 result data digest does not match retained content")
-    );
 }
 
 #[test]
@@ -739,159 +450,6 @@ fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
         .validate()
         .expect_err("the active dataset cannot also be an overlay");
     assert!(error.contains("cannot also be an overlay"));
-}
-
-#[test]
-fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
-    let mut libraries = LibraryManager::with_primitives();
-    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectSnapshot::new(workspace, libraries);
-    let project_value = serde_json::to_value(project).expect("project converts to JSON");
-
-    // A schema-v1 golden record is authored from the fields that actually
-    // existed in that era.  Do not downgrade a current record by deleting a
-    // hand-maintained subset: that silently leaves newly introduced evidence
-    // (for example measurement-verification fields) in an anachronistic file.
-    let versioned_v1_results = serde_json::json!({
-        "schema_version": 1,
-        "runs": [
-            {
-                "id": 1,
-                "label": "Run 1 (v1 golden)",
-                "timestamp": 11.0,
-                "analyses": [{
-                    "id": 4,
-                    "analysis_type": "Transient",
-                    "label": "TRAN legacy one",
-                    "timestamp": 11.25,
-                    "waveforms": [{
-                        "name": "V(out)",
-                        "x": [0.0, 1.0e-6],
-                        "y": [0.0, 1.0],
-                        "color": "#00aaff",
-                        "visible": true
-                    }],
-                    "measurements": [],
-                    "success": true
-                }],
-                "elapsed_time": 0.01,
-                "success": true
-            },
-            {
-                "id": 2,
-                "label": "Run 2 (v1 golden)",
-                "timestamp": 12.0,
-                "analyses": [{
-                    "id": 9,
-                    "analysis_type": "Ac",
-                    "label": "AC legacy two",
-                    "timestamp": 12.25,
-                    "waveforms": [],
-                    "measurements": [],
-                    "success": true
-                }],
-                "elapsed_time": 0.02,
-                "success": true
-            }
-        ],
-        "next_run_id": 2,
-        "active_run_id": 2,
-        "active_analysis_id": 9,
-        "overlay_run_ids": [1]
-    });
-
-    let mut migrated_matrix = Vec::new();
-    for versioned in [true, false] {
-        let mut value = project_value.clone();
-        let mut results = versioned_v1_results.clone();
-        if !versioned {
-            results
-                .as_object_mut()
-                .expect("v1 golden result object")
-                .remove("schema_version");
-        }
-        value["simulation_results"] = results;
-        let json = serde_json::to_string_pretty(&value).expect("v1 golden fixture serializes");
-        migrated_matrix.push(load_project_text(&json, None).unwrap_or_else(|error| {
-            panic!(
-                "{} v1 golden project migrates: {error}",
-                if versioned {
-                    "versioned"
-                } else {
-                    "unversioned"
-                }
-            )
-        }));
-    }
-    assert_eq!(
-        migrated_matrix[0].file.simulation_results, migrated_matrix[1].file.simulation_results,
-        "an omitted schema tag is exactly the schema-v1 wire contract"
-    );
-    let migrated = &migrated_matrix[0];
-
-    assert!(migrated.file.simulation_results_warning.is_none());
-    assert_eq!(migrated.file.simulation_results.schema_version, 45);
-    assert!(
-        migrated
-            .file
-            .simulation_results
-            .runs
-            .iter()
-            .all(|run| run.run_id.is_some() && run.dataset_id.is_some())
-    );
-    let active_run_id = migrated.file.simulation_results.runs[1]
-        .run_id
-        .expect("migrated active run id");
-    let active_dataset_id = migrated.file.simulation_results.runs[1]
-        .dataset_id
-        .expect("migrated active dataset id");
-    let migrated_overlay_id = migrated.file.simulation_results.runs[0]
-        .dataset_id
-        .expect("migrated overlay id");
-    assert_eq!(
-        migrated.file.simulation_results.active_run_stable_id,
-        Some(active_run_id)
-    );
-    assert_eq!(
-        migrated.file.simulation_results.active_dataset_id,
-        Some(active_dataset_id)
-    );
-    assert_eq!(
-        migrated.file.simulation_results.active_analysis_sequence,
-        Some(9)
-    );
-    assert_eq!(
-        migrated.file.simulation_results.overlay_dataset_ids,
-        vec![migrated_overlay_id]
-    );
-    assert!(migrated.file.simulation_results.active_run_id.is_none());
-    assert!(
-        migrated
-            .file
-            .simulation_results
-            .active_analysis_id
-            .is_none()
-    );
-    assert!(migrated.file.simulation_results.overlay_run_ids.is_empty());
-
-    let current_json = serialize_project_file(migrated).expect("migration persists");
-    let reloaded = load_project_text(&current_json, None).expect("migrated project reloads");
-    assert_eq!(
-        reloaded.file.simulation_results.active_run_stable_id,
-        Some(active_run_id)
-    );
-    assert_eq!(
-        reloaded.file.simulation_results.active_dataset_id,
-        Some(active_dataset_id)
-    );
-    assert_eq!(
-        reloaded.file.simulation_results.active_analysis_sequence,
-        Some(9)
-    );
-    assert_eq!(
-        reloaded.file.simulation_results.overlay_dataset_ids,
-        vec![migrated_overlay_id]
-    );
 }
 
 #[test]
@@ -1208,85 +766,6 @@ fn project_text_load_without_source_path_clears_stale_file_identity() {
     assert_eq!(
         loaded.file.workspace.project.display_name(),
         "stale-native-path"
-    );
-}
-
-#[test]
-fn legacy_project_migration_assigns_stable_identity_metadata() {
-    let project = project_with_execution_context();
-    let mut value = serde_json::to_value(project).expect("project converts to JSON");
-    let descriptor = value["workspace"]["project"]
-        .as_object_mut()
-        .expect("project descriptor is an object");
-    descriptor.remove("id");
-    descriptor.remove("schema_version");
-    descriptor.remove("revision");
-    value["workspace"]
-        .as_object_mut()
-        .expect("workspace is an object")
-        .remove("simulation_plan_payloads");
-    value["execution_context"]["schema_version"] = serde_json::Value::from(3_u32);
-    let legacy_plan = value["execution_context"]["simulation_plan"]
-        .as_object_mut()
-        .expect("simulation plan is an object");
-    legacy_plan.remove("analysis_plan");
-    legacy_plan.insert("enabled".to_owned(), serde_json::json!([1]));
-    legacy_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
-    let legacy = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
-
-    let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
-    let replay = load_project_text(&legacy, None).expect("identical legacy bytes migrate again");
-
-    assert!(!migrated.file.workspace.project.id().as_uuid().is_nil());
-    assert_eq!(
-        migrated.file.workspace.project.schema_version(),
-        crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION
-    );
-    assert_eq!(migrated.file.workspace.project.revision().get(), 1);
-    assert_eq!(
-        migrated.file.workspace.project.id(),
-        replay.file.workspace.project.id()
-    );
-    let migrated_plan = migrated
-        .file
-        .execution_context
-        .as_ref()
-        .expect("migrated execution context")
-        .simulation_plan
-        .stable_analysis_plan()
-        .expect("migrated stable plan");
-    let replay_plan = replay
-        .file
-        .execution_context
-        .as_ref()
-        .expect("replayed execution context")
-        .simulation_plan
-        .stable_analysis_plan()
-        .expect("replayed stable plan");
-    assert_eq!(migrated_plan.id(), replay_plan.id());
-    assert_eq!(
-        migrated_plan
-            .instances()
-            .iter()
-            .map(|instance| instance.id())
-            .collect::<Vec<_>>(),
-        replay_plan
-            .instances()
-            .iter()
-            .map(|instance| instance.id())
-            .collect::<Vec<_>>()
-    );
-
-    let migrated_json =
-        serialize_project_file(&migrated).expect("migrated identity persists on save");
-    let reloaded = load_project_text(&migrated_json, None).expect("migrated project reloads");
-    assert_eq!(
-        reloaded.file.workspace.project.id(),
-        migrated.file.workspace.project.id()
-    );
-    assert_eq!(
-        reloaded.file.workspace.project.revision(),
-        migrated.file.workspace.project.revision()
     );
 }
 
@@ -1684,77 +1163,54 @@ fn canonical_plan_kind_tags_cover_the_complete_manifest_without_collisions() {
     assert_eq!(AnalysisKind::DcMismatch.canonical_kind().tag(), 34);
 }
 
-/// A project written before results were attributed to a PVT point still
-/// loads, and its results stay unattributed. Inventing a nominal point for
-/// them would let a specification scoped to nominal pass on evidence that
-/// belongs to no point at all.
 #[test]
-fn results_written_before_point_attribution_load_as_unattributed() {
-    use crate::state::SpecPointScope;
-
-    let mut run = SimulationRun::new(41);
+fn current_impulse_project_history_round_trips_and_authenticates_charge() {
+    let mut run = SimulationRun::new(1);
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Ac, "Prepared AC").with_provenance(
-            AnalysisResultProvenance::new(
-                AnalysisInstanceId::new(),
-                ObjectRevision::INITIAL,
-                ContentDigest::from_bytes([0xb7; 32]),
-                Vec::new(),
-            )
-            .expect("prepared provenance fixture"),
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+            AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
+                digital_traces: vec![],
+                real_traces: vec![],
+                digital_buses: vec![],
+                current_impulses: Some(crate::state::current_impulse_history_fixture()),
+            },
         ),
     );
-    seal_prepared_run(
-        &mut run,
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        ContentDigest::from_bytes([0xb6; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xb5; 32])),
-        &[2],
-    );
+    seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 41;
-
-    let mut v5 = crate::io::capture_simulation_results(&simulation);
-    v5.schema_version = 5;
-    clear_v6_execution_fields(&mut v5);
-    clear_v14_specification_fields(&mut v5);
+    simulation.retained.runs = vec![run.clone()].into();
+    simulation.retained.next_run_id = 1;
+    let saved = crate::io::capture_simulation_results(&simulation);
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, saved.clone());
+    let loaded = load_project_text(&serialize_project_file(&project).unwrap(), None).unwrap();
+    assert!(loaded.file.simulation_results_warning.is_none());
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     assert_eq!(
-        v5.runs[0].analyses[0]
-            .provenance
-            .as_ref()
-            .expect("provenance")
-            .pvt_point,
-        None,
-        "a v5 file has no point field to write"
+        restored.retained.runs[0].analyses[0].result_payload,
+        run.analyses[0].result_payload
     );
-
-    v5.migrate_to_current(ProjectId::new())
-        .expect("a project without point attribution migrates");
-    let restored = crate::io::simulation_state_from_results(v5).expect("migrated results restore");
-    let provenance = restored.retained.runs[0].analyses[0]
-        .provenance
-        .as_ref()
-        .expect("provenance survives the migration");
-
-    assert_eq!(provenance.pvt_point(), None);
-    assert!(
-        SpecPointScope::AllPoints.admits(provenance.pvt_point()),
-        "an unscoped specification still judges restored legacy evidence"
-    );
-    assert!(
-        !SpecPointScope::Nominal.admits(provenance.pvt_point()),
-        "a nominal-scoped specification is never answered by unattributed evidence"
-    );
+    let mut tampered = saved;
+    let PersistedField::Value(AnalysisResultPayload::TransientEvents {
+        current_impulses: Some(history),
+        ..
+    }) = &mut tampered.runs[0].analyses[0].result_payload
+    else {
+        panic!("impulses")
+    };
+    history.traces[0].points[0].charge_coulombs *= -1.0;
+    assert!(tampered.validate().is_err());
 }
 
-/// Attribution round-trips exactly, and a legacy file cannot smuggle it in:
-/// a point on a v5 record would be current-schema evidence wearing an older
-/// version number.
+/// A run's point attribution round-trips exactly.
 #[test]
-fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
+fn point_attribution_round_trips_exactly() {
     let point = crate::state::AnalysisResultPvtPoint::new(
         "SS",
         Some(1.62),
@@ -1802,218 +1258,5 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
             .expect("provenance")
             .pvt_point(),
         Some(&point)
-    );
-
-    let mut smuggled = current;
-    smuggled.schema_version = 5;
-    clear_v6_execution_fields(&mut smuggled);
-    clear_v14_specification_fields(&mut smuggled);
-    assert!(
-        smuggled
-            .migrate_to_current(ProjectId::new())
-            .expect_err("a v5 record cannot carry point attribution")
-            .contains("pvt_point was introduced after schema v5")
-    );
-}
-
-/// A results history written at v27 restores under the current digest
-/// function, without a legacy encoder.
-///
-/// Nothing in the recorded-FFT change moved the digest of any shape a v27
-/// document could hold: the payload arm is new, its tag is the next unused
-/// one, and the encoding version did not move. That claim is checkable, and
-/// this is the check — the digests are not resealed, they are re-validated.
-#[test]
-fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
-    let mut run = SimulationRun::new(42);
-    run.mark_running().expect("fixture run starts");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("fixture run completes");
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
-        ]),
-    );
-    seal_legacy_unattributed(&mut run);
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 42;
-
-    let current = crate::io::capture_simulation_results(&simulation);
-    let digests = current.runs[0]
-        .analyses
-        .iter()
-        .map(|analysis| analysis.result_data_digest.clone())
-        .collect::<Vec<_>>();
-    let mut at_v27 = current;
-    at_v27.schema_version = 27;
-
-    at_v27
-        .migrate_to_current(ProjectId::new())
-        .expect("a v27 history migrates");
-    assert_eq!(at_v27.schema_version, 45);
-    let after = at_v27.runs[0]
-        .analyses
-        .iter()
-        .map(|analysis| analysis.result_data_digest.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(after, digests, "no existing retained digest moved");
-}
-
-/// A recorded FFT payload cannot be smuggled into an older schema.
-#[test]
-fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
-    use crate::state::AnalysisResultPayload;
-    use rspice_results::fft::spectrum::{
-        FftSpectrumEvidence, FftSpectrumModeEvidence, FftSpectrumStatusEvidence,
-    };
-
-    let spectrum = FftSpectrumEvidence {
-        status: FftSpectrumStatusEvidence::Complete,
-        output: "V(OUT)".to_owned(),
-        physical_type: "voltage".to_owned(),
-        start_time_s: 0.0,
-        stop_time_s: 8.0e-3,
-        sample_interval_s: 8.0e-3 / 256.0,
-        point_count: 256,
-        accurate_sampling: true,
-        format: rspice_results::fft::FftSpectrumFormatEvidence::Unnormalized,
-        mode: FftSpectrumModeEvidence::HspiceCompatible,
-        window: "RECT".to_owned(),
-        alpha: 3.0,
-        coherent_gain: 1.0,
-        frequency_resolution_hz: 125.0,
-        fundamental_bin: 8,
-        minimum_metric_bin: 1,
-        maximum_metric_bin: 128,
-        metrics: None,
-    };
-    let mut run = SimulationRun::new(43);
-    run.mark_running().expect("fixture run starts");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("fixture run completes");
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Fourier, "FFT")
-            .with_result_payload(AnalysisResultPayload::FftSpectrum { spectrum }),
-    );
-    seal_legacy_unattributed(&mut run);
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 43;
-
-    let mut smuggled = crate::io::capture_simulation_results(&simulation);
-    smuggled.schema_version = 27;
-    assert!(
-        smuggled
-            .migrate_to_current(ProjectId::new())
-            .expect_err("a v27 record cannot carry a recorded FFT")
-            .contains("result schemas before v28 cannot contain recorded FFT spectra")
-    );
-}
-
-/// A results history written at v28 restores under the current digest
-/// function, without a legacy encoder.
-///
-/// Nothing in the sensitivity-study change moved the digest of any shape a
-/// v28 document could hold: the payload arm is new, its tag is the next
-/// unused one, the frozen single-point arm was not edited, and the encoding
-/// version did not move. That claim is checkable, and this is the check — the
-/// digests are not resealed, they are re-validated.
-#[test]
-fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged() {
-    use crate::state::{AnalysisResultPayload, SensitivityResultMode, SensitivityResultRow};
-
-    let mut run = SimulationRun::new(44);
-    run.mark_running().expect("fixture run starts");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("fixture run completes");
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
-        ]),
-    );
-    // The frozen payload, exactly as a build before this one wrote it.
-    run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Sensitivity, "SENS").with_result_payload(
-            AnalysisResultPayload::Sensitivity {
-                output: "V(out)".to_owned(),
-                result_mode: SensitivityResultMode::Dc,
-                rows: vec![SensitivityResultRow {
-                    parameter: "GAIN".to_owned(),
-                    raw: (2.0).into(),
-                    normalized: (0.5).into(),
-                }],
-            },
-        ),
-    );
-    seal_legacy_unattributed(&mut run);
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 44;
-
-    let current = crate::io::capture_simulation_results(&simulation);
-    let digests = current.runs[0]
-        .analyses
-        .iter()
-        .map(|analysis| analysis.result_data_digest.clone())
-        .collect::<Vec<_>>();
-    let mut at_v28 = current;
-    at_v28.schema_version = 28;
-
-    at_v28
-        .migrate_to_current(ProjectId::new())
-        .expect("a v28 history migrates");
-    assert_eq!(at_v28.schema_version, 45);
-    let after = at_v28.runs[0]
-        .analyses
-        .iter()
-        .map(|analysis| analysis.result_data_digest.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(after, digests, "no existing retained digest moved");
-}
-
-/// A sensitivity study cannot be smuggled into an older schema.
-#[test]
-fn a_result_schema_before_the_study_cannot_carry_one() {
-    use crate::state::{
-        AnalysisResultPayload, SensitivityBasisEvidence, SensitivityStudyEvidence,
-        SensitivityStudyRow,
-    };
-    use rspice_core::analysis::sensitivity::SensitivityValue;
-
-    let mut run = SimulationRun::new(45);
-    run.mark_running().expect("fixture run starts");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("fixture run completes");
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
-            AnalysisResultPayload::SensitivityStudy {
-                evidence: std::sync::Arc::new(SensitivityStudyEvidence {
-                    output: "V(OUT)".to_owned(),
-                    filter: "PARAM:*".to_owned(),
-                    basis: SensitivityBasisEvidence::Dc { output: 1.0 },
-                    rows: vec![SensitivityStudyRow {
-                        parameter: "PARAM:GAIN".to_owned(),
-                        nominal_value: 2.0,
-                        raw: vec![SensitivityValue::Available(0.5)],
-                        normalized: vec![SensitivityValue::Available(1.0)],
-                        phase: Vec::new(),
-                    }],
-                }),
-            },
-        ),
-    );
-    seal_legacy_unattributed(&mut run);
-    let mut simulation = SimulationState::default();
-    simulation.retained.runs = vec![run].into();
-    simulation.retained.next_run_id = 45;
-
-    let mut smuggled = crate::io::capture_simulation_results(&simulation);
-    smuggled.schema_version = 28;
-    assert!(
-        smuggled
-            .migrate_to_current(ProjectId::new())
-            .expect_err("a v28 record cannot carry a sensitivity study")
-            .contains("result schemas before v29 cannot contain sensitivity study evidence")
     );
 }

@@ -4,7 +4,7 @@ use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, Retai
 use rspice_simulation::output_contract::{PreparedSavedOutput, materialization};
 
 #[cfg(test)]
-use crate::product::{AnalysisInstanceId, ContentDigest};
+use crate::product::AnalysisInstanceId;
 #[cfg(test)]
 use crate::simulation::config::NoiseSweepType;
 #[cfg(test)]

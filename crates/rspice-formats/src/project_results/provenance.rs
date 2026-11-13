@@ -27,17 +27,6 @@ pub enum ProjectRunProvenanceMode {
     PreparedTaskBound,
 }
 
-pub(super) fn set_legacy_unclassified_source_domains(run: &mut ProjectSimulationRun) {
-    for provenance in run
-        .analyses
-        .iter_mut()
-        .filter_map(|analysis| analysis.provenance.as_mut())
-    {
-        provenance.source_domain =
-            PersistedField::Value(AnalysisResultSourceDomain::LegacyUnclassified);
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "digest", rename_all = "snake_case")]
 pub enum ProjectPreparedSourceCheckReceipt {
@@ -424,92 +413,6 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
                 .collect(),
         }
     }
-}
-
-/// Schema v14 sealed governed specification records and an explicit plan-wide
-/// policy onto the receipt. An earlier receipt carries neither, and the default
-/// policy it is given is the one those runs already evaluated under; a receipt
-/// that carries either field early is a rewritten file, not an old one.
-pub(super) fn migrate_legacy_specification_receipts(
-    results: &mut ProjectSimulationResultsData,
-    source_schema: u32,
-) -> Result<(), String> {
-    if source_schema >= GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    for (run_index, run) in results.runs.iter_mut().enumerate() {
-        let PersistedField::Value(receipt) = &mut run.prepared_receipt else {
-            continue;
-        };
-        if !receipt.specification_definitions.is_empty()
-            || receipt.specification_policy.is_present()
-        {
-            return Err(format!(
-                "schema-v{source_schema} runs[{run_index}].prepared_receipt contains governed specification fields introduced by schema v14"
-            ));
-        }
-        receipt.specification_policy = PersistedField::Value(SpecificationPolicy::default());
-    }
-    Ok(())
-}
-
-/// Schema v15 sealed the deck's occurrence map onto the receipt.
-///
-/// Nothing is added here, and that is the whole rule: a run recorded earlier
-/// executed without a map, so its map stays empty and its reader falls back to
-/// raw engine names, exactly as that run always did. Reconstructing rows from
-/// today's design would attribute a deck to a run that never emitted it. A file
-/// that claims an older schema while carrying a map is therefore refused rather
-/// than trusted.
-/// A derived task identity could not be persisted before schema v15 either.
-///
-/// Not because the field is new to the format — it is additive within v15 —
-/// but because a project holding a run with derived task identities could not
-/// be written at all: the plan-closure check refused every one of them. So a
-/// file claiming an older schema while carrying a derivation record is a
-/// rewritten file, and is refused rather than trusted.
-pub(super) fn reject_derived_task_identities_before_schema_v15(
-    results: &ProjectSimulationResultsData,
-    source_schema: u32,
-) -> Result<(), String> {
-    if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    for (run_index, run) in results.runs.iter().enumerate() {
-        let PersistedField::Value(receipt) = &run.prepared_receipt else {
-            continue;
-        };
-        if let Some(task_index) = receipt
-            .tasks
-            .iter()
-            .position(|task| task.derived_from.is_some())
-        {
-            return Err(format!(
-                "schema-v{source_schema} runs[{run_index}].prepared_receipt.tasks[{task_index}] carries a derived task identity that schema could not persist"
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn reject_hierarchy_maps_before_schema_v15(
-    results: &ProjectSimulationResultsData,
-    source_schema: u32,
-) -> Result<(), String> {
-    if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    for (run_index, run) in results.runs.iter().enumerate() {
-        let PersistedField::Value(receipt) = &run.prepared_receipt else {
-            continue;
-        };
-        if !receipt.hierarchy_map.is_empty() {
-            return Err(format!(
-                "schema-v{source_schema} runs[{run_index}].prepared_receipt contains a hierarchy map introduced by schema v15"
-            ));
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

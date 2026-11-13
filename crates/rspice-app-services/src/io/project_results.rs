@@ -30,9 +30,6 @@ pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationR
             &state.retained.executed_decks,
             state.retained.runs.iter().map(|run| run.id),
         ),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
         ..ProjectSimulationResultsData::default()
     }
     .into()

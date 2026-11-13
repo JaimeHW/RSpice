@@ -3,7 +3,7 @@
 use super::binding_tests::{HIERARCHY, check_value, close, dc, execute};
 use super::fixtures::{ac, output, run};
 use super::*;
-use crate::io::project_io::{PersistedField, ProjectSimulationResults};
+use crate::io::project_io::ProjectSimulationResults;
 use crate::state::{OutputSelectionMode, SavedOutputBoundSource, SimulationRun, SimulationState};
 
 fn tran() -> AnalysisSpec {
@@ -209,74 +209,4 @@ fn saved_source_bindings_are_validated_and_authenticated() {
     json["runs"][0]["analyses"][0]["saved_output_receipts"][0]["source_bindings"] =
         serde_json::Value::Null;
     assert!(serde_json::from_value::<ProjectSimulationResults>(json).is_err());
-    for schema in 1..24 {
-        let mut injected = persisted.clone();
-        injected.schema_version = schema;
-        assert!(
-            injected
-                .migrate_to_current(crate::product::ProjectId::new())
-                .unwrap_err()
-                .contains("source bindings")
-        );
-    }
-}
-
-#[test]
-fn schema_21_through_23_authenticate_original_digests_without_inventing_bindings() {
-    for schema in [21, 22, 23] {
-        for spec in [AnalysisSpec::dc_op(), tran()] {
-            let op = matches!(spec, AnalysisSpec::DcOp { .. });
-            let mut output = output(
-                SavedOutputKind::RawVoltageOrCurrent,
-                "Historical voltage",
-                "V(in)",
-            );
-            output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-            let mut executed = execute(HIERARCHY, spec, &[output]);
-            executed.analyses[0].saved_output_receipts[0].source_bindings = None;
-            let original = executed.analyses[0]
-                .result_data_ref()
-                .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
-            let dataset = executed.data.dataset_content_digest_with_encoding(
-                rspice_results::result_digest::ResultDigestEncoding::V12,
-            );
-            let mut old = stored(executed);
-            old.schema_version = schema;
-            old.runs[0].analyses[0].result_data_digest = PersistedField::Value(original);
-            old.runs[0].dataset_content_digest = PersistedField::Value(dataset);
-            for corrupt_dataset in [false, true] {
-                let mut corrupt = old.clone();
-                let altered = PersistedField::Value(ContentDigest::from_bytes([9; 32]));
-                if corrupt_dataset {
-                    corrupt.runs[0].dataset_content_digest = altered;
-                } else {
-                    corrupt.runs[0].analyses[0].result_data_digest = altered;
-                }
-                let before = corrupt.clone();
-                assert!(
-                    corrupt
-                        .migrate_to_current(crate::product::ProjectId::new())
-                        .unwrap_err()
-                        .contains("digest")
-                );
-                assert_eq!(corrupt, before);
-            }
-            old.migrate_to_current(crate::product::ProjectId::new())
-                .unwrap();
-            assert_eq!(
-                old.schema_version,
-                crate::io::project_io::ProjectSimulationResults::default().schema_version
-            );
-            let mut state = crate::io::simulation_state_from_results(old).unwrap();
-            let analysis = &mut state.retained.runs[0].analyses[0];
-            assert!(analysis.saved_output_receipts[0].source_bindings.is_none());
-            assert_ne!(analysis.result_data_digest(), original);
-            let result = materialize_deferred_saved_output(analysis, 0);
-            if op {
-                result.unwrap();
-            } else {
-                assert!(result.unwrap_err().contains("historical output"));
-            }
-        }
-    }
 }

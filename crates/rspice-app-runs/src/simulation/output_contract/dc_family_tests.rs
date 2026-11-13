@@ -384,7 +384,7 @@ fn stored(run: SimulationRun) -> crate::io::project_io::ProjectSimulationResults
 }
 
 #[test]
-fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
+fn dc_family_receipts_round_trip_every_member() {
     let mut output = output(
         SavedOutputKind::RawVoltageOrCurrent,
         "Current alias",
@@ -409,68 +409,6 @@ fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
             .all(|waveform| waveform.display_cache.is_some()
                 && waveform.unit.as_deref() == Some("A"))
     );
-    for schema in [21, 22] {
-        let mut downgraded = snapshot.clone();
-        downgraded.schema_version = schema;
-        for receipt in &mut downgraded.runs[0].analyses[0].saved_output_receipts {
-            receipt.source_bindings = None;
-        }
-        assert!(
-            downgraded
-                .migrate_to_current(crate::product::ProjectId::new())
-                .unwrap_err()
-                .contains("DC output families")
-        );
-    }
-}
-
-#[test]
-fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
-    for nested in [false, true] {
-        let mut output = output(
-            SavedOutputKind::RawVoltageOrCurrent,
-            "Voltage alias",
-            "V(out)",
-        );
-        if nested {
-            output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-        }
-        let mut run = run(spec(nested, false), &[output]);
-        run.analyses[0].saved_output_receipts[0].source_bindings = None;
-        let digest = run.analyses[0]
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
-        let dataset_digest = run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V12,
-        );
-        let mut snapshot = stored(run);
-        snapshot.schema_version = 22;
-        snapshot.runs[0].analyses[0].result_data_digest =
-            crate::io::project_io::PersistedField::Value(digest);
-        snapshot.runs[0].dataset_content_digest =
-            crate::io::project_io::PersistedField::Value(dataset_digest);
-        let mut corrupted = snapshot.clone();
-        Arc::make_mut(&mut corrupted.runs[0].analyses[0].waveforms[0].y)[0] += 0.1;
-        assert!(
-            corrupted
-                .migrate_to_current(crate::product::ProjectId::new())
-                .unwrap_err()
-                .contains("digest")
-        );
-        snapshot
-            .migrate_to_current(crate::product::ProjectId::new())
-            .unwrap();
-        assert_eq!(
-            snapshot.schema_version,
-            crate::io::project_io::ProjectSimulationResults::default().schema_version
-        );
-        let mut state = crate::state::SimulationState::default();
-        crate::io::restore_simulation_results(snapshot, &mut state).unwrap();
-        assert_ne!(
-            state.retained.runs[0].analyses[0].result_data_digest(),
-            digest
-        );
-    }
 }
 
 #[test]

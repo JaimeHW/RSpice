@@ -1524,7 +1524,6 @@ pub fn decode_project_text(
     validate_project_text_size(contents.len())?;
     let mut project: ProjectFile = serde_json::from_str(contents)
         .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
-    let project_id = project.workspace.project.id();
     let mut load_repairs = Vec::new();
     let repaired_markers = project
         .result_presentation
@@ -1583,11 +1582,7 @@ pub fn decode_project_text(
     load_repairs.extend(project.validate_schematic_instance_masters());
     project.workspace_migration_warning =
         (!load_repairs.is_empty()).then(|| load_repairs.join(" "));
-    let mut simulation_results_error = project
-        .simulation_results
-        .migrate_to_current(project_id)
-        .err()
-        .or_else(|| project.simulation_results.validate().err());
+    let mut simulation_results_error = project.simulation_results.validate().err();
     if simulation_results_error.is_none() {
         simulation_results_error = project.validate_result_plan_references().err();
     }

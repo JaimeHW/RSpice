@@ -1,6 +1,6 @@
 //! Accepted core images cross retention, project recovery, and receiving limits.
 use super::*;
-use crate::product::{ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
+use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::state::{CanonicalAnalysisKind, PreparedRunReceipt, PreparedRunTaskReceipt};
 use rspice_core::engine::{Engine, TransientCheckpointEncoding, TransientStartupMode};
 use rspice_core::{NoAbort, ResourceLimits};
@@ -468,7 +468,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
 }
 
 #[test]
-fn transient_checkpoint_project_schema_and_import_library_are_content_checked() {
+fn transient_checkpoint_project_results_and_import_library_are_content_checked() {
     let bytes = images();
     let (controller, mut state) = fixture();
     controller
@@ -496,17 +496,6 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
     );
 
     let original = crate::io::capture_simulation_results(&state.model.simulation);
-    for version in [1, 15, 27, 40, 43] {
-        let mut legacy = original.clone();
-        legacy.schema_version = version;
-        assert!(
-            legacy
-                .migrate_to_current(ProjectId::new())
-                .unwrap_err()
-                .contains("transient checkpoints")
-        );
-        assert_eq!(legacy.schema_version, version);
-    }
     let mut null = original.clone();
     null.runs[0].analyses[0].transient_checkpoint = PersistedField::Null;
     assert!(
@@ -514,13 +503,6 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
             .unwrap_err()
             .contains("null transient checkpoint")
     );
-    state.model.simulation.active_run_mut().unwrap().analyses[0].transient_checkpoint = None;
-    let mut legacy = crate::io::capture_simulation_results(&state.model.simulation);
-    let digest = legacy.runs[0].dataset_content_digest.clone();
-    legacy.schema_version = 43;
-    legacy.migrate_to_current(ProjectId::new()).unwrap();
-    assert_eq!(legacy.schema_version, 45);
-    assert_eq!(legacy.runs[0].dataset_content_digest, digest);
 
     let mut library = TransientCheckpointLibrary::default();
     assert!(
@@ -558,13 +540,5 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
             .imported_transient_checkpoints
             .get(evidence.digest()),
         Some(&evidence)
-    );
-    let mut invalid = persisted;
-    invalid.schema_version = 43;
-    assert!(
-        invalid
-            .migrate_to_current(ProjectId::new())
-            .unwrap_err()
-            .contains("imported transient checkpoints")
     );
 }

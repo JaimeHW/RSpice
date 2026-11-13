@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_absence() {
+fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
     use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
     use crate::state::MonteCarloCheckpointEvidence;
 
@@ -147,22 +147,6 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
             .contains("committed trials")
     );
     assert_eq!(partial.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
-
-    // Pre-checkpoint projects preserve both absence and the old digest.
-    state.retained.runs[0].analyses[0].monte_carlo_checkpoint = None;
-    let mut legacy = crate::io::capture_simulation_results(&state);
-    let digest = state.retained.runs[0].dataset_content_digest();
-    legacy.schema_version = 34;
-    legacy
-        .migrate_to_current(project.file.workspace.project.id())
-        .unwrap();
-    let restored = crate::io::simulation_state_from_results(legacy).unwrap();
-    assert!(
-        restored.retained.runs[0].analyses[0]
-            .monte_carlo_checkpoint
-            .is_none()
-    );
-    assert_eq!(restored.retained.runs[0].dataset_content_digest(), digest);
 }
 
 #[test]

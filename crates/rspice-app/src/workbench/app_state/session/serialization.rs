@@ -214,7 +214,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .map_or_else(crate::state::ProjectWorkspace::default, |workspace| {
                 *workspace
             });
-        let project_id = project_workspace.content.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
         // Documents skip their runtime dirty flag. The session's open tabs
         // retain it, including inactive schematics that will be reopened later.
@@ -325,10 +324,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
             )],
         };
-        let mut simulation_results = *de.simulation_results;
+        let simulation_results = *de.simulation_results;
         let simulation_results_warning = simulation_results
-            .migrate_to_current(project_id)
-            .and_then(|()| simulation_results.validate())
+            .validate()
             .and_then(|()| {
                 rspice_project::ProjectFile::validate_result_plan_references_for(
                     &simulation_results,

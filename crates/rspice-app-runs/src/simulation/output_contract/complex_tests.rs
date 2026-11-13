@@ -3,7 +3,7 @@
 use super::binding_tests::{check_value, close, execute};
 use super::fixtures::{ac, output};
 use super::*;
-use crate::io::project_io::{PersistedField, ProjectSimulationResults};
+use crate::io::project_io::ProjectSimulationResults;
 use crate::state::{ComplexExpressionPolicy, SimulationState};
 
 const PHASORS: &str =
@@ -140,65 +140,4 @@ fn complex_policy_is_bound_to_prepared_contract_and_retained_digest() {
         };
         assert!(corrupt.validate().unwrap_err().contains("digest"));
     }
-}
-
-#[test]
-fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic() {
-    let current = history(ComplexExpressionPolicy::LegacyMagnitude, true);
-    let state = crate::io::simulation_state_from_results(current.clone()).unwrap();
-    let run = &state.retained.runs[0];
-    let analysis_digest = run.analyses[0]
-        .result_data_ref()
-        .digest(rspice_results::result_digest::ResultDigestEncoding::V13);
-    let dataset_digest = run.data.dataset_content_digest_with_encoding(
-        rspice_results::result_digest::ResultDigestEncoding::V13,
-    );
-    let mut historical = current;
-    historical.schema_version = 24;
-    historical.runs[0].analyses[0].result_data_digest = PersistedField::Value(analysis_digest);
-    historical.runs[0].dataset_content_digest = PersistedField::Value(dataset_digest);
-    for corrupt_dataset in [false, true] {
-        let mut corrupt = historical.clone();
-        let wrong = PersistedField::Value(ContentDigest::from_bytes([7; 32]));
-        if corrupt_dataset {
-            corrupt.runs[0].dataset_content_digest = wrong;
-        } else {
-            corrupt.runs[0].analyses[0].result_data_digest = wrong;
-        }
-        let before = corrupt.clone();
-        assert!(
-            corrupt
-                .migrate_to_current(crate::product::ProjectId::new())
-                .unwrap_err()
-                .contains("digest")
-        );
-        assert_eq!(corrupt, before, "failed migration must be atomic");
-    }
-    for schema in 1..25 {
-        let mut injected = historical.clone();
-        injected.schema_version = schema;
-        injected.runs[0].analyses[0].saved_output_receipts[0].complex_policy =
-            ComplexExpressionPolicy::Rectangular;
-        assert!(
-            injected
-                .migrate_to_current(crate::product::ProjectId::new())
-                .unwrap_err()
-                .contains("rectangular")
-        );
-    }
-    historical
-        .migrate_to_current(crate::product::ProjectId::new())
-        .unwrap();
-    assert_eq!(
-        historical.schema_version,
-        crate::io::project_io::ProjectSimulationResults::default().schema_version
-    );
-    let mut state = crate::io::simulation_state_from_results(historical).unwrap();
-    let analysis = &mut state.retained.runs[0].analyses[0];
-    assert_eq!(
-        analysis.saved_output_receipts[0].complex_policy,
-        ComplexExpressionPolicy::LegacyMagnitude
-    );
-    materialize_deferred_saved_output(analysis, 0).unwrap();
-    check_value(&state.retained.runs[0], 0, 0.0);
 }

@@ -9,7 +9,6 @@ use rspice_results::analysis_type::AnalysisType;
 use rspice_results::run::{ExecutionTarget, SimulationRun, SimulationRunLifecycle};
 use rspice_results::run_receipt::SimulationRunProvenance;
 use rspice_results::waveform::RetainedWaveform;
-use rspice_vocabulary::product::ProjectId;
 
 fn project(sample: f64, complex: bool) -> ProjectSimulationResults {
     let mut waveform =
@@ -65,24 +64,7 @@ fn project_roundtrip_preserves_unavailable_samples_and_binds_their_identity() {
             current.runs[0].dataset_content_digest,
             project(f64::from_bits(0x7ff8_0000_0000_0123), complex).runs[0].dataset_content_digest
         );
-        let mut legacy = restored;
-        legacy.schema_version = 42;
-        assert!(legacy.validate().is_err());
-        assert!(
-            legacy
-                .migrate_to_current(ProjectId::new())
-                .unwrap_err()
-                .contains("unavailable")
-        );
-        assert_eq!(legacy.schema_version, 42);
     }
-    let mut legacy_dense = project(0.0, false);
-    let digest = legacy_dense.runs[0].dataset_content_digest.clone();
-    legacy_dense.schema_version = 42;
-    legacy_dense.migrate_to_current(ProjectId::new()).unwrap();
-    legacy_dense.validate().unwrap();
-    assert_eq!(legacy_dense.schema_version, 45);
-    assert_eq!(legacy_dense.runs[0].dataset_content_digest, digest);
 }
 
 #[test]
