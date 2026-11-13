@@ -95,7 +95,7 @@ pub(crate) fn dispatch_file_menu_action(
             ) {
                 return;
             }
-            crate::workbench::workflows::netlist_workflow::open_netlist_project(state);
+            state.open_netlist_project();
         }
         FileMenuAction::ImportNetlist => {
             if require_netlist_source_save_confirmation_if_dirty(
@@ -104,7 +104,7 @@ pub(crate) fn dispatch_file_menu_action(
             ) {
                 return;
             }
-            crate::workbench::workflows::netlist_workflow::import_netlist(state);
+            state.import_netlist();
         }
         // The format is asked first; the frame runs the export once it is
         // answered, because the picker is a dialog that lives across frames.

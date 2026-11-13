@@ -604,18 +604,13 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         CodeRequest::BeginNetlistProfileReview => {
-            crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
-                &mut app.state,
-            );
+            app.state.begin_owned_netlist_profile_review();
         }
         CodeRequest::FormatNetlistDocument => {
             super::netlist_validation::format_owned_netlist(app);
         }
         CodeRequest::ImportDroppedNetlist(dropped) => {
-            crate::workbench::workflows::netlist_workflow::import_dropped_netlist(
-                &mut app.state,
-                dropped,
-            );
+            app.state.import_dropped_netlist(dropped);
         }
         CodeRequest::Automation(request) => answer_automation_request(app, request),
     }

@@ -56,12 +56,7 @@ fn launcher_drop_stages_a_new_netlist_project_review() {
     let mut state = AppState::default();
     let source = b"dropped deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 
-    assert!(stage_dropped_netlist_project(
-        &mut state,
-        source.to_vec(),
-        None,
-        "dropped.cir".to_owned(),
-    ));
+    assert!(state.stage_dropped_netlist_project(source.to_vec(), None, "dropped.cir".to_owned()));
 
     let review = state
         .code
@@ -324,13 +319,12 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
     let transaction =
         crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
             .expect("replacement transaction starts");
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         bytes,
         None,
-        "portable-run.zip".to_owned(),
+        "portable-run.zip".to_owned()
     ));
     let review = state.code.netlist.import_review.as_ref().unwrap();
     assert!(review.archive_import);
@@ -410,13 +404,12 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
             .expect("replacement transaction starts");
     let source = b"* staged\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
 
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source.clone(),
         None,
-        "staged.cir".to_owned(),
+        "staged.cir".to_owned()
     ));
     assert_eq!(state.model.workspace.content.project.id(), original_project);
     assert_eq!(
@@ -581,13 +574,12 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
         let transaction =
             crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
                 .expect("replacement transaction starts");
-        assert!(stage_netlist_import(
-            &mut state,
+        assert!(state.stage_netlist_import(
             transaction,
             NetlistImportMode::ImportIntoProject,
             source.to_vec(),
             None,
-            "deck.cir".to_owned(),
+            "deck.cir".to_owned()
         ));
         let review = state.code.netlist.import_review.as_ref().unwrap();
         assert_eq!(review.selected_dialect, expected);
@@ -603,13 +595,12 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     let source = b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "foreign.sp".to_owned(),
+        "foreign.sp".to_owned()
     ));
     let review = state.code.netlist.import_review.as_ref().unwrap();
     assert_eq!(
@@ -658,13 +649,12 @@ fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
         crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
             .expect("replacement transaction starts");
     let source = b"* standard subset\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "standard-subset.cir".to_owned(),
+        "standard-subset.cir".to_owned()
     ));
 
     {
@@ -723,13 +713,12 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
     let source = b"simulator lang=spice\n* SPICE interoperability deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "spectre-spice.scs".to_owned(),
+        "spectre-spice.scs".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
@@ -770,13 +759,12 @@ fn ads_spice_export_import_preserves_source_and_profile() {
     let source = b"Options ResourceUsage=yes UseNutmegFormat=no TopDesignName=\"divider\"\n* ADS SPICE export\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "ads-spice-export.net".to_owned(),
+        "ads-spice-export.net".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
@@ -815,13 +803,12 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
         crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
             .expect("replacement transaction starts");
     let source = b"* declarative SPICE3 subset\n.param gain=2\nV1 in 0 1\nB1 out 0 V=log(exp({gain}))\nR1 out 0 1k\n.control\nop\nsave v(out)\n.endc\n.end\n".to_vec();
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "declarative-spice3.cir".to_owned(),
+        "declarative-spice3.cir".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
@@ -870,13 +857,12 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
             .expect("replacement transaction starts");
     let source = b"* PSpice declarative subset\nV1 in 0 AC 1\nE1 out 0 CHEBYSHEV {V(in)} = BP (800Hz 1.2kHz 2kHz 3kHz) .1dB 50dB\nR1 out 0 1k\n.probe V(out)\n.ac dec 10 100 10k\n.end\n"
             .to_vec();
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "declarative-pspice.cir".to_owned(),
+        "declarative-pspice.cir".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
@@ -966,7 +952,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
         .revision_history
         .clone();
 
-    assert!(begin_owned_netlist_profile_review(&mut state));
+    assert!(state.begin_owned_netlist_profile_review());
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.operation,
@@ -1000,7 +986,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
 #[test]
 fn owned_profile_review_rejects_source_revision_change_transactionally() {
     let mut state = quarantined_owned_ngspice_state();
-    assert!(begin_owned_netlist_profile_review(&mut state));
+    assert!(state.begin_owned_netlist_profile_review());
     state
         .code
         .netlist
@@ -1048,13 +1034,12 @@ fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
     let source =
         b"* imperative ngspice\nV1 out 0 1\n.control\nop\nwrdata out.txt v(out)\n.endc\n.end\n"
             .to_vec();
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "imperative-ngspice.cir".to_owned(),
+        "imperative-ngspice.cir".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = crate::state::NetlistSourceDialect::Spice3Ngspice;
@@ -1073,13 +1058,12 @@ fn semantic_loss_parser_diagnostics_block_import() {
         crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
             .expect("replacement transaction starts");
     let source = b"* ignored option is unsafe\n.options definitely_unknown=7\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    assert!(stage_netlist_import(
-        &mut state,
+    assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
         source,
         None,
-        "unknown-option.cir".to_owned(),
+        "unknown-option.cir".to_owned()
     ));
     let review = state.code.netlist.import_review.as_ref().unwrap();
     assert!(review.blocking_issue_count() > 0);

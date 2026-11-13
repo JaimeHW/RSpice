@@ -995,7 +995,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "browser/navigation", 7),
     ("app", "workflows/file_actions", 2),
     ("app", "frame", 5),
-    ("app", "workflows/netlist_workflow", 3),
     ("app", "cross_probe", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.

@@ -151,10 +151,7 @@ const PREPARE_FRAME: &[Step] = &[
             "self.state.results.analysis.clear_transient_specialized_viewer_data()",
         ],
     ),
-    (
-        "5.27",
-        &["netlist_workflow::poll_browser_netlist_workflow("],
-    ),
+    ("5.27", &["self.state.poll_browser_netlist_workflow()"]),
     (
         "5.28",
         &["result_import_workflow::poll_browser_result_dataset_import("],

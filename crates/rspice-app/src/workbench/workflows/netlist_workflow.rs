@@ -7,7 +7,9 @@
 //! validation and the format over these parts.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
@@ -27,29 +29,25 @@ pub(crate) use find::apply_netlist_find_step;
 pub(crate) use import::sha256;
 pub(crate) use import::{
     ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,
-    imported_deck_refusal, install_imported_deck, record_import_failure,
+    imported_deck_refusal, install_imported_deck, netlist_import_start_block_reason,
+    record_import_failure,
 };
-pub(crate) use platform::{import_netlist, open_netlist_project, request_dependency_relink};
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use platform::show_open_netlist_dialog;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use platform::{
+    BrowserNetlistImportResult, pick_browser_netlist, poll_browser_dependency_relink,
+    take_browser_netlist_completion,
+};
+pub(crate) use platform::{request_dependency_relink, route_started_netlist_import};
 pub(crate) use save::save_owned_netlist_source;
 pub(crate) use staging::{
-    begin_owned_netlist_profile_review, cancel_staged_netlist_import,
-    commit_owned_netlist_profile_review, committable_staged_import, import_dropped_netlist,
-    stage_dropped_netlist_project, staged_import_commit, staged_import_still_valid,
+    cancel_staged_netlist_import, commit_owned_netlist_profile_review, committable_staged_import,
+    open_owned_netlist_profile_review, owned_netlist_profile_candidate,
+    stage_validated_netlist_import, staged_import_commit, staged_import_still_valid,
 };
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
-    platform::poll_browser_netlist_import(state);
-    platform::poll_browser_dependency_relink(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
-        &mut state.workbench,
-    );
-}
 
 pub(crate) fn normalize_owned_netlist_whitespace(source: &str) -> String {
     if source.is_empty() {

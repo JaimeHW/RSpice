@@ -207,12 +207,10 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
     };
     match bytes {
         Ok(bytes) => {
-            if crate::workbench::workflows::netlist_workflow::stage_dropped_netlist_project(
-                &mut app.state,
-                bytes,
-                source_path,
-                display_name,
-            ) {
+            if app
+                .state
+                .stage_dropped_netlist_project(bytes, source_path, display_name)
+            {
                 dismiss_launcher(app);
                 true
             } else {

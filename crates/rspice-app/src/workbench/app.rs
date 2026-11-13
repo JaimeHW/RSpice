@@ -715,9 +715,7 @@ impl RSpiceApp {
                 .clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::workflows::netlist_workflow::poll_browser_netlist_workflow(
-            &mut self.state,
-        );
+        self.state.poll_browser_netlist_workflow();
         #[cfg(target_arch = "wasm32")]
         crate::workbench::workflows::result_import_workflow::poll_browser_result_dataset_import(
             &mut self.state.results_parts(),

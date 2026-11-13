@@ -7,10 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 use super::bundle::{decode_import_bytes, parse_generated_netlist_bundle};
-use super::import::{
-    NetlistImportMetadata, NetlistImportMode, netlist_import_start_block_reason,
-    record_import_failure, sha256,
-};
+use super::import::{NetlistImportMetadata, NetlistImportMode, record_import_failure, sha256};
 use super::*;
 
 pub(super) fn detect_netlist_dialect(
@@ -214,8 +211,16 @@ pub(super) fn validate_import_candidate(
     issues
 }
 
-pub(super) fn stage_netlist_import(
-    state: &mut AppState,
+/// Stage a file for review once its project replacement validates: a
+/// netlist bundle through its archive, a plain deck once it decodes, with
+/// its dialect detected, its includes resolved and its issues listed. The
+/// review opens on the netlist page; a deck that cannot be decoded cancels
+/// the transaction.
+pub(crate) fn stage_validated_netlist_import(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
     transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
     bytes: Vec<u8>,
@@ -227,34 +232,12 @@ pub(super) fn stage_netlist_import(
         NetlistImportReviewState,
     };
 
-    if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-        record_import_failure(
-            &mut state.model,
-            &format!(
-                "the selected file exceeds the {} B size limit",
-                crate::io::project_io::MAX_PROJECT_FILE_BYTES
-            ),
-        );
-        return false;
-    }
-    if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
-        state,
-        transaction,
-    ) {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-        state.prompt(format!(
-            "{} was cancelled because the project changed: {error}",
-            mode.dialog_title()
-        ));
-        return false;
-    }
     if bytes.starts_with(b"PK\x03\x04") {
         return stage_netlist_bundle_import(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.platform,
-            &mut state.workbench,
+            model,
+            netlist,
+            platform,
+            workbench,
             transaction,
             mode,
             bytes,
@@ -265,8 +248,8 @@ pub(super) fn stage_netlist_import(
     let (source, encoding) = match decode_import_bytes(&bytes) {
         Ok(decoded) => decoded,
         Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            record_import_failure(&mut state.model, &error);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
+            record_import_failure(model, &error);
             return false;
         }
     };
@@ -354,11 +337,11 @@ pub(super) fn stage_netlist_import(
     // A deck that names no dialect starts from the one Preferences sets; a
     // deck whose markers name one is read as that.
     let selected_dialect = if detected_dialect == crate::state::NetlistSourceDialect::RSpice {
-        state.model.preferences.imported_netlist_dialect()
+        model.preferences.imported_netlist_dialect()
     } else {
         detected_dialect
     };
-    state.code.netlist.import_review = Some(NetlistImportReviewState {
+    netlist.import_review = Some(NetlistImportReviewState {
         transaction,
         operation: match mode {
             NetlistImportMode::OpenProject => NetlistImportOperation::OpenProject,
@@ -382,9 +365,7 @@ pub(super) fn stage_netlist_import(
         compatibility_accepted: false,
         error: None,
     });
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+    workbench.activate(crate::workbench::state::Workspace::Netlist);
     true
 }
 
@@ -595,120 +576,6 @@ impl NativeDependencyResolver {
     }
 }
 
-/// Stage a desktop/browser drag-and-drop import through the same bounded,
-/// revision-guarded transaction used by the explicit picker.
-pub(crate) fn stage_dropped_netlist_import(
-    state: &mut AppState,
-    bytes: Vec<u8>,
-    source_path: Option<std::path::PathBuf>,
-    display_name: String,
-) -> bool {
-    stage_dropped_netlist(
-        state,
-        NetlistImportMode::ImportIntoProject,
-        bytes,
-        source_path,
-        display_name,
-    )
-}
-
-/// Stage the files dropped on the netlist page as an import into the
-/// project: one SPICE deck or RSpice netlist bundle at a time, and nothing
-/// while a modal holds the application.
-pub(crate) fn import_dropped_netlist(state: &mut AppState, dropped: Vec<egui::DroppedFile>) {
-    if state.application_modal_open() {
-        return;
-    }
-    if dropped.len() != 1 {
-        state.prompt("Drop one SPICE deck or RSpice netlist bundle at a time.");
-        return;
-    }
-    let file = &dropped[0];
-    let source_path = file.path.clone();
-    let display_name = (!file.name.trim().is_empty())
-        .then(|| file.name.clone())
-        .or_else(|| {
-            source_path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            source_path
-                .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
-        }
-    };
-    match bytes {
-        Ok(bytes) => {
-            stage_dropped_netlist_import(state, bytes, source_path, display_name);
-        }
-        Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Netlist,
-                format!("The dropped SPICE file could not be read: {error}"),
-            );
-        }
-    }
-}
-
-/// Stage a deck dropped on the project launcher as a new netlist-first
-/// project. This uses the same review transaction as the explicit Open deck
-/// command rather than importing into whichever project happened to be open.
-pub(crate) fn stage_dropped_netlist_project(
-    state: &mut AppState,
-    bytes: Vec<u8>,
-    source_path: Option<std::path::PathBuf>,
-    display_name: String,
-) -> bool {
-    stage_dropped_netlist(
-        state,
-        NetlistImportMode::OpenProject,
-        bytes,
-        source_path,
-        display_name,
-    )
-}
-
-fn stage_dropped_netlist(
-    state: &mut AppState,
-    mode: NetlistImportMode,
-    bytes: Vec<u8>,
-    source_path: Option<std::path::PathBuf>,
-    display_name: String,
-) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(
-        &state.model,
-        state.platform.project_lifecycle.is_open(),
-        mode,
-    ) {
-        state.prompt(format!(
-            "The dropped SPICE file was not imported: {reason}."
-        ));
-        return false;
-    }
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                state.prompt(format!("The dropped SPICE file was not imported: {error}."));
-                return false;
-            }
-        };
-    stage_netlist_import(state, transaction, mode, bytes, source_path, display_name)
-}
-
 pub(super) fn stage_netlist_bundle_import(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -804,92 +671,118 @@ pub(super) fn stage_netlist_bundle_import(
     true
 }
 
-/// Stage the exact persisted owned source for an in-product execution-profile
-/// review. No file picker, host interpreter, or external conversion is
-/// involved; retained dependency bytes are reviewed and validated as part of
-/// the same guarded project snapshot.
-pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
+/// The persisted owned source an execution-profile review would stage, read
+/// before the review's project replacement begins.
+pub(crate) struct OwnedNetlistProfileCandidate {
+    display_name: String,
+    encoding: crate::state::NetlistTextEncoding,
+    line_ending: crate::state::NetlistLineEnding,
+    selected_dialect: crate::state::NetlistSourceDialect,
+    detected_dialect: crate::state::NetlistSourceDialect,
+    detection_evidence: Vec<String>,
+    source: String,
+    dependencies: Vec<crate::state::DependencyMetadata>,
+    issues: Vec<crate::workbench::documents::netlist_document::NetlistImportIssue>,
+}
+
+/// The exact persisted owned source for an in-product execution-profile
+/// review, or why it cannot be reviewed. No file picker, host interpreter, or
+/// external conversion is involved; retained dependency bytes are reviewed
+/// and validated as part of the same guarded project snapshot. It reads the
+/// model and whether a project is open.
+pub(crate) fn owned_netlist_profile_candidate(
+    model: &Model,
+    project_open: bool,
+) -> Result<OwnedNetlistProfileCandidate, String> {
     use crate::workbench::documents::netlist_document::{
-        NetlistImportIssue, NetlistImportIssueSeverity, NetlistImportOperation,
-        NetlistImportReviewState,
+        NetlistImportIssue, NetlistImportIssueSeverity,
     };
 
-    let candidate = (|| -> Result<_, String> {
-        if !state.platform.project_lifecycle.is_open() {
-            return Err("Open the project before reviewing its netlist profile.".to_owned());
-        }
-        if state.model.safe_mode.project_read_only() {
-            return Err("The project is read-only in the current safe mode.".to_owned());
-        }
-        let descriptor = state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .ok_or_else(|| "No owned netlist descriptor is available.".to_owned())?;
-        if !descriptor.execution_profile_review_required() {
-            return Err("The owned source already has an accepted execution profile.".to_owned());
-        }
-        let document = state
-            .model
-            .workspace
-            .content
-            .netlist_document
-            .as_ref()
-            .ok_or_else(|| "No owned netlist document is available.".to_owned())?;
-        let source = state
-            .model
-            .workspace
-            .content
-            .netlist_source
-            .as_ref()
-            .filter(|source| source.as_str() == document.source())
-            .cloned()
-            .ok_or_else(|| "The owned netlist text does not match its document.".to_owned())?;
-        let dependencies = document.dependencies().to_vec();
-        let validation_source = if dependencies.is_empty() {
-            source.clone()
-        } else {
-            rspice_simulation::netlist_sources::expand_retained_netlist_dependencies(
-                document.id(),
-                &source,
-                &dependencies,
-            )
-            .map_err(|error| format!("Retained dependency closure is invalid: {error}"))?
-            .source
-        };
-        let selected_dialect = descriptor
-            .imported_dialect
-            .unwrap_or(crate::state::NetlistSourceDialect::RSpice);
-        let mut issues = validate_import_candidate(
-            &validation_source,
-            None,
-            selected_dialect.execution_profile(),
-        );
-        if selected_dialect.requires_compatibility_review() {
-            issues.push(NetlistImportIssue {
-                severity: NetlistImportIssueSeverity::Advisory,
-                message: format!(
-                    "{} cannot run until its execution profile is accepted.",
-                    selected_dialect.label()
-                ),
-            });
-        }
-        let (detected_dialect, detection_evidence) = detect_netlist_dialect(&source);
-        Ok((
-            descriptor.artifact_name.clone(),
-            descriptor.source_encoding,
-            descriptor.source_line_ending,
-            selected_dialect,
-            detected_dialect,
-            detection_evidence,
-            source,
-            dependencies,
-            issues,
-        ))
-    })();
-    let (
+    if !project_open {
+        return Err("Open the project before reviewing its netlist profile.".to_owned());
+    }
+    if model.safe_mode.project_read_only() {
+        return Err("The project is read-only in the current safe mode.".to_owned());
+    }
+    let descriptor = model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .ok_or_else(|| "No owned netlist descriptor is available.".to_owned())?;
+    if !descriptor.execution_profile_review_required() {
+        return Err("The owned source already has an accepted execution profile.".to_owned());
+    }
+    let document = model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .ok_or_else(|| "No owned netlist document is available.".to_owned())?;
+    let source = model
+        .workspace
+        .content
+        .netlist_source
+        .as_ref()
+        .filter(|source| source.as_str() == document.source())
+        .cloned()
+        .ok_or_else(|| "The owned netlist text does not match its document.".to_owned())?;
+    let dependencies = document.dependencies().to_vec();
+    let validation_source = if dependencies.is_empty() {
+        source.clone()
+    } else {
+        rspice_simulation::netlist_sources::expand_retained_netlist_dependencies(
+            document.id(),
+            &source,
+            &dependencies,
+        )
+        .map_err(|error| format!("Retained dependency closure is invalid: {error}"))?
+        .source
+    };
+    let selected_dialect = descriptor
+        .imported_dialect
+        .unwrap_or(crate::state::NetlistSourceDialect::RSpice);
+    let mut issues = validate_import_candidate(
+        &validation_source,
+        None,
+        selected_dialect.execution_profile(),
+    );
+    if selected_dialect.requires_compatibility_review() {
+        issues.push(NetlistImportIssue {
+            severity: NetlistImportIssueSeverity::Advisory,
+            message: format!(
+                "{} cannot run until its execution profile is accepted.",
+                selected_dialect.label()
+            ),
+        });
+    }
+    let (detected_dialect, detection_evidence) = detect_netlist_dialect(&source);
+    Ok(OwnedNetlistProfileCandidate {
+        display_name: descriptor.artifact_name.clone(),
+        encoding: descriptor.source_encoding,
+        line_ending: descriptor.source_line_ending,
+        selected_dialect,
+        detected_dialect,
+        detection_evidence,
+        source,
+        dependencies,
+        issues,
+    })
+}
+
+/// Open the execution-profile review of `candidate` under the project
+/// replacement `transaction`, on the netlist page.
+pub(crate) fn open_owned_netlist_profile_review(
+    netlist: &mut NetlistDocumentState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    transaction: crate::product::TransactionId,
+    candidate: OwnedNetlistProfileCandidate,
+) {
+    use crate::workbench::documents::netlist_document::{
+        NetlistImportOperation, NetlistImportReviewState,
+    };
+
+    let OwnedNetlistProfileCandidate {
         display_name,
         encoding,
         line_ending,
@@ -899,24 +792,10 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         source,
         dependencies,
         issues,
-    ) = match candidate {
-        Ok(candidate) => candidate,
-        Err(error) => {
-            state.prompt(format!("Execution-profile review is unavailable: {error}"));
-            return false;
-        }
-    };
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                state.prompt(format!("Execution-profile review is unavailable: {error}"));
-                return false;
-            }
-        };
+    } = candidate;
     let original_byte_count = source.len();
     let original_sha256 = sha256(source.as_bytes());
-    state.code.netlist.import_review = Some(NetlistImportReviewState {
+    netlist.import_review = Some(NetlistImportReviewState {
         transaction,
         operation: NetlistImportOperation::RequalifyOwnedSource,
         display_name,
@@ -943,10 +822,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         compatibility_accepted: false,
         error: None,
     });
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
-    true
+    workbench.activate(crate::workbench::state::Workspace::Netlist);
 }
 
 /// The staged review, when its dialect is qualified and nothing blocks its

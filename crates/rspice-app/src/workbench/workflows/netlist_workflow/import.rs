@@ -133,7 +133,7 @@ pub(crate) enum NetlistImportMode {
 }
 
 impl NetlistImportMode {
-    pub(super) const fn dialog_title(self) -> &'static str {
+    pub(crate) const fn dialog_title(self) -> &'static str {
         match self {
             Self::OpenProject => "Open Netlist Project",
             Self::ImportIntoProject => "Import SPICE Deck",
@@ -143,7 +143,7 @@ impl NetlistImportMode {
 
 /// Why an import in `mode` cannot start, over the model and whether a
 /// project is open.
-pub(super) fn netlist_import_start_block_reason(
+pub(crate) fn netlist_import_start_block_reason(
     model: &Model,
     project_open: bool,
     mode: NetlistImportMode,

@@ -3,88 +3,11 @@
 //! The two targets present the same workflow: the native side resolves a
 //! path synchronously, the browser side polls a permission-scoped handle.
 
-use super::import::{NetlistImportMode, netlist_import_start_block_reason, record_import_failure};
-use super::staging::stage_netlist_import;
+use super::import::NetlistImportMode;
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(
-        &state.model,
-        state.platform.project_lifecycle.is_open(),
-        mode,
-    ) {
-        state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
-        return false;
-    }
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                state.prompt(format!("{} is unavailable: {error}.", mode.dialog_title()));
-                return false;
-            }
-        };
-    let loaded = show_open_netlist_dialog(mode).and_then(|path| {
-        std::fs::read(&path)
-            .map(|bytes| (path, bytes))
-            .map_err(|error| error.to_string())
-    });
-    match loaded {
-        Ok((path, bytes)) => {
-            if let Err(error) =
-                crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
-                    state,
-                    transaction,
-                )
-            {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
-                    &mut state.platform,
-                );
-                state.prompt(format!(
-                    "{} was cancelled because the project changed: {error}",
-                    mode.dialog_title()
-                ));
-                return false;
-            }
-            let display_name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.display().to_string());
-            stage_netlist_import(state, transaction, mode, bytes, Some(path), display_name)
-        }
-        Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            if error != "cancelled" {
-                record_import_failure(&mut state.model, &error);
-            }
-            false
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
-    let started = import_netlist_with_mode(state, NetlistImportMode::OpenProject);
-    route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
-        started,
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn import_netlist(state: &mut AppState) -> bool {
-    let started = import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject);
-    route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
-        started,
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn show_open_netlist_dialog(
+pub(crate) fn show_open_netlist_dialog(
     mode: NetlistImportMode,
 ) -> Result<std::path::PathBuf, String> {
     rfd::FileDialog::new()
@@ -197,50 +120,11 @@ fn record_relink_failure(model: &mut Model, error: &str) {
     );
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(
-        &state.model,
-        state.platform.project_lifecycle.is_open(),
-        mode,
-    ) {
-        state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
-        return false;
-    }
-    match start_browser_netlist_import(state, mode) {
-        Ok(()) => true,
-        Err(error) => {
-            record_import_failure(&mut state.model, &error);
-            false
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
-    let started = import_netlist_with_mode(state, NetlistImportMode::OpenProject);
-    route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
-        started,
-    )
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn import_netlist(state: &mut AppState) -> bool {
-    let started = import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject);
-    route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
-        started,
-    )
-}
-
 /// Browser picker completions are consumed by the Netlist surface. Route a
 /// successfully started open/import transaction to that owning page before
 /// the asynchronous file read can complete. Native uses the same transition
 /// so the staged review always opens in a deterministic workspace.
-pub(super) fn route_started_netlist_import(
+pub(crate) fn route_started_netlist_import(
     workbench: &mut crate::workbench::state::WorkbenchSession,
     page: &mut crate::workbench::documents::code_workspace::CodeWorkspacePage,
     started: bool,
@@ -253,7 +137,7 @@ pub(super) fn route_started_netlist_import(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) enum BrowserNetlistImportResult {
+pub(crate) enum BrowserNetlistImportResult {
     Loaded(crate::workbench::browser::file_import::PickedTextFile),
     Failed(String),
     Cancelled,
@@ -273,11 +157,11 @@ pub(super) struct BrowserDependencyRelinkCompletion {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) struct BrowserNetlistImportCompletion {
+pub(crate) struct BrowserNetlistImportCompletion {
     token: crate::workbench::browser::file_import::TextImportToken,
-    transaction: crate::product::TransactionId,
-    mode: NetlistImportMode,
-    result: BrowserNetlistImportResult,
+    pub(crate) transaction: crate::product::TransactionId,
+    pub(crate) mode: NetlistImportMode,
+    pub(crate) result: BrowserNetlistImportResult,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -410,19 +294,21 @@ pub(crate) fn poll_browser_dependency_relink(
     }
 }
 
+/// Open the browser's picker for a SPICE deck or netlist bundle under the
+/// project replacement `transaction`; its completion lands for
+/// [`take_browser_netlist_completion`]. A picker already open refuses, and
+/// cancels the transaction.
 #[cfg(target_arch = "wasm32")]
-pub(super) fn start_browser_netlist_import(
-    state: &mut AppState,
+pub(crate) fn pick_browser_netlist(
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
+    transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
 ) -> Result<(), String> {
-    let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state)
-            .map_err(|error| error.to_string())?;
     let token = crate::workbench::browser::file_import::try_begin_text_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::Netlist,
     )
     .inspect_err(|_| {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
     })?;
 
     crate::workbench::browser::file_import::pick_text_file(
@@ -447,57 +333,20 @@ pub(super) fn start_browser_netlist_import(
     Ok(())
 }
 
+/// The browser picker's finished netlist import, once one has landed and
+/// its picker token is still current; a stale completion cancels its
+/// transaction and is dropped.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
-    let Some(completion) = BROWSER_NETLIST_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
-    else {
-        return false;
-    };
+pub(crate) fn take_browser_netlist_completion(
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
+) -> Option<BrowserNetlistImportCompletion> {
+    let completion = BROWSER_NETLIST_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            &mut state.platform,
+            platform,
             completion.transaction,
         );
-        return false;
+        return None;
     }
-    if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
-        state,
-        completion.transaction,
-    ) {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            &mut state.platform,
-            completion.transaction,
-        );
-        state.prompt(format!(
-            "{} was cancelled because the project changed: {error}",
-            completion.mode.dialog_title()
-        ));
-        return false;
-    }
-    match completion.result {
-        BrowserNetlistImportResult::Loaded(file) => stage_netlist_import(
-            state,
-            completion.transaction,
-            completion.mode,
-            file.original_bytes
-                .unwrap_or_else(|| file.contents.into_bytes()),
-            None,
-            file.name,
-        ),
-        BrowserNetlistImportResult::Failed(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
-                completion.transaction,
-            );
-            record_import_failure(&mut state.model, &error);
-            false
-        }
-        BrowserNetlistImportResult::Cancelled => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
-                completion.transaction,
-            );
-            false
-        }
-    }
+    Some(completion)
 }

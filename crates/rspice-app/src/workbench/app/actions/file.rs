@@ -305,9 +305,7 @@ impl RSpiceApp {
                 }
             }
             ConfirmationAction::OpenNetlistProject => {
-                crate::workbench::workflows::netlist_workflow::open_netlist_project(
-                    &mut self.state,
-                );
+                self.state.open_netlist_project();
             }
             ConfirmationAction::CloseProject(destination) => {
                 self.state.close_project_discard(destination);
@@ -319,7 +317,7 @@ impl RSpiceApp {
                 }
             }
             ConfirmationAction::ImportNetlist => {
-                crate::workbench::workflows::netlist_workflow::import_netlist(&mut self.state);
+                self.state.import_netlist();
             }
             ConfirmationAction::Exit => {
                 // Signal exit request - this will be handled by the frame update
