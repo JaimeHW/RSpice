@@ -190,121 +190,73 @@ pub fn show_header(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.set_clip_rect(legend_rect);
-            egui::ScrollArea::horizontal()
-                .id_salt(("rspice.results.pane-legend", model.analysis_key, pane.unit))
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    let traces = model
-                        .traces
-                        .iter()
-                        .take(model.signal_trace_count)
-                        .enumerate()
-                        .filter(|(_, trace)| trace_belongs_to_pane(model, pane, ordinal, trace));
-                    for (_, trace) in traces {
-                        let selected = host.trace_selected(trace);
-                        let (swatch, swatch_response) =
-                            ui.allocate_exact_size(egui::vec2(18.0, 19.0), egui::Sense::click());
-                        paint_trace_swatch(
-                            ui.painter(),
-                            swatch,
-                            trace.color,
-                            SwatchStyle::of(trace).look(t.color_safe_traces),
-                            c.bg_panel,
-                        );
-                        swatch_response.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Button,
-                                true,
-                                trace.visible,
-                                format!("Toggle {} visibility", display_name(&trace.name)),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &swatch_response, swatch);
-                        if swatch_response.clicked() {
-                            host.toggle_trace_visibility(trace);
-                        }
-                        // The instrument idiom: a trace states its own value
-                        // at cursor A right where its name is, so reading one
-                        // curve never costs a trip to the readout register.
-                        // A corner family draws one chip for the whole group,
-                        // so the chip states how many traces it stands for.
-                        let family = trace.family_group_ordinal.map(|_| {
-                            model
-                                .traces
-                                .iter()
-                                .filter(|candidate| {
-                                    candidate.presentation_key == trace.presentation_key
-                                        && candidate.family_group_ordinal.is_some()
-                                })
-                                .count()
-                        });
-                        let shown = display_name(&trace.name);
-                        let label = match &cursor_a_value {
-                            Some((x, presentation, policy)) if trace.visible => {
-                                let digits =
-                                    usize::from(presentation.displayed_significant_digits().get());
-                                let value = sample_at_with_shape(
-                                    &trace.x,
-                                    &trace.y,
-                                    &trace.shape,
-                                    *x,
-                                    cursor_interpolation(presentation.cursor_interpolation()),
-                                );
-                                format!(
-                                    "{}  {}",
-                                    elide(&shown, 16),
-                                    model.format_trace_value(trace, value, digits, *policy)
-                                )
-                            }
-                            _ => elide(&shown, 20),
-                        };
-                        let label = match family {
-                            Some(count) if count > 1 => format!("{label}  ×{count}"),
-                            _ => label,
-                        };
-                        // A hidden trace keeps its chip so it can be brought
-                        // back, but must not read as a curve on the canvas.
-                        let label = if trace.visible {
-                            egui::RichText::new(label)
-                        } else {
-                            egui::RichText::new(label)
-                                .strikethrough()
-                                .color(c.text_faint)
-                        };
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let traces: Vec<&StripTrace> = model
+                .traces
+                .iter()
+                .take(model.signal_trace_count)
+                .filter(|trace| trace_belongs_to_pane(model, pane, ordinal, trace))
+                .collect();
+            let (plotted, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
+                traces.into_iter().partition(|trace| trace.visible);
+            // A name gives way only past a share of the row: hierarchical
+            // names keep their leaf, cut from the middle as ViVA cuts them.
+            let name_budget = (legend_rect.width() * 0.4).max(72.0);
+            let chips: Vec<LegendEntry> = plotted
+                .iter()
+                .map(|trace| {
+                    legend_entry(
+                        ui,
+                        model,
+                        trace,
+                        &cursor_a_value,
+                        name_budget,
+                        &display_name,
+                    )
+                })
+                .collect();
+            let hidden_label = format!("{} hidden", hidden.len());
+            let reserve = |label: &str| control_width(ui, label) + 3.0;
+            let hidden_width = if hidden.is_empty() {
+                0.0
+            } else {
+                reserve(&hidden_label)
+            };
+            let fitted = fitted_chips(&chips, legend_rect.width() - hidden_width, |overflow| {
+                reserve(&format!("+{overflow}"))
+            });
+            for (trace, entry) in plotted.iter().zip(&chips).take(fitted) {
+                legend_chip(ui, trace, entry, &display_name, host);
+            }
+            if fitted < chips.len() {
+                let overflow = &plotted[fitted..];
+                ui.menu_button(format!("+{}", overflow.len()), |ui| {
+                    for (trace, entry) in overflow.iter().zip(&chips[fitted..]) {
+                        ui.horizontal(|ui| legend_chip(ui, trace, entry, &display_name, host));
+                    }
+                })
+                .response
+                .on_hover_text(format!(
+                    "{} more plotted in the {} pane",
+                    overflow.len(),
+                    pane.unit
+                ));
+            }
+            if !hidden.is_empty() {
+                ui.menu_button(&hidden_label, |ui| {
+                    for trace in &hidden {
+                        let mut shown = false;
                         if ui
-                            .selectable_label(selected, label)
-                            .on_hover_text(&*shown)
+                            .checkbox(&mut shown, &*display_name(&trace.name))
                             .clicked()
                         {
-                            host.select_trace(trace);
+                            host.toggle_trace_visibility(trace);
                         }
                     }
-                    ui.menu_button("+", |ui| {
-                        let mut any = false;
-                        for trace in
-                            model
-                                .traces
-                                .iter()
-                                .take(model.signal_trace_count)
-                                .filter(|trace| {
-                                    !trace.visible
-                                        && trace_belongs_to_pane(model, pane, ordinal, trace)
-                                })
-                        {
-                            any = true;
-                            if ui.button(&*display_name(&trace.name)).clicked() {
-                                host.toggle_trace_visibility(trace);
-                                ui.close();
-                            }
-                        }
-                        if !any {
-                            ui.label("All compatible signals are already shown");
-                        }
-                    })
-                    .response
-                    .on_hover_text(format!("Add a signal to the {} pane", pane.unit));
-                });
+                })
+                .response
+                .on_hover_text(format!("Hidden traces of the {} pane", pane.unit));
+            }
         },
     );
 
@@ -348,6 +300,137 @@ pub fn show_header(
         },
     );
     output
+}
+
+/// One plotted trace's legend chip, measured before it is laid out so the
+/// row can tell how many fit.
+struct LegendEntry {
+    label: String,
+    width: f32,
+}
+
+const LEGEND_SWATCH: egui::Vec2 = egui::vec2(18.0, 19.0);
+
+fn legend_entry(
+    ui: &Ui,
+    model: &StripModel,
+    trace: &StripTrace,
+    cursor_a: &Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
+    name_budget: f32,
+    display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+) -> LegendEntry {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let shown = display_name(&trace.name);
+    let name = rspice_ui_kit::panels::elide_middle(ui, &shown, &font, name_budget);
+    // The instrument idiom: a trace states its own value at cursor A right
+    // where its name is, so reading one curve never costs a trip to the
+    // readout register.
+    let label = match cursor_a {
+        Some((x, presentation, policy)) => {
+            let digits = usize::from(presentation.displayed_significant_digits().get());
+            let value = sample_at_with_shape(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                *x,
+                cursor_interpolation(presentation.cursor_interpolation()),
+            );
+            format!(
+                "{name}  {}",
+                model.format_trace_value(trace, value, digits, *policy)
+            )
+        }
+        None => name,
+    };
+    // A corner family draws one chip for the whole group, so the chip states
+    // how many traces it stands for.
+    let family = trace.family_group_ordinal.map(|_| {
+        model
+            .traces
+            .iter()
+            .filter(|candidate| {
+                candidate.presentation_key == trace.presentation_key
+                    && candidate.family_group_ordinal.is_some()
+            })
+            .count()
+    });
+    let label = match family {
+        Some(count) if count > 1 => format!("{label}  ×{count}"),
+        _ => label,
+    };
+    let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
+    LegendEntry { label, width }
+}
+
+/// The width a button-like control labelled `label` takes.
+fn control_width(ui: &Ui, label: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter()
+        .layout_no_wrap(label.to_owned(), font, egui::Color32::WHITE)
+        .size()
+        .x
+        + 2.0 * ui.spacing().button_padding.x
+}
+
+/// How many of `chips` the row shows in `width`: all of them when they fit,
+/// otherwise as many as leave room for the chip that counts the rest.
+fn fitted_chips(chips: &[LegendEntry], width: f32, overflow_width: impl Fn(usize) -> f32) -> usize {
+    let total: f32 = chips.iter().map(|chip| chip.width).sum();
+    if total <= width {
+        return chips.len();
+    }
+    let mut used = 0.0;
+    for (index, chip) in chips.iter().enumerate() {
+        if used + chip.width + overflow_width(chips.len() - index) > width {
+            return index;
+        }
+        used += chip.width;
+    }
+    chips.len()
+}
+
+/// A plotted trace's chip: its swatch, which hides it, then its name and
+/// value, which select it. The full name is on hover.
+fn legend_chip(
+    ui: &mut Ui,
+    trace: &StripTrace,
+    entry: &LegendEntry,
+    display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+    host: &mut impl PaneHeaderHost,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
+    paint_trace_swatch(
+        ui.painter(),
+        swatch,
+        trace.color,
+        SwatchStyle::of(trace).look(t.color_safe_traces),
+        t.color.bg_panel,
+    );
+    let shown = display_name(&trace.name);
+    swatch_response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            true,
+            trace.visible,
+            format!("Toggle {shown} visibility"),
+        )
+    });
+    theme::paint_focus_ring(ui, &swatch_response, swatch);
+    if swatch_response
+        .on_hover_text(format!("Hide {shown}"))
+        .clicked()
+    {
+        host.toggle_trace_visibility(trace);
+    }
+    let selected = host.trace_selected(trace);
+    if ui
+        .selectable_label(selected, entry.label.as_str())
+        .on_hover_text(&*shown)
+        .clicked()
+    {
+        host.select_trace(trace);
+    }
 }
 
 #[cfg(test)]
