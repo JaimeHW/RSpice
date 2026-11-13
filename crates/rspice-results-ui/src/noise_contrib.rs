@@ -219,14 +219,35 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             c.text_faint,
                         );
                         // Device and mechanism share the row's one line. A
-                        // source too long for its column elides in the
-                        // middle and is read whole on hover.
-                        let source = format!("{} · {}", row.device, row.mechanism);
-                        let shown = elide_middle(ui, &source, &font, SOURCE_W - 2.0 * CELL_INSET);
-                        if shown != source {
-                            response.clone().on_hover_text(&source);
+                        // device too long for what the mechanism leaves of
+                        // the column elides in the middle, keeping its leaf,
+                        // and the whole source is read on hover.
+                        let mechanism = format!(" · {}", row.mechanism);
+                        let mechanism_width = ui
+                            .painter()
+                            .layout_no_wrap(mechanism.clone(), font.clone(), c.text)
+                            .size()
+                            .x;
+                        let device = elide_middle(
+                            ui,
+                            &row.device,
+                            &font,
+                            SOURCE_W - 2.0 * CELL_INSET - mechanism_width,
+                        );
+                        if device != row.device {
+                            response
+                                .clone()
+                                .on_hover_text(format!("{}{mechanism}", row.device));
                         }
-                        paint_cell(ui, rect, RANK_W, SOURCE_W, shown, Align2::LEFT_CENTER, c.text);
+                        paint_cell(
+                            ui,
+                            rect,
+                            RANK_W,
+                            SOURCE_W,
+                            format!("{device}{mechanism}"),
+                            Align2::LEFT_CENTER,
+                            c.text,
+                        );
                         paint_cell(
                             ui,
                             rect,

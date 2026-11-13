@@ -306,6 +306,14 @@ mod tests {
                 painted.iter().any(|text| text == "M1 · flicker"),
                 "{density:?}: device and mechanism share one line: {painted:?}"
             );
+            // A long device elides in the middle and keeps its leaf and its
+            // mechanism.
+            assert!(
+                painted
+                    .iter()
+                    .any(|text| text.ends_with("M14 · flicker") && text.contains('…')),
+                "{density:?}: the long source lost its leaf or its mechanism: {painted:?}"
+            );
             assert!(
                 painted.iter().all(|text| !text.contains('\n')),
                 "{density:?}: a cell wraps onto a second line"
