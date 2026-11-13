@@ -3,8 +3,16 @@
 use super::*;
 use rspice_matrix::{
     CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, DivisionPolicy, KluDiagnostics,
-    KluNumericCheckpoint, NumericFactorizationPolicy, RealSolverBackend, SolverOptions,
+    KluNumericCheckpoint, NumericFactorizationPolicy, RealSolverBackend, RemainderTracking,
+    SolverOptions,
 };
+
+/// The remainder trackings in their wire order.
+const REMAINDER_TRACKINGS: [RemainderTracking; 3] = [
+    RemainderTracking::FirstAssembly,
+    RemainderTracking::Off,
+    RemainderTracking::Latched,
+];
 
 fn write_indices<T: std::fmt::Display>(
     out: &mut String,
@@ -98,6 +106,13 @@ pub(super) fn write_solver_state(
         u8::from(o.circuit_lu_robustness == CircuitLuRobustness::BackendFaithful),
         o.pivot_tolerance,
         o.absolute_pivot_tolerance
+    ));
+    out.push_str(&format!(
+        "accepted_solver_remainders {}\n",
+        REMAINDER_TRACKINGS
+            .iter()
+            .position(|tracking| *tracking == state.remainders)
+            .expect("every remainder tracking has a wire index")
     ));
     write_indices(out, "accepted_solver_col_ptr", &state.col_ptr, abort)?;
     write_indices(out, "accepted_solver_row_idx", &state.row_idx, abort)?;
@@ -240,6 +255,10 @@ pub(super) fn read_solver_state(
             .parse()
             .map_err(|_| "invalid solver absolute pivot tolerance")?,
     };
+    let remainders = choice(
+        fields::<1>(lines, "accepted_solver_remainders")?[0],
+        &REMAINDER_TRACKINGS,
+    )?;
     let col_ptr = read_indices(lines, "accepted_solver_col_ptr", budget)?;
     let row_idx = read_indices(lines, "accepted_solver_row_idx", budget)?;
     let klu = match fields::<1>(lines, "accepted_solver_klu")?[0] {
@@ -298,6 +317,7 @@ pub(super) fn read_solver_state(
     // the aggregate budget before checking the complete matrix image.
     Ok(Some(StaticMatrixSolverCheckpoint {
         version,
+        remainders,
         dimension,
         col_ptr,
         row_idx,

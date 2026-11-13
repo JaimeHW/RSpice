@@ -12492,14 +12492,19 @@ mod tests {
         let text = sample().to_text();
         for (from, to) in [
             (
-                "accepted_solver_state 1 5 0",
+                "accepted_solver_state 2 5 0",
                 "accepted_solver_state 99 5 0",
             ),
+            ("accepted_solver_state 2 5 0", "accepted_solver_state 1 5 0"),
             (
-                "accepted_solver_state 1 5 0",
-                "accepted_solver_state 1 18446744073709551615 0",
+                "accepted_solver_state 2 5 0",
+                "accepted_solver_state 2 18446744073709551615 0",
             ),
             ("accepted_solver_options 1", "accepted_solver_options 99"),
+            (
+                "accepted_solver_remainders 1\n",
+                "accepted_solver_remainders 3\n",
+            ),
             (
                 "accepted_solver_col_ptr 6\n0\n",
                 "accepted_solver_col_ptr 6\n7\n",

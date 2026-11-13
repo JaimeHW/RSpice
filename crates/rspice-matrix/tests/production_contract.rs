@@ -430,6 +430,162 @@ fn a_milliohm_cluster_keeps_the_leg_conductance_its_diagonal_sum_rounds_away() {
                 solution[SOURCE],
                 source_current
             );
+
+            // A transient step captures an assembly and restores it before
+            // it stamps its own terms: the restored stamps keep the legs.
+            let (values, remainders) = matrix.values_and_remainders_mut();
+            let values = values.to_vec();
+            let remainders = remainders
+                .unwrap_or_else(|| panic!("{profile} (newton: {newton}): no remainders kept"))
+                .to_vec();
+            matrix.clear_values();
+            let (stamped, stamped_remainders) = matrix.values_and_remainders_mut();
+            stamped.copy_from_slice(&values);
+            stamped_remainders
+                .expect("a cleared matrix keeps tracking remainders")
+                .copy_from_slice(&remainders);
+            let mut restored = Vec::new();
+            if newton {
+                matrix.solve_newton_into(&rhs, &mut restored).unwrap();
+            } else {
+                matrix.solve_into(&rhs, &mut restored).unwrap();
+            }
+            for node in [Y, DP, DN] {
+                assert!(
+                    (restored[node] - 0.5 * vdd).abs() <= 1e-12 * vdd,
+                    "{profile} (newton: {newton}): restored node {node} at {:.12e} V, \
+                     expected {:.12e} V",
+                    restored[node],
+                    0.5 * vdd
+                );
+            }
+
+            // A Newton correction from an iterate 3% low lands on the same
+            // answer: its residual reads the remainders too.
+            let iterate: Vec<Value> = solution.iter().map(|value| 0.97 * value).collect();
+            let mut correction = Vec::new();
+            matrix
+                .correction_rhs_into(&rhs, &iterate, &mut correction)
+                .unwrap();
+            let mut step = Vec::new();
+            if newton {
+                matrix.solve_newton_into(&correction, &mut step).unwrap();
+            } else {
+                matrix.solve_into(&correction, &mut step).unwrap();
+            }
+            for node in [Y, DP, DN] {
+                let corrected = iterate[node] + step[node];
+                assert!(
+                    (corrected - 0.5 * vdd).abs() <= 1e-12 * vdd,
+                    "{profile} (newton: {newton}): corrected node {node} at {corrected:.12e} V, \
+                     expected {:.12e} V",
+                    0.5 * vdd
+                );
+            }
+        }
+    }
+}
+
+/// A transient resumed from a checkpoint builds a fresh matrix, and a fresh
+/// matrix keeps its stamps' remainders through its first assembly. Restoring
+/// the captured solver state hands it the captured matrix's tracking, so both
+/// form a Newton correction's right-hand side to the same bits: a system whose
+/// first solve ended the tracking reads no remainders after the restore, and
+/// the milliohm cluster, whose pivots latched it, goes on reading them.
+#[test]
+fn a_restored_matrix_forms_the_captured_matrix_corrections_bit_for_bit() {
+    // Two nodes tied by 0.1 S, each 1 S to ground: every diagonal sum rounds,
+    // and nothing cancels.
+    let rounded = (
+        "rounded diagonals",
+        2,
+        vec![
+            (0, 0, 1.0),
+            (0, 0, 0.1),
+            (1, 1, 1.0),
+            (1, 1, 0.1),
+            (0, 1, -0.1),
+            (1, 0, -0.1),
+        ],
+        vec![1.0, 0.5],
+        false,
+    );
+    // The milliohm cluster: y links dp and dn through 1 mOhm, 1 TOhm legs tie
+    // dp to the 11.5 mV source node dd and dn to ground.
+    let (link, leg) = (1.0e3, 1.0e-12);
+    let mut cluster_stamps = Vec::new();
+    for (p, n, g) in [
+        (0, Some(1), link),
+        (0, Some(2), link),
+        (1, Some(3), leg),
+        (2, None, leg),
+    ] {
+        cluster_stamps.push((p, p, g));
+        if let Some(n) = n {
+            cluster_stamps.extend([(n, n, g), (p, n, -g), (n, p, -g)]);
+        }
+    }
+    cluster_stamps.extend([(3, 4, 1.0), (4, 3, 1.0)]);
+    let cluster = (
+        "milliohm cluster",
+        5,
+        cluster_stamps,
+        vec![0.0, 0.0, 0.0, 0.0, 0.0115],
+        true,
+    );
+    let profiles = [
+        ("default", SolverOptions::default()),
+        ("circuit LU", options(RealSolverBackend::Klu)),
+    ];
+    for (name, n, stamps, rhs, latches) in [rounded, cluster] {
+        let pattern: Vec<_> = stamps
+            .iter()
+            .map(|&(row, col, _)| (row, col, 0.0))
+            .collect();
+        let stamp = |matrix: &mut StaticMatrix| {
+            matrix.clear_values();
+            for &(row, col, value) in &stamps {
+                matrix.add(row, col, value);
+            }
+        };
+        let fresh = |solver_options| {
+            StaticMatrix::from_triplets_with_options(n, n, &pattern, solver_options).unwrap()
+        };
+        let correction = |matrix: &mut StaticMatrix, iterate: &[Value]| {
+            stamp(matrix);
+            let mut out = Vec::new();
+            matrix.correction_rhs_into(&rhs, iterate, &mut out).unwrap();
+            out.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+        };
+        for (profile, solver_options) in profiles {
+            let mut captured = fresh(solver_options);
+            stamp(&mut captured);
+            let mut solution = Vec::new();
+            captured.solve_newton_into(&rhs, &mut solution).unwrap();
+            let checkpoint = captured.capture_solver_checkpoint().unwrap();
+            let mut restored = fresh(solver_options);
+            restored.restore_solver_checkpoint(&checkpoint).unwrap();
+            assert_eq!(
+                restored.values_and_remainders_mut().1.is_some(),
+                latches,
+                "{name}, {profile}: the restored matrix keeps remainders as the captured one does"
+            );
+            let iterate: Vec<Value> = solution.iter().map(|value| 0.97 * value).collect();
+            let expected = correction(&mut captured, &iterate);
+            assert_eq!(
+                correction(&mut restored, &iterate),
+                expected,
+                "{name}, {profile}: correction bits after the restore"
+            );
+            if !latches {
+                // A fresh matrix that skipped the restore would still be in
+                // its first assembly and read the remainders.
+                assert_ne!(
+                    correction(&mut fresh(solver_options), &iterate),
+                    expected,
+                    "{name}, {profile}: a first assembly reads the remainders"
+                );
+            }
         }
     }
 }

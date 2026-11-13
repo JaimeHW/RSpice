@@ -24,8 +24,8 @@ pub use dense_eigen::{
 };
 pub use klu::{KluDiagnostics, KluNumericCheckpoint, KluSolver};
 pub use sparse::{
-    ComplexMatrix, ComplexTransposeBackwardErrorReport, CscIndex, CscPatternToken, SparseLuSolver,
-    StaticMatrix, StaticMatrixSolverCheckpoint, TripletMatrix,
+    ComplexMatrix, ComplexTransposeBackwardErrorReport, CscIndex, CscPatternToken,
+    RemainderTracking, SparseLuSolver, StaticMatrix, StaticMatrixSolverCheckpoint, TripletMatrix,
     analyze_complex_transpose_solution_by_entry_visitor,
     certify_complex_transpose_solution_by_entry_visitor,
 };

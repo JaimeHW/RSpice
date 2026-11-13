@@ -121,29 +121,71 @@ pub(super) struct TransientSystemContext<'a> {
 /// attempt layer additionally contains sources at the trial time and ordinary
 /// capacitor companions for the active integration coefficients. Diode charge
 /// and conduction terms remain candidate-dependent and are stamped normally.
+///
+/// Each layer keeps the stamps' rounding remainders with its values while the
+/// matrix keeps them: a 1 mOhm link's 1000 S diagonal rounds away the
+/// picosiemens beside it, and a solve refined against the rounded sums
+/// alone settles on a circuit the stamps do not describe.
 #[derive(Default)]
 pub(super) struct DiodeTransientStampCache {
     attempt_source_side: Option<SourceTimeSide>,
     static_values: Vec<Value>,
+    static_remainders: Vec<Value>,
     static_rhs: Vec<Value>,
     attempt_values: Vec<Value>,
+    attempt_remainders: Vec<Value>,
     attempt_rhs: Vec<Value>,
+}
+
+/// Copy `matrix`'s values, and their rounding remainders while it keeps
+/// them, into a captured layer.
+#[inline]
+fn capture_stamped_values(
+    matrix: &mut crate::solver::StaticMatrix,
+    values: &mut Vec<Value>,
+    remainders: &mut Vec<Value>,
+) {
+    let (stamped, stamped_remainders) = matrix.values_and_remainders_mut();
+    values.clear();
+    values.extend_from_slice(stamped);
+    remainders.clear();
+    if let Some(stamped_remainders) = stamped_remainders {
+        remainders.extend_from_slice(stamped_remainders);
+    }
+}
+
+/// Restore a captured layer's values, and its remainders while the matrix
+/// keeps them: zero for a layer captured without them.
+#[inline]
+fn restore_stamped_values(
+    matrix: &mut crate::solver::StaticMatrix,
+    values: &[Value],
+    remainders: &[Value],
+) {
+    let (stamped, stamped_remainders) = matrix.values_and_remainders_mut();
+    debug_assert_eq!(stamped.len(), values.len());
+    stamped.copy_from_slice(values);
+    if let Some(stamped_remainders) = stamped_remainders {
+        if remainders.len() == stamped_remainders.len() {
+            stamped_remainders.copy_from_slice(remainders);
+        } else {
+            stamped_remainders.fill(0.0);
+        }
+    }
 }
 
 impl DiodeTransientStampCache {
     #[inline]
     fn capture_static(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
-        self.static_values.clear();
-        self.static_values.extend_from_slice(matrix.values_mut());
+        capture_stamped_values(matrix, &mut self.static_values, &mut self.static_remainders);
         self.static_rhs.clear();
         self.static_rhs.extend_from_slice(rhs);
     }
 
     #[inline]
     fn restore_static(&self, matrix: &mut crate::solver::StaticMatrix, rhs: &mut [Value]) {
-        debug_assert_eq!(matrix.values_mut().len(), self.static_values.len());
         debug_assert_eq!(rhs.len(), self.static_rhs.len());
-        matrix.values_mut().copy_from_slice(&self.static_values);
+        restore_stamped_values(matrix, &self.static_values, &self.static_remainders);
         rhs.copy_from_slice(&self.static_rhs);
     }
 
@@ -155,17 +197,19 @@ impl DiodeTransientStampCache {
         side: SourceTimeSide,
     ) {
         self.attempt_source_side = Some(side);
-        self.attempt_values.clear();
-        self.attempt_values.extend_from_slice(matrix.values_mut());
+        capture_stamped_values(
+            matrix,
+            &mut self.attempt_values,
+            &mut self.attempt_remainders,
+        );
         self.attempt_rhs.clear();
         self.attempt_rhs.extend_from_slice(rhs);
     }
 
     #[inline]
     fn restore_attempt(&self, matrix: &mut crate::solver::StaticMatrix, rhs: &mut [Value]) {
-        debug_assert_eq!(matrix.values_mut().len(), self.attempt_values.len());
         debug_assert_eq!(rhs.len(), self.attempt_rhs.len());
-        matrix.values_mut().copy_from_slice(&self.attempt_values);
+        restore_stamped_values(matrix, &self.attempt_values, &self.attempt_remainders);
         rhs.copy_from_slice(&self.attempt_rhs);
     }
 }

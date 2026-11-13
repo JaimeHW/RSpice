@@ -232,8 +232,13 @@ impl MatrixStampError {
 /// and the matrix's current stamp values are not part of this image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaticMatrixSolverCheckpoint {
-    /// Numeric and symbolic reconstruction contract version.
+    /// Numeric and symbolic reconstruction contract version: 2 since the image
+    /// carries the remainder tracking.
     pub version: u32,
+    /// Whether the matrix kept its stamps' rounding remainders. A Newton
+    /// correction's residual reads them while it does, so a matrix restored
+    /// without this would read them where the captured one had stopped.
+    pub remainders: RemainderTracking,
     /// Square system dimension.
     pub dimension: usize,
     /// Native CSC column boundaries, including the terminal nonzero count.
@@ -282,7 +287,7 @@ impl StaticMatrixSolverCheckpoint {
             SolverError::InvalidCircuit(format!("invalid sparse-solver checkpoint: {detail}"))
         };
         let n = self.dimension;
-        if self.version != 1
+        if self.version != 2
             || n == 0
             || n > u32::MAX as usize
             || n.checked_add(1) != Some(self.col_ptr.len())
@@ -439,7 +444,7 @@ enum CertificateMiss {
 /// them costs every stamp a few operations, so only the matrices whose solves
 /// need them keep them past the first assembly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RemainderTracking {
+pub enum RemainderTracking {
     /// Until the first solve, so a system solved once, a linear operating
     /// point among them, is refined from its stamps' exact sums.
     FirstAssembly,
@@ -1659,11 +1664,14 @@ struct CorrectionRhsWorkspace<'a> {
     low_components: &'a mut Vec<Value>,
 }
 
+/// `values_lo` holds the stamps' rounding remainders while the matrix keeps
+/// them: a residual of the rounded sums alone misses the conductance a large
+/// diagonal rounded away, and Newton settles on that rounded circuit however
+/// exactly it solves for each correction.
 fn fill_correction_rhs(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
-    nrows: usize,
-    ncols: usize,
+    values_lo: Option<&[Value]>,
     rhs: &[Value],
     iterate: &[Value],
     workspace: CorrectionRhsWorkspace<'_>,
@@ -1672,6 +1680,7 @@ fn fill_correction_rhs(
         correction,
         low_components: correction_lo,
     } = workspace;
+    let (nrows, ncols) = (csc.nrows(), csc.ncols());
     if rhs.len() != nrows || iterate.len() != ncols {
         return Err(SolverError::InvalidCircuit(format!(
             "Correction system requires RHS/iterate dimensions {} and {}, got {} and {}",
@@ -1709,6 +1718,19 @@ fn fill_correction_rhs(
             let refined = sum + tail;
             correction_lo[row] = tail - (refined - sum);
             correction[row] = refined;
+        }
+    }
+    if let Some(values_lo) = values_lo {
+        // Each remainder is below its sum's last bit, so its product joins
+        // the low component directly.
+        for col in 0..ncols {
+            let x = iterate[col];
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                let remainder = values_lo[index];
+                if remainder != 0.0 {
+                    correction_lo[row_idx[index]] -= remainder * x;
+                }
+            }
         }
     }
     for (hi, &lo) in correction.iter_mut().zip(correction_lo.iter()) {
@@ -1974,7 +1996,8 @@ impl StaticMatrix {
             .as_ref()
             .and_then(crate::KluSolver::capture_numeric_checkpoint);
         let checkpoint = StaticMatrixSolverCheckpoint {
-            version: 1,
+            version: 2,
+            remainders: self.remainders,
             dimension: self.nrows,
             col_ptr: self.csc.col_ptr().to_vec(),
             row_idx: self.csc.row_idx().to_vec(),
@@ -2014,7 +2037,10 @@ impl StaticMatrix {
         Ok(())
     }
 
-    /// Restore solver caches atomically, retaining the target's stamp values and tokens.
+    /// Restore solver caches and remainder tracking atomically, retaining the
+    /// target's stamp values and tokens. The tracking replaces whatever a
+    /// solve on the target set, so the next assembly keeps remainders exactly
+    /// where the captured matrix's would have.
     pub fn restore_solver_checkpoint(
         &mut self,
         checkpoint: &StaticMatrixSolverCheckpoint,
@@ -2064,6 +2090,10 @@ impl StaticMatrix {
         self.klu = restored.klu;
         self.klu_factored_values = restored.klu_factored_values;
         self.klu_oriented_values = restored.klu_oriented_values;
+        self.remainders = checkpoint.remainders;
+        if !self.tracks_remainders() {
+            self.values_lo.fill(0.0);
+        }
         Ok(())
     }
 
@@ -2116,6 +2146,15 @@ impl StaticMatrix {
     #[inline]
     fn tracks_remainders(&self) -> bool {
         self.remainders != RemainderTracking::Off
+    }
+
+    /// Whether a Newton correction's residual reads the stamps' remainders:
+    /// while the matrix keeps them, except under the backend-faithful
+    /// profile, whose solves never read them either.
+    #[inline]
+    fn residual_reads_remainders(&self) -> bool {
+        self.tracks_remainders()
+            && self.solver_options.circuit_lu_robustness != CircuitLuRobustness::BackendFaithful
     }
 
     /// Add one stamp, keeping the sum's rounding remainder while the matrix
@@ -2426,6 +2465,19 @@ impl StaticMatrix {
     pub fn values_mut(&mut self) -> &mut [Value] {
         self.drop_remainders();
         &mut self.values
+    }
+
+    /// The stamped values, with their rounding remainders while the matrix
+    /// keeps them, for a caller that captures an assembly and restores it
+    /// later. Unlike [`Self::values_mut`], reading through it keeps the
+    /// remainders; a caller that writes values writes their remainders too,
+    /// zero where it has none.
+    #[inline]
+    pub fn values_and_remainders_mut(&mut self) -> (&mut [Value], Option<&mut [Value]>) {
+        let remainders = self
+            .tracks_remainders()
+            .then_some(self.values_lo.as_mut_slice());
+        (self.values.as_mut_slice(), remainders)
     }
 
     /// Dot one row with a vector, considering columns at or beyond `first`.
@@ -3705,6 +3757,8 @@ impl StaticMatrix {
     /// Dynamic-device callers may subsequently replace their own rows with a
     /// constitutive residual evaluated from state differences, avoiding loss
     /// that already occurred while forming a large absolute history source.
+    /// While the matrix keeps the stamps' rounding remainders, `A` is their
+    /// exact sums, except under the backend-faithful profile.
     pub fn correction_rhs(
         &self,
         rhs: &[Value],
@@ -3716,8 +3770,8 @@ impl StaticMatrix {
         fill_correction_rhs(
             self.csc.as_ref(),
             &self.values,
-            self.nrows,
-            self.ncols,
+            self.residual_reads_remainders()
+                .then_some(self.values_lo.as_slice()),
             rhs,
             iterate,
             CorrectionRhsWorkspace {
@@ -3743,11 +3797,13 @@ impl StaticMatrix {
         // corrections are most valuable precisely when large KCL terms nearly
         // cancel; ordinary f64 accumulation would round that small residual to
         // the same scale as the forward error we are trying to remove.
+        let values_lo = self
+            .residual_reads_remainders()
+            .then_some(self.values_lo.as_slice());
         fill_correction_rhs(
             self.csc.as_ref(),
             &self.values,
-            self.nrows,
-            self.ncols,
+            values_lo,
             rhs,
             iterate,
             CorrectionRhsWorkspace {

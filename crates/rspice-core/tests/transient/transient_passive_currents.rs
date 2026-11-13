@@ -927,3 +927,43 @@ fn prescribed_capacitance_differentiates_product_charge_and_resumes() {
         }
     }
 }
+
+/// Node y links to dp and dn through 1 mOhm; 1 TOhm legs tie dp to the source
+/// and dn to ground, so the legs alone set the cluster's voltage, through a
+/// 1 pF capacitor with a 0.5 s time constant. Summing a leg's 1e-12 S into
+/// its node's 1000 S diagonal rounds it away: each Newton correction's
+/// residual reads the stamps' remainders, and so does the cached assembly a
+/// diode deck restores. The ODE's own solution at 3 s is 11.457111 mV
+/// (QSPICE 11.456873 mV). Both decks give 11.457117 mV; before, 11.2023.
+#[test]
+fn a_milliohm_cluster_keeps_its_legs_through_the_transient() {
+    let cluster = "\
+vdd dd 0 pwl(0 0.0115 0.5 0.0115 0.6 0.023)
+r1 y dp 1m
+r2 y dn 1m
+r3 dp dd 1e12
+r4 dn 0 1e12
+c1 y 0 1p
+.tran 10m 3
+";
+    // The diode sits across the source, where it draws only source current.
+    for extra in ["", "d1 dd 0 dclamp\n.model dclamp d\n"] {
+        let deck = format!("* milliohm cluster behind 1 TOhm legs\n{cluster}{extra}.end\n");
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = Engine::default()
+            .run_tran(&netlist, 3.0, 10.0e-3)
+            .expect("transient solves");
+        let time = *result.time.last().expect("transient has a final point");
+        let y = *result
+            .try_voltage_waveform_named("y")
+            .expect("node Y waveform exists")
+            .last()
+            .expect("transient has a final point");
+        let expected = 11.457_111e-3;
+        assert!((time - 3.0).abs() <= 1e-12, "final time {time}");
+        assert!(
+            (y - expected).abs() <= 1e-5 * expected,
+            "{extra:?}: V(y) at 3 s is {y:.9e} V, expected {expected:.9e} V"
+        );
+    }
+}
