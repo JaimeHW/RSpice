@@ -183,7 +183,11 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
         crate::workbench::ResultViewer::Manifest,
     );
     let manifest_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut manifest_state.results_parts(), &manifest_io);
+    action_export_dataset_with_io(
+        &mut manifest_state.results_parts(),
+        &manifest_io,
+        &DatasetExportChoice::default(),
+    );
     let manifest = &manifest_io.text_files.borrow()[0].1;
     assert!(manifest.contains("dataset_id"));
     assert!(manifest.contains("inventory,,,Transient"));
@@ -199,7 +203,11 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
     });
     let mut op_state = state_with_typed_result(op);
     let op_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut op_state.results_parts(), &op_io);
+    action_export_dataset_with_io(
+        &mut op_state.results_parts(),
+        &op_io,
+        &DatasetExportChoice::default(),
+    );
     let op_csv = &op_io.text_files.borrow()[0].1;
     assert!(op_csv.contains("node_voltage,V(out),,,value,1.25000000000000000e0,V"));
 
@@ -222,7 +230,11 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
         });
     activate_result_document(&mut specs_state, crate::workbench::ResultViewer::Specs);
     let specs_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut specs_state.results_parts(), &specs_io);
+    action_export_dataset_with_io(
+        &mut specs_state.results_parts(),
+        &specs_io,
+        &DatasetExportChoice::default(),
+    );
     let specs = &specs_io.text_files.borrow()[0].1;
     assert!(specs.contains("gain,max V(out),1.50000000000000000e0"));
     assert!(specs.contains(",pass,"));
@@ -242,7 +254,11 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
         ]);
     let mut optimization_state = state_with_typed_result(optimization);
     let optimization_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut optimization_state.results_parts(), &optimization_io);
+    action_export_dataset_with_io(
+        &mut optimization_state.results_parts(),
+        &optimization_io,
+        &DatasetExportChoice::default(),
+    );
     let optimization = &optimization_io.text_files.borrow()[0].1;
     assert!(optimization.contains("converged,true"));
     assert!(optimization.contains("iteration,cost,w"));
@@ -280,7 +296,11 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("rspice-spectrum.csv"));
@@ -333,7 +353,11 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     state.results.results.session.viewer = crate::workbench::ResultViewer::Hist;
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("rspice-distribution.csv"));
@@ -389,7 +413,11 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
     state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.text_files.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
@@ -429,7 +457,11 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
         state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
         let io = MockExportWorkflowIo::default();
 
-        action_export_csv_with_io(&mut state.results_parts(), &io);
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
 
         assert!(io.text_files.borrow().is_empty());
         assert!(io.datasets.borrow().is_empty());
@@ -452,7 +484,11 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
     state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(
         io.text_files.borrow().is_empty(),
@@ -500,7 +536,11 @@ fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.datasets.borrow().is_empty());
     assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Result CSV"]);
@@ -555,7 +595,11 @@ fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("pole-zero.csv"));
@@ -633,7 +677,11 @@ fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("sensitivity.csv"));
@@ -696,7 +744,11 @@ fn a_swept_sensitivity_exports_one_row_per_parameter_per_frequency() {
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("sensitivity.csv"));
@@ -726,7 +778,11 @@ fn csv_export_preserves_unavailable_sensitivity_without_fabricating_zero() {
     );
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     let files = io.text_files.borrow();
     assert_eq!(files.len(), 1);
     assert!(
@@ -949,7 +1005,11 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("soa-evidence.csv"));
@@ -988,7 +1048,11 @@ fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets.len(), 1);
@@ -1029,7 +1093,11 @@ fn waves_export_preserves_every_displayed_analysis_and_independent_axes() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.datasets.borrow().is_empty());
     let files = io.text_files.borrow();
@@ -1060,7 +1128,11 @@ fn csv_export_preserves_single_analysis_axis_shape() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets.len(), 1);
@@ -1114,7 +1186,11 @@ fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert_eq!(io.datasets.borrow().len(), 1);
     assert_eq!(io.datasets.borrow()[0].signal_names(), vec!["V(out)"]);
@@ -1132,7 +1208,11 @@ fn csv_export_fails_closed_when_the_active_analysis_has_no_samples() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
@@ -1157,7 +1237,11 @@ fn csv_export_rejects_single_analysis_divergent_x_axes() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.datasets.borrow().is_empty());
     assert!(refusal(&state).contains("different x-axis samples"));
@@ -1188,7 +1272,11 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets.len(), 1);
@@ -1234,7 +1322,11 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets.len(), 1);
@@ -1404,7 +1496,11 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
         .unwrap();
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.datasets.borrow().is_empty());
     assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Touchstone"]);
@@ -1434,7 +1530,11 @@ fn engineering_export_preference_dispatches_exact_tsv() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 2)
         .expect("TSV preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert_eq!(
         io.dialog_titles.borrow().as_slice(),
@@ -1454,7 +1554,11 @@ fn flat_export_refuses_mismatched_sample_lengths_without_opening_a_picker() {
         ]);
     let mut state = state_with_typed_result(transient);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert!(io.dialog_titles.borrow().is_empty());
     let message = last_log_message(&state);
     assert!(message.contains("did not verify"), "{message}");
@@ -1480,7 +1584,11 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
         .unwrap();
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
@@ -1510,7 +1618,11 @@ fn displayed_digits_never_reduce_csv_source_precision() {
         .unwrap();
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets[0].get_signal("V(out)").unwrap().data, vec![exact]);
@@ -1538,7 +1650,11 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
         saved_paths_are_reopenable: false,
         ..Default::default()
     };
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert_eq!(
         last_log_message(&state),
@@ -1596,13 +1712,21 @@ fn hidden_trace_state(analyses: usize) -> ResultsTestHost {
 fn a_hidden_trace_stays_out_of_the_export_for_one_analysis_and_for_many() {
     let mut single = hidden_trace_state(1);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut single.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut single.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert_eq!(io.datasets.borrow().len(), 1);
     assert_eq!(io.datasets.borrow()[0].signal_names(), vec!["V(out)"]);
 
     let mut stacked = hidden_trace_state(2);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut stacked.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut stacked.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     let written = io.text_files.borrow();
     let contents = &written.last().expect("long-form CSV is written").1;
     assert!(contents.contains(",V(out),display,"), "{contents}");
@@ -1654,7 +1778,11 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
     for &preference in preferences {
         let mut state = stacked_export_state(preference);
         let io = MockExportWorkflowIo::default();
-        action_export_csv_with_io(&mut state.results_parts(), &io);
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
         assert!(
             io.dialog_titles.borrow().is_empty(),
             "preference {preference}: a partial export opened a picker"
@@ -1672,7 +1800,11 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
                 &run.analyses[1],
             ),
         );
-        action_export_csv_with_io(&mut state.results_parts(), &io);
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
         let files = io.byte_files.borrow();
         assert_eq!(files.len(), 1, "{}", last_log_message(&state));
         if preference == 5 {
@@ -1717,7 +1849,11 @@ fn delimited_stacked_export_with_events_keeps_both_displayed_waveforms() {
     for preference in [0, 2] {
         let mut state = stacked_export_state(preference);
         let io = MockExportWorkflowIo::default();
-        action_export_csv_with_io(&mut state.results_parts(), &io);
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
         let files = io.text_files.borrow();
         assert_eq!(files.len(), 1, "{}", last_log_message(&state));
         let contents = &files[0].1;
@@ -1742,7 +1878,11 @@ fn an_export_with_every_trace_hidden_names_the_hidden_traces() {
     );
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
@@ -1775,7 +1915,11 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
     failed.error_message = Some("gmin stepping did not converge".to_owned());
     let mut state = op_state(failed);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
     let message = refusal(&state);
@@ -1796,7 +1940,11 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
     transient.dc_op = Some(dc_op_with_one_node());
     let mut state = op_state(transient);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
     let message = refusal(&state);
@@ -1839,7 +1987,11 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
 
     let datasets = io.datasets.borrow();
     assert_eq!(datasets.len(), 1);

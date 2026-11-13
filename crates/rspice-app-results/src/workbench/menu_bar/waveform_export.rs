@@ -242,15 +242,6 @@ pub fn action_export_result_selection_with_io(
     }
 }
 
-/// Export the displayed result in the stored format as the view shows it:
-/// the plotted traces of the displayed analyses.
-pub fn action_export_csv_with_io(
-    state: &mut ResultsParts<'_>,
-    io: &(impl ExportWorkflowIo + ?Sized),
-) {
-    action_export_dataset_with_io(state, io, &DatasetExportChoice::default());
-}
-
 /// Export the displayed result in the stored format, narrowed to what the
 /// export form chose: one of the displayed analyses, and the plotted signals
 /// or every one the analysis retains.

@@ -20,7 +20,9 @@ pub(crate) use netlist_export::{
 };
 pub(crate) use waveform_export::action_export_result_selection_with_io;
 #[cfg(test)]
-pub(crate) use waveform_export::{DatasetExportPicker, action_export_csv_with_io};
+pub(crate) use waveform_export::{
+    DatasetExportChoice, DatasetExportPicker, action_export_dataset_with_io,
+};
 
 use crate::workbench::app_state::AppState;
 

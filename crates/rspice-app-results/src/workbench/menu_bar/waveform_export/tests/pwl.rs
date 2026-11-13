@@ -186,7 +186,11 @@ fn a_frequency_sweep_is_refused_as_a_pwl_source() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, PWL)
         .unwrap();
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert!(io.byte_files.borrow().is_empty());
     let message = refusal(&state);
     assert!(message.contains("waveform in time"), "{message}");

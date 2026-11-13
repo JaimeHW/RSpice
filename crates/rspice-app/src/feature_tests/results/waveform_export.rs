@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::test_fixtures::{MockExportWorkflowIo, waveform};
-use crate::workbench::menu_bar::action_export_csv_with_io;
+use crate::workbench::menu_bar::{DatasetExportChoice, action_export_dataset_with_io};
 
 fn last_log_message(state: &AppState) -> String {
     state
@@ -74,7 +74,11 @@ fn a_result_export_names_its_file_on_the_status_bar() {
     state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     state.drain_notices(&egui::Context::default());
 
     let line = last_log_message(&state);
@@ -100,7 +104,11 @@ fn a_result_export_that_fails_is_toasted() {
         ..MockExportWorkflowIo::default()
     };
 
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     state.drain_notices(&egui::Context::default());
 
     assert_eq!(

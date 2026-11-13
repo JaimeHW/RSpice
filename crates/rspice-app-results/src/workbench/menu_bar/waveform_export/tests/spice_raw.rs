@@ -40,7 +40,11 @@ fn exported(state: &mut ResultsTestHost, preference: usize) -> (Vec<u8>, String)
         )
         .expect("a rawfile preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert_eq!(
         io.dialog_titles.borrow().as_slice(),
         &["Export SPICE Rawfile"],
@@ -152,7 +156,11 @@ fn an_operating_point_is_refused_before_the_file_picker() {
         )
         .unwrap();
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state.results_parts(), &io);
+    action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &io,
+        &DatasetExportChoice::default(),
+    );
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());
     let message = refusal(&state);
