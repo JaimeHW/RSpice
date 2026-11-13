@@ -240,7 +240,10 @@ fn a_bus_keeps_its_value_names_across_a_reload() {
         )
         .unwrap();
     let saved = serde_json::to_value(&document).unwrap();
-    assert_eq!(saved["schema_version"], serde_json::json!(12));
+    assert_eq!(
+        saved["schema_version"],
+        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
+    );
     assert_eq!(
         saved["user_buses"][0]["value_names"][2],
         serde_json::json!({"value": 3, "name": "DONE"})

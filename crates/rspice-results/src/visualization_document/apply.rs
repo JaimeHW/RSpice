@@ -1021,6 +1021,29 @@ impl VisualizationDocument {
                 }
                 Ok(())
             }
+            DocumentEdit::SetUnitAbscissa {
+                pane_id,
+                unit,
+                abscissa,
+            } => {
+                self.unit_abscissas
+                    .retain(|held| held.pane_id != pane_id || held.unit != unit);
+                if let Some(abscissa) = abscissa {
+                    let choice = UnitAbscissa {
+                        pane_id,
+                        unit,
+                        abscissa,
+                    };
+                    self.validate_unit_abscissa(&choice)?;
+                    ensure_maximum_len(
+                        "visualization-document.unit-abscissas",
+                        self.unit_abscissas.len() + 1,
+                        MAX_VISUALIZATION_UNIT_ABSCISSAS,
+                    )?;
+                    self.unit_abscissas.push(choice);
+                }
+                Ok(())
+            }
             DocumentEdit::SetEventLaneOrder(order) => {
                 self.validate_event_lane_order(&order)?;
                 self.event_lane_orders
@@ -1486,12 +1509,12 @@ impl VisualizationDocument {
         self.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
         self.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
         let dataset = self.dataset_for_binding(trace.binding)?;
-        let signal = find_column(dataset, &trace.signal_key)?;
-        let coordinate = find_column(dataset, &trace.coordinate_key)?;
-        if signal.role != ColumnRole::Signal || coordinate.role != ColumnRole::Coordinate {
+        if !trace_columns_are_drawable(dataset, &trace.signal_key, &trace.coordinate_key)? {
             return Err(VisualizationError::InvalidValue {
                 field: "trace.source-columns",
-                message: "trace requires one signal column and one coordinate column".to_owned(),
+                message: "trace requires one signal column, drawn against a coordinate column \
+                          or against another signal column"
+                    .to_owned(),
             });
         }
         validate_trace_row_predicates(dataset, &trace.row_predicates)?;
@@ -1692,6 +1715,8 @@ impl VisualizationDocument {
             .retain(|order| order.pane_id != pane_id);
         self.expression_traces
             .retain(|trace| trace.pane_id != pane_id);
+        self.unit_abscissas
+            .retain(|choice| choice.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -1900,9 +1925,7 @@ impl VisualizationDocument {
             self.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
             self.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
             let dataset = self.dataset_for_binding(trace.binding)?;
-            if find_column(dataset, &trace.signal_key)?.role != ColumnRole::Signal
-                || find_column(dataset, &trace.coordinate_key)?.role != ColumnRole::Coordinate
-            {
+            if !trace_columns_are_drawable(dataset, &trace.signal_key, &trace.coordinate_key)? {
                 return Err(VisualizationError::InvalidValue {
                     field: "trace.source-columns",
                     message: "invalid signal or coordinate column role".to_owned(),
@@ -2035,6 +2058,25 @@ impl VisualizationDocument {
                 });
             }
         }
+        ensure_maximum_len(
+            "visualization-document.unit-abscissas",
+            self.unit_abscissas.len(),
+            MAX_VISUALIZATION_UNIT_ABSCISSAS,
+        )?;
+        let mut unit_axes = HashSet::new();
+        for choice in &self.unit_abscissas {
+            self.validate_unit_abscissa(choice)?;
+            if !unit_axes.insert((choice.pane_id, choice.unit.as_str())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "unit-abscissa.unit",
+                    message: format!(
+                        "pane {} chooses two abscissas for its {:?} axis",
+                        choice.pane_id.get(),
+                        choice.unit
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -2138,6 +2180,38 @@ impl VisualizationDocument {
             self.dataset_for_binding(*binding)?;
         }
         Ok(())
+    }
+
+    /// One unit axis's abscissa on its own: a pane of the document, a unit
+    /// axis named within the bound, and a signal name or expression text a
+    /// label or a calculator source can hold.
+    fn validate_unit_abscissa(&self, choice: &UnitAbscissa) -> Result<(), VisualizationError> {
+        self.require_pane(choice.pane_id)?;
+        if choice.unit.len() > MAX_UNIT_AXIS_BYTES || choice.unit.chars().any(char::is_control) {
+            return Err(VisualizationError::InvalidValue {
+                field: "unit-abscissa.unit",
+                message: format!(
+                    "must contain no control characters and not exceed {MAX_UNIT_AXIS_BYTES} bytes"
+                ),
+            });
+        }
+        match &choice.abscissa {
+            Abscissa::Signal { name } => validate_label("unit-abscissa.signal", name),
+            Abscissa::Expression { text } => {
+                if text.trim().is_empty()
+                    || text.len() > MAX_SOURCE_TEXT_BYTES
+                    || text.chars().any(char::is_control)
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "unit-abscissa.expression",
+                        message: format!(
+                            "must be non-blank, contain no control characters, and not exceed {MAX_SOURCE_TEXT_BYTES} bytes"
+                        ),
+                    });
+                }
+                Ok(())
+            }
+        }
     }
 
     /// One user bus on its own: a named, non-empty, duplicate-free word of

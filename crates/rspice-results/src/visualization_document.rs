@@ -87,6 +87,8 @@ pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
 pub const MAX_VISUALIZATION_EXPRESSION_TRACES: usize = 1_024;
 /// Maximum datasets one expression trace reads.
 pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
+/// Maximum unit axes drawn against a chosen abscissa in one document.
+pub const MAX_VISUALIZATION_UNIT_ABSCISSAS: usize = 1_024;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1696,6 +1698,61 @@ const fn default_expression_visible() -> bool {
     true
 }
 
+/// What one unit axis of a pane draws its curves against, in place of the
+/// analysis' own sweep: a transfer curve, a hysteresis loop or a Lissajous
+/// figure is one signal drawn against another.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Abscissa {
+    /// A result vector of the pane's analysis, by its name.
+    Signal {
+        #[serde(deserialize_with = "deserialize_label_string")]
+        name: String,
+    },
+    /// A calculator expression over the pane's analysis, as typed.
+    Expression {
+        #[serde(deserialize_with = "deserialize_source_text_string")]
+        text: String,
+    },
+}
+
+impl Abscissa {
+    /// The signal name or the expression text, as the X axis is labelled.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Signal { name } => name,
+            Self::Expression { text } => text,
+        }
+    }
+}
+
+/// The longest unit-axis identity a pane abscissa names: a unit, or for an
+/// expression whose unit cannot be stated, its text and a short suffix.
+pub const MAX_UNIT_AXIS_BYTES: usize = MAX_SOURCE_TEXT_BYTES + 64;
+
+/// One unit axis of a pane drawn against an [`Abscissa`].
+///
+/// A waveform pane stacks one axis per unit, and the reader chooses the X
+/// of each: the volts axis may read V(out) against V(in) while the amperes
+/// axis below it keeps time. The axis is named by the unit it reads in,
+/// which is how the pane tells its axes apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitAbscissa {
+    pub pane_id: PaneId,
+    /// The unit axis, by its unit; empty for a plain number.
+    #[serde(deserialize_with = "deserialize_unit_axis_string")]
+    pub unit: String,
+    pub abscissa: Abscissa,
+}
+
+fn deserialize_unit_axis_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<MAX_UNIT_AXIS_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
 fn deserialize_expression_datasets<'de, D>(deserializer: D) -> Result<Vec<DatasetBinding>, D::Error>
 where
     D: Deserializer<'de>,
@@ -2332,6 +2389,8 @@ pub struct VisualizationDocument {
     event_lane_orders: Vec<EventLaneOrder>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     expression_traces: Vec<ExpressionTrace>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unit_abscissas: Vec<UnitAbscissa>,
 }
 
 #[derive(Deserialize)]
@@ -2389,6 +2448,8 @@ struct VisualizationDocumentWire {
     >,
     #[serde(default)]
     expression_traces: Option<BoundedVec<ExpressionTrace, MAX_VISUALIZATION_EXPRESSION_TRACES>>,
+    #[serde(default)]
+    unit_abscissas: Option<BoundedVec<UnitAbscissa, MAX_VISUALIZATION_UNIT_ABSCISSAS>>,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -2430,7 +2491,15 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             expression_traces: wire
                 .expression_traces
                 .map_or_else(Vec::new, BoundedVec::into_inner),
+            unit_abscissas: wire
+                .unit_abscissas
+                .map_or_else(Vec::new, BoundedVec::into_inner),
         };
+        if document.schema_version < 13 && !document.unit_abscissas.is_empty() {
+            return Err(serde::de::Error::custom(
+                "a unit axis drawn against a signal requires visualization schema 13",
+            ));
+        }
         if document.schema_version < 12
             && document
                 .user_buses
@@ -2520,7 +2589,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
-            7..=11 => document.schema_version = Self::SCHEMA_VERSION,
+            7..=12 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -2572,7 +2641,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 12;
+    pub const SCHEMA_VERSION: u16 = 13;
 
     pub fn new(
         title: impl Into<String>,
@@ -2628,6 +2697,7 @@ impl VisualizationDocument {
             user_buses: Vec::new(),
             event_lane_orders: Vec::new(),
             expression_traces: Vec::new(),
+            unit_abscissas: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2757,6 +2827,12 @@ impl VisualizationDocument {
     /// The calculator expressions plotted on the document's panes.
     pub fn expression_traces(&self) -> &[ExpressionTrace] {
         &self.expression_traces
+    }
+
+    /// The unit axes of the document's panes that are drawn against a
+    /// chosen signal or expression rather than their analysis' sweep.
+    pub fn unit_abscissas(&self) -> &[UnitAbscissa] {
+        &self.unit_abscissas
     }
 
     /// The order one pane draws its event lanes in; empty when it recorded
@@ -3019,6 +3095,8 @@ impl VisualizationDocument {
     }
 }
 
+#[cfg(test)]
+mod abscissa_tests;
 #[cfg(test)]
 mod expression_tests;
 #[cfg(test)]

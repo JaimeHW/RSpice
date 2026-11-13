@@ -627,7 +627,14 @@ pub fn resolve_cartesian_line_scene(
             .collect::<Result<Vec<_>, _>>()?;
         let x_column = &dataset.columns()[x_index];
         let y_column = &dataset.columns()[y_index];
-        if x_column.role() != ColumnRole::Coordinate || y_column.role() != ColumnRole::Signal {
+        // A trace may be drawn against another of its dataset's signals, row
+        // by row, as a transfer curve is. A run reference's samples come
+        // paired with its sweep, so there it reads against the sweep only.
+        let signal_abscissa = x_column.role() == ColumnRole::Signal && x_index != y_index;
+        if !(x_column.role() == ColumnRole::Coordinate || signal_abscissa)
+            || y_column.role() != ColumnRole::Signal
+            || (signal_abscissa && dataset.run_source().is_some())
+        {
             return Err(VisualizationRasterError::UnsupportedStyleMode(
                 "trace source-column role",
             ));
@@ -665,6 +672,15 @@ pub fn resolve_cartesian_line_scene(
                 .iter()
                 .all(|(index, expected)| row.values()[*index].exact_eq(expected))
             {
+                continue;
+            }
+            if signal_abscissa && row.values()[x_index].is_missing() {
+                // A signal with no sample here breaks the curve, as a missing
+                // value does.
+                points.push(ResolvedRasterPoint {
+                    x: f64::NAN,
+                    y: f64::NAN,
+                });
                 continue;
             }
             let x = numeric_value(&row.values()[x_index], trace.id, x_column.key())?;
@@ -709,7 +725,8 @@ pub fn resolve_cartesian_line_scene(
         x_axis.range,
         traces
             .iter()
-            .flat_map(|trace| trace.points.iter().map(|point| point.x)),
+            .flat_map(|trace| trace.points.iter().map(|point| point.x))
+            .filter(|value| !value.is_nan()),
         "horizontal axis",
     )?;
     let y_range = resolve_axis_range(
@@ -1613,6 +1630,48 @@ mod tests {
         assert!(scene.traces[0].points[1].y.is_nan());
         assert!(scene.y_range.minimum.is_finite() && scene.y_range.maximum.is_finite());
         rasterize_cartesian_line_scene(&scene, &profile).unwrap();
+    }
+
+    /// A trace read against another signal is drawn row by row: each point
+    /// is the two signals' values at one retained sample, in sample order,
+    /// so a curve that turns back on itself keeps both branches.
+    #[test]
+    fn a_trace_against_another_signal_is_drawn_row_by_row() {
+        let mut fixture = fixture(ValueType::Real, AxisScale::Linear);
+        let mut wire = serde_json::to_value(&fixture.document).unwrap();
+        // An input signal that rises, turns back and falls past its start,
+        // which the output is read against.
+        wire["datasets"][0]["columns"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "key": "in", "label": "Input", "value_type": "real",
+                "role": "signal", "unit": "V"
+            }));
+        for (row, value) in [0.0, 1.0, 0.5, -1.0].into_iter().enumerate() {
+            wire["datasets"][0]["rows"][row]["values"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"type": "real", "value": value}));
+        }
+        wire["traces"][0]["coordinate_key"] = serde_json::json!("in");
+        fixture.document = serde_json::from_value(wire).unwrap();
+        let reference = reference(&fixture);
+        let scene = resolve_cartesian_line_scene(
+            &fixture.document,
+            &reference,
+            fixture.page_id,
+            fixture.pane_id,
+        )
+        .unwrap();
+        let points: Vec<(f64, f64)> = scene.traces[0]
+            .points
+            .iter()
+            .map(|point| (point.x, point.y))
+            .collect();
+        assert_eq!(points, [(0.0, 0.0), (1.0, 1.0), (0.5, -0.5), (-1.0, 0.75)]);
+        assert!(scene.x_range.minimum <= -1.0 && scene.x_range.maximum >= 1.0);
+        rasterize_cartesian_line_scene(&scene, &VisualizationRasterProfile::default()).unwrap();
     }
 
     #[test]

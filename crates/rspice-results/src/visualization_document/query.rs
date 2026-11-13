@@ -205,6 +205,21 @@ pub(super) fn find_column<'a>(
         .ok_or_else(|| VisualizationError::ColumnNotFound(key.to_owned()))
 }
 
+/// Whether a trace reading `signal` against `coordinate` can be drawn: a
+/// signal column against a coordinate column, or against another signal
+/// column, as a transfer curve or a hysteresis loop is.
+pub(super) fn trace_columns_are_drawable(
+    dataset: &SourceDataset,
+    signal: &str,
+    coordinate: &str,
+) -> Result<bool, VisualizationError> {
+    let signal_role = find_column(dataset, signal)?.role;
+    let coordinate_role = find_column(dataset, coordinate)?.role;
+    Ok(signal_role == ColumnRole::Signal
+        && (coordinate_role == ColumnRole::Coordinate
+            || (coordinate_role == ColumnRole::Signal && signal != coordinate)))
+}
+
 pub(super) fn column_index(
     dataset: &SourceDataset,
     key: &str,

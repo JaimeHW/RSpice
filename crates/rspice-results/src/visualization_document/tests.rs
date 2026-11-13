@@ -2121,7 +2121,10 @@ fn a_family_measurement_keeps_its_distribution_and_reads_back() {
     );
 
     let encoded = serde_json::to_value(&document).unwrap();
-    assert_eq!(encoded["schema_version"], serde_json::json!(12));
+    assert_eq!(
+        encoded["schema_version"],
+        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
+    );
     let decoded: VisualizationDocument = serde_json::from_value(encoded.clone()).unwrap();
     assert_eq!(decoded.measurements()[0].family.as_ref(), Some(&summary));
 

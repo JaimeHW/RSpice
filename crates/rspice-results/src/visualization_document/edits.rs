@@ -259,6 +259,14 @@ pub enum DocumentEdit {
         #[serde(deserialize_with = "deserialize_source_text_string")]
         text: String,
     },
+    /// Draw one unit axis of a pane against a signal or an expression, or
+    /// with `None`, against its analysis' sweep again.
+    SetUnitAbscissa {
+        pane_id: PaneId,
+        #[serde(deserialize_with = "deserialize_unit_axis_string")]
+        unit: String,
+        abscissa: Option<Abscissa>,
+    },
     /// Replace the order one pane draws its event lanes in. An empty order
     /// forgets the pane's recorded order.
     SetEventLaneOrder(EventLaneOrder),
