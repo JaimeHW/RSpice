@@ -90,15 +90,12 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.4", &["self.state.workbench.theme.apply(ctx)"]),
     ("5.5", &["if initializing_frame", "ctx.request_repaint()"]),
     ("5.6", &["self.poll_code(ctx)"]),
-    ("5.13", &["code_workspace::poll_automation_workflow(self)"]),
+    ("5.13", &["self.poll_automation_workflow()"]),
     (
         "5.14",
         &["code_workspace::settle_pending_python_execute(&mut self.code_workspace_parts(),)"],
     ),
-    (
-        "5.15",
-        &["code_workspace::poll_managed_automation_runtime(self)"],
-    ),
+    ("5.15", &["self.poll_managed_automation_runtime()"]),
     (
         "5.16",
         &[

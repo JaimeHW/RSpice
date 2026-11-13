@@ -655,11 +655,11 @@ impl RSpiceApp {
         }
 
         self.poll_code(ctx);
-        crate::workbench::documents::code_workspace::poll_automation_workflow(self);
+        self.poll_automation_workflow();
         crate::workbench::documents::code_workspace::settle_pending_python_execute(
             &mut self.code_workspace_parts(),
         );
-        crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
+        self.poll_managed_automation_runtime();
         let automation = &self.state.code.code_workspace.automation;
         if automation.pending_runtime_validation.is_some()
             || automation.runtime_execution.is_some()

@@ -641,8 +641,8 @@ fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
         AutomationRequest::Validate => {
             code_workspace::validate_automation_workspace(&mut app.code_workspace_parts())
         }
-        AutomationRequest::DryRun => code_workspace::dry_run_automation_workflow(app),
-        AutomationRequest::Run => code_workspace::start_automation_workflow(app),
+        AutomationRequest::DryRun => app.dry_run_automation_workflow(),
+        AutomationRequest::Run => app.start_automation_workflow(),
         AutomationRequest::Stop => {
             code_workspace::cancel_automation_workflow(&mut app.code_workspace_parts())
         }

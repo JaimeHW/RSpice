@@ -12,7 +12,8 @@ use super::debugger::debug_fail;
 use super::*;
 
 pub(super) fn handle_runtime_host_call(
-    app: &mut RSpiceApp,
+    parts: &mut CodeWorkspaceParts<'_>,
+    run_port: &mut impl AutomationRunPort,
     request_id: u64,
     session_id: uuid::Uuid,
     call: rspice_automation_protocol::HostCall,
@@ -20,38 +21,35 @@ pub(super) fn handle_runtime_host_call(
     use rspice_automation_protocol::HostOperation;
     use uuid::Uuid;
 
-    let Some(mut pending) = app
-        .state
+    let Some(mut pending) = parts
         .code
-        .code_workspace
         .automation
         .runtime_execution
         .clone()
         .filter(|pending| pending.request_id == request_id)
     else {
         runtime_protocol_failure(
-            &mut app.code_workspace_parts(),
+            parts,
             "A managed Python host call has no owning request ledger.",
         );
         return;
     };
     if pending.session_id != Some(session_id) {
         runtime_protocol_failure(
-            &mut app.code_workspace_parts(),
+            parts,
             "A managed Python host call has the wrong session identity.",
         );
         return;
     }
     if call.call_id != pending.last_call_id.saturating_add(1) {
         runtime_protocol_failure(
-            &mut app.code_workspace_parts(),
+            parts,
             "Managed Python host-call identities are not a strict monotonic sequence.",
         );
         return;
     }
     pending.last_call_id = call.call_id;
-    let exact_bundle_is_current = app
-        .state
+    let exact_bundle_is_current = parts
         .model
         .workspace
         .content
@@ -60,11 +58,9 @@ pub(super) fn handle_runtime_host_call(
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| bundle.id() == pending.bundle_id);
-    if !exact_bundle_is_current
-        || !source_token_is_current(&app.code_workspace_parts(), pending.token)
-    {
+    if !exact_bundle_is_current || !source_token_is_current(parts, pending.token) {
         reject_runtime_host_call(
-            &mut app.code_workspace_parts(),
+            parts,
             session_id,
             call.call_id,
             "STALE-SOURCE",
@@ -73,19 +69,14 @@ pub(super) fn handle_runtime_host_call(
         );
         return;
     }
-    let Some(snapshot) = app
-        .state
+    let Some(snapshot) = parts
         .code
-        .code_workspace
         .automation
         .runtime_snapshot
         .clone()
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, pending.token))
     else {
-        runtime_protocol_failure(
-            &mut app.code_workspace_parts(),
-            "The validated Python source is no longer available.",
-        );
+        runtime_protocol_failure(parts, "The validated Python source is no longer available.");
         return;
     };
     let Some(grant) = snapshot
@@ -94,7 +85,7 @@ pub(super) fn handle_runtime_host_call(
         .find(|grant| grant.capability == call.capability && grant.token == call.capability_token)
     else {
         reject_runtime_host_call(
-            &mut app.code_workspace_parts(),
+            parts,
             session_id,
             call.call_id,
             "CAPABILITY-DENIED",
@@ -129,7 +120,7 @@ pub(super) fn handle_runtime_host_call(
     };
     if !scope_allowed {
         reject_runtime_host_call(
-            &mut app.code_workspace_parts(),
+            parts,
             session_id,
             call.call_id,
             "CAPABILITY-SCOPE-DENIED",
@@ -139,7 +130,7 @@ pub(super) fn handle_runtime_host_call(
         return;
     }
 
-    let manifest = app.state.code.code_workspace.automation.manifest.clone();
+    let manifest = parts.code.automation.manifest.clone();
     let mut response = None;
     match call.operation {
         HostOperation::OpenProject { selector } => {
@@ -181,9 +172,9 @@ pub(super) fn handle_runtime_host_call(
             fail_closed,
         } => {
             let Some(manifest) = manifest.as_ref() else {
-                retain_runtime_execution(&mut app.code_workspace_parts(), pending);
+                retain_runtime_execution(parts, pending);
                 send_runtime_host_response(
-                    &mut app.code_workspace_parts(),
+                    parts,
                     session_id,
                     call.call_id,
                     host_failure(
@@ -209,38 +200,23 @@ pub(super) fn handle_runtime_host_call(
                     "Commercial Automation execution requires fail_closed=True.",
                 ));
             } else {
-                app.state.code.code_workspace.automation.last_error = None;
-                prepare_automation_workflow(app, false);
-                let accepted = app
-                    .state
+                parts.code.automation.last_error = None;
+                prepare_automation_workflow(parts, run_port, false);
+                let accepted = parts
                     .code
-                    .code_workspace
                     .automation
                     .receipt
                     .as_ref()
                     .is_some_and(|receipt| receipt.token == pending.token)
-                    && app
-                        .state
-                        .code
-                        .code_workspace
-                        .automation
-                        .last_error
-                        .is_none();
+                    && parts.code.automation.last_error.is_none();
                 if accepted {
                     let handle = pending.preview_handle.unwrap_or_else(Uuid::new_v4);
                     pending.preview_handle = Some(handle);
                     response = Some(host_success(Some(handle), "run-plan preflight passed"));
                 } else {
-                    let message = app
-                        .state
-                        .code
-                        .code_workspace
-                        .automation
-                        .last_error
-                        .clone()
-                        .unwrap_or_else(|| {
-                            "Run-plan preflight did not pass and gave no reason.".to_owned()
-                        });
+                    let message = parts.code.automation.last_error.clone().unwrap_or_else(|| {
+                        "Run-plan preflight did not pass and gave no reason.".to_owned()
+                    });
                     response = Some(host_failure("PREFLIGHT-FAILED", message));
                 }
             }
@@ -265,22 +241,16 @@ pub(super) fn handle_runtime_host_call(
                         "dry-run execution call validated; no simulation was dispatched",
                     ));
                 } else {
-                    app.state.code.code_workspace.automation.last_error = None;
-                    prepare_automation_workflow(app, true);
+                    parts.code.automation.last_error = None;
+                    prepare_automation_workflow(parts, run_port, true);
                     if matches!(
-                        app.state.code.code_workspace.automation.execution,
+                        parts.code.automation.execution,
                         AutomationExecutionState::AwaitingDispatch { .. }
                     ) {
                         pending.pending_execute_call_id = Some(call.call_id);
                     } else {
-                        let message = app
-                            .state
-                            .code
-                            .code_workspace
-                            .automation
-                            .last_error
-                            .clone()
-                            .unwrap_or_else(|| {
+                        let message =
+                            parts.code.automation.last_error.clone().unwrap_or_else(|| {
                                 "The simulator did not accept the prepared run.".to_owned()
                             });
                         pending.run_handle = None;
@@ -306,8 +276,7 @@ pub(super) fn handle_runtime_host_call(
                     "REQUIREMENT-PROFILE-MISMATCH",
                     "The requested requirement profile differs from the selected run plan.",
                 ));
-            } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
+            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(parts, &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -342,8 +311,7 @@ pub(super) fn handle_runtime_host_call(
                     "BASELINE-MISMATCH",
                     "The requested comparison differs from the baseline policy sealed into the run plan.",
                 ));
-            } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
+            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(parts, &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -387,8 +355,7 @@ pub(super) fn handle_runtime_host_call(
                     "ARTIFACT-POLICY-MISMATCH",
                     "One or more requested artifact formats are not authorized by the selected run plan.",
                 ));
-            } else if !pending.mode.is_dry_run()
-                && !completed_run_matches_pending(&app.code_workspace_parts(), &pending)
+            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(parts, &pending)
             {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
@@ -397,9 +364,8 @@ pub(super) fn handle_runtime_host_call(
             } else if !pending.mode.is_dry_run()
                 && requested.as_ref().is_some_and(|requested| {
                     requested.iter().any(|kind| {
-                        !app.state
+                        !parts
                             .code
-                            .code_workspace
                             .automation
                             .artifacts
                             .iter()
@@ -441,14 +407,9 @@ pub(super) fn handle_runtime_host_call(
             }
         }
     }
-    retain_runtime_execution(&mut app.code_workspace_parts(), pending);
+    retain_runtime_execution(parts, pending);
     if let Some(response) = response {
-        send_runtime_host_response(
-            &mut app.code_workspace_parts(),
-            session_id,
-            call.call_id,
-            response,
-        );
+        send_runtime_host_response(parts, session_id, call.call_id, response);
     }
 }
 

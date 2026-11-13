@@ -258,7 +258,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// strip. The strip and the action it applies after its chips paint took the
 /// application whole; they read and write only the model, the session and
 /// the sheets feature's reveal request, so they take those.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 716;
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 709;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

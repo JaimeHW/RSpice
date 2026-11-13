@@ -8,6 +8,7 @@ use crate::state::{
 };
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 #[test]
 fn source_workspace_runtime_transitions_have_no_production_panic_shortcuts() {

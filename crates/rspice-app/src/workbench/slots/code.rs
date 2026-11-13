@@ -4,7 +4,8 @@
 //! collapsed; and what code shows other features.
 
 use crate::simulation::NetlistShown;
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::framework::feature::CodePort;
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
@@ -87,21 +88,35 @@ impl CodeState {
 
     /// Which netlist document the editor shows, as a manual-deck run reads it.
     pub(crate) fn netlist_shown(&self) -> NetlistShown {
-        NetlistShown {
-            settled: self.netlist.active_document_initialized,
-            comparison: self.netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
-            owned_source: self.netlist.active_document == ActiveNetlistDocument::OwnedSource,
-        }
+        netlist_shown_in(&self.netlist)
     }
 
     /// The receipt of the project's current Verilog-A compilation.
     pub(crate) fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
-        self.code_workspace
-            .veriloga
-            .receipt
-            .as_ref()
-            .map(|receipt| &receipt.compilation)
+        veriloga_compilation_in(&self.code_workspace)
     }
+}
+
+/// Which netlist document the netlist editor's session shows, as a
+/// manual-deck run reads it.
+pub(crate) fn netlist_shown_in(netlist: &NetlistDocumentState) -> NetlistShown {
+    NetlistShown {
+        settled: netlist.active_document_initialized,
+        comparison: netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
+        owned_source: netlist.active_document == ActiveNetlistDocument::OwnedSource,
+    }
+}
+
+/// The receipt of the project's current Verilog-A compilation, as the Code &
+/// Automation page's state holds it.
+pub(crate) fn veriloga_compilation_in(
+    code_workspace: &CodeWorkspaceRuntimeState,
+) -> Option<&ProjectCompileReceipt> {
+    code_workspace
+        .veriloga
+        .receipt
+        .as_ref()
+        .map(|receipt| &receipt.compilation)
 }
 
 impl CodePort for CodeState {

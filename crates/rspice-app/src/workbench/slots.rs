@@ -23,7 +23,7 @@ mod shell;
 use rspice_app_simulate::workbench::slots::simulate;
 
 pub(crate) use cloud::CloudState;
-pub(crate) use code::CodeState;
+pub(crate) use code::{CodeState, netlist_shown_in, veriloga_compilation_in};
 pub(crate) use design::{DesignPanel, DesignState};
 pub(crate) use hardcopy::HardcopyState;
 pub(crate) use models::ModelsState;

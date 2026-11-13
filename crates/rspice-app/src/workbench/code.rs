@@ -29,21 +29,25 @@ use crate::workbench::commands::code_context::{
 };
 use crate::workbench::commands::foreign_import_refusal;
 use crate::workbench::documents::code_workspace::{
-    CodeWorkspacePage, CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile,
-    consume_veriloga_compile_request, design_hosts_veriloga, netlist_page_shown,
-    poll_automation_source_import, poll_veriloga_compile, poll_veriloga_import,
+    self, AutomationRunPort, CodeWorkspacePage, CodeWorkspaceParts, ProblemStep,
+    cancel_veriloga_compile, consume_veriloga_compile_request, design_hosts_veriloga,
+    netlist_page_shown, poll_automation_source_import, poll_veriloga_compile, poll_veriloga_import,
     refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
+use crate::workbench::framework::command_registry::{
+    CommandAvailability, CommandSpec, Registry, ids,
+};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    Reads,
+    Peers, Reads,
 };
-use crate::workbench::slots::CodeState;
+use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
+use crate::workbench::slots::{CodeState, netlist_shown_in, veriloga_compilation_in};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::{CodeCommand, CodeRequest};
+use rspice_app_runs::simulation::{RunHost, SimulationController};
 
 /// The code feature.
 pub(crate) struct CodeFeature;
@@ -507,7 +511,15 @@ impl CodeFeature {
     pub(in crate::workbench) fn workspace_parts<'c>(
         cx: &'c mut Cx<'_, Self>,
     ) -> CodeWorkspaceParts<'c> {
-        CodeWorkspaceParts {
+        Self::automation_parts(cx).0
+    }
+
+    /// The code workspace's parts and the run tier's host lent over them,
+    /// both from `cx` for one call: what the automation workflow runs over.
+    fn automation_parts<'c, 'a>(
+        cx: &'c mut Cx<'a, Self>,
+    ) -> (CodeWorkspaceParts<'c>, AutomationRunLend<'c, 'a>) {
+        let parts = CodeWorkspaceParts {
             code: &mut cx.state.code_workspace,
             netlist: &mut cx.state.netlist,
             handles: &mut *cx.own,
@@ -517,7 +529,75 @@ impl CodeFeature {
             runs: &mut *cx.runs,
             run_controller: &mut *cx.handles.run_controller,
             export_io: cx.handles.export_io,
-        }
+        };
+        let lend = AutomationRunLend {
+            peers: &mut cx.peers,
+            commands: cx.commands,
+        };
+        (parts, lend)
+    }
+}
+
+/// The run tier's host the code feature lends the automation workflow: the
+/// peers of the context the workflow runs in and the command registry, over
+/// the code workspace's parts the workflow hands it for each step.
+struct AutomationRunLend<'c, 'a> {
+    peers: &'c mut Peers<'a>,
+    commands: &'static Registry,
+}
+
+/// The host is the framework's, built as simulate's commands build it. What
+/// code shows is read from the parts, which lend it only shared while the
+/// host lives, so it is what code shows throughout.
+impl AutomationRunPort for AutomationRunLend<'_, '_> {
+    fn run_host<'v>(
+        &'v mut self,
+        parts: &'v mut CodeWorkspaceParts<'_>,
+    ) -> (impl RunHost + 'v, &'v mut SimulationController) {
+        let code = RunCodeFacts {
+            veriloga_compilation: veriloga_compilation_in(parts.code),
+            netlist_shown: netlist_shown_in(parts.netlist),
+        };
+        let host = RunView::new(
+            &mut *parts.model,
+            &mut *parts.runs,
+            &mut *parts.wb,
+            parts.platform,
+            &mut *self.peers,
+            code,
+            self.commands,
+        );
+        (host, &mut *parts.run_controller)
+    }
+}
+
+/// The automation workflow's steps the shell runs, each over the code
+/// workspace's parts and the run tier's host the feature lends them.
+impl CodeFeature {
+    /// Check the Automation workflow and queue the run it binds.
+    pub(crate) fn start_automation_workflow(cx: &mut Cx<'_, Self>) {
+        let (mut parts, mut run_port) = Self::automation_parts(cx);
+        code_workspace::start_automation_workflow(&mut parts, &mut run_port);
+    }
+
+    /// Check the Automation workflow through its run preflight without
+    /// queueing a run.
+    pub(crate) fn dry_run_automation_workflow(cx: &mut Cx<'_, Self>) {
+        let (mut parts, mut run_port) = Self::automation_parts(cx);
+        code_workspace::dry_run_automation_workflow(&mut parts, &mut run_port);
+    }
+
+    /// Follow the Automation run in flight: take the run its dispatch
+    /// produced, and publish or refuse its results.
+    pub(crate) fn poll_automation_workflow(cx: &mut Cx<'_, Self>) {
+        let (mut parts, mut run_port) = Self::automation_parts(cx);
+        code_workspace::poll_automation_workflow(&mut parts, &mut run_port);
+    }
+
+    /// Take what the managed Python worker reported since the last frame.
+    pub(crate) fn poll_managed_automation_runtime(cx: &mut Cx<'_, Self>) {
+        let (mut parts, mut run_port) = Self::automation_parts(cx);
+        code_workspace::poll_managed_automation_runtime(&mut parts, &mut run_port);
     }
 }
 

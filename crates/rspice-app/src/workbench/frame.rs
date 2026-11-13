@@ -271,6 +271,29 @@ impl RSpiceApp {
         CodeFeature::terminate_after_project_change(&mut features::cx(self));
     }
 
+    /// Have the code feature start the Automation workflow's run, in its
+    /// context.
+    pub(in crate::workbench) fn start_automation_workflow(&mut self) {
+        CodeFeature::start_automation_workflow(&mut features::cx(self));
+    }
+
+    /// Have the code feature dry-run the Automation workflow, in its context.
+    pub(in crate::workbench) fn dry_run_automation_workflow(&mut self) {
+        CodeFeature::dry_run_automation_workflow(&mut features::cx(self));
+    }
+
+    /// Have the code feature follow the Automation run in flight, in its
+    /// context.
+    pub(in crate::workbench) fn poll_automation_workflow(&mut self) {
+        CodeFeature::poll_automation_workflow(&mut features::cx(self));
+    }
+
+    /// Have the code feature take what the managed Python worker reported
+    /// since the last frame, in its context.
+    pub(in crate::workbench) fn poll_managed_automation_runtime(&mut self) {
+        CodeFeature::poll_managed_automation_runtime(&mut features::cx(self));
+    }
+
     /// Have the code feature stop its automation runtime as the application
     /// shuts down, in its context.
     pub(in crate::workbench) fn terminate_code_runtime(&mut self) {
