@@ -77,6 +77,7 @@ pub fn set_han_preference(ctx: &Context, preference: HanPreference) {
 }
 
 /// The installed faces that have joined `ctx`'s families, in chain order.
+#[cfg(any(test, feature = "test-support"))]
 #[must_use]
 pub fn joined_families(ctx: &Context) -> Vec<String> {
     ctx.with_plugin(|plugin: &mut SystemFontsPlugin| {
