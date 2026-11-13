@@ -333,10 +333,11 @@ pub fn show_shared_x_axis(
             .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
     };
     if let Some(cursors) = cursor_values {
-        // The same colours the plot draws each cursor in and the readout
-        // heads its column with, so one cursor is one colour everywhere.
+        // The same fills and letter ink as the plot's own cursor flags, so
+        // one cursor is one colour everywhere and its letter reads off the
+        // fill whichever interface theme frames the canvas.
         for (label, value, color) in [
-            ("A", cursors.a, c.accent),
+            ("A", cursors.a, c.canvas_cursor_a),
             ("B", cursors.b, c.canvas_cursor_b),
         ] {
             let Some(value) = value else { continue };
