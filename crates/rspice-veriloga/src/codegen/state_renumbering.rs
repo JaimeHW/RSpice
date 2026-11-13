@@ -237,7 +237,7 @@ pub(crate) struct StateSlotMapping {
 
 impl StateSlotMapping {
     /// Walk every program of one compiled module, pairing what has a root.
-    #[cfg(any(test, feature = "native", feature = "wasm-jit"))]
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
     pub(crate) fn build(model: &CompiledModel, hir: &HirModel, mir: &MirModel) -> Self {
         match Self::build_with_control(model, hir, mir, &crate::metrics::NoPipelineControl) {
             Ok(mapping) => mapping,
