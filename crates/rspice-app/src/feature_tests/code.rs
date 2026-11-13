@@ -9,6 +9,7 @@ use crate::workbench::app::{dialogs, navigate_source_bundle, veriloga_interface_
 
 #[cfg(not(target_arch = "wasm32"))]
 mod netlist_document;
+mod netlist_export;
 mod netlist_generation;
 mod netlist_search;
 mod netlist_source_menu;
