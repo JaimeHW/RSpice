@@ -49,35 +49,11 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 
 const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
-/// Supported canonical encodings, including authenticated project migrations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The canonical result encoding. Its number and domain names are hashed
+/// into every digest, so changing what the encoder writes means a new number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ResultDigestEncoding {
-    V1 = 1,
-    V2 = 2,
-    V3 = 3,
-    V4 = 4,
-    V5 = 5,
-    V6 = 6,
-    V7 = 7,
-    V8 = 8,
-    V9 = 9,
-    /// 2026-09-06: the digital bus table declared over a transient's retained
-    /// event traces. A declaration is data, not presentation — the same members
-    /// read as one 8-bit word rather than as eight conductors is a different
-    /// claim about the run — so a result that gained one is a different result.
-    V10 = 10,
-    /// v11 binds external source attribution to its retained event-code interpretation.
-    V11 = 11,
-    /// v12 binds numerical quality and its original transient time basis.
-    V12 = 12,
-    // Physical source bindings for durable saved-output evaluation.
-    V13 = 13,
-    // Arithmetic interpretation is part of an immutable saved-output recipe.
-    V14 = 14,
-    // Explicit availability for sensitivity quantities.
-    V15 = 15,
-    // Exact current charge observations and frontend delivery coverage.
     V16 = 16,
 }
 
@@ -247,37 +223,19 @@ where
     /// SHA-256 identity of authoritative data in the selected supported encoding.
     #[must_use]
     pub fn digest(&self, encoding: ResultDigestEncoding) -> ContentDigest {
-        self.result_data_writer_with_encoding(encoding).finish()
+        self.result_data_writer(encoding).finish()
     }
 
     /// Logical retained bytes from the complete current digest field walk.
     /// The presentation owner accounts for its derived caches separately.
     #[must_use]
     pub fn retained_data_bytes(&self) -> u64 {
-        self.result_data_writer_with_encoding(ResultDigestEncoding::CURRENT)
+        self.result_data_writer(ResultDigestEncoding::CURRENT)
             .retained_bytes()
     }
 
-    fn result_data_writer_with_encoding(
-        &self,
-        version: ResultDigestEncoding,
-    ) -> ResultDigestWriter {
+    fn result_data_writer(&self, version: ResultDigestEncoding) -> ResultDigestWriter {
         let domain = match version {
-            ResultDigestEncoding::V1 => "rspice.analysis-result-data/v1",
-            ResultDigestEncoding::V2 => "rspice.analysis-result-data/v2",
-            ResultDigestEncoding::V3 => "rspice.analysis-result-data/v3",
-            ResultDigestEncoding::V4 => "rspice.analysis-result-data/v4",
-            ResultDigestEncoding::V5 => "rspice.analysis-result-data/v5",
-            ResultDigestEncoding::V6 => "rspice.analysis-result-data/v6",
-            ResultDigestEncoding::V7 => "rspice.analysis-result-data/v7",
-            ResultDigestEncoding::V8 => "rspice.analysis-result-data/v8",
-            ResultDigestEncoding::V9 => "rspice.analysis-result-data/v9",
-            ResultDigestEncoding::V10 => "rspice.analysis-result-data/v10",
-            ResultDigestEncoding::V11 => "rspice.analysis-result-data/v11",
-            ResultDigestEncoding::V12 => "rspice.analysis-result-data/v12",
-            ResultDigestEncoding::V13 => "rspice.analysis-result-data/v13",
-            ResultDigestEncoding::V14 => "rspice.analysis-result-data/v14",
-            ResultDigestEncoding::V15 => "rspice.analysis-result-data/v15",
             ResultDigestEncoding::V16 => "rspice.analysis-result-data/v16",
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -287,15 +245,11 @@ where
             writer.string(value);
         });
 
-        if version >= ResultDigestEncoding::V11 {
-            writer.option(self.import_source, |writer, source| {
-                writer.string(&source.source_name);
-                writer.string(source.format.canonical_id());
-            });
-        }
-        if version >= ResultDigestEncoding::V12 {
-            writer.option(self.convergence, |writer, quality| quality.encode(writer));
-        }
+        writer.option(self.import_source, |writer, source| {
+            writer.string(&source.source_name);
+            writer.string(source.format.canonical_id());
+        });
+        writer.option(self.convergence, |writer, quality| quality.encode(writer));
         writer.sequence(self.waveforms.len());
         for waveform in self.waveforms.clone() {
             writer.string(&waveform.name);
@@ -309,24 +263,20 @@ where
             // The unit is not presentation: the same samples read as amps
             // rather than volts are different data, and a dataset that
             // restated one must not keep the identity of the one it replaced.
-            if version >= ResultDigestEncoding::V6 {
-                writer.option(waveform.unit.as_deref(), |writer, unit| {
-                    writer.string(unit);
-                });
-            }
+            writer.option(waveform.unit.as_deref(), |writer, unit| {
+                writer.string(unit);
+            });
         }
 
         writer.option(self.dc_op, encode_dc_op);
         writer.option(self.device_op, encode_device_op);
         writer.option(self.noise_summary, |writer, summary| {
-            encode_noise_summary(writer, summary, version);
+            encode_noise_summary(writer, summary);
         });
         writer.option(self.family_metadata, encode_family_metadata);
-        if version >= ResultDigestEncoding::V2 {
-            writer.option(self.result_payload, |writer, payload| {
-                encode_result_payload(writer, payload, version);
-            });
-        }
+        writer.option(self.result_payload, |writer, payload| {
+            encode_result_payload(writer, payload);
+        });
 
         writer.sequence(self.measurements.len());
         for measurement in self.measurements {
@@ -344,15 +294,13 @@ where
             writer.option(measurement.tolerance.as_ref(), |writer, value| {
                 writer.f64(*value);
             });
-            if version >= ResultDigestEncoding::V9 {
-                writer.option(measurement.raw_value.as_ref(), |writer, value| {
-                    writer.f64(*value);
-                });
-                writer.option(measurement.failure_limit.as_ref(), |writer, value| {
-                    writer.f64(*value);
-                });
-                writer.bool(measurement.failure_limit_exceeded);
-            }
+            writer.option(measurement.raw_value.as_ref(), |writer, value| {
+                writer.f64(*value);
+            });
+            writer.option(measurement.failure_limit.as_ref(), |writer, value| {
+                writer.f64(*value);
+            });
+            writer.bool(measurement.failure_limit_exceeded);
         }
 
         writer.sequence(self.saved_output_receipts.len());
@@ -363,55 +311,49 @@ where
             writer.digest(receipt.contract_digest);
             writer.string(&receipt.name);
             writer.string(&receipt.source_expression);
-            if version >= ResultDigestEncoding::V14 {
-                writer.u8(match receipt.complex_policy {
-                    ComplexExpressionPolicy::LegacyMagnitude => 0,
-                    ComplexExpressionPolicy::Rectangular => 1,
-                });
-            }
+            writer.u8(match receipt.complex_policy {
+                ComplexExpressionPolicy::LegacyMagnitude => 0,
+                ComplexExpressionPolicy::Rectangular => 1,
+            });
             writer.u8(receipt.output_kind.digest_tag());
             writer.u8(receipt.save_policy.digest_tag());
             writer.u8(receipt.stored_precision.digest_tag());
             writer.u8(receipt.streaming.digest_tag());
             encode_saved_output_status(&mut writer, &receipt.status);
-            if version >= ResultDigestEncoding::V13 {
-                writer.option(receipt.source_bindings.as_ref(), |writer, bindings| {
-                    use crate::saved_output::{SavedOutputAxis, SavedOutputBoundSource};
-                    match &bindings.axis {
-                        SavedOutputAxis::Missing => writer.u8(0),
-                        SavedOutputAxis::OperatingPoint => writer.u8(1),
-                        SavedOutputAxis::Waveform { name } => {
+            writer.option(receipt.source_bindings.as_ref(), |writer, bindings| {
+                use crate::saved_output::{SavedOutputAxis, SavedOutputBoundSource};
+                match &bindings.axis {
+                    SavedOutputAxis::Missing => writer.u8(0),
+                    SavedOutputAxis::OperatingPoint => writer.u8(1),
+                    SavedOutputAxis::Waveform { name } => {
+                        writer.u8(2);
+                        writer.string(name);
+                    }
+                    SavedOutputAxis::DcFamily => writer.u8(3),
+                }
+                writer.sequence(bindings.references.len());
+                for (reference, source) in &bindings.references {
+                    writer.string(reference);
+                    match source {
+                        SavedOutputBoundSource::Missing => writer.u8(0),
+                        SavedOutputBoundSource::Ground => writer.u8(1),
+                        SavedOutputBoundSource::Waveform { name } => {
                             writer.u8(2);
                             writer.string(name);
                         }
-                        SavedOutputAxis::DcFamily => writer.u8(3),
-                    }
-                    writer.sequence(bindings.references.len());
-                    for (reference, source) in &bindings.references {
-                        writer.string(reference);
-                        match source {
-                            SavedOutputBoundSource::Missing => writer.u8(0),
-                            SavedOutputBoundSource::Ground => writer.u8(1),
-                            SavedOutputBoundSource::Waveform { name } => {
-                                writer.u8(2);
-                                writer.string(name);
-                            }
-                            SavedOutputBoundSource::DcQuantity { quantity } => {
-                                writer.u8(3);
-                                writer.u64(*quantity as u64);
-                            }
+                        SavedOutputBoundSource::DcQuantity { quantity } => {
+                            writer.u8(3);
+                            writer.u64(*quantity as u64);
                         }
                     }
-                });
-            }
+                }
+            });
         }
 
-        // Optional extension: historical results without a journal keep their
-        // existing identities. Bind exact binary bits, including signed zero,
-        // through the validated content digest and account for the full blob.
-        if version >= ResultDigestEncoding::V16
-            && let Some(checkpoint) = self.monte_carlo_checkpoint
-        {
+        // Tagged extensions below are written only when present. A journal
+        // binds exact binary bits, including signed zero, through the
+        // validated content digest and accounts for the full blob.
+        if let Some(checkpoint) = self.monte_carlo_checkpoint {
             writer.string("monte-carlo-checkpoint/v1");
             writer.digest(checkpoint.digest());
             writer.usize(checkpoint.bytes().len());
@@ -420,9 +362,7 @@ where
                 .saturating_add(checkpoint.bytes().len() as u64);
         }
 
-        if version >= ResultDigestEncoding::V16
-            && let Some(checkpoint) = self.transient_checkpoint
-        {
+        if let Some(checkpoint) = self.transient_checkpoint {
             writer.string("transient-checkpoint/v1");
             writer.digest(checkpoint.digest());
             writer.usize(checkpoint.bytes().len());
@@ -434,17 +374,16 @@ where
         let members = self
             .family_metadata
             .map_or(&[][..], |metadata| metadata.member_measurements());
-        if version >= ResultDigestEncoding::V16
-            && (self
-                .measurements
-                .iter()
-                .any(|measurement| measurement.units.is_some())
-                || members.iter().any(|member| {
-                    member
-                        .measurements
-                        .iter()
-                        .any(|measurement| measurement.unit.is_some())
-                }))
+        if self
+            .measurements
+            .iter()
+            .any(|measurement| measurement.units.is_some())
+            || members.iter().any(|member| {
+                member
+                    .measurements
+                    .iter()
+                    .any(|measurement| measurement.unit.is_some())
+            })
         {
             writer.string("measurement-units/v1");
             writer.sequence(self.measurements.len());
@@ -463,10 +402,7 @@ where
                 }
             }
         }
-        // The absent extension leaves all historical result identities intact.
-        if version >= ResultDigestEncoding::V16
-            && let Some(units) = self.native_scalar_units
-        {
+        if let Some(units) = self.native_scalar_units {
             writer.string("native-scalar-units/v1");
             writer.sequence(units.len());
             for (name, unit) in units {
@@ -474,30 +410,19 @@ where
                 encode_measurement_unit(&mut writer, unit);
             }
         }
-        // Optional, tagged extension: historical imports without coordinate
-        // metadata retain their sealed identities.
-        if version >= ResultDigestEncoding::V16
-            && let Some(coordinate) = self
-                .import_source
-                .and_then(|source| source.coordinate.as_ref())
+        if let Some(coordinate) = self
+            .import_source
+            .and_then(|source| source.coordinate.as_ref())
         {
             writer.string("import-coordinate/v1");
             writer.string(&coordinate.name);
             writer.option(coordinate.unit.as_ref(), |writer, unit| writer.string(unit));
         }
-        // Optional, tagged extension: a result without checks keeps its
-        // sealed identity.
-        if version >= ResultDigestEncoding::V16
-            && !(self.checks.hdl.is_empty() && self.checks.assertions.is_empty())
-        {
+        if !(self.checks.hdl.is_empty() && self.checks.assertions.is_empty()) {
             writer.string("run-checks/v1");
             encode_run_checks(&mut writer, self.checks);
         }
-        // The same for the task that ended the run: a result a run reached
-        // the end of keeps its identity.
-        if version >= ResultDigestEncoding::V16
-            && let Some(finish) = &self.checks.finish
-        {
+        if let Some(finish) = &self.checks.finish {
             writer.string("run-finish/v1");
             encode_model_finish(&mut writer, finish);
         }
@@ -638,21 +563,6 @@ where
     W: ExactSizeIterator<Item = &'a RetainedWaveform> + Clone,
 {
     let domain = match version {
-        ResultDigestEncoding::V1 => "rspice.simulation-dataset-data/v1",
-        ResultDigestEncoding::V2 => "rspice.simulation-dataset-data/v2",
-        ResultDigestEncoding::V3 => "rspice.simulation-dataset-data/v3",
-        ResultDigestEncoding::V4 => "rspice.simulation-dataset-data/v4",
-        ResultDigestEncoding::V5 => "rspice.simulation-dataset-data/v5",
-        ResultDigestEncoding::V6 => "rspice.simulation-dataset-data/v6",
-        ResultDigestEncoding::V7 => "rspice.simulation-dataset-data/v7",
-        ResultDigestEncoding::V8 => "rspice.simulation-dataset-data/v8",
-        ResultDigestEncoding::V9 => "rspice.simulation-dataset-data/v9",
-        ResultDigestEncoding::V10 => "rspice.simulation-dataset-data/v10",
-        ResultDigestEncoding::V11 => "rspice.simulation-dataset-data/v11",
-        ResultDigestEncoding::V12 => "rspice.simulation-dataset-data/v12",
-        ResultDigestEncoding::V13 => "rspice.simulation-dataset-data/v13",
-        ResultDigestEncoding::V14 => "rspice.simulation-dataset-data/v14",
-        ResultDigestEncoding::V15 => "rspice.simulation-dataset-data/v15",
         ResultDigestEncoding::V16 => "rspice.simulation-dataset-data/v16",
     };
     let mut writer = ResultDigestWriter::new(domain, version);
@@ -663,11 +573,7 @@ where
     }
     writer.finish()
 }
-fn encode_result_payload(
-    writer: &mut ResultDigestWriter,
-    payload: &AnalysisResultPayload,
-    encoding_version: ResultDigestEncoding,
-) {
+fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResultPayload) {
     match payload {
         AnalysisResultPayload::DcSweep { evidence } => {
             use crate::dc_sweep::{
@@ -855,20 +761,9 @@ fn encode_result_payload(
             writer.u8(0);
             encode_complex_result_values(writer, poles);
             encode_complex_result_values(writer, zeros);
-            if encoding_version >= ResultDigestEncoding::V7 {
-                writer.option(gain.as_ref(), |writer, gain| writer.f64(*gain));
-                encode_pole_zero_root_evidence(writer, pole_evidence);
-                encode_pole_zero_root_evidence(writer, zero_evidence);
-            } else if let Some(gain) = gain {
-                // Preserve the byte-for-byte schema-v9 through schema-v15
-                // encoding for authenticated legacy migration.
-                writer.f64(*gain);
-            } else {
-                // No authentic legacy payload could omit gain. Keep this
-                // deterministic and distinct so validation reports a digest
-                // mismatch instead of panicking on a tampered document.
-                writer.u8(u8::MAX);
-            }
+            writer.option(gain.as_ref(), |writer, gain| writer.f64(*gain));
+            encode_pole_zero_root_evidence(writer, pole_evidence);
+            encode_pole_zero_root_evidence(writer, zero_evidence);
         }
         AnalysisResultPayload::PssFloquet {
             period_s,
@@ -881,13 +776,6 @@ fn encode_result_payload(
             trivial_multiplier_index,
             stability_verdict,
         } => {
-            if encoding_version < ResultDigestEncoding::V8 {
-                // No authentic schema-v16 result could contain this payload.
-                // Migration rejects it before invoking the legacy encoder;
-                // the sentinel keeps digest helpers total for adversarial data.
-                writer.u8(u8::MAX);
-                return;
-            }
             writer.u8(8);
             writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
             writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
@@ -925,10 +813,6 @@ fn encode_result_payload(
             converged,
             iterations,
         } => {
-            if encoding_version < ResultDigestEncoding::V8 {
-                writer.u8(u8::MAX - 1);
-                return;
-            }
             writer.u8(9);
             writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
             writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
@@ -995,15 +879,12 @@ fn encode_result_payload(
                 for value in [row.raw, row.normalized] {
                     match value {
                         rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
-                            if encoding_version >= ResultDigestEncoding::V15 {
-                                writer.u8(0);
-                            }
+                            writer.u8(0);
                             writer.f64(value);
                         }
                         rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
                             unavailable,
                         } => {
-                            // Legacy imports reject this shape before checking their digest.
                             writer.u8(1);
                             writer.string(unavailable.as_str());
                         }
@@ -1011,10 +892,6 @@ fn encode_result_payload(
                 }
             }
         }
-        // Written unconditionally of `encoding_version`. The per-era rules
-        // above replay an older encoding over a payload that era could
-        // contain; no build before this one could write a DC mismatch
-        // payload, so there is no older encoding of it to replay.
         AnalysisResultPayload::DcMismatch { evidence } => {
             writer.u8(11);
             writer.string(&evidence.output);
@@ -1291,11 +1168,8 @@ fn encode_result_payload(
                     .sum::<u64>(),
             );
         }
-        // Tag 13: the recorded FFT spectrum holds 12. Written unconditionally
-        // of `encoding_version` for the same reason the DC mismatch arm above
-        // is: no build before this one could write a sensitivity study, so
-        // there is no older encoding of one to replay. The frozen
-        // `Sensitivity` arm keeps tag 1 and is untouched.
+        // Tag 13: the recorded FFT spectrum holds 12 and the `Sensitivity`
+        // arm keeps tag 1.
         AnalysisResultPayload::SensitivityStudy { evidence } => {
             writer.u8(13);
             encode_sensitivity_study_evidence(writer, evidence);
@@ -1308,47 +1182,45 @@ fn encode_result_payload(
             voltage_impulses,
         } => {
             writer.u8(7);
-            if encoding_version >= ResultDigestEncoding::V16 {
-                writer.option(current_impulses.as_ref(), |writer, history| {
-                    writer.f64(history.start_time_s);
-                    writer.f64(history.stop_time_s);
-                    writer.bool(history.delivery_complete);
-                    writer.sequence(history.traces.len());
-                    for trace in &history.traces {
-                        match &trace.owner {
-                            rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
-                                writer.u8(0);
-                                writer.string(branch_name);
-                            }
-                            rspice_core::CurrentImpulseOwner::DeviceLead {
-                                device_name,
-                                parameter,
-                            } => {
-                                writer.u8(1);
-                                writer.string(device_name);
-                                writer.string(parameter);
-                            }
+            writer.option(current_impulses.as_ref(), |writer, history| {
+                writer.f64(history.start_time_s);
+                writer.f64(history.stop_time_s);
+                writer.bool(history.delivery_complete);
+                writer.sequence(history.traces.len());
+                for trace in &history.traces {
+                    match &trace.owner {
+                        rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
+                            writer.u8(0);
+                            writer.string(branch_name);
                         }
-                        writer.bool(trace.complete);
-                        writer.sequence(trace.points.len());
-                        for point in &trace.points {
-                            writer.f64(point.time);
-                            writer.f64(point.charge_coulombs);
-                        }
-                        // Typed extension preserves every pre-derivative digest.
-                        // The string tag cannot alias the following owner/sequence tag.
-                        if !trace.derivatives.is_empty() {
-                            writer.string("current-impulse-derivatives-v1");
-                            writer.sequence(trace.derivatives.len());
-                            for point in &trace.derivatives {
-                                writer.f64(point.time);
-                                writer.u64(u64::from(point.order));
-                                writer.f64(point.coefficient);
-                            }
+                        rspice_core::CurrentImpulseOwner::DeviceLead {
+                            device_name,
+                            parameter,
+                        } => {
+                            writer.u8(1);
+                            writer.string(device_name);
+                            writer.string(parameter);
                         }
                     }
-                });
-            }
+                    writer.bool(trace.complete);
+                    writer.sequence(trace.points.len());
+                    for point in &trace.points {
+                        writer.f64(point.time);
+                        writer.f64(point.charge_coulombs);
+                    }
+                    // Typed extension preserves every pre-derivative digest.
+                    // The string tag cannot alias the following owner/sequence tag.
+                    if !trace.derivatives.is_empty() {
+                        writer.string("current-impulse-derivatives-v1");
+                        writer.sequence(trace.derivatives.len());
+                        for point in &trace.derivatives {
+                            writer.f64(point.time);
+                            writer.u64(u64::from(point.order));
+                            writer.f64(point.coefficient);
+                        }
+                    }
+                }
+            });
             if let Some(history) = voltage_impulses {
                 writer.string("voltage-impulse-history-v1");
                 writer.f64(history.start_time_s);
@@ -1393,18 +1265,16 @@ fn encode_result_payload(
             // eight traces read as one byte are a different claim about the
             // run than eight independent conductors, and a result that gained
             // or lost one must not keep the identity of the one it replaced.
-            if encoding_version >= ResultDigestEncoding::V10 {
-                writer.sequence(digital_buses.len());
-                for bus in digital_buses {
-                    writer.string(&bus.name);
-                    writer.i64(bus.msb);
-                    writer.i64(bus.lsb);
-                    writer.sequence(bus.members.len());
-                    for member in &bus.members {
-                        writer.string(member);
-                    }
-                    writer.u8(digital_bus_source_tag(bus.source));
+            writer.sequence(digital_buses.len());
+            for bus in digital_buses {
+                writer.string(&bus.name);
+                writer.i64(bus.msb);
+                writer.i64(bus.lsb);
+                writer.sequence(bus.members.len());
+                for member in &bus.members {
+                    writer.string(member);
                 }
+                writer.u8(digital_bus_source_tag(bus.source));
             }
         }
     }
@@ -1926,24 +1796,13 @@ fn encode_device_op(
     }
 }
 
-fn encode_noise_summary(
-    writer: &mut ResultDigestWriter,
-    summary: &NoiseSummary,
-    encoding_version: ResultDigestEncoding,
-) {
-    if encoding_version <= ResultDigestEncoding::V4 {
-        // Schemas v1-v11 required this scalar and encoded it directly. The
-        // migration boundary rejects absence before invoking this legacy
-        // encoder; NaN keeps this helper total for digest-focused unit tests.
-        writer.f64(summary.total_rms.unwrap_or(f64::NAN));
-    } else {
-        writer.option(summary.total_rms.as_ref(), |writer, value| {
-            writer.f64(*value)
-        });
-        writer.option(summary.input_rms.as_ref(), |writer, value| {
-            writer.f64(*value)
-        });
-    }
+fn encode_noise_summary(writer: &mut ResultDigestWriter, summary: &NoiseSummary) {
+    writer.option(summary.total_rms.as_ref(), |writer, value| {
+        writer.f64(*value)
+    });
+    writer.option(summary.input_rms.as_ref(), |writer, value| {
+        writer.f64(*value)
+    });
     writer.f64(summary.band.0);
     writer.f64(summary.band.1);
     writer.sequence(summary.rows.len());

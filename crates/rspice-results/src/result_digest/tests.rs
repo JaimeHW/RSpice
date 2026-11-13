@@ -84,7 +84,6 @@ fn stb_circuit_modes_and_unavailability_participate_in_the_digest() {
             &AnalysisResultPayload::Stb {
                 response: std::sync::Arc::new(response),
             },
-            ResultDigestEncoding::CURRENT,
         );
         writer.finish()
     };
@@ -149,7 +148,7 @@ fn current_impulse_derivatives_participate_in_authenticated_identity() {
         };
         let mut writer =
             ResultDigestWriter::new("test-current-derivatives", ResultDigestEncoding::CURRENT);
-        encode_result_payload(&mut writer, &payload, ResultDigestEncoding::CURRENT);
+        encode_result_payload(&mut writer, &payload);
         writer.finish()
     };
     let original = digest(Some(point));

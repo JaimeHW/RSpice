@@ -2,8 +2,7 @@
 //!
 //! The assertions here are about identity, not arithmetic: a digest has to
 //! change when the authoritative data changes and stay put when only
-//! presentation does, and a seal written under an earlier schema has to keep
-//! authenticating against the bytes it was written from.
+//! presentation does.
 
 use super::*;
 use rspice_results::floquet::{
@@ -55,7 +54,7 @@ fn stable_pstb_result() -> AnalysisResult {
 }
 
 #[test]
-fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
+fn periodic_payload_fields_are_content_identity() {
     let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(
         AnalysisResultPayload::PssFloquet {
             period_s: Some(1.0),
@@ -90,20 +89,10 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
     };
     multipliers[0].multiplier.real = 0.25;
     assert_ne!(pss.result_data_digest(), changed_pss.result_data_digest());
-    assert_eq!(
-        pss.result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V7),
-        changed_pss
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V7)
-    );
 
     let source = stable_pstb_result();
     assert!(source.validate_retained_evidence().is_ok());
     let baseline = source.result_data_digest();
-    let legacy = source
-        .result_data_ref()
-        .digest(rspice_results::result_digest::ResultDigestEncoding::V7);
 
     macro_rules! assert_mutation_is_identity {
         ($pattern:pat, $mutation:expr) => {{
@@ -113,13 +102,6 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
             };
             $mutation;
             assert_ne!(baseline, changed.result_data_digest());
-            assert_eq!(
-                legacy,
-                changed
-                    .result_data_ref()
-                    .digest(rspice_results::result_digest::ResultDigestEncoding::V7),
-                "schema-v16 encoded no periodic payload semantics"
-            );
         }};
     }
 
@@ -175,18 +157,10 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
         second_run.dataset_content_digest(),
         "a full mode hidden from presentation remains dataset identity"
     );
-    assert_eq!(
-        first_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V7
-        ),
-        second_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V7
-        )
-    );
 }
 
 #[test]
-fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
+fn measurement_verification_fields_are_content_identity() {
     let mut measurement = rspice_core::MeasureResult::success("peak", 12.0);
     measurement.failure_limit = Some(10.0);
     measurement.failure_limit_exceeded = true;
@@ -195,39 +169,18 @@ fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
     let source = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_measurements(vec![measurement]);
     let current = source.result_data_digest();
-    let legacy = source
-        .result_data_ref()
-        .digest(rspice_results::result_digest::ResultDigestEncoding::V8);
 
     let mut raw_changed = source.clone();
     raw_changed.measurements[0].raw_value = Some(13.0);
     assert_ne!(current, raw_changed.result_data_digest());
-    assert_eq!(
-        legacy,
-        raw_changed
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
-    );
 
     let mut limit_changed = source.clone();
     limit_changed.measurements[0].failure_limit = Some(11.0);
     assert_ne!(current, limit_changed.result_data_digest());
-    assert_eq!(
-        legacy,
-        limit_changed
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
-    );
 
     let mut verdict_changed = source.clone();
     verdict_changed.measurements[0].failure_limit_exceeded = false;
     assert_ne!(current, verdict_changed.result_data_digest());
-    assert_eq!(
-        legacy,
-        verdict_changed
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
-    );
 
     let mut first_run = SimulationRun::new(1);
     first_run.analyses = vec![source];
@@ -236,14 +189,6 @@ fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
     assert_ne!(
         first_run.dataset_content_digest(),
         second_run.dataset_content_digest()
-    );
-    assert_eq!(
-        first_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V8
-        ),
-        second_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V8
-        )
     );
 }
 
@@ -440,7 +385,7 @@ fn analysis_digest_detects_real_imaginary_and_kind_changes() {
 }
 
 #[test]
-fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
+fn retained_waveform_unit_is_content_identity() {
     let unstated = analysis(AnalysisType::Transient);
     let volts = {
         let mut result = unstated.clone();
@@ -455,14 +400,6 @@ fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
 
     assert_ne!(unstated.result_data_digest(), volts.result_data_digest());
     assert_ne!(volts.result_data_digest(), amps.result_data_digest());
-    assert_eq!(
-        volts
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V5),
-        amps.result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V5),
-        "schema-v12 never contained waveform unit bytes"
-    );
 
     let mut stated_run = SimulationRun::new(1);
     stated_run.analyses = vec![volts];
@@ -471,14 +408,6 @@ fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
     assert_ne!(
         stated_run.dataset_content_digest(),
         restated_run.dataset_content_digest()
-    );
-    assert_eq!(
-        stated_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V5
-        ),
-        restated_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V5
-        )
     );
 }
 
@@ -601,7 +530,7 @@ fn periodic_noise_quantity_and_carrier_are_content_identity() {
 }
 
 #[test]
-fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
+fn typed_payload_is_content_identity() {
     let pole_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
         AnalysisResultPayload::PoleZero {
             poles: vec![ComplexResultValue {
@@ -681,15 +610,6 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
         approximate_evidence.result_data_digest(),
         "root-set qualification is authenticated result evidence"
     );
-    assert_eq!(
-        pole_zero
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V1),
-        changed_root
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V1),
-        "schema-v8 never contained typed payload bytes"
-    );
 
     let mut first_run = SimulationRun::new(1);
     first_run.analyses = vec![pole_zero];
@@ -698,14 +618,6 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
     assert_ne!(
         first_run.dataset_content_digest(),
         second_run.dataset_content_digest()
-    );
-    assert_eq!(
-        first_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V1
-        ),
-        second_run.data.dataset_content_digest_with_encoding(
-            rspice_results::result_digest::ResultDigestEncoding::V1
-        )
     );
 }
 
@@ -895,14 +807,6 @@ fn transfer_function_evidence_is_field_sensitive_v4_content_identity() {
         };
         *nominal_output = Some(0.25);
     });
-
-    assert_ne!(
-        source.result_data_digest(),
-        source
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V3),
-        "current results must be sealed in the v6 domain"
-    );
 }
 
 #[test]
@@ -1110,29 +1014,6 @@ fn declaring_a_bus_over_the_same_traces_is_a_different_result() {
     let (plain, bussed) = events_with_and_without_a_bus();
     assert_ne!(plain.result_data_digest(), bussed.result_data_digest());
     assert_eq!(bussed.result_data_digest(), bussed.result_data_digest());
-}
-
-/// The V9 encoding is what schema-v18 files were sealed with. It has to
-/// keep answering the same way for a table it never knew about, or every
-/// such file fails authentication the moment one is added.
-#[test]
-fn the_schema_v18_encoding_cannot_see_a_bus_table() {
-    let (plain, bussed) = events_with_and_without_a_bus();
-    assert_eq!(
-        plain
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V9),
-        bussed
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V9)
-    );
-    assert_ne!(
-        plain
-            .result_data_ref()
-            .digest(rspice_results::result_digest::ResultDigestEncoding::V9),
-        plain.result_data_digest(),
-        "V10 states the table, even an empty one, so it is a different domain"
-    );
 }
 
 /// A two-contributor divider spread, shaped as the engine produces one.
