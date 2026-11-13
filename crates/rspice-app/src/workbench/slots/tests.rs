@@ -515,7 +515,7 @@ const NATIVE_DIALOG_GATE: &[DialogRow] = &[("pending_autosave_restore", |dialogs
                 byte_len: 1,
                 modified_unix_ms: 1,
             },
-            ownership: CheckpointOwnership::Legacy,
+            ownership: CheckpointOwnership::NoManifest,
             source_snapshot: None,
         },
     });

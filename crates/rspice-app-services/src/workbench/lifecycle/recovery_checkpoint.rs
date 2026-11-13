@@ -2,7 +2,7 @@
 //!
 //! A checkpoint is published before its manifest. If the process stops in
 //! between, the complete checkpoint remains discoverable as a conservative
-//! legacy candidate. A per-checkpoint OS lease distinguishes a dead owner from
+//! candidate with no ownership manifest. A per-checkpoint OS lease distinguishes a dead owner from
 //! another running RSpice process and serializes destructive cleanup.
 
 use std::collections::HashMap;
@@ -36,10 +36,10 @@ pub enum CheckpointOwnership {
         session_id: Uuid,
         process_id: u32,
     },
-    /// A checkpoint written before ownership manifests were introduced (or a
-    /// fully committed checkpoint whose manifest publication was interrupted).
-    /// It may be opened non-destructively but is never deleted by Recovery.
-    Legacy,
+    /// A complete checkpoint with no ownership manifest beside it, such as one
+    /// whose manifest publication was interrupted. It may be opened
+    /// non-destructively but is never deleted by Recovery.
+    NoManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -553,7 +553,7 @@ pub fn write_checkpoint(source: &Path, schematic: &SchematicState) -> Result<Pat
     })();
 
     if let Err(error) = result {
-        // A fully published checkpoint remains as a conservative legacy
+        // A fully published checkpoint remains as a conservative unmanifested
         // generation if manifest publication or its durability receipt fails.
         let _ = release_writer_lease(&checkpoint);
         return Err(error);
@@ -616,7 +616,7 @@ pub fn inspect_checkpoint(source: &Path, checkpoint: &Path) -> CheckpointInspect
     let Some(manifest) = manifest else {
         return CheckpointInspection::Candidate(CheckpointBinding {
             identity,
-            ownership: CheckpointOwnership::Legacy,
+            ownership: CheckpointOwnership::NoManifest,
             source_snapshot: None,
         });
     };
@@ -703,7 +703,7 @@ fn source_snapshot_relation(
 
 /// Decide whether opening a saved source should be interrupted by its restore
 /// prompt. A manifest-bound exact source always receives the prompt, including
-/// coarse-filesystem timestamp ties. Changed and legacy/unrecorded sources only
+/// coarse-filesystem timestamp ties. Changed and unrecorded sources only
 /// receive it when the checkpoint is strictly newer; stale evidence remains
 /// available in Recovery without repeatedly blocking ordinary file opens.
 fn should_offer_checkpoint_on_source_open(
@@ -754,7 +754,7 @@ fn validate_binding(
             }
             Some(lease)
         }
-        CheckpointOwnership::Legacy => None,
+        CheckpointOwnership::NoManifest => None,
     };
     Ok(lease)
 }
@@ -779,9 +779,9 @@ pub fn discard_bound_checkpoint(
     checkpoint: &Path,
     binding: &CheckpointBinding,
 ) -> Result<(), String> {
-    if matches!(binding.ownership, CheckpointOwnership::Legacy) {
+    if matches!(binding.ownership, CheckpointOwnership::NoManifest) {
         return Err(
-            "legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration"
+            "checkpoint ownership cannot be proven without its manifest; open it non-destructively instead"
                 .to_owned(),
         );
     }
@@ -795,7 +795,7 @@ pub fn discard_bound_checkpoint(
         );
     }
 
-    // Manifest first: a crash during cleanup leaves a discoverable legacy
+    // Manifest first: a crash during cleanup leaves a discoverable unmanifested
     // checkpoint, never bytes hidden behind a stale ownership record.
     let manifest = checkpoint_manifest_path(checkpoint);
     std::fs::remove_file(&manifest).map_err(|error| {
@@ -1082,22 +1082,22 @@ mod tests {
     }
 
     #[test]
-    fn legacy_checkpoint_is_openable_but_never_destructively_discarded() {
-        let root = unique_temp_dir("legacy");
+    fn unmanifested_checkpoint_is_openable_but_never_destructively_discarded() {
+        let root = unique_temp_dir("no-manifest");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint = autosave_checkpoint_path(&source);
         let bytes = serialize_checkpoint(&source, &SchematicState::default())
-            .expect("serialize legacy checkpoint");
-        atomic_write(&checkpoint, &bytes).expect("write legacy checkpoint");
+            .expect("serialize unmanifested checkpoint");
+        atomic_write(&checkpoint, &bytes).expect("write unmanifested checkpoint");
 
         let CheckpointInspection::Candidate(binding) = inspect_checkpoint(&source, &checkpoint)
         else {
-            panic!("legacy checkpoint should be a candidate")
+            panic!("an unmanifested checkpoint should be a candidate")
         };
-        assert!(matches!(binding.ownership, CheckpointOwnership::Legacy));
+        assert!(matches!(binding.ownership, CheckpointOwnership::NoManifest));
         assert_eq!(
-            read_bound_checkpoint(&source, &checkpoint, &binding).expect("read exact legacy bytes"),
+            read_bound_checkpoint(&source, &checkpoint, &binding).expect("read exact bytes"),
             bytes
         );
         assert!(discard_bound_checkpoint(&source, &checkpoint, &binding).is_err());
@@ -1280,14 +1280,14 @@ mod tests {
         newer.identity.modified_unix_ms = 101;
         assert!(should_offer_checkpoint_on_source_open(&newer, &source));
 
-        let stale_legacy = CheckpointBinding {
+        let stale_unmanifested = CheckpointBinding {
             identity: checkpoint,
-            ownership: CheckpointOwnership::Legacy,
+            ownership: CheckpointOwnership::NoManifest,
             source_snapshot: None,
         };
         assert!(
-            !should_offer_checkpoint_on_source_open(&stale_legacy, &source),
-            "stale legacy evidence belongs in Recovery, not every file open"
+            !should_offer_checkpoint_on_source_open(&stale_unmanifested, &source),
+            "stale unmanifested evidence belongs in Recovery, not every file open"
         );
     }
 

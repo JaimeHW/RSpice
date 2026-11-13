@@ -131,7 +131,7 @@ pub(super) fn recovery_page(
                     }
         });
 
-    const LEGACY_CHECKPOINT_ADVISORY: &str = "Legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration";
+    const NO_MANIFEST_ADVISORY: &str = "Checkpoint ownership cannot be proven without its manifest; open it non-destructively instead";
 
     let selected = cx.platform.recovery_catalog.selected().cloned();
     launcher_page_footer(ui, layout, regions.footer, |ui| {
@@ -143,13 +143,13 @@ pub(super) fn recovery_page(
             .show(ui);
         let discard = if selected
             .as_ref()
-            .is_some_and(RecoveryCandidate::is_legacy_checkpoint)
+            .is_some_and(RecoveryCandidate::has_no_ownership_manifest)
         {
-            // A legacy checkpoint may still be discardable, so this advisory
-            // has to read in both states; each call is inert in the other one.
+            // The advisory has to read whether or not Discard is enabled; each
+            // call is inert in the other state.
             discard
-                .on_hover_text(LEGACY_CHECKPOINT_ADVISORY)
-                .on_disabled_hover_text(LEGACY_CHECKPOINT_ADVISORY)
+                .on_hover_text(NO_MANIFEST_ADVISORY)
+                .on_disabled_hover_text(NO_MANIFEST_ADVISORY)
         } else {
             discard
         };

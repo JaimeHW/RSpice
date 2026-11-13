@@ -81,12 +81,12 @@ impl RecoveryCandidate {
         false
     }
 
-    pub fn is_legacy_checkpoint(&self) -> bool {
+    pub fn has_no_ownership_manifest(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.binding
                 .as_ref()
-                .is_some_and(|binding| matches!(binding.ownership, CheckpointOwnership::Legacy))
+                .is_some_and(|binding| matches!(binding.ownership, CheckpointOwnership::NoManifest))
         }
         #[cfg(target_arch = "wasm32")]
         false
@@ -309,7 +309,7 @@ fn discover_candidate(
                                         .to_owned(),
                                 ),
                                 SourceSnapshotRelation::Unrecorded => Some(
-                                    "Legacy checkpoint has no recorded saved-source identity"
+                                    "Checkpoint has no recorded saved-source identity"
                                         .to_owned(),
                                 ),
                             },
