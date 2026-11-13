@@ -28,7 +28,7 @@ use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
 
 pub(crate) use automation::automation_task_count;
-pub(crate) use automation::{AutomationRunPort, CodeHandles, CodeWorkspaceParts};
+pub use automation::{AutomationRunPort, CodeHandles, CodeWorkspaceParts};
 pub(crate) use automation::{
     automation_runtime_unavailable_reason, invalidate_automation_evidence_in,
 };
@@ -45,18 +45,18 @@ pub use editor::{
     CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, EditorFindings,
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
-pub(crate) use editor::{
+pub use editor::{
     ProblemStep, problem_at_caret_announcement, problem_step_announcement, problem_step_index,
     queue_problem_step, reveal_source_location, severity_title, show_veriloga_document_versioned,
     take_problem_step,
 };
-pub(crate) use language_services::{
+pub use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
     format_language_document, open_language_tools_in_bundle,
 };
 // A managed run the frame tests seed, to press its Stop.
 #[cfg(test)]
-pub(crate) use page::PendingAutomationRuntimeExecution;
+pub use page::PendingAutomationRuntimeExecution;
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
@@ -68,7 +68,7 @@ pub use page::{
     VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
     VerilogAReplaceTarget, VerilogAWorkbenchState,
 };
-pub(crate) use source_files::{
+pub use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
     commit_source_workspace_dialog, import_dropped_automation_files, open_source_file_dialog,
     open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
@@ -81,12 +81,12 @@ pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
     document_navigation,
 };
-pub(crate) use source_search::{
+pub use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
     open_active_source_search, open_source_search, open_source_search_in_bundle,
     source_search_query_id, source_search_results_in,
 };
-pub(crate) use veriloga::{
+pub use veriloga::{
     PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,
     close_veriloga_import_form, commit_veriloga_source_replacement,
     compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_sources,
@@ -96,28 +96,28 @@ pub(crate) use veriloga::{
     writable_libraries, write_veriloga_build_profile,
 };
 #[cfg(test)]
-pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
+pub use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 #[cfg(test)]
-pub(crate) use veriloga_inspector::veriloga_diagnostics;
-pub(crate) use veriloga_inspector::{
+pub use veriloga_inspector::veriloga_diagnostics;
+pub use veriloga_inspector::{
     VerilogAInspectorAction, show_veriloga_inspector, veriloga_compile_status,
     veriloga_current_diagnostics, veriloga_receipt,
 };
 #[cfg(test)]
-pub(crate) use veriloga_interface::VerilogASymbolDrift;
-pub(crate) use veriloga_interface::{
+pub use veriloga_interface::VerilogASymbolDrift;
+pub use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
     reconciled_symbol, refresh_symbol_standing, symbol_drift_text, symbol_standing,
 };
-pub(in crate::workbench) use veriloga_library::{
+pub use veriloga_library::{
     persist_global_veriloga_library, restore_global_veriloga_library, save_global_veriloga_library,
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
 /// Compile the project's Automation workspace as a new session opens it,
 /// and keep its manifest and worker snapshot.
-pub(crate) fn bootstrap_automation(
+pub fn bootstrap_automation(
     workspace: &crate::state::ProjectWorkspace,
     code_workspace: &mut CodeWorkspaceRuntimeState,
 ) {
@@ -208,7 +208,7 @@ pub(crate) fn veriloga_dependency_view(
 
 /// Whether `shown` is the Netlist workspace on its netlist page: the
 /// netlist document, not merely the workspace that hosts it.
-pub(crate) fn netlist_page_shown(
+pub fn netlist_page_shown(
     shown: crate::workbench::state::Workspace,
     code: &CodeWorkspaceRuntimeState,
 ) -> bool {
@@ -231,7 +231,7 @@ pub(crate) fn design_hosts_veriloga(
 ///
 /// A Verilog-A cell view the Design workspace is showing is that document;
 /// everywhere else it is the page the Netlist workspace has selected.
-pub(crate) fn active_source_language(
+pub fn active_source_language(
     shown: crate::workbench::state::Workspace,
     workspace: &crate::state::ProjectWorkspace,
     page: CodeWorkspacePage,
@@ -309,7 +309,7 @@ pub(crate) fn active_bundle_path(
 /// Verilog-A well mixes in, or a reveal request lands on an editor that is not
 /// on screen and the caller silently does nothing. One owner, so a navigator
 /// row and a search result cannot disagree about where they are pointing.
-pub(crate) fn source_editor_id(
+pub fn source_editor_id(
     language: crate::state::ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
@@ -330,7 +330,7 @@ pub(crate) fn source_editor_id(
 /// A built-in header open in the editor well gives way to it: choosing a file
 /// is choosing to edit. `None` means this project holds no active bundle for
 /// `language`, which is the honest answer when a finding outlived its source.
-pub(crate) fn select_source_document(
+pub fn select_source_document(
     workspace: &crate::state::ProjectWorkspace,
     code: &mut CodeWorkspaceRuntimeState,
     language: crate::state::ProjectSourceLanguage,

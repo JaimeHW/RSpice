@@ -21,7 +21,7 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 /// Carry out the find window's `step`: replace every match Replace all
 /// planned, or go to, or replace, the match it names.
-pub(crate) fn apply_netlist_find_step(
+pub fn apply_netlist_find_step(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,

@@ -73,7 +73,7 @@ struct LoadedVerilogALibrary {
 }
 
 /// Restore the user's Verilog-A library, or say why it could not be.
-pub(in crate::workbench) fn restore_global_veriloga_library(
+pub fn restore_global_veriloga_library(
     library_manager: &mut LibraryManager,
     workspace: &mut ProjectWorkspace,
 ) -> Result<(), String> {
@@ -102,7 +102,7 @@ pub(in crate::workbench) fn restore_global_veriloga_library(
 
 /// Save the user's Verilog-A library, stating in the log why it could not
 /// be saved.
-pub(in crate::workbench) fn persist_global_veriloga_library(model: &mut Model) {
+pub fn persist_global_veriloga_library(model: &mut Model) {
     if let Err(err) = save_global_veriloga_library(&model.library_manager, &model.workspace) {
         model.record(
             LogSeverity::Warning,
@@ -112,7 +112,7 @@ pub(in crate::workbench) fn persist_global_veriloga_library(model: &mut Model) {
     }
 }
 
-pub(in crate::workbench) fn save_global_veriloga_library(
+pub fn save_global_veriloga_library(
     library_manager: &LibraryManager,
     workspace: &ProjectWorkspace,
 ) -> Result<(), String> {

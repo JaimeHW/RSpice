@@ -17,7 +17,7 @@ fn zoom_id() -> Id {
 }
 
 /// Set the size the editors draw at from this frame on.
-pub(crate) fn publish(ctx: &Context, size: f32) {
+pub fn publish(ctx: &Context, size: f32) {
     ctx.data_mut(|data| data.insert_temp(size_id(), size));
 }
 
@@ -47,7 +47,7 @@ pub(crate) fn request_zoom(ctx: &Context, step: i8) {
 }
 
 /// The step asked for since the last frame, once.
-pub(crate) fn take_zoom_request(ctx: &Context) -> Option<i8> {
+pub fn take_zoom_request(ctx: &Context) -> Option<i8> {
     ctx.data_mut(|data| data.remove_temp::<i8>(zoom_id()))
         .filter(|step| *step != 0)
 }

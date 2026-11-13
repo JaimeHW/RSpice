@@ -7,16 +7,16 @@
 use std::collections::{HashMap, HashSet};
 
 /// A project-owned Verilog-A file an exported deck needs beside it.
-pub(super) struct ExportedSource {
+pub struct ExportedSource {
     /// Relative to the folder the deck is written to, with `/` separators.
-    pub(super) relative_path: String,
-    pub(super) content: String,
+    pub relative_path: String,
+    pub content: String,
 }
 
 /// An AHDL deck and the files to write beside it.
-pub(super) struct AhdlExport {
-    pub(super) netlist: String,
-    pub(super) sources: Vec<ExportedSource>,
+pub struct AhdlExport {
+    pub netlist: String,
+    pub sources: Vec<ExportedSource>,
 }
 
 /// The deck as another tool reads it.
@@ -24,7 +24,7 @@ pub(super) struct AhdlExport {
 /// A project-owned source exists nowhere outside the project, so it is copied
 /// into a folder named after the deck and the deck names it by relative path.
 /// A source already on disk keeps its path, as it would in a Virtuoso netlist.
-pub(super) fn spice_to_ahdl_export(
+pub fn spice_to_ahdl_export(
     spice_netlist: &str,
     workspace: &crate::state::ProjectWorkspace,
     deck_stem: &str,

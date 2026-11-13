@@ -6,7 +6,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod vendor_profiles;
 
-pub(crate) fn generated_bundle_fixture() -> Vec<u8> {
+pub fn generated_bundle_fixture() -> Vec<u8> {
     use crate::product::{ContentDigest, ObjectRevision};
     use crate::state::{
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, SourceLocator,
@@ -56,7 +56,7 @@ pub(crate) fn generated_bundle_fixture() -> Vec<u8> {
 /// The owned-strategy fixture seeded into a session's model: a generated
 /// deck copied into an owned source the author rewrote, held under
 /// `strategy`.
-pub(crate) fn seed_owned_strategy(
+pub fn seed_owned_strategy(
     model: &mut rspice_app_state::workbench::app_state::model::Model,
     generated_source: &str,
     authored_source: &str,

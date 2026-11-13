@@ -4,7 +4,7 @@
 
 use super::generation;
 
-pub(crate) fn retain_generated(
+pub fn retain_generated(
     model: &mut rspice_app_state::workbench::app_state::model::Model,
     netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     source: &str,
@@ -23,7 +23,7 @@ pub(crate) fn retain_generated(
 
 /// Seal one manual-deck run into history the way a dispatch does, so the
 /// strip has a real receipt to read its digest and revision back off.
-pub(crate) fn seal_manual_run(
+pub fn seal_manual_run(
     model: &mut rspice_app_state::workbench::app_state::model::Model,
     run_number: u64,
     deck_digest: u8,

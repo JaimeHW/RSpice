@@ -582,7 +582,7 @@ fn source_offset_is_comment(source: &str, offset: usize) -> bool {
     false
 }
 
-pub(crate) fn find_replace_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+pub fn find_replace_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
     if !cx.state.netlist.find.open {
         return;
     }

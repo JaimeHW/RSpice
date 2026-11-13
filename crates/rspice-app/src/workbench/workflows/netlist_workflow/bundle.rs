@@ -4,10 +4,10 @@
 //! reaches the project, and entry names are validated against traversal.
 
 #[derive(Debug)]
-pub(crate) struct ImportedNetlistBundle {
+pub struct ImportedNetlistBundle {
     pub(super) source: String,
-    pub(crate) dependencies: Vec<crate::state::DependencyMetadata>,
-    pub(crate) expanded_source: String,
+    pub dependencies: Vec<crate::state::DependencyMetadata>,
+    pub expanded_source: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -47,9 +47,7 @@ pub(super) struct GeneratedBundleEdge {
     include_index: usize,
 }
 
-pub(crate) fn parse_generated_netlist_bundle(
-    bytes: &[u8],
-) -> Result<ImportedNetlistBundle, String> {
+pub fn parse_generated_netlist_bundle(bytes: &[u8]) -> Result<ImportedNetlistBundle, String> {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     const MAX_ARCHIVE_ENTRIES: usize = 20_004;

@@ -398,7 +398,7 @@ pub struct RenderedArtifact {
 }
 
 impl RenderedArtifact {
-    pub(crate) fn new(kind: ArtifactKind, bytes: impl Into<Arc<[u8]>>) -> Self {
+    pub fn new(kind: ArtifactKind, bytes: impl Into<Arc<[u8]>>) -> Self {
         let bytes = bytes.into();
         Self {
             kind,

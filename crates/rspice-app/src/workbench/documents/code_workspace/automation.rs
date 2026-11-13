@@ -64,17 +64,17 @@ use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 /// What the code feature runs, held by the application beside its state:
 /// the automation runtime and the project it is authorized to serve.
-pub(crate) struct CodeHandles {
+pub struct CodeHandles {
     /// Verified application-local Python worker service. It is deliberately
     /// outside persisted state and absent from browser builds, which own a Web
     /// Worker backend instead.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) automation_runtime: crate::automation_runtime::NativeAutomationRuntime,
+    pub automation_runtime: crate::automation_runtime::NativeAutomationRuntime,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) automation_runtime: crate::automation_runtime::BrowserAutomationRuntime,
+    pub automation_runtime: crate::automation_runtime::BrowserAutomationRuntime,
     /// Project identity currently authorized to own the process/worker. Any
     /// identity change terminates the worker before another event is polled.
-    pub(crate) automation_runtime_project_id: crate::product::ProjectId,
+    pub automation_runtime_project_id: crate::product::ProjectId,
 }
 
 /// A test session's handles: the managed runtime is never discovered, so a
@@ -99,16 +99,16 @@ impl Default for CodeHandles {
 /// run tier with its controller and the export IO. Each is one the code
 /// feature's context lends as well; until the shell's arms take a context,
 /// the application lends them.
-pub(crate) struct CodeWorkspaceParts<'a> {
-    pub(crate) code: &'a mut super::CodeWorkspaceRuntimeState,
-    pub(crate) netlist: &'a mut crate::workbench::documents::netlist_document::NetlistDocumentState,
-    pub(crate) handles: &'a mut CodeHandles,
-    pub(crate) model: &'a mut Model,
-    pub(crate) wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
-    pub(crate) platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
-    pub(crate) runs: &'a mut rspice_app_runs::workbench::slots::runs::RunsState,
-    pub(crate) run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
-    pub(crate) export_io:
+pub struct CodeWorkspaceParts<'a> {
+    pub code: &'a mut super::CodeWorkspaceRuntimeState,
+    pub netlist: &'a mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    pub handles: &'a mut CodeHandles,
+    pub model: &'a mut Model,
+    pub wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
+    pub platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
+    pub runs: &'a mut rspice_app_runs::workbench::slots::runs::RunsState,
+    pub run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
+    pub export_io:
         &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
@@ -121,7 +121,7 @@ pub(crate) struct CodeWorkspaceParts<'a> {
 /// through the peers of the context the workflow runs in, and the command
 /// registry. The code feature, which holds both, lends it from above; its
 /// lend is the only implementation.
-pub(crate) trait AutomationRunPort {
+pub trait AutomationRunPort {
     /// The run tier's host over `parts`, and the run controller it prepares
     /// through, for one step.
     fn run_host<'v>(

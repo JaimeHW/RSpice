@@ -12,10 +12,10 @@ mod touch;
 
 pub(crate) use accessibility::bounded_accessible_text;
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use accessibility::speak_caret_lines;
+pub use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
 use context_menu::{context_menu_id, take_menu_keys};
-pub(crate) use context_menu::{context_menu_may_show, context_menu_open};
+pub use context_menu::{context_menu_may_show, context_menu_open};
 use keymap::{KeyAction, Motion, Reach};
 
 use std::ops::Range;
@@ -241,7 +241,7 @@ fn take_zoom_keys(ctx: &egui::Context) {
 
 /// Whether a key read as `down` has gone down since it was last read.
 #[cfg(windows)]
-pub(crate) fn press_begins(ctx: &egui::Context, id: egui::Id, down: bool) -> bool {
+pub fn press_begins(ctx: &egui::Context, id: egui::Id, down: bool) -> bool {
     let was_down = ctx.data_mut(|data| {
         let was_down = data.get_temp::<bool>(id).unwrap_or_default();
         data.insert_temp(id, down);
@@ -267,7 +267,7 @@ pub(crate) fn resynchronize(ctx: &egui::Context, editor_id: egui::Id) {
 
 /// The text the editor `editor_id` showed when it was last drawn.
 #[cfg(test)]
-pub(crate) fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> {
+pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> {
     ctx.data(|data| {
         data.get_temp::<VirtualEditorSession>(editor_id.with("virtual-session"))
             .map(|session| session.model.to_source())

@@ -6,20 +6,20 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetlistImportOperation {
+pub enum NetlistImportOperation {
     OpenProject,
     ImportIntoProject,
     RequalifyOwnedSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetlistImportIssueSeverity {
+pub enum NetlistImportIssueSeverity {
     Advisory,
     Blocking,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NetlistImportIssue {
+pub struct NetlistImportIssue {
     pub severity: NetlistImportIssueSeverity,
     pub message: String,
 }
@@ -29,7 +29,7 @@ pub(crate) struct NetlistImportIssue {
 /// snapshot and raw-file identity; accepting the dialog never re-reads a
 /// different file and cancellation never mutates project-owned documents.
 #[derive(Debug, Clone)]
-pub(crate) struct NetlistImportReviewState {
+pub struct NetlistImportReviewState {
     pub transaction: crate::product::TransactionId,
     pub operation: NetlistImportOperation,
     pub display_name: String,
@@ -55,14 +55,14 @@ pub(crate) struct NetlistImportReviewState {
 }
 
 impl NetlistImportReviewState {
-    pub(crate) fn blocking_issue_count(&self) -> usize {
+    pub fn blocking_issue_count(&self) -> usize {
         self.issues
             .iter()
             .filter(|issue| issue.severity == NetlistImportIssueSeverity::Blocking)
             .count()
     }
 
-    pub(crate) fn can_commit(&self) -> bool {
+    pub fn can_commit(&self) -> bool {
         self.blocking_issue_count() == 0
             && self.dialect_qualification().is_ok()
             && (!self.selected_dialect.requires_compatibility_review()
@@ -73,7 +73,7 @@ impl NetlistImportReviewState {
     /// implementation. A review checkbox acknowledges a qualified profile;
     /// it can never create an adapter or turn a vendor marker into canonical
     /// RSpice syntax. This check is deliberately repeated at commit.
-    pub(crate) fn dialect_qualification(&self) -> Result<(), String> {
+    pub fn dialect_qualification(&self) -> Result<(), String> {
         use crate::state::NetlistSourceDialect;
 
         match self.selected_dialect {

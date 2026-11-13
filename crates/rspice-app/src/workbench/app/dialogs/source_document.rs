@@ -51,7 +51,7 @@ use crate::ui::widgets::{
 /// The shell's `open_source_document_dialog`, over the workspace in front, the model,
 /// the Code workspace's runtime state, the netlist editor's state and the
 /// platform's state.
-pub(crate) fn open_source_document_dialog_in(
+pub fn open_source_document_dialog_in(
     workspace: Workspace,
     model: &Model,
     code: &mut CodeWorkspaceRuntimeState,
@@ -83,7 +83,7 @@ pub(crate) fn open_source_document_dialog_in(
 /// a project that owns no deck yet, the one [`generated_deck_refusal`]
 /// sends here. It reads the model and the platform's state, and writes the
 /// Code workspace's runtime state and the netlist editor's state.
-pub(crate) fn begin_new_top_deck_in(
+pub fn begin_new_top_deck_in(
     model: &Model,
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &mut NetlistDocumentState,
@@ -102,7 +102,7 @@ pub(crate) fn begin_new_top_deck_in(
 }
 
 /// Whether the lifecycle dialog can be opened for the visible page.
-pub(crate) fn source_document_dialog_is_available(
+pub fn source_document_dialog_is_available(
     workspace: Workspace,
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
@@ -148,15 +148,15 @@ fn visible_language_in(
 /// Read once per frame into owned values so applying a transaction cannot
 /// invalidate a borrow the body is still rendering from, and so every row is
 /// measured from the same closure.
-pub(crate) struct DocumentFacts {
-    pub(crate) language: ProjectSourceLanguage,
-    pub(crate) logical_path: String,
+pub struct DocumentFacts {
+    pub language: ProjectSourceLanguage,
+    pub logical_path: String,
     leaf: String,
     role: String,
     is_entry: bool,
     is_environment_lock: bool,
     editable: bool,
-    pub(crate) is_root: bool,
+    pub is_root: bool,
     line_endings: MessageId,
     validation_current: bool,
     imports: Vec<String>,
@@ -172,21 +172,21 @@ struct RevisionRow {
     current: bool,
 }
 
-pub(crate) struct NetlistLifecycleFacts {
-    pub(crate) deck_id: Option<uuid::Uuid>,
+pub struct NetlistLifecycleFacts {
+    pub deck_id: Option<uuid::Uuid>,
     logical_path: String,
     line_endings: MessageId,
     /// The file on disk the deck or include was saved to or opened from;
     /// `None` for one that lives only inside the project.
     native_path: Option<String>,
     history_count: usize,
-    pub(crate) decks: Vec<(uuid::Uuid, String)>,
+    pub decks: Vec<(uuid::Uuid, String)>,
     operations_blocked: Option<String>,
     include_identity: Option<String>,
     include_owned: bool,
 }
 
-pub(crate) fn netlist_lifecycle_facts(
+pub fn netlist_lifecycle_facts(
     model: &Model,
     netlist: &NetlistDocumentState,
 ) -> Option<NetlistLifecycleFacts> {
@@ -419,14 +419,14 @@ fn role_label(messages: MessageCatalog, role: Option<crate::state::ProjectSource
 }
 
 /// Close the document lifecycle dialog and the drafts it opened.
-pub(in crate::workbench) fn close_document_lifecycle(code: &mut CodeWorkspaceRuntimeState) {
+pub fn close_document_lifecycle(code: &mut CodeWorkspaceRuntimeState) {
     code.source_document_dialog = false;
     code.source_file_dialog = None;
     code.source_history = None;
 }
 
 /// Close the netlist lifecycle dialog and the transactions it opened.
-pub(crate) fn close_netlist_lifecycle(
+pub fn close_netlist_lifecycle(
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &mut NetlistDocumentState,
 ) {
@@ -529,7 +529,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
 
 /// Carry out a lifecycle choice on the Verilog-A or Automation document at
 /// `logical_path` that the dialog handed the shell.
-pub(crate) fn apply_lifecycle_action(
+pub fn apply_lifecycle_action(
     parts: &mut CodeWorkspaceParts<'_>,
     action: LifecycleAction,
     language: ProjectSourceLanguage,

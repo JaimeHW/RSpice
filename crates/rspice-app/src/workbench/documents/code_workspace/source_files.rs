@@ -33,7 +33,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) fn source_file_mutation_block_reason(
+pub fn source_file_mutation_block_reason(
     parts: &CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
 ) -> Option<&'static str> {
@@ -42,7 +42,7 @@ pub(crate) fn source_file_mutation_block_reason(
 
 /// [`source_file_mutation_block_reason`], over the model, the Code
 /// workspace's runtime state and the platform's.
-pub(crate) fn source_file_mutation_block_reason_in(
+pub fn source_file_mutation_block_reason_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
@@ -73,9 +73,7 @@ pub(crate) fn source_file_mutation_block_reason_in(
 ///
 /// Automation is the one project-wide source workspace: a Verilog-A source is
 /// a cell view, created with its cell.
-pub(crate) fn open_source_workspace_dialog(
-    parts: &mut CodeWorkspaceParts<'_>,
-) -> Result<(), String> {
+pub fn open_source_workspace_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
     let language = ProjectSourceLanguage::RSpiceAutomation;
     if let Some(reason) = source_file_mutation_block_reason(parts, language) {
         return Err(reason.to_owned());
@@ -114,7 +112,7 @@ pub(crate) fn open_source_workspace_dialog(
     Ok(())
 }
 
-pub(crate) fn commit_source_workspace_dialog(
+pub fn commit_source_workspace_dialog(
     parts: &mut CodeWorkspaceParts<'_>,
 ) -> Result<String, String> {
     let draft = parts
@@ -305,7 +303,7 @@ fn new_automation_workspace_bundle(
     .map_err(|error| error.to_string())
 }
 
-pub(crate) fn assign_automation_source_role(
+pub fn assign_automation_source_role(
     parts: &mut CodeWorkspaceParts<'_>,
     logical_path: &str,
     role: Option<ProjectSourceRole>,
@@ -351,7 +349,7 @@ pub(crate) fn assign_automation_source_role(
 
 /// Resolve edit authority from persisted document ownership and semantic
 /// roles. File extensions and demonstration filenames are never authority.
-pub(crate) fn source_document_is_editable(
+pub fn source_document_is_editable(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
@@ -372,7 +370,7 @@ pub(crate) fn source_document_is_editable(
 /// Code workspace's runtime state and the platform's. A Verilog-A bundle
 /// belongs to its cell view; Automation remains confined to its singleton
 /// project workspace.
-pub(crate) fn source_bundle_document_is_editable_in(
+pub fn source_bundle_document_is_editable_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
@@ -398,7 +396,7 @@ pub(crate) fn source_bundle_document_is_editable_in(
 /// owner in the currently open project. Read-only policy is intentionally not
 /// part of this predicate so find, navigation, and language inspection remain
 /// available in safe mode.
-pub(crate) fn source_bundle_contains_document(
+pub fn source_bundle_contains_document(
     parts: &CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
@@ -450,7 +448,7 @@ fn source_document_blocks_graph_mutation(
         && bundle.role_for_path(logical_path) == Some(ProjectSourceRole::AutomationEnvironmentLock)
 }
 
-pub(crate) fn open_source_file_dialog(
+pub fn open_source_file_dialog(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     action: CodeSourceFileAction,
@@ -473,7 +471,7 @@ pub(crate) fn open_source_file_dialog(
     )
 }
 
-pub(crate) fn open_source_file_dialog_in_bundle(
+pub fn open_source_file_dialog_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
@@ -549,9 +547,7 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     Ok(())
 }
 
-pub(crate) fn commit_source_file_dialog(
-    parts: &mut CodeWorkspaceParts<'_>,
-) -> Result<String, String> {
+pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
     let draft = parts
         .code
         .source_file_dialog
@@ -694,7 +690,7 @@ pub(crate) fn commit_source_file_dialog(
     Ok(message)
 }
 
-pub(crate) fn open_source_history(
+pub fn open_source_history(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     source_path: &str,
@@ -747,7 +743,7 @@ pub(crate) fn open_source_history_in_bundle(
     Ok(())
 }
 
-pub(crate) fn request_automation_source_import(
+pub fn request_automation_source_import(
     parts: &mut CodeWorkspaceParts<'_>,
     importer_path: &str,
 ) -> Result<(), String> {
@@ -793,7 +789,7 @@ pub(crate) fn request_automation_source_import(
 /// browser build can hand the file back asynchronously. A request that is
 /// never polled leaves `source_import` set forever, and every later import is
 /// then refused as already pending — so this must stay wired into the frame.
-pub(crate) fn poll_automation_source_import(
+pub fn poll_automation_source_import(
     model: &mut Model,
     code: &mut CodeWorkspaceRuntimeState,
     wb: &mut WorkbenchSession,
@@ -1025,7 +1021,7 @@ fn apply_automation_source_import_in(
 /// Import the one file dropped on the Automation page as its source, or say
 /// why not: one file at a time, its bytes within the source limit and in
 /// UTF-8. Nothing is imported while an application modal is open.
-pub(crate) fn import_dropped_automation_files(
+pub fn import_dropped_automation_files(
     parts: &mut CodeWorkspaceParts<'_>,
     application_modal_open: bool,
     dropped: Vec<egui::DroppedFile>,
@@ -1130,9 +1126,7 @@ fn import_dropped_automation_source(
     apply_automation_source_import(parts, request, file_name, contents)
 }
 
-pub(crate) fn commit_source_history_restore(
-    parts: &mut CodeWorkspaceParts<'_>,
-) -> Result<String, String> {
+pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
     let draft = parts
         .code
         .source_history

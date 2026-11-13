@@ -50,14 +50,14 @@ use rspice_app_runs::simulation::{RunHost, SimulationController};
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 
 /// The code feature.
-pub(crate) struct CodeFeature;
+pub struct CodeFeature;
 
 /// The source editor's right-click menu: the language group, shown only
 /// where the document's language service can answer it, then the
 /// clipboard, then the line edits. Mutating rows are greyed on a read-only
 /// source. Every page that draws a source editor is the code feature's:
 /// the deck, Automation and a Verilog-A view.
-pub(crate) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
+pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
@@ -453,7 +453,7 @@ impl CodeFeature {
     /// Verilog-A import and compile that finished are taken, the compile a
     /// request asked for starts, where the open module's symbol stands is
     /// measured, and the Automation import that finished is taken.
-    pub(crate) fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    pub fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
         Self::terminate_after_project_change(cx);
         #[cfg(not(target_arch = "wasm32"))]
         cx.own.automation_runtime.poll_discovery();
@@ -487,7 +487,7 @@ impl CodeFeature {
     /// A project replaced since the last check takes its automation
     /// authority with it: the runtime serving it stops, the Code &
     /// Automation page starts over, and the run prepared for it is dropped.
-    pub(crate) fn terminate_after_project_change(cx: &mut Cx<'_, Self>) {
+    pub fn terminate_after_project_change(cx: &mut Cx<'_, Self>) {
         let project_id = cx.model.workspace.content.project.id();
         if project_id == cx.own.automation_runtime_project_id {
             return;
@@ -499,7 +499,7 @@ impl CodeFeature {
     }
 
     /// Stop the automation runtime, as the application shuts down.
-    pub(crate) fn terminate_runtime(cx: &mut Cx<'_, Self>) {
+    pub fn terminate_runtime(cx: &mut Cx<'_, Self>) {
         let _ = cx.own.automation_runtime.terminate();
     }
 }
@@ -575,27 +575,27 @@ impl AutomationRunPort for AutomationRunLend<'_, '_> {
 /// workspace's parts and the run tier's host the feature lends them.
 impl CodeFeature {
     /// Check the Automation workflow and queue the run it binds.
-    pub(crate) fn start_automation_workflow(cx: &mut Cx<'_, Self>) {
+    pub fn start_automation_workflow(cx: &mut Cx<'_, Self>) {
         let (mut parts, mut run_port) = Self::automation_parts(cx);
         code_workspace::start_automation_workflow(&mut parts, &mut run_port);
     }
 
     /// Check the Automation workflow through its run preflight without
     /// queueing a run.
-    pub(crate) fn dry_run_automation_workflow(cx: &mut Cx<'_, Self>) {
+    pub fn dry_run_automation_workflow(cx: &mut Cx<'_, Self>) {
         let (mut parts, mut run_port) = Self::automation_parts(cx);
         code_workspace::dry_run_automation_workflow(&mut parts, &mut run_port);
     }
 
     /// Follow the Automation run in flight: take the run its dispatch
     /// produced, and publish or refuse its results.
-    pub(crate) fn poll_automation_workflow(cx: &mut Cx<'_, Self>) {
+    pub fn poll_automation_workflow(cx: &mut Cx<'_, Self>) {
         let (mut parts, mut run_port) = Self::automation_parts(cx);
         code_workspace::poll_automation_workflow(&mut parts, &mut run_port);
     }
 
     /// Take what the managed Python worker reported since the last frame.
-    pub(crate) fn poll_managed_automation_runtime(cx: &mut Cx<'_, Self>) {
+    pub fn poll_managed_automation_runtime(cx: &mut Cx<'_, Self>) {
         let (mut parts, mut run_port) = Self::automation_parts(cx);
         code_workspace::poll_managed_automation_runtime(&mut parts, &mut run_port);
     }

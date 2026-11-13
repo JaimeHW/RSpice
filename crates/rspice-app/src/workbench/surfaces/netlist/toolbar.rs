@@ -28,7 +28,7 @@ use super::{
 };
 use crate::workbench::documents::netlist_document::open_owned_source_in;
 
-pub(crate) const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
+pub const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
 pub(super) const CODE_TOOLBAR_GAP: f32 = 5.0;
 pub(super) const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
@@ -52,7 +52,7 @@ const CODE_STATUS_MARK_COLUMN: f32 = CODE_STATUS_MARK_SIDE + CODE_STATUS_MARK_GA
 /// rows cannot drift apart. The other two are the layout contract this file
 /// used to get wrong: an action group wider than its reservation printed over
 /// the status chips, and no constant could be trusted to notice.
-pub(crate) struct CodeToolbarLayout {
+pub struct CodeToolbarLayout {
     pub content: egui::Rect,
     /// Exact rect the status chips were painted into.
     #[cfg(test)]
@@ -155,7 +155,7 @@ struct ActionSetContext {
 /// page has drawn: Run and Stop, copying an include into the project,
 /// picking its file again, validating the deck and the quick fix. It
 /// returns where it drew.
-pub(crate) fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
+pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
     let messages = cx.wb.messages();
     let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
         MessageId::NetlistDownloadSourceCopy

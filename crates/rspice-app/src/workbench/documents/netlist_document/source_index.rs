@@ -15,7 +15,7 @@ use crate::state::NetlistSourceIndex;
 /// unlike a revision counter it cannot go stale behind a writer that forgets
 /// to bump it. It reads the model and keeps the index in the netlist
 /// editor's state.
-pub(crate) fn visible_source_index_in(
+pub fn visible_source_index_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {
@@ -30,7 +30,7 @@ pub(crate) fn visible_source_index_in(
 /// the editor shows. Until the Netlist workspace has been opened, a restored
 /// session or a reopened project has put nothing in the editor, and an
 /// include file the editor has open is not the deck.
-pub(crate) fn root_deck_source_index(
+pub fn root_deck_source_index(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {

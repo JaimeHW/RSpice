@@ -72,8 +72,8 @@ const RESULT_LIST_MAX_HEIGHT: f32 = 168.0;
 const COMPACT_FIELDS_WIDTH: f32 = 360.0;
 /// The label column of every kit form, Go to line's among them: its
 /// fields start 100 pt in, past this column and the 8 pt gap after it.
-pub(crate) const LABEL_COLUMN: f32 = 92.0;
-pub(crate) const LABEL_GAP: f32 = 8.0;
+pub const LABEL_COLUMN: f32 = 92.0;
+pub const LABEL_GAP: f32 = 8.0;
 
 /// A field's label as the kit's forms state theirs: the secondary size in
 /// the dimmed ink, so the values beside it carry the weight.

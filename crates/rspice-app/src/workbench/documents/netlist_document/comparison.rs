@@ -17,10 +17,7 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 /// Reopen the already-materialized comparison document. Creating a new
 /// comparison remains an explicit revision workflow; a tab switch is only a
 /// presentation transition.
-pub(crate) fn open_netlist_comparison(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) -> bool {
+pub fn open_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if netlist.generated_diff_source.is_empty() {
         return false;
     }
@@ -36,7 +33,7 @@ pub(crate) fn open_netlist_comparison(
     true
 }
 
-pub(crate) fn compare_generated_revision(
+pub fn compare_generated_revision(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     index: usize,
@@ -75,7 +72,7 @@ pub(crate) fn compare_generated_revision(
     Ok(())
 }
 
-pub(crate) fn compare_owned_revision(
+pub fn compare_owned_revision(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     index: usize,
@@ -247,7 +244,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 /// Both halves are required: a run binding without its sealed text is a
 /// snapshot that cannot show a deck, and text without a run is a deck that
 /// cannot name what executed it. It reads the runs.
-pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
+pub fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
     let run_id = runs.manual_run.last_run_id?;
     runs.manual_run
         .last_run_buffer
@@ -259,7 +256,7 @@ pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
 /// The synthetic filename the run snapshot is filed under. It is an
 /// identifier, not translated copy, and it names the run so two snapshots from
 /// different runs can never be mistaken for one document.
-pub(crate) fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
+pub fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
     format!("run-{}.sp", runs.manual_run.last_run_id.unwrap_or_default())
 }
 
@@ -269,7 +266,7 @@ pub(crate) fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
 /// from the live editor, so what this shows is what the engine read. It
 /// writes the model and the netlist editor's state, and reads the runs that
 /// sealed the deck.
-pub(crate) fn open_run_deck_snapshot_in(
+pub fn open_run_deck_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
@@ -298,7 +295,7 @@ pub(crate) fn open_run_deck_snapshot_in(
 /// travels with the selection. Opening is the only moment the answer can
 /// change, because both of its inputs are sealed. It writes the model and the
 /// netlist editor's state, and reads the runs that sealed the deck.
-pub(crate) fn open_executed_deck_in(
+pub fn open_executed_deck_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
@@ -393,10 +390,7 @@ fn project_run_snapshot_in(
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
-pub(crate) fn close_run_deck_snapshot(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) -> bool {
+pub fn close_run_deck_snapshot(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if netlist.active_document != ActiveNetlistDocument::RunSnapshot {
         return false;
     }
@@ -409,7 +403,7 @@ pub(crate) fn close_run_deck_snapshot(
 /// Diff the run's sealed deck against the working revision it was opened
 /// from. It writes the model and the netlist editor's state, and reads the
 /// runs that sealed the deck.
-pub(crate) fn compare_run_deck_snapshot_in(
+pub fn compare_run_deck_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,

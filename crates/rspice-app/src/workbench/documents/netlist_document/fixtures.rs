@@ -21,7 +21,7 @@ pub(crate) const INCLUDE_NATIVE_ORIGIN: &str = "C:/project/models/resistor.inc";
 /// The owned-dependency fixture seeded into a session's model and netlist
 /// editor: a generated deck that includes one dependency, copied into the
 /// project's own root source, which the editor shows, validated.
-pub(crate) fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentState) {
+pub fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentState) {
     let locator = SourceLocator::try_new(INCLUDE_IDENTITY, "resistor.inc")
         .unwrap()
         .with_native_origin(INCLUDE_NATIVE_ORIGIN)

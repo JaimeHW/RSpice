@@ -69,7 +69,7 @@ struct IndexedToken {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LanguageServiceIndex {
+pub struct LanguageServiceIndex {
     pub project_id: ProjectId,
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
@@ -85,7 +85,7 @@ pub(crate) struct LanguageServiceIndex {
 /// An open Rename symbol: the index it was opened against, the name under
 /// the caret, and the new name being typed.
 #[derive(Debug, Clone)]
-pub(crate) struct CodeLanguageToolsState {
+pub struct CodeLanguageToolsState {
     pub index: LanguageServiceIndex,
     pub active_path: String,
     /// The character the name was taken from.
@@ -96,7 +96,7 @@ pub(crate) struct CodeLanguageToolsState {
     pub error: Option<String>,
 }
 
-pub(crate) fn open_language_tools_in_bundle(
+pub fn open_language_tools_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
@@ -139,7 +139,7 @@ pub(crate) fn open_language_tools_in_bundle(
     Ok(())
 }
 
-pub(crate) fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
     let state = current_language_transaction(parts)?;
     let replacements = state.index.rename_preview_at(
         &state.active_path,
@@ -197,7 +197,7 @@ pub(crate) fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Resu
 }
 
 /// "3 occurrences in 2 files", for the rename form and its receipt.
-pub(crate) fn extent_words(occurrences: usize, files: usize) -> String {
+pub fn extent_words(occurrences: usize, files: usize) -> String {
     format!(
         "{occurrences} occurrence{} in {files} file{}",
         if occurrences == 1 { "" } else { "s" },
@@ -255,7 +255,7 @@ fn current_language_transaction(
 /// its code actions instead, leaving the user to find and apply the format
 /// there. A read-only source, or one the formatter refuses to touch because
 /// it does not parse, says why instead of changing anything.
-pub(crate) fn format_language_document(
+pub fn format_language_document(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: ProjectSourceId,
@@ -473,7 +473,7 @@ impl LanguageServiceIndex {
 
     /// What a rename of `name` rewrites: its occurrences outside comments and
     /// strings, and the files they sit in.
-    pub(crate) fn rename_extent(&self, name: &str) -> (usize, usize) {
+    pub fn rename_extent(&self, name: &str) -> (usize, usize) {
         let occurrences = self
             .tokens
             .iter()

@@ -23,25 +23,25 @@ mod staging;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use external_change::apply_staged_external_netlist_change;
-pub(crate) use find::apply_netlist_find_step;
+pub use external_change::apply_staged_external_netlist_change;
+pub use find::apply_netlist_find_step;
 #[cfg(test)]
-pub(crate) use import::sha256;
-pub(crate) use import::{
+pub use import::sha256;
+pub use import::{
     ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,
     imported_deck_refusal, install_imported_deck, netlist_import_start_block_reason,
     record_import_failure,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use platform::show_open_netlist_dialog;
+pub use platform::show_open_netlist_dialog;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use platform::{
+pub use platform::{
     BrowserNetlistImportResult, pick_browser_netlist, poll_browser_dependency_relink,
     take_browser_netlist_completion,
 };
-pub(crate) use platform::{request_dependency_relink, route_started_netlist_import};
-pub(crate) use save::save_owned_netlist_source;
-pub(crate) use staging::{
+pub use platform::{request_dependency_relink, route_started_netlist_import};
+pub use save::save_owned_netlist_source;
+pub use staging::{
     cancel_staged_netlist_import, commit_owned_netlist_profile_review, committable_staged_import,
     open_owned_netlist_profile_review, owned_netlist_profile_candidate,
     stage_validated_netlist_import, staged_import_commit, staged_import_still_valid,
@@ -49,7 +49,7 @@ pub(crate) use staging::{
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
 
-pub(crate) fn normalize_owned_netlist_whitespace(source: &str) -> String {
+pub fn normalize_owned_netlist_whitespace(source: &str) -> String {
     if source.is_empty() {
         return String::new();
     }
@@ -83,7 +83,7 @@ pub(crate) fn normalize_owned_netlist_whitespace(source: &str) -> String {
     formatted
 }
 
-pub(crate) fn record_validation_failure(model: &mut Model, error: &str) {
+pub fn record_validation_failure(model: &mut Model, error: &str) {
     model.record(
         LogSeverity::Error,
         LogSource::Netlist,
@@ -110,7 +110,7 @@ fn record_include_resolutions(
     }
 }
 
-pub(crate) fn acknowledge_canonical_dependencies(
+pub fn acknowledge_canonical_dependencies(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     include_resolutions: &mut std::collections::BTreeMap<
@@ -432,7 +432,7 @@ fn dependency_source_authority(
     }
 }
 
-pub(crate) fn acknowledge_canonical_validation(
+pub fn acknowledge_canonical_validation(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
 ) -> Result<(), String> {
@@ -501,10 +501,7 @@ pub(crate) fn acknowledge_canonical_validation(
     Ok(())
 }
 
-pub(crate) fn invalidate_canonical_validation(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) {
+pub fn invalidate_canonical_validation(model: &mut Model, netlist: &mut NetlistDocumentState) {
     let document = match netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             model.netlist_artifacts.generated_document.as_mut()

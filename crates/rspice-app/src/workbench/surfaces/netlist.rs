@@ -59,7 +59,7 @@ pub(super) fn publish_source_editor(
 
 /// Step the netlist editor's caret to the next or previous finding of the
 /// deck it shows, when F8 or Shift+F8 asked, and say which it reached.
-pub(crate) fn step_netlist_problem(
+pub fn step_netlist_problem(
     ctx: &egui::Context,
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
@@ -156,7 +156,7 @@ pub(crate) fn step_netlist_problem(
 
 /// Hand a line revealed in the netlist editor to it the way this page asks
 /// for a line.
-pub(crate) fn reveal_in_netlist(
+pub fn reveal_in_netlist(
     ui: &Ui,
     model: &crate::workbench::app_state::Model,
     netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
@@ -177,7 +177,7 @@ pub(crate) fn reveal_in_netlist(
 /// before the shell takes the dispatcher's answers the page's context holds,
 /// so they are the answers the editor gets; the page publishes it again as
 /// it draws it.
-pub(crate) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
+pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::{
         active_netlist_source_is_editable_in, editor_id_in,
     };
@@ -206,7 +206,7 @@ pub(crate) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
 /// Whether the deck editor's right-click menu is open, or may open on what
 /// this frame carries. The page's context holds the menu's answers only
 /// then, so the shell reads this before it lends the context.
-pub(in crate::workbench) fn source_menu_open(
+pub fn source_menu_open(
     ctx: &egui::Context,
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
@@ -221,7 +221,7 @@ pub(in crate::workbench) fn source_menu_open(
 /// prepared. The context holds the dispatcher's answers for the commands
 /// the feature reads, and its menu's while [`source_menu_open`] says the
 /// source editor's menu is open or opening.
-pub(crate) fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // A file dropped on the page is staged as an import once the page has
     // drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
@@ -438,7 +438,7 @@ enum EmptyNetlistAction {
 }
 
 /// Height of the post-run strip, matching the mockup's `.netlist-override-strip`.
-pub(crate) const RUN_STRIP_HEIGHT: f32 = 24.0;
+pub const RUN_STRIP_HEIGHT: f32 = 24.0;
 const RUN_STRIP_PADDING_X: f32 = 8.0;
 const RUN_STRIP_GAP: f32 = 8.0;
 const RUN_STRIP_ACTION_HEIGHT: f32 = 20.0;
@@ -454,7 +454,7 @@ const RUN_STRIP_MARK_COLUMN: f32 = RUN_STRIP_MARK_SIDE + RUN_STRIP_DOT_GAP;
 
 /// Which statement the strip is making about the run it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RunStripPhase {
+pub enum RunStripPhase {
     /// The working deck is byte-for-byte the deck this run executed.
     Current,
     /// The working deck has moved on since this run executed.
@@ -471,7 +471,7 @@ pub(crate) enum RunStripPhase {
 /// retained, or was not a manual deck run, there is nothing to state and the
 /// strip does not appear.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RunStripProjection {
+pub struct RunStripProjection {
     pub run_id: u64,
     pub deck_digest: String,
     pub revision: u64,
@@ -494,7 +494,7 @@ pub(crate) struct RunStripProjection {
     pub verification: Option<ExecutedDeckVerification>,
 }
 
-pub(crate) fn run_strip_projection(
+pub fn run_strip_projection(
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
     runs: &rspice_app_runs::workbench::slots::runs::RunsState,

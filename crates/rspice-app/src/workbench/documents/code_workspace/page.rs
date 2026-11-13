@@ -248,7 +248,7 @@ impl VerilogAWorkbenchState {
     /// Drop what the last compile proved, and stop a compile still running:
     /// the source either was of is not the source any more. The stopped work
     /// never holds the next compile up, and the reader is told it is gone.
-    pub(crate) fn void_evidence(&mut self) {
+    pub fn void_evidence(&mut self) {
         if let Some(pending) = self.pending.take() {
             pending.cancellation.cancel();
             self.note_compile_discarded();
@@ -819,7 +819,7 @@ pub struct CodeWorkspaceRuntimeState {
     /// transactions below stay independent of it: a file operation opened from
     /// the navigator brings the dialog up around its own review section, and
     /// closing the dialog abandons the draft rather than committing it.
-    pub(crate) source_document_dialog: bool,
+    pub source_document_dialog: bool,
     pub source_workspace_dialog: Option<CodeSourceWorkspaceDialogState>,
     pub source_file_dialog: Option<CodeSourceFileDialogState>,
     pub source_history: Option<CodeSourceHistoryState>,
@@ -854,7 +854,7 @@ pub struct CodeWorkspaceRuntimeState {
     /// the deck: written when the closure is resolved against the host, and
     /// deliberately not persisted, because a project restored elsewhere has
     /// not walked that chain.
-    pub(crate) include_resolutions:
+    pub include_resolutions:
         std::collections::BTreeMap<String, rspice_core::netlist::IncludeResolution>,
     /// The `.lib` sections each retained include's exact bytes declare, keyed
     /// by the same locator and held against the digest they were read from.

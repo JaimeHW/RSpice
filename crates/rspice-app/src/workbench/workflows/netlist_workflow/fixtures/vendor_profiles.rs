@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 const CORPUS: &str = include_str!("testdata/vendor_profile_corpus_v1.tsv");
 
-pub(crate) fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
+pub fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
     let mut seen = BTreeSet::new();
     let cases = CORPUS
         .lines()
@@ -50,7 +50,7 @@ pub(crate) fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecution
     cases
 }
 
-pub(crate) fn source(path: &str) -> (String, PathBuf) {
+pub fn source(path: &str) -> (String, PathBuf) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/xyce/Netlists/XDM")
         .join(path);

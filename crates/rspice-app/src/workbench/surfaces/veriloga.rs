@@ -33,7 +33,7 @@ const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
 /// editor in front, before the shell takes the dispatcher's answers the
 /// page's context holds, so they are the answers the editor gets. The page
 /// publishes it again as it draws it.
-pub(crate) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+pub fn prepare(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::code_workspace::{
         active_veriloga_file_path, selected_veriloga_source_in, viewed_veriloga_header,
     };
@@ -64,7 +64,7 @@ pub(crate) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
 /// what this frame carries, read from the editor the page put in front.
 /// The page's context holds the menu's answers only then, so this is read
 /// before the context is lent.
-pub(crate) fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
+pub fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
     wb.active_source_editor.is_some_and(|editor| {
         crate::workbench::documents::virtual_text_editor::context_menu_may_show(ctx, editor.id)
     })
@@ -119,7 +119,7 @@ fn page_editor(
 
 /// Draw a Verilog-A cell view in the code feature's context, and say what
 /// the reader pressed on the interface strip.
-pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
     // Import and compile results are consumed by the frame loop, so a result
     // that lands while the editor is off screen is still published. Only what
     // needs this surface's pointer and context stays here.
@@ -683,7 +683,7 @@ fn interface_strip(
 }
 
 /// What the reader pressed on the interface strip.
-pub(crate) enum InterfaceAction {
+pub enum InterfaceAction {
     /// Update symbol, beside a hand-edited symbol's drift.
     UpdateSymbol,
     /// Place the new device in the schematic the strip named.

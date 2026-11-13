@@ -9,7 +9,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 /// picker. It is transient UI state; exact relinked bytes and locator evidence
 /// are persisted only after the guarded transaction commits.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NetlistDependencyRelinkState {
+pub struct NetlistDependencyRelinkState {
     pub root: ActiveNetlistDocument,
     pub logical_identity: String,
     pub expected_document_id: crate::state::NetlistDocumentId,

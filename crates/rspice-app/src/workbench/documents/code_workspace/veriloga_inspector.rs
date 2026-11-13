@@ -31,7 +31,7 @@ use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
 
 /// The compile receipt for exactly this source, if the last compile was of it.
-pub(crate) fn veriloga_receipt<'a>(
+pub fn veriloga_receipt<'a>(
     state: &'a VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
@@ -44,7 +44,7 @@ pub(crate) fn veriloga_receipt<'a>(
 
 /// The diagnostics the last compile of exactly this source produced: the
 /// receipt's advisories after a pass, the failure's findings after a refusal.
-pub(crate) fn veriloga_diagnostics(
+pub fn veriloga_diagnostics(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
@@ -57,7 +57,7 @@ pub(crate) fn veriloga_diagnostics(
 /// the one made while it is written, or `None` when the source changed after
 /// it: the editor then keeps the last check's findings, outdated, rather
 /// than show the text as clean.
-pub(crate) fn veriloga_current_diagnostics(
+pub fn veriloga_current_diagnostics(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
@@ -88,7 +88,7 @@ pub(crate) fn veriloga_current_diagnostics(
 /// Compiling and edited-since-the-last-compile are where the source is, not
 /// something wrong with it, so they carry no mark; a failure, ports that
 /// disagree with the schematic, and advisories left in Diagnostics do.
-pub(crate) fn veriloga_compile_status(
+pub fn veriloga_compile_status(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
@@ -168,7 +168,7 @@ pub(crate) fn veriloga_compile_status(
 
 /// What the reader asked the inspector to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum VerilogAInspectorAction {
+pub enum VerilogAInspectorAction {
     /// Put the editor's caret where a finding is: the document of the
     /// bundle that holds it, and its one-based line and column.
     RevealFinding {
@@ -182,7 +182,7 @@ pub(crate) enum VerilogAInspectorAction {
 /// The inspector body: the module and where its ports stand, what the
 /// compiler found in it, and the parameters an instance of it takes. Where
 /// the source stands with the compiler is the editor strip's to say.
-pub(crate) fn show_veriloga_inspector(
+pub fn show_veriloga_inspector(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,

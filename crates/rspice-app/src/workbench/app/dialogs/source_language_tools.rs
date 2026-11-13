@@ -30,7 +30,7 @@ use crate::workbench::documents::code_workspace::{
     self, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
 };
 
-pub(crate) const RENAME_TITLE: &str = "Rename symbol";
+pub const RENAME_TITLE: &str = "Rename symbol";
 const RENAME_PRIMARY: &str = "Rename";
 const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 
@@ -38,7 +38,7 @@ const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 /// source editor on screen, in the `language` bundle it shows, through the
 /// project source index. A netlist answers through its own language service
 /// instead, which the shell asks.
-pub(crate) fn navigate_source_bundle(
+pub fn navigate_source_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
     language: crate::state::ProjectSourceLanguage,
     command: CodeCommand,

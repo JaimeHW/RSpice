@@ -15,7 +15,7 @@ use crate::workbench::framework::feature::Cx;
 
 /// What the source editor menu's rows read, answered from the code
 /// feature's context lent with its menus' answers.
-pub(crate) struct SourceMenuLookup<'c, 'a>(pub(crate) &'c Cx<'a, CodeFeature>);
+pub struct SourceMenuLookup<'c, 'a>(pub &'c Cx<'a, CodeFeature>);
 
 impl MenuLookup for SourceMenuLookup<'_, '_> {
     fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {

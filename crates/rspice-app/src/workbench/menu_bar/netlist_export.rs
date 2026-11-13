@@ -7,7 +7,7 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub(crate) fn action_export_generated_netlist_with_options(
+pub fn action_export_generated_netlist_with_options(
     model: &mut crate::workbench::app_state::Model,
     wb: &mut crate::workbench::state::WorkbenchSession,
     format: crate::io::NetlistFormat,
@@ -171,13 +171,13 @@ fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> St
 }
 
 /// A deck the generator wrote, and the warnings it raised beside it.
-pub(crate) struct GeneratedNetlist {
-    pub(crate) source: String,
-    pub(crate) warnings: Vec<String>,
+pub struct GeneratedNetlist {
+    pub source: String,
+    pub warnings: Vec<String>,
 }
 
 /// The shell's `build_menu_netlist`, over the model.
-pub(crate) fn build_menu_netlist_in(
+pub fn build_menu_netlist_in(
     model: &crate::workbench::app_state::Model,
 ) -> Result<GeneratedNetlist, Vec<String>> {
     let execution_projection = model
@@ -265,12 +265,12 @@ pub(crate) fn build_menu_netlist_in(
 
 /// One Console line for a deck the reader asked for that could not be written:
 /// what was asked, and every reason the generator gave.
-pub(crate) fn netlist_failure_text(action: &str, reasons: &[String]) -> String {
+pub fn netlist_failure_text(action: &str, reasons: &[String]) -> String {
     format!("{action} failed: {}", reasons.join("; "))
 }
 
 /// The shell's `record_netlist_warnings`, in the model's Console.
-pub(crate) fn record_netlist_warnings_in(
+pub fn record_netlist_warnings_in(
     model: &mut crate::workbench::app_state::Model,
     warnings: Vec<String>,
 ) {

@@ -15,7 +15,7 @@ use super::*;
 /// `save_as` always asks for a destination. Ordinary Save reuses a reopenable
 /// imported/native origin when one exists; browser downloads have no durable
 /// path authority and therefore always use the user-agent download workflow.
-pub(crate) fn save_owned_netlist_source(
+pub fn save_owned_netlist_source(
     model: &mut crate::workbench::app_state::Model,
     netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     wb: &mut crate::workbench::state::WorkbenchSession,

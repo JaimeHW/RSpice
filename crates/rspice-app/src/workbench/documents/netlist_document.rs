@@ -36,11 +36,11 @@ mod owned_source;
 mod param_scan;
 mod relink;
 mod source_index;
-pub(crate) use import_review::{
+pub use import_review::{
     NetlistImportIssue, NetlistImportIssueSeverity, NetlistImportOperation,
     NetlistImportReviewState,
 };
-pub(crate) use navigation::{open_diagnostic_location, open_source_location};
+pub use navigation::{open_diagnostic_location, open_source_location};
 pub(crate) use owned_source::open_owned_source_in;
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
@@ -48,18 +48,18 @@ pub(crate) use relink::{
 };
 
 pub use comparison::{close_revision_comparison, restore_owned_revision, reveal_executed_deck};
-pub(crate) use comparison::{
+pub use comparison::{
     close_run_deck_snapshot, compare_run_deck_snapshot_in, open_executed_deck_in,
     open_netlist_comparison, open_run_deck_snapshot_in, run_deck_snapshot_artifact_name_in,
     run_deck_snapshot_run_id_in,
 };
-pub(crate) use comparison::{compare_generated_revision, compare_owned_revision};
+pub use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub use editor::show as show_editor;
-pub(crate) use editor::{commit_edit as commit_editor_edit, editor_id_in};
+pub use editor::{commit_edit as commit_editor_edit, editor_id_in};
 pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
-pub(crate) use source_index::{root_deck_source_index, visible_source_index_in};
+pub use source_index::{root_deck_source_index, visible_source_index_in};
 
 /// Exact, derived state of one project-owned netlist publication.
 ///
@@ -67,7 +67,7 @@ pub(crate) use source_index::{root_deck_source_index, visible_source_index_in};
 /// are independent facts. Keeping the projection here prevents the inspector,
 /// toolbar, and execution gate from inventing contradictory interpretations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OwnedNetlistPublicationState {
+pub struct OwnedNetlistPublicationState {
     pub project_modified: bool,
     pub source_modified: bool,
     pub published_before: bool,
@@ -102,7 +102,7 @@ impl OwnedNetlistPublicationState {
 /// digest: whether it is saved, validated against the project's revision and
 /// eligible to run. It reads the model and the netlist editor's state.
 #[must_use]
-pub(crate) fn owned_netlist_publication_state_in(
+pub fn owned_netlist_publication_state_in(
     model: &Model,
     netlist: &NetlistDocumentState,
     digest: crate::product::ContentDigest,
@@ -145,7 +145,7 @@ enum OwnedNetlistReplacementTarget {
 /// mutation begins. The original digest prevents a stale search result from
 /// changing newer source bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OwnedNetlistReplacement {
+pub struct OwnedNetlistReplacement {
     target: OwnedNetlistReplacementTarget,
     original: String,
     expected_digest: crate::product::ContentDigest,
@@ -155,7 +155,7 @@ pub(crate) struct OwnedNetlistReplacement {
 
 impl OwnedNetlistReplacement {
     #[must_use]
-    pub(crate) fn root(original: &str, replacement: String, replacement_count: usize) -> Self {
+    pub fn root(original: &str, replacement: String, replacement_count: usize) -> Self {
         Self {
             target: OwnedNetlistReplacementTarget::Root,
             original: original.to_owned(),
@@ -166,7 +166,7 @@ impl OwnedNetlistReplacement {
     }
 
     #[must_use]
-    pub(crate) fn dependency(
+    pub fn dependency(
         logical_identity: impl Into<String>,
         original: &str,
         replacement: String,
@@ -256,7 +256,7 @@ fn clear_netlist_edit_journal(state: &mut NetlistDocumentState) {
 /// transition. No active-document switching occurs while the transaction is
 /// prepared, and every original digest is checked before the cloned candidate
 /// replaces live state.
-pub(crate) fn replace_owned_sources_atomically(
+pub fn replace_owned_sources_atomically(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -604,16 +604,16 @@ fn replace_owned_sources_atomically_impl(
 }
 
 #[must_use]
-pub(crate) fn can_undo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
+pub fn can_undo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
     !netlist.edit_undo.is_empty()
 }
 
 #[must_use]
-pub(crate) fn can_redo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
+pub fn can_redo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
     !netlist.edit_redo.is_empty()
 }
 
-pub(crate) fn undo_netlist_edit(
+pub fn undo_netlist_edit(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -636,7 +636,7 @@ pub(crate) fn undo_netlist_edit(
     Ok(Some(description))
 }
 
-pub(crate) fn redo_netlist_edit(
+pub fn redo_netlist_edit(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -681,7 +681,7 @@ pub fn replace_owned_source(
 /// document rewritten over it, when the project keeps one, becomes the
 /// editor's, and the editor's revision and undo history move past the source
 /// they were taken from.
-pub(crate) fn adopt_live_owned_source(
+pub fn adopt_live_owned_source(
     netlist: &mut NetlistDocumentState,
     document: Option<crate::state::NetlistDocument>,
 ) {
@@ -805,10 +805,7 @@ pub(crate) fn active_dependency_is_owned_in(model: &Model, netlist: &NetlistDocu
 /// Whether editor mutations are authorized for the exact visible source. It
 /// reads the model and the netlist editor's state.
 #[must_use]
-pub(crate) fn active_netlist_source_is_editable_in(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-) -> bool {
+pub fn active_netlist_source_is_editable_in(model: &Model, netlist: &NetlistDocumentState) -> bool {
     if netlist.active_dependency_identity.is_some() {
         active_dependency_is_owned_in(model, netlist)
     } else {
@@ -864,7 +861,7 @@ pub(crate) fn working_deck_source_in<'a>(
 /// [`manual_deck_run_block_reason_in`] finds, then a validation whose
 /// authorization the run controller no longer holds, which is the run
 /// tier's half of the answer.
-pub(crate) fn manual_deck_run_block_reason_for_run(
+pub fn manual_deck_run_block_reason_for_run(
     model: &Model,
     netlist: &NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
@@ -879,7 +876,7 @@ pub(crate) fn manual_deck_run_block_reason_for_run(
 
 /// User-facing reason the Netlist workspace cannot run the current deck. It
 /// reads the model, the netlist editor's state and the message catalogue.
-pub(crate) fn manual_deck_run_block_reason_in(
+pub fn manual_deck_run_block_reason_in(
     model: &Model,
     netlist: &NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
@@ -953,7 +950,7 @@ pub(crate) fn open_netlist_dependency_in(
 /// Open a dependency of the given root document, over the model, the netlist
 /// editor's state, the include tabs the reader opened and the runs, whose
 /// manual run forgets the lines edited in the deck it leaves.
-pub(crate) fn open_netlist_dependency_from_root_in(
+pub fn open_netlist_dependency_from_root_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -1233,7 +1230,7 @@ pub fn replace_owned_dependency_source(
 /// the Netlist workspace, with the generated primary in front. It works over
 /// the model, the netlist editor's state, the Code workspace's page and the
 /// workbench.
-pub(crate) fn show_generated_deck(
+pub fn show_generated_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     page: &mut CodeWorkspacePage,
@@ -1250,10 +1247,7 @@ pub(crate) fn show_generated_deck(
 /// owned source or generated-diff document. This is an explicit document
 /// transition; navigating among Code workspace pages must not call it. It
 /// works over the model and the netlist editor's state.
-pub(crate) fn open_generated_primary_in(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) -> bool {
+pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if model.netlist_artifacts.generated_document.is_none()
         || model.netlist_artifacts.generated_source.trim().is_empty()
     {
@@ -1357,7 +1351,7 @@ pub struct NetlistFindState {
     pub error: Option<String>,
     /// A press the window made this frame, which the shell carries out once
     /// the page has drawn. The session does not store it.
-    pub(crate) pending: Option<NetlistFindStep>,
+    pub pending: Option<NetlistFindStep>,
 }
 
 impl Default for NetlistFindState {
@@ -1384,7 +1378,7 @@ impl Default for NetlistFindState {
 /// commits through a candidate copy of the whole state, so the shell carries
 /// it out once the page has drawn.
 #[derive(Debug, Clone)]
-pub(crate) struct NetlistFindStep {
+pub struct NetlistFindStep {
     pub(crate) action: Option<NetlistFindAction>,
     /// The options the matches were found with.
     pub(crate) options: crate::state::FindOptions,
@@ -1428,7 +1422,7 @@ pub struct NetlistOwnershipDialogState {
 /// Native publication paths are deliberately not edited here: rename and move
 /// operate on the portable project path, while Save As controls publication.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NetlistLifecycleTransaction {
+pub struct NetlistLifecycleTransaction {
     pub action: CodeSourceFileAction,
     pub project_id: crate::product::ProjectId,
     pub deck_id: Option<uuid::Uuid>,
@@ -1441,13 +1435,13 @@ pub(crate) struct NetlistLifecycleTransaction {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetlistLifecycleDialogState {
+pub struct NetlistLifecycleDialogState {
     pub transaction: Option<NetlistLifecycleTransaction>,
     pub include_transaction: Option<NetlistIncludeLifecycleTransaction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NetlistIncludeLifecycleTransaction {
+pub struct NetlistIncludeLifecycleTransaction {
     pub action: CodeSourceFileAction,
     pub project_id: crate::product::ProjectId,
     pub root_document_id: crate::state::NetlistDocumentId,
@@ -1459,7 +1453,7 @@ pub(crate) struct NetlistIncludeLifecycleTransaction {
 
 /// Open the lifecycle transaction for a Rename or Move of the active owned
 /// include, over the model and the netlist editor's state.
-pub(crate) fn begin_owned_include_lifecycle_action(
+pub fn begin_owned_include_lifecycle_action(
     model: &Model,
     netlist: &mut NetlistDocumentState,
     action: CodeSourceFileAction,
@@ -1497,7 +1491,7 @@ pub(crate) fn begin_owned_include_lifecycle_action(
     Ok(())
 }
 
-pub(crate) fn commit_owned_include_lifecycle_action(
+pub fn commit_owned_include_lifecycle_action(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -1608,7 +1602,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
 /// Open the lifecycle transaction for a New, Rename, Move, Duplicate or
 /// Delete of the active top deck, with the path it proposes, over the model
 /// and the netlist editor's state.
-pub(crate) fn begin_netlist_lifecycle_action_in(
+pub fn begin_netlist_lifecycle_action_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
     action: CodeSourceFileAction,
@@ -1655,7 +1649,7 @@ pub(crate) fn begin_netlist_lifecycle_action_in(
     Ok(())
 }
 
-pub(crate) fn commit_netlist_lifecycle_action(
+pub fn commit_netlist_lifecycle_action(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -1876,7 +1870,7 @@ pub(crate) fn commit_netlist_lifecycle_action(
     Ok(message)
 }
 
-pub(crate) fn select_retained_top_deck(
+pub fn select_retained_top_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -2113,7 +2107,7 @@ pub struct NetlistSaveDialogState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum NetlistExternalChangeResolution {
+pub enum NetlistExternalChangeResolution {
     #[default]
     Merge,
     KeepLocal,
@@ -2125,7 +2119,7 @@ impl NetlistExternalChangeResolution {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct NetlistExternalChangeState {
+pub struct NetlistExternalChangeState {
     pub path: std::path::PathBuf,
     pub expected_sha256: [u8; 32],
     pub observed_sha256: [u8; 32],
@@ -2154,7 +2148,7 @@ impl Default for NetlistSaveDialogState {
 
 /// Open the owned deck's save dialog, or its Save As, in the deck's own
 /// encoding, over the model and the netlist editor's state.
-pub(crate) fn open_netlist_save_dialog_in(
+pub fn open_netlist_save_dialog_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
     save_as: bool,
@@ -2242,10 +2236,10 @@ pub struct NetlistDocumentState {
     /// transactions that change one or more canonical project sources.
     edit_undo: Vec<NetlistEditJournalEntry>,
     edit_redo: Vec<NetlistEditJournalEntry>,
-    pub(crate) rename_dialog: language::NetlistRenameDialogState,
-    pub(crate) signature_help: language::NetlistSignatureHelpState,
+    pub rename_dialog: language::NetlistRenameDialogState,
+    pub signature_help: language::NetlistSignatureHelpState,
     pub ownership_dialog: NetlistOwnershipDialogState,
-    pub(crate) lifecycle_dialog: NetlistLifecycleDialogState,
+    pub lifecycle_dialog: NetlistLifecycleDialogState,
     pub comparison_dialog: NetlistComparisonDialogState,
     pub save_dialog: NetlistSaveDialogState,
     /// Native external-file compare/merge transaction. Browser downloads have
@@ -2332,11 +2326,7 @@ impl NetlistDocumentState {
     /// Take the schematic cross-probe's line: withdraw the request it made
     /// before while nothing has asked for another line, mark `line`, and ask
     /// for it while the generated deck is the document shown.
-    pub(crate) fn project_cross_probe_line(
-        &mut self,
-        released: Option<usize>,
-        line: Option<usize>,
-    ) {
+    pub fn project_cross_probe_line(&mut self, released: Option<usize>, line: Option<usize>) {
         if released.is_some() && self.requested_line == released {
             self.requested_line = None;
         }
@@ -2360,7 +2350,7 @@ impl NetlistDocumentState {
     /// Record a settled parse of `revision`, as the editor does once it has
     /// validated the buffer.
     #[cfg(test)]
-    pub(crate) fn mark_validated_for_test(&mut self, revision: u64) {
+    pub fn mark_validated_for_test(&mut self, revision: u64) {
         self.diag_revision = Some(revision);
     }
 
@@ -2379,7 +2369,7 @@ impl NetlistDocumentState {
     /// Whether a retained Code-workspace transaction owns exclusive input.
     /// This is queried before painting, so keyboard shortcuts cannot mutate
     /// the document behind a modal during its opening frame.
-    pub(crate) fn application_modal_open(&self) -> bool {
+    pub fn application_modal_open(&self) -> bool {
         self.find.open
             || self.rename_dialog.open
             || self.ownership_dialog.open
@@ -2432,7 +2422,7 @@ pub fn prepare(
 /// Run the Netlist workspace's deck: remember the page Run was pressed on,
 /// and start the run, or queue it behind the one going. It writes the model,
 /// the runs and the session.
-pub(crate) fn request_netlist_manual_deck_run_in(
+pub fn request_netlist_manual_deck_run_in(
     model: &mut Model,
     runs: &mut RunsState,
     workbench: &mut crate::workbench::state::WorkbenchSession,

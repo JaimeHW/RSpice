@@ -16,7 +16,7 @@ use rspice_design::library::ViewType;
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 
 /// The symbol of the cell the open Verilog-A view defines, when it has one.
-pub(crate) fn active_veriloga_symbol(model: &Model) -> Option<CellViewRef> {
+pub fn active_veriloga_symbol(model: &Model) -> Option<CellViewRef> {
     let active = &model.workspace.content.active_view;
     let cell = model
         .library_manager
@@ -36,7 +36,7 @@ pub(in crate::workbench) fn can_open_veriloga_symbol(model: &Model) -> bool {
 /// Reconcile the hand-edited symbol of the cell owning the Verilog-A view at
 /// `reference` with the module's ports, as one undo step. Returns the
 /// sentence describing what changed.
-pub(crate) fn update_veriloga_symbol(
+pub fn update_veriloga_symbol(
     model: &mut Model,
     reference: &CellViewRef,
 ) -> Result<String, String> {

@@ -45,24 +45,21 @@ use crate::workbench::{MessageCatalog, MessageId};
 
 /// Draft for New Verilog-A device….
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NewVerilogADeviceFormState {
-    pub(crate) open: bool,
-    pub(crate) library: String,
-    pub(crate) name: String,
+pub struct NewVerilogADeviceFormState {
+    pub open: bool,
+    pub library: String,
+    pub name: String,
     /// The ports the starter module declares, as typed: `inp:in d[7:0] vss`.
-    pub(crate) ports: String,
+    pub ports: String,
     /// Why the last commit was refused. Any edit clears it.
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
     /// The schematic the form was opened from: where the device is offered
     /// for placement once its module compiles with a port.
     pub(crate) origin: Option<crate::state::CellViewRef>,
 }
 
 /// The shell's `open_new_veriloga_device_form`, over the model and the form alone.
-pub(crate) fn open_new_veriloga_device_form_in(
-    model: &Model,
-    form: &mut NewVerilogADeviceFormState,
-) {
+pub fn open_new_veriloga_device_form_in(model: &Model, form: &mut NewVerilogADeviceFormState) {
     let libraries = writable_libraries(&model.library_manager);
     let active = &model.workspace.content.active_view;
     let library = libraries
@@ -86,13 +83,13 @@ pub(crate) fn open_new_veriloga_device_form_in(
 
 /// Whether New Verilog-A device… can make anything at all: it needs a
 /// library it can write.
-pub(crate) fn new_veriloga_device_available_in(model: &Model) -> bool {
+pub fn new_veriloga_device_available_in(model: &Model) -> bool {
     !writable_libraries(&model.library_manager).is_empty()
 }
 
 /// What the typed draft is, measured against the live catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Draft {
+pub enum Draft {
     /// No cell name yet. The primary is off and the form says nothing.
     Empty,
     /// A refusal the reader has to fix.
@@ -103,7 +100,7 @@ pub(crate) enum Draft {
 
 /// The form's draft, measured against the model's catalog and stated in
 /// the reader's messages.
-pub(crate) fn draft_in(
+pub fn draft_in(
     form: &NewVerilogADeviceFormState,
     model: &Model,
     messages: &MessageCatalog,
@@ -196,7 +193,7 @@ fn typed_ports(typed: &str, messages: &MessageCatalog) -> Result<Vec<PortSpec>, 
 
 /// What one field's line says, owned for the frame it is drawn in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Line {
+pub enum Line {
     /// Nothing declared yet: the slot keeps its height and stays blank.
     Blank,
     Derived(String),
@@ -216,7 +213,7 @@ impl Line {
 /// The line under Cell name: blank while there is none (the footer says
 /// what Create waits for), the module the cell's view will declare, or why
 /// the name is refused.
-pub(crate) fn cell_line(
+pub fn cell_line(
     form: &NewVerilogADeviceFormState,
     model: &Model,
     messages: &MessageCatalog,
@@ -233,7 +230,7 @@ pub(crate) fn cell_line(
 
 /// The line under Ports: how many the generated symbol starts with, or the
 /// entry that is refused.
-pub(crate) fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
+pub fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
     match typed_ports(typed, messages) {
         Err(refusal) => Line::Error(refusal),
         Ok(ports) => Line::Derived(match ports.len() {
@@ -250,7 +247,7 @@ pub(crate) fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
 /// Draw New Verilog-A device… while it is open, over the form, the model and
 /// the reader's messages. Returns whether the reader asked to create a draft
 /// that is ready on this frame's edits.
-pub(crate) fn render_new_veriloga_device_form(
+pub fn render_new_veriloga_device_form(
     form: &mut NewVerilogADeviceFormState,
     model: &Model,
     messages: &MessageCatalog,
@@ -337,16 +334,16 @@ pub(crate) fn render_new_veriloga_device_form(
 
 /// What New Verilog-A device… made: the module's cell view, which opens in
 /// Design, the receipt of its starter compile, and the line the log records.
-pub(in crate::workbench) struct CreatedVerilogADevice {
-    pub(in crate::workbench) reference: CellViewRef,
-    pub(in crate::workbench) receipt: VerilogACompileReceipt,
-    pub(in crate::workbench) record: String,
+pub struct CreatedVerilogADevice {
+    pub reference: CellViewRef,
+    pub receipt: VerilogACompileReceipt,
+    pub record: String,
 }
 
 /// Create the drafted cell in one library transaction, and remember the
 /// schematic the form came from for the placement offer. The shell opens the
 /// module in Design (commands/veriloga_commits.rs).
-pub(in crate::workbench) fn publish_new_veriloga_device(
+pub fn publish_new_veriloga_device(
     model: &mut Model,
     form: &mut NewVerilogADeviceFormState,
     veriloga: &mut VerilogAWorkbenchState,

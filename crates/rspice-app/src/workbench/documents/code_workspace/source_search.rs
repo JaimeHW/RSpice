@@ -23,16 +23,16 @@ use super::CodeWorkspaceRuntimeState;
 use super::language_services::{bundle_documents, source_line_preview};
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
-pub(crate) fn source_search_query_id() -> egui::Id {
+pub fn source_search_query_id() -> egui::Id {
     egui::Id::new(("rspice.source-find", "query"))
 }
 
-pub(crate) const SOURCE_SEARCH_RESULT_LIMIT: usize = 500;
+pub const SOURCE_SEARCH_RESULT_LIMIT: usize = 500;
 pub(crate) const SOURCE_SEARCH_STREAM_LIMIT: usize = 50_000;
 pub(crate) const GENERATED_REFERENCE_PATH: &str = "rspice://generated/top-deck";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodeSourceSearchResult {
+pub struct CodeSourceSearchResult {
     pub logical_path: String,
     pub line: usize,
     pub column: usize,
@@ -43,7 +43,7 @@ pub(crate) struct CodeSourceSearchResult {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CodeSourceSearchResults {
+pub struct CodeSourceSearchResults {
     pub matches: Vec<CodeSourceSearchResult>,
     pub total_matches: usize,
     pub editable_matches: usize,
@@ -52,7 +52,7 @@ pub(crate) struct CodeSourceSearchResults {
     pub read_only_matches: usize,
 }
 
-pub(crate) fn open_source_search(
+pub fn open_source_search(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     active_path: &str,
@@ -66,7 +66,7 @@ pub(crate) fn open_source_search(
     open_source_search_in_bundle(parts, language, bundle_id, active_path)
 }
 
-pub(crate) fn open_source_search_in_bundle(
+pub fn open_source_search_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
     language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
@@ -141,7 +141,7 @@ pub(crate) fn open_source_search_in_bundle(
     Ok(())
 }
 
-pub(crate) fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
+pub fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
     match super::active_source_language(parts.wb.workspace, &parts.model.workspace, parts.code.page)
     {
         None => {
@@ -186,7 +186,7 @@ pub(crate) fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> R
 /// The matches the search finds in its source bundle, over the model, the
 /// Code workspace's runtime state, the netlist editor's state and the
 /// platform's.
-pub(crate) fn source_search_results_in(
+pub fn source_search_results_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     netlist: &NetlistDocumentState,
@@ -257,9 +257,7 @@ pub(crate) fn source_search_results_in(
     Ok(output)
 }
 
-pub(crate) fn commit_source_search_replace(
-    parts: &mut CodeWorkspaceParts<'_>,
-) -> Result<String, String> {
+pub fn commit_source_search_replace(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
     let search = parts
         .code
         .source_search

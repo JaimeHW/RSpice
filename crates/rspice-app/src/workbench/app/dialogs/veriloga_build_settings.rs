@@ -65,30 +65,30 @@ fn undefine_id() -> Id {
 /// The form's draft: the profile as read, and what the reader has made of
 /// each field it shows.
 #[derive(Debug, Clone)]
-pub(crate) struct VerilogABuildSettingsDraft {
+pub struct VerilogABuildSettingsDraft {
     /// The closure the form was opened on. A save is bound to it, and refused
     /// if the source moved underneath.
     source: SelectedVerilogASource,
     /// The profile as read, carrying the policy the form does not show.
     profile: VerilogABuildProfile,
     /// The top modules the source declares: the entry module's choices.
-    pub(crate) modules: Vec<String>,
-    pub(crate) entry_module: String,
-    pub(crate) generated_rust: bool,
-    pub(crate) native_x64_jit: bool,
-    pub(crate) reject_fallback: bool,
-    pub(crate) include_paths: Vec<String>,
-    pub(crate) include_draft: String,
-    pub(crate) defines: Vec<(String, String)>,
-    pub(crate) define_draft: String,
+    pub modules: Vec<String>,
+    pub entry_module: String,
+    pub generated_rust: bool,
+    pub native_x64_jit: bool,
+    pub reject_fallback: bool,
+    pub include_paths: Vec<String>,
+    pub include_draft: String,
+    pub defines: Vec<(String, String)>,
+    pub define_draft: String,
     pub(crate) undefines: Vec<String>,
     pub(crate) undefine_draft: String,
     /// Whether the profile carried undefines when the form opened. The row is
     /// shown only then: almost no profile has one.
     show_undefines: bool,
-    pub(crate) checks: VerilogACheckProfile,
+    pub checks: VerilogACheckProfile,
     /// Why the last save was refused, when no field owns the reason.
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
 }
 
 impl VerilogABuildSettingsDraft {
@@ -252,7 +252,7 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 
 /// Whether Build settings has a profile to show: a Verilog-A view in front,
 /// with its source.
-pub(crate) fn veriloga_build_settings_available(model: &Model, platform: &PlatformState) -> bool {
+pub fn veriloga_build_settings_available(model: &Model, platform: &PlatformState) -> bool {
     platform.project_lifecycle.is_open()
         && model.workspace.content.active_view_type() == ViewType::VerilogA
         && model
@@ -262,7 +262,7 @@ pub(crate) fn veriloga_build_settings_available(model: &Model, platform: &Platfo
 }
 
 /// Open Build settings on the profile of the Verilog-A view in front.
-pub(crate) fn open_veriloga_build_settings(
+pub fn open_veriloga_build_settings(
     model: &Model,
     form: &mut Option<VerilogABuildSettingsDraft>,
 ) -> Result<(), String> {
@@ -319,7 +319,7 @@ pub(crate) fn open_veriloga_build_settings(
 /// Refused, with the form left open, on a read-only project, for an entry a
 /// list's field still holds that the list refuses, for a profile the build
 /// refuses, and for a source that moved since the form opened.
-pub(crate) fn save_veriloga_build_settings(
+pub fn save_veriloga_build_settings(
     model: &mut Model,
     code: &mut CodeWorkspaceRuntimeState,
     form: &mut Option<VerilogABuildSettingsDraft>,

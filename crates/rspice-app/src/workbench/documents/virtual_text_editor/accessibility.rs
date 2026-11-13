@@ -374,7 +374,7 @@ const SPEAK_CARET_LINES_ID: &str = "source-editor-speak-caret-lines";
 /// desktop screen reader follows the editor's text itself and would hear it
 /// twice.
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn speak_caret_lines(ctx: &egui::Context) {
+pub fn speak_caret_lines(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(SPEAK_CARET_LINES_ID), true));
 }
 

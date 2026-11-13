@@ -65,10 +65,7 @@ const fn platform_include_access() -> IncludeAccess {
 /// Stable per-document id so cursor, selection, undo, and scroll state do not
 /// leak between an owned root, generated root, include, or comparison tab,
 /// over the model and the netlist editor's state.
-pub(crate) fn editor_id_in(
-    model: &super::Model,
-    netlist: &super::NetlistDocumentState,
-) -> egui::Id {
+pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState) -> egui::Id {
     let base = egui::Id::new("rspice.netlist.editor.text");
     if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
         return base.with("comparison");
@@ -443,7 +440,7 @@ fn show_signature_help(
 /// Commit the text the editor showed at the end of its frame, typed on
 /// `cursor_line` at input time `now`, and mark the lines it changed against
 /// the run's baseline when the deck itself is in front.
-pub(crate) fn commit_edit(
+pub fn commit_edit(
     model: &mut super::Model,
     netlist: &mut super::NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,

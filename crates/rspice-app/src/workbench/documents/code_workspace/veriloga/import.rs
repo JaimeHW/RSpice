@@ -48,10 +48,10 @@ const VERILOGA_FILE_TYPES: (&str, &[&str]) = (
 /// A file picked or dropped for import: its name, its text, and the folder it
 /// was read from when it came from disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PickedSource {
-    pub(crate) name: String,
-    pub(crate) contents: String,
-    pub(crate) folder: Option<PathBuf>,
+pub struct PickedSource {
+    pub name: String,
+    pub contents: String,
+    pub folder: Option<PathBuf>,
 }
 
 /// Consume an import request raised by the File menu, the Files rail or the
@@ -331,7 +331,7 @@ fn import_target_is_current(model: &Model, target: &VerilogAImportTarget) -> boo
 /// Ask for files to add to `bundle_id`, beside `importer_path`, the file in
 /// front of the reader. The picker is bound to that exact revision. The
 /// caller has checked that the project's sources may change.
-pub(crate) fn request_veriloga_add_files(
+pub fn request_veriloga_add_files(
     model: &Model,
     veriloga: &mut VerilogAWorkbenchState,
     bundle_id: ProjectSourceId,
@@ -360,7 +360,7 @@ pub(crate) fn request_veriloga_add_files(
 
 /// Ask for the file that holds `path`, a missing include of the open import
 /// form.
-pub(crate) fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchState, path: &str) {
+pub fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchState, path: &str) {
     if veriloga.import_requested {
         return;
     }
@@ -376,7 +376,7 @@ pub(crate) fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchSta
 /// What the picker delivers when a file is chosen, for tests that cannot
 /// open a native picker.
 #[cfg(test)]
-pub(crate) fn complete_veriloga_file_pick(
+pub fn complete_veriloga_file_pick(
     parts: &mut CodeWorkspaceParts<'_>,
     file_name: &str,
     contents: &str,
@@ -386,7 +386,7 @@ pub(crate) fn complete_veriloga_file_pick(
 
 /// What the picker delivers when files are chosen from `folder`.
 #[cfg(test)]
-pub(crate) fn complete_veriloga_files_pick(
+pub fn complete_veriloga_files_pick(
     parts: &mut CodeWorkspaceParts<'_>,
     files: &[(&str, &str)],
     folder: Option<&Path>,
@@ -473,7 +473,7 @@ fn open_veriloga_import_forms(
 
 /// Close File > Import's form, opening the next root of the same pick or
 /// drop when one is waiting.
-pub(crate) fn close_veriloga_import_form(veriloga: &mut VerilogAWorkbenchState) {
+pub fn close_veriloga_import_form(veriloga: &mut VerilogAWorkbenchState) {
     veriloga.import_form =
         (!veriloga.import_queue.is_empty()).then(|| veriloga.import_queue.remove(0));
 }
@@ -525,7 +525,7 @@ fn replacement_keeps_previous_text(
 ///
 /// Opens the picker bound to that exact file; the replacement itself waits
 /// for the confirmation the picked file opens.
-pub(crate) fn request_veriloga_source_replacement(
+pub fn request_veriloga_source_replacement(
     parts: &mut CodeWorkspaceParts<'_>,
     logical_path: &str,
 ) -> Result<(), String> {
@@ -563,7 +563,7 @@ pub(crate) fn request_veriloga_source_replacement(
 
 /// Replace the file a confirmed review names with the picked file, when that
 /// file is still exactly what the editor showed.
-pub(crate) fn commit_veriloga_source_replacement(
+pub fn commit_veriloga_source_replacement(
     parts: &mut CodeWorkspaceParts<'_>,
 ) -> Result<(), String> {
     let review = parts
@@ -707,7 +707,7 @@ fn read_beside_root(folder: Option<&Path>, logical: &str) -> Option<String> {
 }
 
 /// The libraries a cell can be created in, by name.
-pub(crate) fn writable_libraries(libraries: &LibraryManager) -> Vec<String> {
+pub fn writable_libraries(libraries: &LibraryManager) -> Vec<String> {
     libraries
         .libraries_sorted()
         .into_iter()
@@ -718,7 +718,7 @@ pub(crate) fn writable_libraries(libraries: &LibraryManager) -> Vec<String> {
 
 /// Files dropped on the workbench: each root among them opens the import
 /// form, with the other files and the root's folder to resolve its includes.
-pub(crate) fn import_dropped_veriloga_sources(
+pub fn import_dropped_veriloga_sources(
     model: &Model,
     veriloga: &mut VerilogAWorkbenchState,
     dropped: Vec<PickedSource>,

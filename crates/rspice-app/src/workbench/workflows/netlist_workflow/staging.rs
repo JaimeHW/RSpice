@@ -216,7 +216,7 @@ pub(super) fn validate_import_candidate(
 /// its dialect detected, its includes resolved and its issues listed. The
 /// review opens on the netlist page; a deck that cannot be decoded cancels
 /// the transaction.
-pub(crate) fn stage_validated_netlist_import(
+pub fn stage_validated_netlist_import(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
@@ -673,7 +673,7 @@ pub(super) fn stage_netlist_bundle_import(
 
 /// The persisted owned source an execution-profile review would stage, read
 /// before the review's project replacement begins.
-pub(crate) struct OwnedNetlistProfileCandidate {
+pub struct OwnedNetlistProfileCandidate {
     display_name: String,
     encoding: crate::state::NetlistTextEncoding,
     line_ending: crate::state::NetlistLineEnding,
@@ -690,7 +690,7 @@ pub(crate) struct OwnedNetlistProfileCandidate {
 /// external conversion is involved; retained dependency bytes are reviewed
 /// and validated as part of the same guarded project snapshot. It reads the
 /// model and whether a project is open.
-pub(crate) fn owned_netlist_profile_candidate(
+pub fn owned_netlist_profile_candidate(
     model: &Model,
     project_open: bool,
 ) -> Result<OwnedNetlistProfileCandidate, String> {
@@ -772,7 +772,7 @@ pub(crate) fn owned_netlist_profile_candidate(
 
 /// Open the execution-profile review of `candidate` under the project
 /// replacement `transaction`, on the netlist page.
-pub(crate) fn open_owned_netlist_profile_review(
+pub fn open_owned_netlist_profile_review(
     netlist: &mut NetlistDocumentState,
     workbench: &mut crate::workbench::state::WorkbenchSession,
     transaction: crate::product::TransactionId,
@@ -829,7 +829,7 @@ pub(crate) fn open_owned_netlist_profile_review(
 /// commit; otherwise the review states why and there is none. The first
 /// step of committing a staged import, before the shell checks that the
 /// project has not changed under it.
-pub(crate) fn committable_staged_import(
+pub fn committable_staged_import(
     netlist: &mut NetlistDocumentState,
 ) -> Option<crate::workbench::documents::netlist_document::NetlistImportReviewState> {
     let review = netlist.import_review.clone()?;
@@ -855,7 +855,7 @@ pub(crate) fn committable_staged_import(
 /// still validates, as it did when the review opened; otherwise the review
 /// states why. Committing checks this after the project's replacement
 /// transaction validates.
-pub(crate) fn staged_import_still_valid(
+pub fn staged_import_still_valid(
     netlist: &mut NetlistDocumentState,
     review: &crate::workbench::documents::netlist_document::NetlistImportReviewState,
 ) -> bool {
@@ -928,7 +928,7 @@ pub(crate) fn staged_import_still_valid(
 /// its source. An owned-source profile review commits through
 /// [`commit_owned_netlist_profile_review`] instead, so reaching here with one
 /// is refused, and the review states why.
-pub(crate) fn staged_import_commit(
+pub fn staged_import_commit(
     netlist: &mut NetlistDocumentState,
     review: &crate::workbench::documents::netlist_document::NetlistImportReviewState,
 ) -> Option<(NetlistImportMode, NetlistImportMetadata)> {
@@ -965,7 +965,7 @@ pub(crate) fn staged_import_commit(
 /// in a deck transaction; the review's transaction is cancelled only once
 /// the record is installed, as the whole-state copy used to cancel it on
 /// itself before being installed.
-pub(crate) fn commit_owned_netlist_profile_review(
+pub fn commit_owned_netlist_profile_review(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -1041,7 +1041,7 @@ pub(crate) fn commit_owned_netlist_profile_review(
     true
 }
 
-pub(crate) fn cancel_staged_netlist_import(
+pub fn cancel_staged_netlist_import(
     netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
 ) {

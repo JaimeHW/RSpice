@@ -20,7 +20,7 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 /// the Code & Automation page, the includes the reader opened, the runs that
 /// sealed a deck and the message catalogue.
 #[derive(Clone, Copy)]
-pub(crate) struct NetlistTabsReads<'a> {
+pub struct NetlistTabsReads<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
     pub(crate) code_workspace: &'a CodeWorkspaceRuntimeState,
@@ -29,7 +29,7 @@ pub(crate) struct NetlistTabsReads<'a> {
     pub(crate) messages: MessageCatalog,
 }
 
-pub(crate) fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<WorkspaceDocument> {
+pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<WorkspaceDocument> {
     let NetlistTabsReads {
         model,
         netlist,
@@ -162,7 +162,7 @@ fn code_workspace_document(
     }
 }
 
-pub(in crate::workbench) fn active_netlist_document_id(
+pub fn active_netlist_document_id(
     model: &Model,
     netlist: &NetlistDocumentState,
     page: CodeWorkspacePage,
@@ -203,7 +203,7 @@ pub(in crate::workbench) fn active_netlist_document_id(
 }
 
 /// Show the generated netlist, when it is the one this tab names.
-pub(in crate::workbench) fn activate_generated_netlist(
+pub fn activate_generated_netlist(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     document_id: &crate::state::NetlistDocumentId,
@@ -222,7 +222,7 @@ pub(in crate::workbench) fn activate_generated_netlist(
 }
 
 /// Show the project's own netlist, when it is the one this tab names.
-pub(in crate::workbench) fn activate_owned_netlist(
+pub fn activate_owned_netlist(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     document_id: &crate::state::NetlistDocumentId,
@@ -237,7 +237,7 @@ pub(in crate::workbench) fn activate_owned_netlist(
 
 /// Show an include of the generated or the owned netlist, as a tab the
 /// reader opened, leaving the manual run's edited lines behind.
-pub(in crate::workbench) fn activate_netlist_dependency(
+pub fn activate_netlist_dependency(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -275,15 +275,12 @@ pub(in crate::workbench) fn activate_netlist_dependency(
 }
 
 /// Show the generated netlist's comparison.
-pub(in crate::workbench) fn activate_netlist_comparison(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) -> bool {
+pub fn activate_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     crate::workbench::documents::netlist_document::open_netlist_comparison(model, netlist)
 }
 
 /// Show the deck the last manual run consumed.
-pub(in crate::workbench) fn activate_netlist_run_snapshot(
+pub fn activate_netlist_run_snapshot(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
@@ -293,7 +290,7 @@ pub(in crate::workbench) fn activate_netlist_run_snapshot(
 
 /// Close an include tab: the reader no longer has it open. The tab's
 /// document stays in its root's source closure.
-pub(in crate::workbench) fn close_netlist_dependency(
+pub fn close_netlist_dependency(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     document: &WorkspaceDocumentId,
 ) {

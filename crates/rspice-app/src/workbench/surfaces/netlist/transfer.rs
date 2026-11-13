@@ -179,7 +179,7 @@ fn files_phrase(count: usize) -> String {
     }
 }
 
-pub(crate) fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
     if !cx.state.netlist.export_dialog.open {
         return;
     }

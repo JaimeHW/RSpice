@@ -25,7 +25,7 @@ use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
 /// One command of the code feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodeCommand {
+pub enum CodeCommand {
     /// A cell whose Verilog-A module the reader writes next, with the symbol
     /// its ports generate.
     NewVerilogADevice,
@@ -105,7 +105,7 @@ pub(crate) enum CodeCommand {
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workbench) enum CodeRequest {
+pub enum CodeRequest {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
@@ -191,7 +191,7 @@ impl Request for CodeRequest {
 /// page saw the keystroke committed. Raised in the order the editor made
 /// them.
 #[derive(Clone, Debug, PartialEq)]
-pub(in crate::workbench) enum NetlistEditorRequest {
+pub enum NetlistEditorRequest {
     /// Commit the text the editor showed at the end of its frame, typed on
     /// `cursor_line` at input time `now`, through the ownership guard.
     Commit {
@@ -212,7 +212,7 @@ impl Request for NetlistEditorRequest {
 /// the runs or the project's sources past what the page draws. Raised by
 /// the press, the drop or the editor request that asks for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workbench) enum AutomationRequest {
+pub enum AutomationRequest {
     /// Import the files dropped on the page as its source.
     ImportDropped(Vec<egui::DroppedFile>),
     /// Open the source workspace dialog, as the empty page offers.
@@ -266,7 +266,7 @@ pub(in crate::workbench) enum AutomationRequest {
 /// What a choice in the source document dialogs still needs of the whole
 /// application, which the shell carries out as the dialog's step returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workbench) enum SourceDocumentRequest {
+pub enum SourceDocumentRequest {
     /// Create the Automation workspace the draft describes.
     CreateWorkspace,
     /// A lifecycle choice on the Verilog-A or Automation document at
@@ -292,7 +292,7 @@ pub(in crate::workbench) enum SourceDocumentRequest {
 /// Automation document, applied after rendering so a transaction never
 /// mutates the project while its own rows are still on screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum LifecycleAction {
+pub enum LifecycleAction {
     None,
     Begin(CodeSourceFileAction),
     Commit,
@@ -311,7 +311,7 @@ pub(crate) enum LifecycleAction {
 /// What the source document dialog's body asked for of the netlist page's
 /// deck or include, applied the same way.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workbench) enum NetlistLifecycleAction {
+pub enum NetlistLifecycleAction {
     None,
     Begin(CodeSourceFileAction),
     Commit,
@@ -444,7 +444,7 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 40] = [
+    pub const ALL: [Self; 40] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::ImportNetlist,
@@ -488,7 +488,7 @@ impl CodeCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::NewVerilogADevice => ids::NEW_VERILOGA_DEVICE,
             Self::OpenNetlist => ids::OPEN_NETLIST,
@@ -537,13 +537,13 @@ impl CodeCommand {
 
     /// The command `key` names; `None` for a key the feature does not
     /// declare.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.key() == key)
     }
 
     /// What this command asks of a source editor when one is the document on
     /// screen: the same thing its shortcut does with the editor focused.
-    pub(crate) const fn source_editor_request(self) -> Option<SourceEditorRequest> {
+    pub const fn source_editor_request(self) -> Option<SourceEditorRequest> {
         Some(match self {
             Self::ToggleLineComment => {
                 SourceEditorRequest::Structural(StructuralCommand::ToggleComment)
@@ -575,14 +575,14 @@ impl CodeCommand {
     /// Find is the exception: its key acts in the focused editor, but the
     /// command searches whichever code page is on screen, from its toolbar
     /// and the palette as well.
-    pub(crate) const fn source_editor_only(self) -> bool {
+    pub const fn source_editor_only(self) -> bool {
         matches!(self.context(), ShortcutContext::SourceEditor)
             && !matches!(self, Self::FindCodeDocument)
     }
 
     /// The language-service group: offered only where the document's
     /// language service can answer it.
-    pub(crate) const fn navigates_source_language(self) -> bool {
+    pub const fn navigates_source_language(self) -> bool {
         matches!(
             self,
             Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol
@@ -653,7 +653,7 @@ impl CodeCommand {
     /// The generated deck and the jump to it commit a pending inspector edit
     /// before they act, and the generated deck keeps the chord whose desktop
     /// key a browser keeps for itself.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
         let opens_file = palette.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);

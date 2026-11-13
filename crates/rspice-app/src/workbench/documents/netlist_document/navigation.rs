@@ -20,7 +20,7 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 /// inspector actions, and future validation reports all route through this
 /// function so included-source diagnostics cannot be misrepresented as root
 /// buffer lines.
-pub(crate) fn open_diagnostic_location(
+pub fn open_diagnostic_location(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -69,7 +69,7 @@ pub(crate) fn open_diagnostic_location(
 /// Problems rows and the simulation-preflight report both route here. That is
 /// the point: a location has to mean the same thing wherever it was reported
 /// from, and the preflight report used to have no route to the netlist at all.
-pub(crate) fn open_source_location(
+pub fn open_source_location(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,

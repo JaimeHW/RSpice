@@ -369,15 +369,15 @@ pub(in crate::workbench) fn render_veriloga_replace_dialog(
 
 /// What an import made: the first module's cell view, which opens in
 /// Design, and the line the log records.
-pub(in crate::workbench) struct ImportedVerilogACells {
-    pub(in crate::workbench) first: CellViewRef,
-    pub(in crate::workbench) record: String,
+pub struct ImportedVerilogACells {
+    pub first: CellViewRef,
+    pub record: String,
 }
 
 /// Create the form's cells in one library transaction. Nothing is published
 /// unless every cell, view and bundle is. The shell opens the first in Design
 /// (commands/veriloga_commits.rs).
-pub(in crate::workbench) fn publish_veriloga_import(
+pub fn publish_veriloga_import(
     model: &mut Model,
     veriloga: &mut VerilogAWorkbenchState,
 ) -> Result<ImportedVerilogACells, String> {

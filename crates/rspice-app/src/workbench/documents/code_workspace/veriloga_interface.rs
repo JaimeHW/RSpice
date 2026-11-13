@@ -75,7 +75,7 @@ impl VerilogASymbolDrift {
 }
 
 /// "Symbol out of date: en missing": which ports the symbol is behind on.
-pub(crate) fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCatalog) -> String {
+pub fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCatalog) -> String {
     let details = [
         (&drift.missing, MessageId::VerilogASymbolStripMissing),
         (&drift.turned, MessageId::VerilogASymbolStripTurned),
@@ -129,7 +129,7 @@ pub struct VerilogASymbolStanding {
 
 impl VerilogASymbolStanding {
     /// The standing of `reference`'s symbol, if it is the view last measured.
-    pub(crate) fn of(&self, reference: &CellViewRef) -> Option<&VerilogACellSymbol> {
+    pub fn of(&self, reference: &CellViewRef) -> Option<&VerilogACellSymbol> {
         self.measured
             .as_ref()
             .filter(|(measured, _)| measured == reference)
@@ -138,7 +138,7 @@ impl VerilogASymbolStanding {
 }
 
 /// Measure the open Verilog-A view's symbol again if the library changed.
-pub(crate) fn refresh_symbol_standing(
+pub fn refresh_symbol_standing(
     state: &mut VerilogAWorkbenchState,
     libraries: &LibraryManager,
     active: &CellViewRef,
@@ -167,7 +167,7 @@ pub(crate) fn refresh_symbol_standing(
 
 /// Where the symbol of the cell owning the Verilog-A view at `reference`
 /// stands against the cell's interface.
-pub(crate) fn symbol_standing(
+pub fn symbol_standing(
     libraries: &LibraryManager,
     reference: &CellViewRef,
 ) -> Option<VerilogACellSymbol> {
@@ -234,7 +234,7 @@ fn symbol_drift(document: &SymbolDocument, ports: &[PortSpec]) -> VerilogASymbol
 /// The hand-edited symbol of the cell owning `reference`, reconciled with
 /// the module's ports: missing pins added, directions taken from the ports,
 /// discrete ports' pins `Logic`. Extra pins are kept for their author.
-pub(crate) fn reconciled_symbol(
+pub fn reconciled_symbol(
     libraries: &LibraryManager,
     reference: &CellViewRef,
 ) -> Result<SymbolDocument, String> {
@@ -269,7 +269,7 @@ pub(crate) fn reconciled_symbol(
 
 /// A finding the editor's strip states about the open view's interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum VerilogAInterfaceFinding<'a> {
+pub enum VerilogAInterfaceFinding<'a> {
     /// The current compile's ports differ from the cell's schematic.
     SchematicMismatch {
         schematic: &'a [PortSpec],
@@ -283,7 +283,7 @@ pub(crate) enum VerilogAInterfaceFinding<'a> {
 
 /// What the strip above the source should say about the open view's
 /// interface, if anything.
-pub(crate) fn interface_finding<'a>(
+pub fn interface_finding<'a>(
     state: &'a VerilogAWorkbenchState,
     receipt: Option<&'a VerilogACompileReceipt>,
     reference: &CellViewRef,
@@ -333,7 +333,7 @@ pub(crate) fn view_selecting_module<'a>(
 
 /// The design check's finding for a retained compile whose module disagrees
 /// with its cell's schematic: the view it names, and what to tell the reader.
-pub(crate) fn interface_check_finding(
+pub fn interface_check_finding(
     state: &VerilogAWorkbenchState,
     sources: &ProjectSourceRegistry,
     libraries: &LibraryManager,

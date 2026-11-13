@@ -7,9 +7,7 @@ use super::import::NetlistImportMode;
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn show_open_netlist_dialog(
-    mode: NetlistImportMode,
-) -> Result<std::path::PathBuf, String> {
+pub fn show_open_netlist_dialog(mode: NetlistImportMode) -> Result<std::path::PathBuf, String> {
     rfd::FileDialog::new()
         .add_filter(NETLIST_FILTER.0, NETLIST_FILTER.1)
         .add_filter("RSpice Netlist Bundle", &["zip"])
@@ -24,7 +22,7 @@ pub(crate) fn show_open_netlist_dialog(
 /// `poll_browser_dependency_relink` and remains guarded by both the global
 /// picker token and the root document revision captured before the picker.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn request_dependency_relink(
+pub fn request_dependency_relink(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -124,7 +122,7 @@ fn record_relink_failure(model: &mut Model, error: &str) {
 /// successfully started open/import transaction to that owning page before
 /// the asynchronous file read can complete. Native uses the same transition
 /// so the staged review always opens in a deterministic workspace.
-pub(crate) fn route_started_netlist_import(
+pub fn route_started_netlist_import(
     workbench: &mut crate::workbench::state::WorkbenchSession,
     page: &mut crate::workbench::documents::code_workspace::CodeWorkspacePage,
     started: bool,
@@ -137,7 +135,7 @@ pub(crate) fn route_started_netlist_import(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) enum BrowserNetlistImportResult {
+pub enum BrowserNetlistImportResult {
     Loaded(crate::workbench::browser::file_import::PickedTextFile),
     Failed(String),
     Cancelled,
@@ -157,11 +155,11 @@ pub(super) struct BrowserDependencyRelinkCompletion {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserNetlistImportCompletion {
+pub struct BrowserNetlistImportCompletion {
     token: crate::workbench::browser::file_import::TextImportToken,
-    pub(crate) transaction: crate::product::TransactionId,
-    pub(crate) mode: NetlistImportMode,
-    pub(crate) result: BrowserNetlistImportResult,
+    pub transaction: crate::product::TransactionId,
+    pub mode: NetlistImportMode,
+    pub result: BrowserNetlistImportResult,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -177,7 +175,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn request_dependency_relink(
+pub fn request_dependency_relink(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     _open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -221,7 +219,7 @@ pub(crate) fn request_dependency_relink(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_dependency_relink(
+pub fn poll_browser_dependency_relink(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -299,7 +297,7 @@ pub(crate) fn poll_browser_dependency_relink(
 /// [`take_browser_netlist_completion`]. A picker already open refuses, and
 /// cancels the transaction.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn pick_browser_netlist(
+pub fn pick_browser_netlist(
     platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
     transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
@@ -337,7 +335,7 @@ pub(crate) fn pick_browser_netlist(
 /// its picker token is still current; a stale completion cancels its
 /// transaction and is dropped.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn take_browser_netlist_completion(
+pub fn take_browser_netlist_completion(
     platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
 ) -> Option<BrowserNetlistImportCompletion> {
     let completion = BROWSER_NETLIST_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;

@@ -8,12 +8,12 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NetlistImportMetadata {
-    pub(crate) encoding: crate::state::NetlistTextEncoding,
-    pub(crate) line_ending: crate::state::NetlistLineEnding,
-    pub(crate) dialect: crate::state::NetlistSourceDialect,
-    pub(crate) compatibility_reviewed: bool,
-    pub(crate) raw_sha256: [u8; 32],
+pub struct NetlistImportMetadata {
+    pub encoding: crate::state::NetlistTextEncoding,
+    pub line_ending: crate::state::NetlistLineEnding,
+    pub dialect: crate::state::NetlistSourceDialect,
+    pub compatibility_reviewed: bool,
+    pub raw_sha256: [u8; 32],
 }
 
 /// Why a deck was not installed.
@@ -23,7 +23,7 @@ pub(crate) struct NetlistImportMetadata {
 /// candidate it discards on failure, so a reason reported there would be
 /// discarded with it.
 #[derive(Debug)]
-pub(crate) enum ImportFailure {
+pub enum ImportFailure {
     /// The gesture was refused before anything was read.
     Refused(&'static str),
     /// The deck could not be installed.
@@ -34,7 +34,7 @@ pub(crate) enum ImportFailure {
 /// no open project, a read-only project (unless the deck initializes a new
 /// netlist project) or a running simulation. It reads the model and whether
 /// a project is open.
-pub(crate) fn imported_deck_refusal(
+pub fn imported_deck_refusal(
     model: &Model,
     project_open: bool,
     source: &str,
@@ -69,7 +69,7 @@ pub(crate) fn imported_deck_refusal(
 /// deck initializes a new netlist project, the editor starts over on the
 /// owned source, and the result must validate; the shell installs the
 /// candidate only if this succeeds.
-pub(crate) fn install_imported_deck(
+pub fn install_imported_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -118,7 +118,7 @@ pub(crate) fn install_imported_deck(
     Ok(())
 }
 
-pub(crate) fn record_import_failure(model: &mut Model, error: &str) {
+pub fn record_import_failure(model: &mut Model, error: &str) {
     model.record(
         LogSeverity::Error,
         LogSource::Netlist,
@@ -127,13 +127,13 @@ pub(crate) fn record_import_failure(model: &mut Model, error: &str) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetlistImportMode {
+pub enum NetlistImportMode {
     OpenProject,
     ImportIntoProject,
 }
 
 impl NetlistImportMode {
-    pub(crate) const fn dialog_title(self) -> &'static str {
+    pub const fn dialog_title(self) -> &'static str {
         match self {
             Self::OpenProject => "Open Netlist Project",
             Self::ImportIntoProject => "Import SPICE Deck",
@@ -143,7 +143,7 @@ impl NetlistImportMode {
 
 /// Why an import in `mode` cannot start, over the model and whether a
 /// project is open.
-pub(crate) fn netlist_import_start_block_reason(
+pub fn netlist_import_start_block_reason(
     model: &Model,
     project_open: bool,
     mode: NetlistImportMode,
@@ -160,7 +160,7 @@ pub(crate) fn netlist_import_start_block_reason(
     None
 }
 
-pub(crate) fn canonical_import_document(
+pub fn canonical_import_document(
     source: &str,
     source_path: Option<&std::path::Path>,
     display_name: &str,
@@ -227,7 +227,7 @@ pub(crate) fn canonical_import_document(
     Ok((document, descriptor))
 }
 
-pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     use sha2::Digest as _;
 
     let digest = sha2::Sha256::digest(bytes);

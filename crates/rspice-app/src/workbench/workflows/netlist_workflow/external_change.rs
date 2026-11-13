@@ -285,7 +285,7 @@ pub(super) fn stage_external_netlist_change(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn apply_staged_external_netlist_change(
+pub fn apply_staged_external_netlist_change(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -409,7 +409,7 @@ pub(crate) fn apply_staged_external_netlist_change(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn apply_staged_external_netlist_change(
+pub fn apply_staged_external_netlist_change(
     _model: &mut Model,
     _netlist: &mut NetlistDocumentState,
     _open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,

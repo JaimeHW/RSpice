@@ -39,25 +39,25 @@ use crate::state::code_diagnostics::CodeDiagnosticCollection;
 /// or shares with the views of the file's other modules, and the module that
 /// view binds.
 #[derive(Debug, Clone)]
-pub(crate) struct SelectedVerilogASource {
+pub struct SelectedVerilogASource {
     pub(super) view: crate::state::CellViewRef,
     pub(super) bundle: ProjectSourceBundle,
     pub(super) selected_module: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SelectedVerilogAEditorSnapshot {
+pub struct SelectedVerilogAEditorSnapshot {
     selected: SelectedVerilogASource,
     active_path: String,
     selection_was_invalid: bool,
 }
 
 impl SelectedVerilogAEditorSnapshot {
-    pub(crate) fn bundle_id(&self) -> ProjectSourceId {
+    pub fn bundle_id(&self) -> ProjectSourceId {
         self.selected.bundle().id()
     }
 
-    pub(crate) fn active_path(&self) -> &str {
+    pub fn active_path(&self) -> &str {
         &self.active_path
     }
 
@@ -69,30 +69,27 @@ impl SelectedVerilogAEditorSnapshot {
 impl SelectedVerilogASource {
     /// The cell view the source is selected for: its module's view, which
     /// for a shared source need not be the bundle's owner.
-    pub(crate) fn view(&self) -> &crate::state::CellViewRef {
+    pub fn view(&self) -> &crate::state::CellViewRef {
         &self.view
     }
 
-    pub(crate) fn bundle(&self) -> &ProjectSourceBundle {
+    pub fn bundle(&self) -> &ProjectSourceBundle {
         &self.bundle
     }
 
-    pub(crate) fn document(&self) -> &crate::state::ProjectSourceDocument {
+    pub fn document(&self) -> &crate::state::ProjectSourceDocument {
         self.bundle.root()
     }
 
-    pub(crate) fn selected_module(&self) -> Option<&str> {
+    pub fn selected_module(&self) -> Option<&str> {
         self.selected_module.as_deref()
     }
 
-    pub(crate) fn token(
-        &self,
-        project_id: crate::product::ProjectId,
-    ) -> VerilogASourceOperationToken {
+    pub fn token(&self, project_id: crate::product::ProjectId) -> VerilogASourceOperationToken {
         VerilogASourceOperationToken::capture(project_id, self.bundle(), self.selected_module())
     }
 
-    pub(crate) fn matches_token(
+    pub fn matches_token(
         &self,
         project_id: crate::product::ProjectId,
         token: VerilogASourceOperationToken,
@@ -103,7 +100,7 @@ impl SelectedVerilogASource {
 
 /// The Verilog-A source of the cell view in front, with the module it
 /// selects, read from the model.
-pub(crate) fn selected_veriloga_source_in(model: &Model) -> Result<SelectedVerilogASource, String> {
+pub fn selected_veriloga_source_in(model: &Model) -> Result<SelectedVerilogASource, String> {
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
     let owner = model
         .workspace
@@ -164,7 +161,7 @@ fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) ->
 
 /// The open Verilog-A view's source and the file its editor shows, read
 /// from the model and the Code workspace's runtime state alone.
-pub(crate) fn selected_veriloga_editor_snapshot_in(
+pub fn selected_veriloga_editor_snapshot_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
 ) -> Result<SelectedVerilogAEditorSnapshot, String> {
@@ -193,15 +190,15 @@ mod import;
 #[cfg(test)]
 use import::add_bundle_file;
 pub use import::poll_veriloga_import;
-pub(crate) use import::{
+pub use import::{
     PickedSource, close_veriloga_import_form, commit_veriloga_source_replacement,
     import_dropped_veriloga_sources, request_veriloga_add_files, request_veriloga_import_locate,
     request_veriloga_source_replacement, writable_libraries,
 };
 #[cfg(test)]
-pub(crate) use import::{complete_veriloga_file_pick, complete_veriloga_files_pick};
+pub use import::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 
-pub(crate) fn active_veriloga_file_path(
+pub fn active_veriloga_file_path(
     code: &CodeWorkspaceRuntimeState,
     selected: &SelectedVerilogASource,
 ) -> String {
@@ -220,7 +217,7 @@ pub(crate) fn active_veriloga_file_path(
 
 /// The built-in header the editor well shows in place of `active_path` of
 /// `bundle_id`, by its canonical identity and exact text, when one is open.
-pub(crate) fn viewed_veriloga_header(
+pub fn viewed_veriloga_header(
     state: &super::page::VerilogAWorkbenchState,
     bundle_id: ProjectSourceId,
     active_path: &str,
@@ -243,7 +240,7 @@ pub(crate) fn viewed_veriloga_header(
 /// registry fingerprints a cell view's bundle as part of that view's document,
 /// so publishing the bundle publishes the view and the registry marks it
 /// clean.
-pub(crate) fn invalidate_veriloga_evidence(
+pub fn invalidate_veriloga_evidence(
     parts: &mut CodeWorkspaceParts<'_>,
     bundle_id: ProjectSourceId,
 ) {
@@ -284,7 +281,7 @@ fn mark_bundle_unsaved(model: &mut Model, bundle_id: ProjectSourceId) {
 /// still active. The registry performs the edit transaction on a clone,
 /// increments the bundle revision, invalidates validation evidence, and
 /// commits only after the complete closure remains valid.
-pub(crate) fn replace_selected_veriloga_file(
+pub fn replace_selected_veriloga_file(
     parts: &mut CodeWorkspaceParts<'_>,
     expected: &SelectedVerilogASource,
     logical_path: &str,
@@ -327,7 +324,7 @@ pub(crate) fn replace_selected_veriloga_file_in(
 /// the click, and the frame loop starts exactly that on its next pass. A
 /// source on the compiler's built-in defaults stays on them: a build profile
 /// document is written when its settings are changed, never by compiling.
-pub(crate) fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
+pub fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
     if parts.code.veriloga.pending.is_some() {
         return Err("A Verilog-A compile is already running.".to_owned());
     }
@@ -350,7 +347,7 @@ pub(crate) fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Re
 /// that bundle is still exactly what it was: over the profile document it
 /// holds, as any edit of a source file is made, or as a new profile document
 /// when it holds none yet. Returns whether anything changed.
-pub(crate) fn write_veriloga_build_profile(
+pub fn write_veriloga_build_profile(
     model: &mut Model,
     code: &mut CodeWorkspaceRuntimeState,
     expected: &SelectedVerilogASource,
@@ -496,10 +493,7 @@ fn start_veriloga_compile(
 
 /// Stop the running compile at the reader's request. The source keeps the
 /// standing it had: what the last finished compile proved is still proved.
-pub(crate) fn cancel_veriloga_compile(
-    code: &mut CodeWorkspaceRuntimeState,
-    wb: &mut WorkbenchSession,
-) {
+pub fn cancel_veriloga_compile(code: &mut CodeWorkspaceRuntimeState, wb: &mut WorkbenchSession) {
     let Some(pending) = code.veriloga.pending.take() else {
         return;
     };
@@ -1021,7 +1015,7 @@ fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompile
     )
 }
 
-pub(crate) fn compile_project_bundle_virtual_for_provenance(
+pub fn compile_project_bundle_virtual_for_provenance(
     bundle: &ProjectSourceBundle,
     selected_module: &str,
 ) -> Result<VirtualRuntimeCompilation, String> {

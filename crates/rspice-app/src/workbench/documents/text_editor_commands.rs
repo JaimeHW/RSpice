@@ -9,7 +9,7 @@ use std::ops::Range;
 use egui::{Id, Key, KeyboardShortcut, Modifiers, Ui};
 
 // The workbench session records which source editor a page shows.
-pub(crate) use crate::workbench::state::ActiveSourceEditor;
+pub use crate::workbench::state::ActiveSourceEditor;
 
 use crate::workbench::framework::requests::{
     EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
@@ -158,7 +158,7 @@ pub(crate) fn queue_go_to_line(context: &egui::Context, editor_id: Id) {
 /// editor the same way typing does — through the source it synchronizes
 /// against. The caret cannot be moved directly for the same reason, hence a
 /// request that is applied after that synchronization rather than before it.
-pub(crate) fn queue_caret_char_index(context: &egui::Context, editor_id: Id, char_index: usize) {
+pub fn queue_caret_char_index(context: &egui::Context, editor_id: Id, char_index: usize) {
     context.data_mut(|data| data.insert_temp(editor_id.with("caret-char-index"), char_index));
 }
 
@@ -221,7 +221,7 @@ pub(crate) fn publish_caret_line(context: &egui::Context, editor_id: Id, line: u
     context.data_mut(|data| data.insert_temp(editor_id.with("caret-line"), line));
 }
 
-pub(crate) fn queue_format_document(context: &egui::Context, editor_id: Id) {
+pub fn queue_format_document(context: &egui::Context, editor_id: Id) {
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("format-document"), true);
     });

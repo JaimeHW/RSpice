@@ -12,7 +12,7 @@ pub(crate) fn english() -> MessageCatalog {
     MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
 }
 
-pub(crate) fn facts_of(
+pub fn facts_of(
     workspace: Workspace,
     model: &Model,
     code: &CodeWorkspaceRuntimeState,

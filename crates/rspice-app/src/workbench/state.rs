@@ -26,7 +26,7 @@ pub use simulate_session::*;
 pub use stimulus_editor::*;
 #[cfg(test)]
 use workbench_session::LAYOUT_SCHEMA_VERSION;
-pub(crate) use workbench_session::{ActiveSourceEditor, default_console_height};
+pub use workbench_session::{ActiveSourceEditor, default_console_height};
 pub use workbench_session::{
     ConsolePage, Drawer, SourceReference, SourceReferences, WorkbenchSession, WorkspaceDocumentId,
     WorkspaceDocumentRegistry, WorkspaceLayoutState,

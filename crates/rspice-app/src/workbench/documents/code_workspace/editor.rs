@@ -99,7 +99,7 @@ pub fn show_code_document_interaction_versioned(
 
 /// The Verilog-A source editor, with `include_files` the project files its
 /// `` `include `` completion offers.
-pub(crate) fn show_veriloga_document_versioned(
+pub fn show_veriloga_document_versioned(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     source: &mut String,
@@ -165,7 +165,7 @@ pub fn show_code_document_with_debug_versioned(
 /// keyboard, so F8 steps on from there. Every way to a place in a source
 /// document goes through here: a finding opened from Problems or the
 /// inspector, and F8 and Shift+F8.
-pub(crate) fn reveal_source_location(
+pub fn reveal_source_location(
     context: &egui::Context,
     editor_id: egui::Id,
     line: usize,
@@ -208,7 +208,7 @@ fn caret_place(source: &str, char_index: usize) -> (usize, usize) {
 /// document, from wherever its caret is, both wrapping at the document's
 /// ends; or a question about the finding at the caret, which stays put.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProblemStep {
+pub enum ProblemStep {
     Next,
     Previous,
     AtCaret,
@@ -223,16 +223,13 @@ impl crate::workbench::framework::requests::Request for ProblemStep {
 
 /// Hand `step` to the editor `editor_id`, which takes it the next time it is
 /// drawn.
-pub(crate) fn queue_problem_step(context: &egui::Context, editor_id: egui::Id, step: ProblemStep) {
+pub fn queue_problem_step(context: &egui::Context, editor_id: egui::Id, step: ProblemStep) {
     context.data_mut(|data| data.insert_temp(problem_step_id(editor_id), step));
     context.request_repaint();
 }
 
 /// The step queued for the editor `editor_id`, taken once.
-pub(crate) fn take_problem_step(
-    context: &egui::Context,
-    editor_id: egui::Id,
-) -> Option<ProblemStep> {
+pub fn take_problem_step(context: &egui::Context, editor_id: egui::Id) -> Option<ProblemStep> {
     let id = problem_step_id(editor_id);
     context.data_mut(|data| {
         let step = data.get_temp::<ProblemStep>(id);
@@ -262,7 +259,7 @@ struct LastProblemStep {
 /// `editor_id`: the first finding after the caret, or the last before it,
 /// each wrapping to the other end. The caller moves the caret there. A
 /// question about the caret moves nowhere and lands on none.
-pub(crate) fn problem_step_index(
+pub fn problem_step_index(
     context: &egui::Context,
     editor_id: egui::Id,
     source: &str,
@@ -312,7 +309,7 @@ pub(crate) fn problem_step_index(
 }
 
 /// What a step says it reached: "Error 2 of 5, line 14: …".
-pub(crate) fn problem_step_announcement(
+pub fn problem_step_announcement(
     messages: crate::workbench::MessageCatalog,
     severity: CodeEditorSeverity,
     index: usize,
@@ -334,7 +331,7 @@ pub(crate) fn problem_step_announcement(
 
 /// What "Show problem at caret" says of a finding: its severity, code,
 /// place and message, and whether it was found before the latest edits.
-pub(crate) fn problem_at_caret_announcement(
+pub fn problem_at_caret_announcement(
     messages: crate::workbench::MessageCatalog,
     severity: CodeEditorSeverity,
     code: &str,
@@ -869,7 +866,7 @@ fn append(job: &mut LayoutJob, text: &str, font: FontId, color: Color32, underli
 }
 
 /// A finding's severity as the word that opens a sentence about it.
-pub(crate) fn severity_title(
+pub fn severity_title(
     severity: CodeEditorSeverity,
     messages: crate::workbench::MessageCatalog,
 ) -> String {

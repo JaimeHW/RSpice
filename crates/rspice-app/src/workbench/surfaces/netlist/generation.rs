@@ -83,7 +83,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
     }
 }
 
-pub(crate) fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
+pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
     let input_digest =
         match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(
             &crate::workbench::lifecycle::project_lifecycle::LifecycleView {

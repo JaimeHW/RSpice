@@ -17,16 +17,16 @@ use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetlistRenameDialogState {
-    pub(crate) open: bool,
-    pub(crate) original: String,
+pub struct NetlistRenameDialogState {
+    pub open: bool,
+    pub original: String,
     pub(crate) replacement: String,
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetlistSignatureHelpState {
-    pub(crate) open: bool,
+pub struct NetlistSignatureHelpState {
+    pub open: bool,
     pub(crate) revision: u64,
     pub(crate) cursor_char_index: usize,
     pub(crate) title: String,
@@ -862,7 +862,7 @@ pub(crate) fn open_project_location_in(
 /// Go to the definition of the symbol at the caret, opening the source it
 /// is in, over the model, the netlist editor's state, the include tabs the
 /// reader opened, the runs and the session.
-pub(crate) fn go_to_definition_at_cursor_in(
+pub fn go_to_definition_at_cursor_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -913,7 +913,7 @@ pub(crate) fn go_to_declaration_at_cursor(
         .map(|message| message.replace("definition", "declaration"))
 }
 
-pub(crate) fn show_signature_help_at_cursor(
+pub fn show_signature_help_at_cursor(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Result<String, String> {
@@ -980,7 +980,7 @@ pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> b
     preferred_quick_fix(netlist).is_some()
 }
 
-pub(crate) fn apply_preferred_quick_fix(
+pub fn apply_preferred_quick_fix(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -997,7 +997,7 @@ pub(crate) fn apply_preferred_quick_fix(
 /// caret's fix instead would apply whatever fix happened to be on the line the
 /// netlist editor was last left on, which is not the finding the reader
 /// selected.
-pub(crate) fn apply_quick_fix_for_finding(
+pub fn apply_quick_fix_for_finding(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -1094,7 +1094,7 @@ fn preferred_quick_fix(netlist: &NetlistDocumentState) -> Option<BoundQuickFix> 
 
 /// List the references to the symbol at the caret in the navigator, over the
 /// model, the netlist editor's state and the session.
-pub(crate) fn find_references_at_cursor_in(
+pub fn find_references_at_cursor_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
@@ -1120,7 +1120,7 @@ pub(crate) fn find_references_at_cursor_in(
 
 /// Open the rename dialog for the symbol at the caret, over the model and the
 /// netlist editor's state.
-pub(crate) fn begin_rename_at_cursor_in(
+pub fn begin_rename_at_cursor_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Result<(), String> {
@@ -1163,7 +1163,7 @@ pub(crate) fn begin_rename_at_cursor_in(
     Ok(())
 }
 
-pub(crate) fn commit_rename(
+pub fn commit_rename(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
