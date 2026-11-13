@@ -30,12 +30,9 @@ use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
-/// The identity a declared bus's row carries, before its `name[msb:lsb]`
-/// label: one per bus, so ticking one plots that bus alone.
-pub(super) const BUS_ROW_PREFIX: &str = "payload/transient-events/bus/";
-/// The identity of the row of an event net the run keeps only as history,
-/// before the `D(net)` or `E(net)` name its lane answers to.
-pub(super) const EVENT_NET_ROW_PREFIX: &str = "payload/transient-events/net/";
+use crate::workbench::documents::result_document::browser_plot::{
+    BUS_ROW_PREFIX, EVENT_NET_ROW_PREFIX,
+};
 pub const EXPRESSION_HEADER_HEIGHT: f32 = 24.0;
 pub const SIGNAL_ROW_HEIGHT: f32 = 22.0;
 /// The browser's row at compact density: one register, so a dock shows half

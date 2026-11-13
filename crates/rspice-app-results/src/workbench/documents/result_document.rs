@@ -9,6 +9,7 @@ pub(crate) mod axis_range;
 mod bars;
 mod bode;
 mod box_violin;
+pub(crate) mod browser_plot;
 pub mod create_document;
 pub mod document_edit;
 pub(crate) use document_edit::show as show_document_dialog;
@@ -165,6 +166,7 @@ pub use waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 
+pub use browser_plot::set_result_quantity_ticked;
 pub use waves::{event_net_plotted, set_event_net_plotted, toggle_visibility, waveform_plotted};
 
 use bars::show as show_sheet_bar;
