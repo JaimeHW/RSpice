@@ -1486,7 +1486,7 @@ mod tests {
     }
 
     // What a deck expands into is asserted here. That an expanded row then
-    // *solves* is asserted in `tests/xyce_data_sweep.rs`, because this layer
+    // *solves* is asserted in `tests/netlist/xyce_data_sweep.rs`, because this layer
     // may not name the engine.
 
     #[test]

@@ -7084,7 +7084,7 @@ mod tests {
                 }
             }
             // That the AREA reaches the diode equation is checked through the
-            // engine in `tests/netlist_engine_roundtrip.rs`.
+            // engine in `tests/netlist/netlist_engine_roundtrip.rs`.
         }
     }
 
@@ -7205,7 +7205,7 @@ mod tests {
                 }
                 // That the winning AREA and M reach the diode equation is
                 // checked through the engine in
-                // `tests/netlist_engine_roundtrip.rs`.
+                // `tests/netlist/netlist_engine_roundtrip.rs`.
             }
         }
     }

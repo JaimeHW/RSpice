@@ -7,7 +7,7 @@ use rspice_core::netlist::{Netlist, NetlistParseOptions};
 use rspice_core::numerics::integration::IntegrationMethod;
 
 const AUTHORED_DECK: &str =
-    include_str!("../../../tests/xyce/Netlists/LEAD_CURRENTS/lead_min2_trap.cir");
+    include_str!("../../../../tests/xyce/Netlists/LEAD_CURRENTS/lead_min2_trap.cir");
 
 fn fixture() -> (Engine, Netlist) {
     fixture_from_source(AUTHORED_DECK)

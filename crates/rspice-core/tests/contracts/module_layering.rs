@@ -235,7 +235,7 @@ const LAYERS: &[(&str, u32)] = &[
 ///
 /// The `netlist -> engine` and `netlist -> circuit` edges have retired: the
 /// physical half of each check moved into an integration test under
-/// `crates/rspice-core/tests/` (`netlist_engine_roundtrip.rs`,
+/// `crates/rspice-core/tests/netlist/` (`netlist_engine_roundtrip.rs`,
 /// `netlist_engine_roundtrip_more.rs`), which is an external crate and
 /// therefore not an edge at all, while the parser-internal halves stayed,
 /// because they drive `super::parse_numeric_field_value` and its siblings

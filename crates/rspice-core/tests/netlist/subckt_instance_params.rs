@@ -6,8 +6,7 @@
 //! definition-time defaults. Every PDK device wrapper depends on this; the
 //! historical failure mode was silent (overrides parsed, then ignored).
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use op_point::op_voltage;
 use rspice_core::engine::Engine;
