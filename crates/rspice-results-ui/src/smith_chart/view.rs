@@ -295,11 +295,13 @@ fn decibel_field(
     bar_label(ui, "dB");
 }
 
-/// Inks for one frame of the chart.
+/// Inks for one frame of the chart, all resolved from the canvas theme so
+/// they stand off the well whatever the interface mode beside it.
 #[derive(Clone, Copy)]
 struct ChartInks {
     grid: egui::Color32,
     admittance: egui::Color32,
+    admittance_label: egui::Color32,
     boundary: egui::Color32,
     label: egui::Color32,
     stability: egui::Color32,
@@ -313,25 +315,31 @@ impl ChartInks {
         let c = tokens.color;
         // The Smith grid is the chart's coordinate system, not background
         // ruling, so it stands a step above the Cartesian grid lines.
-        let ruling = c.text_faint.gamma_multiply(0.42);
+        let ruling = c.canvas_text_faint.gamma_multiply(0.42);
+        // Loci take the canvas's trace hues from slot 0, and a two-port lists
+        // at most its four coefficients, so the circles and the second grid
+        // family take slots 4 to 6, which no locus of a two-port uses. Every
+        // trace hue stands 4.5:1 off its canvas, so circle tags read too.
+        let second_family = c.traces[6];
         Self {
             grid: ruling,
             // Alone, the admittance grid is the chart's grid. Beside the
             // impedance grid it takes its own ink, as on a printed Z-Y chart.
             admittance: if grid == SmithGrid::ImpedanceAdmittance {
-                c.warn.gamma_multiply(0.32)
+                second_family.gamma_multiply(0.32)
             } else {
                 ruling
             },
+            admittance_label: if grid == SmithGrid::ImpedanceAdmittance {
+                second_family
+            } else {
+                c.canvas_text_faint
+            },
             boundary: c.border_strong,
-            label: c.text_faint,
-            // A two-port lists at most its four coefficients, in palette
-            // slots 0 to 3, so gain circles take slot 4, which no locus uses.
-            // Slot 5 is too near the error ink of the stability boundary, the
-            // one circle that is a verdict, so noise circles stay neutral.
-            stability: c.err,
+            label: c.canvas_text_faint,
             gain: c.traces[4],
-            noise: c.text_dim,
+            stability: c.traces[5],
+            noise: c.canvas_text_dim,
             well: c.canvas_bg,
         }
     }
@@ -492,8 +500,8 @@ fn paint_grid(
 
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     for (gamma, text, admittance, place) in grid_labels(mode) {
-        let color = if admittance && mode == SmithGrid::ImpedanceAdmittance {
-            inks.admittance.gamma_multiply(2.6)
+        let color = if admittance {
+            inks.admittance_label
         } else {
             inks.label
         };
@@ -788,7 +796,7 @@ pub fn show(
             egui::Align2::CENTER_TOP,
             hint,
             theme::sans(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
+            c.canvas_text_dim,
         );
     }
 
@@ -867,7 +875,7 @@ pub fn show(
             ranges.0,
             ranges.1,
         );
-        painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.accent));
+        painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.canvas_cursor_a));
         crate::presentation::point_card(
             &plot_ui,
             response.plot_rect,

@@ -532,6 +532,47 @@ fn amplifier_page(
     (ctx, output.expect("a pass ran"))
 }
 
+/// Every run of text on the page stands 4.5:1 off what is painted behind
+/// it, in every interface mode over either canvas: the grid labels of both
+/// families, the circle tags, the marker label, the bar and the readout.
+#[test]
+fn every_run_of_text_reads_off_its_ground_in_every_theme() {
+    use rspice_ui_kit::theme::{EngineeringCanvasTheme, Theme};
+    use rspice_ui_kit::tokens::Mode;
+
+    let scene = amplifier_scene();
+    let mut failures = Vec::new();
+    for mode in Mode::ALL {
+        for canvas_theme in EngineeringCanvasTheme::ALL {
+            let theme = Theme {
+                mode,
+                canvas_theme,
+                ..Theme::default()
+            };
+            let (ctx, output) = amplifier_page(&scene, theme, 1.0);
+            let contrasts = raster::text_contrasts(&ctx, PAGE, &output);
+            for wanted in ["j0.5", "0.5", "source stab", "GA 17 dB", "m1", "Marker m1"] {
+                assert!(
+                    contrasts.iter().any(|text| text.text == wanted),
+                    "{mode:?}/{canvas_theme:?}: {wanted} is drawn"
+                );
+            }
+            failures.extend(
+                contrasts
+                    .into_iter()
+                    .filter(|text| text.ratio < 4.5)
+                    .map(|text| {
+                        format!(
+                            "{mode:?}/{canvas_theme:?}: {:?} {:.2}:1 ({:?} on {:?})",
+                            text.text, text.ratio, text.ink, text.ground
+                        )
+                    }),
+            );
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The judged Smith picture: the page above at 2x in both themes. Set
 /// `RSPICE_REVIEW_DIR` to choose where.
 #[test]

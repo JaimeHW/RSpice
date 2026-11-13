@@ -585,7 +585,7 @@ pub fn show(
         },
         LegendChip {
             name: "A \u{b7} B frequency markers",
-            color: c.accent,
+            color: c.canvas_cursor_a,
             on: true,
         },
     ];
@@ -755,7 +755,7 @@ fn paint_canvas(
                 egui::Align2::LEFT_TOP,
                 rule.ring_label(fraction),
                 theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_faint,
+                c.canvas_text_faint,
             );
         }
     }
@@ -793,7 +793,7 @@ fn paint_canvas(
             egui::Align2::CENTER_CENTER,
             format!("{signed:.0}\u{b0}"),
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text_faint,
+            c.canvas_text_faint,
         );
     }
 
@@ -901,7 +901,7 @@ fn paint_canvas(
             }
             Some(overlay) => (&overlays[overlay], inks[overlay]),
         };
-        painter.circle_stroke(point, 5.0, egui::Stroke::new(1.5, c.accent));
+        painter.circle_stroke(point, 5.0, egui::Stroke::new(1.5, c.canvas_cursor_a));
         crate::presentation::point_card(
             ui,
             rect,
@@ -1062,18 +1062,18 @@ fn paint_decade_marks(
             continue;
         }
         let Some(point) = place(index) else { continue };
-        painter.circle_filled(point, 2.5, t.color.text_dim);
+        painter.circle_filled(point, 2.5, t.color.canvas_text_dim);
         // On a patch of the well, so a locus passing under the label does
         // not strike it through.
         let galley = painter.layout_no_wrap(
             policy.format_frequency(frequency, 0),
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
+            t.color.canvas_text_dim,
         );
         let label =
             egui::Rect::from_min_size(egui::pos2(point.x + 5.0, point.y + 2.0), galley.size());
         painter.rect_filled(label.expand(1.5), 2.0, t.color.canvas_bg);
-        painter.galley(label.min, galley, t.color.text_dim);
+        painter.galley(label.min, galley, t.color.canvas_text_dim);
     }
 }
 
@@ -1725,18 +1725,93 @@ mod tests {
         assert!((half - 0.5).abs() < 1e-12, "{half}");
     }
 
-    /// The three-response polar chart for review. Set `RSPICE_REVIEW_DIR`
-    /// to choose where.
-    #[test]
-    #[ignore = "writes a PNG for review"]
-    fn write_polar_overlay_png() {
+    const PANE: egui::Vec2 = egui::vec2(760.0, 560.0);
+
+    /// Three low-pass responses with decade marks and both frequency
+    /// markers, drawn on the canvas well under `theme`, settled and returned
+    /// with the context that drew it.
+    fn three_responses(
+        theme: rspice_ui_kit::theme::Theme,
+        pixels_per_point: f32,
+    ) -> (egui::Context, egui::FullOutput) {
         let primary = low_pass("V(lp1)", std::f64::consts::FRAC_1_SQRT_2);
         let overlays = [low_pass("V(lp2)", 0.5), low_pass("V(lp3)", 1.8)];
         let sheet = PolarSheetState {
             decade_marks: true,
             ..PolarSheetState::default()
         };
-        let (canvas, _) = render_loci(&primary, &overlays, &sheet);
+        let ctx = egui::Context::default();
+        ctx.set_os(egui::os::OperatingSystem::Nix);
+        theme.apply(&ctx);
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(ctx.run_ui(
+                rspice_ui_kit::raster::display_input(PANE, pixels_per_point),
+                |ui| {
+                    let c = Tokens::get(ui.ctx()).color;
+                    ui.painter().rect_filled(ui.max_rect(), 0.0, c.canvas_bg);
+                    let samples = CursorSamples {
+                        a: primary.nearest_to_frequency(5.0e5),
+                        b: primary.nearest_to_frequency(2.0e6),
+                    };
+                    let _ = show(
+                        ui,
+                        Some(&primary),
+                        &overlays,
+                        &sheet,
+                        samples,
+                        &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+                    );
+                },
+            ));
+        }
+        (ctx, output.expect("a pass ran"))
+    }
+
+    /// Every run of text on the polar pane stands 4.5:1 off what is painted
+    /// behind it, in every interface mode over either canvas: ring and spoke
+    /// labels, decade marks, cursor flags and the legend.
+    #[test]
+    fn every_run_of_text_reads_off_its_ground_in_every_theme() {
+        use rspice_ui_kit::theme::{EngineeringCanvasTheme, Theme};
+        use rspice_ui_kit::tokens::Mode;
+
+        let mut failures = Vec::new();
+        for mode in Mode::ALL {
+            for canvas_theme in EngineeringCanvasTheme::ALL {
+                let theme = Theme {
+                    mode,
+                    canvas_theme,
+                    ..Theme::default()
+                };
+                let (ctx, output) = three_responses(theme, 1.0);
+                let contrasts = rspice_ui_kit::raster::text_contrasts(&ctx, PANE, &output);
+                for wanted in ["90°", "1 MHz", "A", "B", "V(lp3)"] {
+                    assert!(
+                        contrasts.iter().any(|text| text.text == wanted),
+                        "{mode:?}/{canvas_theme:?}: {wanted} is drawn"
+                    );
+                }
+                failures.extend(contrasts.into_iter().filter(|text| text.ratio < 4.5).map(
+                    |text| {
+                        format!(
+                            "{mode:?}/{canvas_theme:?}: {:?} {:.2}:1 ({:?} on {:?})",
+                            text.text, text.ratio, text.ink, text.ground
+                        )
+                    },
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The three-response polar chart for review, at 2x as a review display
+    /// shows it. Set `RSPICE_REVIEW_DIR` to choose where.
+    #[test]
+    #[ignore = "writes a PNG for review"]
+    fn write_polar_overlay_png() {
+        let (ctx, output) = three_responses(rspice_ui_kit::theme::Theme::default(), 2.0);
+        let canvas = rspice_ui_kit::raster::rasterize(&ctx, PANE, &output);
         let directory = std::env::var_os("RSPICE_REVIEW_DIR")
             .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
         let path = directory.join("polar-three-responses.png");
