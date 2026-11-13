@@ -8,7 +8,132 @@ fn preview(value: Result<Option<String>, String>) -> MeasurementPreview {
         x_unit: "s".to_owned(),
         value,
         refusal: None,
+        family: None,
     }
+}
+
+/// A Monte Carlo pane's preview: ten trials of `avg(V(out))`, judged against
+/// [0.9, 1.1] with two trials outside.
+fn family_preview() -> MeasurementPreview {
+    MeasurementPreview {
+        pane: "Monte Carlo review \u{b7} V(out)".to_owned(),
+        family: Some(FamilyPreview {
+            family: "10 Monte Carlo trials, each measured on its own".to_owned(),
+            statistics: Ok(Some(
+                "n 10 \u{b7} mean 1.002 V \u{b7} \u{3c3} 48.71 mV \u{b7} min 902.1 mV \u{b7} max 1.104 V"
+                    .to_owned(),
+            )),
+            judged: Some(Ok(
+                "8 of 10 pass (80 %) \u{b7} fails Trial 3 \u{b7} seed 7, Trial 8 \u{b7} seed 12".to_owned(),
+            )),
+        }),
+        ..preview(Ok(Some("Keeps the yield: 80 %".to_owned())))
+    }
+}
+
+/// Over a family the form states the members' distribution under the
+/// expression, offers the statistic to keep and the limits of a yield, and
+/// reads out who fails it; Add is open once the kept value resolves.
+#[test]
+fn a_family_pane_offers_the_statistics_and_the_yield_limits() {
+    let mut draft = MeasurementDraft {
+        expression: "avg(V(out))".to_owned(),
+        statistic: FamilyStatistic::Yield,
+        lower: "0.9".to_owned(),
+        upper: "1.1".to_owned(),
+        ..MeasurementDraft::default()
+    };
+    reread(&mut draft);
+    let preview = family_preview();
+    let canvas = render_form(
+        rspice_ui_kit::Theme::default(),
+        egui::vec2(900.0, 760.0),
+        &mut draft,
+        &preview,
+        None,
+    );
+    assert!(canvas.height() > 0);
+    let ctx = Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut read = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            rspice_ui_kit::raster::display_input(egui::vec2(900.0, 760.0), 1.0),
+            |ui| {
+                show(ui.ctx(), &mut draft, &preview);
+            },
+        );
+        read = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| {
+                [
+                    node.label().map(str::to_owned),
+                    node.value().map(str::to_owned),
+                ]
+            })
+            .flatten()
+            .collect();
+    }
+    let family = preview.family.as_ref().unwrap();
+    for expected in [
+        "Family",
+        family.family.as_str(),
+        "Keep",
+        "Lower limit",
+        "Upper limit",
+        family.statistics.as_ref().unwrap().as_deref().unwrap(),
+        family.judged.as_ref().unwrap().as_deref().unwrap(),
+        "Keeps the yield: 80 %",
+    ] {
+        assert!(
+            read.iter().any(|text| text.contains(expected)),
+            "{expected:?} is not read out: {read:?}"
+        );
+    }
+    for statistic in FamilyStatistic::ALL {
+        assert!(
+            read.iter().any(|text| text == statistic.label()),
+            "{statistic:?}"
+        );
+    }
+    assert_eq!(draft.statistic, FamilyStatistic::Yield);
+}
+
+/// A plain pane keeps its single value and never shows the family rows.
+#[test]
+fn a_plain_pane_shows_no_family_rows() {
+    let ctx = Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut draft = MeasurementDraft::default();
+    let preview = preview(Ok(Some("1 V".to_owned())));
+    let mut read = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            rspice_ui_kit::raster::display_input(egui::vec2(900.0, 700.0), 1.0),
+            |ui| {
+                show(ui.ctx(), &mut draft, &preview);
+            },
+        );
+        read = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect();
+    }
+    assert!(
+        !read
+            .iter()
+            .any(|label| label == "Keep" || label == "Lower limit")
+    );
 }
 
 /// Before anything is typed, the line under Expression says what Add
@@ -452,5 +577,23 @@ fn write_measurement_form_pngs() {
             std::fs::write(&path, canvas.png(canvas.height())).expect("write form render");
             println!("render: {}", path.display());
         }
+        let mut family = MeasurementDraft {
+            expression: "avg(V(out))".to_owned(),
+            statistic: FamilyStatistic::Yield,
+            lower: "0.9".to_owned(),
+            upper: "1.1".to_owned(),
+            ..MeasurementDraft::default()
+        };
+        reread(&mut family);
+        let canvas = render_form(
+            theme,
+            egui::vec2(900.0, 760.0),
+            &mut family,
+            &family_preview(),
+            None,
+        );
+        let path = directory.join(format!("add-measurement-family-{suffix}.png"));
+        std::fs::write(&path, canvas.png(canvas.height())).expect("write form render");
+        println!("render: {}", path.display());
     }
 }

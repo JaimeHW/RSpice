@@ -1801,9 +1801,10 @@ pub struct Measurement {
 }
 
 /// Which statistic of a family measurement its value reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FamilyStatistic {
+    #[default]
     Mean,
     /// The sample standard deviation, divided by n − 1.
     StdDev,

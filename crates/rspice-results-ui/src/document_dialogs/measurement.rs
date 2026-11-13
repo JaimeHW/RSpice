@@ -10,6 +10,7 @@ use egui::{Context, Id};
 use rspice_results::calculator::catalogue::{
     self, ArgumentDefault, ArgumentKind, ArgumentSpec, MEASUREMENTS, MeasureGroup, MeasureSpec,
 };
+use rspice_results::visualization_document::FamilyStatistic;
 use rspice_ui_kit::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, SelectGroup};
 
 /// The measurement being built, as the reader left it.
@@ -26,6 +27,24 @@ pub struct MeasurementDraft {
     /// The signal argument waiting for a trace the reader clicks in the
     /// strip. The form steps aside while it waits.
     pub picking: Option<usize>,
+    /// Over a family: which statistic of the members' values is kept.
+    pub statistic: FamilyStatistic,
+    /// Over a family: the limits a yield is judged against, as typed.
+    pub lower: String,
+    pub upper: String,
+}
+
+/// What the host resolved a family pane's draft to: the measurement is
+/// evaluated once per member and its distribution kept.
+pub struct FamilyPreview {
+    /// What the family is and how many members it has.
+    pub family: String,
+    /// The members' distribution in one line, `Ok(None)` while nothing is
+    /// typed, or why the expression has none.
+    pub statistics: Result<Option<String>, String>,
+    /// The yield against the typed limits and who fails it, `None` while no
+    /// limit is typed, or why the limits are refused.
+    pub judged: Option<Result<String, String>>,
 }
 
 /// What the host resolved the draft to on this frame.
@@ -45,6 +64,8 @@ pub struct MeasurementPreview {
     /// Why Add is refused whatever the expression: a quick view keeps no
     /// measurements.
     pub refusal: Option<String>,
+    /// Present when the pane shows a family of results.
+    pub family: Option<FamilyPreview>,
 }
 
 /// What the line under Expression says before anything is typed.
@@ -59,6 +80,8 @@ const FUNCTION_SALT: &str = "rspice.add-measurement.function";
 const CHOICE_COLUMNS: usize = 4;
 /// The option a second edge type offers for "as the first".
 const SAME: &str = "same";
+/// What the line under the limits says before a limit is typed.
+const LIMITS_MISSING: &str = "Type a lower limit, an upper limit or both to judge a yield.";
 
 /// The label of the action that takes a signal argument from the strip.
 const PICK: &str = "Pick";
@@ -77,18 +100,26 @@ pub fn show(
     let incomplete = draft
         .function
         .and_then(|spec| spec.call(&draft.arguments).err());
+    let family = preview.family.as_ref();
     CommandForm::new("Add measurement", "Add")
         .wide()
-        .describe(
+        .describe(if family.is_some() {
             "Pick a measurement and fill its arguments, or type any expression that reduces to \
-             one number. Its value on the selected pane is kept in the document.",
-        )
+             one number. It is evaluated once on every member of the family the pane shows, and \
+             the distribution is kept in the document."
+        } else {
+            "Pick a measurement and fill its arguments, or type any expression that reduces to \
+             one number. Its value on the selected pane is kept in the document."
+        })
         .primary_enabled(
             refusal.is_none() && incomplete.is_none() && matches!(preview.value, Ok(Some(_))),
         )
         .status(refusal.map_or(Ok(None), Err))
         .show(ctx, |rows| {
             rows.value("Pane", &preview.pane);
+            if let Some(family) = family {
+                rows.value("Family", &family.family);
+            }
             let groups = picker_groups();
             let selected = draft
                 .function
@@ -122,17 +153,23 @@ pub fn show(
             {
                 reread(draft);
             }
+            // Over a family the line states the members' distribution; the
+            // statistic kept is picked below it.
+            let value = family.map_or(&preview.value, |family| &family.statistics);
             rows.field_line(
                 Some(field),
                 // The line is never blank: before anything is typed it
                 // says what Add waits for, so the form keeps one pitch.
-                match (&incomplete, &preview.value) {
+                match (&incomplete, value) {
                     (Some(problem), _) => FieldLine::Error(problem),
                     (None, Ok(None)) => FieldLine::Derived(EXPRESSION_MISSING),
                     (None, Ok(Some(value))) => FieldLine::Value(value),
                     (None, Err(reason)) => FieldLine::Error(reason),
                 },
             );
+            if let Some(family) = family {
+                family_rows(rows, draft, family, preview);
+            }
             Some(field)
         })
 }
@@ -216,6 +253,45 @@ pub fn fill_picked(
         .and_then(|spec| spec.call(&draft.arguments).ok())
     {
         draft.expression = call;
+    }
+}
+
+/// The statistic a family measurement keeps and the limits its yield is
+/// judged against.
+fn family_rows(
+    rows: &mut FormRows<'_>,
+    draft: &mut MeasurementDraft,
+    family: &FamilyPreview,
+    preview: &MeasurementPreview,
+) {
+    let options = FamilyStatistic::ALL.map(FamilyStatistic::label);
+    let mut selected = FamilyStatistic::ALL
+        .iter()
+        .position(|statistic| *statistic == draft.statistic)
+        .unwrap_or(0);
+    if rows.segmented_in_columns(
+        "Keep",
+        "rspice.add-measurement.statistic",
+        &options,
+        &mut selected,
+        options.len(),
+    ) {
+        draft.statistic = FamilyStatistic::ALL[selected];
+    }
+    let lower = Id::new("rspice.add-measurement.lower");
+    let upper = Id::new("rspice.add-measurement.upper");
+    rows.quantity("Lower limit", lower, &mut draft.lower, "none", "", "");
+    rows.quantity("Upper limit", upper, &mut draft.upper, "none", "", "");
+    let waiting = match (&family.judged, draft.statistic) {
+        (None, FamilyStatistic::Yield) => FieldLine::Error(LIMITS_MISSING),
+        (None, _) => FieldLine::Derived(LIMITS_MISSING),
+        (Some(Ok(line)), _) => FieldLine::Value(line),
+        (Some(Err(reason)), _) => FieldLine::Error(reason),
+    };
+    rows.field_line(Some(upper), waiting);
+    // What Add keeps, once the expression and the limits allow it.
+    if let Ok(Some(kept)) = &preview.value {
+        rows.derived_line(kept);
     }
 }
 
