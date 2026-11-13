@@ -19,7 +19,7 @@ use rspice_app_state::workbench::app_state::model::{
     Model, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 
-use deck_transaction::DeckTransaction;
+pub(crate) use deck_transaction::DeckTransaction;
 
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 

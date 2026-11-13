@@ -312,8 +312,13 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
             .as_mut()
             .unwrap()
             .resolution = crate::workbench::documents::netlist_document::NetlistExternalChangeResolution::ReloadExternal;
-    apply_staged_external_netlist_change(&mut app.state)
-        .expect("explicit external reload succeeds");
+    apply_staged_external_netlist_change(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+        &app.state.workbench,
+    )
+    .expect("explicit external reload succeeds");
     assert_eq!(
         app.state.model.workspace.content.netlist_source.as_deref(),
         Some(external)

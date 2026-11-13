@@ -2,38 +2,52 @@
 //! drawn.
 //!
 //! Going to a match opens the document it is in, and a replacement commits
-//! through a candidate copy of the whole state, so the window stores the
-//! press and the shell carries it out here, with the body the window ran.
+//! through a deck transaction over the model, the netlist editor's state
+//! and the include tabs, so the window stores the press and the shell
+//! carries it out here, with the body the window ran.
+
+use std::collections::HashSet;
+
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use crate::state::replace_source_ranges;
 use crate::workbench::MessageId;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, NetlistFindAction, NetlistFindStep, open_owned_source_in,
+    ActiveNetlistDocument, NetlistDocumentState, NetlistFindAction, NetlistFindStep,
+    open_owned_source_in,
 };
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 /// Carry out the find window's `step`: replace every match Replace all
 /// planned, or go to, or replace, the match it names.
-pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindStep) {
+pub(crate) fn apply_netlist_find_step(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    workbench: &mut WorkbenchSession,
+    step: NetlistFindStep,
+) {
     let NetlistFindStep {
         action,
         options,
         target,
         replacements: scoped_replacements,
     } = step;
-    let messages = state.workbench.messages();
+    let messages = workbench.messages();
 
     if let Some(replacements) = scoped_replacements {
         match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
+            model,
+            netlist,
+            open_documents,
             replacements,
         ) {
             Ok(count) if count > 0 => {
-                state.code.netlist.find.selected_match = 0;
+                netlist.find.selected_match = 0;
                 let count_text = count.to_string();
-                state.prompt(messages.format(
+                workbench.prompt(messages.format(
                     if count == 1 {
                         MessageId::NetlistFindReplacedSingular
                     } else {
@@ -44,7 +58,7 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             }
             Ok(_) => {}
             // The find window states the refusal in place.
-            Err(error) => state.code.netlist.find.error = Some(error),
+            Err(error) => netlist.find.error = Some(error),
         }
         return;
     }
@@ -57,42 +71,41 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             if let Some(deck_id) = target.deck_id
                 && let Err(error) =
                     crate::workbench::documents::netlist_document::select_retained_top_deck(
-                        &mut state.model,
-                        &mut state.code.netlist,
-                        &mut state.code.netlist_open_documents,
+                        model,
+                        netlist,
+                        open_documents,
                         deck_id,
                     )
             {
-                state.prompt(error);
+                workbench.prompt(error);
                 return;
             }
             match target.active_document {
                 ActiveNetlistDocument::Generated => {
                     let _ =
                         crate::workbench::documents::netlist_document::open_generated_primary_in(
-                            &mut state.model,
-                            &mut state.code.netlist,
+                            model, netlist,
                         );
                 }
                 ActiveNetlistDocument::OwnedSource => {
-                    let _ = open_owned_source_in(&mut state.model, &mut state.code.netlist);
+                    let _ = open_owned_source_in(model, netlist);
                 }
                 ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {}
             }
             if let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =
                     crate::workbench::documents::netlist_document::open_netlist_dependency_in(
-                        &mut state.model,
-                        &mut state.code.netlist,
-                        &mut state.code.netlist_open_documents,
-                        &mut state.runs,
+                        model,
+                        netlist,
+                        open_documents,
+                        runs,
                         identity,
                     )
             {
-                state.prompt(error);
+                workbench.prompt(error);
                 return;
             }
-            state.code.netlist.requested_line = Some(target.line);
+            netlist.requested_line = Some(target.line);
         }
         Some(NetlistFindAction::ReplaceNext) => {
             let Some(source) = target.source.as_deref().filter(|_| target.editable) else {
@@ -100,28 +113,28 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             };
             if target.deck_id.is_none()
                 && target.active_document == ActiveNetlistDocument::OwnedSource
-                && state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
+                && netlist.active_document != ActiveNetlistDocument::OwnedSource
             {
-                let _ = open_owned_source_in(&mut state.model, &mut state.code.netlist);
+                let _ = open_owned_source_in(model, netlist);
             }
             if target.deck_id.is_none()
                 && let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =
                     crate::workbench::documents::netlist_document::open_netlist_dependency_in(
-                        &mut state.model,
-                        &mut state.code.netlist,
-                        &mut state.code.netlist_open_documents,
-                        &mut state.runs,
+                        model,
+                        netlist,
+                        open_documents,
+                        runs,
                         identity,
                     )
             {
-                state.prompt(error);
+                workbench.prompt(error);
                 return;
             }
             match replace_source_ranges(
                 source,
-                &state.code.netlist.find.find,
-                &state.code.netlist.find.replacement,
+                &netlist.find.find,
+                &netlist.find.replacement,
                 options,
                 std::slice::from_ref(&target.byte_range),
                 false,
@@ -159,14 +172,14 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                         false
                     } else {
                         match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-                            &mut state.model,
-                            &mut state.code.netlist,
-                            &mut state.code.netlist_open_documents,
+                            model,
+                            netlist,
+                            open_documents,
                             vec![edit],
                         ) {
                             Ok(_) => true,
                             Err(error) => {
-                                state.code.netlist.find.error = Some(error);
+                                netlist.find.error = Some(error);
                                 false
                             }
                         }
@@ -174,31 +187,31 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                     if replaced {
                         if let Some(deck_id) = target.deck_id
                             && let Err(error) = crate::workbench::documents::netlist_document::select_retained_top_deck(
-                                &mut state.model,
-                                &mut state.code.netlist,
-                                &mut state.code.netlist_open_documents,
+                                model,
+                                netlist,
+                                open_documents,
                                 deck_id,
                             )
                         {
-                            state.prompt(error);
+                            workbench.prompt(error);
                             return;
                         }
                         if let Some(identity) = target.dependency_identity.as_deref()
                             && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency_in(
-                                &mut state.model,
-                                &mut state.code.netlist,
-                                &mut state.code.netlist_open_documents,
-                                &mut state.runs,
+                                model,
+                                netlist,
+                                open_documents,
+                                runs,
                                 identity,
                             )
                         {
-                            state.prompt(error);
+                            workbench.prompt(error);
                             return;
                         }
-                        state.code.netlist.requested_line = Some(target.line);
-                        state.code.netlist.find.selected_match = 0;
+                        netlist.requested_line = Some(target.line);
+                        netlist.find.selected_match = 0;
                         let count_text = count.to_string();
-                        state.prompt(messages.format(
+                        workbench.prompt(messages.format(
                             if count == 1 {
                                 MessageId::NetlistFindReplacedSingular
                             } else {
@@ -208,7 +221,7 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                         ));
                     }
                 }
-                Err(error) => state.code.netlist.find.error = Some(error.to_string()),
+                Err(error) => netlist.find.error = Some(error.to_string()),
             }
         }
         Some(NetlistFindAction::ReplaceAll) => {}

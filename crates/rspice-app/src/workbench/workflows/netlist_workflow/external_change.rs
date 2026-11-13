@@ -285,27 +285,26 @@ pub(super) fn stage_external_netlist_change(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Result<(), String> {
+pub(crate) fn apply_staged_external_netlist_change(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    workbench: &crate::workbench::state::WorkbenchSession,
+) -> Result<(), String> {
     use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
 
-    let review = state
-        .code
-        .netlist
+    let review = netlist
         .external_change
         .clone()
         .ok_or_else(|| "No external source change is staged.".to_owned())?;
-    let current = state
-        .code
-        .netlist
+    let current = netlist
         .owned_document
         .as_ref()
         .cloned()
         .ok_or_else(|| "No current owned source document is available.".to_owned())?;
     if current.source() != review.local_source
-        || state.model.workspace.content.netlist_source_path.as_deref()
-            != Some(review.path.as_path())
-        || state
-            .model
+        || model.workspace.content.netlist_source_path.as_deref() != Some(review.path.as_path())
+        || model
             .workspace
             .content
             .netlist_descriptor
@@ -332,7 +331,11 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         NetlistExternalChangeResolution::KeepLocal => review.local_source.clone(),
         NetlistExternalChangeResolution::ReloadExternal => review.external_source.clone(),
     };
-    let mut candidate = state.clone();
+    let mut candidate = crate::workbench::documents::netlist_document::DeckTransaction::begin(
+        model,
+        netlist,
+        open_documents,
+    );
     let mut descriptor = candidate
         .model
         .workspace
@@ -348,12 +351,16 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
     }
     candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
 
+    // The replacement answers a refusal on the session it is lent. This copy
+    // is dropped with the transaction, as the copy of the whole state it
+    // replaces was, and the caller reports the refusal.
+    let mut refusal_session = workbench.clone();
     if selected_source != review.local_source
         && !crate::workbench::documents::netlist_document::replace_owned_source(
             &mut candidate.model,
-            &mut candidate.code.netlist,
-            &mut candidate.code.netlist_open_documents,
-            &mut candidate.workbench,
+            &mut candidate.netlist,
+            &mut candidate.open_documents,
+            &mut refusal_session,
             selected_source.clone(),
         )
     {
@@ -362,7 +369,6 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         );
     }
     let next_document = candidate
-        .code
         .netlist
         .owned_document
         .as_ref()
@@ -388,21 +394,26 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
                 NetlistExternalChangeResolution::ReloadExternal => "Reloaded external source",
             },
         )?;
-    candidate.code.netlist.externally_saved_content_digest = (review.resolution
+    candidate.netlist.externally_saved_content_digest = (review.resolution
         == NetlistExternalChangeResolution::ReloadExternal)
         .then(|| crate::state::content_digest(&selected_source));
-    candidate.code.netlist.external_change = None;
+    candidate.netlist.external_change = None;
     candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn apply_staged_external_netlist_change(_state: &mut AppState) -> Result<(), String> {
+pub(crate) fn apply_staged_external_netlist_change(
+    _model: &mut Model,
+    _netlist: &mut NetlistDocumentState,
+    _open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    _workbench: &crate::workbench::state::WorkbenchSession,
+) -> Result<(), String> {
     Err("Browser downloads do not expose reopenable external source authority.".to_owned())
 }

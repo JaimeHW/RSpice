@@ -536,7 +536,10 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::ApplyExternalNetlistChange => {
             match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                &app.state.workbench,
             ) {
                 Ok(()) => {
                     app.state.record(
@@ -560,7 +563,11 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::ApplyNetlistFind => {
             if let Some(step) = app.state.code.netlist.find.pending.take() {
                 crate::workbench::workflows::netlist_workflow::apply_netlist_find_step(
-                    &mut app.state,
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    &mut app.state.code.netlist_open_documents,
+                    &mut app.state.runs,
+                    &mut app.state.workbench,
                     step,
                 );
             }
