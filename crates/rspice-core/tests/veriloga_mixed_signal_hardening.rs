@@ -869,29 +869,6 @@ fn assert_mixed_persisted_restart_at(deck: &str, signal: &str, at: f64) {
             .filter(|(at, _)| *at > saved.time)
             .collect::<Vec<_>>()
     );
-
-    // A legacy image never silently restarts initial blocks beside an accepted
-    // analog solution, even if its old capability inventory is missing the gap.
-    let legacy = String::from_utf8(text)
-        .unwrap()
-        .lines()
-        .take_while(|line| !line.starts_with("mixed_runtime_image "))
-        .map(|line| {
-            if line.starts_with("RSPICE-CHECKPOINT ") {
-                "RSPICE-CHECKPOINT 56"
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    let legacy = TransientCheckpoint::from_text(&legacy).unwrap();
-    assert!(
-        engine
-            .run_tran_resume(&netlist, &legacy, 200e-9, 1e-9)
-            .is_err()
-    );
 }
 
 #[test]

@@ -10,9 +10,6 @@
 use super::*;
 use crate::device::{AcceptedSwitchCheckpoint, SwitchCheckpointKind};
 
-/// Format 59 adds accepted switch state.
-pub(super) const FORMAT_VERSION: u32 = 59;
-
 pub(super) fn capture(circuit: &CircuitData) -> Vec<AcceptedSwitchCheckpoint> {
     circuit
         .vswitches
@@ -123,12 +120,8 @@ pub(super) fn write(
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Option<Vec<AcceptedSwitchCheckpoint>>, String> {
-    if version < FORMAT_VERSION {
-        return Ok(None);
-    }
     let available = match lines.next().ok_or("missing accepted switch availability")? {
         "accepted_switch_state_available 0" => false,
         "accepted_switch_state_available 1" => true,

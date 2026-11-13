@@ -18,10 +18,6 @@
 use super::*;
 use crate::engine::transient::{FloorLandingGrid, FloorMarch};
 
-/// Format 63 adds the floor march, and keys coupled code-model outputs on the
-/// HDL tick lattice.
-pub(super) const FORMAT_VERSION: u32 = 63;
-
 pub(super) fn validate(grid: Option<&FloorLandingGrid>, time: Value) -> Result<(), String> {
     let Some(march) = grid.and_then(|grid| grid.march) else {
         return Ok(());
@@ -62,7 +58,7 @@ pub(super) fn validate_target(
         return Ok(());
     }
     Err(format!(
-        "legacy transient checkpoint predates format {FORMAT_VERSION}, which keys every \
+        "transient checkpoint does not record its floor march, which keys every \
          code-model event coupled to an HDL module on the HDL tick it is a rounding from; \
          this circuit couples code models to an HDL module, so the event times its image \
          queued would not resume where the uninterrupted run lands them; re-run the \
@@ -95,15 +91,7 @@ pub(super) fn write(out: &mut String, grid: Option<&FloorLandingGrid>) {
     }
 }
 
-pub(super) fn read(
-    lines: &mut CheckpointLines<'_>,
-    version: u32,
-) -> Result<Option<FloorLandingGrid>, String> {
-    // A file older than this format started every resumed run on a fresh
-    // grid, which is what reading it as unknown keeps.
-    if version < FORMAT_VERSION {
-        return Ok(None);
-    }
+pub(super) fn read(lines: &mut CheckpointLines<'_>) -> Result<Option<FloorLandingGrid>, String> {
     let line = lines.next().ok_or("missing floor march line")?;
     let malformed = || format!("malformed floor march line: '{line}'");
     let mut fields = line.split_whitespace();

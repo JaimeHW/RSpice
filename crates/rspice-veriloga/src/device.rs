@@ -284,9 +284,7 @@ enum NativeValueEntry {
 
 #[cfg(test)]
 mod runtime_checkpoint_codec_tests {
-    use super::{
-        CheckpointWordEncoder, RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint,
-    };
+    use super::{RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint};
     use crate::laplace::LaplaceCheckpoint;
     use crate::vm::{
         DelayCheckpoint, DelayConfiguration, PendingTransitionCheckpoint, SlewCheckpoint,
@@ -381,43 +379,9 @@ mod runtime_checkpoint_codec_tests {
         }
     }
 
-    fn minimal_legacy_v1_words() -> Vec<u64> {
-        let mut encoder = CheckpointWordEncoder::default();
-        encoder.word(1);
-        encoder.boolean(false);
-        encoder.float(4.0);
-        encoder.floats(&[]);
-        encoder.floats(&[]);
-        encoder.floats(&[]);
-        encoder.floats(&[]);
-        encoder.booleans(&[]);
-        encoder.word(0); // delay buffers
-        encoder.word(0); // transition filters
-        encoder.word(2); // legacy slew filters: output + previous time only
-        encoder.float(-0.0);
-        encoder.float(1.25);
-        encoder.float(3.5);
-        encoder.float(2.5);
-        encoder.word(0); // cross detectors
-        encoder.word(0); // Laplace filters
-        encoder.word(0); // Zi filters
-        encoder.optional_float(None);
-        encoder.words
-    }
-
     #[test]
-    fn accepted_runtime_transport_sides_round_trip_and_v11_upgrades_exactly() {
+    fn accepted_runtime_transport_sides_round_trip_exactly() {
         let mut checkpoint = checkpoint_with_slew_entries();
-        let old_words = checkpoint.to_words_with_format(11, true, true);
-        let upgraded = VerilogADeviceCheckpoint::from_legacy_v11_words(
-            checkpoint.instance_name.clone(),
-            checkpoint.model_name.clone(),
-            checkpoint.source_digest.clone(),
-            checkpoint.shape_identity.clone(),
-            &old_words,
-        )
-        .unwrap();
-        assert_eq!(upgraded, checkpoint);
         checkpoint.accepted.delay_buffers[1].left_limits = vec![(0.0, -0.0), (1.0, 3.0)];
         let decode = |state: &VerilogADeviceCheckpoint| {
             VerilogADeviceCheckpoint::from_words(
@@ -441,34 +405,12 @@ mod runtime_checkpoint_codec_tests {
             invalid.accepted.delay_buffers[1].left_limits[1] = bad;
             assert!(decode(&invalid).unwrap_err().contains("delay 1"));
         }
-        assert!(
-            VerilogADeviceCheckpoint::from_legacy_v11_words(
-                checkpoint.instance_name.clone(),
-                checkpoint.model_name.clone(),
-                checkpoint.source_digest.clone(),
-                checkpoint.shape_identity.clone(),
-                &checkpoint.to_words(),
-            )
-            .is_err()
-        );
     }
 
     #[test]
-    fn accepted_runtime_event_order_words_preserve_bounds_and_upgrade_v12_as_unknown() {
+    fn accepted_runtime_event_order_words_preserve_bounds() {
         let mut checkpoint = checkpoint_with_slew_entries();
         checkpoint.accepted.delay_buffers[1].left_limits = vec![(0.0, 1.0), (1.0, 2.0)];
-        let legacy = checkpoint.clone();
-        let old_words = legacy.to_words_with_format(12, true, true);
-        let upgraded = VerilogADeviceCheckpoint::from_legacy_v12_words(
-            legacy.instance_name.clone(),
-            legacy.model_name.clone(),
-            legacy.source_digest.clone(),
-            legacy.shape_identity.clone(),
-            &old_words,
-        )
-        .unwrap();
-        assert_eq!(upgraded, legacy);
-        assert!(upgraded.accepted.delay_buffers[1].event_orders.is_empty());
         checkpoint.accepted.delay_buffers[1].event_orders = vec![(0.0, u32::MAX), (1.0, 2)];
         let decode = |words: &[u64]| {
             VerilogADeviceCheckpoint::from_words(
@@ -481,7 +423,6 @@ mod runtime_checkpoint_codec_tests {
         };
         let words = checkpoint.to_words();
         assert_eq!(decode(&words).unwrap(), checkpoint);
-        assert!(decode(&old_words).is_err());
         let index = words
             .iter()
             .position(|word| *word == u64::from(u32::MAX))
@@ -509,16 +450,6 @@ mod runtime_checkpoint_codec_tests {
             invalid.accepted.delay_buffers[1].event_orders = records;
             assert!(decode(&invalid.to_words()).unwrap_err().contains("delay 1"));
         }
-        assert!(
-            VerilogADeviceCheckpoint::from_legacy_v12_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .is_err()
-        );
     }
 
     #[test]
@@ -671,184 +602,6 @@ mod runtime_checkpoint_codec_tests {
     }
 
     #[test]
-    fn legacy_v1_payload_is_fully_validated_without_migrating_slew_initialization() {
-        let words = minimal_legacy_v1_words();
-        VerilogADeviceCheckpoint::validate_legacy_v1_words(&words)
-            .expect("complete two-word legacy slew entries validate");
-
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                "x1".into(),
-                "model".into(),
-                "source".into(),
-                "shape".into(),
-                &words,
-            )
-            .expect_err("the current decoder must not migrate legacy state")
-            .contains("unsupported runtime Verilog-A state version 1")
-        );
-
-        let mut malformed_boolean = words.clone();
-        malformed_boolean[1] = 2;
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v1_words(&malformed_boolean)
-                .expect_err("legacy boolean tags remain strict")
-                .contains("previous discontinuity boolean tag 2 is invalid")
-        );
-
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v1_words(&words[..12])
-                .expect_err("truncated two-word legacy slew entry must fail closed")
-                .contains("slew filters declares 2 entries")
-        );
-    }
-
-    #[test]
-    fn legacy_v2_payload_is_fully_validated_without_migrating_idtmod_history() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v2_words_for_test();
-
-        VerilogADeviceCheckpoint::validate_legacy_v2_words(&words)
-            .expect("complete legacy common-format payload validates");
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .expect_err("the current decoder must not reinterpret legacy idtmod history")
-            .contains("unsupported runtime Verilog-A state version 2")
-        );
-
-        let mut malformed_boolean = words.clone();
-        malformed_boolean[1] = 2;
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v2_words(&malformed_boolean)
-                .expect_err("legacy v2 boolean tags remain strict")
-                .contains("previous discontinuity boolean tag 2 is invalid")
-        );
-
-        let mut trailing = words;
-        trailing.push(0);
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v2_words(&trailing)
-                .expect_err("legacy v2 trailing words must fail closed")
-                .contains("trailing words")
-        );
-    }
-
-    #[test]
-    fn legacy_v3_payload_is_validated_without_inventing_slew_corners() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v3_words_for_test();
-        VerilogADeviceCheckpoint::validate_legacy_v3_words(&words)
-            .expect("complete legacy v3 payload validates");
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .expect_err("v3 cannot resume without its accepted slew corner")
-            .contains("unsupported runtime Verilog-A state version 3")
-        );
-    }
-
-    #[test]
-    fn legacy_v4_payload_is_validated_without_inventing_transition_queue_history() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v4_words_for_test();
-        VerilogADeviceCheckpoint::validate_legacy_v4_words(&words)
-            .expect("complete legacy v4 payload validates");
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .expect_err("v4 cannot resume without accepted transition queue history")
-            .contains("unsupported runtime Verilog-A state version 4")
-        );
-    }
-
-    #[test]
-    fn legacy_v5_payload_is_validated_without_inventing_absdelay_configuration() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v5_words_for_test();
-        VerilogADeviceCheckpoint::validate_legacy_v5_words(&words)
-            .expect("complete legacy v5 delay history validates");
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name.clone(),
-                checkpoint.model_name.clone(),
-                checkpoint.source_digest.clone(),
-                checkpoint.shape_identity.clone(),
-                &words,
-            )
-            .expect_err("v5 cannot resume without its frozen absdelay definition")
-            .contains("unsupported runtime Verilog-A state version 5")
-        );
-
-        let legacy_delay_section = words
-            .windows(4)
-            .position(|window| window == [3, 0, 2, 0])
-            .expect("legacy delay section begins with empty and fixed histories");
-        let mut malformed = words;
-        malformed[legacy_delay_section + 3] = f64::NAN.to_bits();
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v5_words(&malformed)
-                .expect_err("legacy v5 delay samples must remain fully validated")
-                .contains("delay sample 0 is not finite")
-        );
-    }
-
-    #[test]
-    fn legacy_v6_payload_is_validated_without_inventing_laplace_history() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v6_words_for_test();
-        VerilogADeviceCheckpoint::validate_legacy_v6_words(&words)
-            .expect("complete legacy v6 Laplace state validates");
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name.clone(),
-                checkpoint.model_name.clone(),
-                checkpoint.source_digest.clone(),
-                checkpoint.shape_identity.clone(),
-                &words,
-            )
-            .expect_err("v6 cannot resume without older Laplace state and derivative history")
-            .contains("unsupported runtime Verilog-A state version 6")
-        );
-
-        let state_word = words
-            .windows(4)
-            .position(|window| {
-                window
-                    == [
-                        1, // one Laplace filter
-                        2, // two state values
-                        (-0.0_f64).to_bits(),
-                        f64::MIN_POSITIVE.to_bits(),
-                    ]
-            })
-            .expect("legacy Laplace state has a unique serialized prefix")
-            + 2;
-        let mut malformed = words;
-        malformed[state_word] = f64::NAN.to_bits();
-        assert!(
-            VerilogADeviceCheckpoint::validate_legacy_v6_words(&malformed)
-                .expect_err("legacy v6 Laplace state must remain fully validated")
-                .contains("Laplace filter 0 state contains a non-finite value")
-        );
-    }
-
-    #[test]
     fn circular_origin_payload_round_trips_and_rejects_malformed_history() {
         use rspice_veriloga_runtime::arithmetic::IdtModOrigin;
         let mut checkpoint = checkpoint_with_slew_entries();
@@ -889,83 +642,6 @@ mod runtime_checkpoint_codec_tests {
             decode(&checkpoint)
                 .unwrap_err()
                 .contains("unsupported runtime Verilog-A state version 10")
-        );
-    }
-
-    #[test]
-    fn legacy_v9_payload_cannot_restore_missing_limiter_history() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let mut words = checkpoint.to_words_with_format(9, true, true);
-        VerilogADeviceCheckpoint::validate_legacy_v9_words(&words).unwrap();
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .unwrap_err()
-            .contains("unsupported runtime Verilog-A state version 9")
-        );
-        words.push(0);
-        assert!(VerilogADeviceCheckpoint::validate_legacy_v9_words(&words).is_err());
-    }
-
-    #[test]
-    fn legacy_v8_payload_validates_but_cannot_restore_ambiguous_discontinuity() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let mut words = checkpoint.to_words_with_format(8, true, true);
-        VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).unwrap();
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name,
-                checkpoint.model_name,
-                checkpoint.source_digest,
-                checkpoint.shape_identity,
-                &words,
-            )
-            .unwrap_err()
-            .contains("unsupported runtime Verilog-A state version 8")
-        );
-        words.push(0);
-        assert!(VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).is_err());
-    }
-
-    /// Versions 7 and 8 use the same fields and encoding. What v7 does not carry
-    /// is the numbering — its slot arrays are indexed by the bytecode
-    /// generator's per-emission allocation rather than the canonical per-site
-    /// one — so the payload has to validate for diagnostics and refuse to
-    /// resume, and nothing but the version word can tell the two apart.
-    #[test]
-    fn legacy_v7_payload_validates_but_cannot_be_read_as_the_per_site_numbering() {
-        let checkpoint = checkpoint_with_slew_entries();
-        let words = checkpoint.to_legacy_v7_words_for_test();
-        VerilogADeviceCheckpoint::validate_legacy_v7_words(&words)
-            .expect("a complete legacy v7 payload validates");
-
-        let current = checkpoint.to_words_with_format(8, true, true);
-        assert_eq!(
-            words.len(),
-            current.len(),
-            "v7 and v8 encode the same fields; only the meaning of the indices differs"
-        );
-        assert_eq!(
-            &words[1..],
-            &current[1..],
-            "the version word is the only difference between the two encodings"
-        );
-
-        assert!(
-            VerilogADeviceCheckpoint::from_words(
-                checkpoint.instance_name.clone(),
-                checkpoint.model_name.clone(),
-                checkpoint.source_digest.clone(),
-                checkpoint.shape_identity.clone(),
-                &words,
-            )
-            .expect_err("v7 state slots are numbered per emission and cannot be resumed")
-            .contains("unsupported runtime Verilog-A state version 7")
         );
     }
 
@@ -1337,17 +1013,8 @@ impl VerilogADeviceCheckpoint {
     /// portable checkpoint format. Floating-point values are stored by IEEE
     /// bits, preserving signed zero and every accepted finite value exactly.
     pub fn to_words(&self) -> Vec<u64> {
-        self.to_words_with_format(self.state_version, true, true)
-    }
-
-    fn to_words_with_format(
-        &self,
-        state_version: u32,
-        include_slew_corners: bool,
-        include_transition_queue: bool,
-    ) -> Vec<u64> {
         let mut encoder = CheckpointWordEncoder::default();
-        encoder.word(u64::from(state_version));
+        encoder.word(u64::from(self.state_version));
         encoder.boolean(self.prev_discontinuity);
         encoder.float(self.accepted.time);
         encoder.floats(&self.accepted.variables);
@@ -1357,17 +1024,15 @@ impl VerilogADeviceCheckpoint {
         encoder.booleans(&self.accepted.state_initialized);
         encoder.word(self.accepted.delay_buffers.len() as u64);
         for delay in &self.accepted.delay_buffers {
-            if state_version >= 6 {
-                match delay.configuration {
-                    None => encoder.word(0),
-                    Some(crate::vm::DelayConfiguration::Fixed { delay }) => {
-                        encoder.word(1);
-                        encoder.float(delay);
-                    }
-                    Some(crate::vm::DelayConfiguration::Bounded { max_delay }) => {
-                        encoder.word(2);
-                        encoder.float(max_delay);
-                    }
+            match delay.configuration {
+                None => encoder.word(0),
+                Some(crate::vm::DelayConfiguration::Fixed { delay }) => {
+                    encoder.word(1);
+                    encoder.float(delay);
+                }
+                Some(crate::vm::DelayConfiguration::Bounded { max_delay }) => {
+                    encoder.word(2);
+                    encoder.float(max_delay);
                 }
             }
             encoder.word(delay.samples.len() as u64);
@@ -1375,58 +1040,43 @@ impl VerilogADeviceCheckpoint {
                 encoder.float(time);
                 encoder.float(value);
             }
-            if state_version >= 12 {
-                encoder.word(delay.left_limits.len() as u64);
-                for &(time, left) in &delay.left_limits {
-                    encoder.float(time);
-                    encoder.float(left);
-                }
+            encoder.word(delay.left_limits.len() as u64);
+            for &(time, left) in &delay.left_limits {
+                encoder.float(time);
+                encoder.float(left);
             }
-            if state_version >= 13 {
-                encoder.word(delay.event_orders.len() as u64);
-                for &(time, order) in &delay.event_orders {
-                    encoder.float(time);
-                    encoder.word(u64::from(order));
-                }
+            encoder.word(delay.event_orders.len() as u64);
+            for &(time, order) in &delay.event_orders {
+                encoder.float(time);
+                encoder.word(u64::from(order));
             }
         }
         encoder.word(self.accepted.transition_filters.len() as u64);
         for state in &self.accepted.transition_filters {
-            if include_transition_queue {
-                encoder.boolean(state.initialized);
-                encoder.float(state.input);
-                encoder.float(state.output);
-                encoder.float(state.time);
-                encoder.boolean(state.active.is_some());
-                if let Some(active) = state.active {
-                    encoder.float(active.origin_time);
-                    encoder.float(active.origin_value);
-                    encoder.float(active.destination);
-                    encoder.float(active.end_time);
-                }
-                encoder.word(state.pending.len() as u64);
-                for pending in &state.pending {
-                    encoder.float(pending.start_time);
-                    encoder.float(pending.destination);
-                    encoder.float(pending.rise_time);
-                    encoder.float(pending.fall_time);
-                }
-            } else {
-                let active = state.active;
-                encoder.float(state.output);
-                encoder.float(active.map_or(state.input, |segment| segment.destination));
-                encoder.float(active.map_or(state.time, |segment| segment.origin_time));
-                encoder.float(active.map_or(state.time, |segment| segment.end_time));
-                encoder.float(active.map_or(state.output, |segment| segment.origin_value));
+            encoder.boolean(state.initialized);
+            encoder.float(state.input);
+            encoder.float(state.output);
+            encoder.float(state.time);
+            encoder.boolean(state.active.is_some());
+            if let Some(active) = state.active {
+                encoder.float(active.origin_time);
+                encoder.float(active.origin_value);
+                encoder.float(active.destination);
+                encoder.float(active.end_time);
+            }
+            encoder.word(state.pending.len() as u64);
+            for pending in &state.pending {
+                encoder.float(pending.start_time);
+                encoder.float(pending.destination);
+                encoder.float(pending.rise_time);
+                encoder.float(pending.fall_time);
             }
         }
         encoder.word(self.accepted.slew_filters.len() as u64);
         for state in &self.accepted.slew_filters {
             encoder.float(state.output);
             encoder.float(state.prev_time);
-            if include_slew_corners {
-                encoder.optional_float(state.next_corner_time);
-            }
+            encoder.optional_float(state.next_corner_time);
             encoder.boolean(state.initialized);
         }
         encoder.word(self.accepted.cross_detectors.len() as u64);
@@ -1446,10 +1096,8 @@ impl VerilogADeviceCheckpoint {
         encoder.word(self.accepted.laplace_filters.len() as u64);
         for state in &self.accepted.laplace_filters {
             encoder.floats(&state.state);
-            if state_version >= 7 {
-                encoder.floats(&state.older_state);
-                encoder.floats(&state.derivative);
-            }
+            encoder.floats(&state.older_state);
+            encoder.floats(&state.derivative);
         }
         encoder.word(self.accepted.zi_filters.len() as u64);
         for state in &self.accepted.zi_filters {
@@ -1470,16 +1118,14 @@ impl VerilogADeviceCheckpoint {
             encoder.boolean(state.transient_seen);
         }
         encoder.optional_float(self.accepted.timer_event_bound);
-        if state_version >= 11 {
-            encoder.word(self.accepted.idtmod_origins.len() as u64);
-            for (slot, origin) in &self.accepted.idtmod_origins {
-                encoder.word(*slot as u64);
-                encoder.boolean(origin.negative);
-                encoder.word(u64::from(origin.exponent as u32));
-                encoder.word(origin.words.len() as u64);
-                for &word in &origin.words {
-                    encoder.word(word);
-                }
+        encoder.word(self.accepted.idtmod_origins.len() as u64);
+        for (slot, origin) in &self.accepted.idtmod_origins {
+            encoder.word(*slot as u64);
+            encoder.boolean(origin.negative);
+            encoder.word(u64::from(origin.exponent as u32));
+            encoder.word(origin.words.len() as u64);
+            for &word in &origin.words {
+                encoder.word(word);
             }
         }
         encoder.words
@@ -1492,67 +1138,6 @@ impl VerilogADeviceCheckpoint {
         shape_identity: SmolStr,
         words: &[u64],
     ) -> Result<Self, String> {
-        Self::from_words_with_expected_version(
-            instance_name,
-            model_name,
-            source_digest,
-            shape_identity,
-            words,
-            RUNTIME_CHECKPOINT_STATE_VERSION,
-        )
-    }
-
-    /// Version 11 could only store continuous delay knots. Its complete state
-    /// upgrades by adding empty left-limit/order arrays; no history is inferred.
-    pub fn from_legacy_v11_words(
-        instance_name: SmolStr,
-        model_name: SmolStr,
-        source_digest: SmolStr,
-        shape_identity: SmolStr,
-        words: &[u64],
-    ) -> Result<Self, String> {
-        let mut checkpoint = Self::from_words_with_expected_version(
-            instance_name,
-            model_name,
-            source_digest,
-            shape_identity,
-            words,
-            11,
-        )?;
-        checkpoint.state_version = RUNTIME_CHECKPOINT_STATE_VERSION;
-        Ok(checkpoint)
-    }
-
-    /// Version 12 retains event sides but has no derivative-order metadata.
-    /// Migration preserves those events with explicitly unknown order; their
-    /// values must never be used to infer a missing smoothness certificate.
-    pub fn from_legacy_v12_words(
-        instance_name: SmolStr,
-        model_name: SmolStr,
-        source_digest: SmolStr,
-        shape_identity: SmolStr,
-        words: &[u64],
-    ) -> Result<Self, String> {
-        let mut checkpoint = Self::from_words_with_expected_version(
-            instance_name,
-            model_name,
-            source_digest,
-            shape_identity,
-            words,
-            12,
-        )?;
-        checkpoint.state_version = RUNTIME_CHECKPOINT_STATE_VERSION;
-        Ok(checkpoint)
-    }
-
-    fn from_words_with_expected_version(
-        instance_name: SmolStr,
-        model_name: SmolStr,
-        source_digest: SmolStr,
-        shape_identity: SmolStr,
-        words: &[u64],
-        expected_version: u32,
-    ) -> Result<Self, String> {
         use crate::laplace::LaplaceCheckpoint;
         use crate::vm::{
             CrossCheckpoint, DelayBuffer, DelayCheckpoint, DelayConfiguration,
@@ -1563,9 +1148,9 @@ impl VerilogADeviceCheckpoint {
 
         let mut decoder = CheckpointWordDecoder::new(words);
         let state_version = decoder.u32("state version")?;
-        if state_version != expected_version {
+        if state_version != RUNTIME_CHECKPOINT_STATE_VERSION {
             return Err(format!(
-                "unsupported runtime Verilog-A state version {state_version}; expected version {expected_version}"
+                "unsupported runtime Verilog-A state version {state_version}; expected version {RUNTIME_CHECKPOINT_STATE_VERSION}"
             ));
         }
         let prev_discontinuity = decoder.boolean("previous discontinuity")?;
@@ -1579,21 +1164,17 @@ impl VerilogADeviceCheckpoint {
         let delay_count = decoder.length("delay buffers", 1)?;
         let mut delay_buffers = Vec::with_capacity(delay_count);
         for index in 0..delay_count {
-            let configuration = if state_version >= 6 {
-                match decoder.word(&format!("delay {index} configuration"))? {
-                    0 => None,
-                    1 => Some(DelayConfiguration::Fixed {
-                        delay: decoder.float(&format!("delay {index} fixed delay"))?,
-                    }),
-                    2 => Some(DelayConfiguration::Bounded {
-                        max_delay: decoder.float(&format!("delay {index} maximum delay"))?,
-                    }),
-                    tag => {
-                        return Err(format!("delay {index} configuration tag {tag} is invalid"));
-                    }
+            let configuration = match decoder.word(&format!("delay {index} configuration"))? {
+                0 => None,
+                1 => Some(DelayConfiguration::Fixed {
+                    delay: decoder.float(&format!("delay {index} fixed delay"))?,
+                }),
+                2 => Some(DelayConfiguration::Bounded {
+                    max_delay: decoder.float(&format!("delay {index} maximum delay"))?,
+                }),
+                tag => {
+                    return Err(format!("delay {index} configuration tag {tag} is invalid"));
                 }
-            } else {
-                None
             };
             let count = decoder.length(&format!("delay {index} samples"), 2)?;
             let sample_limit = rspice_veriloga_runtime::transport_delay::MAX_DELAY_HISTORY_SAMPLES;
@@ -1609,11 +1190,7 @@ impl VerilogADeviceCheckpoint {
                     decoder.float(&format!("delay {index} sample {sample} value"))?,
                 ));
             }
-            let left_count = if state_version >= 12 {
-                decoder.length(&format!("delay {index} left limits"), 2)?
-            } else {
-                0
-            };
+            let left_count = decoder.length(&format!("delay {index} left limits"), 2)?;
             if left_count > sample_limit - count {
                 return Err(format!(
                     "delay {index} exceeds the supported history sample limit"
@@ -1626,11 +1203,7 @@ impl VerilogADeviceCheckpoint {
                     decoder.float(&format!("delay {index} left limit {sample} value"))?,
                 ));
             }
-            let order_count = if state_version >= 13 {
-                decoder.length(&format!("delay {index} event orders"), 2)?
-            } else {
-                0
-            };
+            let order_count = decoder.length(&format!("delay {index} event orders"), 2)?;
             if order_count > left_count || order_count > sample_limit - count - left_count {
                 return Err(format!(
                     "delay {index} exceeds the supported event-order history limit"
@@ -1649,113 +1222,67 @@ impl VerilogADeviceCheckpoint {
                 configuration,
                 samples,
             };
-            let validation_checkpoint;
-            let checkpoint_to_validate = if state_version >= 6 || checkpoint.samples.is_empty() {
-                &checkpoint
-            } else {
-                // Runtime versions 1 through 5 did not serialize the frozen
-                // absdelay definition. Validate every byte of their retained
-                // history without manufacturing resumable current state.
-                validation_checkpoint = DelayCheckpoint {
-                    event_orders: Vec::new(),
-                    left_limits: Vec::new(),
-                    configuration: Some(DelayConfiguration::Fixed {
-                        delay: f64::MIN_POSITIVE,
-                    }),
-                    samples: checkpoint.samples.clone(),
-                };
-                &validation_checkpoint
-            };
-            DelayBuffer::validate_checkpoint(checkpoint_to_validate)
+            DelayBuffer::validate_checkpoint(&checkpoint)
                 .map_err(|error| format!("delay {index} checkpoint is invalid: {error}"))?;
             delay_buffers.push(checkpoint);
         }
 
-        let transition_has_queue = state_version >= 5;
-        let transition_count = decoder.length(
-            "transition filters",
-            if transition_has_queue { 6 } else { 5 },
-        )?;
+        let transition_count = decoder.length("transition filters", 6)?;
         let mut transition_filters = Vec::with_capacity(transition_count);
         for index in 0..transition_count {
-            if transition_has_queue {
-                let initialized = decoder.boolean(&format!("transition {index} initialized"))?;
-                let input = decoder.float(&format!("transition {index} input"))?;
-                let output = decoder.float(&format!("transition {index} output"))?;
-                let time = decoder.float(&format!("transition {index} accepted time"))?;
-                let active = if decoder.boolean(&format!("transition {index} active"))? {
-                    Some(TransitionSegmentCheckpoint {
-                        origin_time: decoder
-                            .float(&format!("transition {index} active origin time"))?,
-                        origin_value: decoder
-                            .float(&format!("transition {index} active origin value"))?,
-                        destination: decoder
-                            .float(&format!("transition {index} active destination"))?,
-                        end_time: decoder.float(&format!("transition {index} active end time"))?,
-                    })
-                } else {
-                    None
-                };
-                let pending_count = decoder.length(&format!("transition {index} pending"), 4)?;
-                let mut pending = Vec::with_capacity(pending_count);
-                for pending_index in 0..pending_count {
-                    pending.push(PendingTransitionCheckpoint {
-                        start_time: decoder.float(&format!(
-                            "transition {index} pending {pending_index} start time"
-                        ))?,
-                        destination: decoder.float(&format!(
-                            "transition {index} pending {pending_index} destination"
-                        ))?,
-                        rise_time: decoder.float(&format!(
-                            "transition {index} pending {pending_index} rise time"
-                        ))?,
-                        fall_time: decoder.float(&format!(
-                            "transition {index} pending {pending_index} fall time"
-                        ))?,
-                    });
-                }
-                transition_filters.push(TransitionCheckpoint {
-                    input,
-                    output,
-                    time,
-                    active,
-                    pending,
-                    initialized,
-                });
+            let initialized = decoder.boolean(&format!("transition {index} initialized"))?;
+            let input = decoder.float(&format!("transition {index} input"))?;
+            let output = decoder.float(&format!("transition {index} output"))?;
+            let time = decoder.float(&format!("transition {index} accepted time"))?;
+            let active = if decoder.boolean(&format!("transition {index} active"))? {
+                Some(TransitionSegmentCheckpoint {
+                    origin_time: decoder
+                        .float(&format!("transition {index} active origin time"))?,
+                    origin_value: decoder
+                        .float(&format!("transition {index} active origin value"))?,
+                    destination: decoder
+                        .float(&format!("transition {index} active destination"))?,
+                    end_time: decoder.float(&format!("transition {index} active end time"))?,
+                })
             } else {
-                let output = decoder.float(&format!("transition {index} output"))?;
-                let target = decoder.float(&format!("transition {index} target"))?;
-                let start_time = decoder.float(&format!("transition {index} start time"))?;
-                let end_time = decoder.float(&format!("transition {index} end time"))?;
-                let start_value = decoder.float(&format!("transition {index} start value"))?;
-                transition_filters.push(TransitionCheckpoint {
-                    input: target,
-                    output,
-                    time: start_time,
-                    active: (end_time > start_time).then_some(TransitionSegmentCheckpoint {
-                        origin_time: start_time,
-                        origin_value: start_value,
-                        destination: target,
-                        end_time,
-                    }),
-                    pending: Vec::new(),
-                    initialized: true,
+                None
+            };
+            let pending_count = decoder.length(&format!("transition {index} pending"), 4)?;
+            let mut pending = Vec::with_capacity(pending_count);
+            for pending_index in 0..pending_count {
+                pending.push(PendingTransitionCheckpoint {
+                    start_time: decoder.float(&format!(
+                        "transition {index} pending {pending_index} start time"
+                    ))?,
+                    destination: decoder.float(&format!(
+                        "transition {index} pending {pending_index} destination"
+                    ))?,
+                    rise_time: decoder.float(&format!(
+                        "transition {index} pending {pending_index} rise time"
+                    ))?,
+                    fall_time: decoder.float(&format!(
+                        "transition {index} pending {pending_index} fall time"
+                    ))?,
                 });
             }
+            transition_filters.push(TransitionCheckpoint {
+                input,
+                output,
+                time,
+                active,
+                pending,
+                initialized,
+            });
         }
 
-        let slew_has_corners = state_version >= 4;
-        let slew_count = decoder.length("slew filters", if slew_has_corners { 4 } else { 3 })?;
+        let slew_count = decoder.length("slew filters", 4)?;
         let mut slew_filters = Vec::with_capacity(slew_count);
         for index in 0..slew_count {
             slew_filters.push(SlewCheckpoint {
                 output: decoder.float(&format!("slew {index} output"))?,
                 prev_time: decoder.float(&format!("slew {index} previous time"))?,
-                next_corner_time: if slew_has_corners {
-                    decoder.optional_float(&format!("slew {index} catch-up corner"))?
-                } else {
-                    None
-                },
+                next_corner_time: decoder
+                    .optional_float(&format!("slew {index} catch-up corner"))?,
                 initialized: decoder.boolean(&format!("slew {index} initialized"))?,
             });
         }
@@ -1778,31 +1305,13 @@ impl VerilogADeviceCheckpoint {
             });
         }
 
-        let laplace_has_exact_integration_history = state_version >= 7;
-        let laplace_count = decoder.length(
-            "Laplace filters",
-            if laplace_has_exact_integration_history {
-                3
-            } else {
-                1
-            },
-        )?;
+        let laplace_count = decoder.length("Laplace filters", 3)?;
         let mut laplace_filters = Vec::with_capacity(laplace_count);
         for index in 0..laplace_count {
             let state = decoder.floats(&format!("Laplace filter {index} state"))?;
-            let older_state = if laplace_has_exact_integration_history {
-                decoder.floats(&format!("Laplace filter {index} older state"))?
-            } else {
-                Vec::new()
-            };
-            let derivative = if laplace_has_exact_integration_history {
-                decoder.floats(&format!("Laplace filter {index} derivative"))?
-            } else {
-                Vec::new()
-            };
-            if laplace_has_exact_integration_history
-                && (older_state.len() != state.len() || derivative.len() != state.len())
-            {
+            let older_state = decoder.floats(&format!("Laplace filter {index} older state"))?;
+            let derivative = decoder.floats(&format!("Laplace filter {index} derivative"))?;
+            if older_state.len() != state.len() || derivative.len() != state.len() {
                 return Err(format!(
                     "Laplace filter {index} history lengths are {}/{}/{}, expected three equal lanes",
                     state.len(),
@@ -1851,41 +1360,37 @@ impl VerilogADeviceCheckpoint {
         }
         let timer_event_bound = decoder.optional_float("timer event bound")?;
         let mut idtmod_origins = Vec::new();
-        if state_version >= 11 {
-            let count = decoder.length("idtmod origins", 4)?;
-            if count > state_initialized.len() {
-                return Err("idtmod origin count exceeds the state count".into());
+        let count = decoder.length("idtmod origins", 4)?;
+        if count > state_initialized.len() {
+            return Err("idtmod origin count exceeds the state count".into());
+        }
+        for _ in 0..count {
+            let slot = usize::try_from(decoder.word("idtmod slot")?)
+                .map_err(|_| "idtmod slot exceeds this platform")?;
+            let negative = decoder.boolean("idtmod origin sign")?;
+            let exponent = decoder.u32("idtmod origin exponent")? as i32;
+            let count = decoder.length("idtmod origin words", 1)?;
+            if count > rspice_veriloga_runtime::arithmetic::IdtModOrigin::MAX_CHECKPOINT_WORDS {
+                return Err("idtmod origin exceeds the exact history capacity".into());
             }
+            let mut words = Vec::with_capacity(count);
             for _ in 0..count {
-                let slot = usize::try_from(decoder.word("idtmod slot")?)
-                    .map_err(|_| "idtmod slot exceeds this platform")?;
-                let negative = decoder.boolean("idtmod origin sign")?;
-                let exponent = decoder.u32("idtmod origin exponent")? as i32;
-                let count = decoder.length("idtmod origin words", 1)?;
-                if count > rspice_veriloga_runtime::arithmetic::IdtModOrigin::MAX_CHECKPOINT_WORDS {
-                    return Err("idtmod origin exceeds the exact history capacity".into());
-                }
-                let mut words = Vec::with_capacity(count);
-                for _ in 0..count {
-                    words.push(decoder.word("idtmod origin word")?);
-                }
-                let origin = rspice_veriloga_runtime::arithmetic::IdtModOriginCheckpoint {
-                    negative,
-                    exponent,
-                    words,
-                };
-                rspice_veriloga_runtime::arithmetic::IdtModOrigin::from_checkpoint(&origin)?;
-                if slot >= state_initialized.len()
-                    || idtmod_origins
-                        .last()
-                        .is_some_and(|(previous, _)| *previous >= slot)
-                {
-                    return Err(
-                        "idtmod checkpoint slots must be ordered, unique, and in range".into(),
-                    );
-                }
-                idtmod_origins.push((slot, origin));
+                words.push(decoder.word("idtmod origin word")?);
             }
+            let origin = rspice_veriloga_runtime::arithmetic::IdtModOriginCheckpoint {
+                negative,
+                exponent,
+                words,
+            };
+            rspice_veriloga_runtime::arithmetic::IdtModOrigin::from_checkpoint(&origin)?;
+            if slot >= state_initialized.len()
+                || idtmod_origins
+                    .last()
+                    .is_some_and(|(previous, _)| *previous >= slot)
+            {
+                return Err("idtmod checkpoint slots must be ordered, unique, and in range".into());
+            }
+            idtmod_origins.push((slot, origin));
         }
         decoder.finish()?;
         Ok(Self {
@@ -1912,300 +1417,6 @@ impl VerilogADeviceCheckpoint {
             },
             prev_discontinuity,
         })
-    }
-
-    /// Validate and consume a complete legacy version-1 runtime payload.
-    ///
-    /// Version 1 serialized each slew checkpoint as only `(output,
-    /// previous_time)`. It carried no initialization bit, so this method
-    /// deliberately returns no checkpoint and performs no migration. Callers
-    /// may use successful validation only to distinguish a well-formed legacy
-    /// payload from corrupt data before reporting that it cannot be resumed by
-    /// the current runtime.
-    pub fn validate_legacy_v1_words(words: &[u64]) -> Result<(), String> {
-        let mut decoder = CheckpointWordDecoder::new(words);
-        let state_version = decoder.u32("state version")?;
-        if state_version != 1 {
-            return Err(format!(
-                "legacy runtime Verilog-A payload requires state version 1, got {state_version}"
-            ));
-        }
-        decoder.boolean("previous discontinuity")?;
-        decoder.float("accepted time")?;
-        decoder.floats("variables")?;
-        decoder.floats("previous state values")?;
-        decoder.floats("older state values")?;
-        decoder.floats("previous state derivatives")?;
-        decoder.booleans("state initialization flags")?;
-
-        let delay_count = decoder.length("delay buffers", 1)?;
-        for index in 0..delay_count {
-            let count = decoder.length(&format!("delay {index} samples"), 2)?;
-            for sample in 0..count {
-                decoder.float(&format!("delay {index} sample {sample} time"))?;
-                decoder.float(&format!("delay {index} sample {sample} value"))?;
-            }
-        }
-
-        let transition_count = decoder.length("transition filters", 5)?;
-        for index in 0..transition_count {
-            decoder.float(&format!("transition {index} output"))?;
-            decoder.float(&format!("transition {index} target"))?;
-            decoder.float(&format!("transition {index} start time"))?;
-            decoder.float(&format!("transition {index} end time"))?;
-            decoder.float(&format!("transition {index} start value"))?;
-        }
-
-        let slew_count = decoder.length("slew filters", 2)?;
-        for index in 0..slew_count {
-            decoder.float(&format!("slew {index} output"))?;
-            decoder.float(&format!("slew {index} previous time"))?;
-        }
-
-        let cross_count = decoder.length("cross detectors", 6)?;
-        for index in 0..cross_count {
-            decoder.float(&format!("cross {index} value"))?;
-            decoder.float(&format!("cross {index} time"))?;
-            match decoder.word(&format!("cross {index} side"))? {
-                0..=2 => {}
-                value => return Err(format!("cross {index} side tag {value} is invalid")),
-            }
-            decoder.float(&format!("cross {index} last event"))?;
-            decoder.float(&format!("cross {index} last crossing"))?;
-            decoder.boolean(&format!("cross {index} initialized"))?;
-        }
-
-        let laplace_count = decoder.length("Laplace filters", 1)?;
-        for index in 0..laplace_count {
-            decoder.floats(&format!("Laplace filter {index} state"))?;
-        }
-
-        let zi_count = decoder.length("Zi filters", 12)?;
-        for index in 0..zi_count {
-            decoder.boolean(&format!("Zi filter {index} frozen"))?;
-            decoder.floats(&format!("Zi filter {index} numerator"))?;
-            decoder.floats(&format!("Zi filter {index} denominator"))?;
-            decoder.float(&format!("Zi filter {index} period"))?;
-            decoder.float(&format!("Zi filter {index} first transition"))?;
-            decoder.floats(&format!("Zi filter {index} input history"))?;
-            decoder.floats(&format!("Zi filter {index} output history"))?;
-            decoder.float(&format!("Zi filter {index} held output"))?;
-            decoder.float(&format!("Zi filter {index} ramp start time"))?;
-            decoder.float(&format!("Zi filter {index} ramp end time"))?;
-            decoder.float(&format!("Zi filter {index} ramp start value"))?;
-            decoder.word(&format!("Zi filter {index} sample index"))?;
-            decoder.optional_float(&format!("Zi filter {index} accepted time"))?;
-            decoder.boolean(&format!("Zi filter {index} active"))?;
-            decoder.boolean(&format!("Zi filter {index} seen"))?;
-        }
-        decoder.optional_float("timer event bound")?;
-        decoder.finish()
-    }
-
-    /// Validate and consume a complete legacy version-2 runtime payload.
-    ///
-    /// Version 2 serialized `idtmod` accepted lanes without recording whether
-    /// the older lane shared the previous lane's modulo branch. Its word shape
-    /// otherwise matches the current payload, so decode it strictly but never
-    /// expose the result as restart-authoritative current state.
-    pub fn validate_legacy_v2_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            2,
-        )
-        .map(drop)
-    }
-
-    /// Validate and consume a complete legacy version-3 runtime payload.
-    /// Version 3 predates persisted exact `slew` catch-up corners, so it can
-    /// be inspected for corruption but cannot be resumed exactly.
-    pub fn validate_legacy_v3_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            3,
-        )
-        .map(drop)
-    }
-
-    /// Validate and consume a complete legacy version-4 runtime payload.
-    /// Version 4 retained only one transition target and therefore cannot
-    /// reconstruct the arbitrary pending queue or interruption origin needed
-    /// for an exact resume.
-    pub fn validate_legacy_v4_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            4,
-        )
-        .map(drop)
-    }
-
-    /// Validate and consume a complete legacy version-5 runtime payload.
-    /// Version 5 persisted the accepted `absdelay` samples but not the frozen
-    /// fixed/bounded delay definition. Its retained history remains fully
-    /// parseable for corruption diagnostics, but it cannot be promoted into
-    /// restart-authoritative current state without inventing configuration.
-    pub fn validate_legacy_v5_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            5,
-        )
-        .map(drop)
-    }
-
-    /// Validate and consume a complete legacy version-6 runtime payload.
-    /// Version 6 retained only the most recent accepted Laplace state. It did
-    /// not preserve the older state or previous physical derivative required
-    /// by Gear-2 and trapezoidal integration, so it cannot be resumed exactly.
-    pub fn validate_legacy_v6_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            6,
-        )
-        .map(drop)
-    }
-
-    /// Validate and consume a complete legacy version-7 runtime payload.
-    ///
-    /// Version 7 carries every field version 8 does, in the same order and the
-    /// same encoding. What it does not carry is the *numbering*: its slot
-    /// arrays are indexed by the bytecode generator's per-emission allocation,
-    /// so a record it holds cannot be told which operator site owns it without
-    /// the model that produced it. It parses for diagnostics; it cannot be
-    /// promoted into current accepted state.
-    pub fn validate_legacy_v7_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            7,
-        )
-        .map(drop)
-    }
-
-    /// Validate a version-8 payload without treating its single discontinuity
-    /// bit as the independent transient and Newton hints used by version 9.
-    pub fn validate_legacy_v8_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            8,
-        )
-        .map(drop)
-    }
-
-    /// Validate version 9 for diagnostics; its limiter history was not saved.
-    pub fn validate_legacy_v9_words(words: &[u64]) -> Result<(), String> {
-        Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            9,
-        )
-        .map(drop)
-    }
-
-    /// Validate version 10 for diagnostics; exact `idtmod` wrap origins were
-    /// not saved, so this payload cannot become current accepted state.
-    pub fn validate_legacy_v10_words(words: &[u64]) -> Result<(), String> {
-        let checkpoint = Self::from_words_with_expected_version(
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            SmolStr::new_inline("legacy"),
-            words,
-            10,
-        )?;
-        // Legacy rows are discarded before a live VM can validate them. Keep
-        // the common accepted-state checks here; incomplete wrap history is
-        // not a reason to silently accept corrupt state that precedes it.
-        let state = &checkpoint.accepted;
-        if !state.time.is_finite() || state.time < 0.0 {
-            return Err("legacy checkpoint time must be finite and non-negative".into());
-        }
-        let count = state.state_values_prev.len();
-        if state.state_values_older.len() != count
-            || state.state_derivatives_prev.len() != count
-            || state.state_initialized.len() != count
-        {
-            return Err("legacy checkpoint common-state lengths disagree".into());
-        }
-        if state.variables.iter().any(|value| value.is_nan())
-            || state
-                .state_values_prev
-                .iter()
-                .chain(&state.state_values_older)
-                .chain(&state.state_derivatives_prev)
-                .any(|value| !value.is_finite())
-        {
-            return Err("legacy checkpoint VM state contains an invalid numeric value".into());
-        }
-        if state
-            .timer_event_bound
-            .is_some_and(|bound| !bound.is_finite() || bound <= state.time)
-        {
-            return Err("legacy checkpoint timer bound must be finite and strictly future".into());
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(2, false, false)
-    }
-
-    #[cfg(test)]
-    fn to_legacy_v3_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(3, false, false)
-    }
-
-    #[cfg(test)]
-    fn to_legacy_v4_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(4, true, false)
-    }
-
-    #[cfg(test)]
-    fn to_legacy_v5_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(5, true, true)
-    }
-
-    #[cfg(test)]
-    fn to_legacy_v6_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(6, true, true)
-    }
-
-    /// Version 7's words are version 8's words under a different reading of the
-    /// indices, so the encoder needs no arm of its own — only the stamped
-    /// version differs.
-    #[cfg(test)]
-    fn to_legacy_v7_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(7, true, true)
     }
 
     pub fn retained_value_count(&self) -> usize {

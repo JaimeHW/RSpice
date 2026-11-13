@@ -144,142 +144,7 @@ fn checkpoint_operation_result<T>(
 }
 
 /// Format version written to and required from checkpoint files.
-///
-/// Version 17 adds accepted runtime-compiled Verilog-A VM/operator state on
-/// top of version 16's active Xyce breakpoint-span ceiling and effective
-/// controller maximum to the accepted integrator's next-step proposal.
-/// Version 18 adds Xyce's global first-step and beginning-integration controls
-/// to the accepted integrator's next-step proposal. Earlier files remain
-/// readable, but their incomplete in-flight continuation state fails closed
-/// rather than reconstructing analysis phase from a new output segment.
-/// Version 19 adds the accepted compact native diode and legacy Gummel-Poon BJT
-/// limiter/evaluation state. Earlier files remain readable, but resume fails
-/// closed when their target circuit contains either device family rather than
-/// reconstructing an accepted nonlinear state from the external solution.
-/// Version 20 adds accepted engine-owned junction transient history. Version 21
-/// adds the accepted LTE, Trap/Gear, DAE residual/history, nonlinear solver,
-/// and persistent trajectory-policy runtime needed to continue the next
-/// proposed interval exactly. Earlier files remain readable, but an arbitrary
-/// proposal fails closed instead of reconstructing missing runtime state; only
-/// an authenticated normalized-restart phase may resume. Version 22 expands
-/// generated Verilog-A `idt` history to the generalized BE/Trap/Gear contract.
-/// Version 23 adds explicit initialization state to runtime Verilog-A `slew`
-/// history so direct-transient startup is unambiguous and restart-exact.
-/// Version 24 changes runtime Verilog-A `idtmod` accepted lanes to a common-
-/// branch representation so Trap/Gear continuation remains exact across wraps.
-/// Version 25 adds exact generated-device accepted terminal currents. Version
-/// 26 adds accepted ordinary variables written by generated event controls.
-/// Version 27 persists exact accepted runtime Verilog-A `slew` catch-up
-/// corners so checkpoint resume cannot step over a rate-limit endpoint.
-/// Version 28 separates strong source, semantic-model, and accepted-state
-/// shape identities for generated models. Version 29 persists the arbitrary
-/// accepted runtime Verilog-A `transition` queue and
-/// active interruption origin required for exact corner scheduling. Version
-/// 30 persists whether each runtime Verilog-A `absdelay` site froze a
-/// fixed delay or a maximum-delay bound, including the exact accepted value.
-/// Version 31 persists the older accepted state and previous physical
-/// derivative for every runtime Verilog-A Laplace filter so trapezoidal and
-/// Gear-2 continuation is bit-exact across a restart. Version 32 adds the
-/// accepted TEAM resistance-noise PRNG, dwell, level, factor, and provenance.
-/// Version 33 adds accepted solution-dependent capacitor charge,
-/// linearization, and effective-capacitance state.
-/// Version 34 renumbers the runtime Verilog-A accepted-state arrays from the
-/// bytecode generator's per-emission slots to the canonical per-site ones,
-/// moving `RUNTIME_CHECKPOINT_STATE_VERSION` from 7 to 8.
-/// Version 35 records the step/stop defaults used by independent source
-/// waveforms. Older images resume only when those defaults are irrelevant.
-/// Version 36 retains the numerical startup-recovery policy so resume never
-/// needs to repeat the operating point to select its transient controls.
-/// Version 37 preserves sparse-solver factors, row scales and backend routing
-/// so exact continuation follows the uninterrupted numerical path.
-/// Version 38 adds complete accepted JFET nonlinear and integration history.
-/// Version 39 retains JFET terminal displacement currents across integration resets.
-/// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
-/// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
-/// Version 42 retains external BJT BC displacement current across integration resets.
-/// Version 44 records implementation-only unknowns excluded from the Xyce LTE domain.
-/// Version 45 retains fixed GP transport histories independently of charge-integration epochs.
-/// Version 46 retains separate left limits at native and runtime transport jumps.
-/// Version 47 retains known transport event orders; earlier sided events stay unknown.
-/// Version 48 retains analytic outgoing GP anchor slopes for phase error control.
-/// Version 49 retains the separately selected GP Weil filter's accepted memory.
-/// Version 50 retains named behavioral-source SDT accepted histories.
-/// Version 51 retains capacitor value-expression SDT accepted histories.
-/// Version 52 retains native BSIM3 limiter/evaluation and charge-integration state.
-/// Version 53 retains native BSIM4 limiter, junction, and charge-integration state.
-/// Version 54 retains classic-MOS limiter, capacitance, charge, and lead-current history.
-/// Version 55 retains both limits and one-sided slopes of scalar-line events.
-/// Version 56 retains expression-capacitor charge increments before rounding Q.
-/// Version 57 retains the unified accepted mixed-runtime image.
-/// Version 58 carries version 2 HDL host images in that mixed-runtime image.
-/// Version 59 retains accepted voltage- and current-controlled switch state.
-/// Version 60 retains the pending completions of zero-duration edges.
-/// Version 61 retains the other breakpoints the code models asked for.
-/// Version 62 binds the files the `d_vcd` stimuli replay.
-/// Version 63 retains the run of floor landings in progress, and keys coupled
-/// code-model events on the HDL tick lattice.
-/// Version 64 retains the row published at the checkpoint time where it is
-/// not the restart state: a startup's operating point, an event's left limit.
-const FORMAT_VERSION: u32 = published_row::FORMAT_VERSION;
-// The newest section's format is the file format; the sections before it
-// were added in order.
-const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
-const _: () = assert!(switch::FORMAT_VERSION < edge::FORMAT_VERSION);
-const _: () = assert!(edge::FORMAT_VERSION < requested::FORMAT_VERSION);
-const _: () = assert!(requested::FORMAT_VERSION < vcd::FORMAT_VERSION);
-const _: () = assert!(vcd::FORMAT_VERSION < floor_march::FORMAT_VERSION);
-const _: () = assert!(floor_march::FORMAT_VERSION < FORMAT_VERSION);
-const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
-const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
-const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
-const BSIM4_STATE_FORMAT_VERSION: u32 = 53;
-const BSIM3_STATE_FORMAT_VERSION: u32 = 52;
-const CAPACITOR_SDT_FORMAT_VERSION: u32 = 51;
-const BEHAVIORAL_SDT_FORMAT_VERSION: u32 = 50;
-const BJT_WEIL_HISTORY_FORMAT_VERSION: u32 = 49;
-const BJT_PHASE_SLOPE_FORMAT_VERSION: u32 = 48;
-const TRANSPORT_EVENT_ORDER_FORMAT_VERSION: u32 = 47;
-const SIDED_TRANSPORT_FORMAT_VERSION: u32 = 46;
-const BJT_PHASE_HISTORY_FORMAT_VERSION: u32 = 45;
-// Generated circular integrators retain an exact dyadic wrap origin.
-const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_IDTMOD_ORIGIN_FORMAT_VERSION: u32 = 43;
-const BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION: u32 = 42;
-
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION: u32 = 41;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION: u32 = 40;
-const JFET_CURRENT_HISTORY_FORMAT_VERSION: u32 = 39;
-const JFET_STATE_FORMAT_VERSION: u32 = 38;
-const SOLVER_STATE_FORMAT_VERSION: u32 = 37;
-const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
-const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
-const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
-const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_IDTMOD_COMMON_BRANCH_FORMAT_VERSION: u32 = 24;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION: u32 = 27;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION: u32 = 29;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION: u32 = 30;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION: u32 = 31;
-#[cfg(feature = "veriloga")]
-const RUNTIME_VERILOGA_CANONICAL_SITE_STATE_FORMAT_VERSION: u32 = 34;
-const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
-const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
-const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
-const EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION: u32 = 21;
-const GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION: u32 = 22;
-const GENERATED_TERMINAL_CURRENT_FORMAT_VERSION: u32 = 25;
-const GENERATED_EVENT_STATE_FORMAT_VERSION: u32 = 26;
-const GENERATED_IDENTITY_FORMAT_VERSION: u32 = 28;
+const FORMAT_VERSION: u32 = 64;
 
 /// Canonical text header. One owner, so the writer, the parser, and the
 /// format-version gate below cannot drift apart.
@@ -1831,25 +1696,6 @@ fn copy_checkpoint_string(
     Ok(copy)
 }
 
-fn concatenate_checkpoint_string(
-    prefix: &str,
-    suffix: &str,
-    name: &str,
-    budget: &mut CheckpointParseBudget,
-) -> Result<String, String> {
-    let length = prefix.len().checked_add(suffix.len()).ok_or_else(|| {
-        format!("checkpoint parsed-memory allocation size overflow for '{name}' string")
-    })?;
-    budget.charge_bytes(length, name)?;
-    let mut value = String::new();
-    value.try_reserve_exact(length).map_err(|_| {
-        format!("'{name}' string length {length} exceeds checkpoint allocation limits")
-    })?;
-    value.push_str(prefix);
-    value.push_str(suffix);
-    Ok(value)
-}
-
 fn collect_checkpoint_fields<'a>(
     value: &'a str,
     name: &str,
@@ -1997,7 +1843,6 @@ fn write_solution_dependent_capacitor_states(
 fn read_solution_dependent_capacitor_states(
     lines: &mut CheckpointLines<'_>,
     expected_count: usize,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<Option<SolutionDependentCapacitorState>>, String> {
     let header = lines
@@ -2035,7 +1880,7 @@ fn read_solution_dependent_capacitor_states(
                 dcdx_count,
                 dqdx_count,
                 increment @ ..,
-            ] if increment.len() == usize::from(version >= CAPACITOR_INCREMENT_FORMAT_VERSION) => {
+            ] if increment.len() == 1 => {
                 let parse_value = |field: &str, name: &str| {
                     field.parse::<Value>().map_err(|_| {
                         format!(
@@ -2200,7 +2045,6 @@ fn read_canonical_nonempty_line_vector(
 
 fn read_tline_states(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<TransmissionLineCheckpoint>, String> {
     let header = lines
@@ -2264,15 +2108,11 @@ fn read_tline_states(
             .ok_or_else(|| format!("tline state row {row} is missing its backward sample count"))?
             .parse::<usize>()
             .map_err(|_| format!("tline state row {row} has an invalid backward sample count"))?;
-        let event_count = if version >= TLINE_EVENT_FORMAT_VERSION {
-            fields
-                .next()
-                .ok_or_else(|| format!("tline state row {row} is missing its event count"))?
-                .parse::<usize>()
-                .map_err(|_| format!("tline state row {row} has an invalid event count"))?
-        } else {
-            0
-        };
+        let event_count = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its event count"))?
+            .parse::<usize>()
+            .map_err(|_| format!("tline state row {row} has an invalid event count"))?;
         if let Some(extra) = fields.next() {
             return Err(format!("tline state row {row}: extra field '{extra}'"));
         }
@@ -2384,7 +2224,6 @@ fn read_tline_states(
 
 fn read_xspice_instance_states(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<XspiceInstanceCheckpoint>, String> {
     let header = lines
@@ -2409,7 +2248,7 @@ fn read_xspice_instance_states(
         if let Some(extra) = fields.next() {
             return Err(format!("'xspice_state' row {row}: extra field '{extra}'"));
         }
-        let (time, time_prev) = if version >= 5 {
+        let (time, time_prev) = {
             let times = read_value_vector(lines, "context_time", budget)?;
             if times.len() != 2 {
                 return Err(format!(
@@ -2418,8 +2257,6 @@ fn read_xspice_instance_states(
                 ));
             }
             (times[0], times[1])
-        } else {
-            (0.0, 0.0)
         };
         states.push(XspiceInstanceCheckpoint {
             name: copy_checkpoint_string(name, "XSPICE state name", budget)?,
@@ -2731,7 +2568,6 @@ fn read_accepted_jfet_transient_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
     checkpoint: &mut AcceptedJunctionTransientHistoryCheckpoint,
-    version: u32,
 ) -> Result<(), String> {
     let header = lines
         .next()
@@ -2764,19 +2600,8 @@ fn read_accepted_jfet_transient_history(
             "JFET history tag",
             budget,
         )?);
-        for (index, (name, values)) in checkpoint
-            .jfet_history
-            .columns_mut()
-            .into_iter()
-            .enumerate()
-        {
-            values.push(
-                if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && index >= 21 {
-                    0.0
-                } else {
-                    read_finite_history_value(&mut fields, "JFET", row, name)?
-                },
-            );
+        for (name, values) in checkpoint.jfet_history.columns_mut() {
+            values.push(read_finite_history_value(&mut fields, "JFET", row, name)?);
         }
         if fields.next().is_some() {
             return Err("extra field in accepted JFET transient history".to_string());
@@ -2795,22 +2620,6 @@ fn read_accepted_jfet_transient_history(
         read_finite_history_value(&mut fields, "JFET", count, "accepted_dt_prev_prev")?;
     if fields.next().is_some() {
         return Err("extra field in accepted JFET transient timestep history".to_string());
-    }
-    if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && count > 0 {
-        let blocker = copy_checkpoint_string(
-            "legacy checkpoint lacks accepted JFET terminal displacement currents",
-            "JFET current-history blocker",
-            budget,
-        )?;
-        budget.charge_items::<String>(
-            checkpoint.resume_blockers.len().saturating_add(1),
-            "JFET current-history blockers",
-        )?;
-        checkpoint
-            .resume_blockers
-            .try_reserve_exact(1)
-            .map_err(|_| "JFET current-history blockers exceed checkpoint allocation limits")?;
-        checkpoint.resume_blockers.push(blocker);
     }
     checkpoint.jfet_history.validate(count)
 }
@@ -2939,7 +2748,6 @@ fn read_history_bool(
 fn read_bjt_phase_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
-    version: u32,
 ) -> Result<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>, String> {
     use rspice_veriloga_runtime::transport_delay::{
         DelayBuffer, DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
@@ -2976,15 +2784,11 @@ fn read_bjt_phase_history(
                 read_finite_value_field(&mut fields, "accepted BJT phase", "sample current")?;
             samples.push((time, value));
         }
-        let left_count = if version >= SIDED_TRANSPORT_FORMAT_VERSION {
-            fields
-                .next()
-                .ok_or("missing accepted BJT phase left-limit count")?
-                .parse::<usize>()
-                .map_err(|_| "invalid accepted BJT phase left-limit count")?
-        } else {
-            0
-        };
+        let left_count = fields
+            .next()
+            .ok_or("missing accepted BJT phase left-limit count")?
+            .parse::<usize>()
+            .map_err(|_| "invalid accepted BJT phase left-limit count")?;
         if left_count > MAX_DELAY_HISTORY_SAMPLES - count || left_count > line.len() / 3 {
             return Err(
                 "accepted BJT phase left-limit count exceeds available data or history limits"
@@ -3004,15 +2808,11 @@ fn read_bjt_phase_history(
                 read_finite_value_field(&mut fields, "accepted BJT phase", "left-limit current")?,
             ));
         }
-        let order_count = if version >= TRANSPORT_EVENT_ORDER_FORMAT_VERSION {
-            fields
-                .next()
-                .ok_or("missing accepted BJT phase event-order count")?
-                .parse::<usize>()
-                .map_err(|_| "invalid accepted BJT phase event-order count")?
-        } else {
-            0
-        };
+        let order_count = fields
+            .next()
+            .ok_or("missing accepted BJT phase event-order count")?
+            .parse::<usize>()
+            .map_err(|_| "invalid accepted BJT phase event-order count")?;
         if order_count > left_count
             || order_count > MAX_DELAY_HISTORY_SAMPLES - count - left_count
             || order_count > line.len() / 3
@@ -3055,7 +2855,6 @@ fn read_bjt_phase_history(
 fn read_accepted_junction_transient_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
-    version: u32,
 ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
     let availability_line = lines
         .next()
@@ -3084,13 +2883,7 @@ fn read_accepted_junction_transient_history(
         .next()
         .ok_or_else(|| "missing 'accepted_bjt_transient_histories' section".to_string())?;
     let bjt_count = parse_count_header(bjt_header, "accepted_bjt_transient_histories")?;
-    let rows_per_bjt = if version >= BJT_PHASE_SLOPE_FORMAT_VERSION {
-        4
-    } else if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
-        3
-    } else {
-        2
-    };
+    let rows_per_bjt = 4;
     let minimum_bjt_rows = bjt_count.checked_mul(rows_per_bjt).ok_or_else(|| {
         "accepted BJT transient-history row count overflows allocation limits".to_string()
     })?;
@@ -3268,14 +3061,14 @@ fn read_accepted_junction_transient_history(
                 vrbp: linear_prev_prev[5],
                 vrs: linear_prev_prev[6],
             });
-        bjt_history.accepted_external_bc_current.push(
-            if version >= BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION {
-                read_finite_history_value(&mut fields, "BJT", row, "accepted_external_bc_current")?
-            } else {
-                // The model semantic identity rejects pre-fix native BJT resumes.
-                0.0
-            },
-        );
+        bjt_history
+            .accepted_external_bc_current
+            .push(read_finite_history_value(
+                &mut fields,
+                "BJT",
+                row,
+                "accepted_external_bc_current",
+            )?);
         if let Some(extra) = fields.next() {
             return Err(format!(
                 "accepted BJT transient history row {row} has extra field '{extra}'"
@@ -3351,12 +3144,8 @@ fn read_accepted_junction_transient_history(
         vbic_snapshot_cache.push(snapshot);
         bjt_history
             .phase
-            .push(if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
-                read_bjt_phase_history(lines, budget, version)?
-            } else {
-                None
-            });
-        let slope = if version >= BJT_PHASE_SLOPE_FORMAT_VERSION {
+            .push(read_bjt_phase_history(lines, budget)?);
+        let slope = {
             let line = lines.next().ok_or("missing outgoing GP phase slope")?;
             let mut fields = line.split_whitespace();
             if fields.next() != Some("accepted_bjt_transport_slope") {
@@ -3376,11 +3165,9 @@ fn read_accepted_junction_transient_history(
                 return Err("extra outgoing GP phase slope field".into());
             }
             slope
-        } else {
-            None
         };
         bjt_history.phase_outgoing_slopes.push(slope);
-        let weil = if version >= BJT_WEIL_HISTORY_FORMAT_VERSION {
+        let weil = {
             let line = lines.next().ok_or("missing accepted GP Weil history")?;
             let mut fields = line.split_whitespace();
             if fields.next() != Some("accepted_bjt_weil") {
@@ -3406,8 +3193,6 @@ fn read_accepted_junction_transient_history(
                 return Err("extra GP Weil history field".into());
             }
             history
-        } else {
-            None
         };
         bjt_history.weil_phase.push(weil);
     }
@@ -4040,7 +3825,6 @@ fn read_generated_idtmod_states(
 
 fn read_generated_veriloga_states(
     lines: &mut CheckpointLines<'_>,
-    checkpoint_version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
     let header = lines
@@ -4069,7 +3853,7 @@ fn read_generated_veriloga_states(
             source_identity,
             model_identity,
             accepted_state_shape_identity,
-        ) = if checkpoint_version >= GENERATED_IDENTITY_FORMAT_VERSION {
+        ) = {
             let descriptor_abi_version = fields
                 .next()
                 .ok_or_else(|| format!("generated state row {row} is missing descriptor ABI"))?
@@ -4093,43 +3877,15 @@ fn read_generated_veriloga_states(
                 copy_checkpoint_string(model_identity, "generated model identity", budget)?,
                 shape_identity,
             )
-        } else {
-            // Formats before v28 are parsed only for diagnostics and are
-            // discarded by the caller: they lack the split generated identity
-            // and, further back, exact IDT history, terminal currents, or
-            // accepted event-controlled variables. Do not fabricate current
-            // provenance for a payload that can never become
-            // resume-authoritative.
-            let model_identity = fields
-                .next()
-                .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
-            (
-                0,
-                String::new(),
-                copy_checkpoint_string(model_identity, "legacy generated model identity", budget)?,
-                GeneratedVerilogAAcceptedStateShapeIdentity::default(),
-            )
         };
         let state_version = fields
             .next()
             .ok_or_else(|| format!("generated state row {row} is missing state version"))?
             .parse::<u32>()
             .map_err(|_| format!("generated state row {row} has invalid state version"))?;
-        let expected_state_version = if checkpoint_version >= GENERATED_IDTMOD_STATE_FORMAT_VERSION
-        {
-            GENERATED_PERSISTENT_STATE_VERSION
-        } else if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
-            4
-        } else if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
-            3
-        } else if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-            2
-        } else {
-            1
-        };
-        if state_version != expected_state_version {
+        if state_version != GENERATED_PERSISTENT_STATE_VERSION {
             return Err(format!(
-                "generated state row {row} uses unsupported persistent-state version {state_version}; checkpoint format {checkpoint_version} requires version {expected_state_version}"
+                "generated state row {row} uses unsupported persistent-state version {state_version}; this build reads version {GENERATED_PERSISTENT_STATE_VERSION}"
             ));
         }
         if let Some(extra) = fields.next() {
@@ -4137,43 +3893,16 @@ fn read_generated_veriloga_states(
         }
 
         let (mut ddt, ddt_initialized) = read_generated_state_rows(lines, "ddt_state", 3, budget)?;
-        let idt_value_columns =
-            if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-                3
-            } else {
-                1
-            };
+        let idt_value_columns = 3;
         let (mut idt, idt_initialized) =
             read_generated_state_rows(lines, "idt_state", idt_value_columns, budget)?;
-        let idtmod = if checkpoint_version >= GENERATED_IDTMOD_STATE_FORMAT_VERSION {
-            read_generated_idtmod_states(lines, budget)?
-        } else {
-            Vec::new()
-        };
+        let idtmod = read_generated_idtmod_states(lines, budget)?;
         let (mut limiter, limiter_initialized) =
             read_generated_state_rows(lines, "limiter_state", 1, budget)?;
-        let event_variables = if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
-            read_value_vector(lines, "event_state", budget)?
-        } else {
-            Vec::new()
-        };
-        let terminal_currents = if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
-            read_value_vector(lines, "terminal_currents", budget)?
-        } else {
-            Vec::new()
-        };
+        let event_variables = read_value_vector(lines, "event_state", budget)?;
+        let terminal_currents = read_value_vector(lines, "terminal_currents", budget)?;
         let idt_previous = idt.remove(0);
-        let (idt_older, idt_input_previous) =
-            if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-                (idt.remove(0), idt.remove(0))
-            } else {
-                // Persistent-state v1 did not retain enough IDT history to resume
-                // the generalized BE/TR/Gear recurrence exactly. These rows are
-                // consumed for legacy parse compatibility, then discarded by the
-                // caller and represented as unavailable state so injection fails
-                // closed rather than fabricating accepted history.
-                (Vec::new(), Vec::new())
-            };
+        let (idt_older, idt_input_previous) = (idt.remove(0), idt.remove(0));
         states.push(GeneratedVerilogAInstanceCheckpoint {
             instance_name: copy_checkpoint_string(
                 instance_name,
@@ -4185,13 +3914,7 @@ fn read_generated_veriloga_states(
             source_identity,
             model_identity,
             accepted_state_shape_identity,
-            // Generated Rust did not support idtmod in v4. Its complete ordinary
-            // operator history migrates by adding an empty circular-state list.
-            state_version: if state_version == 4 {
-                GENERATED_PERSISTENT_STATE_VERSION
-            } else {
-                state_version
-            },
+            state_version,
             state: GeneratedVerilogAPersistentState {
                 ddt_previous: ddt.remove(0),
                 ddt_older: ddt.remove(0),
@@ -4215,38 +3938,13 @@ fn read_generated_veriloga_states(
 #[cfg(feature = "veriloga")]
 fn read_runtime_veriloga_states(
     lines: &mut CheckpointLines<'_>,
-    checkpoint_version: u32,
     budget: &mut CheckpointParseBudget,
-) -> Result<(Vec<VerilogADeviceCheckpoint>, bool), String> {
+) -> Result<Vec<VerilogADeviceCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
     let count = parse_count_header(header, "runtime_veriloga_states")?;
     let mut states = allocate_checkpoint_rows(lines, count, "runtime_veriloga_states", budget)?;
-    let legacy_state_version =
-        if checkpoint_version < RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION {
-            Some(1)
-        } else if checkpoint_version < RUNTIME_VERILOGA_IDTMOD_COMMON_BRANCH_FORMAT_VERSION {
-            Some(2)
-        } else if checkpoint_version < RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION {
-            Some(3)
-        } else if checkpoint_version < RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION {
-            Some(4)
-        } else if checkpoint_version < RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION {
-            Some(5)
-        } else if checkpoint_version < RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION {
-            Some(6)
-        } else if checkpoint_version < RUNTIME_VERILOGA_CANONICAL_SITE_STATE_FORMAT_VERSION {
-            Some(7)
-        } else if checkpoint_version < RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION {
-            Some(8)
-        } else if checkpoint_version < RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION {
-            Some(9)
-        } else if checkpoint_version < RUNTIME_VERILOGA_IDTMOD_ORIGIN_FORMAT_VERSION {
-            Some(10)
-        } else {
-            None
-        };
     for row in 0..count {
         let line = lines
             .next()
@@ -4319,68 +4017,14 @@ fn read_runtime_veriloga_states(
                 "runtime state row {row} has invalid shape identity"
             ));
         }
-        if let Some(expected_legacy_version) = legacy_state_version {
-            if state_version != expected_legacy_version {
-                return Err(format!(
-                    "runtime state row {row} in checkpoint format {checkpoint_version} uses state version {state_version}, expected legacy version {expected_legacy_version}"
-                ));
-            }
-            match expected_legacy_version {
-                1 => VerilogADeviceCheckpoint::validate_legacy_v1_words(&words),
-                2 => VerilogADeviceCheckpoint::validate_legacy_v2_words(&words),
-                3 => VerilogADeviceCheckpoint::validate_legacy_v3_words(&words),
-                4 => VerilogADeviceCheckpoint::validate_legacy_v4_words(&words),
-                5 => VerilogADeviceCheckpoint::validate_legacy_v5_words(&words),
-                6 => VerilogADeviceCheckpoint::validate_legacy_v6_words(&words),
-                7 => VerilogADeviceCheckpoint::validate_legacy_v7_words(&words),
-                8 => VerilogADeviceCheckpoint::validate_legacy_v8_words(&words),
-                9 => VerilogADeviceCheckpoint::validate_legacy_v9_words(&words),
-                10 => VerilogADeviceCheckpoint::validate_legacy_v10_words(&words),
-                _ => unreachable!("known legacy runtime Verilog-A state version"),
-            }
-            .map_err(|error| {
-                format!("runtime state row {row} legacy payload is invalid: {error}")
-            })?;
-            continue;
-        }
-        let upgrade_v11 = checkpoint_version < SIDED_TRANSPORT_FORMAT_VERSION;
-        let upgrade_v12 = !upgrade_v11 && checkpoint_version < TRANSPORT_EVENT_ORDER_FORMAT_VERSION;
-        let state = if upgrade_v11 {
-            if state_version != 11 {
-                return Err(format!(
-                    "runtime state row {row} requires version 11 for checkpoint format {checkpoint_version}"
-                ));
-            }
-            VerilogADeviceCheckpoint::from_legacy_v11_words(
-                instance.into(),
-                model.into(),
-                source.into(),
-                shape.into(),
-                &words,
-            )?
-        } else if upgrade_v12 {
-            if state_version != 12 {
-                return Err(format!(
-                    "runtime state row {row} requires version 12 for checkpoint format {checkpoint_version}"
-                ));
-            }
-            VerilogADeviceCheckpoint::from_legacy_v12_words(
-                instance.into(),
-                model.into(),
-                source.into(),
-                shape.into(),
-                &words,
-            )?
-        } else {
-            VerilogADeviceCheckpoint::from_words(
-                instance.into(),
-                model.into(),
-                source.into(),
-                shape.into(),
-                &words,
-            )?
-        };
-        if !upgrade_v11 && !upgrade_v12 && state.state_version != state_version {
+        let state = VerilogADeviceCheckpoint::from_words(
+            instance.into(),
+            model.into(),
+            source.into(),
+            shape.into(),
+            &words,
+        )?;
+        if state.state_version != state_version {
             return Err(format!(
                 "runtime state row {row} header version {state_version} disagrees with payload version {}",
                 state.state_version
@@ -4388,23 +4032,7 @@ fn read_runtime_veriloga_states(
         }
         states.push(state);
     }
-    // Runtime state v1 omitted slew initialization and v2 could not identify
-    // the modulo branch shared by accepted `idtmod` history lanes, and v3
-    // omitted exact accepted `slew` catch-up corners. Version 4 retained only
-    // one transition target, not the accepted pending queue and interruption
-    // origin. Version 5 retained `absdelay` samples but not the frozen fixed
-    // delay or maximum-delay bound. Version 6 retained only the latest
-    // accepted Laplace state, not the older state and previous physical
-    // derivative required by Gear-2 and trapezoidal integration. Version 7
-    // carried every field version 8 does, but indexed by the bytecode
-    // generator's per-emission state slots rather than the canonical per-site
-    // ones the compiler now numbers records with, so a record it holds cannot
-    // be told which operator owns it. Version 8 does not distinguish transient
-    // discontinuities from Newton convergence hints. Version 9 omitted limiter
-    // history. Version 10 omitted exact circular-integrator wrap origins.
-    // All remain parseable for diagnostics but cannot be promoted
-    // into exact current accepted state.
-    Ok((states, legacy_state_version.is_some() && count != 0))
+    Ok(states)
 }
 
 fn capture_runtime_blockers(
@@ -5271,7 +4899,7 @@ fn read_accepted_integration_runtime(
     let lte_version = next_runtime_field(&mut lte_fields, "version")?
         .parse::<u32>()
         .map_err(|_| "accepted integration LTE header has invalid version".to_string())?;
-    if lte_version != 1 && lte_version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
+    if lte_version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
         return Err(format!(
             "unsupported accepted-boundary LTE checkpoint version {lte_version} (runtime requires {ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION})"
         ));
@@ -5336,30 +4964,25 @@ fn read_accepted_integration_runtime(
         next_runtime_field(&mut lte_fields, "second previous psi coefficient")?,
         "second previous psi coefficient",
     )?;
-    // Version one used the full solution domain. Preserve that declaration:
-    // restoring it into a circuit with auxiliary unknowns fails the topology
-    // check rather than silently changing its historical error weights.
-    let mut auxiliary_indices = Vec::new();
-    if lte_version >= 2 {
-        let count = parse_usize(
-            next_runtime_field(&mut lte_fields, "auxiliary count")?,
-            "auxiliary count",
-        )?;
-        if count > solution_dimension {
-            return Err("LTE auxiliary count exceeds the solution dimension".to_string());
+    let count = parse_usize(
+        next_runtime_field(&mut lte_fields, "auxiliary count")?,
+        "auxiliary count",
+    )?;
+    if count > solution_dimension {
+        return Err("LTE auxiliary count exceeds the solution dimension".to_string());
+    }
+    let mut auxiliary_indices =
+        allocate_checkpoint_capacity(count, "LTE auxiliary indices", budget)?;
+    for index in 0..count {
+        if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+            && lines.abort.is_some_and(AbortSignal::is_aborted)
+        {
+            return Err("checkpoint parsing was aborted".to_string());
         }
-        auxiliary_indices = allocate_checkpoint_capacity(count, "LTE auxiliary indices", budget)?;
-        for index in 0..count {
-            if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
-                && lines.abort.is_some_and(AbortSignal::is_aborted)
-            {
-                return Err("checkpoint parsing was aborted".to_string());
-            }
-            auxiliary_indices.push(parse_usize(
-                next_runtime_field(&mut lte_fields, "auxiliary index")?,
-                "auxiliary index",
-            )?);
-        }
+        auxiliary_indices.push(parse_usize(
+            next_runtime_field(&mut lte_fields, "auxiliary index")?,
+            "auxiliary index",
+        )?);
     }
     if let Some(extra) = lte_fields.next() {
         return Err(format!(
@@ -9022,7 +8645,7 @@ impl TransientCheckpoint {
             .strip_prefix(TEXT_HEADER_PREFIX)
             .and_then(|v| v.trim().parse().ok())
             .ok_or_else(|| format!("not a checkpoint file (header: '{header}')"))?;
-        if !(1..=FORMAT_VERSION).contains(&version) {
+        if version != FORMAT_VERSION {
             return Err(format!(
                 "unsupported checkpoint version {version} (this build reads {FORMAT_VERSION})"
             ));
@@ -9036,7 +8659,7 @@ impl TransientCheckpoint {
             .and_then(|v| u64::from_str_radix(v, 16).ok())
             .ok_or_else(|| format!("malformed fingerprint line: '{fingerprint_line}'"))?;
 
-        let netlist_identity = if version >= 8 {
+        let netlist_identity = {
             let identity_line = lines.next().ok_or("missing netlist identity line")?;
             let identity = identity_line
                 .strip_prefix("netlist_identity ")
@@ -9059,11 +8682,9 @@ impl TransientCheckpoint {
                     "malformed netlist identity line: '{identity_line}'"
                 ));
             }
-        } else {
-            None
         };
 
-        let restart_identity = if version >= 14 {
+        let restart_identity = {
             let identity_line = lines.next().ok_or("missing restart identity line")?;
             let identity = identity_line
                 .strip_prefix("restart_identity ")
@@ -9086,11 +8707,9 @@ impl TransientCheckpoint {
                     "malformed restart identity line: '{identity_line}'"
                 ));
             }
-        } else {
-            None
         };
 
-        let simulation_identity = if version >= 9 {
+        let simulation_identity = {
             let identity_line = lines.next().ok_or("missing simulation identity line")?;
             let identity = identity_line
                 .strip_prefix("simulation_identity ")
@@ -9113,11 +8732,9 @@ impl TransientCheckpoint {
                     "malformed simulation identity line: '{identity_line}'"
                 ));
             }
-        } else {
-            None
         };
 
-        let startup_mode = if version >= 12 {
+        let startup_mode = {
             let mode_line = lines.next().ok_or("missing startup mode line")?;
             match mode_line.strip_prefix("startup_mode ").map(str::trim) {
                 Some("operating-point") => Some(TransientStartupMode::OperatingPoint),
@@ -9125,19 +8742,15 @@ impl TransientCheckpoint {
                 Some("unknown") => None,
                 _ => return Err(format!("malformed startup mode line: '{mode_line}'")),
             }
-        } else {
-            None
         };
 
-        let linearized_startup = if version >= 36 {
+        let linearized_startup = {
             let line = lines.next().ok_or("missing startup recovery policy line")?;
             match line.strip_prefix("linearized_startup ").map(str::trim) {
                 Some("unknown") => None,
                 Some(field) => Some(parse_checkpoint_bool(field, "startup recovery policy")?),
                 None => return Err(format!("malformed startup recovery policy line: '{line}'")),
             }
-        } else {
-            None
         };
 
         let time_line = lines.next().ok_or("missing time line")?;
@@ -9147,7 +8760,7 @@ impl TransientCheckpoint {
             .ok_or_else(|| format!("malformed time line: '{time_line}'"))?;
 
         let integration_max_step =
-            if version >= 14 {
+            {
                 let line = lines
                     .next()
                     .ok_or_else(|| "missing integration maximum-step line".to_string())?;
@@ -9162,11 +8775,9 @@ impl TransientCheckpoint {
                         format!("malformed integration maximum-step line: '{line}'")
                     })?)
                 }
-            } else {
-                None
             };
 
-        let source_time_basis = if version >= SOURCE_TIME_BASIS_FORMAT_VERSION {
+        let source_time_basis = {
             let line = lines.next().ok_or("missing source time basis line")?;
             let field = line
                 .strip_prefix("source_time_basis ")
@@ -9180,11 +8791,9 @@ impl TransientCheckpoint {
                 }),
                 _ => return Err(format!("malformed source time basis line: '{line}'")),
             }
-        } else {
-            None
         };
 
-        let integration_continuation = if version >= CONTROLLER_PHASE_FORMAT_VERSION {
+        let integration_continuation = {
             let line = lines
                 .next()
                 .ok_or_else(|| "missing integration continuation line".to_string())?;
@@ -9232,67 +8841,9 @@ impl TransientCheckpoint {
                     return Err(format!("malformed integration continuation line: '{line}'"));
                 }
             }
-        } else if (16..CONTROLLER_PHASE_FORMAT_VERSION).contains(&version) {
-            let line = lines
-                .next()
-                .ok_or_else(|| "missing integration continuation line".to_string())?;
-            let field = line
-                .strip_prefix("integration_continuation ")
-                .map(str::trim)
-                .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
-            let fields =
-                collect_checkpoint_fields(field, "integration continuation fields", budget)?;
-            match fields.as_slice() {
-                ["unavailable"] => IntegrationContinuation::Unavailable,
-                ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
-                ["breakpoint-restart"] => IntegrationContinuation::BreakpointRestart,
-                ["proposed", next_step, ceiling, controller_max_step] => {
-                    next_step.parse::<Value>().map_err(|_| {
-                        format!("malformed integration continuation line: '{line}'")
-                    })?;
-                    if *ceiling != "none" {
-                        ceiling.parse::<Value>().map_err(|_| {
-                            format!("malformed integration continuation line: '{line}'")
-                        })?;
-                    }
-                    controller_max_step.parse::<Value>().map_err(|_| {
-                        format!("malformed integration continuation line: '{line}'")
-                    })?;
-                    // Version 16 omitted Xyce's restored analysis/restart
-                    // phase, so an in-flight continuation is incomplete.
-                    IntegrationContinuation::Unavailable
-                }
-                _ => {
-                    return Err(format!("malformed integration continuation line: '{line}'"));
-                }
-            }
-        } else if version == 15 {
-            let line = lines
-                .next()
-                .ok_or_else(|| "missing integration continuation line".to_string())?;
-            let field = line
-                .strip_prefix("integration_continuation ")
-                .map(str::trim)
-                .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
-            match field {
-                "unavailable" => IntegrationContinuation::Unavailable,
-                "synthetic-origin" => IntegrationContinuation::SyntheticOrigin,
-                "breakpoint-restart" => IntegrationContinuation::BreakpointRestart,
-                _ => {
-                    field.parse::<Value>().map_err(|_| {
-                        format!("malformed integration continuation line: '{line}'")
-                    })?;
-                    // Version 15 carried the proposal but not the active span
-                    // ceiling, so an in-flight resume cannot restore its
-                    // controller without potentially changing the proposal.
-                    IntegrationContinuation::Unavailable
-                }
-            }
-        } else {
-            IntegrationContinuation::Unavailable
         };
 
-        let pending_tline_arrivals = if version >= 14 {
+        let pending_tline_arrivals = {
             let line = lines
                 .next()
                 .ok_or_else(|| "missing pending transmission-line arrivals line".to_string())?;
@@ -9335,10 +8886,8 @@ impl TransientCheckpoint {
                 ));
             }
             arrivals
-        } else {
-            Vec::new()
         };
-        let dynamic_tline_breakpoints_added = if version >= 14 {
+        let dynamic_tline_breakpoints_added = {
             let line = lines.next().ok_or_else(|| {
                 "missing dynamic transmission-line breakpoint count line".to_string()
             })?;
@@ -9351,86 +8900,55 @@ impl TransientCheckpoint {
             field.parse::<usize>().map_err(|_| {
                 format!("malformed dynamic transmission-line breakpoint count line: '{line}'")
             })?
-        } else {
-            0
         };
 
         let mut solution_cols = read_value_section(lines, "solution", 1, budget)?;
         if solution_cols[0].iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
         }
-        let (lte_reference_mode, lte_signal_global_reference, lte_signal_local_reference) =
-            if version >= 6 {
-                let mode_line = lines
-                    .next()
-                    .ok_or_else(|| "missing 'lte_reference_mode' line".to_string())?;
-                let mode = match mode_line.strip_prefix("lte_reference_mode ").map(str::trim) {
-                    Some("none") => None,
-                    Some("predictor-local") => Some(TransientLteReference::PredictorLocal),
-                    Some(selector) => {
-                        let selector = selector.parse::<u8>().map_err(|_| {
-                            format!("malformed LTE reference mode line: '{mode_line}'")
-                        })?;
-                        Some(
-                            TransientLteReference::from_xyce_selector(selector).ok_or_else(
-                                || format!("unsupported LTE reference mode in line: '{mode_line}'"),
-                            )?,
-                        )
-                    }
-                    None => {
-                        return Err(format!("malformed LTE reference mode line: '{mode_line}'"));
-                    }
-                };
-                let global = read_value_vector(lines, "lte_signal_global", budget)?;
-                if global.len() != 1 || !global[0].is_finite() || global[0] < 0.0 {
-                    return Err(
-                        "'lte_signal_global' must contain one finite non-negative value"
-                            .to_string(),
-                    );
+        let (lte_reference_mode, lte_signal_global_reference, lte_signal_local_reference) = {
+            let mode_line = lines
+                .next()
+                .ok_or_else(|| "missing 'lte_reference_mode' line".to_string())?;
+            let mode = match mode_line.strip_prefix("lte_reference_mode ").map(str::trim) {
+                Some("none") => None,
+                Some("predictor-local") => Some(TransientLteReference::PredictorLocal),
+                Some(selector) => {
+                    let selector = selector
+                        .parse::<u8>()
+                        .map_err(|_| format!("malformed LTE reference mode line: '{mode_line}'"))?;
+                    Some(
+                        TransientLteReference::from_xyce_selector(selector).ok_or_else(|| {
+                            format!("unsupported LTE reference mode in line: '{mode_line}'")
+                        })?,
+                    )
                 }
-                let local = read_value_vector(lines, "lte_signal_local", budget)?;
-                if local.iter().any(|value| !value.is_finite() || *value < 0.0) {
-                    return Err(
-                        "'lte_signal_local' values must be finite and non-negative".to_string()
-                    );
+                None => {
+                    return Err(format!("malformed LTE reference mode line: '{mode_line}'"));
                 }
-                (mode, global[0], local)
-            } else {
-                (None, 0.0, Vec::new())
             };
-        let accepted_integration_runtime = if version >= EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION {
-            read_accepted_integration_runtime(lines, &solution_cols[0], time, budget)?
-        } else if integration_continuation == IntegrationContinuation::SyntheticOrigin
-            && time.to_bits() == 0.0_f64.to_bits()
-        {
-            AcceptedIntegrationRuntime::RestartNormalized(
-                RestartNormalizedIntegrationRuntimeCheckpoint {
-                    version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
-                    resume_blockers: Vec::new(),
-                    lte_warmup_skips: 0,
-                    force_accept_cooldown: 0,
-                    livelock_streak: 0,
-                    livelock_last_restart_time: None,
-                    accepted_interval_count: 0,
-                    damped_first_solver_call: true,
-                    damped_status: None,
-                },
-            )
-        } else {
-            AcceptedIntegrationRuntime::UnavailableLegacy
+            let global = read_value_vector(lines, "lte_signal_global", budget)?;
+            if global.len() != 1 || !global[0].is_finite() || global[0] < 0.0 {
+                return Err(
+                    "'lte_signal_global' must contain one finite non-negative value".to_string(),
+                );
+            }
+            let local = read_value_vector(lines, "lte_signal_local", budget)?;
+            if local.iter().any(|value| !value.is_finite() || *value < 0.0) {
+                return Err("'lte_signal_local' values must be finite and non-negative".to_string());
+            }
+            (mode, global[0], local)
         };
-        let accepted_solver_state = if version >= SOLVER_STATE_FORMAT_VERSION {
-            read_solver_state(lines, budget)?
-        } else {
-            None
-        };
+        let accepted_integration_runtime =
+            read_accepted_integration_runtime(lines, &solution_cols[0], time, budget)?;
+        let accepted_solver_state = read_solver_state(lines, budget)?;
         let cap_cols = read_value_section(lines, "capacitors", 5, budget)?;
         let (
             solution_dependent_capacitor_state_available,
             solution_dependent_capacitor_increment_available,
             cap_effective_capacitances,
             solution_dependent_capacitor_states,
-        ) = if version >= SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION {
+        ) = {
             let availability_line = lines.next().ok_or_else(|| {
                 "missing solution-dependent capacitor state availability line".to_string()
             })?;
@@ -9455,7 +8973,7 @@ impl TransientCheckpoint {
                 ));
             }
             let effective = read_value_vector(lines, "cap_effective_capacitances", budget)?;
-            let increment_available = if version >= CAPACITOR_INCREMENT_FORMAT_VERSION {
+            let increment_available = {
                 let line = lines
                     .next()
                     .ok_or_else(|| "missing capacitor charge-increment availability".to_string())?;
@@ -9473,8 +8991,6 @@ impl TransientCheckpoint {
                     return Err("extra capacitor charge-increment availability field".to_string());
                 }
                 available
-            } else {
-                false
             };
             let states = read_solution_dependent_capacitor_states(
                 lines,
@@ -9483,14 +8999,11 @@ impl TransientCheckpoint {
                 } else {
                     0
                 },
-                version,
                 budget,
             )?;
             (available, increment_available, effective, states)
-        } else {
-            (false, false, Vec::new(), Vec::new())
         };
-        let inductor_flux_history_available = if version >= 13 {
+        let inductor_flux_history_available = {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing 'inductor_flux_history_available' line".to_string())?;
@@ -9514,8 +9027,6 @@ impl TransientCheckpoint {
                 ));
             }
             available
-        } else {
-            false
         };
         let ind_columns = if inductor_flux_history_available {
             4
@@ -9538,18 +9049,11 @@ impl TransientCheckpoint {
             expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
             ind_cols = expanded;
         }
-        let xyce_memristor_resistance_stores = if version >= 10 {
-            read_value_vector(lines, "xyce_memristor_resistance_stores", budget)?
-        } else {
-            Vec::new()
-        };
+        let xyce_memristor_resistance_stores =
+            read_value_vector(lines, "xyce_memristor_resistance_stores", budget)?;
         let xyce_team_resistance_noise_states =
-            if version >= XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION {
-                read_xyce_team_resistance_noise_states(lines, budget)?
-            } else {
-                Vec::new()
-            };
-        let generic_switch_stores = if version >= 11 {
+            read_xyce_team_resistance_noise_states(lines, budget)?;
+        let generic_switch_stores = {
             let columns = read_value_section(lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
             let mut stores = allocate_checkpoint_capacity(count, "generic_switch_stores", budget)?;
@@ -9563,22 +9067,10 @@ impl TransientCheckpoint {
                 stores.push([first, second, third, fourth]);
             }
             stores
-        } else {
-            Vec::new()
         };
-        let behavioral_states = if version >= BEHAVIORAL_SDT_FORMAT_VERSION {
-            behavioral::read(lines, budget)?
-        } else {
-            None
-        };
-        let capacitor_sdt_states = if version >= CAPACITOR_SDT_FORMAT_VERSION {
-            capacitor_sdt::read(lines, budget)?
-        } else {
-            None
-        };
-        let (accepted_nonlinear_state_available, accepted_nonlinear_states) = if version
-            >= NATIVE_NONLINEAR_FORMAT_VERSION
-        {
+        let behavioral_states = behavioral::read(lines, budget)?;
+        let capacitor_sdt_states = capacitor_sdt::read(lines, budget)?;
+        let (accepted_nonlinear_state_available, accepted_nonlinear_states) = {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing accepted nonlinear state availability line".to_string())?;
@@ -9611,39 +9103,17 @@ impl TransientCheckpoint {
                     )?,
                     diodes: read_accepted_diode_nonlinear_states(lines, budget)?,
                     bjts: read_accepted_bjt_nonlinear_states(lines, budget)?,
-                    jfets: if version >= JFET_STATE_FORMAT_VERSION {
-                        read_accepted_jfet_nonlinear_states(lines, budget)?
-                    } else {
-                        Vec::new()
-                    },
+                    jfets: read_accepted_jfet_nonlinear_states(lines, budget)?,
                 },
             )
-        } else {
-            (false, AcceptedNativeNonlinearCheckpointStates::default())
         };
-        let mut accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
-            read_accepted_junction_transient_history(lines, budget, version)?
-        } else {
-            AcceptedJunctionTransientHistoryCheckpoint::default()
-        };
-        if version >= JFET_STATE_FORMAT_VERSION {
-            read_accepted_jfet_transient_history(
-                lines,
-                budget,
-                &mut accepted_junction_history,
-                version,
-            )?;
-        }
-        if version >= BSIM3_STATE_FORMAT_VERSION {
-            bsim3::read(lines, budget, &mut accepted_junction_history)?;
-        }
-        if version >= BSIM4_STATE_FORMAT_VERSION {
-            bsim4::read(lines, budget, &mut accepted_junction_history)?;
-        }
-        if version >= MOSFET_STATE_FORMAT_VERSION {
-            mosfet::read(lines, budget, &mut accepted_junction_history)?;
-        }
-        let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
+        let mut accepted_junction_history =
+            read_accepted_junction_transient_history(lines, budget)?;
+        read_accepted_jfet_transient_history(lines, budget, &mut accepted_junction_history)?;
+        bsim3::read(lines, budget, &mut accepted_junction_history)?;
+        bsim4::read(lines, budget, &mut accepted_junction_history)?;
+        mosfet::read(lines, budget, &mut accepted_junction_history)?;
+        let (tline_state_available, tline_resume_blockers, tline_states) = {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing 'tline_state_available' line".to_string())?;
@@ -9669,85 +9139,39 @@ impl TransientCheckpoint {
             (
                 available,
                 read_nonempty_line_vector(lines, "tline_blockers", budget)?,
-                read_tline_states(lines, version, budget)?,
+                read_tline_states(lines, budget)?,
             )
-        } else {
-            (false, Vec::new(), Vec::new())
         };
-        let xspice_instances = if version >= 2 {
-            read_nonempty_line_vector(lines, "xspice", budget)?
-        } else {
-            Vec::new()
-        };
-        let mut xspice_resume_blockers = if version >= 3 {
-            read_nonempty_line_vector(lines, "xspice_blockers", budget)?
-        } else {
-            Vec::new()
-        };
-        if version == 2 && !xspice_instances.is_empty() {
-            const SUFFIX: &str = ": legacy checkpoint did not record model checkpoint support";
-            let mut blockers = allocate_checkpoint_capacity(
-                xspice_instances.len(),
-                "legacy XSPICE blockers",
-                budget,
-            )?;
-            for instance in &xspice_instances {
-                blockers.push(concatenate_checkpoint_string(
-                    instance,
-                    SUFFIX,
-                    "legacy XSPICE blocker",
-                    budget,
-                )?);
+        let xspice_instances = read_nonempty_line_vector(lines, "xspice", budget)?;
+        let xspice_resume_blockers = read_nonempty_line_vector(lines, "xspice_blockers", budget)?;
+        let xspice_instance_states = read_xspice_instance_states(lines, budget)?;
+        let (generated_veriloga_state_available, generated_veriloga_instance_states) = {
+            let availability_line = lines
+                .next()
+                .ok_or_else(|| "missing 'generated_veriloga_state_available' line".to_string())?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("generated_veriloga_state_available") {
+                return Err(format!(
+                    "malformed generated Verilog-A availability line: '{availability_line}'"
+                ));
             }
-            xspice_resume_blockers = blockers;
-        }
-        let xspice_instance_states = if version >= 4 {
-            read_xspice_instance_states(lines, version, budget)?
-        } else {
-            Vec::new()
-        };
-        let (generated_veriloga_state_available, generated_veriloga_instance_states) =
-            if version >= 7 {
-                let availability_line = lines.next().ok_or_else(|| {
-                    "missing 'generated_veriloga_state_available' line".to_string()
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "generated Verilog-A availability line is missing its boolean".to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "generated Verilog-A availability")
                 })?;
-                let mut fields = availability_line.split_whitespace();
-                if fields.next() != Some("generated_veriloga_state_available") {
-                    return Err(format!(
-                        "malformed generated Verilog-A availability line: '{availability_line}'"
-                    ));
-                }
-                let available = fields
-                    .next()
-                    .ok_or_else(|| {
-                        "generated Verilog-A availability line is missing its boolean".to_string()
-                    })
-                    .and_then(|field| {
-                        parse_checkpoint_bool(field, "generated Verilog-A availability")
-                    })?;
-                if let Some(extra) = fields.next() {
-                    return Err(format!(
-                        "generated Verilog-A availability line has extra field '{extra}'"
-                    ));
-                }
-                let states = read_generated_veriloga_states(lines, version, budget)?;
-                if version >= GENERATED_IDENTITY_FORMAT_VERSION {
-                    (available, states)
-                } else {
-                    // Older formats remain parseable, but cannot reconstruct
-                    // every accepted generated-device observable required by
-                    // the current runtime (generalized IDT history before v22,
-                    // exact external terminal currents before v25, accepted
-                    // event-controlled variables before v26, the split
-                    // generated identity before v28). Preserve a fail-closed
-                    // resume representation.
-                    (false, Vec::new())
-                }
-            } else {
-                (false, Vec::new())
-            };
-        let parsed_runtime_veriloga_state_available = if version >= RUNTIME_VERILOGA_FORMAT_VERSION
-        {
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "generated Verilog-A availability line has extra field '{extra}'"
+                ));
+            }
+            let states = read_generated_veriloga_states(lines, budget)?;
+            (available, states)
+        };
+        let parsed_runtime_veriloga_state_available = {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing 'runtime_veriloga_state_available' line".to_string())?;
@@ -9769,25 +9193,16 @@ impl TransientCheckpoint {
                 ));
             }
             available
-        } else {
-            false
         };
         #[cfg(feature = "veriloga")]
-        let (runtime_veriloga_state_available, runtime_veriloga_instance_states) =
-            if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
-                let (states, discarded_legacy_rows) =
-                    read_runtime_veriloga_states(lines, version, budget)?;
-                (
-                    parsed_runtime_veriloga_state_available && !discarded_legacy_rows,
-                    states,
-                )
-            } else {
-                (false, Vec::new())
-            };
+        let (runtime_veriloga_state_available, runtime_veriloga_instance_states) = (
+            parsed_runtime_veriloga_state_available,
+            read_runtime_veriloga_states(lines, budget)?,
+        );
         #[cfg(not(feature = "veriloga"))]
         let runtime_veriloga_state_available = parsed_runtime_veriloga_state_available;
         #[cfg(not(feature = "veriloga"))]
-        if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
+        {
             let header = lines
                 .next()
                 .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
@@ -9798,13 +9213,13 @@ impl TransientCheckpoint {
                 ));
             }
         }
-        let mixed_runtime_image = mixed::read(lines, version, budget)?;
-        let switch_states = switch::read(lines, version, budget)?;
-        let edge_completions = edge::read(lines, version, budget)?;
-        let requested_breakpoints = requested::read(lines, version, budget)?;
-        let vcd_files = vcd::read(lines, version, budget)?;
-        let floor_grid = floor_march::read(lines, version)?;
-        let published_row = published_row::read(lines, version, budget)?;
+        let mixed_runtime_image = mixed::read(lines, budget)?;
+        let switch_states = switch::read(lines, budget)?;
+        let edge_completions = edge::read(lines, budget)?;
+        let requested_breakpoints = requested::read(lines, budget)?;
+        let vcd_files = vcd::read(lines, budget)?;
+        let floor_grid = floor_march::read(lines)?;
+        let published_row = published_row::read(lines, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -10133,11 +9548,11 @@ fn checkpoint_format_version_gate(bytes: &[u8]) -> Result<(), PersistenceIncompa
     else {
         return Ok(());
     };
-    if !(1..=FORMAT_VERSION).contains(&version) {
+    if version != FORMAT_VERSION {
         return Err(PersistenceIncompatibleError::new(
             "transient checkpoint",
             Some(version),
-            format!("1..={FORMAT_VERSION}"),
+            FORMAT_VERSION.to_string(),
         ));
     }
     Ok(())
@@ -10755,7 +10170,7 @@ mod tests {
     use crate::engine::Engine;
 
     #[test]
-    fn gp_phase_checkpoint_preserves_outgoing_slope_and_old_unknown_state() {
+    fn gp_phase_checkpoint_preserves_outgoing_slope() {
         let mut original = sample();
         original.accepted_junction_history = sample_junction_history();
         original.accepted_junction_history.bjt_runtime_tags[0] =
@@ -10775,18 +10190,6 @@ mod tests {
         assert_eq!(
             restored.accepted_junction_history.bjt_history,
             original.accepted_junction_history.bjt_history
-        );
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 47)).unwrap();
-        assert_eq!(
-            legacy
-                .accepted_junction_history
-                .bjt_history
-                .phase_outgoing_slopes,
-            vec![None]
-        );
-        assert_eq!(
-            legacy.accepted_junction_history.bjt_history.phase,
-            original.accepted_junction_history.bjt_history.phase
         );
         for fields in ["1 NaN", "1 inf", "2 0", "1", "0 2"] {
             assert!(
@@ -10808,12 +10211,10 @@ mod tests {
     }
 
     #[test]
-    fn gp_weil_checkpoint_round_trip_wire_validation_and_v48_absence() {
+    fn gp_weil_checkpoint_round_trip_and_wire_validation() {
         use super::super::bjt::weil::WeilHistory;
         let mut original = sample();
         original.accepted_junction_history = sample_junction_history();
-        let old = TransientCheckpoint::from_text(&legacy_text(&original, 48)).unwrap();
-        assert!(old.accepted_junction_history.bjt_history.weil_phase[0].is_none());
         let time = original.time;
         original.accepted_junction_history.bjt_runtime_tags[0] =
             super::super::GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG.into();
@@ -10871,8 +10272,6 @@ mod tests {
                 "accepted malformed Weil row: {replacement}"
             );
         }
-        // An old image cannot advertise a filter law whose memory it lacks.
-        assert!(TransientCheckpoint::from_text(&legacy_text(&original, 48)).is_err());
     }
 
     #[test]
@@ -10956,7 +10355,7 @@ mod tests {
     }
 
     #[test]
-    fn gp_phase_event_order_checkpoint_round_trip_and_v46_unknown_migration() {
+    fn gp_phase_event_order_checkpoint_round_trip() {
         use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayEvent, DelayEventOrder};
         let mut original = sample();
         let time = original.time;
@@ -11047,67 +10446,6 @@ mod tests {
                 "accepted {tail}"
             );
         }
-        original.accepted_junction_history.bjt_history.phase[0] =
-            Some(DelayBuffer::from_checkpoint(old_phase).unwrap());
-        let restored = TransientCheckpoint::from_text(&legacy_text(&original, 46)).unwrap();
-        assert_eq!(
-            restored.accepted_junction_history,
-            original.accepted_junction_history
-        );
-        assert_eq!(
-            restored.accepted_junction_history.bjt_history.phase[0]
-                .as_ref()
-                .unwrap()
-                .next_event_after(time)
-                .unwrap()
-                .unwrap()
-                .order,
-            DelayEventOrder::Unknown
-        );
-    }
-
-    #[test]
-    fn gp_phase_checkpoint_keeps_zero_phase_v44_readable_and_refuses_lost_phase() {
-        let mut original = sample();
-        original.accepted_junction_history = sample_junction_history();
-        let legacy = legacy_text(&original, 44);
-        let restored = TransientCheckpoint::from_text(&legacy).unwrap();
-        assert_eq!(
-            restored.accepted_junction_history,
-            original.accepted_junction_history
-        );
-        let bad = legacy.replace(
-            super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
-            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
-        );
-        assert!(TransientCheckpoint::from_text(&bad).is_err());
-    }
-
-    #[test]
-    fn gp_phase_v45_continuous_history_upgrades_without_inventing_sides() {
-        use rspice_veriloga_runtime::transport_delay::DelayBuffer;
-        let mut original = sample();
-        original.accepted_junction_history = sample_junction_history();
-        original.accepted_junction_history.bjt_runtime_tags[0] =
-            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
-        let mut phase = DelayBuffer::new(2);
-        phase.accept_sample(0.0, 1.0, original.time, None).unwrap();
-        phase
-            .accept_sample(original.time, 2.0, original.time, None)
-            .unwrap();
-        original.accepted_junction_history.bjt_history.phase[0] = Some(phase);
-        let restored = TransientCheckpoint::from_text(&legacy_text(&original, 45)).unwrap();
-        assert_eq!(
-            restored.accepted_junction_history,
-            original.accepted_junction_history
-        );
-        assert!(restored.behavioral_states.is_none());
-        assert!(restored.capacitor_sdt_states.is_none());
-        let upgraded = restored.to_text();
-        assert_eq!(
-            TransientCheckpoint::from_text(&upgraded).unwrap().to_text(),
-            upgraded
-        );
     }
 
     #[test]
@@ -11119,21 +10457,13 @@ mod tests {
         text.push_str(" 0 0\n");
         let bytes = 257 * std::mem::size_of::<(Value, Value)>();
         let mut budget = CheckpointParseBudget::new(bytes - 1);
-        let error = read_bjt_phase_history(
-            &mut CheckpointLines::new(&text),
-            &mut budget,
-            FORMAT_VERSION,
-        )
-        .unwrap_err();
+        let error =
+            read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget).unwrap_err();
         assert!(error.contains("parsed-memory limit"), "{error}");
         let mut budget = CheckpointParseBudget::new(bytes);
-        let history = read_bjt_phase_history(
-            &mut CheckpointLines::new(&text),
-            &mut budget,
-            FORMAT_VERSION,
-        )
-        .unwrap()
-        .unwrap();
+        let history = read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget)
+            .unwrap()
+            .unwrap();
         assert_eq!(history.accepted_sample_count(), 257);
         assert_eq!(
             budget.used, bytes,
@@ -11144,7 +10474,7 @@ mod tests {
         lines.abort = Some(&abort);
         let mut budget = CheckpointParseBudget::new(bytes);
         assert!(
-            read_bjt_phase_history(&mut lines, &mut budget, FORMAT_VERSION)
+            read_bjt_phase_history(&mut lines, &mut budget)
                 .unwrap_err()
                 .contains("aborted")
         );
@@ -11164,22 +10494,14 @@ mod tests {
         let all_bytes = 2 * bytes + 257 * std::mem::size_of::<(Value, u32)>();
         let mut budget = CheckpointParseBudget::new(all_bytes - 1);
         assert!(
-            read_bjt_phase_history(
-                &mut CheckpointLines::new(&ordered),
-                &mut budget,
-                FORMAT_VERSION
-            )
-            .unwrap_err()
-            .contains("parsed-memory limit")
+            read_bjt_phase_history(&mut CheckpointLines::new(&ordered), &mut budget)
+                .unwrap_err()
+                .contains("parsed-memory limit")
         );
         let mut budget = CheckpointParseBudget::new(all_bytes);
-        let history = read_bjt_phase_history(
-            &mut CheckpointLines::new(&ordered),
-            &mut budget,
-            FORMAT_VERSION,
-        )
-        .unwrap()
-        .unwrap();
+        let history = read_bjt_phase_history(&mut CheckpointLines::new(&ordered), &mut budget)
+            .unwrap()
+            .unwrap();
         assert_eq!(history.accepted_event_orders().len(), 257);
         assert_eq!(budget.used, all_bytes);
         let abort = crate::abort_signal::CountingAbort::new(6);
@@ -11187,7 +10509,7 @@ mod tests {
         lines.abort = Some(&abort);
         let mut budget = CheckpointParseBudget::new(all_bytes);
         assert!(
-            read_bjt_phase_history(&mut lines, &mut budget, FORMAT_VERSION)
+            read_bjt_phase_history(&mut lines, &mut budget)
                 .unwrap_err()
                 .contains("aborted")
         );
@@ -11300,15 +10622,6 @@ mod tests {
             assert_ne!(malformed, text);
             assert!(TransientCheckpoint::from_text(&malformed).is_err());
         }
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 51)).unwrap();
-        assert!(legacy.accepted_junction_history.bsim3_states.is_empty());
-        assert!(
-            legacy
-                .restore_accepted_junction_transient_history(&circuit)
-                .unwrap_err()
-                .to_string()
-                .contains("BSIM3")
-        );
         let mut wrong_name = recaptured.clone();
         wrong_name.instance_name.push_str("_other");
         assert!(
@@ -11454,13 +10767,6 @@ mod tests {
                 assert_ne!(malformed, text);
                 assert!(TransientCheckpoint::from_text(&malformed).is_err());
             }
-            let old = TransientCheckpoint::from_text(&legacy_text(&original, 53)).unwrap();
-            assert!(
-                old.restore_accepted_junction_transient_history(&circuit)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("MOSFET")
-            );
             let mut wrong_model = restored.clone();
             wrong_model.level += 1;
             assert!(
@@ -11577,15 +10883,6 @@ mod tests {
             assert_ne!(malformed, text);
             assert!(TransientCheckpoint::from_text(&malformed).is_err());
         }
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 52)).unwrap();
-        assert!(legacy.accepted_junction_history.bsim4_states.is_empty());
-        assert!(
-            legacy
-                .restore_accepted_junction_transient_history(&circuit)
-                .unwrap_err()
-                .to_string()
-                .contains("BSIM4")
-        );
         let mut wrong_name = recaptured.clone();
         wrong_name.instance_name.push_str("_other");
         assert!(
@@ -11602,7 +10899,7 @@ mod tests {
     }
 
     #[test]
-    fn jfet_checkpoint_wire_preserves_every_lane_and_refuses_legacy_state() {
+    fn jfet_checkpoint_wire_preserves_every_lane() {
         let mut original = sample();
         let device = crate::device::Jfet::njf("J1", 1, 2, 0);
         original
@@ -11667,39 +10964,6 @@ mod tests {
             assert_ne!(malformed, text);
             assert!(TransientCheckpoint::from_text(&malformed).is_err());
         }
-        let mut legacy = TransientCheckpoint::from_text(&legacy_text(&original, 37)).unwrap();
-        assert!(legacy.accepted_nonlinear_states.jfets.is_empty());
-        legacy.accepted_nonlinear_states.diodes.clear();
-        legacy.accepted_nonlinear_states.bjts.clear();
-        let mut circuit = CircuitData::new();
-        circuit.jfets.push(device);
-        assert!(
-            circuit
-                .validate_accepted_native_nonlinear_checkpoint_states(
-                    &legacy.accepted_nonlinear_states
-                )
-                .unwrap_err()
-                .contains("JFET")
-        );
-        assert!(
-            legacy
-                .restore_accepted_junction_transient_history(&circuit)
-                .unwrap_err()
-                .to_string()
-                .contains("JFET")
-        );
-        let previous = TransientCheckpoint::from_text(&legacy_text(&original, 38)).unwrap();
-        assert_eq!(
-            previous.accepted_nonlinear_states.jfets,
-            original.accepted_nonlinear_states.jfets
-        );
-        assert!(
-            previous
-                .restore_accepted_junction_transient_history(&circuit)
-                .unwrap_err()
-                .to_string()
-                .contains("accepted JFET terminal displacement currents")
-        );
         let mut empty = original.clone();
         empty.accepted_nonlinear_states.jfets.clear();
         empty.accepted_junction_history.jfet_names.clear();
@@ -11786,12 +11050,12 @@ mod tests {
     }
 
     #[test]
-    fn source_time_basis_round_trips_and_legacy_waveforms_require_known_defaults() {
+    fn source_time_basis_round_trips_and_an_unknown_basis_requires_known_defaults() {
         let source = sample();
         let restored = TransientCheckpoint::from_text(&source.to_text()).unwrap();
         assert_eq!(restored.source_time_basis, source.source_time_basis);
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&source, 34)).unwrap();
-        assert_eq!(legacy.source_time_basis, None);
+        let mut unknown = source.clone();
+        unknown.source_time_basis = None;
         let fallback = crate::circuit::SourceTimeBasis {
             tstep: 2e-9,
             tstop: 2e-6,
@@ -11820,11 +11084,11 @@ mod tests {
                 ),
             ] {
                 let netlist = Netlist::parse(&format!(
-                    "legacy source basis\nV1 out 0 {waveform}\nR1 out 0 1k\n.end\n"
+                    "unknown source basis\nV1 out 0 {waveform}\nR1 out 0 1k\n.end\n"
                 ))
                 .unwrap();
                 let circuit = Engine::default().build_circuit(&netlist).unwrap();
-                let outcome = legacy.source_time_basis_for_resume(&circuit, fallback, dialect);
+                let outcome = unknown.source_time_basis_for_resume(&circuit, fallback, dialect);
                 assert_eq!(
                     outcome.is_err(),
                     required,
@@ -11856,7 +11120,7 @@ mod tests {
     }
 
     #[test]
-    fn sided_line_event_checkpoint_round_trips_and_reads_legacy_histories() {
+    fn sided_line_event_checkpoint_round_trips() {
         use crate::device::TransmissionLineHistoryEvent;
         let mut checkpoint = sample();
         let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 1e-6);
@@ -11891,29 +11155,10 @@ mod tests {
         line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
         line.update_history(checkpoint.time, 0.0, 0.0, 0.0, 0.0);
         checkpoint.tline_states = vec![line.checkpoint_state().unwrap()];
-        let legacy = legacy_text(&checkpoint, 54)
-            .lines()
-            .map(|row| {
-                if row.starts_with("tline_state ") {
-                    row.rsplit_once(' ').unwrap().0.to_string()
-                } else {
-                    row.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n";
-        assert_eq!(
-            TransientCheckpoint::from_text(&legacy)
-                .unwrap()
-                .tline_states,
-            checkpoint.tline_states
-        );
-
         let text = "tline_states 1\ntline_state T1 50 0 0 0 0 0 0 0 0 1000000\n";
         let mut budget = CheckpointParseBudget::new(4096);
         assert!(
-            read_tline_states(&mut CheckpointLines::new(text), FORMAT_VERSION, &mut budget)
+            read_tline_states(&mut CheckpointLines::new(text), &mut budget)
                 .unwrap_err()
                 .contains("event count exceeds")
         );
@@ -11924,7 +11169,7 @@ mod tests {
     /// whose run asked for none; and a completion that is not ahead of the
     /// checkpoint, or a resume step that is not a step, is refused.
     #[test]
-    fn pending_edge_completions_round_trip_and_read_empty_from_older_files() {
+    fn pending_edge_completions_round_trip() {
         let mut checkpoint = sample();
         let completion = checkpoint.time + 1.0e-12;
         checkpoint.edge_completions = EdgeCompletionSchedule {
@@ -11944,11 +11189,6 @@ mod tests {
             TransientCheckpoint::from_text(&waiting.to_text()).unwrap(),
             waiting
         );
-
-        let legacy =
-            TransientCheckpoint::from_text(&legacy_text(&checkpoint, switch::FORMAT_VERSION))
-                .unwrap();
-        assert_eq!(legacy.edge_completions, EdgeCompletionSchedule::default());
 
         for schedule in [
             EdgeCompletionSchedule {
@@ -11975,7 +11215,7 @@ mod tests {
     /// resumes on a fresh grid as such a file always did; and a march that
     /// describes no run of landings is refused.
     #[test]
-    fn the_floor_march_round_trips_and_reads_unknown_from_older_files() {
+    fn the_floor_march_round_trips_and_reads_unknown() {
         let mut checkpoint = sample();
         let time = checkpoint.time;
         let floor = 1.0e-17;
@@ -11996,14 +11236,15 @@ mod tests {
             assert_eq!(restored.floor_landing_grid(), grid);
         }
 
-        let legacy =
-            TransientCheckpoint::from_text(&legacy_text(&checkpoint, vcd::FORMAT_VERSION)).unwrap();
-        assert_eq!(legacy.floor_grid, None);
+        let mut unknown = checkpoint.clone();
+        unknown.floor_grid = None;
+        let restored = TransientCheckpoint::from_text(&unknown.to_text()).unwrap();
+        assert_eq!(restored.floor_grid, None);
         assert_eq!(
-            legacy.floor_landing_grid(),
+            restored.floor_landing_grid(),
             super::super::FloorLandingGrid::default()
         );
-        assert!(legacy.to_text().contains("\nfloor_march unknown\n"));
+        assert!(restored.to_text().contains("\nfloor_march unknown\n"));
 
         for march in [
             super::super::FloorMarch {
@@ -12035,7 +11276,7 @@ mod tests {
     /// a row that is out of order, not finite or names a device with a space
     /// is refused.
     #[test]
-    fn the_published_row_round_trips_and_reads_none_from_older_files() {
+    fn the_published_row_round_trips() {
         let checkpoint = sample();
         let none = checkpoint.to_text();
         assert!(none.contains("\npublished_row none\n"));
@@ -12049,12 +11290,6 @@ mod tests {
             TransientCheckpoint::from_text(&restored.to_text()).unwrap(),
             restored
         );
-
-        let legacy =
-            TransientCheckpoint::from_text(&legacy_text(&restored, floor_march::FORMAT_VERSION))
-                .unwrap();
-        assert_eq!(legacy.published_row(), None);
-        assert_eq!(legacy.to_text(), none);
 
         for invalid in [
             row.replace("published_voltage 2 -50.005", "published_voltage 0 -50.005"),
@@ -12071,7 +11306,7 @@ mod tests {
     /// a quote and a backslash included; a file from before the section reads
     /// with none; and a row whose digest is not BLAKE3 hex is refused.
     #[test]
-    fn replayed_vcd_files_round_trip_and_read_empty_from_older_files() {
+    fn replayed_vcd_files_round_trip() {
         let mut checkpoint = sample();
         checkpoint.vcd_files = vec![
             vcd::ReplayedFile {
@@ -12100,11 +11335,6 @@ mod tests {
             blake3::hash(b"second").to_hex()
         )));
 
-        let legacy =
-            TransientCheckpoint::from_text(&legacy_text(&checkpoint, requested::FORMAT_VERSION))
-                .unwrap();
-        assert!(legacy.vcd_files.is_empty());
-
         let corrupt = text.replace(&blake3::hash(b"first").to_hex().to_string(), "not-hex");
         assert!(TransientCheckpoint::from_text(&corrupt).is_err());
     }
@@ -12114,7 +11344,7 @@ mod tests {
     /// and so does a current file that says so; and a request that is not
     /// ahead of the checkpoint, or out of order, is refused.
     #[test]
-    fn pending_model_breakpoints_round_trip_and_read_unknown_from_older_files() {
+    fn pending_model_breakpoints_round_trip_and_read_unknown() {
         let mut checkpoint = sample();
         let deadline = checkpoint.time + 3.0e-11;
         checkpoint.requested_breakpoints = Some(vec![deadline, 1.0 / 3.0 * 1.0e-5]);
@@ -12133,11 +11363,6 @@ mod tests {
             vec![deadline, 3.0e-6]
         );
 
-        let legacy =
-            TransientCheckpoint::from_text(&legacy_text(&checkpoint, edge::FORMAT_VERSION))
-                .unwrap();
-        assert_eq!(legacy.requested_breakpoints, None);
-        assert!(legacy.requested_breakpoints().is_empty());
         let mut unknown = checkpoint.clone();
         unknown.requested_breakpoints = None;
         assert_eq!(
@@ -12379,14 +11604,16 @@ mod tests {
             let restored = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
             assert_eq!(restored.initial_solution_mode().unwrap(), expected);
 
-            let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 35)).unwrap();
+            let mut unknown = checkpoint.clone();
+            unknown.linearized_startup = None;
+            let unknown = TransientCheckpoint::from_text(&unknown.to_text()).unwrap();
             assert!(
-                legacy
+                unknown
                     .initial_solution_mode()
                     .unwrap_err()
                     .contains("startup recovery policy")
             );
-            assert!(legacy.capability().require_resumable().is_err());
+            assert!(unknown.capability().require_resumable().is_err());
         }
         let text = sample().to_text();
         for field in ["0", "2", "true", "NaN", "", "1 0"] {
@@ -12458,21 +11685,6 @@ mod tests {
     }
 
     #[test]
-    fn sparse_solver_checkpoint_missing_legacy_state_fails_closed() {
-        let original = sample();
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 36)).unwrap();
-        assert!(legacy.accepted_solver_state.is_none());
-        assert!(legacy.capability().require_resumable().is_err());
-        let netlist = Netlist::parse("solver state\nR1 a 0 1k\n.end\n").unwrap();
-        assert!(
-            legacy
-                .validate_resume_capabilities(&netlist)
-                .unwrap_err()
-                .contains("sparse-solver")
-        );
-    }
-
-    #[test]
     fn sparse_solver_checkpoint_parser_charges_cumulative_vector_storage() {
         let state = sample_solver_state(rspice_matrix::RealSolverBackend::Klu);
         let mut text = String::new();
@@ -12534,762 +11746,6 @@ mod tests {
         assert!(TransientCheckpoint::from_text(&text[..end]).is_err());
     }
 
-    fn sample_without_generated_veriloga_state() -> TransientCheckpoint {
-        let mut checkpoint = sample();
-        checkpoint.generated_veriloga_state_available = false;
-        checkpoint.generated_veriloga_instance_states.clear();
-        checkpoint
-    }
-
-    fn legacy_text(checkpoint: &TransientCheckpoint, version: u32) -> String {
-        let text = checkpoint.to_text().replace(
-            &format!("RSPICE-CHECKPOINT {FORMAT_VERSION}"),
-            &format!("RSPICE-CHECKPOINT {version}"),
-        );
-        let mut output = String::new();
-        let mut lines = text.lines();
-        while let Some(line) = lines.next() {
-            if version < published_row::FORMAT_VERSION && line.starts_with("published_") {
-                continue;
-            }
-            if version < floor_march::FORMAT_VERSION && line.starts_with("floor_march ") {
-                continue;
-            }
-            if version < vcd::FORMAT_VERSION
-                && (line.starts_with("vcd_files ") || line.starts_with("vcd_file "))
-            {
-                continue;
-            }
-            if version < requested::FORMAT_VERSION && line.starts_with("pending_model_breakpoints ")
-            {
-                continue;
-            }
-            if version < edge::FORMAT_VERSION
-                && (line.starts_with("pending_edge_completions ")
-                    || line.starts_with("edge_crossing "))
-            {
-                continue;
-            }
-            if version < switch::FORMAT_VERSION && line.starts_with("accepted_switch_") {
-                continue;
-            }
-            if version < mixed::FORMAT_VERSION && line.starts_with("mixed_runtime_image ") {
-                if line == "mixed_runtime_image 1" {
-                    let bytes =
-                        parse_count_header(lines.next().unwrap(), "mixed_runtime_bytes").unwrap();
-                    let mut consumed = 0;
-                    while consumed < bytes {
-                        consumed += lines
-                            .next()
-                            .unwrap()
-                            .strip_prefix("mixed_runtime ")
-                            .unwrap()
-                            .len();
-                    }
-                    assert_eq!(consumed, bytes);
-                }
-                continue;
-            }
-
-            if version < CAPACITOR_INCREMENT_FORMAT_VERSION {
-                if line.starts_with("solution_dependent_capacitor_increment_available ") {
-                    continue;
-                }
-                if line.starts_with("solution_dependent_capacitor_state 1 ") {
-                    let fields = line.split_whitespace().collect::<Vec<_>>();
-                    assert_eq!(fields.len(), 8);
-                    output.push_str(&fields[..7].join(" "));
-                    output.push('\n');
-                    continue;
-                }
-            }
-            if version < BSIM3_STATE_FORMAT_VERSION && line.starts_with("accepted_bsim3_") {
-                if line.starts_with("accepted_bsim3_states ") {
-                    let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
-                    for _ in 0..count {
-                        lines.next().expect("complete BSIM3 state rows");
-                    }
-                }
-                continue;
-            }
-            if version < BSIM4_STATE_FORMAT_VERSION && line.starts_with("accepted_bsim4_") {
-                if line.starts_with("accepted_bsim4_states ") {
-                    let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
-                    for _ in 0..count {
-                        lines.next().expect("complete BSIM4 state rows");
-                    }
-                }
-                continue;
-            }
-            if version < MOSFET_STATE_FORMAT_VERSION && line.starts_with("accepted_mosfet_") {
-                if line.starts_with("accepted_mosfet_states ") {
-                    let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
-                    lines.next().expect("MOSFET extended history flag");
-                    for _ in 0..count {
-                        lines.next().expect("complete MOSFET state rows");
-                    }
-                }
-                continue;
-            }
-            if version < CAPACITOR_SDT_FORMAT_VERSION
-                && line.starts_with("capacitor_sdt_state_available ")
-            {
-                continue;
-            }
-            if version < CAPACITOR_SDT_FORMAT_VERSION && line.starts_with("capacitor_sdt_states ") {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-                for _ in 0..count {
-                    let row = lines.next().unwrap();
-                    let integrals = row
-                        .split_whitespace()
-                        .nth(2)
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap();
-                    for _ in 0..integrals {
-                        lines.next().unwrap();
-                    }
-                }
-                continue;
-            }
-            if version < BEHAVIORAL_SDT_FORMAT_VERSION
-                && line.starts_with("behavioral_state_available ")
-            {
-                continue;
-            }
-            if version < BEHAVIORAL_SDT_FORMAT_VERSION && line.starts_with("behavioral_states ") {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-                for _ in 0..count {
-                    let row = lines.next().unwrap();
-                    let integrals = row
-                        .split_whitespace()
-                        .nth(3)
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap();
-                    for _ in 0..integrals {
-                        lines.next().unwrap();
-                    }
-                }
-                continue;
-            }
-            if version < BJT_PHASE_SLOPE_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transport_slope ")
-            {
-                continue;
-            }
-            if version < BJT_WEIL_HISTORY_FORMAT_VERSION && line.starts_with("accepted_bjt_weil ") {
-                continue;
-            }
-            if version < BJT_PHASE_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transport ")
-            {
-                continue;
-            }
-            if version < SIDED_TRANSPORT_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transport ")
-            {
-                let fields = line.split_whitespace().collect::<Vec<_>>();
-                let count = fields[1].parse::<usize>().unwrap();
-                let end = if count == 0 { 2 } else { 3 + 2 * count };
-                if count != 0 {
-                    assert_eq!(fields[end], "0", "legacy fixture cannot discard jump sides");
-                }
-                output.push_str(&fields[..end].join(" "));
-                output.push('\n');
-                continue;
-            }
-            if version < TRANSPORT_EVENT_ORDER_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transport ")
-            {
-                let fields = line.split_whitespace().collect::<Vec<_>>();
-                let count = fields[1].parse::<usize>().unwrap();
-                let end = if count == 0 {
-                    2
-                } else {
-                    let left_index = 3 + 2 * count;
-                    left_index + 1 + 2 * fields[left_index].parse::<usize>().unwrap()
-                };
-                if count != 0 {
-                    assert_eq!(
-                        fields[end], "0",
-                        "legacy fixture cannot discard known event orders"
-                    );
-                }
-                output.push_str(&fields[..end].join(" "));
-                output.push('\n');
-                continue;
-            }
-            if version < BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transient_history ")
-            {
-                output.push_str(line.rsplit_once(' ').unwrap().0);
-                output.push('\n');
-                continue;
-            }
-            if version < JFET_CURRENT_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_jfet_transient_history ")
-            {
-                output.push_str(
-                    &line
-                        .split_whitespace()
-                        .take(24)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                );
-                output.push('\n');
-                continue;
-            }
-            if version < JFET_STATE_FORMAT_VERSION {
-                if line.starts_with("accepted_jfet_nonlinear_states ")
-                    || line.starts_with("accepted_jfet_transient_histories ")
-                {
-                    let count = line
-                        .split_whitespace()
-                        .nth(1)
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap();
-                    for _ in 0..count {
-                        lines.next().expect("JFET checkpoint row");
-                    }
-                    continue;
-                }
-                if line.starts_with("accepted_jfet_transient_dt ") {
-                    continue;
-                }
-            }
-            if version < SOLVER_STATE_FORMAT_VERSION && line.starts_with("accepted_solver_state ") {
-                if !line.ends_with(" none") {
-                    for row in lines.by_ref() {
-                        if row == "accepted_solver_end" {
-                            break;
-                        }
-                    }
-                }
-                continue;
-            }
-            if version < EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION
-                && line.starts_with("accepted_integration_runtime ")
-            {
-                if line.contains(" unavailable-legacy") {
-                    continue;
-                }
-                let blocker_header = lines.next().expect("integration runtime blockers");
-                let blocker_count = blocker_header
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("integration runtime blocker count")
-                    .parse::<usize>()
-                    .expect("numeric integration runtime blocker count");
-                for _ in 0..blocker_count {
-                    lines.next().expect("integration runtime blocker row");
-                }
-                lines.next().expect("integration runtime policy");
-                if line.contains(" restart-normalized ") {
-                    continue;
-                }
-                lines.next().expect("integration runtime LTE header");
-                for _ in 0..6 {
-                    let header = lines.next().expect("integration runtime LTE vector header");
-                    let count = header
-                        .split_whitespace()
-                        .nth(1)
-                        .expect("integration runtime LTE vector count")
-                        .parse::<usize>()
-                        .expect("numeric integration runtime LTE vector count");
-                    for _ in 0..count {
-                        lines.next().expect("integration runtime LTE vector row");
-                    }
-                }
-                let trapgear = lines.next().expect("integration runtime Trap/Gear header");
-                if !trapgear.ends_with(" none") {
-                    let count = trapgear
-                        .split_whitespace()
-                        .nth(2)
-                        .expect("integration runtime Trap/Gear lane count")
-                        .parse::<usize>()
-                        .expect("numeric integration runtime Trap/Gear lane count");
-                    for _ in 0..count {
-                        lines.next().expect("integration runtime Trap/Gear lane");
-                    }
-                }
-                lines.next().expect("integration runtime next order");
-                for _ in 0..3 {
-                    lines
-                        .next()
-                        .expect("integration runtime vector availability");
-                    let header = lines.next().expect("integration runtime vector header");
-                    let count = header
-                        .split_whitespace()
-                        .nth(1)
-                        .expect("integration runtime vector count")
-                        .parse::<usize>()
-                        .expect("numeric integration runtime vector count");
-                    for _ in 0..count {
-                        lines.next().expect("integration runtime vector row");
-                    }
-                }
-                continue;
-            }
-            if version < 13 && line.starts_with("inductor_flux_history_available ") {
-                continue;
-            }
-            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
-                && line.starts_with("solution_dependent_capacitor_state_available ")
-            {
-                continue;
-            }
-            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
-                && line.starts_with("cap_effective_capacitances ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("effective capacitor value count")
-                    .parse::<usize>()
-                    .expect("numeric effective capacitor value count");
-                for _ in 0..count {
-                    lines.next().expect("complete effective capacitor values");
-                }
-                continue;
-            }
-            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
-                && line.starts_with("solution_dependent_capacitor_states ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("solution-dependent capacitor state count")
-                    .parse::<usize>()
-                    .expect("numeric solution-dependent capacitor state count");
-                for _ in 0..count {
-                    let state = lines
-                        .next()
-                        .expect("complete solution-dependent capacitor state rows");
-                    let fields = state.split_whitespace().collect::<Vec<_>>();
-                    if fields.get(1) == Some(&"1") {
-                        let dcdx_count = fields[5]
-                            .parse::<usize>()
-                            .expect("numeric dC/dx history count");
-                        let dqdx_count = fields[6]
-                            .parse::<usize>()
-                            .expect("numeric dQ/dx history count");
-                        for _ in 0..dcdx_count.saturating_add(dqdx_count) {
-                            lines
-                                .next()
-                                .expect("complete solution-dependent capacitor partials");
-                        }
-                    }
-                }
-                continue;
-            }
-            if version < 13 && line.starts_with("inductors ") {
-                // Pre-13 files carried three inductor columns
-                // (i_prev, i_prev_prev, v_prev): drop the flux-history column.
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("inductor checkpoint row count")
-                    .parse::<usize>()
-                    .expect("numeric inductor checkpoint row count");
-                output.push_str(line);
-                output.push('\n');
-                for _ in 0..count {
-                    let row = lines.next().expect("complete inductor checkpoint rows");
-                    let fields = row.split_whitespace().collect::<Vec<_>>();
-                    assert_eq!(
-                        fields.len(),
-                        4,
-                        "current format writes four inductor columns"
-                    );
-                    output.push_str(&format!("{} {} {}\n", fields[0], fields[1], fields[3]));
-                }
-                continue;
-            }
-            if version < 8 && line.starts_with("netlist_identity ") {
-                continue;
-            }
-            if version < 14 && line.starts_with("restart_identity ") {
-                continue;
-            }
-            if version < SOURCE_TIME_BASIS_FORMAT_VERSION && line.starts_with("source_time_basis ")
-            {
-                continue;
-            }
-            if version < 14 && line.starts_with("integration_max_step ") {
-                continue;
-            }
-            if version < 15 && line.starts_with("integration_continuation ") {
-                continue;
-            }
-            if (16..CONTROLLER_PHASE_FORMAT_VERSION).contains(&version)
-                && line.starts_with("integration_continuation proposed ")
-            {
-                let fields = line.split_whitespace().collect::<Vec<_>>();
-                assert_eq!(
-                    fields.len(),
-                    7,
-                    "current proposed continuation carries six payload fields"
-                );
-                output.push_str(&format!(
-                    "integration_continuation proposed {} {} {}\n",
-                    fields[2], fields[3], fields[4]
-                ));
-                continue;
-            }
-            if version == 15 && line.starts_with("integration_continuation proposed ") {
-                let next_step = line
-                    .split_whitespace()
-                    .nth(2)
-                    .expect("current proposed continuation carries its next step");
-                output.push_str(&format!("integration_continuation {next_step}\n"));
-                continue;
-            }
-            if version < 14 && line.starts_with("pending_tline_arrivals ") {
-                continue;
-            }
-            if version < 14 && line.starts_with("dynamic_tline_breakpoints_added ") {
-                continue;
-            }
-            if version < 9 && line.starts_with("simulation_identity ") {
-                continue;
-            }
-            if version < 12 && line.starts_with("startup_mode ") {
-                continue;
-            }
-            if version < 36 && line.starts_with("linearized_startup ") {
-                continue;
-            }
-            if version < 10 && line.starts_with("xyce_memristor_resistance_stores ") {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("memristor store checkpoint vector count")
-                    .parse::<usize>()
-                    .expect("numeric memristor store checkpoint vector count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete memristor store checkpoint vector");
-                }
-                continue;
-            }
-            if version < XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION
-                && line.starts_with("xyce_team_resistance_noise_states ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("TEAM resistance-noise checkpoint row count")
-                    .parse::<usize>()
-                    .expect("numeric TEAM resistance-noise checkpoint row count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete TEAM resistance-noise checkpoint rows");
-                }
-                continue;
-            }
-            if version < 11 && line.starts_with("generic_switch_stores ") {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("generic switch checkpoint row count")
-                    .parse::<usize>()
-                    .expect("numeric generic switch checkpoint row count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete generic switch checkpoint rows");
-                }
-                continue;
-            }
-            if version < NATIVE_NONLINEAR_FORMAT_VERSION
-                && line.starts_with("accepted_nonlinear_state_available ")
-            {
-                continue;
-            }
-            if version < NATIVE_NONLINEAR_FORMAT_VERSION
-                && line.starts_with("accepted_nonlinear_blockers ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted nonlinear blocker count")
-                    .parse::<usize>()
-                    .expect("numeric accepted nonlinear blocker count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete accepted nonlinear blocker rows");
-                }
-                continue;
-            }
-            if version < NATIVE_NONLINEAR_FORMAT_VERSION
-                && line.starts_with("accepted_diode_nonlinear_states ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted diode state count")
-                    .parse::<usize>()
-                    .expect("numeric accepted diode state count");
-                for _ in 0..count {
-                    lines.next().expect("complete accepted diode state rows");
-                }
-                continue;
-            }
-            if version < NATIVE_NONLINEAR_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_nonlinear_states ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted BJT state count")
-                    .parse::<usize>()
-                    .expect("numeric accepted BJT state count");
-                for _ in 0..count {
-                    lines.next().expect("complete accepted BJT state header");
-                    let values = lines
-                        .next()
-                        .expect("accepted BJT state values header")
-                        .split_whitespace()
-                        .nth(1)
-                        .expect("accepted BJT state values count")
-                        .parse::<usize>()
-                        .expect("numeric accepted BJT state values count");
-                    for _ in 0..values {
-                        lines.next().expect("complete accepted BJT state values");
-                    }
-                }
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_junction_history_available ")
-            {
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_junction_history_blockers ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted junction-history blocker count")
-                    .parse::<usize>()
-                    .expect("numeric accepted junction-history blocker count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete accepted junction-history blocker rows");
-                }
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transient_histories ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted BJT transient-history count")
-                    .parse::<usize>()
-                    .expect("numeric accepted BJT transient-history count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete accepted BJT transient-history row");
-                    lines
-                        .next()
-                        .expect("complete accepted BJT charge-snapshot row");
-                }
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_bjt_transient_dt ")
-            {
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_diode_transient_histories ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("accepted diode transient-history count")
-                    .parse::<usize>()
-                    .expect("numeric accepted diode transient-history count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete accepted diode transient-history row");
-                }
-                continue;
-            }
-            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
-                && line.starts_with("accepted_diode_transient_dt ")
-            {
-                continue;
-            }
-            if version < 14 && line.starts_with("tline_state_available ") {
-                continue;
-            }
-            if version < 14
-                && (line.starts_with("tline_blockers ") || line.starts_with("tline_states "))
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("transmission-line checkpoint row count")
-                    .parse::<usize>()
-                    .expect("numeric transmission-line checkpoint row count");
-                assert_eq!(
-                    count, 0,
-                    "the generic legacy fixture only supports empty transmission-line state"
-                );
-                continue;
-            }
-            if version < 7 && line.starts_with("generated_veriloga_state_available ") {
-                break;
-            }
-            if version < GENERATED_IDENTITY_FORMAT_VERSION
-                && line.starts_with("generated_veriloga_state ")
-            {
-                let fields = line.split_whitespace().collect::<Vec<_>>();
-                assert_eq!(fields.len(), 8, "current generated state header");
-                output.push_str(fields[0]);
-                output.push(' ');
-                output.push_str(fields[1]);
-                output.push(' ');
-                output.push_str(fields[2]);
-                output.push(' ');
-                output.push_str(fields[5]);
-                output.push_str(if version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
-                    " 4\n"
-                } else if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-                    " 1\n"
-                } else if version < GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
-                    " 2\n"
-                } else {
-                    " 3\n"
-                });
-                continue;
-            }
-            if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION
-                && line.starts_with("idt_state ")
-            {
-                output.push_str(line);
-                output.push('\n');
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("generated IDT state count")
-                    .parse::<usize>()
-                    .expect("numeric generated IDT state count");
-                for _ in 0..count {
-                    let row = lines.next().expect("complete generated IDT state row");
-                    let fields = row.split_whitespace().collect::<Vec<_>>();
-                    assert_eq!(fields.len(), 4, "current generated IDT state row");
-                    output.push_str(fields[0]);
-                    output.push(' ');
-                    output.push_str(fields[3]);
-                    output.push('\n');
-                }
-                continue;
-            }
-            if version < GENERATED_IDTMOD_STATE_FORMAT_VERSION {
-                if line.starts_with("idtmod_state ") {
-                    assert_eq!(
-                        line, "idtmod_state 0",
-                        "legacy fixtures cannot contain circular state"
-                    );
-                    continue;
-                }
-                if line.starts_with("generated_veriloga_state ") {
-                    let (header, _) = line.rsplit_once(' ').expect("generated state version");
-                    output.push_str(header);
-                    output.push_str(" 4\n");
-                    continue;
-                }
-            }
-            if version < GENERATED_TERMINAL_CURRENT_FORMAT_VERSION
-                && line.starts_with("terminal_currents ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("generated terminal-current count")
-                    .parse::<usize>()
-                    .expect("numeric generated terminal-current count");
-                for _ in 0..count {
-                    lines
-                        .next()
-                        .expect("complete generated terminal-current vector");
-                }
-                continue;
-            }
-            if version < GENERATED_EVENT_STATE_FORMAT_VERSION && line.starts_with("event_state ") {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("generated event-state count")
-                    .parse::<usize>()
-                    .expect("numeric generated event-state count");
-                for _ in 0..count {
-                    lines.next().expect("complete generated event-state vector");
-                }
-                continue;
-            }
-            if version < RUNTIME_VERILOGA_FORMAT_VERSION
-                && line.starts_with("runtime_veriloga_state_available ")
-            {
-                continue;
-            }
-            if version < RUNTIME_VERILOGA_FORMAT_VERSION
-                && line.starts_with("runtime_veriloga_states ")
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("runtime Verilog-A checkpoint count")
-                    .parse::<usize>()
-                    .expect("numeric runtime Verilog-A checkpoint count");
-                assert_eq!(count, 0, "legacy fixture has no runtime Verilog-A state");
-                continue;
-            }
-            if version < 6 && line.starts_with("lte_reference_mode ") {
-                continue;
-            }
-            if version < 6
-                && (line.starts_with("lte_signal_global ") || line.starts_with("lte_signal_local "))
-            {
-                let count = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("LTE checkpoint vector count")
-                    .parse::<usize>()
-                    .expect("numeric LTE checkpoint vector count");
-                for _ in 0..count {
-                    lines.next().expect("complete LTE checkpoint vector");
-                }
-                continue;
-            }
-            output.push_str(line);
-            output.push('\n');
-        }
-        output
-    }
-
     #[cfg(feature = "veriloga")]
     fn runtime_veriloga_slew_words(
         state_version: u32,
@@ -13312,9 +11768,7 @@ mod tests {
             accepted_time.to_bits(),
         ];
         if let Some(initialized) = initialized {
-            if state_version >= 4 {
-                words.push(0); // optional slew catch-up corner
-            }
+            words.push(0); // optional slew catch-up corner
             words.push(u64::from(initialized));
         }
         words.extend([
@@ -13323,9 +11777,7 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]);
-        if state_version >= 11 {
-            words.push(0); // exact idtmod origins
-        }
+        words.push(0); // exact idtmod origins
         words
     }
 
@@ -13352,9 +11804,7 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ];
-        if state_version >= 11 {
-            words.push(0); // exact idtmod origins
-        }
+        words.push(0); // exact idtmod origins
         words
     }
 
@@ -13391,9 +11841,7 @@ mod tests {
             0,                                  // Zi filters
             0,                                  // optional timer-event bound
         ];
-        if state_version >= 11 {
-            words.push(0); // exact idtmod origins
-        }
+        words.push(0); // exact idtmod origins
         words
     }
 
@@ -13410,12 +11858,10 @@ mod tests {
             0, // state initialization flags
             1, // delay buffers
         ];
-        if state_version >= 6 {
-            words.extend([
-                2,                 // bounded-delay configuration
-                2.0_f64.to_bits(), // maximum delay
-            ]);
-        }
+        words.extend([
+            2,                 // bounded-delay configuration
+            2.0_f64.to_bits(), // maximum delay
+        ]);
         words.extend([
             2, // accepted samples
             0.0_f64.to_bits(),
@@ -13423,12 +11869,8 @@ mod tests {
             accepted_time.to_bits(),
             4.0_f64.to_bits(),
         ]);
-        if state_version >= 12 {
-            words.push(0); // left limits
-        }
-        if state_version >= 13 {
-            words.push(0); // known event orders
-        }
+        words.push(0); // left limits
+        words.push(0); // known event orders
         words.extend([
             0, // transition filters
             0, // slew filters
@@ -13437,9 +11879,7 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]);
-        if state_version >= 11 {
-            words.push(0); // exact idtmod origins
-        }
+        words.push(0); // exact idtmod origins
         words
     }
 
@@ -13463,23 +11903,19 @@ mod tests {
             0.5_f64.to_bits(),
             (-0.25_f64).to_bits(),
         ];
-        if state_version >= 7 {
-            words.extend([
-                2, // older accepted state
-                0.375_f64.to_bits(),
-                (-0.125_f64).to_bits(),
-                2, // previous physical derivative
-                1.0_f64.to_bits(),
-                (-2.0_f64).to_bits(),
-            ]);
-        }
+        words.extend([
+            2, // older accepted state
+            0.375_f64.to_bits(),
+            (-0.125_f64).to_bits(),
+            2, // previous physical derivative
+            1.0_f64.to_bits(),
+            (-2.0_f64).to_bits(),
+        ]);
         words.extend([
             0, // Zi filters
             0, // optional timer-event bound
         ]);
-        if state_version >= 11 {
-            words.push(0); // exact idtmod origins
-        }
+        words.push(0); // exact idtmod origins
         words
     }
 
@@ -13574,7 +12010,7 @@ mod tests {
     }
 
     #[test]
-    fn integration_continuation_round_trips_and_legacy_state_fails_closed() {
+    fn integration_continuation_round_trips_and_fails_closed_when_invalid() {
         let checkpoint = sample();
         let continuation = checkpoint
             .validated_integration_continuation()
@@ -13595,27 +12031,6 @@ mod tests {
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current continuation round-trips");
         assert_eq!(checkpoint, restored);
-
-        for version in [14, 15, 16] {
-            let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, version))
-                .unwrap_or_else(|error| {
-                    panic!("version-{version} checkpoint remains readable: {error}")
-                });
-            assert!(
-                legacy
-                    .validated_integration_continuation()
-                    .expect_err("incomplete legacy continuation must fail closed")
-                    .contains("does not record complete integration continuation state")
-            );
-        }
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 14))
-            .expect("version-14 checkpoint remains readable");
-        assert!(
-            legacy
-                .to_text()
-                .contains("integration_continuation unavailable\n"),
-            "reserializing legacy state must not invent a proposal"
-        );
 
         for invalid in [0.0, -1.0e-9, Value::NAN, Value::INFINITY] {
             let mut malformed = checkpoint.clone();
@@ -13684,13 +12099,14 @@ mod tests {
                 .contains("must not exceed")
         );
 
-        let mut legacy_origin = legacy;
-        legacy_origin.time = 0.0;
-        legacy_origin.integration_max_step = None;
+        let mut unavailable_origin = checkpoint.clone();
+        unavailable_origin.integration_continuation = IntegrationContinuation::Unavailable;
+        unavailable_origin.time = 0.0;
+        unavailable_origin.integration_max_step = None;
         assert!(
-            legacy_origin
+            unavailable_origin
                 .bind_authenticated_synthetic_origin_max_step(1.0e-9)
-                .expect_err("legacy t=0 state is not a synthetic origin")
+                .expect_err("an unavailable t=0 continuation is not a synthetic origin")
                 .contains("does not carry synthetic integration state")
         );
     }
@@ -13915,30 +12331,6 @@ mod tests {
     }
 
     #[test]
-    fn v20_arbitrary_proposal_lacks_exact_integration_runtime_and_fails_closed() {
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 20))
-            .expect("version-20 checkpoint remains readable for diagnostics");
-        assert!(matches!(
-            legacy.accepted_integration_runtime,
-            AcceptedIntegrationRuntime::UnavailableLegacy
-        ));
-        let error = legacy
-            .validated_integration_continuation()
-            .expect_err("v20 arbitrary proposal must not synthesize exact runtime state");
-        assert!(
-            error.contains("does not record exact accepted integration runtime"),
-            "unexpected error: {error}"
-        );
-        let error = legacy
-            .validate_resume_capabilities(&Netlist::default())
-            .expect_err("v20 resume capability validation must fail before construction");
-        assert!(
-            error.contains("does not record accepted integration runtime state"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
     fn retained_value_count_includes_accepted_integration_controls_and_payloads() {
         let without_direct_q = sample();
         let mut without_source_basis = without_direct_q.clone();
@@ -14098,14 +12490,6 @@ mod tests {
                 .validate_numeric_state()
                 .unwrap_err()
                 .contains("accepted_external_bc_current")
-        );
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 41)).unwrap();
-        assert_eq!(
-            legacy
-                .accepted_junction_history
-                .bjt_history
-                .accepted_external_bc_current,
-            vec![0.0]
         );
         let mut duplicate = sample();
         duplicate
@@ -14581,72 +12965,6 @@ mod tests {
     }
 
     #[test]
-    fn v17_fails_closed_for_native_diode_and_bjt_resume() {
-        let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 17))
-            .expect("version-17 checkpoint remains parseable for diagnostics");
-        assert!(!legacy.accepted_nonlinear_state_available);
-        assert!(legacy.accepted_nonlinear_states.diodes.is_empty());
-        assert!(legacy.accepted_nonlinear_states.bjts.is_empty());
-
-        let mut target = engine
-            .build_circuit(&netlist)
-            .expect("legacy restore target builds");
-        let error = legacy
-            .inject(&mut target)
-            .expect_err("v17 cannot reconstruct accepted diode/BJT state");
-        assert!(
-            error.contains("legacy transient checkpoint")
-                && error.contains("accepted native nonlinear state"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn v19_junction_history_is_target_aware_and_fails_closed_for_junction_devices() {
-        let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 19))
-            .expect("version-19 checkpoint remains parseable for diagnostics");
-        assert!(!legacy.accepted_junction_history.available);
-        assert!(legacy.accepted_junction_history.resume_blockers.is_empty());
-        assert!(accepted_junction_history_payload_is_empty(
-            &legacy.accepted_junction_history
-        ));
-
-        let target = engine
-            .build_circuit(&netlist)
-            .expect("v19 junction-history target builds");
-        let error = legacy
-            .restore_accepted_junction_transient_history(&target)
-            .expect_err("v19 cannot reconstruct accepted BJT/diode histories")
-            .to_string();
-        assert!(
-            error.contains("legacy transient checkpoint")
-                && error.contains("junction transient history"),
-            "unexpected error: {error}"
-        );
-
-        let empty = engine
-            .build_circuit(&Netlist::default())
-            .expect("empty target circuit builds");
-        let RestoredJunctionTransientHistories {
-            bsim3: _,
-            bsim4: _,
-            mosfet: _,
-            bjt,
-            diode,
-            jfet,
-            vbic_snapshot_cache: cache,
-        } = legacy
-            .restore_accepted_junction_transient_history(&empty)
-            .expect("v19 missing junction history is irrelevant to a junction-free target");
-        assert_eq!(bjt, BjtTransientHistory::default());
-        assert_eq!(diode, DiodeTransientHistory::default());
-        assert_eq!(jfet, JfetTransientHistory::default());
-        assert!(cache.is_empty());
-    }
-
-    #[test]
     fn accepted_junction_blockers_round_trip_and_fail_before_circuit_construction() {
         let mut checkpoint = sample();
         checkpoint.accepted_junction_history.resume_blockers =
@@ -15090,351 +13408,11 @@ mod tests {
     }
 
     #[test]
-    fn startup_mode_round_trips_and_legacy_format_does_not_invent_it() {
+    fn startup_mode_round_trips() {
         let checkpoint = sample();
         let current = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current checkpoint parses");
         assert_eq!(current.startup_mode(), Some(TransientStartupMode::Uic));
-
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 11))
-            .expect("version-eleven checkpoint remains parseable for diagnostics");
-        assert_eq!(legacy.startup_mode(), None);
-        assert!(
-            !legacy.runtime_veriloga_state_available,
-            "legacy parsing must never invent runtime Verilog-A state provenance"
-        );
-    }
-
-    #[test]
-    fn v17_runtime_veriloga_tail_parses_without_reinterpreting_controller_phase() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 17))
-            .expect("version-17 runtime Verilog-A checkpoint remains parseable");
-
-        assert!(
-            legacy.runtime_veriloga_state_available,
-            "v17 introduced runtime Verilog-A state provenance"
-        );
-        assert!(matches!(
-            legacy.integration_continuation,
-            IntegrationContinuation::Unavailable
-        ));
-        assert!(matches!(
-            legacy.accepted_integration_runtime,
-            AcceptedIntegrationRuntime::UnavailableLegacy
-        ));
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v22_legacy_runtime_veriloga_rows_are_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_slew_words(1, checkpoint.time, None);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 22), 1, &words);
-
-        let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("format-22 runtime Verilog-A v1 payload remains parseable");
-        assert!(
-            !restored.runtime_veriloga_state_available,
-            "v1 slew history has no initialization bit and cannot be exact resume state"
-        );
-        assert!(
-            restored.runtime_veriloga_instance_states.is_empty(),
-            "validated legacy rows must not be exposed as current accepted state"
-        );
-
-        let mut malformed_words = words;
-        malformed_words[1] = 2;
-        let malformed =
-            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 22), 1, &malformed_words);
-        let error = TransientCheckpoint::from_text(&malformed)
-            .expect_err("legacy runtime payload tags must still be fully validated");
-        assert!(
-            error.contains("legacy payload is invalid") && error.contains("boolean tag"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v23_runtime_veriloga_rows_are_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_idtmod_words(2, checkpoint.time);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 23), 2, &words);
-
-        let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("v23 runtime Verilog-A v2 payload remains parseable");
-        assert!(
-            !restored.runtime_veriloga_state_available,
-            "v2 idtmod history has no common-branch contract and cannot be exact resume state"
-        );
-        assert!(restored.runtime_veriloga_instance_states.is_empty());
-    }
-
-    /// Every checkpoint format that carries a runtime Verilog-A section
-    /// accepts exactly one state version, and refuses either neighbour.
-    ///
-    /// The second column is that version, written out per format rather than
-    /// read back from the parser's ladder: the ladder is the contract under
-    /// test, and a table derived from it would agree with a renumbering that
-    /// moved a shipped format's contract as readily as with a correct one.
-    /// The table is checked below for one row per format from the first that
-    /// carries the section through the current one, so a format bump that
-    /// leaves the new format unpinned fails here rather than going untested —
-    /// which is what happened to `31`, written when `31` was current and left
-    /// asserting current-format behaviour after two renumberings moved it into
-    /// the legacy ladder.
-    #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 48] = [
-        (17, 1),
-        (18, 1),
-        (19, 1),
-        (20, 1),
-        (21, 1),
-        (22, 1),
-        (23, 2),
-        (24, 3),
-        (25, 3),
-        (26, 3),
-        (27, 4),
-        (28, 4),
-        (29, 5),
-        (30, 6),
-        (31, 7),
-        (32, 7),
-        (33, 7),
-        (34, 8),
-        (35, 8),
-        (36, 8),
-        (37, 8),
-        (38, 8),
-        (39, 8),
-        (40, 9),
-        (41, 10),
-        (42, 10),
-        (43, 11),
-        (44, 11),
-        (45, 11),
-        (46, 12),
-        (47, 13),
-        (48, 13),
-        (49, 13),
-        (50, 13),
-        (51, 13),
-        (52, 13),
-        (53, 13),
-        (54, 13),
-        (55, 13),
-        (56, 13),
-        (57, 13),
-        (58, 13),
-        (59, 13),
-        (60, 13),
-        (61, 13),
-        (62, 13),
-        (63, 13),
-        (64, 13),
-    ];
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn runtime_veriloga_checkpoint_versions_cannot_cross_history_contracts() {
-        let contracts = RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS;
-        for (index, (outer_version, required_version)) in contracts.iter().enumerate() {
-            assert_eq!(
-                *outer_version,
-                RUNTIME_VERILOGA_FORMAT_VERSION + index as u32,
-                "the table states one row per checkpoint format, in order"
-            );
-            assert!(
-                *required_version >= 1
-                    && *required_version
-                        <= rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION,
-                "format {outer_version} cannot require a state version that never existed"
-            );
-        }
-        let (last_format, last_version) = contracts[contracts.len() - 1];
-        assert_eq!(
-            last_format, FORMAT_VERSION,
-            "a checkpoint format was added without a row pinning the runtime Verilog-A \
-             state version it accepts"
-        );
-        assert_eq!(
-            last_version,
-            rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION,
-            "the current format accepts the current runtime Verilog-A state version"
-        );
-
-        let checkpoint = sample_without_generated_veriloga_state();
-        for (outer_version, required_version) in contracts {
-            for inner_version in [required_version - 1, required_version + 1] {
-                // Outer formats that share today's runtime state encoding
-                // use the current decoder's version gate. Only formats with
-                // older runtime encodings enter the legacy validation ladder.
-                let expected = if required_version
-                    == rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION
-                {
-                    format!(
-                        "unsupported runtime Verilog-A state version {inner_version}; \
-                         expected version {required_version}"
-                    )
-                } else if required_version == 11 || required_version == 12 {
-                    format!(
-                        "requires version {required_version} for checkpoint format {outer_version}"
-                    )
-                } else {
-                    format!(
-                        "uses state version {inner_version}, \
-                         expected legacy version {required_version}"
-                    )
-                };
-                let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
-                let fixture = replace_empty_runtime_veriloga_tail(
-                    legacy_text(&checkpoint, outer_version),
-                    inner_version,
-                    &words,
-                );
-                let error = TransientCheckpoint::from_text(&fixture)
-                    .expect_err("outer and inner history contracts must agree");
-                assert!(
-                    error.contains(&expected),
-                    "outer={outer_version} inner={inner_version}: unexpected error: {error}"
-                );
-            }
-        }
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v26_runtime_veriloga_rows_without_slew_corners_are_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_idtmod_words(3, checkpoint.time);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 26), 3, &words);
-
-        let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("v26 runtime Verilog-A v3 payload remains parseable");
-        assert!(!restored.runtime_veriloga_state_available);
-        assert!(restored.runtime_veriloga_instance_states.is_empty());
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v27_and_v28_runtime_veriloga_rows_without_transition_queues_are_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_idtmod_words(4, checkpoint.time);
-        for outer_version in [27, 28] {
-            let fixture = replace_empty_runtime_veriloga_tail(
-                legacy_text(&checkpoint, outer_version),
-                4,
-                &words,
-            );
-
-            let restored = TransientCheckpoint::from_text(&fixture).unwrap_or_else(|error| {
-                panic!(
-                    "v{outer_version} runtime Verilog-A v4 payload must remain parseable: {error}"
-                )
-            });
-            assert!(!restored.runtime_veriloga_state_available);
-            assert!(restored.runtime_veriloga_instance_states.is_empty());
-        }
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v29_runtime_veriloga_rows_without_absdelay_configuration_are_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_absdelay_words(5, checkpoint.time);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 29), 5, &words);
-
-        let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("v29 runtime Verilog-A v5 absdelay history remains parseable");
-        assert!(!restored.runtime_veriloga_state_available);
-        assert!(restored.runtime_veriloga_instance_states.is_empty());
-
-        let mut malformed_words = words;
-        malformed_words[10] = Value::NAN.to_bits();
-        let malformed =
-            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 29), 5, &malformed_words);
-        let error = TransientCheckpoint::from_text(&malformed)
-            .expect_err("legacy v5 absdelay history must remain fully validated");
-        assert!(
-            error.contains("legacy payload is invalid")
-                && error.contains("delay sample 0 is not finite"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v30_runtime_veriloga_rows_without_exact_laplace_history_are_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_laplace_words(6, checkpoint.time);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 30), 6, &words);
-
-        let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("v30 runtime Verilog-A v6 Laplace state remains parseable");
-        assert!(
-            !restored.runtime_veriloga_state_available,
-            "v6 has no exact Laplace Gear-2/trapezoidal continuation history"
-        );
-        assert!(restored.runtime_veriloga_instance_states.is_empty());
-
-        let mut malformed_words = words;
-        malformed_words[14] = Value::NAN.to_bits();
-        let malformed =
-            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 30), 6, &malformed_words);
-        let error = TransientCheckpoint::from_text(&malformed)
-            .expect_err("legacy v6 Laplace state must remain fully validated");
-        assert!(
-            error.contains("legacy payload is invalid")
-                && error.contains("Laplace filter 0 state contains a non-finite value"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v40_runtime_veriloga_state_without_limiter_history_is_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let mut words = runtime_veriloga_idtmod_words(9, checkpoint.time);
-        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 40), 9, &words);
-        let restored = TransientCheckpoint::from_text(&fixture).unwrap();
-        assert!(!restored.runtime_veriloga_state_available);
-        assert!(restored.runtime_veriloga_instance_states.is_empty());
-        words.push(0);
-        let corrupt = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 40), 9, &words);
-        assert!(
-            TransientCheckpoint::from_text(&corrupt)
-                .unwrap_err()
-                .contains("legacy payload is invalid")
-        );
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn pre_v40_runtime_veriloga_discontinuity_state_is_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_idtmod_words(8, checkpoint.time);
-        for outer_version in 34..40 {
-            let fixture = replace_empty_runtime_veriloga_tail(
-                legacy_text(&checkpoint, outer_version),
-                8,
-                &words,
-            );
-            let restored = TransientCheckpoint::from_text(&fixture)
-                .expect("v8 runtime state remains readable");
-            assert!(!restored.runtime_veriloga_state_available);
-            assert!(restored.runtime_veriloga_instance_states.is_empty());
-        }
-        let mut invalid = words;
-        invalid.push(0);
-        let fixture =
-            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 39), 8, &invalid);
-        assert!(
-            TransientCheckpoint::from_text(&fixture)
-                .unwrap_err()
-                .contains("legacy payload is invalid")
-        );
     }
 
     #[cfg(feature = "veriloga")]
@@ -15458,54 +13436,6 @@ mod tests {
                 fixture,
                 "current initialized={initialized} must preserve every nested payload word"
             );
-        }
-    }
-
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn v41_v42_runtime_state_without_exact_wrap_origins_is_validated_then_discarded() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        let words = runtime_veriloga_idtmod_words(10, checkpoint.time);
-        for outer_version in [41, 42] {
-            let fixture = replace_empty_runtime_veriloga_tail(
-                legacy_text(&checkpoint, outer_version),
-                10,
-                &words,
-            );
-            let restored = TransientCheckpoint::from_text(&fixture)
-                .expect("legacy wrap history remains readable for diagnostics");
-            assert!(!restored.runtime_veriloga_state_available);
-            assert!(restored.runtime_veriloga_instance_states.is_empty());
-            for malformed in 0..7 {
-                let mut invalid = words.clone();
-                match malformed {
-                    0 => invalid[5] = Value::NAN.to_bits(), // previous state value
-                    1 => invalid.push(0),                   // a v11 origin count is not a v10 field
-                    2 => {
-                        invalid.pop();
-                    } // required timer bound is missing
-                    3 => invalid[2] = Value::NAN.to_bits(),
-                    4 => invalid[2] = (-1.0_f64).to_bits(),
-                    5 => {
-                        // missing older lane with a structurally valid vector
-                        invalid[6] = 0;
-                        invalid.remove(7);
-                    }
-                    _ => {
-                        // timer bound must lie strictly after accepted time
-                        *invalid.last_mut().unwrap() = 1;
-                        invalid.push(checkpoint.time.to_bits());
-                    }
-                }
-                let fixture = replace_empty_runtime_veriloga_tail(
-                    legacy_text(&checkpoint, outer_version),
-                    10,
-                    &invalid,
-                );
-                let error = TransientCheckpoint::from_text(&fixture)
-                    .expect_err("malformed legacy state must not be discarded silently");
-                assert!(error.contains("legacy payload is invalid"), "{error}");
-            }
         }
     }
 
@@ -15594,9 +13524,8 @@ mod tests {
 
     #[cfg(feature = "veriloga")]
     #[test]
-    fn runtime_transport_sides_round_trip_and_v43_through_v45_upgrade_v11() {
+    fn runtime_transport_sides_round_trip() {
         let checkpoint = sample();
-        let old_words = runtime_veriloga_absdelay_words(11, checkpoint.time);
         let current_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
         let current_words = runtime_veriloga_absdelay_words(current_version, checkpoint.time);
         let current = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
@@ -15605,21 +13534,6 @@ mod tests {
             &current_words,
         ))
         .unwrap();
-        for version in [43, 44, 45, 46] {
-            let runtime_version = if version == 46 { 12 } else { 11 };
-            let legacy_words = runtime_veriloga_absdelay_words(runtime_version, checkpoint.time);
-            let upgraded = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
-                legacy_text(&checkpoint, version),
-                runtime_version,
-                &legacy_words,
-            ))
-            .unwrap();
-            assert!(upgraded.runtime_veriloga_state_available);
-            assert_eq!(
-                upgraded.runtime_veriloga_instance_states,
-                current.runtime_veriloga_instance_states
-            );
-        }
         let mut sided = current;
         sided.runtime_veriloga_instance_states[0]
             .accepted
@@ -15649,23 +13563,6 @@ mod tests {
                 (-0.0_f64).to_bits()
             );
         }
-        let invalid = replace_empty_runtime_veriloga_tail(checkpoint.to_text(), 11, &old_words);
-        assert!(TransientCheckpoint::from_text(&invalid).is_err());
-        let mut v12_sides = runtime_veriloga_absdelay_words(12, checkpoint.time);
-        assert_eq!(v12_sides[16], 0); // Left-limit count in this explicit wire fixture.
-        v12_sides[16] = 1;
-        v12_sides.splice(17..17, [checkpoint.time.to_bits(), (-0.0_f64).to_bits()]);
-        let restored = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
-            legacy_text(&checkpoint, 46),
-            12,
-            &v12_sides,
-        ))
-        .unwrap();
-        let phase = &restored.runtime_veriloga_instance_states[0]
-            .accepted
-            .delay_buffers[0];
-        assert_eq!(phase.left_limits[0].1.to_bits(), (-0.0_f64).to_bits());
-        assert!(phase.event_orders.is_empty());
     }
 
     #[test]
@@ -15697,7 +13594,7 @@ mod tests {
     }
 
     #[test]
-    fn pem_resistance_store_round_trips_and_legacy_resume_fails_closed() {
+    fn pem_resistance_store_round_trips() {
         let unique = format!(
             "checkpoint-pem-store-{}-{}",
             std::process::id(),
@@ -15774,18 +13671,12 @@ mod tests {
             4321.25f64.to_bits()
         );
 
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 9))
-            .expect("version-9 checkpoint parses");
-        let error = legacy
-            .inject(&mut resumed_circuit)
-            .expect_err("legacy checkpoint lacks PEM store state");
-        assert!(error.contains("memristor resistance store"));
         crate::xspice::unregister_data_file(&positive).expect("unregister positive PEM table");
         crate::xspice::unregister_data_file(&negative).expect("unregister negative PEM table");
     }
 
     #[test]
-    fn signal_history_lte_references_round_trip_and_legacy_resume_fails_closed() {
+    fn signal_history_lte_references_round_trip() {
         let checkpoint = sample();
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current checkpoint format parses");
@@ -15801,16 +13692,6 @@ mod tests {
         let (global, local) = estimator.signal_reference_snapshot();
         assert_eq!(global.to_bits(), 3.25f64.to_bits());
         assert!(local.is_empty());
-
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 5))
-            .expect("version-five checkpoint remains readable");
-        let err = legacy
-            .restore_lte_references(&mut estimator)
-            .expect_err("legacy checkpoint cannot resume signal-history NEWLTE exactly");
-        assert!(
-            err.contains("NEWLTE signal-history"),
-            "unexpected error: {err}"
-        );
     }
 
     #[test]
@@ -15827,72 +13708,6 @@ mod tests {
             .restore_lte_references(&mut estimator)
             .expect_err("checkpoint mode provenance must match the resumed solver");
         assert!(err.contains("does not match"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn legacy_checkpoint_upgrade_does_not_invent_signal_history() {
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 5))
-            .expect("version-five checkpoint remains readable");
-        assert!(!legacy.lte_reference_history_available);
-        assert!(!legacy.generated_veriloga_state_available);
-        assert!(legacy.generated_veriloga_instance_states.is_empty());
-
-        let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
-            .expect("legacy checkpoint can be re-serialized in the current format");
-        assert!(!upgraded.lte_reference_history_available);
-        assert_eq!(upgraded.lte_reference_mode, None);
-        assert!(!upgraded.generated_veriloga_state_available);
-        assert!(upgraded.generated_veriloga_instance_states.is_empty());
-
-        let mut estimator = LteEstimator::with_tolerances_and_reference(
-            1.0e-3,
-            1.0e-6,
-            TransientLteReference::SignalGlobal,
-        );
-        estimator.seed_reference_prefix(&upgraded.solution, upgraded.solution.len());
-        let err = upgraded
-            .restore_lte_references(&mut estimator)
-            .expect_err("upgrading a legacy file cannot synthesize signal history");
-        assert!(
-            err.contains("NEWLTE signal-history"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn version_twenty_one_generated_state_parses_but_resume_state_fails_closed() {
-        let legacy = TransientCheckpoint::from_text(&legacy_text(
-            &sample(),
-            GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION - 1,
-        ))
-        .expect("persistent-state v1 generated payload remains parseable");
-        assert!(
-            !legacy.generated_veriloga_state_available,
-            "v1 lacks generalized IDT input/older history and cannot be resume-authoritative"
-        );
-        assert!(legacy.generated_veriloga_instance_states.is_empty());
-
-        let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
-            .expect("fail-closed legacy representation re-serializes canonically");
-        assert!(!upgraded.generated_veriloga_state_available);
-        assert!(upgraded.generated_veriloga_instance_states.is_empty());
-    }
-
-    #[test]
-    fn generated_state_before_the_split_identity_parses_but_fails_closed() {
-        for version in [
-            GENERATED_EVENT_STATE_FORMAT_VERSION - 1,
-            GENERATED_EVENT_STATE_FORMAT_VERSION,
-            GENERATED_IDENTITY_FORMAT_VERSION - 1,
-        ] {
-            let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), version))
-                .unwrap_or_else(|error| panic!("v{version} remains parseable: {error}"));
-            assert!(
-                !legacy.generated_veriloga_state_available,
-                "v{version} predates the split identity and cannot be resume-authoritative"
-            );
-            assert!(legacy.generated_veriloga_instance_states.is_empty());
-        }
     }
 
     #[test]
@@ -16016,22 +13831,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_v4_checkpoint_migrates_without_fabricating_circular_history() {
-        let checkpoint = sample();
-        for version in [28, 35, 42] {
-            let restored =
-                TransientCheckpoint::from_text(&legacy_text(&checkpoint, version)).unwrap();
-            let state = &restored.generated_veriloga_instance_states[0];
-            assert_eq!(state.state_version, GENERATED_PERSISTENT_STATE_VERSION);
-            assert!(state.state.idtmod.is_empty());
-            assert_eq!(
-                state.state,
-                checkpoint.generated_veriloga_instance_states[0].state
-            );
-        }
-    }
-
-    #[test]
     fn generated_state_parser_rejects_invalid_provenance_shape_and_values() {
         let text = sample().to_text();
         let err = TransientCheckpoint::from_text(&text.replace(
@@ -16124,7 +13923,7 @@ mod tests {
     }
 
     #[test]
-    fn capacitor_charge_increment_checkpoints_preserve_precision_and_legacy_absence() {
+    fn capacitor_charge_increment_checkpoints_preserve_precision() {
         use crate::engine::SpiceDialect;
         let deck = Netlist::parse(
         "Capacitor history precision\nBdrive out 0 V={1+1Meg*time}\nVctrl ctrl 0 PWL(0 1 1n 0)\nC1 out 0 C={1p+1u*V(ctrl)}\n.end\n"
@@ -16168,43 +13967,6 @@ mod tests {
                     .is_err()
             );
             assert!(TransientCheckpoint::from_text(&malformed.to_text()).is_err());
-        }
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 55)).unwrap();
-        assert!(!legacy.solution_dependent_capacitor_increment_available);
-        assert_eq!(
-            legacy.solution_dependent_capacitor_states[0]
-                .as_ref()
-                .unwrap()
-                .q_prev,
-            state.q_prev
-        );
-        let mut circuit = engine.build_circuit(&deck).unwrap();
-        checkpoint.inject(&mut circuit).unwrap();
-        let before = (
-            circuit.capacitors.value_expression_states.clone(),
-            circuit.capacitors.v_prev.clone(),
-            circuit.capacitors.i_prev.clone(),
-        );
-        for encoding in [
-            TransientCheckpointEncoding::Unpacked,
-            TransientCheckpointEncoding::Packed,
-        ] {
-            let upgraded =
-                TransientCheckpoint::from_bytes(&legacy.to_bytes(encoding).unwrap()).unwrap();
-            assert!(!upgraded.solution_dependent_capacitor_increment_available);
-            let error = upgraded.inject(&mut circuit).unwrap_err();
-            assert!(
-                error.contains("does not contain accepted capacitor charge increments"),
-                "{error}"
-            );
-            assert_eq!(
-                before,
-                (
-                    circuit.capacitors.value_expression_states.clone(),
-                    circuit.capacitors.v_prev.clone(),
-                    circuit.capacitors.i_prev.clone()
-                )
-            );
         }
     }
 
@@ -16258,44 +14020,6 @@ mod tests {
             ),
             "checkpoint rejection must occur before any circuit state mutation"
         );
-    }
-
-    #[test]
-    fn legacy_checkpoint_without_inductor_flux_history_fails_closed_for_inductors() {
-        let mut checkpoint = sample();
-        // Keep the generated Verilog-A gate out of the way: this test is
-        // about the inductor refusal, which inject checks after it.
-        checkpoint.generated_veriloga_instance_states.clear();
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 12))
-            .expect("version-12 checkpoint remains readable");
-        assert!(!legacy.inductor_flux_history_available);
-        assert!(legacy.ind_i_prev_prev_prev.is_empty());
-        assert_eq!(legacy.ind_i_prev, checkpoint.ind_i_prev);
-        assert_eq!(legacy.ind_i_prev_prev, checkpoint.ind_i_prev_prev);
-        assert_eq!(legacy.ind_v_prev, checkpoint.ind_v_prev);
-
-        // Re-serializing keeps the absence explicit rather than inventing a
-        // third accepted current.
-        let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
-            .expect("legacy checkpoint re-serializes in the current format");
-        assert!(!upgraded.inductor_flux_history_available);
-        assert!(upgraded.ind_i_prev_prev_prev.is_empty());
-        assert_eq!(upgraded.ind_i_prev_prev, checkpoint.ind_i_prev_prev);
-
-        let mut circuit = CircuitData::new();
-        circuit.inductors.i_prev = vec![41.0];
-        circuit.inductors.i_prev_prev = vec![31.0];
-        circuit.inductors.i_prev_prev_prev = vec![26.0];
-        circuit.inductors.v_prev = vec![21.0];
-        circuit.inductors.names = vec!["L1".to_string()];
-        let err = legacy
-            .inject(&mut circuit)
-            .expect_err("legacy checkpoint cannot resume a circuit with inductors");
-        assert!(
-            err.contains("inductor flux history"),
-            "unexpected error: {err}"
-        );
-        assert_eq!(circuit.inductors.i_prev_prev_prev, vec![26.0]);
     }
 
     #[test]
@@ -16557,7 +14281,7 @@ mod tests {
     }
 
     #[test]
-    fn netlist_identity_is_collision_resistant_and_legacy_v7_resume_fails_closed() {
+    fn netlist_identity_is_collision_resistant() {
         let first = Netlist::parse("identity bench\nr1 1 0 1k\n.end\n").expect("first deck parses");
         let second =
             Netlist::parse("identity bench\nr1 1 0 2k\n.end\n").expect("second deck parses");
@@ -16579,16 +14303,6 @@ mod tests {
             .validate_for(&second)
             .expect_err("changed canonical source must be refused");
         assert!(err.contains("different netlist"), "unexpected error: {err}");
-
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 7))
-            .expect("version-7 checkpoint still parses");
-        let err = legacy
-            .validate_for(&first)
-            .expect_err("legacy FNV-only identity cannot authorize state restore");
-        assert!(
-            err.contains("collision-resistant netlist identity"),
-            "unexpected error: {err}"
-        );
     }
 
     #[test]
@@ -16789,16 +14503,6 @@ mod tests {
                 "unexpected restart incompatibility diagnostic: {error}"
             );
         }
-
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 13))
-            .expect("pre-restart-identity checkpoint remains parseable");
-        let error = legacy
-            .validate_for_restart(&first)
-            .expect_err("legacy checkpoint must not authorize a changed restart deck");
-        assert!(
-            error.contains("collision-resistant restart identity"),
-            "unexpected legacy restart diagnostic: {error}"
-        );
     }
 
     /// Swapping the sample's `valid` hash for a short, uppercase or non-hex one
@@ -17215,55 +14919,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v8_configuration_identity_fails_closed() {
-        let netlist = Netlist::parse("legacy config\nr1 1 0 1k\n.end\n").unwrap();
-        let mut current = sample();
-        current.netlist_fingerprint = netlist_fingerprint(&netlist);
-        current.netlist_identity = netlist_checkpoint_identity(&netlist);
-        let legacy = TransientCheckpoint::from_text(&legacy_text(&current, 8))
-            .expect("version-8 checkpoint parses");
-        let error = legacy
-            .validate_for_with_config(&netlist, &SimulationConfig::default())
-            .expect_err("v8 has no resolved configuration identity");
-        assert!(error.contains("simulation configuration identity"));
-    }
-
-    #[test]
-    fn version_one_checkpoint_files_still_load_without_xspice_state() {
-        let version_one =
-            legacy_text(&sample(), 1).replace("xspice 0\nxspice_blockers 0\nxspice_states 0\n", "");
-        let restored = TransientCheckpoint::from_text(&version_one)
-            .expect("v1 checkpoint without XSPICE section still loads");
-        assert!(restored.xspice_instances.is_empty());
-        assert!(restored.xspice_resume_blockers.is_empty());
-        assert!(restored.xspice_instance_states.is_empty());
-        assert!(!restored.lte_reference_history_available);
-    }
-
-    #[test]
-    fn xspice_blockers_round_trip_and_legacy_v2_refuses_resume() {
+    fn xspice_blockers_round_trip() {
         let mut original = sample();
         original.xspice_instances = vec!["a1(gain)".to_string()];
         original.xspice_resume_blockers = vec!["a1(gain): model owns pending state".to_string()];
         let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
         assert_eq!(original, restored);
-
-        let version_two = legacy_text(&original, 2).replace(
-            "xspice_blockers 1\na1(gain): model owns pending state\nxspice_states 0\n",
-            "",
-        );
-        let restored = TransientCheckpoint::from_text(&version_two)
-            .expect("v2 checkpoint with XSPICE instance list still loads");
-        assert_eq!(restored.xspice_instances, vec!["a1(gain)"]);
-        assert!(
-            restored.xspice_resume_blockers[0].contains("legacy checkpoint"),
-            "legacy v2 checkpoints must remain blocked, got {:?}",
-            restored.xspice_resume_blockers
-        );
     }
 
     #[test]
-    fn xspice_instance_states_round_trip_and_v3_loads_without_state_section() {
+    fn xspice_instance_states_round_trip() {
         let mut original = sample();
         original.xspice_instances = vec!["a1(int)".to_string()];
         original.xspice_instance_states = vec![XspiceInstanceCheckpoint {
@@ -17279,17 +14944,6 @@ mod tests {
         }];
         let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
         assert_eq!(original, restored);
-
-        let version_three = legacy_text(&sample(), 3).replace("xspice_states 0\n", "");
-        let restored = TransientCheckpoint::from_text(&version_three)
-            .expect("v3 checkpoint without serialized XSPICE state still loads");
-        assert!(restored.xspice_instance_states.is_empty());
-
-        let version_four = legacy_text(&original, 4).replace("context_time 2\n1.25\n1\n", "");
-        let restored = TransientCheckpoint::from_text(&version_four)
-            .expect("v4 XSPICE state checkpoint without context times still loads");
-        assert_eq!(restored.xspice_instance_states[0].context.time, 0.0);
-        assert_eq!(restored.xspice_instance_states[0].context.time_prev, 0.0);
     }
 
     #[test]
@@ -17445,9 +15099,8 @@ mod tests {
         );
         let mut lines = CheckpointLines::new(&text);
         let mut budget = CheckpointParseBudget::new(limit);
-        let error =
-            read_accepted_junction_transient_history(&mut lines, &mut budget, FORMAT_VERSION)
-                .expect_err("dense snapshots must not amplify beyond the cumulative parse budget");
+        let error = read_accepted_junction_transient_history(&mut lines, &mut budget)
+            .expect_err("dense snapshots must not amplify beyond the cumulative parse budget");
         assert!(
             error.contains("parsed-memory limit")
                 && error.contains("accepted BJT charge snapshot values"),
@@ -17456,7 +15109,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_text_limit_preserves_normal_and_legacy_parsing() {
+    fn custom_text_limit_preserves_normal_parsing() {
         let current = sample().to_text();
         let byte_error = TransientCheckpoint::from_text_with_limit(&current, current.len() - 1)
             .expect_err("custom text parsing must enforce its canonical byte ceiling first");
@@ -17472,11 +15125,6 @@ mod tests {
                 .expect("ordinary current checkpoint fits a caller-owned budget"),
             sample()
         );
-
-        let legacy = legacy_text(&sample(), 7);
-        let legacy_limit = legacy.len().saturating_mul(8);
-        TransientCheckpoint::from_text_with_limit(&legacy, legacy_limit)
-            .expect("legacy checkpoint fits the same explicit parsed-memory policy");
     }
 
     #[test]
@@ -17510,7 +15158,7 @@ mod tests {
 
         let text = format!("xspice_states {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_xspice_instance_states(&mut lines, FORMAT_VERSION, &mut budget)
+        let err = read_xspice_instance_states(&mut lines, &mut budget)
             .expect_err("oversized nested XSPICE sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
@@ -17527,7 +15175,7 @@ mod tests {
             "accepted_junction_history_available 1\naccepted_junction_history_blockers 0\naccepted_bjt_transient_histories {count}\n"
         );
         let mut lines = CheckpointLines::new(&text);
-        let err = read_accepted_junction_transient_history(&mut lines, &mut budget, FORMAT_VERSION)
+        let err = read_accepted_junction_transient_history(&mut lines, &mut budget)
             .expect_err("outer accepted BJT history counts must be bounded before allocation");
         assert!(
             err.contains("row count overflows") || err.contains("each state requires 3 rows"),

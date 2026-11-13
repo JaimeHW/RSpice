@@ -11,9 +11,6 @@
 //! refusal names the file.
 use super::*;
 
-/// Format 62 adds the files the `d_vcd` stimuli replay.
-pub(super) const FORMAT_VERSION: u32 = 62;
-
 /// One instance's file, and the digest of the bytes it read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReplayedFile {
@@ -93,13 +90,8 @@ pub(super) fn write(
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<ReplayedFile>, String> {
-    // A file older than this section predates `d_vcd`.
-    if version < FORMAT_VERSION {
-        return Ok(Vec::new());
-    }
     let header = lines.next().ok_or("missing 'vcd_files' section")?;
     let count = parse_count_header(header, "vcd_files")?;
     let mut files = allocate_checkpoint_capacity(count, "vcd_files", budget)?;

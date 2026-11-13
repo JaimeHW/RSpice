@@ -1271,8 +1271,7 @@ fn an_hdl_delay_and_a_gated_clock_on_one_nanosecond_are_one_instant() {
 
 /// A checkpoint at the accepted point just before a coincident edge, and one
 /// on the edge itself, both resume onto the uninterrupted run's axis and
-/// events bit for bit. An image from before the format that keys coupled
-/// events on the tick lattice is refused, naming the format.
+/// events bit for bit.
 #[test]
 fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
     use rspice_core::engine::TransientStartupMode;
@@ -1339,20 +1338,6 @@ fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
                 "`{net}` events from {seam:e}"
             );
         }
-
-        let text = String::from_utf8(bytes).unwrap();
-        let older = text
-            .replacen("RSPICE-CHECKPOINT 64\n", "RSPICE-CHECKPOINT 62\n", 1)
-            .lines()
-            .filter(|line| !line.starts_with("floor_march ") && !line.starts_with("published_row "))
-            .map(|line| format!("{line}\n"))
-            .collect::<String>();
-        let older = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-62 image");
-        let refusal = engine
-            .run_tran_resume(&deck, &older, tstop, max_step)
-            .expect_err("an older image of a coupled circuit is refused")
-            .to_string();
-        assert!(refusal.contains("format 63"), "{refusal}");
     }
 }
 

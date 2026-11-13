@@ -11,9 +11,6 @@
 //! current and device operating-point value at its time.
 use super::*;
 
-/// Format 64 adds the row published at the checkpoint time.
-pub(super) const FORMAT_VERSION: u32 = 64;
-
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::engine::transient) struct PublishedRow {
     voltages: Vec<(usize, Value)>,
@@ -174,15 +171,8 @@ pub(super) fn write(
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Option<PublishedRow>, String> {
-    // A file older than this section never told the published row apart
-    // from the restart state; resuming it publishes the restart state, as
-    // it always did.
-    if version < FORMAT_VERSION {
-        return Ok(None);
-    }
     let line = lines.next().ok_or("missing published row line")?;
     let malformed = |line: &str| format!("malformed published row line: '{line}'");
     let fields = line.split_whitespace().collect::<Vec<_>>();

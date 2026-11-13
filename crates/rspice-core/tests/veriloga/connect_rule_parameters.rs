@@ -1176,64 +1176,6 @@ fn a_checkpoint_just_before_a_deadline_resumes_onto_the_uninterrupted_run() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// An image from before the format that carries those breakpoints is
-/// refused when the circuit holds a connect-rule converter, naming it: one
-/// of its deadlines may have been pending. A circuit on stock XSPICE cards
-/// coupled to the module is refused too, for the format that keys its
-/// events on the HDL ticks: the image predates it.
-#[test]
-fn an_image_without_the_model_breakpoints_is_refused_naming_why() {
-    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
-    let directory = TempDirectory::new("older-image");
-    let engine = Engine::default();
-    for stock in [false, true] {
-        let netlist = deadline_deck(&directory, stock);
-        let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 1e-6, 10e-9)
-            .expect("checkpoints");
-        let checkpoint = checkpoint.into_checkpoint().unwrap();
-        let text = String::from_utf8(
-            checkpoint
-                .to_bytes(TransientCheckpointEncoding::Unpacked)
-                .expect("serializes"),
-        )
-        .expect("canonical text");
-        let (header, body) = text.split_once('\n').expect("a header line");
-        assert_eq!(header, "RSPICE-CHECKPOINT 64");
-        let mut older = String::from("RSPICE-CHECKPOINT 60\n");
-        for line in body.lines().filter(|line| {
-            !line.starts_with("pending_model_breakpoints ")
-                && !line.starts_with("vcd_files ")
-                && !line.starts_with("floor_march ")
-                && !line.starts_with("published_row ")
-        }) {
-            older.push_str(line);
-            older.push('\n');
-        }
-        let image = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-60 image");
-        let outcome = engine.run_tran_resume(&netlist, &image, 4e-6, 10e-9);
-        if stock {
-            let refusal = match outcome {
-                Ok(_) => panic!("an older image of coupled stock cards is refused"),
-                Err(error) => error.to_string(),
-            };
-            assert!(
-                refusal.contains("predates format 63"),
-                "the refusal names the format: {refusal}"
-            );
-        } else {
-            let refusal = match outcome {
-                Ok(_) => panic!("an older image with a connect-rule converter is refused"),
-                Err(error) => error.to_string(),
-            };
-            assert!(
-                refusal.contains("__rspice_auto_") && refusal.contains("(__rspice_connect_"),
-                "the refusal names the converter and its model: {refusal}"
-            );
-        }
-    }
-}
-
 //=============================================================================
 // 7. A driver-sensitive D/A on an XSPICE node
 //=============================================================================

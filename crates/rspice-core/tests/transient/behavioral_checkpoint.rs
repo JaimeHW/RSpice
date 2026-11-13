@@ -32,69 +32,6 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
     (engine, netlist, checkpoint)
 }
 
-/// Rewrite one current-format row for a reader older than format 56. Format 56
-/// appended the accepted charge increment to each solution-dependent capacitor
-/// state behind an availability row, format 57 added the mixed runtime image
-/// row, format 59 the accepted switch rows, format 60 the pending edge
-/// completion rows, format 61 the pending model breakpoint row, format 62 the
-/// replayed VCD file rows, format 63 the floor march row, and format 64 the
-/// published row; none exists in the legacy images built below. `None`
-/// drops the row.
-fn pre_v56_row(line: &str) -> Option<String> {
-    if line.starts_with("published_row ") {
-        assert_eq!(
-            line, "published_row none",
-            "these checkpoints sit at no event"
-        );
-        return None;
-    }
-    if line.starts_with("floor_march ") {
-        assert_eq!(
-            line, "floor_march none",
-            "these decks land on no floor grid"
-        );
-        return None;
-    }
-    if line.starts_with("vcd_files ") {
-        assert_eq!(line, "vcd_files 0", "these decks replay no VCD file");
-        return None;
-    }
-    if line.starts_with("mixed_runtime_image ") {
-        assert_eq!(line, "mixed_runtime_image 0", "these decks are analog-only");
-        return None;
-    }
-    if line.starts_with("pending_model_breakpoints ") {
-        assert_eq!(
-            line, "pending_model_breakpoints 0",
-            "these decks have no code model"
-        );
-        return None;
-    }
-    if line.starts_with("pending_edge_completions ") || line.starts_with("edge_crossing ") {
-        assert!(
-            line == "pending_edge_completions 0" || line == "edge_crossing none",
-            "these decks have no D/A edge: {line}"
-        );
-        return None;
-    }
-    if line.starts_with("accepted_switch_") {
-        assert!(
-            line == "accepted_switch_state_available 1" || line == "accepted_switch_states 0",
-            "these decks hold no switch: {line}"
-        );
-        return None;
-    }
-    if line.starts_with("solution_dependent_capacitor_increment_available ") {
-        return None;
-    }
-    if line.starts_with("solution_dependent_capacitor_state 1 ") {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        assert_eq!(fields.len(), 8, "format 56 capacitor state row: {line}");
-        return Some(fields[..7].join(" "));
-    }
-    Some(line.to_owned())
-}
-
 #[test]
 fn capacitor_checkpoint_restores_integrals_and_physical_charge_together() {
     let (engine, netlist, checkpoint) = capacitor_fixture();
@@ -144,7 +81,7 @@ fn capacitor_checkpoint_restores_integrals_and_physical_charge_together() {
 }
 
 #[test]
-fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
+fn capacitor_checkpoint_rejects_malformed_and_mismatched_integrals() {
     let (engine, netlist, checkpoint) = capacitor_fixture();
     let text = checkpoint.to_text();
     assert!(text.contains("capacitor_sdt_states 2\n"));
@@ -185,61 +122,6 @@ fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
             1
         ))
         .is_err()
-    );
-
-    let mut old = String::new();
-    let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 64"));
-    old.push_str("RSPICE-CHECKPOINT 50\n");
-    while let Some(line) = lines.next() {
-        let Some(line) = pre_v56_row(line) else {
-            continue;
-        };
-        let line = line.as_str();
-        if line.starts_with("accepted_bsim3_")
-            || line.starts_with("accepted_bsim4_")
-            || line.starts_with("accepted_mosfet_")
-        {
-            continue;
-        }
-        if line.starts_with("capacitor_sdt_state_available ") {
-            continue;
-        }
-        if line.starts_with("capacitor_sdt_states ") {
-            let count = line
-                .split_whitespace()
-                .nth(1)
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            for _ in 0..count {
-                let count = lines
-                    .next()
-                    .unwrap()
-                    .split_whitespace()
-                    .nth(2)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-                for _ in 0..count {
-                    lines.next().unwrap();
-                }
-            }
-            continue;
-        }
-        old.push_str(line);
-        old.push('\n');
-    }
-    let legacy = TransientCheckpoint::from_text(&old).unwrap();
-    // Re-export must preserve unknown history, not invent zero-valued integrals.
-    let legacy = TransientCheckpoint::from_text(&legacy.to_text()).unwrap();
-    let error = engine
-        .run_tran_resume(&netlist, &legacy, 1e-3, 2e-6)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("does not contain capacitor SDT history"),
-        "{error}"
     );
 }
 
@@ -343,64 +225,4 @@ fn behavioral_checkpoint_rejects_corrupt_or_mismatched_operator_history() {
         1,
     );
     assert!(TransientCheckpoint::from_text(&huge).is_err());
-}
-
-#[test]
-fn behavioral_checkpoint_legacy_state_remains_unknown() {
-    let (engine, netlist, checkpoint) = fixture();
-    let text = checkpoint.to_text();
-    let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 64"));
-    let mut old = "RSPICE-CHECKPOINT 49\n".to_owned();
-    while let Some(line) = lines.next() {
-        let Some(line) = pre_v56_row(line) else {
-            continue;
-        };
-        let line = line.as_str();
-        if line.starts_with("accepted_bsim3_")
-            || line.starts_with("accepted_bsim4_")
-            || line.starts_with("accepted_mosfet_")
-        {
-            continue;
-        }
-        if line.starts_with("capacitor_sdt_state_available ") || line == "capacitor_sdt_states 0" {
-            continue;
-        }
-        if line.starts_with("behavioral_state_available ") {
-            continue;
-        }
-        if line.starts_with("behavioral_states ") {
-            let count = line
-                .split_whitespace()
-                .nth(1)
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            for _ in 0..count {
-                let count = lines
-                    .next()
-                    .unwrap()
-                    .split_whitespace()
-                    .nth(3)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-                for _ in 0..count {
-                    lines.next().unwrap();
-                }
-            }
-            continue;
-        }
-        old.push_str(line);
-        old.push('\n');
-    }
-    let legacy = TransientCheckpoint::from_text(&old).unwrap();
-    let error = engine
-        .run_tran_resume(&netlist, &legacy, 1e-3, 10e-6)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("does not contain behavioral SDT history"),
-        "{error}"
-    );
 }

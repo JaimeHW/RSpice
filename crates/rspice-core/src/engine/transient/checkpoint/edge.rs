@@ -12,9 +12,6 @@
 use super::*;
 use crate::numerics::integration::EdgeCompletionSchedule;
 
-/// Format 60 adds the pending edge completions.
-pub(super) const FORMAT_VERSION: u32 = 60;
-
 /// Keep only what is still ahead of `time`, ascending.
 pub(super) fn capture(schedule: &EdgeCompletionSchedule, time: Value) -> EdgeCompletionSchedule {
     let mut completions = schedule
@@ -91,14 +88,8 @@ pub(super) fn write(
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<EdgeCompletionSchedule, String> {
-    // A file older than this section came from a run that never asked for an
-    // edge completion, so its schedule was empty.
-    if version < FORMAT_VERSION {
-        return Ok(EdgeCompletionSchedule::default());
-    }
     let line = lines
         .next()
         .ok_or("missing pending edge completions line")?;

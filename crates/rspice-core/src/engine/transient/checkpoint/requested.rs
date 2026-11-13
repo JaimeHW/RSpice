@@ -14,9 +14,6 @@
 //! carries.
 use super::*;
 
-/// Format 61 adds the pending model-requested breakpoints.
-pub(super) const FORMAT_VERSION: u32 = 61;
-
 /// Keep only what is still ahead of `time`, ascending.
 pub(super) fn capture(requests: &[Value], time: Value) -> Vec<Value> {
     let mut requests = requests
@@ -110,14 +107,8 @@ pub(super) fn write(
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Option<Vec<Value>>, String> {
-    // A file older than this section did not record what its models asked
-    // for.
-    if version < FORMAT_VERSION {
-        return Ok(None);
-    }
     let line = lines
         .next()
         .ok_or("missing pending model breakpoints line")?;

@@ -3,11 +3,6 @@
 //! Elaborated circuit validation and typed reconstruction happen during inject.
 use super::*;
 
-/// Format 58 carries HDL host images of version 2 (threads and an effects
-/// section, design P2 section 5.4); a version 1 host image still restores.
-pub(super) const FORMAT_VERSION: u32 = 58;
-/// The format that introduced the mixed-runtime section.
-const MIXED_RUNTIME_FORMAT_VERSION: u32 = 57;
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,12 +59,8 @@ impl Image {
 
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
-    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Option<Image>, String> {
-    if version < MIXED_RUNTIME_FORMAT_VERSION {
-        return Ok(None);
-    }
     let header = lines.next().ok_or("missing mixed runtime image header")?;
     match parse_count_header(header, "mixed_runtime_image")? {
         0 => Ok(None),
@@ -159,25 +150,14 @@ mod tests {
                 .all(|s| s.len() <= CHECKPOINT_IO_CHUNK_BYTES + "mixed_runtime ".len())
         );
         let mut budget = CheckpointParseBudget::new(image.0.len());
-        let decoded = read(
-            &mut CheckpointLines::new(&text),
-            FORMAT_VERSION,
-            &mut budget,
-        )
-        .unwrap()
-        .unwrap();
+        let decoded = read(&mut CheckpointLines::new(&text), &mut budget)
+            .unwrap()
+            .unwrap();
         assert_eq!(decoded, image);
         assert_eq!(budget.used, image.0.len());
         decoded.validate(0.0, 2).unwrap();
         let mut limited = CheckpointParseBudget::new(image.0.len() - 1);
-        assert!(
-            read(
-                &mut CheckpointLines::new(&text),
-                FORMAT_VERSION,
-                &mut limited
-            )
-            .is_err()
-        );
+        assert!(read(&mut CheckpointLines::new(&text), &mut limited).is_err());
         assert_eq!(limited.used, 0);
         for malformed in [
             "mixed_runtime_image 2\n".to_owned(),
@@ -188,7 +168,6 @@ mod tests {
             assert!(
                 read(
                     &mut CheckpointLines::new(&malformed),
-                    FORMAT_VERSION,
                     &mut CheckpointParseBudget::new(MAX_BYTES)
                 )
                 .is_err()
