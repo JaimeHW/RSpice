@@ -82,6 +82,9 @@ pub struct PlotResponse {
     /// explicit axis limits has to seed itself from what the reader can
     /// see, and only the renderer knows that for certain.
     pub axes: ((f64, f64), (f64, f64)),
+    /// Where the X axis' own label was painted, so a surface can let the
+    /// reader click it to change what the axis is drawn against.
+    pub x_label_rect: Option<Rect>,
 }
 
 /// A row of the hover readout: (label, value).
@@ -932,6 +935,7 @@ pub fn show(
         plot_rect,
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
+        x_label_rect: None,
     };
     if plot_rect.width() < 24.0 || plot_rect.height() < 24.0 {
         theme::paint_focus_ring(ui, &out.response, rect);
@@ -1249,13 +1253,13 @@ pub fn show(
         );
     }
     if !x_end_label.is_empty() {
-        painter.text(
+        out.x_label_rect = Some(painter.text(
             pos2(plot_rect.right(), rect.bottom() - 9.0),
             Align2::RIGHT_CENTER,
             x_end_label,
             tick_font.clone(),
             c.canvas_text_dim,
-        );
+        ));
     }
 
     // ---- markers

@@ -28,6 +28,7 @@ mod policy;
 mod projection;
 pub mod readout;
 pub mod stack;
+pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
 pub use projection::{

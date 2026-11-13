@@ -1085,6 +1085,7 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
         expression_groups,
         signal_sets,
         x_scales,
+        unit_abscissas,
     } = presentation;
     restore_markers(state, markers, marker_id_high_water);
     restore_log_y_panes(state, log_y_panes);
@@ -1099,6 +1100,18 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
                 crate::ui::plot::XScale::Linear
             };
             (scale.analysis, x_scale)
+        })
+        .collect();
+    *state.results.session.unit_abscissas = unit_abscissas
+        .into_iter()
+        .map(|choice| {
+            (
+                WavePanePresentationKey {
+                    analysis: choice.analysis,
+                    unit: choice.unit,
+                },
+                rspice_results_ui::session::UnitAbscissaChoice::new(choice.abscissa),
+            )
         })
         .collect();
 }

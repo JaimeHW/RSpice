@@ -672,6 +672,16 @@ pub struct StripXScale {
     pub logarithmic: bool,
 }
 
+/// The X the reader chose for one unit axis of a strip, in place of its
+/// analysis' sweep: another signal of the analysis, or an expression.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StripUnitAbscissa {
+    pub analysis: AnalysisPresentationKey,
+    /// The unit axis, by its unit; empty for a plain number.
+    pub unit: String,
+    pub abscissa: crate::visualization_document::Abscissa,
+}
+
 /// The unit the reader declared for one expression, which replaces the unit
 /// unit algebra infers from its text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -729,6 +739,14 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub x_scales: Vec<StripXScale>,
+    /// The signals or expressions the reader drew unit axes against, by
+    /// strip and unit.
+    #[serde(
+        default,
+        rename = "result_unit_abscissas",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub unit_abscissas: Vec<StripUnitAbscissa>,
 }
 
 fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
@@ -750,6 +768,8 @@ pub struct ResultFingerprintFields<'a> {
     pub signal_sets: &'a [SignalSet],
     /// Digested as an extension only when there are any, as signal sets are.
     pub x_scales: &'a [StripXScale],
+    /// Digested as an extension only when there are any, as X scales are.
+    pub unit_abscissas: &'a [StripUnitAbscissa],
 }
 
 /// Pane choices are a set, but project files and content fingerprints encode
@@ -861,6 +881,7 @@ impl ResultPresentation {
             expression_groups,
             signal_sets,
             x_scales,
+            unit_abscissas,
         } = self;
         Ok(ResultFingerprintFields {
             markers,
@@ -869,6 +890,7 @@ impl ResultPresentation {
             marker_history: self.marker_allocation_history()?,
             signal_sets,
             x_scales,
+            unit_abscissas,
         })
     }
 }

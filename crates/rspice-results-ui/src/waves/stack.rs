@@ -13,7 +13,7 @@ use super::{
 use crate::{
     derived::DerivedSeries,
     presentation::well_hint,
-    session::{ExprEditor, ResultViewerState},
+    session::{ExprEditor, ResultViewerState, UnitAbscissaChoice},
     strip::{LegendChip, StripHeader},
 };
 use egui::Ui;
@@ -67,6 +67,15 @@ pub trait StackHost {
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan>;
     fn place_marker(&mut self, model: &StripModel, trace: &StripTrace, x: f64);
     fn note_sample_reads(&mut self, overview: usize, extrema: usize);
+    /// Evaluate `text` as the abscissa a pane is drawn against, once per
+    /// member of the strip. A host without a calculator has none to offer.
+    fn resolve_abscissa_expression(
+        &mut self,
+        _model: &StripModel,
+        text: &str,
+    ) -> Result<super::xy::ResolvedAbscissa, String> {
+        Err(format!("{text} cannot be evaluated here"))
+    }
     /// Height of the logic and bus lanes this strip shows above its panes;
     /// zero when it shows none.
     fn event_lane_height(&self, _model: &StripModel) -> f32 {
@@ -662,13 +671,13 @@ fn expression_conversions(
 }
 
 #[derive(Clone, Copy)]
-struct StripFrame<'a> {
-    model: &'a StripModel,
-    x_domain: (f64, f64),
-    pane_count: usize,
-    linked_cursor_domain: Option<&'a CursorDomain>,
-    options: StackOptions,
-    gutter: Gutter,
+pub(crate) struct StripFrame<'a> {
+    pub(crate) model: &'a StripModel,
+    pub(crate) x_domain: (f64, f64),
+    pub(crate) pane_count: usize,
+    pub(crate) linked_cursor_domain: Option<&'a CursorDomain>,
+    pub(crate) options: StackOptions,
+    pub(crate) gutter: Gutter,
 }
 
 /// Why a strip's X axis cannot be logarithmic, when it cannot: some X it
@@ -1144,6 +1153,11 @@ fn show_unit_pane(
             .map(|x| (x, options.readout, options.quantity))
     })
     .flatten();
+    let abscissa = host
+        .session()
+        .unit_abscissas
+        .get(&pane_key)
+        .map(|choice| choice.abscissa.clone());
     let input = pane_header::PaneHeader {
         height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
         active: host.session().active_wave_pane.as_ref() == Some(&pane_key),
@@ -1153,12 +1167,18 @@ fn show_unit_pane(
         name_width: (gutter.name > 0.0).then_some(gutter.name),
         expressions: pane_expressions(host, model, pane, exprs, cursor_a, &t),
         plotted,
+        abscissa: options
+            .pane_chrome
+            .then(|| abscissa_menu(host.session(), model, pane, abscissa.clone())),
     };
     let header = host.pane_header(ui, model, pane, ordinal, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
     if let Some(width) = header.resize_name {
         host.session_mut().lane_name_width = Some(clamp_name_width(width));
+    }
+    if let Some(choice) = header.abscissa {
+        choose_abscissa(host.session_mut(), &pane_key, ordinal, choice);
     }
     if header.autoscale_y || header.toggle_log_y {
         let view = host.session_mut().analysis_plot_view_pane_mut(
@@ -1173,6 +1193,30 @@ fn show_unit_pane(
         set_pane_log_y(host.session_mut(), model, pane, log_y);
     }
 
+    if let Some(abscissa) = host
+        .session()
+        .unit_abscissas
+        .get(&pane_key)
+        .map(|choice| choice.abscissa.clone())
+    {
+        if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT && (auto_y.is_some() || !exprs.is_empty())
+        {
+            super::xy::show(
+                ui,
+                host,
+                super::xy::XyInput {
+                    pane,
+                    ordinal,
+                    exprs,
+                    frame,
+                    abscissa: &abscissa,
+                    log_y,
+                },
+            );
+        }
+        paint_active_rail(ui, host, model, pane, pane_top, &t);
+        return;
+    }
     let Some((auto_y0, auto_y1)) = auto_y else {
         // A pane with nothing plotted is its header alone; the hint is for a
         // pane whose plotted traces hold no finite value to fit.
@@ -1319,9 +1363,84 @@ fn show_unit_pane(
         }
     }
 
-    // The mockup's `.plot-pane.active::before`: a 2 px rail down the pane
-    // that received the instrument's actions. Painted last so it reads over
-    // the header fill and the canvas alike.
+    paint_active_rail(ui, host, model, pane, pane_top, &t);
+}
+
+/// Draw the pane `pane_key` against `choice`, or against its strip's sweep
+/// for `None`.
+pub(crate) fn choose_abscissa(
+    session: &mut ResultViewerState,
+    pane_key: &WavePanePresentationKey,
+    ordinal: usize,
+    choice: Option<rspice_results::visualization_document::Abscissa>,
+) {
+    match choice {
+        Some(abscissa) => {
+            session
+                .unit_abscissas
+                .insert(pane_key.clone(), UnitAbscissaChoice::new(abscissa));
+        }
+        None => {
+            session.unit_abscissas.remove(pane_key);
+        }
+    }
+    // A Y range read against one X is no view against another.
+    session
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, pane_key.analysis, ordinal)
+        .y = None;
+}
+
+/// What a pane may be drawn against: the strip's sweep, any of its signals
+/// (the pane's own first) or its expressions.
+pub(crate) fn abscissa_menu(
+    session: &ResultViewerState,
+    model: &StripModel,
+    pane: &UnitPane,
+    current: Option<rspice_results::visualization_document::Abscissa>,
+) -> pane_header::AbscissaMenu {
+    let mut own = Vec::new();
+    let mut others = Vec::new();
+    for trace in model.traces.iter().take(model.signal_trace_count) {
+        if !matches!(
+            trace.kind,
+            super::TraceKind::Value | super::TraceKind::Real | super::TraceKind::Imaginary
+        ) || own.contains(&trace.source_waveform_name)
+            || others.contains(&trace.source_waveform_name)
+        {
+            continue;
+        }
+        if model.trace_unit(trace) == pane.unit {
+            own.push(trace.source_waveform_name.clone());
+        } else {
+            others.push(trace.source_waveform_name.clone());
+        }
+    }
+    own.extend(others);
+    pane_header::AbscissaMenu {
+        current,
+        sweep: model.x_label().to_owned(),
+        signals: own,
+        expressions: session
+            .analysis_exprs
+            .get(&model.analysis_key)
+            .into_iter()
+            .flatten()
+            .map(|expr| expr.text.clone())
+            .collect(),
+    }
+}
+
+/// The mockup's `.plot-pane.active::before`: a 2 px rail down the pane that
+/// received the instrument's actions. Painted last so it reads over the
+/// header fill and the canvas alike.
+fn paint_active_rail(
+    ui: &Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    pane: &UnitPane,
+    pane_top: f32,
+    t: &Tokens,
+) {
     let pane_active = host.session_mut().active_wave_pane.as_ref()
         == Some(&WavePanePresentationKey {
             analysis: model.analysis_key,

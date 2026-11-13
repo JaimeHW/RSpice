@@ -270,6 +270,27 @@ impl TracePick {
     }
 }
 
+/// The signal or expression a unit pane of a strip is drawn against, and
+/// the range of it the reader zoomed to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitAbscissaChoice {
+    pub abscissa: rspice_results::visualization_document::Abscissa,
+    /// The abscissa range shown, when the reader zoomed or panned it.
+    pub x_view: Option<(f64, f64)>,
+}
+
+impl UnitAbscissaChoice {
+    pub const fn new(abscissa: rspice_results::visualization_document::Abscissa) -> Self {
+        Self {
+            abscissa,
+            x_view: None,
+        }
+    }
+}
+
+/// The unit panes drawn against a chosen abscissa, by strip and unit.
+pub type UnitAbscissas = HashMap<WavePanePresentationKey, UnitAbscissaChoice>;
+
 /// The quick view's own expressions and X scales, set aside while a result
 /// document's pane shows the ones it keeps in their place.
 #[derive(Debug, Clone, Default)]
@@ -280,6 +301,7 @@ pub struct QuickViewPresentation {
     pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
     pub x_scales:
         Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
+    pub unit_abscissas: Box<UnitAbscissas>,
 }
 
 /// State of the inline expression editor under a strip header.
@@ -564,6 +586,9 @@ pub struct ResultViewerState {
     /// keep the results state inside its stack budget.
     pub x_scales:
         Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
+    /// The signal or expression the reader drew a unit pane against, in
+    /// place of its strip's sweep. Boxed, as the X scales are.
+    pub unit_abscissas: Box<UnitAbscissas>,
     /// The quick view's expressions and X scales while a document pane
     /// shows its own, boxed: the results state is built by value before it
     /// is boxed, and a stash held only while a document is open need not
@@ -884,6 +909,7 @@ impl ResultViewerState {
                 expr_projection_keys: self.expr_projection_keys.clone(),
                 expression_units: self.expression_units.clone(),
                 x_scales: self.x_scales.clone(),
+                unit_abscissas: self.unit_abscissas.clone(),
             }));
         }
     }
@@ -931,6 +957,34 @@ impl ResultViewerState {
         self.set_quick_view_aside();
         if self.x_scales.get(&analysis) != Some(&scale) {
             self.x_scales.insert(analysis, scale);
+        }
+    }
+
+    /// Draw a document pane's unit axes against the abscissas the pane
+    /// keeps. The quick view's own choices are set aside the first time and
+    /// come back when the document is left, as its expressions do.
+    pub fn project_document_abscissas(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        choices: Vec<(String, rspice_results::visualization_document::Abscissa)>,
+    ) {
+        self.set_quick_view_aside();
+        let held: Vec<_> = self
+            .unit_abscissas
+            .iter()
+            .filter(|(pane, _)| pane.analysis == analysis)
+            .map(|(pane, choice)| (pane.unit.clone(), choice.abscissa.clone()))
+            .collect();
+        if held.len() == choices.len() && choices.iter().all(|choice| held.contains(choice)) {
+            return;
+        }
+        self.unit_abscissas
+            .retain(|pane, _| pane.analysis != analysis);
+        for (unit, abscissa) in choices {
+            self.unit_abscissas.insert(
+                WavePanePresentationKey { analysis, unit },
+                UnitAbscissaChoice::new(abscissa),
+            );
         }
     }
 
@@ -1026,6 +1080,7 @@ impl ResultViewerState {
             self.expr_projection_keys = quick.expr_projection_keys;
             self.expression_units = quick.expression_units;
             self.x_scales = quick.x_scales;
+            self.unit_abscissas = quick.unit_abscissas;
         }
         self.persistent_pane_context = None;
         self.document_markers.clear();
@@ -1385,6 +1440,7 @@ impl ResultViewerState {
         self.expression_units
             .retain(|(analysis, _), _| live(*analysis));
         self.x_scales.retain(|analysis, _| live(*analysis));
+        self.unit_abscissas.retain(|pane, _| live(pane.analysis));
         self.expr_projection_keys
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));

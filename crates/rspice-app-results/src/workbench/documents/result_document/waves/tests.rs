@@ -24,6 +24,7 @@ mod measurements;
 mod pane_legend;
 mod source_cache;
 mod strip_chrome;
+mod xy;
 
 #[test]
 fn the_readout_strip_stands_down_until_a_cursor_is_placed() {

@@ -31,6 +31,13 @@ impl StackHost for WaveStackHost<'_, '_> {
     fn resolve_expressions(&mut self, model: &StripModel, tokens: &Tokens) -> Vec<ResolvedExpr> {
         resolve_strip_exprs(self.0, model, tokens)
     }
+    fn resolve_abscissa_expression(
+        &mut self,
+        model: &StripModel,
+        text: &str,
+    ) -> Result<rspice_results_ui::waves::xy::ResolvedAbscissa, String> {
+        super::expressions::resolve_abscissa_expression(self.0, model, text)
+    }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         self.0.results.analysis_expr_cache.remove(&(analysis, text));
     }

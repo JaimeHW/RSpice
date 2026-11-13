@@ -38,5 +38,6 @@ pub fn real_step_trace(
         label: format!("E({})", lane.name()),
         y_extremes,
         family_style: None,
+        presentation_key: 0,
     }
 }

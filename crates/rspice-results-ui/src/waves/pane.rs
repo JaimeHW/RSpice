@@ -35,6 +35,9 @@ pub struct ResolvedExpr {
     pub label: String,
     pub y_extremes: Option<(f64, f64)>,
     pub family_style: Option<FamilyTraceStyle>,
+    /// The family group it was evaluated on, as a trace's
+    /// [`StripTrace::presentation_key`]; 0 outside a family.
+    pub presentation_key: u64,
 }
 
 /// The envelope of one family of curves in a pane: its members, folded per

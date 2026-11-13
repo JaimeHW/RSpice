@@ -40,7 +40,13 @@ pub struct DerivedSeries {
     /// A bus word reassembled from its members, per bus identity, so a
     /// reader's grouping is not reassembled on every frame it is drawn.
     bus_lanes: std::collections::HashMap<u64, std::sync::Arc<crate::waves::logic::BusLane>>,
+    /// A curve paired with the abscissa its pane is drawn against, per pair
+    /// identity: merging two grids is a pass over both, and the pane is drawn
+    /// every frame.
+    xy_curves: std::collections::HashMap<u64, XyCurveMemo>,
 }
+
+type XyCurveMemo = Result<std::sync::Arc<crate::waves::xy::XyCurve>, crate::waves::xy::XyRefusal>;
 
 impl DerivedSeries {
     /// Observe the bounded measurement cache in application integration tests.
@@ -59,6 +65,7 @@ impl DerivedSeries {
             self.shapes.clear();
             self.event_lanes.clear();
             self.bus_lanes.clear();
+            self.xy_curves.clear();
             self.version = version;
         }
     }
@@ -113,6 +120,18 @@ impl DerivedSeries {
                 .entry(key)
                 .or_insert_with(|| std::sync::Arc::new(build())),
         )
+    }
+
+    /// Fetch or pair one curve with its pane's abscissa.
+    pub fn xy_curve_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> Result<crate::waves::xy::XyCurve, crate::waves::xy::XyRefusal>,
+    ) -> XyCurveMemo {
+        self.xy_curves
+            .entry(key)
+            .or_insert_with(|| build().map(std::sync::Arc::new))
+            .clone()
     }
 
     /// Fetch or compute the cached finite (min, max) of a series.

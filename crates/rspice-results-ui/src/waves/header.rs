@@ -4,6 +4,7 @@ use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
 use crate::strip::HEADER_PADDING_X;
 use egui::Ui;
+use rspice_results::visualization_document::Abscissa;
 use rspice_ui_kit::{
     icons::Icon,
     plot::{paint_trace_swatch, sample::sample_at_with_shape},
@@ -68,6 +69,111 @@ pub struct PaneHeader {
     /// header alone, which offers no autoscale and no log toggle for an axis
     /// it does not draw.
     pub plotted: bool,
+    /// What the pane may be drawn against, when the host offers a choice.
+    pub abscissa: Option<AbscissaMenu>,
+}
+
+/// What a unit pane may be drawn against: its strip's sweep, one of the
+/// strip's signals, one of its expressions, or an expression typed here.
+#[derive(Debug, Clone, Default)]
+pub struct AbscissaMenu {
+    /// The signal or expression the pane is drawn against, if any.
+    pub current: Option<Abscissa>,
+    /// The strip's sweep, as its axis names it.
+    pub sweep: String,
+    /// The strip's signals, by source name: the pane's own first.
+    pub signals: Vec<String>,
+    /// The strip's expressions.
+    pub expressions: Vec<String>,
+}
+
+/// The header's tag while the pane is drawn against `current` rather than
+/// its sweep, as ADS's `vs()` reads.
+fn abscissa_tag(current: &Abscissa, display_name: &dyn Fn(&str) -> String) -> String {
+    let against = match current {
+        Abscissa::Signal { name } => display_name(name),
+        Abscissa::Expression { text } => text.clone(),
+    };
+    format!("vs {}", elide(&against, 12))
+}
+
+/// The sweep, as the menu and the way back name it.
+fn sweep_name(menu: &AbscissaMenu) -> &str {
+    if menu.sweep.is_empty() {
+        "the sweep"
+    } else {
+        &menu.sweep
+    }
+}
+
+/// The choices of an [`AbscissaMenu`] under a heading naming the pane, with
+/// a field to type an expression. The pane header's context menu, the tag it
+/// shows while drawn against a signal, and an X axis drawn against one all
+/// open this.
+pub(crate) fn abscissa_choices(
+    ui: &mut Ui,
+    unit: &str,
+    menu: &AbscissaMenu,
+    display_name: &dyn Fn(&str) -> String,
+    draft_id: egui::Id,
+) -> Option<Option<Abscissa>> {
+    let mut chosen = None;
+    ui.label(egui::RichText::new(format!("Draw the {unit} pane against")).weak());
+    let sweep = if menu.sweep.is_empty() {
+        "the sweep".to_owned()
+    } else {
+        format!("{} (the sweep)", menu.sweep)
+    };
+    if ui.selectable_label(menu.current.is_none(), sweep).clicked() {
+        chosen = Some(None);
+    }
+    let signals = menu
+        .signals
+        .iter()
+        .map(|name| Abscissa::Signal { name: name.clone() });
+    let expressions = menu
+        .expressions
+        .iter()
+        .map(|text| Abscissa::Expression { text: text.clone() });
+    let options: Vec<Abscissa> = signals.chain(expressions).collect();
+    if !options.is_empty() {
+        ui.separator();
+    }
+    egui::ScrollArea::vertical()
+        .max_height(240.0)
+        .show(ui, |ui| {
+            for option in options {
+                let label = match &option {
+                    Abscissa::Signal { name } => display_name(name),
+                    Abscissa::Expression { text } => text.clone(),
+                };
+                if ui
+                    .selectable_label(menu.current.as_ref() == Some(&option), label)
+                    .clicked()
+                {
+                    chosen = Some(Some(option));
+                }
+            }
+        });
+    ui.separator();
+    let mut draft = ui.data_mut(|data| data.get_temp::<String>(draft_id).unwrap_or_default());
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut draft)
+            .hint_text("Expression, e.g. V(a)-V(b)")
+            .desired_width(200.0),
+    );
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if entered && !draft.trim().is_empty() {
+        chosen = Some(Some(Abscissa::Expression {
+            text: draft.trim().to_owned(),
+        }));
+        draft.clear();
+    }
+    ui.data_mut(|data| data.insert_temp(draft_id, draft));
+    if chosen.is_some() {
+        ui.close();
+    }
+    chosen
 }
 
 pub use rspice_ui_kit::panels::elide_chars as elide;
@@ -103,6 +209,9 @@ pub struct UnitPaneHeaderResponse {
     pub toggle_expression: Option<usize>,
     /// The expression whose entry's Remove was chosen.
     pub remove_expression: Option<usize>,
+    /// What the reader chose to draw the pane against: `Some(None)` for the
+    /// strip's sweep.
+    pub abscissa: Option<Option<Abscissa>>,
 }
 
 /// The three regions of a pane header, across its row.
@@ -170,13 +279,21 @@ pub fn show_header(
         name_width,
         expressions,
         plotted,
+        abscissa,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = height.clamp(0.0, WAVE_PANE_HEADER_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(
+    // The row's own background opens the pane's context menu, which is where
+    // the pane is drawn against another signal; the chips over it keep their
+    // own clicks and menus.
+    let (rect, background) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
+        if abscissa.is_some() {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
     );
     ui.painter().rect_filled(rect, 0.0, c.bg_panel);
     ui.painter().hline(
@@ -188,6 +305,13 @@ pub fn show_header(
         return UnitPaneHeaderResponse::default();
     }
 
+    // A pane drawn against its sweep shows nothing new; one drawn against a
+    // signal or an expression says so, with the way back beside it.
+    let display = |name: &str| display_name(name).into_owned();
+    let abscissa_tag = abscissa
+        .as_ref()
+        .and_then(|menu| menu.current.as_ref())
+        .map(|current| abscissa_tag(current, &display));
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
     // An expression whose unit cannot be stated has a pane of its own and
@@ -259,6 +383,32 @@ pub fn show_header(
                 {
                     output.autoscale_y = true;
                 }
+                if let (Some(menu), Some(tag)) = (abscissa.as_ref(), abscissa_tag.as_deref()) {
+                    let sweep = sweep_name(menu);
+                    let back = format!("Draw the {} pane against {sweep} again", pane.unit);
+                    if IconButton::new(Icon::Close)
+                        .side(ABSCISSA_RESET_SIDE)
+                        .tooltip(&back)
+                        .show(ui)
+                        .clicked()
+                    {
+                        output.abscissa = Some(None);
+                    }
+                    let draft_id =
+                        ui.id()
+                            .with(("abscissa-tag-draft", model.analysis_key, pane.unit));
+                    let response = chip(ui, tag, true).on_hover_text(format!(
+                        "The {} pane is drawn against {}; click to choose what it is drawn against",
+                        pane.unit,
+                        menu.current.as_ref().map_or(sweep, Abscissa::text)
+                    ));
+                    if let Some(chosen) = egui::Popup::menu(&response)
+                        .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
+                        .and_then(|inner| inner.inner)
+                    {
+                        output.abscissa = Some(chosen);
+                    }
+                }
             },
         );
         let width = space.right() - drawn.response.rect.left();
@@ -279,6 +429,7 @@ pub fn show_header(
         ..
     } = header_regions(rect, unit_width, action_width);
 
+    let mut unit_response = None;
     if let Some(unit_chip) = unit_chip {
         ui.scope_builder(
             egui::UiBuilder::new()
@@ -290,6 +441,7 @@ pub fn show_header(
                 if response.clicked() {
                     host.activate_pane();
                 }
+                unit_response = Some(response);
             },
         );
     }
@@ -411,6 +563,19 @@ pub fn show_header(
                 .with(("pane-name-grip", model.analysis_key, pane.unit)),
         )
     });
+    if let Some(menu) = abscissa.as_ref() {
+        let draft_id = ui
+            .id()
+            .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
+        for response in std::iter::once(&background).chain(unit_response.as_ref()) {
+            if let Some(chosen) = egui::Popup::context_menu(response)
+                .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
+                .and_then(|inner| inner.inner)
+            {
+                output.abscissa = Some(chosen);
+            }
+        }
+    }
     output
 }
 
@@ -555,6 +720,9 @@ fn expression_chip(
         }
     });
 }
+
+/// The side of the button that draws a pane against its sweep again.
+const ABSCISSA_RESET_SIDE: f32 = 19.0;
 
 /// The width a button-like control labelled `label` takes.
 fn control_width(ui: &Ui, label: &str) -> f32 {

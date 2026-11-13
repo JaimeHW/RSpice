@@ -296,10 +296,116 @@ pub(super) fn resolve_strip_exprs(
                     |group| format!("{base_label} · {}", group.label),
                 ),
                 family_style,
+                presentation_key: group.map_or(0, |group| group.stable_key),
             });
         }
     }
     resolved
+}
+
+/// Evaluate `text` as the abscissa a pane is drawn against: once per family
+/// member the strip shows, on the active run, in the unit the reader
+/// declared for it or the one unit algebra states.
+pub(super) fn resolve_abscissa_expression(
+    state: &mut ResultsParts<'_>,
+    model: &StripModel,
+    text: &str,
+) -> Result<rspice_results_ui::waves::xy::ResolvedAbscissa, String> {
+    use rspice_results_ui::waves::xy::{AbscissaSeries, MemberKey, ResolvedAbscissa};
+    let session = &state.results.session;
+    // Read as the strip reads the same text when it also plots it, so the
+    // two share one evaluation.
+    let complex_policy = session
+        .analysis_exprs
+        .get(&model.analysis_key)
+        .and_then(|exprs| exprs.iter().find(|expr| expr.text == text))
+        .map_or(ComplexExpressionPolicy::Rectangular, |expr| {
+            expr.complex_policy
+        });
+    let sample_selection = session.sample_selection.clone();
+    let lanes = session.event_lanes.get(&model.analysis_key).cloned();
+    let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
+    let version = expression_version(
+        state.model.simulation.view.data_version,
+        sample_selection.as_ref(),
+        complex_policy,
+    ) ^ bus_reading.rotate_left(41);
+    let key = (model.analysis_key, text.to_owned());
+    let fresh = state
+        .results
+        .analysis_expr_cache
+        .get(&key)
+        .is_some_and(|cached| cached.version == version);
+    if !fresh {
+        let series = evaluate_expression_reading(
+            &state.model.simulation,
+            model.analysis_index,
+            text,
+            sample_selection.as_ref(),
+            complex_policy,
+            lanes.as_ref(),
+        );
+        state
+            .results
+            .analysis_expr_cache
+            .insert(key.clone(), ExprSeries { version, series });
+    }
+    let outputs = match state.results.analysis_expr_cache.get(&key) {
+        Some(cached) => cached.series.clone()?,
+        None => return Err(format!("{text} was not evaluated")),
+    };
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .ok_or("the analysis no longer exists")?;
+    let unit = state
+        .results
+        .session
+        .expression_units
+        .get(&key)
+        .cloned()
+        .or_else(|| {
+            run.analyses
+                .get(model.analysis_index)
+                .and_then(|analysis| expression_unit(text, analysis, &model.x_unit).ok())
+        })
+        .unwrap_or_default();
+    let base_key = expr_cache_key(model.analysis_key, text) ^ version.rotate_left(7);
+    let mut series = Vec::new();
+    for output in outputs {
+        if output.waveform.complex.is_some() {
+            return Err(format!(
+                "{text} is complex; draw against its real part, imaginary part or magnitude"
+            ));
+        }
+        let group = match output.source {
+            ExpressionSource::Analysis | ExpressionSource::SelectedSamples => None,
+            ExpressionSource::FamilyMember { ordinal } => {
+                let Some(group) = sample_selection
+                    .as_ref()
+                    .and_then(SourceSampleSelection::family_render_plan)
+                    .and_then(|plan| plan.groups().get(ordinal))
+                    .filter(|group| group.ordinal == ordinal)
+                else {
+                    continue;
+                };
+                Some(group)
+            }
+        };
+        let presentation_key = group.map_or(0, |group| group.stable_key);
+        series.push(AbscissaSeries {
+            member: MemberKey {
+                run_id: run.id,
+                overlay: false,
+                presentation_key,
+            },
+            grid: output.waveform.data.x,
+            values: output.waveform.data.y,
+            cache_key: base_key ^ presentation_key.rotate_left(19),
+        });
+    }
+    Ok(ResolvedAbscissa { unit, series })
 }
 
 /// Add `text` to the strip's expressions, as a trace's or lane's menu asks
