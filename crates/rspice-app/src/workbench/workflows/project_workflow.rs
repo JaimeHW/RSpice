@@ -19,8 +19,6 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::lifecycle::project_lifecycle::PersistenceBinding;
-#[cfg(test)]
-use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView,
     ProjectLifecycleError, SaveScope,

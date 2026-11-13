@@ -1,0 +1,2097 @@
+//! The project workflow's transactions carried out on the whole state: what
+//! creating, opening, importing, saving and closing a project leave behind,
+//! and which transitions authorize a destructive action.
+
+use rspice_results_ui::bode::BodeData;
+use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
+use rspice_results_ui::fft::{FftData, window::WindowFunction};
+use rspice_results_ui::nyquist::NyquistData;
+use std::path::Path;
+
+use crate::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
+use crate::state::ActiveViewer;
+use crate::workbench::app_state::AppState;
+use crate::workbench::lifecycle::project_lifecycle::{
+    DestinationAuthority, ProjectCloseDestination, SaveScope,
+};
+use crate::workbench::workflows::project_workflow::{
+    LiveProjectApply, NewProjectParams, ProjectLoadOrigin, SaveRequestOutcome,
+    apply_loaded_project, live_mirror_save_block, project_save_dialog_default_name,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+mod marker_history;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod waivers;
+
+fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("synthetic historical run has valid unattributed legacy provenance");
+}
+
+fn project_named(path: &str) -> ProjectSnapshot {
+    let mut libraries = crate::state::LibraryManager::with_primitives();
+    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from(path));
+    ProjectSnapshot::new(workspace, libraries)
+}
+
+fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::SchematicGridPitch) {
+    let expected = pitch.canvas_grid_size();
+    assert_eq!(
+        state.model.schematic.document().document_policy.grid_pitch,
+        pitch
+    );
+    assert_eq!(state.model.schematic.document().grid_size, expected);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.grid_size,
+        expected
+    );
+    assert_eq!(state.design.schematic_snap.grid_size, expected);
+}
+
+#[test]
+fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
+    use crate::workbench::ChoicePreference;
+
+    let mut state = AppState::default();
+    state.design.schematic_snap.snap_radius = 8;
+    state.design.schematic_snap.snap_to_grid = false;
+    state.design.schematic_snap.grid_size = 555;
+    state
+        .model
+        .preferences
+        .set_choice(ChoicePreference::SchematicGrid, 1)
+        .unwrap();
+
+    state.create_new_project();
+    state.assert_project_open_fact();
+
+    assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.snap_radius,
+        8
+    );
+    assert!(
+        !state
+            .model
+            .schematic
+            .session
+            .editor
+            .snap_engine
+            .snap_to_grid
+    );
+
+    state
+        .model
+        .preferences
+        .set_choice(ChoicePreference::SchematicGrid, 2)
+        .unwrap();
+    state.design.schematic_snap.grid_size = 777;
+
+    assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+    assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.snap_radius,
+        8
+    );
+    assert!(
+        !state
+            .model
+            .schematic
+            .session
+            .editor
+            .snap_engine
+            .snap_to_grid
+    );
+}
+
+#[test]
+fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
+    let mut state = AppState::default();
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+    // An untouched project closes without asking; an edited one is reviewed.
+    state
+        .model
+        .workspace
+        .content
+        .project
+        .rename("edited")
+        .expect("valid name");
+
+    assert!(state.request_close_project());
+    assert!(matches!(
+        state.workbench.project_review_dialog.request,
+        Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+    ));
+
+    state.workbench.project_review_dialog.close();
+    assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+    assert!(!state.platform.project_lifecycle.is_open());
+    state.assert_project_open_fact();
+    assert!(!state.project.project_launcher_open);
+    assert_eq!(
+        state.workbench.workspace,
+        crate::workbench::state::Workspace::Project
+    );
+    assert_eq!(
+        state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::Project
+    );
+}
+
+/// Projects and files ▸ On startup. "Start with no project" closes a project
+/// reopened from its file when that loses nothing, and lands on the
+/// no-project workspace; unsaved changes keep it open whichever is chosen.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::ChoicePreference;
+    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-startup-choice-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("create the test folder");
+    let reopened = |name: &str, choice: usize| {
+        let mut state = AppState::default();
+        save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &folder.join(name),
+            DestinationAuthority::UserSelected,
+        )
+        .expect("save the project");
+        state
+            .model
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        state
+    };
+
+    let mut kept = reopened("kept.rspiceproj", 0);
+    kept.apply_startup_project_choice();
+    assert!(
+        kept.platform.project_lifecycle.is_open(),
+        "Reopen last project"
+    );
+
+    let mut closed = reopened("closed.rspiceproj", 1);
+    closed.apply_startup_project_choice();
+    assert!(!closed.platform.project_lifecycle.is_open());
+    assert_eq!(
+        closed.workbench.workspace,
+        crate::workbench::state::Workspace::Project
+    );
+
+    let mut edited = reopened("edited.rspiceproj", 1);
+    edited
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(3, 8));
+    edited.apply_startup_project_choice();
+    assert!(
+        edited.platform.project_lifecycle.is_open(),
+        "unsaved changes stay"
+    );
+
+    drop((kept, closed, edited));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// File ▸ Close Project, then a restart. The workspace still holds the
+/// placeholder the close left behind; the session says no project was open,
+/// so that placeholder is never opened as an untitled project, whichever On
+/// startup says.
+#[test]
+fn a_session_saved_after_close_project_restarts_with_no_project() {
+    use crate::workbench::ChoicePreference;
+
+    let mut state = AppState::default();
+    assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+    let session = serde_json::to_string(&state).expect("the session serializes");
+
+    for choice in [0, 1] {
+        let mut restored =
+            serde_json::from_str::<Box<AppState>>(&session).expect("the session restores");
+        restored
+            .model
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        restored.open_session_project();
+        assert!(
+            !restored.platform.project_lifecycle.is_open(),
+            "On startup choice {choice} opened a project"
+        );
+        assert!(!restored.project.project_launcher_open);
+        assert_eq!(
+            restored.workbench.workspace,
+            crate::workbench::state::Workspace::Project
+        );
+    }
+}
+
+/// A saved project survives the restart through its session: Reopen last
+/// project binds its file again, and Start with no project keeps it open
+/// when it carries an edit the file does not have, and says why.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_saved_project_comes_back_through_its_session() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::ChoicePreference;
+    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-startup-session-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("create the test folder");
+    let session = |name: &str, edited: bool| {
+        let mut state = Box::new(AppState::default());
+        save_native(
+            state.as_mut(),
+            SaveScope::AllDocuments,
+            &folder.join(name),
+            DestinationAuthority::UserSelected,
+        )
+        .expect("save the project");
+        if edited {
+            state
+                .model
+                .schematic
+                .add_component(ComponentType::Resistor, Point::new(3, 8));
+            state
+                .model
+                .workspace
+                .save_active_schematic(&state.model.schematic);
+        }
+        serde_json::to_string(state.as_ref()).expect("the session serializes")
+    };
+    let restart = |session: &str, choice: usize| {
+        let mut state =
+            serde_json::from_str::<Box<AppState>>(session).expect("the session restores");
+        state
+            .model
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        state.open_session_project();
+        state
+    };
+
+    let reopened = restart(&session("reopened.rspiceproj", false), 0);
+    assert!(
+        reopened.platform.project_lifecycle.is_open(),
+        "Reopen last project"
+    );
+    assert!(reopened.platform.project_lifecycle.accepted().is_some());
+    assert!(
+        reopened
+            .platform
+            .project_lifecycle
+            .canonical_native_path()
+            .is_some()
+    );
+
+    let edited = restart(&session("edited.rspiceproj", true), 1);
+    assert!(
+        edited.platform.project_lifecycle.is_open(),
+        "unsaved changes stay"
+    );
+    assert_eq!(edited.model.schematic.document().components.len(), 1);
+    assert!(edited.model.log_buffer.entries().any(|entry| {
+        entry.message == "The last project was reopened because it has unsaved changes."
+    }));
+
+    drop((reopened, edited));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Closing the project while an edit settles drops the edit with everything
+/// else the design held: nothing is checked afterwards, and nothing says a
+/// check failed.
+#[test]
+fn closing_a_project_as_an_edit_settles_checks_nothing() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use crate::workbench::examples::hierarchy_reference;
+
+    let reference = hierarchy_reference::build();
+    let mut state = reference.state;
+    state.open_project_session();
+    let amp = reference.amp_schematic;
+    state.open_workspace_view(amp.clone());
+    let start = crate::time_compat::Instant::now();
+    let _ = state.refresh_live_checks(start);
+    state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(4000, 4000));
+    assert!(
+        state.refresh_live_checks(start).is_some(),
+        "the edit settles"
+    );
+
+    assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+    assert_eq!(state.refresh_live_checks(start), None);
+    assert!(
+        state
+            .model
+            .diagnostics
+            .batch(&DiagnosticInputs::LiveCheck { subject: amp })
+            .is_none(),
+        "nothing is checked once the project is closed"
+    );
+    assert!(
+        !state
+            .model
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with("Live checks could not run")),
+        "nothing says a check failed"
+    );
+}
+
+#[test]
+fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
+    let mut state = AppState::default();
+
+    assert!(state.close_project_discard(ProjectCloseDestination::LiveMirror));
+    assert!(!state.platform.project_lifecycle.is_open());
+    assert!(!state.project.project_launcher_open);
+    assert_eq!(
+        state.workbench.workspace,
+        crate::workbench::state::Workspace::Project
+    );
+    use crate::workbench::framework::requests::LiveMirrorEntry;
+    assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_some());
+    assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_none());
+}
+
+#[test]
+fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
+    let mut host = AppState::default();
+    host.model
+        .workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
+    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+        .expect("host state snapshots");
+    let text =
+        crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+
+    let mut guest = AppState::default();
+    assert!(matches!(
+        guest.apply_live_project_snapshot(text.as_bytes(), "Jaime"),
+        LiveProjectApply::Applied
+    ));
+    assert!(guest.platform.project_lifecycle.is_open());
+    assert_eq!(
+        guest.model.workspace.content.project.id(),
+        host.model.workspace.content.project.id()
+    );
+    // The host's on-disk location must never become a guest save target.
+    assert!(guest.model.workspace.content.project.path.is_none());
+    #[cfg(not(target_arch = "wasm32"))]
+    assert!(
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest.platform)
+            .is_none()
+    );
+}
+
+#[test]
+fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
+    let host = AppState::default();
+    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+        .expect("host state snapshots");
+    let text =
+        crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+
+    let mut guest = AppState::default();
+    guest.model.simulation.execution.is_running = true;
+    assert!(matches!(
+        guest.apply_live_project_snapshot(text.as_bytes(), "Jaime"),
+        LiveProjectApply::RetryLater
+    ));
+
+    guest.model.simulation.execution.is_running = false;
+    assert!(matches!(
+        guest.apply_live_project_snapshot(b"not a project", "Jaime"),
+        LiveProjectApply::Rejected
+    ));
+}
+
+#[test]
+fn mirror_save_copy_policy_gates_every_project_persistence_path() {
+    let mut state = AppState::default();
+    state.model.live_write_locks.mirror = true;
+    state.model.live_write_locks.mirror_save_copy_allowed = false;
+
+    assert!(
+        !state
+            .save_project_scope(SaveScope::ActiveDocument)
+            .request_started()
+    );
+    assert!(
+        !state
+            .save_project_scope(SaveScope::AllDocuments)
+            .request_started()
+    );
+    assert!(!state.save_project_as());
+    assert!(matches!(
+        state.save_project_scope(SaveScope::AllDocuments),
+        SaveRequestOutcome::Failed(_)
+    ));
+}
+
+#[test]
+fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
+    let mut state = AppState::default();
+    state.model.live_write_locks.mirror = true;
+    state.model.live_write_locks.mirror_save_copy_allowed = true;
+
+    assert_eq!(
+        live_mirror_save_block(&state.model, false),
+        Some("A live mirror cannot be saved in place. Use Save As to create an independent copy.")
+    );
+    assert_eq!(live_mirror_save_block(&state.model, true), None);
+}
+
+fn project_named_with_results(path: &str) -> ProjectSnapshot {
+    let mut libraries = crate::state::LibraryManager::with_primitives();
+    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from(path));
+
+    let waveform = crate::state::RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0, 2.0],
+        vec![0.0, 0.5, 1.0],
+        "#00aaff",
+    );
+    let mut run = crate::state::SimulationRun::new(4);
+    run.label = "Run 4 (import fixture)".to_string();
+    run.add_analysis(
+        crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform]),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 4;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
+
+    ProjectSnapshot::new_with_simulation_results(
+        workspace,
+        libraries,
+        crate::io::capture_simulation_results(&simulation),
+    )
+}
+
+fn seed_specialized_viewer_caches(state: &mut AppState) {
+    let waveform = crate::state::RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0, 2.0],
+        vec![0.0, 0.5, 1.0],
+        "#00aaff",
+    );
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform]),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.next_run_id = 2;
+
+    state.results.analysis.histogram_state.selected = Some("old measurement".to_owned());
+    let mut bode = BodeData::new();
+    bode.add_response();
+    state.results.analysis.bode_plot_state.load_data(bode);
+
+    state
+        .results
+        .analysis
+        .nyquist_state
+        .load_data(NyquistData::from_arrays(
+            "old nyquist",
+            &[1.0, 10.0],
+            &[1.0, -0.5],
+            &[0.0, 0.25],
+        ));
+
+    state
+        .results
+        .analysis
+        .smith_chart_state
+        .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
+        .expect("valid Smith fixture");
+
+    let mut eye = EyeData::new(1e-9, 2);
+    eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
+    state.results.analysis.eye_diagram_state.load_data(eye);
+
+    state.results.analysis.fft_state.load_data(
+        FftData::from_time_domain_with_normalization(
+            "old fft",
+            &[
+                0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0,
+            ],
+            16.0,
+            WindowFunction::Rectangular,
+            rspice_results_ui::fft::data::SpectrumNormalization::Peak,
+        )
+        .expect("finite qualified prior FFT fixture"),
+    );
+
+    let provenance = state
+        .model
+        .active_specialized_viewer_cache_provenance()
+        .expect("default test project has an active retained analysis");
+    for viewer in [
+        ActiveViewer::BodePlot,
+        ActiveViewer::Nyquist,
+        ActiveViewer::SmithChart,
+        ActiveViewer::Fft,
+        ActiveViewer::EyeDiagram,
+    ] {
+        state
+            .results
+            .analysis
+            .bind_specialized_viewer_cache(viewer, provenance);
+    }
+
+    assert!(!state.viewer_is_available(ActiveViewer::Histogram));
+    for viewer in [
+        ActiveViewer::SmithChart,
+        ActiveViewer::EyeDiagram,
+        ActiveViewer::BodePlot,
+        ActiveViewer::Nyquist,
+        ActiveViewer::Fft,
+    ] {
+        assert!(
+            state.viewer_is_available(viewer),
+            "{} should be available before project switch",
+            viewer.name()
+        );
+    }
+}
+
+fn assert_specialized_viewer_caches_cleared(state: &AppState) {
+    assert_eq!(state.results.analysis.histogram_state.selected, None);
+    for viewer in [
+        ActiveViewer::SmithChart,
+        ActiveViewer::EyeDiagram,
+        ActiveViewer::Histogram,
+        ActiveViewer::BodePlot,
+        ActiveViewer::Nyquist,
+        ActiveViewer::Fft,
+        ActiveViewer::PoleZero,
+    ] {
+        assert!(
+            !state.viewer_is_available(viewer),
+            "{} should be unavailable after project switch",
+            viewer.name()
+        );
+    }
+}
+
+#[test]
+fn browser_import_applies_project_clears_runs_and_skips_recents() {
+    let mut state = AppState::default();
+    seal_legacy_unattributed(state.model.simulation.start_run());
+    assert!(state.model.simulation.retained.has_results());
+
+    let mut project = project_named("browser-import.rspiceproj");
+    project.file.workspace.project.path = None;
+
+    let imported = apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    );
+
+    assert!(imported);
+    assert_eq!(
+        state.model.workspace.content.project.display_name(),
+        "browser-import"
+    );
+    assert!(state.model.workspace.content.project.path.is_none());
+    assert!(!state.model.simulation.retained.has_results());
+    assert!(state.platform.recent_files.is_empty());
+    assert!(state.model.log_buffer.entries().any(|entry| {
+        entry
+            .message
+            .contains("Imported project browser-import (browser-import.rspiceproj).")
+    }));
+}
+
+#[test]
+fn browser_import_keeps_project_filename_as_save_suggestion_without_native_path() {
+    let mut state = AppState::default();
+    let project = project_named("stale-native-path.rspiceproj");
+
+    let imported = apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    );
+
+    assert!(imported);
+    assert!(state.model.workspace.content.project.path.is_none());
+    assert_eq!(
+        state.platform.browser_project_save_name.as_deref(),
+        Some("browser-import.rspiceproj")
+    );
+    assert!(state.platform.recent_files.is_empty());
+}
+
+#[test]
+fn browser_import_filename_is_used_for_next_project_save_as_dialog() {
+    let mut state = AppState::default();
+    let project = project_named("stale-native-path.rspiceproj");
+
+    assert!(apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    ));
+
+    assert_eq!(
+        project_save_dialog_default_name(&state.model, &state.platform),
+        "browser-import.rspiceproj"
+    );
+}
+
+#[test]
+fn project_import_clears_stale_specialized_viewer_caches_without_results() {
+    let mut state = AppState::default();
+    seed_specialized_viewer_caches(&mut state);
+
+    let project = project_named("browser-import.rspiceproj");
+
+    assert!(apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    ));
+
+    assert_specialized_viewer_caches_cleared(&state);
+}
+
+#[test]
+fn create_new_project_clears_stale_specialized_viewer_caches() {
+    let mut state = AppState::default();
+    seed_specialized_viewer_caches(&mut state);
+    state.platform.browser_project_save_name = Some("previous-project.rspiceproj".to_owned());
+
+    state.create_new_project();
+
+    assert_specialized_viewer_caches_cleared(&state);
+    assert!(
+        state.platform.browser_project_save_name.is_none(),
+        "a new browser project must not inherit the previous canonical suggestion"
+    );
+}
+
+#[test]
+fn create_new_project_resets_project_owned_plan_and_model_context() {
+    use crate::simulation::plan::AnalysisKind;
+    use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+
+    let mut state = AppState::default();
+    let stale_plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("current project owns a stable plan");
+    let transient_id = stale_plan.instances()[0].id();
+    stale_plan
+        .remove(transient_id, Vec::new())
+        .expect("default transient removes");
+    stale_plan
+        .insert(AnalysisKind::Noise)
+        .expect("stale noise analysis inserts");
+    let mut stale_models = ModelLibraryManager::new();
+    stale_models.add_library(ModelLibrary::new("stale_project_models"));
+    state.model.model_library_manager = stale_models;
+
+    state.create_new_project();
+
+    let reset_plan = state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("new project owns a stable plan");
+    assert_eq!(reset_plan.instances().len(), 1);
+    assert_eq!(reset_plan.instances()[0].kind(), AnalysisKind::Transient);
+    assert!(reset_plan.instances()[0].enabled());
+    assert!(
+        state
+            .model
+            .model_library_manager
+            .get_library("stale_project_models")
+            .is_none()
+    );
+    assert!(state.model.model_library_manager.library_count() > 0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn new_and_closed_projects_restore_configured_sources_without_leaking_project_libraries() {
+    use crate::state::model_library::ModelLibrary;
+
+    let root = std::env::temp_dir().join(format!(
+        "rspice-project-lifecycle-pdk-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).expect("create configured PDK root");
+    std::fs::write(
+        root.join("configured.lib"),
+        ".model configured_n NMOS (LEVEL=1)\n",
+    )
+    .expect("write configured PDK source");
+
+    let mut state = AppState::default();
+    state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    state
+        .model
+        .pdk_config
+        .add_library_path(root.to_string_lossy().into_owned());
+    state
+        .model
+        .model_library_manager
+        .add_library(ModelLibrary::new("previous_project_only"));
+
+    state.create_new_project();
+
+    assert!(
+        state
+            .model
+            .model_library_manager
+            .get_library("configured")
+            .is_some(),
+        "a new project must rebuild the configured application PDK catalog"
+    );
+    assert!(
+        state
+            .model
+            .model_library_manager
+            .get_library("previous_project_only")
+            .is_none(),
+        "project-owned catalog state must not cross the new-project boundary"
+    );
+
+    state
+        .model
+        .model_library_manager
+        .add_library(ModelLibrary::new("closing_project_only"));
+    state.open_project_session();
+    assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+    assert!(
+        state
+            .model
+            .model_library_manager
+            .get_library("configured")
+            .is_some(),
+        "closing a project must return to the configured application catalog"
+    );
+    assert!(
+        state
+            .model
+            .model_library_manager
+            .get_library("closing_project_only")
+            .is_none(),
+        "closing a project must discard its catalog additions"
+    );
+
+    std::fs::remove_dir_all(root).expect("remove configured PDK root");
+}
+
+/// A new project's plan owns its payload, as the session's first plan does:
+/// run preparation reads the plan's variables, outputs and specifications
+/// from it, and refused every Run plan in a new project without one.
+#[test]
+fn a_new_projects_plan_owns_its_variables_outputs_and_specifications() {
+    let mut state = AppState::default();
+
+    state.create_new_project();
+
+    let plan_id = state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("a new project owns a stable plan")
+        .id();
+    assert!(
+        state.model.workspace.content.plan_data(plan_id).is_some(),
+        "the new plan has its payload"
+    );
+}
+
+/// A project with no technology opens without claiming its runs are blocked
+/// when the run gate lets its plan run: the open warning asked whether the
+/// project had a technology binding at all, and told every project without
+/// one that execution was blocked.
+#[test]
+fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning() {
+    let mut state = AppState::default();
+
+    assert!(apply_loaded_project(
+        &mut state,
+        project_named("no-technology.rspiceproj"),
+        ProjectLoadOrigin::BrowserImport("no-technology.rspiceproj"),
+    ));
+
+    assert!(
+        state
+            .model
+            .technology_inputs()
+            .technology_gate_block_reason()
+            .is_ok()
+    );
+    let blocked = state
+        .model
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.contains("Simulation is blocked"))
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>();
+    assert!(blocked.is_empty(), "{blocked:#?}");
+}
+
+#[test]
+fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
+    use crate::simulation::dialog::IntegrationMethod;
+    use crate::workbench::ChoicePreference;
+
+    let mut state = AppState::default();
+    state
+        .model
+        .preferences
+        .set_choice(ChoicePreference::DefaultSolverPreset, 3)
+        .expect("Robust is a valid solver preset");
+
+    state.create_new_project();
+
+    assert_eq!(state.model.sim_setup.options.itl1, 200);
+    assert_eq!(state.model.sim_setup.options.itl4, 20);
+    assert!(state.model.sim_setup.options.arc_length);
+    assert_eq!(
+        state.model.sim_setup.options.method,
+        IntegrationMethod::Gear2
+    );
+    assert_eq!(state.model.sim_setup.options.temp, 27.0);
+}
+
+#[test]
+fn create_new_project_captures_the_personal_drawing_sheet_default() {
+    use crate::state::{
+        DrawingSheetInheritance, DrawingSheetStandard, SchematicPageOrientation,
+        SchematicSheetFormat,
+    };
+
+    let mut state = AppState::default();
+    let mut personal = state.model.preferences.drawing_sheet_personal_preferences();
+    personal.default_format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiC,
+        SchematicPageOrientation::Portrait,
+    )
+    .try_update(|draft| {
+        draft.inheritance = DrawingSheetInheritance::UserDefault;
+    })
+    .expect("the personal default is valid");
+    state
+        .model
+        .preferences
+        .set_drawing_sheet_personal_preferences(personal)
+        .expect("the personal default persists");
+
+    state.create_new_project();
+
+    let project_default = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .default_format
+        .clone();
+    assert!(
+        matches!(
+            &project_default.authored_size,
+            crate::state::AuthoredDrawingSheetSize::Standard {
+                standard: DrawingSheetStandard::AnsiC
+            }
+        ),
+        "the personal physical format becomes the new project's default"
+    );
+    assert_eq!(
+        project_default.orientation,
+        SchematicPageOrientation::Portrait
+    );
+    assert_eq!(
+        project_default.inheritance,
+        DrawingSheetInheritance::ProjectDefault
+    );
+    let sheet_format = state.model.active_drawing_sheet().format;
+    assert_eq!(
+        sheet_format.as_drawing_sheet_default(),
+        project_default,
+        "the sheet the panel edits is drawn on the project default"
+    );
+}
+
+#[test]
+fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
+    use crate::state::{
+        AuthoredDrawingSheetSize, DrawingSheetInheritance, SchematicPageOrientation,
+        SchematicSheetFormat,
+    };
+
+    let mut state = AppState::default();
+    let mut personal = state.model.preferences.drawing_sheet_personal_preferences();
+    personal.default_format = SchematicSheetFormat::try_custom(
+        "Personal lab panel",
+        250_001,
+        400_003,
+        SchematicPageOrientation::Portrait,
+    )
+    .unwrap()
+    .try_update(|draft| {
+        draft.inheritance = DrawingSheetInheritance::UserDefault;
+        let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size else {
+            unreachable!("the test starts with a custom size");
+        };
+        snapshot.preset_id = Some("personal-lab-panel".to_owned());
+    })
+    .unwrap();
+    state
+        .model
+        .preferences
+        .set_drawing_sheet_personal_preferences(personal.clone())
+        .unwrap();
+    let retained_personal = state.model.preferences.drawing_sheet_personal_preferences();
+
+    state.create_new_project();
+
+    let project_settings = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings();
+    assert_eq!(
+        project_settings.default_format.portrait_dimensions_um(),
+        (250_001, 400_003)
+    );
+    let AuthoredDrawingSheetSize::Custom { snapshot } =
+        &project_settings.default_format.authored_size
+    else {
+        panic!("the exact custom physical format must be retained");
+    };
+    assert!(snapshot.preset_id.is_none());
+    assert!(!snapshot.source_preset_unavailable);
+    assert!(project_settings.presets.is_empty());
+    assert_eq!(
+        state.model.preferences.drawing_sheet_personal_preferences(),
+        retained_personal,
+        "seeding a project must not mutate personal preferences"
+    );
+}
+
+#[test]
+fn project_import_restores_plan_order_solver_options_and_model_catalog() {
+    use crate::simulation::dialog::{IntegrationMethod, MatrixSolver};
+    use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
+    use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+
+    let mut source = AppState::default();
+    let source_plan = source
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("current project owns a stable plan");
+    let transient_id = source_plan.instances()[0].id();
+    let (op_id, _) = source_plan
+        .insert_at(AnalysisKind::OperatingPoint, 0)
+        .expect("OP inserts first");
+    let (ac_id, _) = source_plan
+        .insert_at(AnalysisKind::Ac, 1)
+        .expect("AC inserts second");
+    source_plan
+        .bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
+        .expect("AC binds exact OP");
+    let (noise_id, _) = source_plan
+        .insert_at(AnalysisKind::Noise, 2)
+        .expect("noise inserts third");
+    source_plan
+        .bind_dependency(noise_id, AnalysisKind::OperatingPoint, op_id)
+        .expect("noise binds exact OP");
+    source.model.sim_setup.options.reltol = 2e-4;
+    source.model.sim_setup.options.method = IntegrationMethod::Gear2;
+    source.model.sim_setup.options.solver = MatrixSolver::SparseLu;
+    source.model.sim_setup.options.arc_length = true;
+    let mut project_models = ModelLibraryManager::new();
+    project_models.add_library(ModelLibrary::new("project_exact_models"));
+    source.model.model_library_manager = project_models;
+
+    let context = crate::io::capture_execution_context(
+        &source.model.sim_setup,
+        &source.model.model_library_manager,
+    )
+    .expect("source context validates");
+    let expected_plan =
+        serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
+    let mut design_libraries = crate::state::LibraryManager::with_primitives();
+    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
+    workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from("context.rspiceproj"));
+    let project = ProjectSnapshot::new_with_execution_context(
+        workspace,
+        design_libraries,
+        ProjectSimulationResults::default(),
+        context,
+    );
+
+    let mut target = AppState::default();
+    target
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("target owns a stable plan")
+        .insert(AnalysisKind::DcSweep)
+        .expect("target stale analysis inserts");
+    target.model.model_library_manager.clear();
+    let imported = apply_loaded_project(
+        &mut target,
+        project,
+        ProjectLoadOrigin::BrowserImport("context.rspiceproj"),
+    );
+
+    assert!(imported);
+    assert_eq!(
+        serde_json::to_value(&target.model.sim_setup).expect("restored plan serializes"),
+        expected_plan
+    );
+    let restored = target
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("import restores stable plan");
+    assert_eq!(
+        restored
+            .instances()
+            .iter()
+            .map(|instance| instance.id())
+            .collect::<Vec<_>>(),
+        vec![op_id, ac_id, noise_id, transient_id]
+    );
+    assert_eq!(
+        restored
+            .instance(ac_id)
+            .expect("AC restored")
+            .dependencies()[0]
+            .target(),
+        op_id
+    );
+    assert_eq!(
+        restored
+            .instance(noise_id)
+            .expect("noise restored")
+            .dependencies()[0]
+            .target(),
+        op_id
+    );
+    assert!(restored.instances().iter().all(|instance| {
+        instance.enabled() && instance.lifecycle() == AnalysisLifecycleState::Draft
+    }));
+    assert_eq!(
+        target.model.sim_setup.session.options_draft.reltol,
+        crate::simulation::dialog::options::format_si_value(2e-4)
+    );
+    assert_eq!(target.model.model_library_manager.library_count(), 1);
+    assert!(
+        target
+            .model
+            .model_library_manager
+            .get_library("project_exact_models")
+            .is_some()
+    );
+}
+
+#[test]
+fn invalid_execution_context_does_not_partially_replace_open_project() {
+    let mut project = project_named("invalid-context.rspiceproj");
+    let context = crate::io::capture_execution_context(
+        &crate::workbench::app_state::SimSetupState::new(),
+        &crate::state::model_library::ModelLibraryManager::new(),
+    )
+    .expect("baseline context validates");
+    let mut value = serde_json::to_value(context).expect("context serializes");
+    let instances = value["simulation_plan"]["analysis_plan"]["instances"]
+        .as_array_mut()
+        .expect("v4 instances are an array");
+    let duplicate = instances[0].clone();
+    instances.push(duplicate);
+    let context: ProjectExecutionContext =
+        serde_json::from_value(value).expect("corrupt structure deserializes for validation");
+    project.file.execution_context = Some(context);
+
+    let mut state = AppState::default();
+    let original_project_name = state
+        .model
+        .workspace
+        .content
+        .project
+        .display_name()
+        .to_owned();
+    let original_active_view = state.model.workspace.content.active_view.clone();
+
+    let imported = apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("invalid-context.rspiceproj"),
+    );
+
+    assert!(!imported);
+    assert_eq!(
+        state.model.workspace.content.project.display_name(),
+        original_project_name
+    );
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        original_active_view
+    );
+    assert!(state.model.log_buffer.entries().any(|entry| {
+        entry
+            .message
+            .contains("its saved simulation setup is invalid")
+            && entry.message.contains("appears more than once")
+    }));
+}
+
+#[test]
+fn browser_import_restores_project_simulation_results_and_skips_recents() {
+    let mut state = AppState::default();
+    seal_legacy_unattributed(state.model.simulation.start_run());
+    assert!(state.model.simulation.retained.has_results());
+
+    let project = project_named_with_results("browser-import.rspiceproj");
+
+    let imported = apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    );
+
+    assert!(imported);
+    assert_eq!(
+        state.model.workspace.content.project.display_name(),
+        "browser-import"
+    );
+    assert_eq!(state.model.simulation.retained.run_count(), 1);
+    assert_eq!(
+        state
+            .model
+            .simulation
+            .active_run()
+            .expect("active imported run")
+            .label,
+        "Run 4 (import fixture)"
+    );
+    assert_eq!(state.model.simulation.view.waveforms.len(), 1);
+    assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
+    assert!(state.platform.recent_files.is_empty());
+}
+
+#[test]
+fn project_import_resets_non_persisted_simulation_runtime_state() {
+    let mut state = AppState::default();
+    // An actually running local simulation deliberately blocks project
+    // replacement. These are stale, non-persisted controls from an
+    // already-finished run and must be reset by the accepted import.
+    state.model.simulation.execution.is_running = false;
+    state.model.simulation.execution.trigger_simulation = true;
+    state.model.simulation.execution.trigger_abort = true;
+    state.model.simulation.execution.progress = 0.75;
+    state.model.simulation.execution.status = "Running stale project".to_string();
+    state.model.simulation.source.netlist_content = "stale netlist".to_string();
+    state
+        .model
+        .simulation
+        .view
+        .node_to_waveform
+        .insert("stale".to_string(), 99);
+    state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
+    state.code.code_workspace.page =
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+    state.code.code_workspace.automation.debug.watches.push(
+        crate::workbench::documents::code_workspace::AutomationWatch {
+            expression: "old_project.signal".to_owned(),
+            value: "1.25".to_owned(),
+            error: None,
+        },
+    );
+    state.code.netlist.diagnostics = std::sync::Arc::new(
+        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![crate::state::netlist_diagnostics::Diagnostic::error(
+                "old project diagnostic",
+            )],
+            "",
+        )
+        .unwrap(),
+    );
+    state
+        .model
+        .log_buffer
+        .warning(crate::diagnostics::LogSource::Run, "old project warning");
+    let project = project_named_with_results("browser-import.rspiceproj");
+
+    assert!(apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
+    ));
+
+    assert!(!state.model.simulation.execution.is_running);
+    assert!(!state.model.simulation.execution.trigger_simulation);
+    assert!(!state.model.simulation.execution.trigger_abort);
+    assert_eq!(state.model.simulation.execution.progress, 0.0);
+    assert!(state.model.simulation.execution.status.is_empty());
+    assert!(state.model.simulation.source.netlist_content.is_empty());
+    assert_eq!(
+        state.model.simulation.view.node_to_waveform.get("stale"),
+        None
+    );
+    assert_eq!(state.model.simulation.view.ground_node, None);
+    assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
+    assert_eq!(
+        state.code.code_workspace.page,
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+    );
+    assert!(
+        state
+            .code
+            .code_workspace
+            .automation
+            .debug
+            .watches
+            .is_empty()
+    );
+    assert_eq!(state.code.netlist.diagnostics.summary().total(), 0);
+    // The Console is the session's record: the old project's history stays,
+    // and the replacement states itself once after it.
+    let messages: Vec<_> = state
+        .model
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.as_str())
+        .collect();
+    let old = messages
+        .iter()
+        .position(|message| *message == "old project warning")
+        .expect("the old project's history is kept");
+    let opened: Vec<_> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.starts_with("Imported project "))
+        .collect();
+    assert_eq!(opened.len(), 1, "{messages:?}");
+    assert!(opened[0].0 > old, "{messages:?}");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_writes_simulation_results() {
+    let mut state = AppState::default();
+    let waveform = crate::state::RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0, 2.0],
+        vec![0.0, 1.5, 3.0],
+        "#00aaff",
+    );
+    let mut run = crate::state::SimulationRun::new(9);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform]),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 9;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-results-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+
+    let saved = state.save_project_to_path(&path);
+    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(saved);
+    assert!(loaded.file.execution_context.is_some());
+    assert_eq!(loaded.file.simulation_results.runs.len(), 1);
+    assert_eq!(
+        loaded.file.simulation_results.runs[0].analyses[0].waveforms[0].name,
+        "V(out)"
+    );
+}
+
+/// Markers are the reader's own annotation of a result. Losing them on
+/// close is data loss, so they are written beside the retained datasets
+/// and re-attach to the analysis they named.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_round_trips_result_markers() {
+    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+
+    let mut state = AppState::default();
+    let waveform = crate::state::RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0, 2.0],
+        vec![0.0, 1.5, 3.0],
+        "#00aaff",
+    );
+    let mut run = crate::state::SimulationRun::new(11);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform]),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 11;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+
+    let active = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
+    let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
+    let anchor = state
+        .results
+        .results
+        .session
+        .markers
+        .first()
+        .map(|marker| marker.anchor.clone());
+    assert!(anchor.is_none(), "a fresh workspace carries no markers");
+    let id = {
+        let waveform_anchor =
+            crate::workbench::documents::result_document::marker_anchor_for(analysis, "V(out)");
+        state
+            .results
+            .results
+            .session
+            .add_marker(analysis, waveform_anchor, "V(out)".to_owned(), 1.0)
+            .unwrap()
+    };
+    if let Some(marker) = state.results.results.session.marker_mut(id) {
+        marker.note = "settling point".to_owned();
+    }
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-markers-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+
+    let saved = state.save_project_to_path(&path);
+    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(saved);
+    assert_eq!(loaded.file.result_presentation.markers.len(), 1);
+    assert_eq!(
+        loaded.file.result_presentation.markers[0].note,
+        "settling point"
+    );
+
+    let mut reopened = AppState::default();
+    reopened.model.simulation = state.model.simulation.clone();
+    crate::workbench::documents::result_document::restore_presentation(
+        &mut reopened.results_parts(),
+        loaded.file.result_presentation,
+    );
+    assert_eq!(reopened.results.results.session.markers.len(), 1);
+    assert_eq!(
+        reopened.results.results.session.markers[0].note,
+        "settling point"
+    );
+}
+
+/// A logarithmic Y axis is a decision about a dataset, like a marker.
+///
+/// It used to live in egui's persisted memory under a hand-built id,
+/// which put it outside every owner that knows what a project is: closing
+/// one could not clear it, saving one could not carry it, and it grew an
+/// entry for every dataset ever opened.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_round_trips_logarithmic_panes() {
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, WavePanePresentationKey,
+    };
+
+    let mut state = AppState::default();
+    let mut run = crate::state::SimulationRun::new(12);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC").with_waveforms(
+            vec![crate::state::RetainedTrace::new(
+                "V(out)",
+                vec![1.0, 10.0, 100.0],
+                vec![1.0, 0.5, 0.1],
+                "#00aaff",
+            )],
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 12;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+
+    let active = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
+    let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
+    let pane = WavePanePresentationKey {
+        analysis,
+        unit: "V".to_owned(),
+    };
+    // A pane whose analysis this project does not retain is not written out
+    // at all, and an older file that already carries one does not come back
+    // from it — either would put an axis in log space for nothing on screen.
+    let orphan = WavePanePresentationKey {
+        analysis: AnalysisPresentationKey::new(
+            crate::product::DatasetId::new(),
+            &crate::state::AnalysisResult::new(9, crate::state::AnalysisType::Transient, "gone"),
+        ),
+        unit: "A".to_owned(),
+    };
+    state
+        .results
+        .results
+        .session
+        .log_y_panes
+        .insert(pane.clone());
+    state
+        .results
+        .results
+        .session
+        .log_y_panes
+        .insert(orphan.clone());
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-logy-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+
+    let saved = state.save_project_to_path(&path);
+    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(saved);
+    assert_eq!(
+        loaded.file.result_presentation.log_y_panes,
+        vec![pane.clone()],
+        "the save carries only the pane whose analysis this project retains"
+    );
+
+    // An older file that already carries an orphan is still filtered on load.
+    let mut reopened = AppState::default();
+    reopened.model.simulation = state.model.simulation.clone();
+    let mut older_file = loaded.file.result_presentation.log_y_panes;
+    older_file.push(orphan);
+    crate::workbench::documents::result_document::restore_log_y_panes(
+        &mut reopened.results_parts(),
+        older_file,
+    );
+    assert_eq!(
+        reopened
+            .results
+            .results
+            .session
+            .log_y_panes
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![&pane],
+        "only the pane whose analysis is still retained comes back"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_round_trips_stable_expression_traces() {
+    let mut state = AppState::default();
+    let mut run = crate::state::SimulationRun::new(13);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, 0.5, 1.0],
+                "#00aaff",
+            )]),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 13;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let expression_owner =
+        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+            state.model.simulation.retained.runs[0].dataset_id,
+            &state.model.simulation.retained.runs[0].analyses[0],
+        );
+    assert!(
+        state
+            .results
+            .results
+            .add_expression_trace(
+                &state.model.simulation,
+                expression_owner,
+                "V(out) * 2".to_owned(),
+            )
+            .expect("retained expression owner")
+    );
+    state.model.workspace.content.visualization_documents_dirty = true;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-expressions-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+
+    let saved = state.save_project_to_path(&path);
+    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(saved);
+    assert_eq!(loaded.file.result_presentation.expression_groups.len(), 1);
+    assert_eq!(
+        loaded.file.result_presentation.expression_groups[0].traces,
+        vec![crate::workbench::documents::result_document::ExprTrace {
+            text: "V(out) * 2".to_owned(),
+            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
+            visible: true,
+        }]
+    );
+
+    let mut reopened = AppState::default();
+    reopened.model.simulation = state.model.simulation.clone();
+    crate::workbench::documents::result_document::restore_expression_groups(
+        &mut reopened.results_parts(),
+        loaded.file.result_presentation.expression_groups,
+    );
+    assert_eq!(
+        reopened
+            .results
+            .results
+            .project_expression_groups(&reopened.model.simulation)[0]
+            .traces[0]
+            .text,
+        "V(out) * 2"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_round_trips_canonical_result_document_entities() {
+    use crate::results::visualization_document::{
+        AnnotationAnchor, DocumentEdit, PaneDataBinding, TypedValue, VisualizationDocument,
+        VisualizationPresentationPolicy,
+    };
+
+    let mut state = AppState::default();
+    let mut run = crate::state::SimulationRun::new(21);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(4, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, 0.5, 1.0],
+                "#00aaff",
+            )]),
+    );
+    seal_legacy_unattributed(&mut run);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 21;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let run = &state.model.simulation.retained.runs[0];
+    let analysis = &run.analyses[0];
+    let source =
+        crate::workbench::documents::result_document::visualization_source_dataset(run, analysis)
+            .expect("source projection");
+    let analysis_id = analysis.provenance().map_or_else(
+        || {
+            let name = format!("legacy-analysis-v1/{}", analysis.id);
+            crate::product::AnalysisInstanceId::from_namespace(
+                run.dataset_id.as_uuid(),
+                name.as_bytes(),
+            )
+        },
+        |provenance| provenance.source_instance_id(),
+    );
+    let mut document =
+        VisualizationDocument::new("Saved review", vec![source.clone()]).expect("result document");
+    let pane_id = document.panes()[0].id;
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id,
+                        dataset: source.binding(),
+                    }),
+                },
+                DocumentEdit::SetPresentation(VisualizationPresentationPolicy {
+                    significant_digits: 13,
+                    phase_continuous: true,
+                }),
+            ],
+        )
+        .expect("pane and presentation commit");
+    let trace_id = receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            crate::results::visualization_document::EntityRef::Trace(id) => Some(*id),
+            _ => None,
+        })
+        .expect("bound pane provisions a trace");
+    let cursor_axis_id = document
+        .traces()
+        .iter()
+        .find(|trace| trace.id == trace_id)
+        .expect("bound trace")
+        .x_axis_id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddTypedMarker {
+                    pane_id,
+                    trace_id,
+                    coordinate: TypedValue::Real(1.0),
+                    label: "M1".to_owned(),
+                    kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
+                    scope: crate::results::visualization_document::PlotMarkerScope::Document,
+                    source_specification: None,
+                },
+                DocumentEdit::AddScalarMeasurement {
+                    pane_id,
+                    trace_ids: vec![trace_id],
+                    expression: "rms(V(out))".to_owned(),
+                    value: 0.6454972243679028,
+                },
+                DocumentEdit::AddAnnotation {
+                    pane_id,
+                    anchor: AnnotationAnchor::Trace {
+                        trace_id,
+                        coordinate: TypedValue::Real(1.0),
+                    },
+                    text: "Retained review note".to_owned(),
+                },
+                DocumentEdit::AddCursor {
+                    pane_id,
+                    axis_id: cursor_axis_id,
+                    position: TypedValue::Real(1.0),
+                    label: "A".to_owned(),
+                },
+            ],
+        )
+        .expect("authored entities commit");
+    let document_id = state
+        .model
+        .workspace
+        .content
+        .insert_visualization_document(document)
+        .expect("workspace owns result document");
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-result-document-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+    let saved = state.save_project_to_path(&path);
+    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(saved);
+    let restored = loaded
+        .file
+        .workspace
+        .visualization_document(document_id)
+        .expect("result document round trips");
+    assert_eq!(restored.presentation().significant_digits, 13);
+    assert!(restored.presentation().phase_continuous);
+    assert_eq!(restored.traces().len(), 1);
+    assert_eq!(restored.markers().len(), 1);
+    assert_eq!(restored.measurements().len(), 1);
+    assert_eq!(restored.annotations().len(), 1);
+    assert_eq!(restored.cursors().len(), 1);
+    assert_eq!(restored.cursors()[0].label, "A");
+    assert_eq!(
+        restored.measurements()[0].expression.as_deref(),
+        Some("rms(V(out))")
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() {
+    let mut state = AppState::default();
+    let waveform = crate::state::RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0, 2.0],
+        vec![0.0, f64::NAN, 3.0],
+        "#00aaff",
+    );
+    let mut run = crate::state::SimulationRun::new(10);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform]),
+    );
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 10;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-save-project-invalid-results-{}-{unique}.rspiceproj",
+        std::process::id()
+    ));
+
+    let saved = state.save_project_to_path(&path);
+    let published = path.exists();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(!saved);
+    assert!(!published);
+    let line = state
+        .model
+        .log_buffer
+        .entries()
+        .find(|entry| entry.message.contains("Project save failed"))
+        .map(|entry| entry.id)
+        .expect("the failure is in the Console");
+    // A save the user asked for that did not happen is said now, not left
+    // for the reader to find under the bell.
+    state.drain_notices(&egui::Context::default());
+    let activity = state.workbench.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].title(), "Project save failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+    assert_eq!(
+        activity[0].action(),
+        Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: line })
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
+    let mut state = AppState::default();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-open-missing-{}-{}.rspiceproj",
+        std::process::id(),
+        crate::time_compat::unix_epoch().as_nanos()
+    ));
+
+    assert!(!state.load_project_from_path(&path));
+
+    state.drain_notices(&egui::Context::default());
+    let activity = state.workbench.toasts.activity();
+    assert_eq!(activity.len(), 1, "an open that failed is said now");
+    assert_eq!(activity[0].title(), "Project open failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+}
+
+#[test]
+fn a_named_new_project_seeds_every_owner_of_its_identity() {
+    let mut state = AppState::default();
+
+    state
+        .create_new_project_with(&NewProjectParams {
+            name: "Precision Sensor AFE".to_owned(),
+            root_library: "afe".to_owned(),
+            top_cell: "core".to_owned(),
+        })
+        .expect("a validated identity creates a project");
+
+    let workspace = &state.model.workspace;
+    assert_eq!(workspace.content.project.name(), "Precision Sensor AFE");
+    assert_eq!(workspace.content.project.root_library, "afe");
+    assert_eq!(workspace.content.project.top_cell, "core");
+
+    let expected = crate::state::CellViewRef::new(
+        "afe",
+        "core",
+        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+    );
+    assert_eq!(workspace.content.active_view, expected);
+    assert_eq!(
+        workspace
+            .content
+            .open_views
+            .iter()
+            .map(|open| open.reference.clone())
+            .collect::<Vec<_>>(),
+        vec![expected.clone()]
+    );
+    assert_eq!(workspace.content.hierarchy_stack, vec![expected.clone()]);
+    assert_eq!(
+        workspace
+            .content
+            .schematic_buffers
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![&expected.key()]
+    );
+
+    // The requested library is the one the project seed created — role
+    // metadata and all — rather than the default one renamed afterwards.
+    let library = state
+        .model
+        .library_manager
+        .get_library("afe")
+        .expect("the requested design library exists");
+    assert_eq!(
+        library.metadata.get("role").map(String::as_str),
+        Some("project")
+    );
+    assert!(
+        library
+            .get_cell("core")
+            .and_then(|cell| cell.get_view(crate::state::workspace::DEFAULT_SCHEMATIC_VIEW))
+            .is_some()
+    );
+
+    // Validated as Save captures it: with its plan, which owns the plan
+    // payload the project seeds.
+    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("a new project captures")
+        .file
+        .validate()
+        .expect("a named new project satisfies the persisted project contract");
+}
+
+#[test]
+fn an_invalid_identity_creates_nothing_and_names_the_field() {
+    let mut state = AppState::default();
+    let before = state.model.workspace.content.project.id();
+
+    let error = state
+        .create_new_project_with(&NewProjectParams {
+            name: "Sensor bridge".to_owned(),
+            root_library: "afe top".to_owned(),
+            ..NewProjectParams::default()
+        })
+        .expect_err("a library segment with a space is refused");
+
+    assert_eq!(
+        error,
+        "The library name can use only letters, numbers and underscores."
+    );
+    assert_eq!(state.model.workspace.content.project.id(), before);
+    assert!(
+        state
+            .prompt_text()
+            .is_some_and(|prompt| prompt.starts_with("New project not created")),
+        "the refusal answers on the status bar"
+    );
+}
+
+#[test]
+fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
+    let mut state = AppState::default();
+
+    state.create_new_project();
+
+    assert!(!state.project.new_project.open);
+    let defaults = NewProjectParams::default();
+    assert_eq!(state.model.workspace.content.project.name(), defaults.name);
+    assert_eq!(
+        state.model.workspace.content.project.root_library,
+        defaults.root_library
+    );
+    assert_eq!(
+        state.model.workspace.content.project.top_cell,
+        defaults.top_cell
+    );
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        crate::state::CellViewRef::default_top()
+    );
+    assert!(
+        state
+            .model
+            .library_manager
+            .get_library(&defaults.root_library)
+            .and_then(|library| library.get_cell(&defaults.top_cell))
+            .is_some()
+    );
+}
+
+/// Save As carries on in the new file: the project location, the recent
+/// list and the saved session all name it, and the session read back by
+/// the next start reopens it there.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+        fn flush(&mut self) {}
+    }
+
+    let directory = std::env::temp_dir().join(format!("rspice-save-as-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).expect("fixture directory");
+    let original = directory.join("original.rspiceproj");
+    let renamed = directory.join("renamed.rspiceproj");
+    let mut state = AppState::default();
+    assert!(state.save_project_to_path(&original));
+
+    assert!(state.save_project_as_to_path(&renamed));
+
+    let names_renamed = |path: Option<&Path>| {
+        path.and_then(Path::file_name)
+            .is_some_and(|name| name == "renamed.rspiceproj")
+    };
+    assert!(names_renamed(
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state.platform)
+            .as_deref()
+    ));
+    assert!(names_renamed(
+        state.model.workspace.content.project.path.as_deref()
+    ));
+    assert!(names_renamed(
+        state
+            .platform
+            .recent_files
+            .first()
+            .map(|recent| recent.path.as_path())
+    ));
+
+    let mut storage = MemoryStorage::default();
+    state.store_session(&mut storage);
+    let restored = AppState::restore_eframe_session(&storage).expect("the session restores");
+    assert!(names_renamed(
+        restored.model.workspace.content.project.path.as_deref()
+    ));
+    assert!(names_renamed(
+        restored
+            .platform
+            .recent_files
+            .first()
+            .map(|recent| recent.path.as_path())
+    ));
+    assert!(
+        original.exists(),
+        "the file it came from is left as last saved"
+    );
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// Close project asks about configuration edits that are not applied before
+/// its review of unsaved documents, and closes nothing meanwhile.
+#[test]
+fn close_project_asks_about_configuration_edits_before_its_review() {
+    let fixture = crate::workbench::examples::hierarchy_reference::build();
+    let mut state = fixture.state;
+    state.open_project_session();
+    let catalog = state.model.workspace.content.configuration_sets.clone();
+    state
+        .project
+        .configuration
+        .edit(&catalog, fixture.configuration, |definition| {
+            definition.stop_views = vec!["spice".to_owned()];
+        });
+    assert!(state.project.configuration.is_dirty(&catalog));
+
+    assert!(state.request_close_project());
+
+    assert_eq!(
+        state
+            .project
+            .configuration_dialog
+            .leaving
+            .as_ref()
+            .map(|leaving| leaving.action),
+        Some(crate::workbench::app::ConfirmationAction::CloseProject(
+            ProjectCloseDestination::EmptyWorkbench
+        ))
+    );
+    assert!(state.workbench.project_review_dialog.request.is_none());
+    assert!(state.platform.project_lifecycle.is_open());
+}
