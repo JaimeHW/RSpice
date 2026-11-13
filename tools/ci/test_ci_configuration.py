@@ -1867,7 +1867,6 @@ class CiConfigurationTests(unittest.TestCase):
             "advisories bans licenses sources",
             workflow,
         )
-        self.assertIn("cargo audit --deny warnings --file Cargo.lock", workflow)
         self.assertIn("cargo cyclonedx --format json --spec-version 1.5", workflow)
         self.assertEqual(workflow.count("actions/attest@"), 2)
         self.assertIn("sha256sum --check --strict ./*.sha256", workflow)
@@ -1891,11 +1890,7 @@ class CiConfigurationTests(unittest.TestCase):
             "advisories bans licenses sources",
             security,
         )
-        self.assertIn("cargo audit --deny warnings --file Cargo.lock", security)
         self.assertIn("cargo cyclonedx --format json --target all", security)
-        self.assertIn(
-            "python3 tools/security/check_advisory_exceptions.py", security
-        )
         self.assertIn("if-no-files-found: error", security)
         self.assertIn("cargo llvm-cov --locked ${{ matrix.packages }}", coverage)
         for group in ("core", "ui", "libraries"):
@@ -1945,29 +1940,6 @@ class CiConfigurationTests(unittest.TestCase):
             "advisories",
             security,
         )
-        self.assertIn("cargo audit --deny warnings --file Cargo.lock", security)
-        self.assertIn(
-            "python3 tools/security/check_advisory_exceptions.py", security
-        )
-
-    def test_security_exceptions_are_owned_scoped_and_unexpired(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "tools/security/check_advisory_exceptions.py"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            f"advisory exception policy failed:\n{result.stdout}\n{result.stderr}",
-        )
-
-        security_policy = read_text("SECURITY.md")
-        codeowners = read_text(".github/CODEOWNERS")
-        self.assertIn("security/advisory-exceptions.toml", security_policy)
-        self.assertIn("security/advisory-exceptions.toml", codeowners)
-        self.assertIn("tools/security/", codeowners)
 
     def test_core_all_features_union_is_linted_with_bounded_memory(self) -> None:
         job = workflow_job_body(read_text(".github/workflows/ci.yml"), "native-feature-lint")

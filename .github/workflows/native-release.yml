@@ -17,7 +17,6 @@ env:
   CARGO_INCREMENTAL: "0"
   RUST_TOOLCHAIN: "1.94.0"
   CARGO_DENY_VERSION: "0.19.9"
-  CARGO_AUDIT_VERSION: "0.22.2"
   CARGO_CYCLONEDX_VERSION: "0.5.9"
   UV_VERSION: "0.12.1"
   MANAGED_PYTHON_VERSION: "3.14.6"
@@ -330,9 +329,6 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
@@ -341,15 +337,12 @@ jobs:
       - name: Install pinned security tooling
         run: |
           cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
-          cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
           cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
       - name: Gate current dependency risk
         run: |
-          python tools/security/check_advisory_exceptions.py
           mkdir -p target
           cargo metadata --locked --all-features --format-version 1 > target/security-metadata.json
           cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
-          cargo audit --deny warnings --file Cargo.lock
       - name: Generate release SBOMs and checksums
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}

@@ -16,7 +16,7 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 | Browser | wasm32 compilation, production UI/worker size reports, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
 | Mobile | ARM64 Android and iOS portable solver/catalog compilation |
 | Feature shards | Clippy and host tests for configurations hidden by workspace feature unification, including emitted WebAssembly execution in wasmi |
-| Security | Committed dependency graph, advisory/license/source policies, expiring exceptions, PR dependency review and SBOMs |
+| Security | Committed dependency graph, advisory/license/source policies, PR dependency review and SBOMs |
 
 The remaining-workspace selector excludes crates with dedicated lanes. Generated
 model packages and catalog utilities are qualified through the simulator and

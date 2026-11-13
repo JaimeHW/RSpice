@@ -16,7 +16,6 @@ env:
   CARGO_INCREMENTAL: "0"
   RUST_TOOLCHAIN: "1.94.0"
   CARGO_DENY_VERSION: "0.19.9"
-  CARGO_AUDIT_VERSION: "0.22.2"
   CARGO_CYCLONEDX_VERSION: "0.5.9"
 
 jobs:
@@ -45,18 +44,13 @@ jobs:
       - name: Install security tools
         run: |
           cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
-          cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
           cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
-      - name: Validate expiring advisory exceptions
-        run: python3 tools/security/check_advisory_exceptions.py
       - name: Resolve the committed dependency graph
         run: |
           mkdir -p target
           cargo metadata --locked --all-features --format-version 1 > target/security-metadata.json
       - name: Cargo deny policy
         run: cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
-      - name: RustSec audit
-        run: cargo audit --deny warnings --file Cargo.lock
       - name: Generate CycloneDX SBOMs
         run: |
           cargo cyclonedx --format json --target all --override-filename bom

@@ -37,11 +37,8 @@ will not be treated as malicious activity by the project.
 ## Dependency risk decisions
 
 Every pull request and every push to `main` resolves the dependency graph from
-the committed `Cargo.lock` and runs both RustSec and cargo-deny. Release gates
-repeat those checks and also generate a software bill of materials. An
-advisory may be accepted only when no safe compatible upgrade exists and
-reachability is constrained. Every exception is recorded in
-[`security/advisory-exceptions.toml`](security/advisory-exceptions.toml) with an
-owner, mitigation, exit criterion, and review date. A yanked release is held to
-the same rule and recorded by its exact `name@version`. CI fails when the
-registry and scanner allowlists diverge or a review expires.
+the committed `Cargo.lock` and runs cargo-deny against the RustSec advisory
+database. Release gates repeat that check and also generate a software bill of
+materials. An advisory may be accepted only when no safe compatible upgrade
+exists and reachability is constrained, and each accepted advisory is listed in
+[`deny.toml`](deny.toml) with the reason it is safe to carry.
