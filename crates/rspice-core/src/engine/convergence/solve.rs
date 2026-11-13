@@ -1124,19 +1124,18 @@ impl Engine {
 
     /// ngspice's direct solve and the last stage of its GMIN stepping run at
     /// CKTdiagGmin = CKTgshunt, zero unless the deck sets RSHUNT (niiter.c,
-    /// cktop.c), where RSpice keeps a GMIN floor from every node to ground.
-    /// Outside the Xyce dialect the operating-point solve runs without the
-    /// floor first.
+    /// cktop.c), and Xyce's operating-point solve adds no nodal shunt, where
+    /// RSpice keeps a GMIN floor from every node to ground. The
+    /// operating-point solve runs without the floor first, unless the deck
+    /// asks for a continuation.
     pub(in crate::engine::convergence) fn tries_zero_dc_nodal_floor(
         &self,
         circuit: &CircuitData,
     ) -> bool {
-        self.config.spice_dialect != SpiceDialect::Xyce
-            && self
-                .config
-                .convergence_config
-                .nonlinear_continuation
-                .is_none()
+        self.config
+            .convergence_config
+            .nonlinear_continuation
+            .is_none()
             && !circuit.zero_dc_nodal_floor
             && !circuit.dc_nodal_floor_retained
             && self.dc_nodal_gmin_floor(circuit) > 0.0

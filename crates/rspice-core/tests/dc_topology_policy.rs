@@ -287,6 +287,36 @@ fn a_sensed_loop_that_nothing_drives_solves_to_zero_on_the_faer_backend() {
     }
 }
 
+/// Xyce adds no conductance from a node to ground on its operating-point
+/// solve, so a node that only teraohm resistors or leakage hold sits where
+/// they put it. With the 1e-15 S floor the Xyce dialect kept on every solve,
+/// the 1e12/1e12 Ohm divider read 0.49975 V, and the same divider beside a
+/// diode 0.49999975 V. Xyce 7.10 prints v = 0.5 for both.
+#[test]
+fn the_xyce_dialect_solves_the_operating_point_without_the_nodal_floor_first() {
+    let xyce = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    for (deck, node) in [
+        (
+            "Teraohm divider\nV1 in 0 1\nR1 in n 1e12\nR2 n 0 1e12\n.op\n.end\n",
+            "n",
+        ),
+        (
+            "Leakage-held divider beside a diode\nV1 in 0 1\nR1 in n 1e9\nR2 n 0 1e9\n\
+             RD in a 1k\nD1 a 0 dmod\n.model dmod d(is=1e-14)\n.op\n.end\n",
+            "n",
+        ),
+    ] {
+        let result = xyce
+            .run_dc_op(&parse(deck))
+            .expect("the divider has an operating point");
+        let v = voltage(&result, node);
+        assert!(
+            (v - 0.5).abs() <= 1.0e-12,
+            "v({node}) = {v:e}, Xyce 7.10 0.5"
+        );
+    }
+}
+
 /// A conductance of -1e-15 S is the whole circuit at `n`, and without a
 /// GMIN floor that system is regular: ngspice-46 prints
 /// v(n) = -9.9999999999999988e+08.
@@ -319,6 +349,32 @@ fn the_polish_of_an_operating_point_solved_without_the_floor_keeps_its_system() 
         .expect("the diode deck has an operating point");
     let n = voltage(&result, "n");
     assert!((n - 0.5).abs() <= 1.0e-12, "v(n) = {n:e}, ngspice-46 0.5");
+}
+
+/// The Xyce dialect starts a transient from the operating point solved
+/// without the nodal floor while that solve succeeds, as `.op` does. Its
+/// transient carries no floor, but the t=0 operating point kept the 1e-15 S
+/// one, so beside a diode the 1e9/1e9 Ohm divider started at 0.49999975 V
+/// and stepped to 0.5 at the next point. Xyce adds no nodal shunt to its
+/// operating point or its transient: Xyce 7.10 prints v(n) = 0.5 throughout.
+#[test]
+fn the_xyce_transient_operating_point_solves_without_the_nodal_floor_first() {
+    let netlist = parse(
+        "Leakage-held divider beside a diode\nV1 in 0 1\nR1 in n 1e9\nR2 n 0 1e9\n\
+         RD in a 1k\nD1 a 0 dmod\n.model dmod d(is=1e-14)\n.tran 1n 2n\n.end\n",
+    );
+    let result = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+        .run_tran(&netlist, 2.0e-9, 1.0e-9)
+        .expect("the diode deck runs a transient");
+    let n = result
+        .try_voltage_waveform_named("n")
+        .expect("v(n) is recorded");
+    for (point, value) in n.iter().enumerate() {
+        assert!(
+            (value - 0.5).abs() <= 1.0e-12,
+            "v(n) = {value:e} at point {point}, Xyce 7.10 0.5",
+        );
+    }
 }
 
 /// Every point of a DC sweep is an operating point solved without the nodal

@@ -2334,11 +2334,18 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
             // The independent reference has no nodal shunts. Deck GMIN
             // controls junction leakage, separately from this solver floor.
             let result = run(SpiceDialect::BestAvailable, Some(0.0));
-            // The default operating point first solves without the floor;
-            // Xyce's dialect keeps the floor on every solve.
+            // The operating point first solves without the floor, in Xyce's
+            // dialect too: Xyce has no nodal shunt.
             let conditioned = op_result(&deck);
-            let xyce_floorless = run(SpiceDialect::Xyce, Some(0.0));
-            let xyce_conditioned = run(SpiceDialect::Xyce, None);
+            let xyce = run(SpiceDialect::Xyce, None);
+            // A deck that asks for GMIN stepping keeps the floor.
+            let stepped_netlist =
+                Netlist::parse(&deck.replace("\n.op\n", "\n.options nonlin continuation=3\n.op\n"))
+                    .unwrap();
+            let xyce_conditioned =
+                Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                    .run_dc_op(&stepped_netlist)
+                    .unwrap();
             for (branch, expected) in [
                 ("Vc", -7.045_220_149_350_812e-8),
                 ("Vb", -8.783310826230572e-8),
@@ -2349,18 +2356,19 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
                     "LEVEL={level} {kind} {branch}: {actual:e} != {:e}",
                     p * expected
                 );
-                assert!(
-                    (conditioned.branch_current_named(branch).unwrap() - actual).abs() < 1e-20,
-                    "LEVEL={level} {kind} {branch}: the floorless default operating point \
-                     carries conditioning current",
-                );
+                for (label, floorless) in [("default", &conditioned), ("Xyce", &xyce)] {
+                    assert!(
+                        (floorless.branch_current_named(branch).unwrap() - actual).abs() < 1e-20,
+                        "LEVEL={level} {kind} {branch}: the floorless {label} operating point \
+                         carries conditioning current",
+                    );
+                }
                 // Where the floor is kept, its 1 fS is below the ULP of a
                 // 3 kS parasitic diagonal, but its current must survive:
                 // four collector nodes at 1.8 V, three base nodes at 0.65 V.
                 let shunt_current = if branch == "Vc" { 7.2e-15 } else { 1.95e-15 };
                 assert!(
-                    (xyce_conditioned.branch_current_named(branch).unwrap()
-                        - xyce_floorless.branch_current_named(branch).unwrap()
+                    (xyce_conditioned.branch_current_named(branch).unwrap() - actual
                         + p * shunt_current)
                         .abs()
                         < 1e-20,
