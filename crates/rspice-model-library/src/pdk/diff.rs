@@ -26,7 +26,6 @@ pub enum PdkTechnologyDiffArea {
     Connectivity,
     Recognition,
     Extraction,
-    Callback,
     Artifact,
 }
 
@@ -375,14 +374,6 @@ impl PdkTechnologyRevisionDiff {
         )?;
         diff_keyed(
             &mut entries,
-            PdkTechnologyDiffArea::Callback,
-            &before.callbacks,
-            &after.callbacks,
-            |contract| contract.callback_id.to_ascii_lowercase(),
-            |_, _, _| PdkTechnologyDiffImpact::Breaking,
-        )?;
-        diff_keyed(
-            &mut entries,
             PdkTechnologyDiffArea::Artifact,
             &before.artifacts,
             &after.artifacts,
@@ -629,9 +620,6 @@ pub enum PdkTechnologyDiffError {
 
 #[cfg(test)]
 mod tests {
-    use super::super::contracts::{
-        PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkCallbackContract,
-    };
     use super::*;
 
     #[test]
@@ -663,52 +651,6 @@ mod tests {
                 Some(&executable),
             ),
             PdkTechnologyDiffImpact::Breaking
-        );
-    }
-
-    #[test]
-    fn callback_abi_contract_changes_are_explicit_and_breaking() {
-        let before = vec![PdkCallbackContract {
-            callback_id: "derive-device".to_owned(),
-            artifact_path: "callbacks/derive.wasm".to_owned(),
-            abi_version: PDK_CALLBACK_ABI_VERSION,
-            entrypoint: "derive".to_owned(),
-            capabilities: vec![
-                PdkCallbackCapability::ReadPackage,
-                PdkCallbackCapability::WriteDerivedMetadata,
-            ],
-        }];
-        let mut after = before.clone();
-        after[0].entrypoint = "derive_v2".to_owned();
-
-        let mut entries = Vec::new();
-        diff_keyed(
-            &mut entries,
-            PdkTechnologyDiffArea::Callback,
-            &before,
-            &after,
-            |contract| contract.callback_id.to_ascii_lowercase(),
-            |_, _, _| PdkTechnologyDiffImpact::Breaking,
-        )
-        .expect("callback diff");
-
-        assert_eq!(entries.len(), 1);
-        let entry = &entries[0];
-        assert_eq!(entry.area, PdkTechnologyDiffArea::Callback);
-        assert_eq!(entry.identity, before[0].callback_id);
-        assert_eq!(entry.kind, PdkTechnologyDiffKind::Changed);
-        assert_eq!(entry.impact, PdkTechnologyDiffImpact::Breaking);
-        assert!(
-            entry
-                .before
-                .as_deref()
-                .is_some_and(|value| value.contains("\"entrypoint\":\"derive\""))
-        );
-        assert!(
-            entry
-                .after
-                .as_deref()
-                .is_some_and(|value| value.contains("\"entrypoint\":\"derive_v2\""))
         );
     }
 }

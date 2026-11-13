@@ -5508,7 +5508,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
- "wat",
  "web-sys",
  "web-time",
  "windows-sys 0.61.2",
@@ -6102,8 +6101,6 @@ dependencies = [
  "toml",
  "uuid",
  "wasm-bindgen",
- "wasmi",
- "wat",
  "web-sys",
  "web-time",
 ]
@@ -8493,28 +8490,6 @@ dependencies = [
  "indexmap",
  "semver",
  "serde",
-]
-
-[[package]]
-name = "wast"
-version = "262.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30612a0c29249b5f185888a107e8a519d920226b7d07f9d351fd094e9f75eb23"
-dependencies = [
- "bumpalo",
- "leb128fmt",
- "memchr",
- "unicode-width",
- "wasm-encoder",
-]
-
-[[package]]
-name = "wat"
-version = "1.262.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e228027f2b07bbaf946980ebbe2437fca73be6f54c40c2a8d4f42f277075f8d1"
-dependencies = [
- "wast",
 ]
 
 [[package]]

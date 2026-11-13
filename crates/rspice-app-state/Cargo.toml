@@ -63,7 +63,6 @@ rspice-design = { workspace = true, features = ["symbol-test-observation", "sche
 base64 = "0.23"
 num-complex = "0.4"
 ron = { version = "0.12.2", features = ["integer128"] }
-wat = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rspice-output = { workspace = true, features = ["durable-file"] }

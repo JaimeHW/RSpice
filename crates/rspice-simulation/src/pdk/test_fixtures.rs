@@ -31,13 +31,6 @@ pub fn fixture_archive() -> (Vec<u8>, PdkAdministrativeAuthority) {
 /// process reads the section of its own name, so the library must declare
 /// `.lib TT` through `.lib FS`.
 pub fn fixture_archive_with_models(model_bytes: Vec<u8>) -> (Vec<u8>, PdkAdministrativeAuthority) {
-    let callback_bytes = wat::parse_str(
-        r#"(module
-                (memory (export "memory") 1 2)
-                (func (export "derive") (result i32)
-                    i32.const 0))"#,
-    )
-    .unwrap();
     let manifest = PdkTechnologyManifest {
         schema_version: PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION,
         package_id: "demo180".to_owned(),
@@ -133,45 +126,21 @@ pub fn fixture_archive_with_models(model_bytes: Vec<u8>) -> (Vec<u8>, PdkAdminis
         vias: Vec::new(),
         recognition: Vec::new(),
         extraction: Vec::new(),
-        callbacks: vec![PdkCallbackContract {
-            callback_id: "derive-device".to_owned(),
-            artifact_path: "callbacks/derive.wasm".to_owned(),
-            abi_version: PDK_CALLBACK_ABI_VERSION,
-            entrypoint: "derive".to_owned(),
-            capabilities: vec![
-                PdkCallbackCapability::ReadPackage,
-                PdkCallbackCapability::WriteDerivedMetadata,
-            ],
+        artifacts: vec![PdkTechnologyArtifact {
+            path: "models/demo.lib".to_owned(),
+            kind: PdkTechnologyArtifactKind::Model,
+            size_bytes: u64::try_from(model_bytes.len()).unwrap(),
+            sha256: content_digest(&model_bytes),
         }],
-        artifacts: vec![
-            PdkTechnologyArtifact {
-                path: "models/demo.lib".to_owned(),
-                kind: PdkTechnologyArtifactKind::Model,
-                size_bytes: u64::try_from(model_bytes.len()).unwrap(),
-                sha256: content_digest(&model_bytes),
-            },
-            PdkTechnologyArtifact {
-                path: "callbacks/derive.wasm".to_owned(),
-                kind: PdkTechnologyArtifactKind::Callback,
-                size_bytes: u64::try_from(callback_bytes.len()).unwrap(),
-                sha256: content_digest(&callback_bytes),
-            },
-        ],
     };
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     let archive = PdkTechnologyArchive {
         schema_version: PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION,
         manifest_base64: STANDARD.encode(&manifest_bytes),
-        files: vec![
-            PdkTechnologyArchiveFile {
-                path: "models/demo.lib".to_owned(),
-                content_base64: STANDARD.encode(model_bytes),
-            },
-            PdkTechnologyArchiveFile {
-                path: "callbacks/derive.wasm".to_owned(),
-                content_base64: STANDARD.encode(callback_bytes),
-            },
-        ],
+        files: vec![PdkTechnologyArchiveFile {
+            path: "models/demo.lib".to_owned(),
+            content_base64: STANDARD.encode(model_bytes),
+        }],
     };
     (
         serde_json::to_vec(&archive).unwrap(),

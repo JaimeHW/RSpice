@@ -1587,18 +1587,11 @@ pub fn revert_document_model(
 
     let follow_up = match id {
         ProjectDocumentId::ProjectConfiguration => {
-            let callback_receipts = baseline.file.workspace.pdk_callback_receipts().to_vec();
             state.model.workspace.content.project = baseline.file.workspace.project;
             state.model.workspace.content.configuration_sets =
                 baseline.file.workspace.configuration_sets;
             state.model.workspace.content.design_management =
                 baseline.file.workspace.design_management;
-            state
-                .model
-                .workspace
-                .content
-                .replace_pdk_callback_receipts_for_lifecycle(callback_receipts)
-                .map_err(ProjectLifecycleError::InvalidState)?;
             RevertFollowUp::ProjectStructure(baseline.file.libraries)
         }
         ProjectDocumentId::CellView(reference) => {

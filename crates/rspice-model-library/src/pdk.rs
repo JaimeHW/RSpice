@@ -7,7 +7,6 @@ use sha2::{Digest as _, Sha256};
 
 mod authority;
 pub use authority::PdkAdministrativeAuthority;
-pub mod callback;
 pub mod contracts;
 pub mod diff;
 pub mod display_profile;
@@ -61,10 +60,6 @@ pub enum PdkTechnologyError {
     },
     #[error("PDK model-source materialization failed: {0}")]
     ModelMaterialization(String),
-    #[error("forbidden callback capability: {0}")]
-    ForbiddenCapability(String),
-    #[error("PDK callback validation failed: {0}")]
-    CallbackValidation(String),
     #[error("immutable technology revision conflict: {0}")]
     ImmutableRevision(String),
     #[error("technology package is not runtime-validated: {0}")]

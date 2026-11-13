@@ -65,7 +65,6 @@ fn document_digests_with_results_cache(
             &project.libraries,
             &project.workspace.configuration_sets,
             &project.workspace.design_management,
-            project.workspace.pdk_callback_receipts(),
         )?)?,
     );
     documents.insert(

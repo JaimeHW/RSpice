@@ -16,8 +16,8 @@ use rspice_simulation_contract::plan_payload::{
 use rspice_simulation_contract::regression_policy::*;
 use rspice_simulation_contract::saved_output::*;
 use rspice_vocabulary::product::{
-    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
-    ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
+    AnalysisInstanceId, CaptureGroupId, DesignVariableId, ObjectRevision, ResultDocumentId,
+    RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -105,12 +105,6 @@ pub struct ProjectWorkspace {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     physical_layout_documents:
         BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
-    /// Project-owned, append-only evidence for exact PDK callback
-    /// executions. Each entry retains canonical inputs, derived metadata,
-    /// package/runtime provenance, active-plan identity, and project revision
-    /// authority; callback output is never accepted as ambient mutable state.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pdk_callback_receipts: Vec<rspice_model_library::pdk::callback::ProjectPdkCallbackReceipt>,
     /// Versioned, per-document Page Setup contracts used by schematic,
     /// symbol, result, and report hardcopy workflows. Publication artifacts
     /// and transient preview state are intentionally not persisted here.
@@ -251,7 +245,6 @@ impl Default for ProjectWorkspace {
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
             physical_layout_documents: BTreeMap::new(),
-            pdk_callback_receipts: Vec::new(),
             hardcopy_setups: rspice_hardcopy_contract::HardcopySetupStore::default(),
             hardcopy_receipts: rspice_hardcopy_contract::HardcopyReceiptLedger::default(),
             project_print_mappings: rspice_hardcopy_contract::PrintMappingPresetCatalog::new(

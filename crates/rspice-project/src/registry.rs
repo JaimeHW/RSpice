@@ -224,16 +224,10 @@ pub fn project_configuration_value(
     libraries: &impl Serialize,
     configuration_sets: &rspice_design::configuration_set::ConfigurationSetCatalog,
     design_management: &rspice_design_model::design_management::DesignManagementCatalog,
-    pdk_callback_receipts: &[rspice_model_library::pdk::callback::ProjectPdkCallbackReceipt],
 ) -> Result<serde_json::Value, String> {
-    let mut value = serde_json::to_value((
-        project,
-        libraries,
-        configuration_sets,
-        design_management,
-        pdk_callback_receipts,
-    ))
-    .map_err(|error| error.to_string())?;
+    let mut value =
+        serde_json::to_value((project, libraries, configuration_sets, design_management))
+            .map_err(|error| error.to_string())?;
     // Paths are persistence bindings and browser/tree expansion is
     // presentation state.  Neither makes engineering content dirty.
     if let Some(project) = value.pointer_mut("/0/path") {

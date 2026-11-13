@@ -209,18 +209,6 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
         .design_management
         .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
         .expect("design-management catalog");
-    let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
-        actor_id: "callback-operator@rspice.invalid".to_owned(),
-        authority_id: "test:lifecycle-callback".to_owned(),
-    };
-    let callback_receipt = state
-        .model
-        .execute_project_pdk_callback(
-            "derive-device",
-            &authority,
-            "Verify callback lifecycle ownership",
-        )
-        .expect("execute exact project callback");
     let edited = snapshot(&state).expect("edited");
     let mut accepted = baseline.clone();
 
@@ -235,10 +223,6 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     assert_eq!(
         accepted.file.workspace.design_management,
         edited.file.workspace.design_management
-    );
-    assert_eq!(
-        accepted.file.workspace.pdk_callback_receipts(),
-        [callback_receipt.clone()]
     );
     assert_eq!(
         accepted
@@ -265,14 +249,6 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     assert_eq!(
         state.model.workspace.content.design_management,
         baseline.file.workspace.design_management
-    );
-    assert!(
-        state
-            .model
-            .workspace
-            .content
-            .pdk_callback_receipts()
-            .is_empty()
     );
     snapshot(&state).expect("reverted state remains valid");
 }

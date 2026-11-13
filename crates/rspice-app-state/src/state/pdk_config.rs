@@ -6,7 +6,6 @@ mod display_profile_tests;
 mod errors;
 mod paths;
 mod persistence;
-mod technology_callback;
 mod technology_diff;
 #[cfg(test)]
 mod technology_draft_tests;
@@ -57,7 +56,6 @@ pub use rspice_simulation::pdk::test_fixtures::{
 pub use rspice_simulation::pdk::{
     PdkConfig, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
 };
-pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(any(test, feature = "test-support"))]
 pub use technology_diff::tests::fixture_revision_archives as pdk_technology_diff_test_fixture;
 pub use technology_diff::{

@@ -26,7 +26,7 @@ winit, wgpu and rfd in its closure.
 | `resolution`, `execution` | `ModelResolutionRecord` provider decisions and `SimulationPlanModelBinding`, a plan's ordered library bindings; `ModelExecutionPlan`, the immutable, content-addressed model namespace of one nominal run, which refuses a contested name instead of falling back to the first definition |
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
 | `technology_binding` | `ProjectTechnologyBinding` and `ProjectPdkPackagePin`: a project's model-source attachment and its exact PDK package pin |
-| `pdk` | PDK archive, manifest and callback contracts; `verify_archive_contents`; callback receipts, technology-revision diffs, display profiles, library search paths and authoring drafts |
+| `pdk` | PDK archive and manifest contracts; `verify_archive_contents`; technology-revision diffs, display profiles, library search paths and authoring drafts |
 | `qualification`, `correlation`, `validation` | Model qualification and release evidence (golden vectors, desktop and WebAssembly parity, fail-closed promotion); versioned measurement-correlation datasets, alignment, metrics and reviewer evidence; `ModelValidationReceipt` and its integrity digest |
 | `symbol` | Model-bound symbol definitions, parameter forms and retained graphics, stored under the `rspice.symbol.*` metadata keys |
 | `facts` | `ClosureFacts`: facts about a model closure that more than one surface reports, derived in one place |
@@ -35,7 +35,7 @@ winit, wgpu and rfd in its closure.
 
 - SPICE and Spectre model-library parsing belongs to
   [`rspice-core`](../rspice-core); this crate projects its parsed records.
-- PDK installation, executable source compilation and callback execution
+- PDK installation and executable source compilation
   belong to [`rspice-simulation`](../rspice-simulation) `pdk`.
 - Materializing model-bound symbols into design libraries belongs to
   [`rspice-design`](../rspice-design) `model_bound_symbol`.
@@ -63,7 +63,7 @@ SHA-256, paths are unique without regard to case, and an undeclared file is
 refused. Manifest schemas from `MINIMUM_PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION`
 to `PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION` are accepted; size and count bounds
 are the `MAX_PDK_*` constants in `pdk::contracts`, `MAX_PDK_ARCHIVE_BYTES`
-among them, and callback modules target `PDK_CALLBACK_ABI_VERSION`.
+among them.
 
 ## Feature flags
 

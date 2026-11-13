@@ -196,9 +196,8 @@ fn registry(
                 "A variable is plan-scoped: every analysis in this plan resolves the same value \
                  unless it declares an explicit override. A bound is hard and is never clamped: \
                  the same check refuses the record at construction, refuses to emit the \
-                 deck's parameter lines, refuses to validate the stored simulation configuration, \
-                 and refuses to export the plan's parameters to the PDK callback. An out-of-range \
-                 value therefore cannot reach a run by any route.",
+                 deck's parameter lines and refuses to validate the stored simulation \
+                 configuration. An out-of-range value therefore cannot reach a run by any route.",
             );
         },
     );

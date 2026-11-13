@@ -51,7 +51,6 @@ pub struct PdkTechnologyManifest {
     pub recognition: Vec<PdkRecognitionContract>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extraction: Vec<PdkExtractionContract>,
-    pub callbacks: Vec<PdkCallbackContract>,
     pub artifacts: Vec<PdkTechnologyArtifact>,
 }
 
@@ -971,84 +970,6 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
         }
     }
 
-    let mut callback_ids = BTreeSet::new();
-    if manifest.callbacks.len() > MAX_PDK_CALLBACK_CONTRACTS {
-        return Err(PdkTechnologyError::LimitExceeded(format!(
-            "manifest.callbacks exceeds {MAX_PDK_CALLBACK_CONTRACTS} contracts"
-        )));
-    }
-    if !manifest.callbacks.is_empty() && manifest.schema_version < 3 {
-        return Err(PdkTechnologyError::InvalidField(
-            "executable callbacks require manifest schema 3 or newer".to_owned(),
-        ));
-    }
-    for (index, callback) in manifest.callbacks.iter().enumerate() {
-        validate_identifier(
-            &format!("manifest.callbacks[{index}].callback_id"),
-            &callback.callback_id,
-        )?;
-        validate_package_path(
-            &format!("manifest.callbacks[{index}].artifact_path"),
-            &callback.artifact_path,
-        )?;
-        if callback.abi_version != PDK_CALLBACK_ABI_VERSION {
-            return Err(PdkTechnologyError::InvalidField(format!(
-                "manifest.callbacks[{index}].abi_version is {}; supported ABI is {PDK_CALLBACK_ABI_VERSION}",
-                callback.abi_version
-            )));
-        }
-        validate_identifier(
-            &format!("manifest.callbacks[{index}].entrypoint"),
-            &callback.entrypoint,
-        )?;
-        if !callback_ids.insert(callback.callback_id.to_ascii_lowercase()) {
-            return Err(PdkTechnologyError::Duplicate(format!(
-                "manifest.callbacks repeats callback '{}'",
-                callback.callback_id
-            )));
-        }
-        let Some((_, kind)) = artifact_paths.get(&callback.artifact_path.to_ascii_lowercase())
-        else {
-            return Err(PdkTechnologyError::InvalidReference(format!(
-                "manifest.callbacks[{index}] references missing artifact '{}'",
-                callback.artifact_path
-            )));
-        };
-        if *kind != PdkTechnologyArtifactKind::Callback {
-            return Err(PdkTechnologyError::InvalidReference(format!(
-                "manifest.callbacks[{index}] artifact is not typed as callback"
-            )));
-        }
-        let artifact = manifest
-            .artifacts
-            .iter()
-            .find(|artifact| artifact.path.eq_ignore_ascii_case(&callback.artifact_path))
-            .expect("callback artifact path was resolved above");
-        if usize::try_from(artifact.size_bytes)
-            .ok()
-            .is_none_or(|size| size > MAX_PDK_CALLBACK_ARTIFACT_BYTES)
-        {
-            return Err(PdkTechnologyError::LimitExceeded(format!(
-                "manifest.callbacks[{index}] artifact '{}' exceeds {MAX_PDK_CALLBACK_ARTIFACT_BYTES} bytes",
-                callback.artifact_path
-            )));
-        }
-        let capabilities = callback
-            .capabilities
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        if capabilities.len() != callback.capabilities.len() {
-            return Err(PdkTechnologyError::Duplicate(format!(
-                "manifest.callbacks[{index}].capabilities contains duplicates"
-            )));
-        }
-        if capabilities.contains(&PdkCallbackCapability::Network) {
-            return Err(PdkTechnologyError::ForbiddenCapability(format!(
-                "manifest.callbacks[{index}] requests network access"
-            )));
-        }
-    }
     Ok(())
 }
 

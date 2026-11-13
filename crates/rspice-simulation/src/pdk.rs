@@ -1,6 +1,5 @@
-//! PDK runtime validation, executable source sealing and callback execution.
+//! PDK runtime validation and executable source sealing.
 
-mod callback;
 mod config;
 mod registry;
 pub use config::PdkConfig;

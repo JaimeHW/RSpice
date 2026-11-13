@@ -16,7 +16,6 @@ pub const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
         PdkTechnologyDiffArea::Connectivity => "Connectivity",
         PdkTechnologyDiffArea::Recognition => "Recognition",
         PdkTechnologyDiffArea::Extraction => "Extraction",
-        PdkTechnologyDiffArea::Callback => "Callback",
         PdkTechnologyDiffArea::Artifact => "Artifact",
     }
 }

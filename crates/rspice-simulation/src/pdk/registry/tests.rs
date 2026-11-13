@@ -587,20 +587,11 @@ fn tampered_artifact_fails_closed() {
 }
 
 #[test]
-fn network_callbacks_and_incomplete_stream_maps_are_rejected() {
+fn incomplete_stream_maps_are_rejected() {
     let (bytes, _) = fixture_archive();
     let archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
     let mut manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes).unwrap();
-    manifest.callbacks[0]
-        .capabilities
-        .push(PdkCallbackCapability::Network);
-    assert!(matches!(
-        validate_manifest(&manifest),
-        Err(PdkTechnologyError::ForbiddenCapability(_))
-    ));
-
-    manifest.callbacks[0].capabilities.pop();
     manifest.stream_map.pop();
     assert!(matches!(
         validate_manifest(&manifest),

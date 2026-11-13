@@ -18,8 +18,6 @@ pub enum SimulationConfigurationError {
     InvalidHardcopySourceSetCatalog { message: String },
     #[error("project hardcopy receipt ledger is invalid: {message}")]
     InvalidHardcopyReceiptLedger { message: String },
-    #[error("project PDK callback receipt ledger is invalid: {message}")]
-    InvalidPdkCallbackReceiptLedger { message: String },
     #[error("project physical-layout document catalog is invalid: {message}")]
     InvalidPhysicalLayoutCatalog { message: String },
     #[error("report_documents[{index}] is invalid: {message}")]

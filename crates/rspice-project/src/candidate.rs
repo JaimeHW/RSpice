@@ -18,9 +18,6 @@ impl ProjectFile {
                 self.workspace.project = working.workspace.project.clone();
                 self.workspace.configuration_sets = working.workspace.configuration_sets.clone();
                 self.workspace.design_management = working.workspace.design_management.clone();
-                self.workspace.replace_pdk_callback_receipts_for_lifecycle(
-                    working.workspace.pdk_callback_receipts().to_vec(),
-                )?;
                 self.libraries = working
                     .libraries
                     .with_document_content_from(&self.libraries);

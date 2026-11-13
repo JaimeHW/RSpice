@@ -1,4 +1,4 @@
-//! Portable PDK archive, process, physical-technology and callback descriptors.
+//! Portable PDK archive, process and physical-technology descriptors.
 //!
 //! These retained declarations do not grant installation or execution authority.
 
@@ -27,9 +27,6 @@ pub const MAX_PDK_MODEL_PROCESS_CONTRACTS: usize = 5;
 pub const MAX_PDK_MODEL_SECTION_SOURCES: usize = 1_024;
 pub const MAX_PDK_VERILOGA_SOURCE_CONTRACTS: usize = 1_024;
 pub const MAX_PDK_SYMBOL_DEFINITIONS: usize = 4_096;
-pub const MAX_PDK_CALLBACK_CONTRACTS: usize = 256;
-pub const MAX_PDK_CALLBACK_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
-pub const PDK_CALLBACK_ABI_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -313,31 +310,6 @@ pub struct PdkExtractionContract {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PdkCallbackContract {
-    pub callback_id: String,
-    pub artifact_path: String,
-    /// Version of the capability-oriented `rspice` host ABI imported by this
-    /// module. Version 1 callbacks export one `() -> i32` entrypoint and a
-    /// linear memory named `memory`.
-    #[serde(default)]
-    pub abi_version: u32,
-    /// Exact exported function invoked by the sandbox.
-    #[serde(default)]
-    pub entrypoint: String,
-    pub capabilities: Vec<PdkCallbackCapability>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PdkCallbackCapability {
-    ReadPackage,
-    ReadProjectParameters,
-    WriteDerivedMetadata,
-    Network,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PdkTechnologyArtifact {
     pub path: String,
     pub kind: PdkTechnologyArtifactKind,
@@ -357,7 +329,6 @@ pub enum PdkTechnologyArtifactKind {
     ExtractionRule,
     QualificationVector,
     QualificationReference,
-    Callback,
     Documentation,
 }
 

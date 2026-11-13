@@ -16,7 +16,7 @@ use std::path::PathBuf;
 mod veriloga_sources;
 use veriloga_sources::seal_pdk_veriloga_sources;
 
-/// Package whose callbacks and executable source closures passed installation
+/// Package whose executable source closures passed installation
 /// validation. Registry deserialization still drops the runtime validation cache.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -73,19 +73,6 @@ impl ValidatedPdkTechnologyPackage {
         archive: &PdkTechnologyArchive,
     ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
         seal_pdk_model_sources(archive, self)
-    }
-
-    /// Execute the selected callback against the exact validated archive.
-    pub fn execute_callback(
-        &self,
-        archive: &PdkTechnologyArchive,
-        callback_id: &str,
-        input: &rspice_model_library::pdk::callback::PdkCallbackExecutionInput,
-    ) -> Result<
-        rspice_model_library::pdk::callback::PdkCallbackExecutionReceipt,
-        rspice_model_library::pdk::callback::PdkCallbackError,
-    > {
-        super::callback::execute_package_callback(archive, self, callback_id, input)
     }
 }
 
@@ -171,8 +158,6 @@ pub fn validate_archive(
     archive: &PdkTechnologyArchive,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
     let package = ValidatedPdkTechnologyPackage(verify_archive_contents(archive)?);
-    super::callback::validate_package_callbacks(archive, &package)
-        .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a
     // deferred simulation-time best effort. This proves section existence,
     // package-relative dependency closure, source encoding, and reachability

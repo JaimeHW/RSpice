@@ -1269,9 +1269,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
 }
 
 /// The registry note claims a bound is refused wherever a variable is built or
-/// read for a run. Three of those paths are reachable from a test, so they are
-/// checked rather than trusted; the fourth, the PDK project callback, needs a
-/// PDK technology pin and was verified by inspection only.
+/// read for a run. Each of those paths is checked here rather than trusted.
 #[test]
 fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     use crate::state::{

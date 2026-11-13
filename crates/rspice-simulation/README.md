@@ -30,7 +30,7 @@ closure.
 | `transient_checkpoint`, `monte_carlo_checkpoint` | Authenticated transient continuation and Monte Carlo checkpoint requests, with bounded delivery of the latest snapshot |
 | `manual_deck`, `study_document` | Running a hand-written deck with the analyses it declares; `StudyDocument`, the versioned JSON study the CLI reads |
 | `model_sources`, `model_import`, `compilation`, `veriloga`, `project_veriloga` | Authentication and materialization of model-source snapshots; compiler preparation for model imports; the compilation policy shared by project, model-library and PDK sources; sealed Verilog-A/AMS artifacts and their engine registration; project Verilog-A compilation with typed failures |
-| `pdk`, `project_technology` | PDK import, runtime validation, executable source sealing and bounded callback execution (`PdkTechnologyRegistry`); project technology validation against the descriptor and model catalog |
+| `pdk`, `project_technology` | PDK import, runtime validation and executable source sealing (`PdkTechnologyRegistry`); project technology validation against the descriptor and model catalog |
 
 ## Boundaries
 
@@ -81,15 +81,12 @@ is in the [CLI README](../rspice-cli/README.md).
 | `generated-veriloga-catalog` | Forwards to `rspice-design/generated-veriloga-catalog`, so the generated Verilog-A models can be placed, bound and netlisted. Forwarded from the flags of the same name on `rspice-app` and `rspice-worker` |
 | `wasm-jit` | Enables `rspice-veriloga/wasm-jit`, so project Verilog-A compilation can return a verified WebAssembly JIT module (`WasmJitWorkerArtifact`) to the browser worker |
 | `browser-worker` | Implies `wasm-jit` and enables `rspice-core/veriloga-wasm-jit`. On `wasm32` it builds the worker-side entry points `rspice-worker` dispatches, `runner::run_worker_request_value` and the Verilog-A JIT request functions. Set by `rspice-worker` |
-| `pdk-test-fixtures` | Builds `pdk::test_fixtures`, PDK archives for dependent tests, pulling in `wat`. Enabled by `rspice-app`'s dev-dependency |
+| `pdk-test-fixtures` | Builds `pdk::test_fixtures`, PDK archives for dependent tests. Enabled by `rspice-app`'s dev-dependency |
 
 ## Testing
 
 ```bash
 cargo test -p rspice-simulation
-
-# CI runs the callback host code-generation regression on its own
-cargo test -p rspice-simulation --test wasmi_callback_codegen -- --test-threads=1
 ```
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

@@ -11,7 +11,7 @@ workspace = true
 
 [features]
 default = []
-pdk-test-fixtures = ["dep:wat"]
+pdk-test-fixtures = []
 generated-veriloga-catalog = [
     "rspice-design/generated-veriloga-catalog",
     "rspice-core/veriloga-builtins",
@@ -20,7 +20,6 @@ wasm-jit = ["rspice-veriloga/wasm-jit"]
 browser-worker = ["wasm-jit", "rspice-core/veriloga-wasm-jit"]
 
 [dependencies]
-wat = { version = "1", optional = true }
 log.workspace = true
 web-time.workspace = true
 num-complex.workspace = true
@@ -42,7 +41,6 @@ sha2.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
-wasmi.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
@@ -52,5 +50,4 @@ web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType
 
 [dev-dependencies]
 rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }
-wat = "1"
 ron = { version = "0.12.2", features = ["integer128"] }
