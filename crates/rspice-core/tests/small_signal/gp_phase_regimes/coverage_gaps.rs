@@ -12,7 +12,7 @@ fn gp_behavioral_dynamic_and_switched_event_gaps_remain_explicit() {
         ".7+sdt(1u)",
     ] {
         let source = Netlist::parse(
-            &include_str!("../testdata/qualification/gp-behavioral-event-gap.cir")
+            &include_str!("../../testdata/qualification/gp-behavioral-event-gap.cir")
                 .replace(".7+1u*sin(2*pi*1e9*time)", expression),
         )
         .unwrap();

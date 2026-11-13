@@ -744,18 +744,7 @@ jobs:
         run: >-
           cargo test --locked -p rspice-core --target wasm32-unknown-unknown
           --release --no-default-features --features veriloga-wasm-jit
-          --test bjt_excess_phase_transient --test gp_history_resources
-          --test gp_phase_cancellation --test gp_phase_regimes
-          --test pole_zero_public_contract --test pole_zero_descriptor_rank
-          --test pole_zero_high_frequency
-          --test control_complex_scalars --test control_transfer_scalars
-          --test control_pole_zero
-          --test control_sensitivity
-          --test stb_precision --test stb_dc_gain
-          --test stb_loopgain --test stability_projection --test stb_availability --test stb_zero_gain
-          --test sensitivity_probe_contract --test sensitivity_linear_devices
-          --test analysis_numeric_fields --test forward_analyses
-          --test frequency_grid_errors
+          --test small_signal
       - name: Test engine numerics in a WebAssembly worker
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'

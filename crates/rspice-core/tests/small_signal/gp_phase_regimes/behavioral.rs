@@ -87,7 +87,7 @@ pub(super) fn check(
 }
 
 fn deck(polarity: f64, current: bool) -> Netlist {
-    let mut text = include_str!("../testdata/qualification/gp-behavioral-event-gap.cir")
+    let mut text = include_str!("../../testdata/qualification/gp-behavioral-event-gap.cir")
         .replace("VC c 0 2", &format!("VC c 0 {}", 2.0 * polarity))
         .replace(
             "V={.7+1u*sin(2*pi*1e9*time)}",

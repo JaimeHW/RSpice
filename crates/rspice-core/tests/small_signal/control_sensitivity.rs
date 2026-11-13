@@ -1,6 +1,5 @@
 //! SENS control retains physical derivatives through the shared card runner.
-#[path = "common/stop_at_completion.rs"]
-mod stop_at_completion;
+use super::stop_at_completion;
 
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,

@@ -1,6 +1,5 @@
 //! Public pole-zero completion and physical port identity, on both solver paths.
-#[path = "common/stop_at_completion.rs"]
-mod stop_at_completion;
+use super::stop_at_completion;
 
 use rspice_core::engine::NodeResolver;
 use rspice_core::execution::{
