@@ -32,3 +32,6 @@ rspice-fonts = { workspace = true, features = ["bidi", "egui", "system"] }
 [dev-dependencies]
 serde_json.workspace = true
 sha2.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+rspice-fonts = { workspace = true, features = ["test-support"] }

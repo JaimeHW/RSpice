@@ -116,8 +116,14 @@ fn a_letter_and_its_marks_stay_in_one_piece() {
 fn each_paragraph_takes_its_direction_from_its_first_strong_character() {
     let text = "abc\nשלום";
     let bidi = BidiText::new(text).expect("the text needs reordering");
-    assert!(!bidi.paragraph_is_right_to_left(0));
-    assert!(bidi.paragraph_is_right_to_left(4));
+    assert!(
+        bidi.paragraph(0)
+            .is_some_and(|paragraph| !paragraph.level.is_rtl())
+    );
+    assert!(
+        bidi.paragraph(4)
+            .is_some_and(|paragraph| paragraph.level.is_rtl())
+    );
     let pieces = bidi.line(Role::Sans, 4..text.len());
     assert_eq!(pieces.len(), 1);
     assert!(pieces[0].right_to_left);

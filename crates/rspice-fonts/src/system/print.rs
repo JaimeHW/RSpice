@@ -70,6 +70,7 @@ pub fn print_from(source: Source, order: [HanVariant; 5]) {
 }
 
 /// Makes print letter from no installed face.
+#[cfg(any(test, feature = "test-support"))]
 pub fn print_from_none() {
     *LOOKUP.lock().unwrap_or_else(PoisonError::into_inner) = None;
     CHANGES.fetch_add(1, Ordering::AcqRel);

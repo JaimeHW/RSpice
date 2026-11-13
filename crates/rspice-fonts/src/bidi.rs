@@ -92,12 +92,6 @@ impl<'a> BidiText<'a> {
     }
 
     /// Whether the paragraph holding byte `at` reads right to left.
-    #[must_use]
-    pub fn paragraph_is_right_to_left(&self, at: usize) -> bool {
-        self.paragraph(at)
-            .is_some_and(|paragraph| paragraph.level.is_rtl())
-    }
-
     fn paragraph(&self, at: usize) -> Option<&unicode_bidi::ParagraphInfo> {
         self.info
             .paragraphs

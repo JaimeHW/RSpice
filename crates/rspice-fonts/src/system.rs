@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
 use skrifa::{FontRef, MetadataProvider, charmap::Charmap};
 
@@ -354,8 +353,9 @@ impl SystemFonts {
 
     /// The next answer, waiting up to `timeout` for it. A frame never calls
     /// this.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
-    pub fn wait_resolution(&self, timeout: Duration) -> Option<Resolution> {
+    pub fn wait_resolution(&self, timeout: std::time::Duration) -> Option<Resolution> {
         self.resolutions.lock().ok()?.recv_timeout(timeout).ok()
     }
 }

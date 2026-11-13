@@ -41,3 +41,6 @@ rspice-fonts = { workspace = true, features = ["bidi", "system"] }
 
 [dev-dependencies]
 lopdf = { version = "0.45", default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+rspice-fonts = { workspace = true, features = ["test-support"] }

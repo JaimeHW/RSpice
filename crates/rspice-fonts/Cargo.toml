@@ -21,6 +21,8 @@ system = ["dep:fontdb"]
 # line and mirrored brackets, and print's shaping. Only the crates that lay
 # text out enable it.
 bidi = ["dep:harfrust", "dep:unicode-bidi", "dep:unicode-bidi-mirroring"]
+# Test synchronization and reset helpers for dependent crates' tests.
+test-support = []
 
 [dependencies]
 egui = { version = "0.35.0", default-features = false, optional = true }
