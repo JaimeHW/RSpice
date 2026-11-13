@@ -2,7 +2,7 @@
 
 use crate::{
     optimization::table_header,
-    presentation::{panel_note, stat_table, well_hint},
+    presentation::{fit_controls_to_rows, panel_note, stat_table, table_row_height, well_hint},
     strip::StripHeader,
 };
 use egui::{RichText, Ui};
@@ -24,8 +24,6 @@ use rspice_ui_kit::{
     widgets::{SegmentedWidth, chip, segmented},
 };
 use std::collections::BTreeSet;
-const ROW_HEIGHT: f32 = 28.0;
-const HEADER_HEIGHT: f32 = 31.0;
 #[derive(Clone, Copy)]
 pub enum EventOrigin<'a> {
     Native,
@@ -248,6 +246,7 @@ fn show_current_impulse_tables(
     history: &rspice_results::current_impulses::CurrentImpulseHistoryEvidence,
     order: &EventOrder,
 ) {
+    let row_height = table_row_height(ui);
     ui.collapsing("Current coverage", |ui| {
         TableBuilder::new(ui)
             .id_salt("rspice.results.current-coverage")
@@ -256,13 +255,13 @@ fn show_current_impulse_tables(
             .column(Column::remainder().clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(120.0).clip(true))
-            .header(HEADER_HEIGHT, |mut header| {
+            .header(row_height, |mut header| {
                 for label in ["Current", "Events", "Coverage"] {
                     header.col(|ui| table_header(ui, label));
                 }
             })
             .body(|body| {
-                body.rows(ROW_HEIGHT, history.traces.len(), |mut row| {
+                body.rows(row_height, history.traces.len(), |mut row| {
                     let index = row.index();
                     let trace = &history.traces[index];
                     row.col(|ui| {
@@ -300,13 +299,13 @@ fn show_current_impulse_tables(
         .column(Column::initial(180.0).clip(true))
         .column(Column::remainder().at_least(100.0).clip(true))
         .column(Column::initial(210.0).clip(true))
-        .header(HEADER_HEIGHT, |mut header| {
+        .header(row_height, |mut header| {
             for label in ["Time (s)", "Current", "Signed charge (C)"] {
                 header.col(|ui| table_header(ui, label));
             }
         })
         .body(|body| {
-            body.rows(ROW_HEIGHT, order.current_rows().len(), |mut row| {
+            body.rows(row_height, order.current_rows().len(), |mut row| {
                 let (trace_index, point_index) = order.current_rows()[row.index()];
                 let point = &history.traces[trace_index].points[point_index];
                 row.col(|ui| {
@@ -386,6 +385,8 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.set_min_width(min_width);
+            let row_height = table_row_height(ui);
+            fit_controls_to_rows(ui, row_height);
             TableBuilder::new(ui)
                 .id_salt("rspice.results.events")
                 .striped(true)
@@ -403,7 +404,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
                 .column(Column::initial(152.0).clip(true))
                 .column(Column::initial(128.0).clip(true))
                 .column(Column::initial(112.0).clip(true))
-                .header(HEADER_HEIGHT, |mut header| {
+                .header(row_height, |mut header| {
                     for label in [
                         "Event",
                         "Physical time",
@@ -416,7 +417,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
                     }
                 })
                 .body(|body| {
-                    body.rows(ROW_HEIGHT, cache.rows().len(), |mut row| {
+                    body.rows(row_height, cache.rows().len(), |mut row| {
                         let row_index = row.index();
                         let Some(row_data) =
                             cache.rows().get(row_index).copied().and_then(|entry| {

@@ -183,6 +183,28 @@ pub fn point_card(
     }
 }
 
+/// The row and header height of a sheet's data table: 24 px at compact
+/// density and 29 px relaxed where a pointer drives the sheet, as dense as
+/// the signal lists of ViVA and Verdi, and a finger's target on the touch
+/// build.
+pub(crate) fn table_row_height(ui: &Ui) -> f32 {
+    let metrics = Tokens::get(ui.ctx()).metrics;
+    if metrics.is_touch() {
+        metrics.touch_target()
+    } else {
+        metrics.row_h - 4.0
+    }
+}
+
+/// Fit the controls a dense table's rows hold to the row: a selectable
+/// ordinal or a row button keeps its width but not the control height, so
+/// it cannot spill into the rows beside it. Call it on the table's own
+/// child `Ui`.
+pub(crate) fn fit_controls_to_rows(ui: &mut Ui, row_height: f32) {
+    let spacing = ui.spacing_mut();
+    spacing.interact_size.y = spacing.interact_size.y.min(row_height - 2.0);
+}
+
 /// Dimmed names and mono values. A key row is set in primary text with a
 /// semibold value: weight, not colour, since accent means selection.
 pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {

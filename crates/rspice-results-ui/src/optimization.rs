@@ -1,6 +1,8 @@
 //! Optimization convergence plots and exact retained candidate presentation.
 
-use crate::presentation::{PlotView, plain_readout, stat_table};
+use crate::presentation::{
+    PlotView, fit_controls_to_rows, plain_readout, stat_table, table_row_height,
+};
 use crate::strip::StripHeader;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -300,6 +302,8 @@ pub fn show(
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.set_min_width(width);
+            let row_height = table_row_height(ui);
+            fit_controls_to_rows(ui, row_height);
             let mut table = TableBuilder::new(ui)
                 .id_salt("rspice.results.optimization")
                 .striped(true)
@@ -312,7 +316,7 @@ pub fn show(
             }
             table
                 .column(Column::remainder().at_least(110.0))
-                .header(31.0, |mut header| {
+                .header(row_height, |mut header| {
                     header.col(|ui| table_header(ui, "Iteration"));
                     header.col(|ui| table_header(ui, "Cost"));
                     header.col(|ui| table_header(ui, "Δ from best"));
@@ -325,7 +329,7 @@ pub fn show(
                 // is thousands of iterations long, and every row here formats
                 // three quantities plus one per design variable.
                 .body(|body| {
-                    body.rows(29.0, view.iterations.len(), |mut row| {
+                    body.rows(row_height, view.iterations.len(), |mut row| {
                         let index = row.index();
                         let iteration = view.iterations[index];
                         let is_selected = selected == Some(index);

@@ -2,7 +2,10 @@
 
 use crate::{
     optimization::{mono, table_header},
-    presentation::{PlotView, panel_note, plain_readout, stat_table, well_hint},
+    presentation::{
+        PlotView, fit_controls_to_rows, panel_note, plain_readout, stat_table, table_row_height,
+        well_hint,
+    },
     strip::StripHeader,
 };
 use egui::{RichText, Ui};
@@ -22,7 +25,6 @@ use rspice_ui_kit::{
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
-const ROW_HEIGHT: f32 = 29.0;
 
 /// The reader's notation for every number the SOA sheet states: engineering
 /// prefixes at the displayed significant digits, and a temperature in the
@@ -461,6 +463,8 @@ pub fn show(
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.set_min_width(width);
+            let row_height = table_row_height(ui);
+            fit_controls_to_rows(ui, row_height);
             TableBuilder::new(ui)
                 .id_salt("rspice.results.soa")
                 .striped(true)
@@ -473,7 +477,7 @@ pub fn show(
                 .column(Column::initial(190.0))
                 .column(Column::initial(92.0))
                 .column(Column::initial(210.0))
-                .header(31.0, |mut header| {
+                .header(row_height, |mut header| {
                     for label in [
                         "Device",
                         "Rule",
@@ -491,7 +495,7 @@ pub fn show(
                 // thousands of rules, and every row here costs a schematic
                 // lookup for its cross-probe button.
                 .body(|body| {
-                    body.rows(ROW_HEIGHT, visible_rules.len(), |mut row| {
+                    body.rows(row_height, visible_rules.len(), |mut row| {
                         let rule = visible_rules[row.index()];
                         // `rule` is an ordinal from the memoized plan and
                         // `evaluations` is the live retained evidence. They
