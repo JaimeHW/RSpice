@@ -126,8 +126,17 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// deck reproduces 1157 and the previous grid hash bit for bit. That run takes
 /// one solver-floor step and dates the first `d_clk` instant 1e-20 s later;
 /// the decimal deck takes none.
+///
+/// Re-measured at 1156 points, grid 7665aafb3056dd2f (was 4ae14cf492891c88),
+/// when a coupled converter's event began to be dated at the crossing its root
+/// located rather than at the landing one representable instant past it.
+/// Every `d_clk` edge moves one ulp earlier — the 1.7 V fall that publishes
+/// `x` at 6.04848484848484880e-9 s now does so at 6.04848484848484798e-9 s —
+/// and the 713 points downstream of the edges (the inverter's, the DAC's
+/// ramp corners, the steps between them) move by the same ulp. The count and
+/// the step sequence are unchanged. Linux x64 measured the same hash.
 const DECK_A_POINTS: usize = 1156;
-const DECK_A_GRID_HASH: u64 = 0x4ae1_4cf4_9289_1c88;
+const DECK_A_GRID_HASH: u64 = 0x7665_aafb_3056_dd2f;
 
 // Deck A pins its point count and grid hash, not a hash of its node waveforms.
 // Its generated diode and its sources run through the platform's libm, which

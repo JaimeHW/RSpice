@@ -280,13 +280,14 @@ pub(super) fn bind_converter_thresholds(circuit: &mut CircuitData) -> Result<(),
         // still constrains the whole circuit; the host is only its ledger owner.
         let fallback = output_owners.values().next().copied().unwrap_or(0);
         let name = instance.name.clone();
+        let decides_by_located = instance.decides_by_located_crossing();
         for threshold in &thresholds {
             let host = output_owners
                 .get(&threshold.element)
                 .copied()
                 .unwrap_or(fallback);
             circuit.mixed_signal_hosts[host]
-                .add_converter_input_root(instance_index, &name, threshold)
+                .add_converter_input_root(instance_index, &name, threshold, decides_by_located)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         circuit.xspice_instances[instance_index]

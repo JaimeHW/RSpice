@@ -1569,6 +1569,41 @@ impl XspiceInstance {
         )
     }
 
+    /// Hand this converter the crossing a coupled run's root located on the
+    /// `threshold`-th threshold of `port[element]`, or take it back; see
+    /// [`super::LocatedCrossing`]. Whether it changes anything is asked first,
+    /// so a candidate that carries none does not copy a shared instance.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn located_crossing_differs(
+        &self,
+        port: &str,
+        element: usize,
+        threshold: usize,
+        crossing: Option<super::LocatedCrossing>,
+    ) -> bool {
+        self.context.located_crossing(port, element, threshold) != crossing
+    }
+
+    /// Whether this model decides its declared thresholds by a crossing the
+    /// root located on them; see [`super::CodeModel::decides_by_located_crossing`].
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn decides_by_located_crossing(&self) -> bool {
+        self.model.decides_by_located_crossing()
+    }
+
+    /// See [`Self::located_crossing_differs`].
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn set_located_crossing(
+        &mut self,
+        port: &str,
+        element: usize,
+        threshold: usize,
+        crossing: Option<super::LocatedCrossing>,
+    ) {
+        self.context
+            .set_located_crossing(port, element, threshold, crossing);
+    }
+
     /// The present value of the connected input `port[element]` itself, in
     /// volts, before any crossing function is applied to it.
     #[cfg(feature = "veriloga")]

@@ -157,6 +157,8 @@ pub(crate) use resource_transaction::{ResourceEntry, ResourceTransactionScope};
 pub use resource_transaction::{ResourceTransaction, TransactionalContextResource};
 mod threshold;
 pub(crate) use threshold::AnalogBandLaw;
+#[cfg(feature = "veriloga")]
+pub(crate) use threshold::LocatedCrossing;
 pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
 
 pub use traits::{

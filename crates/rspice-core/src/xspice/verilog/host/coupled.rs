@@ -53,6 +53,21 @@ pub trait DigitalActiveParticipant {
         None
     }
 
+    /// Hand a deferred converter the crossing the root located on the
+    /// `threshold`-th threshold of `port[element]`, before it is evaluated at
+    /// this candidate: its instant, the decision on its far side and the
+    /// threshold crossed. `None` takes back whatever an earlier candidate
+    /// left.
+    fn locate_analog_crossing(
+        &mut self,
+        _instance: usize,
+        _port: &str,
+        _element: usize,
+        _threshold: usize,
+        _crossing: Option<(f64, crate::xspice::DigitalState, f64)>,
+    ) {
+    }
+
     /// All Active prefixes have drained. Evaluate the requested analog
     /// producers at this physical time and publish their common sample bank.
     fn sample_analog(

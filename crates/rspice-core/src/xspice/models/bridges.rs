@@ -231,6 +231,10 @@ impl CodeModel for AdcBridge {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_stock_adc_bridge(ctx, None)
     }
+
+    fn decides_by_located_crossing(&self) -> bool {
+        true
+    }
 }
 
 /// The supply-tracking form of an A/D threshold pair: the input becomes the
@@ -309,6 +313,49 @@ fn tracking_input_thresholds(
     Ok(thresholds)
 }
 
+/// The decision and the event date of element `index` where a coupled run's
+/// root located a crossing on it: past the crossing, the state on its far
+/// side, dated at the crossing; on it exactly, the law applied to the
+/// threshold. `None` decides by the sample. See
+/// [`crate::xspice::LocatedCrossing`].
+#[cfg(feature = "veriloga")]
+fn located_adc_decision(
+    ctx: &CmContext,
+    index: usize,
+    prev: i64,
+    in_low: Value,
+    in_high: Value,
+) -> Option<(i64, Value)> {
+    let located = ctx.located_crossing("in", index, 0)?;
+    if ctx.time > located.time {
+        let state = match located.state {
+            DigitalState::Zero => 0,
+            DigitalState::One => 1,
+            _ => -1,
+        };
+        Some((state, located.time))
+    } else if ctx.time == located.time {
+        Some((
+            adc_bridge_state(located.threshold, prev, in_low, in_high),
+            ctx.time,
+        ))
+    } else {
+        None
+    }
+}
+
+/// Without a coupled run there is no root to locate a crossing.
+#[cfg(not(feature = "veriloga"))]
+fn located_adc_decision(
+    _ctx: &CmContext,
+    _index: usize,
+    _prev: i64,
+    _in_low: Value,
+    _in_high: Value,
+) -> Option<(i64, Value)> {
+    None
+}
+
 fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmResult<()> {
     let width = bridge_vector_width(ctx, "adc_bridge")?;
     let in_low = finite_bridge_param(ctx, "adc_bridge", "in_low")?;
@@ -325,7 +372,8 @@ fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmRe
             supply,
         );
         let prev = ctx.int_state(index);
-        let new_state = adc_bridge_state(v_in, prev, in_low, in_high);
+        let (new_state, dated) = located_adc_decision(ctx, index, prev, in_low, in_high)
+            .unwrap_or_else(|| (adc_bridge_state(v_in, prev, in_low, in_high), ctx.time));
 
         if commit_outputs && new_state != prev {
             let val = match new_state {
@@ -334,7 +382,14 @@ fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmRe
                 _ => DigitalValue::unknown(),
             };
             let delay =
-                adc_bridge_delay_for_transition(ctx.time, prev, new_state, rise_delay, fall_delay);
+                adc_bridge_delay_for_transition(dated, prev, new_state, rise_delay, fall_delay);
+            // Scheduled from `ctx.time`, so an event dated at an earlier
+            // crossing carries the difference in its delay.
+            let delay = if dated == ctx.time {
+                delay
+            } else {
+                (dated - ctx.time) + delay
+            };
             ctx.set_output_digital_vector_element("out", index, val, delay);
         }
         if commit_outputs {
@@ -1473,6 +1528,9 @@ impl CodeModel for TrackingAdcBridge {
     fn name(&self) -> &str {
         "__rspice_tracking_adc"
     }
+    fn decides_by_located_crossing(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Analog to digital converter tracking a supply net"
     }
@@ -2257,6 +2315,90 @@ mod tests {
             "ngspice schedules falling ADC region changes from the accepted event time, got {}",
             events[0].delay
         );
+    }
+
+    /// A crossing the coupled run's root located on the input decides the
+    /// converter on and past it. On the crossing the law reads the threshold
+    /// itself, as ngspice-46 reads a sample that falls on one (`in <= in_low`
+    /// is low first): a rising crossing holds low there and a falling one goes
+    /// low. One representable instant past it the crossing decides, where the
+    /// sample still reads a rounding short of the threshold and the voltage
+    /// alone would hold, and the event is dated at the crossing.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn adc_bridge_reads_a_located_crossing_as_ngspice_reads_its_threshold() {
+        let crossing = 1.0e-6 + 1.0e-9;
+        for (from, to, short) in [
+            (0.0, DigitalState::One, 0.5 - 6.8e-14),
+            (1.0, DigitalState::Zero, 0.5 + 6.8e-14),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_port_width("in", 1);
+            ctx.set_port_width("out", 1);
+            ctx.set_param("in_low", 0.5);
+            ctx.set_param("in_high", 0.5);
+            ctx.set_param("rise_delay", 1.0e-9);
+            ctx.set_param("fall_delay", 1.0e-9);
+            ctx.init_output_vector("out", PortType::Digital, 1);
+            ctx.analysis = AnalysisType::Transient;
+            ctx.call_type = CallType::TransientAnalysis;
+            ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+            AdcBridge.init(&mut ctx).expect("adc_bridge initializes");
+            for time in [0.0, 1.0e-9] {
+                ctx.time = time;
+                ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(from)]));
+                AdcBridge.evaluate(&mut ctx).expect("records the held side");
+                ctx.take_pending_events();
+                ctx.advance_state();
+            }
+            ctx.set_input(
+                "in",
+                InputValue::AnalogVector(vec![AnalogValue::new(short)]),
+            );
+            let located = crate::xspice::LocatedCrossing {
+                time: crossing,
+                state: to,
+                threshold: 0.5,
+            };
+            let landed = |time: f64, located: Option<crate::xspice::LocatedCrossing>| {
+                let mut ctx = ctx.clone();
+                ctx.time = time;
+                ctx.timestep = time - 1.0e-9;
+                ctx.set_located_crossing("in", 0, 0, located);
+                AdcBridge.evaluate(&mut ctx).expect("evaluates the landing");
+                ctx.take_pending_events()
+                    .into_iter()
+                    .map(|event| (event.values[0], time + event.delay))
+                    .collect::<Vec<_>>()
+            };
+            let on = landed(crossing, Some(located));
+            if to == DigitalState::One {
+                assert!(
+                    on.is_empty(),
+                    "a rising sample on the threshold reads low: {on:?}"
+                );
+            } else {
+                assert_eq!(on, [(DigitalValue::zero(), crossing + 1.0e-9)]);
+            }
+            let past = crossing.next_up();
+            assert!(
+                landed(past, None).is_empty(),
+                "the sample alone reads a rounding short and holds"
+            );
+            let decided = landed(past, Some(located));
+            let expected = if to == DigitalState::One {
+                DigitalValue::one()
+            } else {
+                DigitalValue::zero()
+            };
+            assert_eq!(decided.len(), 1, "{decided:?}");
+            assert_eq!(decided[0].0, expected);
+            assert!(
+                (decided[0].1 - (crossing + 1.0e-9)).abs() <= f64::EPSILON * crossing,
+                "the event is dated at the crossing plus the delay, not at the landing: {:.17e}",
+                decided[0].1
+            );
+        }
     }
 
     #[test]
