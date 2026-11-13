@@ -9,7 +9,7 @@ use crate::workbench::commands::netlist_validation::validate_visible_netlist_sou
 use crate::workbench::workflows::netlist_workflow::tests::state_with_owned_strategy;
 use crate::workbench::workflows::netlist_workflow::tests::vendor_profiles::{cases, source};
 use crate::workbench::workflows::netlist_workflow::{
-    apply_imported_netlist, apply_staged_external_netlist_change, save_owned_netlist_source,
+    apply_staged_external_netlist_change, save_owned_netlist_source,
 };
 
 #[test]
@@ -23,12 +23,10 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
         .clear();
     let source = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        source.to_owned(),
-        None,
-        "standalone.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(source.to_owned(), None, "standalone.cir")
+    );
     assert!(validate_visible_netlist_source(&mut app));
     assert!(app.state.model.netlist_artifacts.validation.is_some());
     assert!(
@@ -53,12 +51,10 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
     let imported = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let edited = "standalone edited\nV1 out 0 2\nR1 out 0 2k\n.op\n.end\n";
 
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        imported.to_owned(),
-        None,
-        "standalone.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(imported.to_owned(), None, "standalone.cir")
+    );
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
             &mut app.state.model,
@@ -95,12 +91,10 @@ fn validation_publishes_exact_direct_and_transitive_dependency_closure() {
     std::fs::write(&root, source).expect("write root deck");
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        source.to_owned(),
-        Some(root.clone()),
-        "root.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(source.to_owned(), Some(root.clone()), "root.cir")
+    );
     assert!(validate_visible_netlist_source(&mut app));
 
     let document = app
@@ -155,12 +149,10 @@ fn validation_distinguishes_inline_lib_sections_from_external_lib_paths() {
     std::fs::write(&root, source).expect("write root deck");
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        source.to_owned(),
-        Some(root),
-        "root.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(source.to_owned(), Some(root), "root.cir")
+    );
     assert!(validate_visible_netlist_source(&mut app));
 
     let document = app
@@ -285,12 +277,10 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     let external = "* changed by another editor\nV1 out 0 2\n.op\n.end\n";
     std::fs::write(&path, authored).expect("write imported source");
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        authored.to_owned(),
-        Some(path.clone()),
-        "owned.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(authored.to_owned(), Some(path.clone()), "owned.cir")
+    );
     assert!(validate_visible_netlist_source(&mut app));
     std::fs::write(&path, external).expect("publish external edit");
 
@@ -360,12 +350,10 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
     std::fs::write(&root, source).expect("write root deck");
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        source.to_owned(),
-        Some(root),
-        "root.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(source.to_owned(), Some(root), "root.cir")
+    );
     assert!(
         !validate_visible_netlist_source(&mut app),
         "nothing the deck is searched from holds device.inc"
@@ -419,12 +407,10 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
         }
         let (source, path) = source(relative);
         let mut app = RSpiceApp::test_instance();
-        assert!(apply_imported_netlist(
-            &mut app.state,
-            source.clone(),
-            Some(path),
-            relative
-        ));
+        assert!(
+            app.state
+                .apply_imported_netlist(source.clone(), Some(path), relative)
+        );
         let descriptor = app
             .state
             .model

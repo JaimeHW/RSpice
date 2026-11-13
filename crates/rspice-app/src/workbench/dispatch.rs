@@ -695,7 +695,6 @@ mod tests {
         use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
         use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;
-        use crate::workbench::workflows::netlist_workflow::apply_imported_netlist;
 
         let mut app = RSpiceApp::test_instance();
         app.state
@@ -713,11 +712,10 @@ mod tests {
         assert!(!app.state.model.simulation.execution.trigger_simulation);
         assert!(!app.state.runs.preflight.take_run_and_queue_request());
 
-        assert!(apply_imported_netlist(
-            &mut app.state,
+        assert!(app.state.apply_imported_netlist(
             "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
             None,
-            "standalone.cir",
+            "standalone.cir"
         ));
         assert!(validate_visible_netlist_source(&mut app));
         app.state.workbench.workspace = Workspace::Netlist;

@@ -858,6 +858,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // work asks for one: they take the project workflows and the feature that
     // asked, so they sit above both.
     "session/project_transactions",
+    // The netlist import's project replacements: they take the netlist
+    // workflow's parts, so they sit above it.
+    "session/netlist_import_transactions",
     // Command dispatch.
     "commands",
     // Following a finding to the object it is about. It reads a route a page

@@ -14,7 +14,6 @@ use crate::simulation::controller::prepared_run::fixtures::{fixture_dir, manual_
 use crate::simulation::execution::PreparationStage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
-use crate::workbench::workflows::netlist_workflow::apply_imported_netlist;
 
 #[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
@@ -121,12 +120,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
 fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
     let source = "reviewed export\nsimulator lang=spice\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut state = session_of(manual_deck_state(source));
-    assert!(apply_imported_netlist(
-        &mut state,
-        source.to_owned(),
-        None,
-        "reviewed.cir",
-    ));
+    assert!(state.apply_imported_netlist(source.to_owned(), None, "reviewed.cir"));
     let descriptor = state
         .model
         .workspace
@@ -160,12 +154,7 @@ fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
 fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
     let source = "quarantined\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut state = session_of(manual_deck_state(source));
-    assert!(apply_imported_netlist(
-        &mut state,
-        source.to_owned(),
-        None,
-        "quarantined.cir",
-    ));
+    assert!(state.apply_imported_netlist(source.to_owned(), None, "quarantined.cir"));
     let descriptor = state
         .model
         .workspace
@@ -185,12 +174,7 @@ fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
 fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
     let source = "reviewed control\nV1 out 0 1\nR1 out 0 1k\n.control; analyses\nop; harmless note\n.endc\n.end\n";
     let mut state = session_of(manual_deck_state(source));
-    assert!(apply_imported_netlist(
-        &mut state,
-        source.to_owned(),
-        None,
-        "reviewed.cir"
-    ));
+    assert!(state.apply_imported_netlist(source.to_owned(), None, "reviewed.cir"));
     let descriptor = state
         .model
         .workspace
@@ -245,12 +229,7 @@ fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
         let parsed = rspice_core::Netlist::parse_with_path(&adapted, &path).unwrap();
         profile.validate_parsed_netlist(&parsed).unwrap();
         let mut state = session_of(manual_deck_state(source));
-        assert!(apply_imported_netlist(
-            &mut state,
-            source.to_owned(),
-            Some(path),
-            "export"
-        ));
+        assert!(state.apply_imported_netlist(source.to_owned(), Some(path), "export"));
         let descriptor = state
             .model
             .workspace

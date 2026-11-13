@@ -8,8 +8,8 @@
 
 use super::bundle::{decode_import_bytes, parse_generated_netlist_bundle};
 use super::import::{
-    NetlistImportMetadata, NetlistImportMode, apply_netlist_import_result,
-    netlist_import_start_block_reason, record_import_failure, sha256,
+    NetlistImportMetadata, NetlistImportMode, netlist_import_start_block_reason,
+    record_import_failure, sha256,
 };
 use super::*;
 
@@ -949,46 +949,46 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
     true
 }
 
-/// Commit the exact reviewed candidate as one project transaction. The live
-/// state is replaced only after a complete clone validates and applies, so an
-/// allocation, parse, origin, or domain error cannot partially import a deck.
-pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
-    let Some(review) = state.code.netlist.import_review.clone() else {
-        return false;
-    };
+/// The staged review, when its dialect is qualified and nothing blocks its
+/// commit; otherwise the review states why and there is none. The first
+/// step of committing a staged import, before the shell checks that the
+/// project has not changed under it.
+pub(crate) fn committable_staged_import(
+    netlist: &mut NetlistDocumentState,
+) -> Option<crate::workbench::documents::netlist_document::NetlistImportReviewState> {
+    let review = netlist.import_review.clone()?;
     if let Err(error) = review.dialect_qualification() {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(error);
         }
-        return false;
+        return None;
     }
     if !review.can_commit() {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(
                 "Resolve every blocking issue and accept the declared compatibility profile before importing."
                     .to_owned(),
             );
         }
-        return false;
+        return None;
     }
-    if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
-        state,
-        review.transaction,
-    ) {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
-            current.error = Some(format!(
-                "The project changed after this review opened. Cancel and import the source again: {error}"
-            ));
-        }
-        return false;
-    }
+    Some(review)
+}
 
+/// Whether the reviewed source still reads, and its dependency closure
+/// still validates, as it did when the review opened; otherwise the review
+/// states why. Committing checks this after the project's replacement
+/// transaction validates.
+pub(crate) fn staged_import_still_valid(
+    netlist: &mut NetlistDocumentState,
+    review: &crate::workbench::documents::netlist_document::NetlistImportReviewState,
+) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = review.selected_file_path.as_deref() {
         let current_bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                if let Some(current) = state.code.netlist.import_review.as_mut() {
+                if let Some(current) = netlist.import_review.as_mut() {
                     current.error = Some(format!(
                         "The selected source can no longer be read. Cancel and import it again: {error}"
                     ));
@@ -999,7 +999,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         if current_bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES
             || sha256(&current_bytes) != review.original_sha256
         {
-            if let Some(current) = state.code.netlist.import_review.as_mut() {
+            if let Some(current) = netlist.import_review.as_mut() {
                 current.error = Some(
                     "The selected source changed after review began. Cancel and import the new bytes again."
                         .to_owned(),
@@ -1019,7 +1019,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         ) {
             Ok(expanded) => expanded.source,
             Err(error) => {
-                if let Some(current) = state.code.netlist.import_review.as_mut() {
+                if let Some(current) = netlist.import_review.as_mut() {
                     current.error = Some(format!(
                         "The retained dependency closure no longer validates: {error}"
                     ));
@@ -1037,7 +1037,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         issue.severity
             == crate::workbench::documents::netlist_document::NetlistImportIssueSeverity::Blocking
     }) {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(format!(
                 "The source no longer passes validation: {}",
                 blocking.message
@@ -1045,13 +1045,17 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         }
         return false;
     }
+    true
+}
 
-    if review.operation
-        == crate::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource
-    {
-        return commit_owned_netlist_profile_review(state, review);
-    }
-
+/// What a reviewed open or import commits as: its mode and the metadata of
+/// its source. An owned-source profile review commits through
+/// [`commit_owned_netlist_profile_review`] instead, so reaching here with one
+/// is refused, and the review states why.
+pub(crate) fn staged_import_commit(
+    netlist: &mut NetlistDocumentState,
+    review: &crate::workbench::documents::netlist_document::NetlistImportReviewState,
+) -> Option<(NetlistImportMode, NetlistImportMetadata)> {
     let metadata = NetlistImportMetadata {
         encoding: review.encoding,
         line_ending: review.line_ending,
@@ -1067,44 +1071,33 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
             NetlistImportMode::ImportIntoProject
         }
         crate::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource => {
-            if let Some(current) = state.code.netlist.import_review.as_mut() {
+            if let Some(current) = netlist.import_review.as_mut() {
                 current.error = Some(
                     "The owned-source profile review reached the import dispatcher without committing. Review the source profile again."
                         .to_owned(),
                 );
             }
-            return false;
+            return None;
         }
     };
-    let mut committed = state.clone();
-    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed.platform);
-    if !apply_netlist_import_result(
-        &mut committed,
-        mode,
-        review.source,
-        review.source_path,
-        &review.display_name,
-        metadata,
-        review.dependencies,
-    ) {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
-            current.error = Some(
-                "The reviewed import could not be committed; the current project remains unchanged."
-                    .to_owned(),
-            );
-        }
-        return false;
-    }
-    state.commit_candidate(committed);
-    true
+    Some((mode, metadata))
 }
 
-pub(super) fn commit_owned_netlist_profile_review(
-    state: &mut AppState,
+/// Record the execution profile an owned-source review accepted, over the
+/// model, the netlist editor's state, the include tabs and the platform
+/// state whose replacement transaction the review held. The record builds
+/// in a deck transaction; the review's transaction is cancelled only once
+/// the record is installed, as the whole-state copy used to cancel it on
+/// itself before being installed.
+pub(crate) fn commit_owned_netlist_profile_review(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
     review: crate::workbench::documents::netlist_document::NetlistImportReviewState,
 ) -> bool {
     let Some(profile) = review.selected_dialect.execution_profile() else {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(
                 "The selected dialect has no versioned executable profile in this build."
                     .to_owned(),
@@ -1112,10 +1105,10 @@ pub(super) fn commit_owned_netlist_profile_review(
         }
         return false;
     };
-    if state.model.workspace.content.netlist_source.as_deref() != Some(review.source.as_str())
+    if model.workspace.content.netlist_source.as_deref() != Some(review.source.as_str())
         || sha256(review.source.as_bytes()) != review.original_sha256
     {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(
                 "The owned source changed after review began. Cancel and review the current bytes again."
                     .to_owned(),
@@ -1124,8 +1117,11 @@ pub(super) fn commit_owned_netlist_profile_review(
         return false;
     }
 
-    let mut committed = state.clone();
-    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed.platform);
+    let mut committed = crate::workbench::documents::netlist_document::DeckTransaction::begin(
+        model,
+        netlist,
+        open_documents,
+    );
     let Some(descriptor) = committed
         .model
         .workspace
@@ -1133,7 +1129,7 @@ pub(super) fn commit_owned_netlist_profile_review(
         .netlist_descriptor
         .as_mut()
     else {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some("The owned netlist descriptor is no longer available.".to_owned());
         }
         return false;
@@ -1142,22 +1138,23 @@ pub(super) fn commit_owned_netlist_profile_review(
     descriptor.compatibility_reviewed = review.selected_dialect.requires_compatibility_review();
     descriptor.execution_profile = Some(profile);
     committed.model.workspace.content.project_metadata_dirty = true;
-    committed.code.netlist.import_review = None;
+    committed.netlist.import_review = None;
     if let Err(error) = committed
         .model
         .workspace
         .content
         .validate_simulation_configuration()
     {
-        if let Some(current) = state.code.netlist.import_review.as_mut() {
+        if let Some(current) = netlist.import_review.as_mut() {
             current.error = Some(format!(
                 "The reviewed profile could not be recorded without invalidating project state: {error}"
             ));
         }
         return false;
     }
-    state.commit_candidate(committed);
-    state.record(
+    committed.commit_deck(model, netlist, open_documents);
+    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(

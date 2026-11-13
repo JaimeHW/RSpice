@@ -2317,7 +2317,6 @@ mod tests {
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
         use crate::state::SimulationRunIntent;
         use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
-        use crate::workbench::workflows::netlist_workflow::apply_imported_netlist;
 
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -2336,11 +2335,10 @@ mod tests {
             "a deck that cannot run yet leaves the primary disabled"
         );
 
-        assert!(apply_imported_netlist(
-            &mut app.state,
+        assert!(app.state.apply_imported_netlist(
             "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
             None,
-            "standalone.cir",
+            "standalone.cir"
         ));
         assert!(validate_visible_netlist_source(&mut app));
         let (enabled, primary) = run_history_over_the_netlist(&ctx, &mut app);

@@ -189,12 +189,10 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
     let latin1_source = "* caf\u{00e9}\nV1 out 0 1\n.op\n.end\n";
-    assert!(apply_imported_netlist(
-        &mut app.state,
-        latin1_source.to_owned(),
-        None,
-        "legacy.cir",
-    ));
+    assert!(
+        app.state
+            .apply_imported_netlist(latin1_source.to_owned(), None, "legacy.cir")
+    );
     app.state
         .model
         .workspace
@@ -340,7 +338,7 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
     assert!(review.source_path.is_none());
     assert_eq!(review.dependencies.len(), 2);
 
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
     assert!(state.model.workspace.content.netlist_source_path.is_none());
     assert_eq!(
         state
@@ -427,7 +425,7 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
     );
     assert!(state.code.netlist.import_review.is_some());
 
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         std::str::from_utf8(&source).ok()
@@ -450,12 +448,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
     let original = "* baseline\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let modified = "* modified\nV1 out 0 2\nR1 out 0 2k\n.op\n.end\n";
     let mut state = AppState::default();
-    assert!(apply_imported_netlist(
-        &mut state,
-        original.to_owned(),
-        None,
-        "history.cir",
-    ));
+    assert!(state.apply_imported_netlist(original.to_owned(), None, "history.cir"));
     let baseline_revision = state
         .model
         .workspace
@@ -634,7 +627,7 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
     review.selected_dialect = crate::state::NetlistSourceDialect::Hspice;
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
@@ -746,7 +739,7 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
     assert_eq!(review.blocking_issue_count(), 0);
     review.compatibility_accepted = true;
     assert!(review.can_commit());
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
@@ -793,7 +786,7 @@ fn ads_spice_export_import_preserves_source_and_profile() {
     assert_eq!(review.blocking_issue_count(), 0);
     review.compatibility_accepted = true;
     assert!(review.can_commit());
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
@@ -839,7 +832,7 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
     review.selected_dialect = crate::state::NetlistSourceDialect::Spice3Ngspice;
     review.compatibility_accepted = true;
     assert!(review.can_commit());
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
 
     let descriptor = state
         .model
@@ -903,7 +896,7 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
         review.issues,
         review.dialect_qualification()
     );
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
 
     let descriptor = state
         .model
@@ -937,12 +930,7 @@ fn quarantined_owned_ngspice_state() -> AppState {
     let source = "* retained declarative source\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut state = AppState::default();
     state.open_project_session();
-    assert!(apply_imported_netlist(
-        &mut state,
-        source.to_owned(),
-        None,
-        "legacy-ngspice.cir",
-    ));
+    assert!(state.apply_imported_netlist(source.to_owned(), None, "legacy-ngspice.cir"));
     let descriptor = state
         .model
         .workspace
@@ -988,7 +976,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
     assert_eq!(review.source, source.as_deref().unwrap());
     review.compatibility_accepted = true;
     assert!(review.can_commit());
-    assert!(commit_staged_netlist_import(&mut state));
+    assert!(state.commit_staged_netlist_import());
 
     let descriptor = state
         .model
@@ -1030,7 +1018,7 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
         )
     );
 
-    assert!(!commit_staged_netlist_import(&mut state));
+    assert!(!state.commit_staged_netlist_import());
     let descriptor = state
         .model
         .workspace
@@ -1411,8 +1399,7 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
     state.model.simulation.start_run();
     assert!(state.model.simulation.retained.has_results());
 
-    let imported = apply_imported_netlist(
-        &mut state,
+    let imported = state.apply_imported_netlist(
         "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
         Some(std::path::PathBuf::from("bias.cir")),
         "bias.cir",
@@ -1462,8 +1449,7 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
     state.model.simulation.start_run();
     state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
-    assert!(apply_opened_netlist_project(
-        &mut state,
+    assert!(state.apply_opened_netlist_project(
         "new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
         Some(std::path::PathBuf::from("bias.cir")),
         "bias.cir",
@@ -1474,7 +1460,7 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
             compatibility_reviewed: false,
             raw_sha256: sha256(b"new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"),
         },
-        Vec::new(),
+        Vec::new()
     ));
 
     assert_ne!(
@@ -1501,10 +1487,8 @@ fn a_netlist_project_that_cannot_open_states_why() {
     let original_project_id = state.model.workspace.content.project.id();
     let source = "deck\nR1 out 0 1k\n.op\n.end\n";
 
-    assert!(!apply_opened_netlist_project(
-        &mut state,
-        source.to_owned(),
-        // A path with no name gives the deck no identity to be filed under.
+    assert!(!state.apply_opened_netlist_project(
+        source.to_owned(), // A path with no name gives the deck no identity to be filed under.
         Some(std::path::PathBuf::new()),
         "bias.cir",
         NetlistImportMetadata {
@@ -1514,7 +1498,7 @@ fn a_netlist_project_that_cannot_open_states_why() {
             compatibility_reviewed: false,
             raw_sha256: sha256(source.as_bytes()),
         },
-        Vec::new(),
+        Vec::new()
     ));
 
     assert_eq!(
@@ -1550,12 +1534,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
     };
     state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
-    assert!(!apply_imported_netlist(
-        &mut state,
-        "new\n.op\n.end\n".to_owned(),
-        None,
-        "new.cir",
-    ));
+    assert!(!state.apply_imported_netlist("new\n.op\n.end\n".to_owned(), None, "new.cir"));
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some("old\n.op\n.end\n")
@@ -1570,7 +1549,7 @@ fn empty_netlist_import_is_rejected_without_clearing_existing_state() {
         Some(std::path::PathBuf::from("existing.cir"));
     state.model.simulation.source.netlist_content = "existing\n.op\n.end\n".to_owned();
 
-    let imported = apply_imported_netlist(&mut state, " \n\t".to_owned(), None, "empty.cir");
+    let imported = state.apply_imported_netlist(" \n\t".to_owned(), None, "empty.cir");
 
     assert!(!imported);
     assert_eq!(

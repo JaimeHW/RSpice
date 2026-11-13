@@ -24,12 +24,17 @@ pub(crate) mod tests;
 pub(crate) use external_change::apply_staged_external_netlist_change;
 pub(crate) use find::apply_netlist_find_step;
 #[cfg(test)]
-pub(crate) use import::apply_imported_netlist;
+pub(crate) use import::sha256;
+pub(crate) use import::{
+    ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,
+    imported_deck_refusal, install_imported_deck, record_import_failure,
+};
 pub(crate) use platform::{import_netlist, open_netlist_project, request_dependency_relink};
 pub(crate) use save::save_owned_netlist_source;
 pub(crate) use staging::{
-    begin_owned_netlist_profile_review, cancel_staged_netlist_import, commit_staged_netlist_import,
-    import_dropped_netlist, stage_dropped_netlist_project,
+    begin_owned_netlist_profile_review, cancel_staged_netlist_import,
+    commit_owned_netlist_profile_review, committable_staged_import, import_dropped_netlist,
+    stage_dropped_netlist_project, staged_import_commit, staged_import_still_valid,
 };
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);

@@ -1,41 +1,19 @@
-//! Applying an accepted import to the project.
+//! Applying an accepted import to the project: its parts.
 //!
-//! The transaction either installs the whole canonical document — source,
-//! descriptor, dependency closure — or leaves the project untouched.
+//! The canonical document an import installs, why a deck cannot be
+//! installed, and installing one into a candidate's parts. The shell's
+//! netlist import transactions install the candidate whole or leave the
+//! project untouched.
 
 use super::*;
 
-#[cfg(test)]
-pub(crate) fn apply_imported_netlist(
-    state: &mut AppState,
-    source: String,
-    source_path: Option<std::path::PathBuf>,
-    display_name: &str,
-) -> bool {
-    let metadata = NetlistImportMetadata {
-        encoding: crate::state::NetlistTextEncoding::Utf8,
-        line_ending: crate::state::NetlistLineEnding::detect(&source),
-        dialect: crate::state::NetlistSourceDialect::RSpice,
-        compatibility_reviewed: false,
-        raw_sha256: sha256(source.as_bytes()),
-    };
-    apply_imported_netlist_transaction(
-        state,
-        source,
-        source_path,
-        display_name,
-        metadata,
-        Vec::new(),
-    )
-}
-
 #[derive(Debug, Clone, Copy)]
-pub(super) struct NetlistImportMetadata {
-    pub(super) encoding: crate::state::NetlistTextEncoding,
-    pub(super) line_ending: crate::state::NetlistLineEnding,
-    pub(super) dialect: crate::state::NetlistSourceDialect,
-    pub(super) compatibility_reviewed: bool,
-    pub(super) raw_sha256: [u8; 32],
+pub(crate) struct NetlistImportMetadata {
+    pub(crate) encoding: crate::state::NetlistTextEncoding,
+    pub(crate) line_ending: crate::state::NetlistLineEnding,
+    pub(crate) dialect: crate::state::NetlistSourceDialect,
+    pub(crate) compatibility_reviewed: bool,
+    pub(crate) raw_sha256: [u8; 32],
 }
 
 /// Why a deck was not installed.
@@ -45,138 +23,102 @@ pub(super) struct NetlistImportMetadata {
 /// candidate it discards on failure, so a reason reported there would be
 /// discarded with it.
 #[derive(Debug)]
-enum ImportFailure {
+pub(crate) enum ImportFailure {
     /// The gesture was refused before anything was read.
     Refused(&'static str),
     /// The deck could not be installed.
     Failed(String),
 }
 
-/// Import a SPICE deck into the open project, reporting the outcome.
-pub(super) fn apply_imported_netlist_transaction(
-    state: &mut AppState,
-    source: String,
-    source_path: Option<std::path::PathBuf>,
-    display_name: &str,
-    metadata: NetlistImportMetadata,
-    dependencies: Vec<crate::state::DependencyMetadata>,
-) -> bool {
-    match install_imported_netlist(
-        state,
-        source,
-        source_path,
-        display_name,
-        false,
-        metadata,
-        dependencies,
-    ) {
-        Ok(()) => {
-            state.record(
-                LogSeverity::Info,
-                LogSource::Netlist,
-                format!("Imported SPICE deck {display_name}."),
-            );
-            true
-        }
-        Err(ImportFailure::Refused(refusal)) => {
-            state.prompt(refusal);
-            false
-        }
-        Err(ImportFailure::Failed(error)) => {
-            record_import_failure(&mut state.model, &error);
-            false
-        }
-    }
-}
-
-fn install_imported_netlist(
-    state: &mut AppState,
-    source: String,
-    source_path: Option<std::path::PathBuf>,
+/// Why a deck cannot be installed, read before anything is: an empty deck,
+/// no open project, a read-only project (unless the deck initializes a new
+/// netlist project) or a running simulation. It reads the model and whether
+/// a project is open.
+pub(crate) fn imported_deck_refusal(
+    model: &Model,
+    project_open: bool,
+    source: &str,
     display_name: &str,
     initializing_netlist_project: bool,
-    metadata: NetlistImportMetadata,
-    dependencies: Vec<crate::state::DependencyMetadata>,
 ) -> Result<(), ImportFailure> {
     if source.trim().is_empty() {
         return Err(ImportFailure::Failed(format!("{display_name} is empty")));
     }
 
-    if !state.platform.project_lifecycle.is_open() {
+    if !project_open {
         return Err(ImportFailure::Refused(
             "SPICE deck import needs an open project.",
         ));
     }
-    if state.model.safe_mode.project_read_only() && !initializing_netlist_project {
+    if model.safe_mode.project_read_only() && !initializing_netlist_project {
         return Err(ImportFailure::Refused(
             "SPICE deck import is unavailable: the project is open read-only.",
         ));
     }
-    if state.model.simulation.execution.has_active_execution() {
+    if model.simulation.execution.has_active_execution() {
         return Err(ImportFailure::Refused(
             "SPICE deck import is unavailable while a simulation is running.",
         ));
     }
+    Ok(())
+}
 
-    let (document, mut descriptor) = canonical_import_document(
-        &source,
-        source_path.as_deref(),
-        display_name,
-        metadata,
-        dependencies,
-    )
-    .map_err(ImportFailure::Failed)?;
-    let mut candidate = state.clone();
-    if !initializing_netlist_project && candidate.model.workspace.content.netlist_document.is_some()
-    {
-        crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate.model)
+/// Install an imported deck's canonical document and descriptor into the
+/// parts of a candidate project: the model, the netlist editor's state, the
+/// include tabs and the runs. The previous top deck is retained unless the
+/// deck initializes a new netlist project, the editor starts over on the
+/// owned source, and the result must validate; the shell installs the
+/// candidate only if this succeeds.
+pub(crate) fn install_imported_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut rspice_app_runs::workbench::slots::runs::RunsState,
+    document: crate::state::NetlistDocument,
+    mut descriptor: crate::state::OwnedNetlistDescriptor,
+    source: String,
+    source_path: Option<std::path::PathBuf>,
+    initializing_netlist_project: bool,
+) -> Result<(), ImportFailure> {
+    if !initializing_netlist_project && model.workspace.content.netlist_document.is_some() {
+        crate::workbench::documents::netlist_document::retain_active_top_deck(model)
             .map_err(ImportFailure::Failed)?;
     }
     descriptor.artifact_name = crate::workbench::documents::netlist_document::unique_top_deck_path(
-        &candidate.model,
+        model,
         &descriptor.artifact_name,
     );
     // Importing a new source deck changes future execution authority but does
     // not delete immutable datasets or a previously active top deck.
-    candidate.model.design_execution_epoch = candidate.model.design_execution_epoch.wrapping_add(1);
-    candidate.code.netlist = Default::default();
-    *candidate.model.netlist_artifacts = Default::default();
-    *candidate.runs.manual_run = Default::default();
-    candidate.code.netlist_open_documents.clear();
+    model.design_execution_epoch = model.design_execution_epoch.wrapping_add(1);
+    *netlist = Default::default();
+    *model.netlist_artifacts = Default::default();
+    *runs.manual_run = Default::default();
+    open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
-    candidate.model.workspace.content.netlist_source = Some(source.clone());
-    candidate.model.workspace.content.netlist_document = Some(document.clone());
-    candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
-    candidate.model.workspace.content.netlist_source_path = source_path;
-    candidate
-        .model
-        .workspace
-        .content
-        .set_netlist_source_dirty(true);
-    candidate.model.simulation.source.netlist_content = source;
-    candidate.code.netlist.owned_document = Some(document);
-    candidate.code.netlist.externally_saved_content_digest =
-        reopenable_import.then_some(source_digest);
-    candidate.code.netlist.active_document =
+    model.workspace.content.netlist_source = Some(source.clone());
+    model.workspace.content.netlist_document = Some(document.clone());
+    model.workspace.content.netlist_descriptor = Some(descriptor);
+    model.workspace.content.netlist_source_path = source_path;
+    model.workspace.content.set_netlist_source_dirty(true);
+    model.simulation.source.netlist_content = source;
+    netlist.owned_document = Some(document);
+    netlist.externally_saved_content_digest = reopenable_import.then_some(source_digest);
+    netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    candidate.code.netlist.active_document_initialized = true;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.model.invalidate_source_evidence();
-    candidate
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
-    candidate
-        .model
+    netlist.active_document_initialized = true;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
+    model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| ImportFailure::Failed(error.to_string()))?;
-    state.commit_candidate(candidate);
     Ok(())
 }
 
-pub(super) fn record_import_failure(model: &mut Model, error: &str) {
+pub(crate) fn record_import_failure(model: &mut Model, error: &str) {
     model.record(
         LogSeverity::Error,
         LogSource::Netlist,
@@ -185,7 +127,7 @@ pub(super) fn record_import_failure(model: &mut Model, error: &str) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NetlistImportMode {
+pub(crate) enum NetlistImportMode {
     OpenProject,
     ImportIntoProject,
 }
@@ -218,90 +160,7 @@ pub(super) fn netlist_import_start_block_reason(
     None
 }
 
-pub(super) fn apply_opened_netlist_project(
-    state: &mut AppState,
-    source: String,
-    source_path: Option<std::path::PathBuf>,
-    display_name: &str,
-    metadata: NetlistImportMetadata,
-    dependencies: Vec<crate::state::DependencyMetadata>,
-) -> bool {
-    if source.trim().is_empty() {
-        state.record(
-            LogSeverity::Error,
-            LogSource::Netlist,
-            format!("Netlist project open failed: {display_name} is empty"),
-        );
-        return false;
-    }
-    if state.model.simulation.execution.has_active_execution() {
-        state.prompt("A netlist project cannot be opened while a simulation is running.");
-        return false;
-    }
-
-    // Construct and validate the replacement off to the side. The currently
-    // open project, its dirty documents and all retained evidence remain
-    // untouched unless the complete netlist-first project is ready to commit.
-    // The candidate states the opened netlist when it is created, so the line
-    // reaches the Console only if the candidate is committed.
-    let mut candidate = state.clone();
-    candidate.create_netlist_project(display_name);
-    if let Err(failure) = install_imported_netlist(
-        &mut candidate,
-        source,
-        source_path,
-        display_name,
-        true,
-        metadata,
-        dependencies,
-    ) {
-        let reason = match failure {
-            ImportFailure::Refused(refusal) => refusal.trim_end_matches('.').to_owned(),
-            ImportFailure::Failed(error) => error,
-        };
-        state.record(
-            LogSeverity::Error,
-            LogSource::Netlist,
-            format!(
-                "Netlist project open failed: {reason}. The current project was left unchanged."
-            ),
-        );
-        return false;
-    }
-    state.commit_candidate(candidate);
-    true
-}
-
-pub(super) fn apply_netlist_import_result(
-    state: &mut AppState,
-    mode: NetlistImportMode,
-    source: String,
-    source_path: Option<std::path::PathBuf>,
-    display_name: &str,
-    metadata: NetlistImportMetadata,
-    dependencies: Vec<crate::state::DependencyMetadata>,
-) -> bool {
-    match mode {
-        NetlistImportMode::OpenProject => apply_opened_netlist_project(
-            state,
-            source,
-            source_path,
-            display_name,
-            metadata,
-            dependencies,
-        ),
-        NetlistImportMode::ImportIntoProject => apply_imported_netlist_transaction(
-            state,
-            source,
-            source_path,
-            display_name,
-            metadata,
-            dependencies,
-        ),
-    }
-}
-
-pub(super) fn canonical_import_document(
+pub(crate) fn canonical_import_document(
     source: &str,
     source_path: Option<&std::path::Path>,
     display_name: &str,
@@ -368,7 +227,7 @@ pub(super) fn canonical_import_document(
     Ok((document, descriptor))
 }
 
-pub(super) fn sha256(bytes: &[u8]) -> [u8; 32] {
+pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
     use sha2::Digest as _;
 
     let digest = sha2::Sha256::digest(bytes);

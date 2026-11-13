@@ -560,9 +560,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             }
         }
         CodeRequest::CommitNetlistImport => {
-            crate::workbench::workflows::netlist_workflow::commit_staged_netlist_import(
-                &mut app.state,
-            );
+            app.state.commit_staged_netlist_import();
         }
         CodeRequest::ApplyNetlistFind => {
             if let Some(step) = app.state.code.netlist.find.pending.take() {

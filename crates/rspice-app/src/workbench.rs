@@ -205,6 +205,7 @@ pub(crate) use rspice_app_workbench::workbench::routing;
 /// The shell's transactions over the whole project, run where a feature's
 /// work asks for one.
 mod session {
+    pub(crate) mod netlist_import_transactions;
     pub(crate) mod project_transactions;
 }
 pub(crate) use rspice_app_settings::workbench::settings;

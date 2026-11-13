@@ -703,12 +703,8 @@ mod tests {
     fn netlist_first_app() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
         assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                DECK.to_owned(),
-                None,
-                "front_end.sp",
-            )
+            app.state
+                .apply_imported_netlist(DECK.to_owned(), None, "front_end.sp")
         );
         assert!(app.state.is_netlist_first_without_schematic());
         app
@@ -721,14 +717,7 @@ mod tests {
         }
         deck.push_str(".op\n.end\n");
         let mut app = RSpiceApp::test_instance();
-        assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                deck,
-                None,
-                "ladder.sp",
-            )
-        );
+        assert!(app.state.apply_imported_netlist(deck, None, "ladder.sp"));
         assert!(app.state.is_netlist_first_without_schematic());
         app
     }
@@ -798,14 +787,11 @@ mod tests {
     #[test]
     fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
         let mut app = RSpiceApp::test_instance();
-        assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                "V1 out 0 1\n.op\n.end\n".to_owned(),
-                None,
-                "front_end.sp",
-            )
-        );
+        assert!(app.state.apply_imported_netlist(
+            "V1 out 0 1\n.op\n.end\n".to_owned(),
+            None,
+            "front_end.sp"
+        ));
 
         assert!(app.state.is_netlist_first_without_schematic());
 
