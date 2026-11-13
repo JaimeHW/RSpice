@@ -3,7 +3,8 @@
 use super::navigation::{WAVE_SHARED_RIGHT_MARGIN, model_x_axis};
 use super::readout::{MAX_READOUT_BRANCHES, branch_tag};
 use super::{
-    ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key, cursor_interpolation, trace_key,
+    ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key, cursor_interpolation, stable_hash,
+    trace_key,
 };
 use egui::Ui;
 use rspice_results::family_projection::FamilyTraceStyle;
@@ -277,6 +278,94 @@ pub const DEFAULT_TRACE_WIDTH: f32 = 1.8;
 /// active run's traces whatever width those are drawn at.
 const SECONDARY_TRACE_RATIO: f32 = 1.4 / 1.8;
 
+/// A family with more members than this in one pane draws them as the band
+/// they occupy, with the member under the pointer stroked over it.
+///
+/// Past this many, overlapping members of one quantity stop reading one by
+/// one, while each still costs a stroke of two points per pixel column on
+/// every frame: five hundred Monte Carlo trials were 6.6 million vertices and
+/// 80 ms a frame to tessellate before a single one of them could be told
+/// apart. Sixty-four curves still stroke inside one 60 Hz frame on a laptop.
+const FAMILY_BAND_MEMBERS: usize = 64;
+
+/// The members of one family in a pane, when there are too many to stroke one
+/// by one.
+struct FamilyBand<'a> {
+    members: Vec<(usize, &'a StripTrace)>,
+    overlay: bool,
+}
+
+/// Whether two curves are members of one family: the same quantity of the
+/// same run across the family's members (its Monte Carlo trials, `.step`
+/// points or corners), drawn at the same weight.
+fn same_family(member: &StripTrace, trace: &StripTrace) -> bool {
+    member.run_id == trace.run_id
+        && member.overlay == trace.overlay
+        && member.kind == trace.kind
+        && member.source_waveform_name == trace.source_waveform_name
+}
+
+/// Group a pane's family members by their family and keep the families too
+/// large to stroke one by one. The active run and each overlay are judged on
+/// their own, because each is drawn at its own weight.
+///
+/// Only a family folds into a band. Curves of different quantities are never
+/// one band however many share a pane: a band says its members are one
+/// quantity spread by what varied between them, which is false of unrelated
+/// node voltages, so they are always stroked one by one.
+fn family_bands<'a>(pane_traces: &[(usize, &'a StripTrace)]) -> Vec<FamilyBand<'a>> {
+    let mut families: Vec<FamilyBand<'a>> = Vec::new();
+    for &(index, trace) in pane_traces {
+        if trace.family_group_ordinal.is_none() {
+            continue;
+        }
+        match families
+            .iter_mut()
+            .find(|family| same_family(family.members[0].1, trace))
+        {
+            Some(family) => family.members.push((index, trace)),
+            None => families.push(FamilyBand {
+                members: vec![(index, trace)],
+                overlay: trace.overlay,
+            }),
+        }
+    }
+    families.retain(|family| family.members.len() > FAMILY_BAND_MEMBERS);
+    families
+}
+
+/// Paint each family's band under the curves, through the same projection the
+/// renderer strokes curves with.
+fn paint_family_bands(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    bands: &[(Arc<[[f64; 2]]>, egui::Color32)],
+    y_scale: XScale,
+    (y0, y1): (f64, f64),
+) {
+    let screen_y =
+        |value: f64| rect.bottom() - (y_scale.normalize(value, y0, y1) as f32) * rect.height();
+    for (band, color) in bands {
+        let columns = band.len() as f32;
+        let mut run: Vec<(egui::Pos2, egui::Pos2)> = Vec::new();
+        for (column, [minimum, maximum]) in band.iter().enumerate() {
+            let x = rect.left() + ((column as f32 + 0.5) / columns) * rect.width();
+            let (top, bottom) = (screen_y(*maximum), screen_y(*minimum));
+            if top.is_finite() && bottom.is_finite() {
+                run.push((egui::pos2(x, top), egui::pos2(x, bottom)));
+                continue;
+            }
+            if run.len() >= 2 {
+                plot::paint_min_max_band(painter, &run, *color, 1.0);
+            }
+            run.clear();
+        }
+        if run.len() >= 2 {
+            plot::paint_min_max_band(painter, &run, *color, 1.0);
+        }
+    }
+}
+
 /// Display inputs resolved by the host for one unit-scoped pane.
 pub struct PanePlot<'a> {
     pub x_range: (f64, f64),
@@ -370,15 +459,35 @@ pub fn show_plot<'a>(
     // has to mean nearest on screen — and on a decade pane a linear guess is
     // wrong by most of the window.
     let y_scale = if log_y { XScale::Log10 } else { XScale::Linear };
+    let pane_traces: Vec<(usize, &StripTrace)> = pane
+        .traces
+        .iter()
+        .copied()
+        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
+        .collect();
+    let families = family_bands(&pane_traces);
     // The plot's own description is where the caution has to live as words.
     // The kind tag carries it as colour and a glyph, and neither of those
-    // reaches a reader who cannot see the strip.
+    // reaches a reader who cannot see the strip. A band says which family it
+    // stands for, and how many members, for the same reason.
+    let detail = families
+        .iter()
+        .map(|family| {
+            format!(
+                "{} members of {} drawn as the band they occupy",
+                family.members.len(),
+                family.members[0].1.base_name
+            )
+        })
+        .chain(model.incomplete.map(str::to_owned))
+        .collect::<Vec<_>>()
+        .join(". ");
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
-    if let Some(reason) = model.incomplete {
-        spec = spec.accessible_detail(reason);
+    if !detail.is_empty() {
+        spec = spec.accessible_detail(&detail);
     }
     spec.left_margin = input.left_margin;
     if log_y {
@@ -415,19 +524,99 @@ pub fn show_plot<'a>(
         spec.traces.push(maximum);
     }
 
+    // A large family is drawn as the band it occupies, with the member the
+    // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`.
+    let mut banded = std::collections::HashSet::new();
+    let mut highlighted: Vec<usize> = Vec::new();
+    if !families.is_empty() {
+        let plot_rect = plot::plot_rect(ui, &spec);
+        // The renderer's own column bucketing, so a band is quantized as its
+        // members' envelopes would have been.
+        let columns = (plot_rect.width().ceil().max(0.0) as usize).next_multiple_of(64);
+        let view = plot::TraceView {
+            x0: spec.x.min,
+            x1: spec.x.max,
+            y0: spec.y.min,
+            y1: spec.y.max,
+            x_scale: spec.x_scale,
+            y_scale: spec.y_scale,
+            columns,
+            rows: 0,
+        };
+        let pointer = ui
+            .input(|input| input.pointer.hover_pos())
+            .filter(|position| {
+                plot_rect.contains(*position) && ui.rect_contains_pointer(plot_rect)
+            });
+        let mut bands = Vec::with_capacity(families.len());
+        for family in &families {
+            let identity = stable_hash(
+                &family
+                    .members
+                    .iter()
+                    .map(|(_, trace)| trace_key(model, trace))
+                    .collect::<Vec<_>>(),
+            );
+            let members: Vec<plot::BandMember<'_>> = family
+                .members
+                .iter()
+                .map(|(_, trace)| plot::BandMember {
+                    x: trace.x.as_slice(),
+                    y: trace.y.as_slice(),
+                    parametric: false,
+                    shape: Some(trace.shape.as_ref()),
+                })
+                .collect();
+            // The quantity's own hue: a band stands for every member, not for
+            // the one a family encoding happened to colour first.
+            let color = family.members[0].1.signal_color;
+            bands.push((
+                cache.band(identity, &members, view),
+                if family.overlay {
+                    color.gamma_multiply(0.40)
+                } else {
+                    color
+                },
+            ));
+            banded.extend(family.members.iter().map(|(index, _)| *index));
+            if let Some(position) = pointer.filter(|_| !family.overlay) {
+                let x = spec.x_scale.denormalize(
+                    f64::from((position.x - plot_rect.left()) / plot_rect.width()),
+                    spec.x.min,
+                    spec.x.max,
+                );
+                let nearest = nearest_drawn_trace(
+                    &family.members,
+                    x,
+                    Some(position.y),
+                    plot_rect,
+                    y_scale,
+                    (spec.y.min, spec.y.max),
+                    interpolation,
+                );
+                highlighted.extend(
+                    family
+                        .members
+                        .iter()
+                        .filter(|(_, trace)| nearest.is_some_and(|near| std::ptr::eq(near, *trace)))
+                        .map(|(index, _)| *index),
+                );
+            }
+        }
+        let (band_scale, band_range) = (spec.y_scale, (spec.y.min, spec.y.max));
+        spec.underlay = Some(Box::new(move |painter, mapper| {
+            paint_family_bands(painter, mapper.rect, &bands, band_scale, band_range);
+        }));
+    }
+
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
-    let pane_traces: Vec<(usize, &StripTrace)> = pane
-        .traces
-        .iter()
-        .copied()
-        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
-        .collect();
     let draw_order = pane_traces
         .iter()
         .filter(|(_, trace)| trace.overlay)
-        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay));
+        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay))
+        .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
     for (_, trace) in draw_order {
         let color = if trace.overlay {
             trace.color.gamma_multiply(0.40)
@@ -463,13 +652,26 @@ pub fn show_plot<'a>(
         ));
     }
 
+    // A banded family reads out the member the reader points at, not the
+    // first six of its members.
+    let readout_traces: Vec<&StripTrace> = highlighted
+        .iter()
+        .filter_map(|index| model.traces.get(*index))
+        .chain(
+            pane_traces
+                .iter()
+                .filter(|(index, _)| !banded.contains(index))
+                .map(|(_, trace)| *trace),
+        )
+        .take(6)
+        .collect();
     let readout = |x: f64| -> Vec<(String, String)> {
         let mut rows = vec![(
             model.x_label().to_owned(),
             model.format_x(x, significant_digits, quantity_policy),
         )];
         let mut samples: Vec<BranchSample> = Vec::new();
-        for (_, trace) in pane_traces.iter().take(6) {
+        for trace in &readout_traces {
             sample_branches_into(
                 &trace.x,
                 &trace.y,

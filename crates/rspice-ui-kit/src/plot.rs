@@ -38,7 +38,7 @@ pub use cursor::CursorPair;
 #[cfg(any(test, feature = "test-support"))]
 pub use decimate::DecimationWork;
 pub use decimate::TraceView;
-pub use decimate::{DecimationCache, SampleInterpolation, sample_at};
+pub use decimate::{BandMember, DecimationCache, SampleInterpolation, sample_at};
 pub use format::{
     fmt_si, fmt_si_readout, fmt_si_significant, fmt_significant, si_tick_label, tick_with_unit,
 };

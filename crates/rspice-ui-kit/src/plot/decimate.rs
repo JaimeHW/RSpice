@@ -88,6 +88,9 @@ enum Reduction {
     OrderedReversed,
     /// Order-agnostic screen-cell walk: a locus or a multi-branch sweep.
     PixelCells,
+    /// Per-column extremes of a whole set of curves; see
+    /// [`DecimationCache::band`].
+    Band,
 }
 
 impl Reduction {
@@ -274,21 +277,13 @@ impl DecimationCache {
             x_scale: view.x_scale,
             y_scale: view.y_scale,
         };
-        if let Some(hit) = self.held.map.get_mut(&key) {
-            hit.last_used = self.tick;
-            #[cfg(any(test, feature = "test-support"))]
-            {
-                self.held.work.hits += 1;
-            }
-            return Arc::clone(&hit.envelope);
-        }
-        #[cfg(any(test, feature = "test-support"))]
-        {
-            self.held.work.rebuilds += 1;
+        if let Some(hit) = self.lookup(&key) {
+            return hit;
         }
         let envelope: Arc<[[f64; 2]]> = match reduction {
             Reduction::PixelCells => decimate_pixel_cells(x, y, view),
-            Reduction::Ordered | Reduction::OrderedReversed => {
+            // `reduction_for` never selects a band; only `band` keys one.
+            Reduction::Ordered | Reduction::OrderedReversed | Reduction::Band => {
                 let orientation = if reduction == Reduction::OrderedReversed {
                     XOrientation::Descending
                 } else {
@@ -306,20 +301,174 @@ impl DecimationCache {
             }
         }
         .into();
+        self.retain(key, &envelope);
+        envelope
+    }
+
+    /// The per-column extremes of a whole set of curves, for a pane that draws
+    /// the members of a large family as the band they occupy.
+    ///
+    /// One row per screen column of `view`: the least and the greatest value
+    /// any member takes in that column, or NaN in both where none has a
+    /// sample to show. On a decade Y scale a value at or below zero has no
+    /// place on screen and is left out, as the curve's own stroke leaves it.
+    ///
+    /// `band_key` names the member set, so a frame that finds the band cached
+    /// reads none of the members' samples at all.
+    pub fn band(
+        &mut self,
+        band_key: u64,
+        members: &[BandMember<'_>],
+        view: TraceView,
+    ) -> Arc<[[f64; 2]]> {
+        let key = CacheKey {
+            trace: band_key,
+            columns: view.columns as u32,
+            x0_bits: view.x0.to_bits(),
+            x1_bits: view.x1.to_bits(),
+            rows: 0,
+            y0_bits: 0,
+            y1_bits: 0,
+            reduction: Reduction::Band,
+            x_scale: view.x_scale,
+            y_scale: view.y_scale,
+        };
+        if let Some(hit) = self.lookup(&key) {
+            return hit;
+        }
+        let band: Arc<[[f64; 2]]> = band_columns(members, view).into();
+        self.retain(key, &band);
+        band
+    }
+
+    fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {
+        let hit = self.held.map.get_mut(key)?;
+        hit.last_used = self.tick;
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.held.work.hits += 1;
+        }
+        Some(Arc::clone(&hit.envelope))
+    }
+
+    fn retain(&mut self, key: CacheKey, envelope: &Arc<[[f64; 2]]>) {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.held.work.rebuilds += 1;
+        }
         let bytes = envelope.len() * size_of::<[f64; 2]>();
         if bytes <= self.byte_capacity {
             self.evict_to_fit(bytes);
             self.held.map.insert(
                 key,
                 Entry {
-                    envelope: Arc::clone(&envelope),
+                    envelope: Arc::clone(envelope),
                     last_used: self.tick,
                 },
             );
             self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         }
-        envelope
     }
+}
+
+/// One member of a banded family, as [`DecimationCache::band`] reads it.
+///
+/// `parametric` and `shape` are the curve's data facts, exactly as
+/// [`DecimationCache::series`] takes them: they decide whether the visible
+/// window can be found by bisection or the whole curve has to be read.
+#[derive(Debug, Clone, Copy)]
+pub struct BandMember<'a> {
+    pub x: &'a [f64],
+    pub y: &'a [f64],
+    pub parametric: bool,
+    pub shape: Option<&'a SweepShape>,
+}
+
+/// Fold every member's stroke into the per-column extremes of `view`.
+///
+/// A column reads every sample that falls in it, and also every segment that
+/// crosses its centre, at the crossing: a member zoomed in past one sample
+/// per column is still a continuous stroke, and its band must not fall apart
+/// into the columns that happen to hold a sample. A hole breaks the stroke,
+/// so it breaks the segment across it too.
+///
+/// The columns are the ones [`decimate_minmax`] quantizes against, so the
+/// band's edge is where the members' own envelopes would have stroked it.
+fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
+    let columns = view.columns;
+    let mut out = vec![[f64::NAN; 2]; columns];
+    if columns == 0
+        || !matches!(
+            view.x1.partial_cmp(&view.x0),
+            Some(std::cmp::Ordering::Greater)
+        )
+    {
+        return out;
+    }
+    let width = columns as f64;
+    let decade_y = view.y_scale == XScale::Log10;
+    let mut fold = |column: usize, value: f64| {
+        let cell = &mut out[column];
+        // `f64::min` and `max` answer the other operand when one is NaN.
+        cell[0] = cell[0].min(value);
+        cell[1] = cell[1].max(value);
+    };
+    for member in members {
+        // An X-ordered member is read over its visible window, with one
+        // sample of margin each side so the strokes into the plot edges are
+        // read too; anything else is read whole, in source order.
+        let (logical, window) = match reduction_for(member.parametric, member.shape) {
+            Reduction::PixelCells | Reduction::Band => {
+                let logical = LogicalView::new(member.x, member.y, false);
+                (logical, 0..logical.paired_len())
+            }
+            reduction @ (Reduction::Ordered | Reduction::OrderedReversed) => {
+                let logical =
+                    LogicalView::new(member.x, member.y, reduction == Reduction::OrderedReversed);
+                let start = logical.below(view.x0).saturating_sub(1);
+                let end = (logical.at_or_below(view.x1) + 1).min(logical.paired_len());
+                (logical, start..end)
+            }
+        };
+        // The previous sample's screen position and its value in the space
+        // the stroke is straight in: a decade pane strokes straight in log Y.
+        let mut previous: Option<(f64, f64)> = None;
+        for index in window {
+            let (x, y) = (logical.x(index), logical.y(index));
+            let t = view.x_scale.normalize(x, view.x0, view.x1);
+            if !(x.is_finite() && y.is_finite() && t.is_finite()) || (decade_y && y <= 0.0) {
+                previous = None;
+                continue;
+            }
+            let value = if decade_y { y.log10() } else { y };
+            if (0.0..=1.0).contains(&t) {
+                fold(((t * width) as usize).min(columns - 1), y);
+            }
+            if let Some((t0, value0)) = previous {
+                let (low, high) = (t0.min(t), t0.max(t));
+                // Centres strictly inside the segment: (column + 0.5) / width.
+                let first = (low.mul_add(width, -0.5).floor() + 1.0).max(0.0);
+                let last = high.mul_add(width, -0.5).ceil() - 1.0;
+                let last = last.min(width - 1.0);
+                if first <= last {
+                    for column in first as usize..=last as usize {
+                        let centre = (column as f64 + 0.5) / width;
+                        let crossing = (value - value0).mul_add((centre - t0) / (t - t0), value0);
+                        fold(
+                            column,
+                            if decade_y {
+                                10f64.powf(crossing)
+                            } else {
+                                crossing
+                            },
+                        );
+                    }
+                }
+            }
+            previous = Some((t, value));
+        }
+    }
+    out
 }
 
 /// Which reduction a trace's declared data facts select.
@@ -1031,5 +1180,164 @@ mod tests {
         let before = cache.work();
         draw_frame(&mut cache, 10, &x, &y, sweep_view(0.0, 999.0));
         assert_eq!(cache.work().since(before).rebuilds, 0);
+    }
+
+    fn member<'a>(x: &'a [f64], y: &'a [f64]) -> BandMember<'a> {
+        BandMember {
+            x,
+            y,
+            parametric: false,
+            shape: None,
+        }
+    }
+
+    /// Every member's own envelope lies inside the band, column by column,
+    /// and the band is no wider than the members reach in that column and
+    /// its neighbours.
+    #[test]
+    fn a_band_holds_every_member_and_no_more() {
+        let x: Vec<f64> = (0..20_000).map(|index| f64::from(index) * 1.0e-3).collect();
+        let curves: Vec<Vec<f64>> = (0..5)
+            .map(|phase| {
+                x.iter()
+                    .map(|value| (value + f64::from(phase) * 0.3).sin())
+                    .collect()
+            })
+            .collect();
+        let view = sweep_view(0.0, 19.999);
+        let members: Vec<BandMember<'_>> = curves.iter().map(|y| member(&x, y)).collect();
+        let band = band_columns(&members, view);
+        assert_eq!(band.len(), view.columns);
+        let column = |value: f64| {
+            ((XScale::Linear.normalize(value, view.x0, view.x1) * view.columns as f64) as usize)
+                .min(view.columns - 1)
+        };
+        let mut reach = vec![[f64::INFINITY, f64::NEG_INFINITY]; view.columns];
+        for y in &curves {
+            for point in decimate_minmax(
+                &x,
+                y,
+                view.x0,
+                view.x1,
+                XScale::Linear,
+                view.columns,
+                XOrientation::Ascending,
+            ) {
+                let [low, high] = band[column(point[0])];
+                assert!(
+                    low <= point[1] && point[1] <= high,
+                    "{point:?} outside [{low}, {high}]"
+                );
+            }
+            for (&value, &sample) in x.iter().zip(y) {
+                let cell = &mut reach[column(value)];
+                cell[0] = cell[0].min(sample);
+                cell[1] = cell[1].max(sample);
+            }
+        }
+        for (index, [low, high]) in band.iter().enumerate() {
+            let neighbours = &reach[index.saturating_sub(1)..(index + 2).min(view.columns)];
+            let floor = neighbours
+                .iter()
+                .map(|cell| cell[0])
+                .fold(f64::INFINITY, f64::min);
+            let ceiling = neighbours
+                .iter()
+                .map(|cell| cell[1])
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!(
+                floor <= *low && *high <= ceiling,
+                "column {index} widened past its members"
+            );
+        }
+    }
+
+    /// Zoomed past one sample per column, a band still covers every column
+    /// its members' strokes cross. Folding samples alone left it a row of
+    /// isolated columns that never painted.
+    #[test]
+    fn a_band_zoomed_past_its_samples_stays_continuous() {
+        let x: Vec<f64> = (0..11).map(f64::from).collect();
+        let rising: Vec<f64> = x.clone();
+        let falling: Vec<f64> = x.iter().map(|value| 10.0 - value).collect();
+        let members = [member(&x, &rising), member(&x, &falling)];
+        let band = band_columns(&members, sweep_view(0.0, 10.0));
+        assert!(
+            band.iter()
+                .all(|[low, high]| low.is_finite() && high.is_finite())
+        );
+        // At the midpoint the two strokes cross at 5.
+        let [low, high] = band[band.len() / 2];
+        assert!(
+            (low - 5.0).abs() < 0.05 && (high - 5.0).abs() < 0.05,
+            "{low} {high}"
+        );
+        // A quarter of the way along they are 2.5 and 7.5.
+        let [low, high] = band[band.len() / 4];
+        assert!(
+            (low - 2.5).abs() < 0.05 && (high - 7.5).abs() < 0.05,
+            "{low} {high}"
+        );
+    }
+
+    /// Where no member reaches, the band has nothing to say; a hole in a
+    /// member breaks its stroke there and is not bridged.
+    #[test]
+    fn a_band_is_empty_where_no_member_strokes() {
+        let x: Vec<f64> = (0..=50).map(f64::from).collect();
+        let mut y: Vec<f64> = x.iter().map(|value| value.sin()).collect();
+        y[20] = f64::NAN;
+        let band = band_columns(&[member(&x, &y)], sweep_view(0.0, 100.0));
+        let empty = |[low, high]: [f64; 2]| low.is_nan() && high.is_nan();
+        assert!(band[band.len() * 3 / 4..].iter().copied().all(empty));
+        // Columns strictly between samples 19 and 21 are left to nobody.
+        let hole = (19.5 / 100.0 * band.len() as f64) as usize
+            ..(20.5 / 100.0 * band.len() as f64) as usize;
+        assert!(band[hole].iter().copied().all(empty));
+        assert!(!empty(band[(10.0 / 100.0 * band.len() as f64) as usize]));
+    }
+
+    /// On a decade pane a value at or below zero has no place, and a stroke
+    /// between two values is straight in log Y.
+    #[test]
+    fn a_decade_band_skips_what_a_decade_pane_cannot_show() {
+        let x = [0.0, 1.0, 2.0];
+        let y = [-1.0, 1.0, 100.0];
+        let view = TraceView {
+            y0: 0.1,
+            y1: 1_000.0,
+            y_scale: XScale::Log10,
+            ..sweep_view(0.0, 2.0)
+        };
+        let band = band_columns(&[member(&x, &y)], view);
+        assert!(
+            band[..band.len() / 2 - 1]
+                .iter()
+                .all(|[low, _]| low.is_nan())
+        );
+        // Three quarters along, halfway between 1 and 100 in log Y is 10.
+        let [low, high] = band[band.len() * 3 / 4];
+        assert!(
+            (low.log10() - 1.0).abs() < 0.01 && (high.log10() - 1.0).abs() < 0.01,
+            "{low}"
+        );
+    }
+
+    /// A band is cached under its member set: a second ask reads no samples.
+    #[test]
+    fn a_cached_band_is_served_without_reading_its_members() {
+        let x: Vec<f64> = (0..2_000).map(f64::from).collect();
+        let y: Vec<f64> = x.iter().map(|value| (value * 0.01).sin()).collect();
+        let view = sweep_view(0.0, 1_999.0);
+        let mut cache = DecimationCache::default();
+        cache.ensure_version(1);
+        let first = cache.band(7, &[member(&x, &y), member(&x, &y)], view);
+        let before = cache.work();
+        let again = cache.band(7, &[], view);
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(cache.work().since(before).rebuilds, 0);
+        // A trace with the same key is a different reduction.
+        let trace = cache.series(7, &x, &y, view, false, None);
+        assert!(!Arc::ptr_eq(&first, &trace));
     }
 }
