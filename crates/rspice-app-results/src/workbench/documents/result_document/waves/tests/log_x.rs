@@ -257,3 +257,55 @@ fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back()
         Some(&XScale::Log10)
     );
 }
+
+/// On log time the overview's miniature starts at the first positive sample,
+/// as the panes do; t = 0 does not drag a line out past the overview's left
+/// edge into the gutter.
+#[test]
+fn a_log_time_overview_starts_at_the_first_positive_sample() {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>, full: &mut Option<f32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out, full)),
+            egui::Shape::Path(path) => out.extend(path.points.iter().copied()),
+            egui::Shape::LineSegment { points, .. } => out.extend(points.iter().copied()),
+            egui::Shape::Text(text) if text.galley.text() == "FULL" => {
+                *full = Some(text.visual_bounding_rect().center().y);
+            }
+            _ => {}
+        }
+    }
+    let x = vec![0.0, 1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3];
+    let mut state = strip_host(AnalysisType::Transient, x);
+    let analysis = key(&state);
+    state
+        .results
+        .results
+        .session
+        .x_scales
+        .insert(analysis, XScale::Log10);
+    let ctx = super::lanes::theme_context();
+    let (mut points, mut full) = (Vec::new(), None);
+    for _ in 0..2 {
+        points.clear();
+        for clipped in super::lanes::frame(&ctx, &mut state, Vec::new()) {
+            walk(&clipped.shape, &mut points, &mut full);
+        }
+    }
+    // The overview's row is the one its FULL label names. A pane clips its
+    // own curve, so only the overview's row is checked.
+    let row = full.expect("the overview labels its row");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, super::lanes::FRAME);
+    let in_row: Vec<_> = points
+        .iter()
+        .filter(|point| (point.y - row).abs() < 12.0)
+        .collect();
+    assert!(!in_row.is_empty(), "the overview draws its miniature");
+    let outside: Vec<_> = in_row
+        .iter()
+        .filter(|point| !screen.contains(***point))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "the overview reaches off the window: {outside:?}"
+    );
+}

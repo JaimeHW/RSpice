@@ -217,6 +217,9 @@ pub fn show_shared_x_axis(
             for segment in overview_segments(&trace.x, &trace.y, &indices) {
                 let points = segment
                     .into_iter()
+                    // t = 0 has no place on a logarithmic axis: the miniature
+                    // starts at the first positive sample, as the panes do.
+                    .filter(|(x, _)| model.x_scale == XScale::Linear || *x > 0.0)
                     .filter_map(|(x, y)| {
                         let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
                         let point = egui::pos2(
