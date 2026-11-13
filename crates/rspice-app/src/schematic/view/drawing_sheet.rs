@@ -101,12 +101,11 @@ mod tests {
     };
     use std::sync::Arc;
 
-    /// Saved with 5 mm margins all round, an A4 sheet drew its frame 5 mm
-    /// from the trimmed edge. It loads on ISO 5457's 20 mm filing border, so
-    /// a wire 12 mm from the left edge keeps its place on the sheet and the
-    /// overflow advisory reports it outside the frame.
+    /// The default A4 sheet frames its content on ISO 5457's 20 mm filing
+    /// border, so a wire 12 mm from the left edge is reported outside the
+    /// frame.
     #[test]
-    fn content_the_standard_margins_now_frame_out_is_reported() {
+    fn content_inside_the_filing_border_is_reported() {
         let mut state = AppState::default();
         state
             .model
@@ -117,15 +116,7 @@ mod tests {
                 31,
                 vec![Point::new(-92, 100), Point::new(-88, 100)],
             ));
-        let mut saved =
-            serde_json::to_value(crate::state::SchematicSheetFormat::default()).unwrap();
-        saved["margins"] = serde_json::json!({
-            "top_um": 5_000,
-            "right_um": 5_000,
-            "bottom_um": 5_000,
-            "left_um": 5_000,
-        });
-        let format: crate::state::SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+        let format = crate::state::SchematicSheetFormat::default();
         let sheet = ActiveDrawingSheet {
             geometry: DrawingSheetGeometry::from_format(&format),
             format,

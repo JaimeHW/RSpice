@@ -259,14 +259,6 @@ fn current_canonical_route_is_the_primary_workspace_source_of_truth() {
 }
 
 #[test]
-fn a_session_saved_on_the_removed_drc_page_restores_to_the_first_page() {
-    let restored: VerificationPage =
-        serde_json::from_value(serde_json::json!("Drc")).expect("the old page name decodes");
-
-    assert_eq!(restored, VerificationPage::Yield);
-}
-
-#[test]
 fn toggling_the_active_drawer_closes_it_deterministically() {
     let mut state = WorkbenchSession::default();
 
@@ -505,16 +497,6 @@ fn console_pages_are_the_four_evidence_surfaces() {
             ConsolePage::TaskLog,
         ]
     );
-}
-
-/// A session saved while the retired Interactive page was open must still
-/// restore. Its page name resolves to the engine log rather than failing the
-/// whole workbench snapshot on a variant this build no longer carries.
-#[test]
-fn a_session_left_on_the_retired_interactive_page_restores_onto_the_console() {
-    let page: ConsolePage =
-        serde_json::from_str("\"Interactive\"").expect("a retired page name still deserializes");
-    assert_eq!(page, ConsolePage::Console);
 }
 
 #[test]

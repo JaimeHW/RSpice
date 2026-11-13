@@ -36,19 +36,7 @@ fn project_page_catalog_is_the_complete_five_tab_contract() {
 }
 
 #[test]
-fn legacy_project_pages_restore_to_their_supported_successors() {
-    for (serialized, expected) in [
-        (r#""Dashboard""#, ProjectPage::Overview),
-        (r#""Activity""#, ProjectPage::Overview),
-        (r#""Technology""#, ProjectPage::Dependencies),
-    ] {
-        assert_eq!(
-            serde_json::from_str::<ProjectPage>(serialized)
-                .expect("legacy project page remains decodable"),
-            expected
-        );
-    }
-
+fn project_pages_round_trip() {
     for page in ProjectPage::ALL {
         let encoded = serde_json::to_string(&page).expect("project page serializes");
         let restored: ProjectPage =

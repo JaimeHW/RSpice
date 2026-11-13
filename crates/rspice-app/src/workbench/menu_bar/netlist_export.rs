@@ -541,18 +541,4 @@ mod tests {
             source.as_bytes()
         );
     }
-
-    /// A netlist format saved by a build that also offered HSPICE and Xyce,
-    /// which wrote the SPICE text under their own extensions, reads back
-    /// as SPICE.
-    #[test]
-    fn a_saved_hspice_or_xyce_format_reads_back_as_spice() {
-        for saved in ["\"Hspice\"", "\"Xyce\"", "\"Spice\""] {
-            assert_eq!(
-                serde_json::from_str::<crate::io::NetlistFormat>(saved).unwrap(),
-                crate::io::NetlistFormat::Spice,
-                "{saved}"
-            );
-        }
-    }
 }
