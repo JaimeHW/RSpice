@@ -150,6 +150,48 @@ fn arrows_are_sparse_and_point_the_way_the_curve_travels() {
     );
 }
 
+/// A curve turns back only where its X travels back by more than the
+/// tolerance: a loop does, a ramp does not, even with solver noise on it
+/// or a flat stretch at either end.
+#[test]
+fn only_a_curve_whose_x_travels_back_turns_back() {
+    let span = 2.0;
+    let tolerance = span * TURN_BACK_SHARE;
+    let ramp: Vec<f64> = (0..=2000)
+        .map(|step| -1.0 + f64::from(step) / 1000.0)
+        .collect();
+    assert!(!turns_back(&ramp, tolerance));
+    let falling: Vec<f64> = ramp.iter().rev().copied().collect();
+    assert!(!turns_back(&falling, tolerance));
+    // Noise of 0.4 of the tolerance, alternating in sign, steps the ramp
+    // back on every other sample, by less than the tolerance.
+    let noisy: Vec<f64> = ramp
+        .iter()
+        .enumerate()
+        .map(|(step, x)| {
+            let sign = if step % 2 == 0 { 1.0 } else { -1.0 };
+            x + sign * 0.4 * tolerance
+        })
+        .collect();
+    assert!(noisy.windows(2).any(|pair| pair[1] < pair[0]));
+    assert!(!turns_back(&noisy, tolerance));
+    // A ramp that holds still at its ends, then a cycle of a sine.
+    let held: Vec<f64> = std::iter::repeat_n(-1.0, 20)
+        .chain(ramp.iter().copied())
+        .chain(std::iter::repeat_n(1.0, 20))
+        .collect();
+    assert!(!turns_back(&held, tolerance));
+    let cycle: Vec<f64> = (0..=200)
+        .map(|step| (2.0 * PI * f64::from(step) / 200.0).sin())
+        .collect();
+    assert!(turns_back(&cycle, tolerance));
+    // Back by just over the tolerance turns back; by just under, not.
+    assert!(turns_back(&[0.0, 1.0, 1.0 - 1.01 * tolerance], tolerance));
+    assert!(!turns_back(&[0.0, 1.0, 1.0 - 0.99 * tolerance], tolerance));
+    assert!(!turns_back(&[f64::NAN, 0.0, f64::INFINITY, 1.0], tolerance));
+    assert!(!turns_back(&[], tolerance));
+}
+
 /// A nested sweep names each member's columns with its point; a member's
 /// curve reads the abscissa's column of that same point, and a column of
 /// no nested sweep names none.

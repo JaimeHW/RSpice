@@ -950,7 +950,8 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
     }
 
     // The amperes curves plotted against the first member's drain voltage
-    // draw one curve per member, each with its own arrows.
+    // draw one curve per member. Each member's Vds only rises, so the axis
+    // says which way it travels and no member carries arrows.
     let colors: Vec<egui::Color32> = members
         .iter()
         .map(|(vgs, point)| trace(model, &format!("I(VD) [VG={vgs}; point {point}]")).color)
@@ -962,8 +963,8 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
     let shapes = frame(&ctx, &mut state, Vec::new());
     for color in colors {
         assert!(
-            !arrowheads(&shapes, color).is_empty(),
-            "every member is drawn with its arrows"
+            arrowheads(&shapes, color).is_empty(),
+            "a member drawn along a rising sweep carries no arrows"
         );
     }
 }
@@ -1019,11 +1020,12 @@ fn a_transient_ramp_drawn_against_its_input_is_the_dc_transfer_curve() {
     }
     assert!(compared >= 180, "{compared} sweep points compared");
 
-    // Drawn, the pane carries the curve's arrows.
+    // Drawn, the curve carries no arrows: Vin only rises along the ramp, so
+    // the axis already says which way the transient travels.
     let color = vout.color;
     drop(models);
     open_strip(&mut transient, "V", signal("IN"));
     let ctx = theme_context();
     frame(&ctx, &mut transient, Vec::new());
-    assert!(!arrowheads(&frame(&ctx, &mut transient, Vec::new()), color).is_empty());
+    assert!(arrowheads(&frame(&ctx, &mut transient, Vec::new()), color).is_empty());
 }

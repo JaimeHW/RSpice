@@ -3,9 +3,10 @@
 //!
 //! Each curve pairs its own values with the abscissa's on one grid, read
 //! through the strip's window on the sweep: zooming the time axis below the
-//! stack chooses which stretch of the loop is drawn. Sparse arrowheads say
-//! which way the sweep travels, and the strip's cursors, which stand on the
-//! sweep, are drawn where the curves are at that instant.
+//! stack chooses which stretch of the loop is drawn. Where a curve's X turns
+//! back, sparse arrowheads say which way the sweep travels; and the strip's
+//! cursors, which stand on the sweep, are drawn where the curves are at that
+//! instant.
 
 use super::pane::ResolvedExpr;
 use super::stack::{StackHost, StripFrame};
@@ -173,6 +174,47 @@ pub fn window(curve: &XyCurve, (start, end): (f64, f64)) -> Range<usize> {
     let first = curve.sweep.partition_point(|&t| t < start);
     let last = curve.sweep.partition_point(|&t| t <= end);
     first..last.max(first)
+}
+
+/// The part of the plot's X span a curve must travel back before its X counts
+/// as turning back: the axis' own resolution, so solver noise on a ramp is no
+/// loop.
+const TURN_BACK_SHARE: f64 = 1.0e-3;
+
+/// Whether `x` turns back by more than `tolerance` anywhere: a loop, a
+/// hysteresis, a Lissajous figure. Only such a curve needs arrowheads to say
+/// which way it travels; on a monotonic sweep its axis says so already.
+pub(crate) fn turns_back(x: &[f64], tolerance: f64) -> bool {
+    let mut finite = x.iter().copied().filter(|value| value.is_finite());
+    let Some(anchor) = finite.next() else {
+        return false;
+    };
+    // The running extreme in the way X has been travelling, once it has
+    // travelled past the tolerance at all.
+    let mut heading: Option<(bool, f64)> = None;
+    for value in finite {
+        heading = match heading {
+            None if (value - anchor).abs() > tolerance => Some((value > anchor, value)),
+            None => None,
+            Some((rising, extreme)) => {
+                let back = if rising {
+                    extreme - value
+                } else {
+                    value - extreme
+                };
+                if back > tolerance {
+                    return true;
+                }
+                let further = if rising {
+                    value.max(extreme)
+                } else {
+                    value.min(extreme)
+                };
+                Some((rising, further))
+            }
+        };
+    }
+    false
 }
 
 /// Screen distance between arrowheads along a curve, in points.
@@ -852,18 +894,28 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         Axis::linear(y0, y1, pane.axis_unit())
     };
     let y_scale = if log_y { XScale::Log10 } else { XScale::Linear };
+    // Arrowheads and the start and end marks go only on a curve whose X turns
+    // back; a monotonic sweep reads its way off the axis.
+    let turn_back_tolerance =
+        auto_x.map_or(f64::INFINITY, |(low, high)| (high - low) * TURN_BACK_SHARE);
+    let turning: Vec<bool> = curves
+        .iter()
+        .map(|curve| turns_back(curve.x(), turn_back_tolerance))
+        .collect();
     let detail = format!(
-        "{} drawn against {}; arrows mark the way {} advances{}",
+        "{} drawn against {}{}{}",
         curves
             .iter()
             .map(|curve| curve.name.as_str())
             .collect::<Vec<_>>()
             .join(", "),
         abscissa_label(abscissa),
-        if model.x_label().is_empty() {
-            "the sweep"
+        if !turning.contains(&true) {
+            String::new()
+        } else if model.x_label().is_empty() {
+            "; arrows mark the way the sweep advances".to_owned()
         } else {
-            model.x_label()
+            format!("; arrows mark the way {} advances", model.x_label())
         },
         refusals
             .iter()
@@ -1168,12 +1220,12 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         }
     }
 
-    // Sparse arrowheads along each curve, and its start filled and its end
-    // hollow, as the polar locus marks its sweep.
+    // Sparse arrowheads along each curve that turns back, and its start
+    // filled and its end hollow, as the polar locus marks its sweep.
     let painter = ui.painter().with_clip_rect(response.plot_rect);
     for curve in order
         .iter()
-        .filter(|index| stroked(**index))
+        .filter(|index| stroked(**index) && turning[**index])
         .map(|index| &curves[*index])
     {
         let color = if curve.overlay {
