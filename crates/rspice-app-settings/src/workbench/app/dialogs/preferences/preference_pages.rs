@@ -816,10 +816,9 @@ fn projects(ui: &mut Ui, state: &mut PreferencesDialogs<'_>, actions: &mut Prefe
         let labels = ["5 minutes", "2 minutes", "10 minutes"]
             .map(str::to_owned)
             .to_vec();
-        let normalized = super::normalize_autosave_minutes(state.platform.autosave_minutes);
         let active = values
             .iter()
-            .position(|minutes| *minutes == normalized)
+            .position(|minutes| *minutes == state.platform.autosave_minutes)
             .unwrap_or_default();
         value_column(ui, |ui| {
             if let Some(selected) = select(

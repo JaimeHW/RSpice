@@ -516,13 +516,6 @@ fn restore_defaults_asks_before_it_resets_the_page() {
     );
 }
 
-#[test]
-fn legacy_autosave_values_migrate_to_mockup_supported_intervals() {
-    assert_eq!(normalize_autosave_minutes(0), 2);
-    assert_eq!(normalize_autosave_minutes(5), 5);
-    assert_eq!(normalize_autosave_minutes(15), 10);
-}
-
 /// Workspace layout closes without applying anything: Cancel is in its
 /// footer and Esc dismisses it. The manager it replaced had no Cancel or
 /// Close, and listed remembered panel widths in pixels.

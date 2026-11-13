@@ -1153,8 +1153,7 @@ fn should_persist_application_state(state: &AppState) -> bool {
 }
 
 fn configured_autosave_interval(minutes: u8) -> std::time::Duration {
-    // Deserialization normalizes legacy values to 2/5/10. Keep this boundary
-    // defensive so a malformed in-memory integration can never request an
+    // Keep this boundary defensive so a zero interval can never request an
     // every-frame persistence loop.
     std::time::Duration::from_secs(u64::from(minutes.max(1)) * 60)
 }

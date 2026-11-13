@@ -217,11 +217,7 @@ fn decode(value: Value, strict: bool) -> Result<PersonalSettings, String> {
         "autosave interval",
         strict,
         &mut unread,
-        |raw| {
-            serde_json::from_value::<u8>(raw)
-                .map(crate::services::session::normalize_autosave_minutes)
-                .map_err(|error| error.to_string())
-        },
+        |raw| serde_json::from_value::<u8>(raw).map_err(|error| error.to_string()),
     )?
     .unwrap_or(crate::services::session::DEFAULT_AUTOSAVE_MINUTES);
     let browser_spoken_feedback = read_setting(

@@ -25,7 +25,6 @@ use crate::ui::Theme;
 use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
-use crate::workbench::lifecycle::session::normalize_autosave_minutes;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
 use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
 use crate::workbench::preferences::UserPreferences;
@@ -187,7 +186,7 @@ impl UiSessionWire {
             schematic_routing_mode: Some(design.schematic_routing_mode),
             duplicate_external_nets: design.duplicate_external_nets,
             engineering_table_views: design.engineering_table_views.clone(),
-            autosave_minutes: normalize_autosave_minutes(platform.autosave_minutes),
+            autosave_minutes: platform.autosave_minutes,
             preferences: preferences.clone(),
             browser_spoken_feedback: settings.browser_spoken_feedback,
             text_locale: workbench.text_locale,
@@ -245,7 +244,7 @@ impl UiSessionWire {
         state.design.schematic_routing_mode = schematic_routing_mode;
         state.design.duplicate_external_nets = ser.duplicate_external_nets;
         state.design.engineering_table_views = ser.engineering_table_views;
-        state.platform.autosave_minutes = normalize_autosave_minutes(ser.autosave_minutes);
+        state.platform.autosave_minutes = ser.autosave_minutes;
         state.settings.browser_spoken_feedback = ser.browser_spoken_feedback;
         state.workbench.text_locale = ser.text_locale;
         state.results.results.session.viewer = ser.result_viewer;

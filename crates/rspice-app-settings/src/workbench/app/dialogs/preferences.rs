@@ -6,8 +6,6 @@ pub mod shortcut_portability_dialogs;
 pub mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
 
-pub use crate::services::session::normalize_autosave_minutes;
-
 use egui::{Context, Id};
 
 use crate::diagnostics::{LogSeverity, LogSource};

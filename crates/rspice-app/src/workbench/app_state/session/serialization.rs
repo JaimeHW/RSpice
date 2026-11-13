@@ -1007,17 +1007,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_autosave_interval_is_migrated_before_the_session_is_rewritten() {
-        let mut state = AppState::default();
-        state.platform.autosave_minutes = 15;
-
-        let json = serde_json::to_string(&state).expect("session serializes");
-        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
-
-        assert_eq!(restored.platform.autosave_minutes, 10);
-    }
-
-    #[test]
     fn current_sessions_write_ui_session_and_keep_shell_read_only() {
         let json = serde_json::to_string(&AppState::default()).expect("session serializes");
 
