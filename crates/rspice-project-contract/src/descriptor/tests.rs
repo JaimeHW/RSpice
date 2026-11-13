@@ -209,7 +209,6 @@ fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_
         "archive_digest": rspice_vocabulary::product::ContentDigest::from_bytes([0x22; 32]),
         "technology_name": "Demo 180 nm",
         "publisher_id": "rspice-foundry-demo",
-        "signing_key_id": "ceremony-01",
         "process_node_nm": 180,
         "stack_name": "1P2M",
         "execution_targets": ["desktop", "web-assembly", "mobile"]
