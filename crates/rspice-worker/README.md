@@ -50,7 +50,7 @@ loads this image, calls these exports:
 | `installRspiceUiWasmJitDispatcher` | Installs the script's dispatcher, through which the engine calls an export of an installed model module |
 | `runRspiceUiVerilogACompileRequest` | Compiles project Verilog-A sources for the JIT target |
 | `runRspiceUiHardcopyRequest` | Renders one hardcopy request |
-| `runRspiceUiModelImportRequest`, `runRspiceUiPdkImportRequest` | Import model sources or a PDK |
+| `runRspiceUiModelImportRequest` | Import model sources |
 | `rspiceUiWasmJitAbiVersion`, `rspiceUiWasmJitEmitterVersion`, `rspiceUiWasmJitProbeModule` and the `…Probe…` exports | Report the JIT versions and run the qualification probes |
 
 ## Feature flags

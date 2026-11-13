@@ -2,8 +2,6 @@
 
 mod callback;
 mod config;
-#[cfg(target_arch = "wasm32")]
-pub mod import;
 mod registry;
 pub use config::PdkConfig;
 pub use registry::{PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, PdkTechnologyRegistry};

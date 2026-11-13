@@ -20,7 +20,6 @@ let runVerilogACompileRequest = null;
 let runHardcopyRequest = null;
 let runModelImportRequest = null;
 let runModelQualificationRequest = null;
-let runPdkImportRequest = null;
 let primaryWasmExports = null;
 let workerModule = null;
 const wasmJitModelCache = new Map();
@@ -88,13 +87,6 @@ function hardcopyResponseTransferList(response) {
 
 function modelImportResponseTransferList(response) {
   const view = response?.libraryBytes;
-  return ArrayBuffer.isView(view) && view.buffer instanceof ArrayBuffer
-    ? [view.buffer]
-    : [];
-}
-
-function pdkImportResponseTransferList(response) {
-  const view = response?.payloadBytes;
   return ArrayBuffer.isView(view) && view.buffer instanceof ArrayBuffer
     ? [view.buffer]
     : [];
@@ -441,15 +433,11 @@ async function initializeWorkerModule() {
   if (typeof module.runRspiceUiModelQualificationRequest !== "function") {
     throw new Error("RSpice worker package is missing its model-qualification executor.");
   }
-  if (typeof module.runRspiceUiPdkImportRequest !== "function") {
-    throw new Error("RSpice worker package is missing its PDK-import executor.");
-  }
   runWorkerRequest = module.runRspiceUiWorkerRequest;
   runVerilogACompileRequest = module.runRspiceUiVerilogACompileRequest;
   runHardcopyRequest = module.runRspiceUiHardcopyRequest;
   runModelImportRequest = module.runRspiceUiModelImportRequest;
   runModelQualificationRequest = module.runRspiceUiModelQualificationRequest;
-  runPdkImportRequest = module.runRspiceUiPdkImportRequest;
   module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry);
   wasmJitCapability = await qualifyWasmJitArchitecture(module, wasmExports);
 }
@@ -463,7 +451,6 @@ async function ensureReady() {
       runHardcopyRequest = null;
       runModelImportRequest = null;
       runModelQualificationRequest = null;
-      runPdkImportRequest = null;
       primaryWasmExports = null;
       workerModule = null;
       wasmJitModelCache.clear();
@@ -480,25 +467,6 @@ async function ensureReady() {
 
 self.addEventListener("message", (event) => {
   const message = event.data || {};
-  if (message.type === "run-pdk-import") {
-    void (async () => {
-      try {
-        await ensureReady();
-        const response = runPdkImportRequest(message.request);
-        postMessage(
-          { type: "pdk-import-result", id: message.id, response },
-          pdkImportResponseTransferList(response),
-        );
-      } catch (error) {
-        postMessage({
-          type: "pdk-import-error",
-          id: message.id ?? 0,
-          error: asErrorMessage(error),
-        });
-      }
-    })();
-    return;
-  }
   if (message.type === "run-model-import") {
     void (async () => {
       try {

@@ -71,10 +71,3 @@ pub fn run_rspice_ui_model_qualification_request(
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     model_qualification::run_worker_request_value(value)
 }
-
-#[cfg(target_arch = "wasm32")]
-pub fn run_rspice_ui_pdk_import_request(
-    value: wasm_bindgen::JsValue,
-) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_simulation::pdk::import::run_pdk_import_worker_request_value(value)
-}

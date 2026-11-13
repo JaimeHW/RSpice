@@ -103,11 +103,6 @@ pub struct PdkTechnologyRegistry {
 }
 
 impl PdkTechnologyRegistry {
-    #[cfg(target_arch = "wasm32")]
-    pub(super) fn take_worker_validated_packages(&mut self) -> Vec<ValidatedPdkTechnologyPackage> {
-        std::mem::take(&mut self.validated_packages)
-    }
-
     #[must_use]
     pub fn archives(&self) -> &[PdkTechnologyArchive] {
         &self.archives
