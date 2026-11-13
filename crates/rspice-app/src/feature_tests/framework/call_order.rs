@@ -1062,7 +1062,11 @@ const END_FRAME: &[Step] = &[
     ),
     (
         "16.2",
-        &["crate::workbench::synchronize_schematic_cross_probe(&mut self.state)"],
+        &[
+            "crate::workbench::synchronize_schematic_cross_probe(",
+            "project_cross_probe_trace(projection.released_trace, projection.trace)",
+            "project_cross_probe_line(projection.released_line, projection.line)",
+        ],
     ),
     ("16.3", &["self.state.models.capture_authoring_recovery()"]),
     (

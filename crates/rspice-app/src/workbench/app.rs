@@ -354,7 +354,21 @@ impl RSpiceApp {
     /// project's automation authority with it.
     fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
         self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame);
-        crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
+        let state = &mut self.state;
+        if let Some(projection) = crate::workbench::synchronize_schematic_cross_probe(
+            &state.model,
+            &mut state.design.schematic_cross_probe,
+            state.code.netlist.active_document,
+        ) {
+            state
+                .results
+                .results
+                .project_cross_probe_trace(projection.released_trace, projection.trace);
+            state
+                .code
+                .netlist
+                .project_cross_probe_line(projection.released_line, projection.line);
+        }
         self.state.models.capture_authoring_recovery();
         // A project replacement can commit from a dialog after prepare_frame.
         // Terminate at the same frame boundary so old authority cannot survive.

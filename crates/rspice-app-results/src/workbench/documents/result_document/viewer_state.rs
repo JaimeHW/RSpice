@@ -31,6 +31,22 @@ impl ResultsState {
         selected.resolve(run).map(|_| selected)
     }
 
+    /// Take the schematic cross-probe's trace: drop the one it selected
+    /// before while that is still the selection, so a trace chosen by hand
+    /// since stays, then select `trace` when there is one.
+    pub fn project_cross_probe_trace(
+        &mut self,
+        released: Option<SelectedResultTrace>,
+        trace: Option<SelectedResultTrace>,
+    ) {
+        if released.is_some() && self.session.selected_trace == released {
+            self.session.selected_trace = None;
+        }
+        if let Some(trace) = trace {
+            self.session.selected_trace = Some(trace);
+        }
+    }
+
     pub(super) fn set_sample_selection(&mut self, selection: Option<SourceSampleSelection>) {
         let current = self
             .session

@@ -10,8 +10,9 @@ use std::collections::HashSet;
 
 use crate::product::ContentDigest;
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
-use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
+use crate::workbench::app_state::Model;
+use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_results_ui::selection::SelectedResultTrace;
 
@@ -47,7 +48,7 @@ struct SynchronizationKey {
     result_data_version: u64,
     active_dataset: Option<crate::product::DatasetId>,
     active_analysis_index: Option<usize>,
-    active_netlist_document: crate::workbench::documents::netlist_document::ActiveNetlistDocument,
+    active_netlist_document: ActiveNetlistDocument,
     generated_input_digest: Option<ContentDigest>,
 }
 
@@ -72,111 +73,113 @@ pub(crate) struct SchematicCrossProbeRuntime {
     source_line: Option<usize>,
 }
 
+/// What the cross-probe asks of the results and of the generated netlist
+/// after a frame: let go of what it selected before, and select what the
+/// schematic selection names now. The shell applies it through the results'
+/// and the netlist's own fns.
+#[derive(Debug)]
+pub(crate) struct CrossProbeProjection {
+    /// The trace the cross-probe selected before, which the results drop
+    /// while it is still the one selected.
+    pub(crate) released_trace: Option<SelectedResultTrace>,
+    /// The source line the cross-probe asked for before, which the netlist
+    /// withdraws while it is still the one requested.
+    pub(crate) released_line: Option<usize>,
+    /// The trace to select now.
+    pub(crate) trace: Option<SelectedResultTrace>,
+    /// The source line to mark now.
+    pub(crate) line: Option<usize>,
+}
+
 /// Reconcile one complete frame of schematic selection changes.
 ///
 /// Callers deliberately invoke this after every visible application window
 /// has rendered. That makes canvas, navigator, and inspector gestures share
 /// one device-local synchronization boundary and avoids order-dependent
 /// behavior among the three surfaces.
-pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
-    if !state
-        .model
+///
+/// `None` when nothing that decides the projection changed, so nothing is
+/// written.
+pub(crate) fn synchronize_schematic_cross_probe(
+    model: &Model,
+    runtime: &mut SchematicCrossProbeRuntime,
+    active_netlist_document: ActiveNetlistDocument,
+) -> Option<CrossProbeProjection> {
+    if !model
         .preferences
         .toggle(TogglePreference::CrossProbeBehavior)
     {
-        clear_synchronized_projection(state);
-        return;
+        return Some(release_synchronized_projection(runtime));
     }
 
     let selection = SelectionObservation {
-        active_view_key: state.model.workspace.content.active_view.key(),
-        topology_version: state.model.schematic.topology_version(),
-        selection: state.model.schematic.session.editor.selection.clone(),
+        active_view_key: model.workspace.content.active_view.key(),
+        topology_version: model.schematic.topology_version(),
+        selection: model.schematic.session.editor.selection.clone(),
     };
-    let target = if state.design.schematic_cross_probe.selection.as_ref() == Some(&selection) {
-        state.design.schematic_cross_probe.target.clone()
+    let target = if runtime.selection.as_ref() == Some(&selection) {
+        runtime.target.clone()
     } else {
-        selected_target(state)
+        selected_target(model)
     };
-    state.design.schematic_cross_probe.selection = Some(selection);
-    state.design.schematic_cross_probe.target = target.clone();
+    runtime.selection = Some(selection);
+    runtime.target = target.clone();
     let generated_input_digest =
-        current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
+        current_generated_artifact(model).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
-        active_view_key: state.model.workspace.content.active_view.key(),
-        occurrence: state.model.workspace.content.occurrence_path(),
-        topology_version: state.model.schematic.topology_version(),
+        active_view_key: model.workspace.content.active_view.key(),
+        occurrence: model.workspace.content.occurrence_path(),
+        topology_version: model.schematic.topology_version(),
         target: target.clone(),
-        cross_probe_version: state.model.simulation.source.cross_probe.version,
-        result_data_version: state.model.simulation.view.data_version,
-        active_dataset: state
-            .model
-            .simulation
-            .active_run()
-            .map(|run| run.dataset_id),
-        active_analysis_index: state.model.simulation.view.active_analysis_idx,
-        active_netlist_document: state.code.netlist.active_document,
+        cross_probe_version: model.simulation.source.cross_probe.version,
+        result_data_version: model.simulation.view.data_version,
+        active_dataset: model.simulation.active_run().map(|run| run.dataset_id),
+        active_analysis_index: model.simulation.view.active_analysis_idx,
+        active_netlist_document,
         generated_input_digest,
     };
-    if state.design.schematic_cross_probe.key.as_ref() == Some(&key) {
-        return;
+    if runtime.key.as_ref() == Some(&key) {
+        return None;
     }
 
-    clear_synchronized_result_trace(state);
-    clear_synchronized_source_line(state);
-
+    let released_trace = runtime.selected_trace.take();
+    let released_line = runtime.source_line.take();
     let selected_trace = target
         .as_ref()
-        .and_then(|target| compatible_result_trace(state, target));
-    if let Some(selected) = selected_trace.clone() {
-        state.results.results.session.selected_trace = Some(selected);
-    }
-
+        .and_then(|target| compatible_result_trace(model, target));
     let source_line = target
         .as_ref()
-        .and_then(|target| compatible_generated_source_line(state, target));
-    state.code.netlist.cross_probe_line = source_line;
-    if source_line.is_some()
-        && state.code.netlist.active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-    {
-        state.code.netlist.requested_line = source_line;
-    }
+        .and_then(|target| compatible_generated_source_line(model, target));
 
-    state.design.schematic_cross_probe.key = Some(key);
-    state.design.schematic_cross_probe.selected_trace = selected_trace;
-    state.design.schematic_cross_probe.source_line = source_line;
+    runtime.key = Some(key);
+    runtime.selected_trace = selected_trace.clone();
+    runtime.source_line = source_line;
+    Some(CrossProbeProjection {
+        released_trace,
+        released_line,
+        trace: selected_trace,
+        line: source_line,
+    })
 }
 
-fn clear_synchronized_projection(state: &mut AppState) {
-    clear_synchronized_result_trace(state);
-    clear_synchronized_source_line(state);
-    state.design.schematic_cross_probe.key = None;
-    state.design.schematic_cross_probe.selection = None;
-    state.design.schematic_cross_probe.target = None;
-}
-
-fn clear_synchronized_result_trace(state: &mut AppState) {
-    let synchronized = state.design.schematic_cross_probe.selected_trace.take();
-    if synchronized.is_some()
-        && state.results.results.session.selected_trace.as_ref() == synchronized.as_ref()
-    {
-        state.results.results.session.selected_trace = None;
+/// Let go of everything the cross-probe projected, with the preference off.
+fn release_synchronized_projection(
+    runtime: &mut SchematicCrossProbeRuntime,
+) -> CrossProbeProjection {
+    runtime.key = None;
+    runtime.selection = None;
+    runtime.target = None;
+    CrossProbeProjection {
+        released_trace: runtime.selected_trace.take(),
+        released_line: runtime.source_line.take(),
+        trace: None,
+        line: None,
     }
 }
 
-fn clear_synchronized_source_line(state: &mut AppState) {
-    let synchronized = state.design.schematic_cross_probe.source_line.take();
-    if synchronized.is_some() && state.code.netlist.requested_line == synchronized {
-        state.code.netlist.requested_line = None;
-    }
-    state.code.netlist.cross_probe_line = None;
-}
-
-fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
-    let selection = &state.model.schematic.session.editor.selection;
-    if state
-        .model
+fn selected_target(model: &Model) -> Option<SchematicCrossProbeTarget> {
+    let selection = &model.schematic.session.editor.selection;
+    if model
         .schematic
         .session
         .editor
@@ -184,14 +187,13 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
         .selected_net_name
         .is_some()
     {
-        let nets = active_design_nets(state);
-        if let Some(name) = semantic_selected_net_name(state, &nets) {
+        let nets = active_design_nets(model);
+        if let Some(name) = semantic_selected_net_name(model, &nets) {
             return Some(SchematicCrossProbeTarget::Net { name });
         }
     }
     if let Some(component_id) = selection.single_component() {
-        let component = state
-            .model
+        let component = model
             .schematic
             .document()
             .components
@@ -210,13 +212,12 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
     if !conductor_selection(selection) {
         return None;
     }
-    let nets = active_design_nets(state);
-    selected_net_name(state, &nets).map(|name| SchematicCrossProbeTarget::Net { name })
+    let nets = active_design_nets(model);
+    selected_net_name(model, &nets).map(|name| SchematicCrossProbeTarget::Net { name })
 }
 
-fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let name = state
-        .model
+fn semantic_selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
+    let name = model
         .schematic
         .session
         .editor
@@ -226,8 +227,7 @@ fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<St
     let net = nets
         .iter()
         .find(|net| net.name.eq_ignore_ascii_case(name))?;
-    if state
-        .model
+    if model
         .schematic
         .session
         .editor
@@ -237,7 +237,7 @@ fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<St
     {
         return None;
     }
-    let selection = &state.model.schematic.session.editor.selection;
+    let selection = &model.schematic.session.editor.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -282,16 +282,16 @@ fn conductor_selection(selection: &crate::state::Selection) -> bool {
 /// has to agree with what generation emitted. An unresolved configuration
 /// therefore synchronizes nothing rather than matching against editor-buffer
 /// names the generator would never produce.
-fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
-    match state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+fn active_design_nets(model: &Model) -> std::sync::Arc<Vec<DesignNet>> {
+    match model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     ) {
         Ok(projection) => projection_nets(
-            state.model.library_manager.catalog(),
+            model.library_manager.catalog(),
             &projection,
-            &state.model.workspace.content.active_view.key(),
+            &model.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Schematic cross-probe has no design projection: {error}");
@@ -300,8 +300,8 @@ fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
     }
 }
 
-fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let selection = &state.model.schematic.session.editor.selection;
+fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
+    let selection = &model.schematic.session.editor.selection;
     if !conductor_selection(selection) {
         return None;
     }
@@ -316,7 +316,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             }
         }
     };
-    for label in &state.model.schematic.document().net_labels {
+    for label in &model.schematic.document().net_labels {
         if selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -339,8 +339,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     }
     for junction in &selection.junctions {
-        let mut names = state
-            .model
+        let mut names = model
             .schematic
             .document()
             .wires
@@ -361,25 +360,25 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 }
 
 fn compatible_result_trace(
-    state: &AppState,
+    model: &Model,
     target: &SchematicCrossProbeTarget,
 ) -> Option<SelectedResultTrace> {
-    if !state.model.simulation.source.cross_probe.is_current_for(
-        &state.model.workspace.content.active_view,
-        state.model.schematic.topology_version(),
+    if !model.simulation.source.cross_probe.is_current_for(
+        &model.workspace.content.active_view,
+        model.schematic.topology_version(),
     ) {
         return None;
     }
-    let run = state.model.simulation.active_run()?;
+    let run = model.simulation.active_run()?;
     let receipt = run.prepared_receipt()?;
-    if receipt.project_revision() != state.model.workspace.content.project.revision() {
+    if receipt.project_revision() != model.workspace.content.project.revision() {
         return None;
     }
 
     // A trace is named by the node the engine solved, which below the design
     // root is the occurrence's flattened name rather than the local one the
     // drawing shows.
-    let occurrence = state.model.workspace.content.occurrence_path();
+    let occurrence = model.workspace.content.occurrence_path();
     let signal = match target {
         SchematicCrossProbeTarget::Component { engine_element, .. } => {
             crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', engine_element)?
@@ -389,7 +388,7 @@ fn compatible_result_trace(
         SchematicCrossProbeTarget::Net { name } => {
             let index = crate::state::CrossProbeIndex::from_receipt(
                 receipt,
-                &state.model.simulation.source.cross_probe,
+                &model.simulation.source.cross_probe,
             );
             let engine = index
                 .for_occurrence(&occurrence)
@@ -399,7 +398,7 @@ fn compatible_result_trace(
         }
     };
 
-    let preferred = state.model.simulation.view.active_analysis_idx;
+    let preferred = model.simulation.view.active_analysis_idx;
     let find_in_analysis = |analysis_index: usize| {
         let analysis = run.analyses.get(analysis_index)?;
         let (waveform_index, _) = analysis
@@ -414,22 +413,17 @@ fn compatible_result_trace(
         .or_else(|| (0..run.analyses.len()).find_map(find_in_analysis))
 }
 
-fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
-    let artifact = state
-        .model
+fn current_generated_artifact(model: &Model) -> Option<&GeneratedArtifact> {
+    let artifact = model
         .netlist_artifacts
         .generated_document
         .as_ref()?
         .generated_artifact()?;
     let input = artifact.provenance().input();
-    let retained = state.model.netlist_artifacts.generated_input_digest?;
-    if state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest
-        != Some(retained)
+    let retained = model.netlist_artifacts.generated_input_digest?;
+    if model.netlist_artifacts.current_generation_input_digest != Some(retained)
         || input.digest() != retained
-        || input.revision() != state.model.workspace.content.project.revision()
+        || input.revision() != model.workspace.content.project.revision()
     {
         return None;
     }
@@ -437,11 +431,11 @@ fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
 }
 
 fn compatible_generated_source_line(
-    state: &AppState,
+    model: &Model,
     target: &SchematicCrossProbeTarget,
 ) -> Option<usize> {
-    let artifact = current_generated_artifact(state)?;
-    source_line_for_target(artifact, &state.model.workspace.content.active_view, target)
+    let artifact = current_generated_artifact(model)?;
+    source_line_for_target(artifact, &model.workspace.content.active_view, target)
 }
 
 fn source_line_for_target(
@@ -615,6 +609,26 @@ mod tests {
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace, SimulationRun,
     };
     use crate::state::{GeneratedProvenance, GenerationInput};
+    use crate::workbench::AppState;
+
+    /// The end-frame step as the shell runs it: the projection, applied
+    /// through the results' and the netlist's own fns.
+    fn synchronize_schematic_cross_probe(state: &mut AppState) {
+        if let Some(projection) = super::synchronize_schematic_cross_probe(
+            &state.model,
+            &mut state.design.schematic_cross_probe,
+            state.code.netlist.active_document,
+        ) {
+            state
+                .results
+                .results
+                .project_cross_probe_trace(projection.released_trace, projection.trace);
+            state
+                .code
+                .netlist
+                .project_cross_probe_line(projection.released_line, projection.line);
+        }
+    }
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])
@@ -700,11 +714,11 @@ mod tests {
         }];
 
         assert_eq!(
-            semantic_selected_net_name(&state, &nets).as_deref(),
+            semantic_selected_net_name(&state.model, &nets).as_deref(),
             Some("PORT_OUT")
         );
         state.model.schematic.session.editor.net_highlight.clear();
-        assert!(semantic_selected_net_name(&state, &nets).is_none());
+        assert!(semantic_selected_net_name(&state.model, &nets).is_none());
     }
 
     #[test]

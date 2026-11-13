@@ -2332,6 +2332,23 @@ pub struct NetlistDocumentState {
 }
 
 impl NetlistDocumentState {
+    /// Take the schematic cross-probe's line: withdraw the request it made
+    /// before while nothing has asked for another line, mark `line`, and ask
+    /// for it while the generated deck is the document shown.
+    pub(crate) fn project_cross_probe_line(
+        &mut self,
+        released: Option<usize>,
+        line: Option<usize>,
+    ) {
+        if released.is_some() && self.requested_line == released {
+            self.requested_line = None;
+        }
+        self.cross_probe_line = line;
+        if line.is_some() && self.active_document == ActiveNetlistDocument::Generated {
+            self.requested_line = line;
+        }
+    }
+
     /// The buffer revision the findings this editor holds were validated
     /// against, or `None` where they are no validation: nothing has been
     /// parsed yet, or the comparison is showing, for which the editor clears
