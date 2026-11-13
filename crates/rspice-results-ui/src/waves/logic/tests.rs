@@ -551,17 +551,15 @@ fn a_lane_names_the_digital_quantity_of_its_net_for_cross_probing() {
     assert_eq!(lane_signal(&bus, Some(9)), None);
 }
 
-fn hdl_record(
-    seconds: f64,
-    stream: rspice_results::engine_evidence::HdlStream,
+fn hdl_diagnostic(
+    point: rspice_results::engine_evidence::HdlPoint,
+    severity: rspice_results::engine_evidence::HdlSeverity,
     text: &str,
-) -> rspice_results::engine_evidence::HdlOutputRecord {
-    rspice_results::engine_evidence::HdlOutputRecord {
-        point: rspice_results::engine_evidence::HdlPoint::Transient { time: seconds },
-        tick: 0,
-        seconds,
-        stream,
+) -> rspice_results::analysis_result::HdlDiagnostic {
+    rspice_results::analysis_result::HdlDiagnostic {
+        severity,
         text: text.to_owned(),
+        point,
         origin: rspice_results::engine_evidence::HdlOrigin {
             scope: "tb".to_owned(),
             file: "tb_ldo_full.vams".to_owned(),
@@ -570,50 +568,28 @@ fn hdl_record(
     }
 }
 
-/// Severity records and the end of the run are markers; `$display` and
-/// `$info` stay in the Console.
+/// Severity records are markers; `$info` stays in the Console.
 #[test]
-fn hdl_severity_and_end_of_run_records_make_markers_and_console_output_does_not() {
-    use rspice_results::engine_evidence::{HdlSeverity, HdlStream};
-    let diagnostic = |severity| HdlStream::Diagnostic { severity };
+fn hdl_severity_records_make_markers_and_info_does_not() {
+    use rspice_results::engine_evidence::{HdlPoint, HdlSeverity};
+    let at = HdlPoint::Transient { time: 99.0e-6 };
     let cases = [
-        (diagnostic(HdlSeverity::Fatal), Some(MarkerSeverity::Fatal)),
-        (diagnostic(HdlSeverity::Error), Some(MarkerSeverity::Error)),
-        (
-            diagnostic(HdlSeverity::Warning),
-            Some(MarkerSeverity::Warning),
-        ),
-        (diagnostic(HdlSeverity::Info), None),
-        (HdlStream::Stdout, None),
-        (
-            HdlStream::Finish {
-                stop: false,
-                level: 1,
-            },
-            Some(MarkerSeverity::Finish),
-        ),
-        (
-            HdlStream::Finish {
-                stop: true,
-                level: 1,
-            },
-            Some(MarkerSeverity::Stop),
-        ),
+        (HdlSeverity::Fatal, Some(MarkerSeverity::Fatal)),
+        (HdlSeverity::Error, Some(MarkerSeverity::Error)),
+        (HdlSeverity::Warning, Some(MarkerSeverity::Warning)),
+        (HdlSeverity::Info, None),
     ];
-    for (stream, expected) in cases {
-        let marker = HdlMarker::from_record(&hdl_record(99.0e-6, stream.clone(), "mismatch\n"));
+    for (severity, expected) in cases {
+        let marker = HdlMarker::from_diagnostic(&hdl_diagnostic(at, severity, "mismatch\n"), 0.0);
         assert_eq!(
             marker.as_ref().map(|marker| marker.severity),
             expected,
-            "{stream:?}"
+            "{severity:?}"
         );
     }
-    let marker = HdlMarker::from_record(&hdl_record(
-        99.0e-6,
-        diagnostic(HdlSeverity::Error),
-        "mismatch\n",
-    ))
-    .unwrap();
+    let marker =
+        HdlMarker::from_diagnostic(&hdl_diagnostic(at, HdlSeverity::Error, "mismatch\n"), 0.0)
+            .unwrap();
     assert_eq!(marker.time, 99.0e-6);
     assert_eq!(marker.text, "mismatch");
     assert_eq!(
@@ -629,6 +605,12 @@ fn hdl_severity_and_end_of_run_records_make_markers_and_console_output_does_not(
         "{described}"
     );
     assert!(described.contains("tb_ldo_full.vams:40"), "{described}");
+    let before_the_axis = HdlMarker::from_diagnostic(
+        &hdl_diagnostic(HdlPoint::OperatingPoint, HdlSeverity::Warning, "early"),
+        5.0e-9,
+    )
+    .unwrap();
+    assert_eq!(before_the_axis.time, 5.0e-9);
 }
 
 #[test]

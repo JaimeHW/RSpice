@@ -16,8 +16,8 @@ use super::plan::TimeMapping;
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
 use rspice_results::engine_evidence::{
-    AssertLevel, AssertionReport, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream, ModelFinish,
-    ModelFinishPoint, ModelFinishTask,
+    AssertLevel, AssertionReport, HdlPoint, HdlSeverity, ModelFinish, ModelFinishPoint,
+    ModelFinishTask,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -110,34 +110,6 @@ pub struct HdlMarker {
 }
 
 impl HdlMarker {
-    /// The marker an HDL output record makes: `$fatal`, `$error` and
-    /// `$warning` records, and `$finish` and `$stop`. Every other record is
-    /// Console output and makes none.
-    pub fn from_record(record: &HdlOutputRecord) -> Option<Self> {
-        let severity = match record.stream {
-            HdlStream::Diagnostic {
-                severity: HdlSeverity::Fatal,
-            } => MarkerSeverity::Fatal,
-            HdlStream::Diagnostic {
-                severity: HdlSeverity::Error,
-            } => MarkerSeverity::Error,
-            HdlStream::Diagnostic {
-                severity: HdlSeverity::Warning,
-            } => MarkerSeverity::Warning,
-            HdlStream::Finish { stop: false, .. } => MarkerSeverity::Finish,
-            HdlStream::Finish { stop: true, .. } => MarkerSeverity::Stop,
-            _ => return None,
-        };
-        let origin = &record.origin;
-        Some(Self {
-            time: record.seconds,
-            severity,
-            text: record.text.trim_end().to_owned(),
-            scope: origin.scope.clone(),
-            source: hdl_source(&origin.file, origin.line),
-        })
-    }
-
     /// The marker a retained severity record makes: `$warning`, `$error`
     /// and `$fatal` do; `$info` is Console output. `start` is the axis' first
     /// sample, where a record made before the axis begins stands.

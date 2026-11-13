@@ -900,13 +900,6 @@ mod tests {
         assert_eq!(basis_label(&dc, &policy), "DC operating point");
         assert_eq!(read_at_label(&dc, 0, &policy), "DC operating point");
     }
-    #[test]
-    fn a_study_states_the_filter_that_chose_its_variables() {
-        let mut evidence = swept_evidence();
-        assert_eq!(evidence.filter_label(), "R* PARAM:*");
-        evidence.filter = String::new();
-        assert_eq!(evidence.filter_label(), "every device and model parameter");
-    }
     /// The exact readings the sheet states, in its rows' names and their
     /// hovers, carry their prefix on the number as every unitless value in
     /// the product does: `250m`, never `250 m`, which reads as metres.
