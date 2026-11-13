@@ -36,11 +36,6 @@ allow = [
     "Unlicense",
     "Zlib",
 ]
-exceptions = [
-    # Bundled egui default fonts include Ubuntu Font License terms. Keep this
-    # exception narrow so future unrelated license additions fail review.
-    { allow = ["LicenseRef-UFL-1.0", "Ubuntu-font-1.0"], crate = "epaint_default_fonts" },
-]
 
 [licenses.private]
 ignore = true

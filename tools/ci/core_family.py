@@ -39,9 +39,7 @@ RANKS = {
     "rspice-core-base": 0,
     "rspice-core-netlist": 1,
     "rspice-core-devices": 2,
-    "rspice-core-xspice": 2,
-    "rspice-core-analysis": 3,
-    CORE: 4,
+    CORE: 3,
 }
 # Feature unification would put these back behind the Verilog-A compiler.
 VERILOGA = "rspice-veriloga"
@@ -156,8 +154,7 @@ def check(root: Path) -> list[str]:
                 problems.append(f"{name}: [{table}] {problem}")
             if package == VERILOGA and name in VERILOGA_FREE:
                 problems.append(
-                    f"{name}: [{table}] names `{VERILOGA}`, which only xspice, analysis "
-                    f"and {CORE} may depend on"
+                    f"{name}: [{table}] names `{VERILOGA}`, which only {CORE} may depend on"
                 )
             if not is_family(package):
                 continue

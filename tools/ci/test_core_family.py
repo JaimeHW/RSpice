@@ -201,7 +201,7 @@ class CoreFamilyTests(unittest.TestCase):
         found = problems(family)
         self.assertTrue(any("which declares no such dependency" in p for p in found), found)
 
-    def test_veriloga_below_xspice_fails_even_optionally(self) -> None:
+    def test_veriloga_below_core_fails_even_optionally(self) -> None:
         for name, table in (
             ("rspice-core-base", "dependencies"),
             ("rspice-core-netlist", "dev-dependencies"),
@@ -215,38 +215,13 @@ class CoreFamilyTests(unittest.TestCase):
                 }
                 self.assertOneProblem(family, f"{name}: [{table}] names `rspice-veriloga`")
 
-    def test_veriloga_in_xspice_passes(self) -> None:
-        family = baseline()
-        xspice = copy.deepcopy(family["rspice-core-netlist"])
-        xspice["package"]["name"] = "rspice-core-xspice"
-        del xspice["dev-dependencies"]
-        xspice["dependencies"]["rspice-veriloga"] = {"path": "../rspice-veriloga", "optional": True}
-        family["rspice-core-xspice"] = xspice
-        core = family["rspice-core"]
-        core["dependencies"]["rspice-core-xspice"] = family_edge("rspice-core-xspice")
-        for feature in ("parallel", "veriloga"):
-            core["features"][feature].append(f"rspice-core-xspice/{feature}")
-        self.assertEqual(problems(family), [])
-
-    def test_an_upward_or_sideways_edge_fails(self) -> None:
+    def test_an_upward_edge_fails(self) -> None:
         family = baseline()
         base = family["rspice-core-base"]
         base["dependencies"]["rspice-core-netlist"] = family_edge("rspice-core-netlist")
         for feature in ("parallel", "veriloga"):
             base["features"][feature].append(f"rspice-core-netlist/{feature}")
         self.assertOneProblem(family, "rspice-core-base: [dependencies] depends on `rspice-core-netlist`")
-
-        family = baseline()
-        for name in ("rspice-core-devices", "rspice-core-xspice"):
-            crate = copy.deepcopy(family["rspice-core-netlist"])
-            crate["package"]["name"] = name
-            del crate["dev-dependencies"]
-            family[name] = crate
-        devices = family["rspice-core-devices"]
-        devices["dependencies"]["rspice-core-xspice"] = family_edge("rspice-core-xspice")
-        for feature in ("parallel", "veriloga"):
-            devices["features"][feature].append(f"rspice-core-xspice/{feature}")
-        self.assertOneProblem(family, "rspice-core-devices: [dependencies] depends on `rspice-core-xspice`")
 
     def test_a_dev_dependency_on_a_crate_above_fails(self) -> None:
         family = baseline()

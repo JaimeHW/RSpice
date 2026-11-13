@@ -19,14 +19,12 @@ ALLOWED: dict[str, set[str]] = {
     "rspice-fonts": set(),
     "rspice-vocabulary": set(),
     "rspice-results": {"rspice-vocabulary", "rspice-units"},
-    "rspice-model-library": {"rspice-vocabulary", "rspice-results"},
+    "rspice-model-library": {"rspice-vocabulary"},
     "rspice-simulation-contract": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
     },
     "rspice-hardcopy-contract": {"rspice-vocabulary", "rspice-results"},
-    "rspice-design": {
-        "rspice-vocabulary", "rspice-model-library", "rspice-hardcopy-contract",
-    },
+    "rspice-design": {"rspice-vocabulary", "rspice-model-library"},
     "rspice-project-contract": {
         "rspice-vocabulary", "rspice-design", "rspice-model-library",
     },
@@ -40,17 +38,14 @@ ALLOWED: dict[str, set[str]] = {
     "rspice-simulation": {
         "rspice-project-contract",
         "rspice-vocabulary", "rspice-design", "rspice-model-library",
-        "rspice-simulation-contract", "rspice-results", "rspice-formats",
+        "rspice-simulation-contract", "rspice-results",
     },
     "rspice-hardcopy": {
         "rspice-vocabulary", "rspice-hardcopy-contract", "rspice-design", "rspice-project-contract",
         "rspice-results", "rspice-formats", "rspice-fonts",
     },
     "rspice-ui-kit": {"rspice-vocabulary", "rspice-results", "rspice-fonts"},
-    "rspice-schematic-editor": {
-        "rspice-vocabulary", "rspice-design", "rspice-model-library",
-        "rspice-ui-kit", "rspice-simulation-contract",
-    },
+    "rspice-schematic-editor": {"rspice-vocabulary", "rspice-design", "rspice-ui-kit"},
     "rspice-results-ui": {"rspice-vocabulary", "rspice-results", "rspice-ui-kit"},
     # The persisted model: every lower crate the application's state is made of,
     # and no host or window crate.
@@ -63,10 +58,8 @@ ALLOWED: dict[str, set[str]] = {
     # The platform services: the persisted model and the lower crates they read
     # and write it with, and no feature, window or shell crate.
     "rspice-app-services": {
-        "rspice-app-state", "rspice-vocabulary", "rspice-ui-kit", "rspice-schematic-editor",
-        "rspice-results-ui", "rspice-design", "rspice-project", "rspice-results",
-        "rspice-hardcopy-contract", "rspice-model-library", "rspice-formats",
-        "rspice-simulation-contract", "rspice-simulation",
+        "rspice-app-state", "rspice-vocabulary", "rspice-ui-kit", "rspice-design",
+        "rspice-project", "rspice-results", "rspice-formats", "rspice-simulation-contract",
     },
     # The run tier: the persisted model, the platform services, and the engine
     # and result crates a run is prepared, dispatched and published with; no
@@ -145,11 +138,7 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-formats", "rspice-results", "rspice-results-ui", "rspice-schematic-editor",
         "rspice-ui-kit", "rspice-vocabulary",
     },
-    "rspice-worker": {
-        "rspice-vocabulary", "rspice-results", "rspice-model-library",
-        "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
-        "rspice-project-contract", "rspice-formats", "rspice-simulation", "rspice-hardcopy",
-    },
+    "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
@@ -157,12 +146,11 @@ HEADLESS = set(ALLOWED) - {
     "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
     "rspice-app-models", "rspice-app-simulate",
 }
-# The application's features, each a crate of its own once it is extracted. A
-# feature reaches no other feature, and nothing above the workbench framework.
+# The application's feature crates. A feature reaches no other feature, and
+# nothing above the workbench framework.
 FEATURES = {
-    "rspice-app-project", "rspice-app-design", "rspice-app-simulate", "rspice-app-results",
-    "rspice-app-models", "rspice-app-code", "rspice-app-sheets", "rspice-app-hardcopy",
-    "rspice-app-settings", "rspice-app-cloud",
+    "rspice-app-simulate", "rspice-app-results", "rspice-app-models", "rspice-app-sheets",
+    "rspice-app-hardcopy", "rspice-app-settings", "rspice-app-cloud",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
@@ -187,7 +175,7 @@ def violations(
     normal_direct: dict[str, set[str]] | None = None,
     named: dict[str, set[str]] | None = None,
 ) -> list[str]:
-    """Validate the package graph; absent planned crates need no placeholder."""
+    """Validate the package graph."""
     issues = []
     # The viewers name the engine's result types through rspice-results; only
     # their tests check what they build against the engine itself.
