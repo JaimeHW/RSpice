@@ -818,45 +818,5 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     });
 }
 
-impl AppState {
-    /// Every occurrence the open document's master is instantiated at, in path
-    /// order.
-    ///
-    /// This is the one derivation of how far an edit here reaches. The canvas
-    /// strip in `workbench::surfaces::design` states it, and no surface counts
-    /// instances for itself.
-    ///
-    /// The design projection is the authority. It is the same value a run is
-    /// prepared from, memoized on the content it derives from, so the number a
-    /// surface states is the number the deck emits rather than the result of a
-    /// second hierarchy walk. A projection that does not resolve yields nothing
-    /// rather than a guess: an edit whose scope cannot be established is not
-    /// announced as landing anywhere in particular.
-    ///
-    /// The document's occurrence ends at its own reference by construction, so
-    /// the master asked about is `active_view`.
-    pub(crate) fn master_occurrence_paths(&self) -> Vec<String> {
-        let Ok(projection) = self.model.workspace.design_projection(
-            &self.model.library_manager,
-            &self.model.workspace.content.active_view,
-            &self.model.schematic,
-        ) else {
-            return Vec::new();
-        };
-        let master = self.model.workspace.content.active_view.key();
-        projection
-            .plan()
-            .bindings()
-            .filter(|binding| {
-                binding
-                    .resolved_reference()
-                    .key()
-                    .eq_ignore_ascii_case(&master)
-            })
-            .map(|binding| binding.instance_path().to_string())
-            .collect()
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests;

@@ -10,6 +10,8 @@ use crate::state::ViewType;
 use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::CloudSessionPort;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::{Problem, empty_state, paint_problem_mark};
@@ -22,7 +24,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.active_view_read_only() {
         read_only_banner(ui);
     }
-    occurrence_scope_banner(ui, app);
+    occurrence_scope_banner(ui, &app.state.model);
     tool_options::show(ui, &mut app.state);
     let content_rect = ui.available_rect_before_wrap();
     let view_type = app.state.model.workspace.content.active_view_type();
@@ -34,15 +36,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 &mut app.state,
                 app.symbol_library.as_ref(),
             );
-            paint_live_cursors(ui, app, content_rect);
+            paint_live_cursors(ui, &app.state.model, &app.cloud, content_rect);
         }
         ViewType::Symbol => {
             crate::schematic::symbol_editor::show(ui, &mut app.state, app.symbol_library.as_ref())
         }
         ViewType::Layout => layout_editor::show(ui, app),
         ViewType::VerilogA => super::veriloga::show_in_design(ui, app),
-        ViewType::Spice | ViewType::Verilog => source_reference_document(ui, app, view_type),
-        view_type => unsupported_document(ui, app, view_type),
+        ViewType::Spice | ViewType::Verilog => {
+            source_reference_document(ui, &app.state.model, view_type);
+        }
+        view_type => unsupported_document(ui, &app.state.model, view_type),
     }
     // A Verilog-A view is a document, not a drawing: it is no level of a
     // descent, and its own heading and the navigator's path already name it.
@@ -57,25 +61,22 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
-    use crate::workbench::framework::feature::{CloudSessionPort, LiveCursor};
+fn paint_live_cursors(ui: &mut Ui, model: &Model, cloud: &dyn CloudSessionPort, canvas: Rect) {
+    use crate::workbench::framework::feature::LiveCursor;
 
-    let doc = format!(
-        "schematic/{}",
-        app.state.model.workspace.content.active_key()
-    );
-    let cursors = app.cloud.live_cursors(&doc);
+    let doc = format!("schematic/{}", model.workspace.content.active_key());
+    let cursors = cloud.live_cursors(&doc);
     if cursors.is_empty() {
         return;
     }
 
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter_at(canvas);
-    let grid = app.state.model.schematic.document().grid_size.max(1) as f32;
-    let zoom = app.state.model.schematic.session.editor.zoom as f32;
+    let grid = model.schematic.document().grid_size.max(1) as f32;
+    let zoom = model.schematic.session.editor.zoom as f32;
     let pan = egui::vec2(
-        app.state.model.schematic.session.editor.pan.0 as f32,
-        app.state.model.schematic.session.editor.pan.1 as f32,
+        model.schematic.session.editor.pan.0 as f32,
+        model.schematic.session.editor.pan.1 as f32,
     );
     const COLORS: [egui::Color32; 8] = [
         egui::Color32::from_rgb(0x2F, 0xC7, 0xE5),
@@ -437,10 +438,9 @@ fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
 /// not, so the canvas says so beside the read-only marking — before the edit
 /// rather than after it — and names every occurrence it will reach on hover.
 ///
-/// `AppState::master_occurrence_paths` is the one derivation of that scope; the
-/// sheet inspector's edit-scope row reads the same function.
-fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
-    let occurrences = app.state.master_occurrence_paths();
+/// [`master_occurrence_paths`] is the one derivation of that scope.
+fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
+    let occurrences = master_occurrence_paths(model);
     if occurrences.len() < 2 {
         return;
     }
@@ -450,10 +450,47 @@ fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
         &format!(
             "Edits here apply to all {} occurrences of {}.",
             occurrences.len(),
-            app.state.model.workspace.content.active_view.cell
+            model.workspace.content.active_view.cell
         ),
     )
     .on_hover_text(occurrences.join("\n"));
+}
+
+/// Every occurrence the open document's master is instantiated at, in path
+/// order.
+///
+/// This is the one derivation of how far an edit here reaches. The canvas
+/// strip states it, and no surface counts instances for itself.
+///
+/// The design projection is the authority. It is the same value a run is
+/// prepared from, memoized on the content it derives from, so the number a
+/// surface states is the number the deck emits rather than the result of a
+/// second hierarchy walk. A projection that does not resolve yields nothing
+/// rather than a guess: an edit whose scope cannot be established is not
+/// announced as landing anywhere in particular.
+///
+/// The document's occurrence ends at its own reference by construction, so
+/// the master asked about is `active_view`.
+fn master_occurrence_paths(model: &Model) -> Vec<String> {
+    let Ok(projection) = model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
+    ) else {
+        return Vec::new();
+    };
+    let master = model.workspace.content.active_view.key();
+    projection
+        .plan()
+        .bindings()
+        .filter(|binding| {
+            binding
+                .resolved_reference()
+                .key()
+                .eq_ignore_ascii_case(&master)
+        })
+        .map(|binding| binding.instance_path().to_string())
+        .collect()
 }
 
 /// Say that the open document cannot be edited, and how to get one that can.
@@ -497,11 +534,9 @@ fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response
 /// is bound to and is read when the design is netlisted; the page says that,
 /// and which file, rather than pointing at another workspace that could not
 /// show it either.
-fn source_reference_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
-    let reference = &app.state.model.workspace.content.active_view;
-    let bound_file = app
-        .state
-        .model
+fn source_reference_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
+    let reference = &model.workspace.content.active_view;
+    let bound_file = model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -533,14 +568,14 @@ fn source_reference_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) 
     );
 }
 
-fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
+fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
     empty_state(
         ui,
         super::super::design_system::WorkbenchIcon::File,
         &format!("{} view", view_type.display_name()),
         &format!(
             "{} is registered in the project and available for downstream integrations.",
-            app.state.model.workspace.content.active_display_path()
+            model.workspace.content.active_display_path()
         ),
     );
 }
@@ -767,13 +802,13 @@ mod tests {
             crate::ui::raster::render(RASTER_VIEWPORT, |ui, background| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(background))
-                    .show(ui, |ui| occurrence_scope_banner(ui, app));
+                    .show(ui, |ui| occurrence_scope_banner(ui, &app.state.model));
             })
         }
 
         let (mut app, shared) = app_with_a_twice_instantiated_cell();
         assert_eq!(
-            app.state.master_occurrence_paths().len(),
+            master_occurrence_paths(&app.state.model).len(),
             1,
             "the design root is instantiated once"
         );
@@ -797,7 +832,7 @@ mod tests {
         app.state.model.schematic = master;
 
         assert_eq!(
-            app.state.master_occurrence_paths().len(),
+            master_occurrence_paths(&app.state.model).len(),
             2,
             "the shared master is instantiated twice"
         );
