@@ -91,7 +91,6 @@ pub(crate) mod chrome {
     pub(crate) mod toolbar {
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
         pub(in crate::workbench) mod code;
-        pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
         pub(in crate::workbench) mod project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;

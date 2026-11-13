@@ -9,15 +9,16 @@ use crate::state::{
 };
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::toolbar::design::{
-    DESIGN_DIRECT_TOOLBAR_COMMANDS, design_toolbar_command_selected,
-};
 use crate::workbench::chrome::toolbar::results::{
     results_document_is_historical, run_has_current_success_authority,
 };
 use crate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use crate::workbench::chrome::toolbar::*;
 use crate::workbench::design::commands::DesignCommand;
+use crate::workbench::design::toolbar::{
+    DESIGN_DIRECT_TOOLBAR_COMMANDS, SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
+    design_toolbar_command_selected,
+};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
@@ -169,6 +170,25 @@ fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
         .request_abort_active_run()
         .unwrap();
     assert_eq!(run_control_label(&app, desktop), "Stopping…");
+}
+
+/// The design feature registers each toolbar once, and every toolbar the
+/// shell's lane chooses for the Design and Stimulus workspaces (the
+/// schematic's, an open symbol's and the Stimulus Library's) is one it
+/// registered.
+#[test]
+fn every_design_toolbar_the_shell_chooses_is_registered_once() {
+    use crate::workbench::design::DesignFeature;
+    use crate::workbench::features::Registered;
+
+    assert_eq!(
+        DesignFeature::registry().validate_toolbars([
+            SCHEMATIC_TOOLBAR,
+            SYMBOL_TOOLBAR,
+            STIMULUS_TOOLBAR
+        ]),
+        Ok(())
+    );
 }
 
 #[test]

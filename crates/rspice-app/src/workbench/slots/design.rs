@@ -357,13 +357,19 @@ impl DesignState {
         self.schematic_snap.grid_size = model.schematic.session.editor.snap_engine.grid_size;
     }
 
-    /// Cycle the upgraded toolbar's exact presentation order.
-    pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
-        let next = match self.grid {
+    /// The style a cycle sets next, in the upgraded toolbar's exact
+    /// presentation order.
+    pub(crate) fn next_grid_style(&self) -> GridStyle {
+        match self.grid {
             GridStyle::Dots => GridStyle::Lines,
             GridStyle::Lines => GridStyle::Off,
             GridStyle::Off => GridStyle::Dots,
-        };
+        }
+    }
+
+    /// Cycle the upgraded toolbar's exact presentation order.
+    pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
+        let next = self.next_grid_style();
         self.set_grid_style(next);
         next
     }

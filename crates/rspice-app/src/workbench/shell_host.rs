@@ -328,9 +328,6 @@ impl Host for RSpiceApp {
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::code::{netlist_tools, veriloga_tools};
-                use crate::workbench::chrome::toolbar::design::{
-                    design_tools, stimulus_tools, symbol_tools,
-                };
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
@@ -341,6 +338,10 @@ impl Host for RSpiceApp {
                     simulation_tools, verification_tools,
                 };
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
+                use crate::workbench::design::DesignFeature;
+                use crate::workbench::design::toolbar::{
+                    SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
+                };
 
                 match scope {
                     ToolbarScope::NoProject => no_project_tools(ui, app, layout),
@@ -361,7 +362,13 @@ impl Host for RSpiceApp {
                             if app.state.model.workspace.content.active_view_type()
                                 == ViewType::Symbol =>
                         {
-                            symbol_tools(ui, app, layout);
+                            features::show_toolbar::<DesignFeature>(
+                                app,
+                                ui,
+                                SYMBOL_TOOLBAR,
+                                layout,
+                            );
+                            app.after_contribution();
                         }
                         Workspace::Design
                             if app.state.model.workspace.content.active_view_type()
@@ -369,9 +376,25 @@ impl Host for RSpiceApp {
                         {
                             veriloga_tools(ui, app, layout);
                         }
-                        Workspace::Design => design_tools(ui, app, layout),
+                        Workspace::Design => {
+                            features::show_toolbar::<DesignFeature>(
+                                app,
+                                ui,
+                                SCHEMATIC_TOOLBAR,
+                                layout,
+                            );
+                            app.after_contribution();
+                        }
                         Workspace::Simulate => simulation_tools(ui, app, layout),
-                        Workspace::Stimulus => stimulus_tools(ui, app, layout),
+                        Workspace::Stimulus => {
+                            features::show_toolbar::<DesignFeature>(
+                                app,
+                                ui,
+                                STIMULUS_TOOLBAR,
+                                layout,
+                            );
+                            app.after_contribution();
+                        }
                         Workspace::Results => {
                             let groups = offered_tool_groups(app.state.results_reads());
                             if results_tracking_button(ui, &mut app.state.results_parts(), layout) {

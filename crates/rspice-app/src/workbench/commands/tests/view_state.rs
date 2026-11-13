@@ -54,6 +54,25 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     assert_eq!(app.state.design.grid, crate::state::GridStyle::Dots);
 }
 
+/// The grid button paints, on the frame that takes its click, the style the
+/// cycle is about to set: the prediction is what the command sets, from
+/// every style.
+#[test]
+fn the_grid_buttons_predicted_style_is_what_cycling_sets() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    for style in [
+        crate::state::GridStyle::Dots,
+        crate::state::GridStyle::Lines,
+        crate::state::GridStyle::Off,
+    ] {
+        app.state.design.set_grid_style(style);
+        let predicted = app.state.design.next_grid_style();
+        app.execute_command_key(DesignCommand::CycleGrid.key());
+        assert_eq!(app.state.design.grid, predicted, "cycling from {style:?}");
+    }
+}
+
 #[test]
 fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
     let mut app = app_with_selected_authored_symbol();

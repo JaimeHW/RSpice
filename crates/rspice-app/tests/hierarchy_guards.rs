@@ -770,7 +770,7 @@ const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("workbench/menu_bar/", "menu"),
     ("workbench/chrome/toolbar.rs", "toolbar"),
     ("workbench/chrome/toolbar/code.rs", "toolbar"),
-    ("workbench/chrome/toolbar/design.rs", "toolbar"),
+    ("workbench/design/toolbar.rs", "toolbar"),
     ("workbench/chrome/toolbar/hardcopy.rs", "toolbar"),
     ("workbench/chrome/toolbar/models.rs", "toolbar"),
     ("workbench/chrome/toolbar/project.rs", "toolbar"),

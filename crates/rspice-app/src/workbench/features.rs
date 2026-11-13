@@ -24,7 +24,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, RoutedCommand,
-    ToolbarTool,
+    ToolbarId, ToolbarTool,
 };
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::models::ModelsFeature;
@@ -506,6 +506,27 @@ pub(super) fn show_split<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) 
 /// The tools `F` puts on the context toolbar, in order.
 pub(super) fn toolbar_tools<F: Registered>() -> &'static [ToolbarTool] {
     F::registry().toolbar_tools()
+}
+
+/// Draw the toolbar `F` registered as `id` in the toolbar's lane: its
+/// presses and conditions read over `F`'s reads, its controls draw in `F`'s
+/// context. The caller answers what it raised straight after.
+pub(super) fn show_toolbar<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    id: ToolbarId,
+    layout: crate::workbench::layout::LayoutSpec,
+) {
+    if let Some(entries) = F::registry().toolbar_entries(id) {
+        crate::workbench::chrome::toolbar::feature_toolbar(
+            ui,
+            app,
+            entries,
+            layout,
+            |app, ask| ask(&F::reads(app)),
+            |app, ui, show, layout| show(&mut cx::<F>(app), ui, layout),
+        );
+    }
 }
 
 /// Commit what `F`'s inspector section holds typed and not yet committed.

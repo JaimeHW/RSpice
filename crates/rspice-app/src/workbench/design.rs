@@ -5,6 +5,7 @@
 
 pub(crate) mod commands;
 mod routed;
+pub(crate) mod toolbar;
 
 use egui::Context;
 use rspice_schematic_editor::symbol_editor::commands::{
@@ -99,6 +100,7 @@ impl Feature for DesignFeature {
         registry.commands::<DesignCommand>();
         registry.dialogs(DIALOGS);
         registry.routed(routed::ROUTED);
+        registry.toolbars(toolbar::TOOLBARS);
     }
 }
 
