@@ -388,12 +388,12 @@ pub fn unavailable_surface(ui: &mut Ui, title: &str, reason: &str) {
             ui.label(
                 RichText::new(title)
                     .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                    .color(t.color.text),
+                    .color(t.color.canvas_text),
             );
             ui.label(
                 RichText::new(reason)
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                    .color(t.color.canvas_text_dim),
             );
         },
     );

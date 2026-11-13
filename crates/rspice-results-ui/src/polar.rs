@@ -716,7 +716,10 @@ fn paint_canvas(
     }
 
     // Cursor flags, in the colours the shared cursor pair has on every plot.
-    for (label, sample, color) in [("A", samples.a, c.accent), ("B", samples.b, c.traces[4])] {
+    for (label, sample, color) in [
+        ("A", samples.a, c.canvas_cursor_a),
+        ("B", samples.b, c.canvas_cursor_b),
+    ] {
         let Some(point) = sample.and_then(&place) else {
             continue;
         };

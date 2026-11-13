@@ -888,6 +888,9 @@ fn stress_trace_card(
         .stroke(egui::Stroke::new(1.0, t.color.border_strong))
         .inner_margin(egui::Margin::symmetric(8, 7))
         .show(ui, |ui| {
+            // The card is a canvas: its text takes the canvas theme's inks,
+            // which a light interface over a dark canvas does not share.
+            ui.visuals_mut().override_text_color = Some(t.color.canvas_text);
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(format!(
@@ -895,7 +898,8 @@ fn stress_trace_card(
                         evaluation.device_id,
                         parameter_label(evaluation.parameter)
                     ))
-                    .strong(),
+                    .strong()
+                    .color(t.color.canvas_text),
                 );
                 ui.separator();
                 mono(

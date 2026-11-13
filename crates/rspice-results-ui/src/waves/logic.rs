@@ -247,26 +247,28 @@ fn paint_gutter(
     let painter = ui.painter();
     let mut right = rect.right() - GUTTER_PAD;
     if let Some(readout) = readout {
-        let value = painter.layout_no_wrap(readout.to_owned(), font.clone(), tokens.color.text);
+        let value =
+            painter.layout_no_wrap(readout.to_owned(), font.clone(), tokens.color.canvas_text);
         let origin = pos2(
             (right - value.size().x).max(left),
             rect.center().y - value.size().y * 0.5,
         );
         right = origin.x - GUTTER_PAD;
-        painter.galley(origin, value, tokens.color.text);
+        painter.galley(origin, value, tokens.color.canvas_text);
     }
     let width = (right - left).max(0.0);
-    let mut galley = painter.layout_no_wrap(name.to_owned(), font.clone(), tokens.color.text_dim);
+    let mut galley =
+        painter.layout_no_wrap(name.to_owned(), font.clone(), tokens.color.canvas_text_dim);
     let chars = name.chars().count().max(1);
     if galley.size().x > width {
         // The gutter font is monospaced, so one glyph's advance is the
         // whole name's over its length.
         let advance = (galley.size().x / chars as f32).max(1.0);
         let fit = (width / advance).floor().max(1.0) as usize;
-        galley = painter.layout_no_wrap(elide(name, fit), font, tokens.color.text_dim);
+        galley = painter.layout_no_wrap(elide(name, fit), font, tokens.color.canvas_text_dim);
     }
     let top = rect.center().y - galley.size().y * 0.5;
-    painter.galley(pos2(left, top), galley, tokens.color.text_dim);
+    painter.galley(pos2(left, top), galley, tokens.color.canvas_text_dim);
 }
 
 /// Draw the lane stack into the next `stack_height(rows)` points of `ui`.
@@ -340,7 +342,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                         ui,
                         pos2(gutter.left() + GUTTER_PAD + 3.0, gutter.center().y),
                         *expanded,
-                        tokens.color.text_dim,
+                        tokens.color.canvas_text_dim,
                     );
                 }
                 paint_gutter(
@@ -392,8 +394,8 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     }
     // The cursors run through the lanes in the colours the panes draw them.
     for (cursor, color) in [
-        (input.cursor, tokens.color.accent),
-        (input.cursor_b, tokens.color.traces[4]),
+        (input.cursor, tokens.color.canvas_cursor_a),
+        (input.cursor_b, tokens.color.canvas_cursor_b),
     ] {
         if let Some(t) = cursor
             && (input.x_range.0..=input.x_range.1).contains(&t)

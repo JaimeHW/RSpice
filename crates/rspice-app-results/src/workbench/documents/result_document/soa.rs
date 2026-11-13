@@ -463,6 +463,39 @@ mod tests {
             "the sheet laid out {drawn} of 400 retained rules for a 1020 px viewport"
         );
     }
+
+    /// The SOA sheet for review, written under `RSPICE_PICTURES` when it is
+    /// set, in the default theme and with a light interface over the dark
+    /// canvas.
+    #[test]
+    #[ignore = "writes the review pictures"]
+    fn write_the_soa_sheet_pictures() {
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let mismatched = crate::ui::Theme {
+            mode: rspice_ui_kit::tokens::Mode::Light,
+            ..crate::ui::Theme::default()
+        };
+        for (name, theme) in [
+            ("soa-sheet", crate::ui::Theme::default()),
+            ("soa-sheet-light-ui-dark-canvas", mismatched),
+        ] {
+            let mut state = soa_state(6, 400, 3.0);
+            let canvas =
+                rspice_ui_kit::raster::render_themed(theme, egui::vec2(1200.0, 760.0), |ui, _| {
+                    let well = ui.available_rect_before_wrap();
+                    let canvas = crate::ui::tokens::Tokens::get(ui.ctx()).color.canvas_bg;
+                    ui.painter().rect_filled(well, 0.0, canvas);
+                    show(ui, &mut state.results_parts());
+                });
+            std::fs::write(
+                format!("{directory}/{name}.png"),
+                canvas.png(canvas.height()),
+            )
+            .expect("the picture is written");
+        }
+    }
 }
 
 #[cfg(test)]

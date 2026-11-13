@@ -53,7 +53,7 @@ impl LaneStyle {
             color,
             unknown: tokens.color.err,
             high_impedance: tokens.color.warn,
-            text: tokens.color.text,
+            text: tokens.color.canvas_text,
             font: theme::mono(tokens::FS_MICRO, FontWeight::Regular),
             width: 1.0,
         }

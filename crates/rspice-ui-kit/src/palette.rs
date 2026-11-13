@@ -3,6 +3,10 @@
 
 use egui::Color32;
 
+/// How many hues a trace palette cycles through before it repeats them in
+/// another dash.
+pub const TRACE_HUES: usize = 8;
+
 const fn color_is_rgb(color: Color32, r: u8, g: u8, b: u8) -> bool {
     color.r() == r && color.g() == g && color.b() == b && color.a() == 255
 }
@@ -69,8 +73,23 @@ pub struct Palette {
     pub net_class_ground: Color32,
     pub net_class_supply: Color32,
     pub net_class_clock: Color32,
-    /// Waveform trace cycle (assignment order for new traces).
-    pub traces: [Color32; 6],
+    /// Primary text drawn on a canvas: tick values, cursor readouts and the
+    /// labels a viewer paints on its well. The canvas has its own theme, so
+    /// the interface text tones can sit on it dark on dark.
+    pub canvas_text: Color32,
+    /// Secondary text on a canvas (tick labels, lane names).
+    pub canvas_text_dim: Color32,
+    /// Tertiary text on a canvas (axis units, hints).
+    pub canvas_text_faint: Color32,
+    /// Cursor A on a canvas: the canvas theme's own accent, which stands off
+    /// that canvas whatever the interface mode beside it.
+    pub canvas_cursor_a: Color32,
+    /// Cursor B on a canvas: a neutral no trace hue is near, so the second
+    /// cursor never reads as a curve.
+    pub canvas_cursor_b: Color32,
+    /// Waveform trace cycle (assignment order for new traces): eight hues
+    /// that stand apart from each other and off the canvas.
+    pub traces: [Color32; TRACE_HUES],
     /// Popover/menu shadow color (translucent).
     pub shadow_color: Color32,
     /// Popover shadow geometry: (y-offset, blur) in points.
@@ -167,7 +186,7 @@ struct ContrastGroundInks {
     err: Color32,
     info: Color32,
     magenta: Color32,
-    traces: [Color32; 6],
+    traces: [Color32; TRACE_HUES],
     keyword: Color32,
     discipline: Color32,
     system: Color32,
@@ -189,13 +208,16 @@ const ON_DARK_GROUND: ContrastGroundInks = ContrastGroundInks {
     err: Color32::from_rgb(0xff, 0x9a, 0x8c),
     info: Color32::from_rgb(0x8c, 0xd8, 0xff),
     magenta: Color32::from_rgb(0xff, 0x8c, 0xf0),
+    // Eight chromatic hues: white is cursor B's, so no trace takes it.
     traces: [
         Color32::from_rgb(0xff, 0xe0, 0x33),
         Color32::from_rgb(0x4d, 0xe8, 0xff),
         Color32::from_rgb(0xff, 0x8c, 0xf0),
         Color32::from_rgb(0x5c, 0xf2, 0x7a),
-        Color32::from_rgb(0xff, 0xff, 0xff),
         Color32::from_rgb(0xff, 0xa8, 0x5c),
+        Color32::from_rgb(0x78, 0xa0, 0xff),
+        Color32::from_rgb(0xff, 0x78, 0x78),
+        Color32::from_rgb(0xbe, 0xff, 0x3c),
     ],
     keyword: Color32::from_rgb(0x8c, 0xcb, 0xff),
     discipline: Color32::from_rgb(0x4e, 0xe6, 0xd0),
@@ -218,13 +240,16 @@ const ON_LIGHT_GROUND: ContrastGroundInks = ContrastGroundInks {
     err: Color32::from_rgb(0xa8, 0x00, 0x1c),
     info: Color32::from_rgb(0x00, 0x4a, 0x80),
     magenta: Color32::from_rgb(0x8a, 0x00, 0x72),
+    // Eight chromatic hues: black is cursor B's, so no trace takes it.
     traces: [
         Color32::from_rgb(0x00, 0x33, 0xa0),
         Color32::from_rgb(0xa8, 0x00, 0x1c),
         Color32::from_rgb(0x0a, 0x5c, 0x1e),
         Color32::from_rgb(0x8a, 0x00, 0x72),
-        Color32::from_rgb(0x00, 0x00, 0x00),
         Color32::from_rgb(0x7a, 0x42, 0x00),
+        Color32::from_rgb(0x00, 0x5a, 0x64),
+        Color32::from_rgb(0x55, 0x28, 0xa0),
+        Color32::from_rgb(0xaa, 0x46, 0x00),
     ],
     keyword: Color32::from_rgb(0x00, 0x33, 0x9a),
     discipline: Color32::from_rgb(0x00, 0x57, 0x4f),
@@ -279,6 +304,11 @@ pub const fn high_contrast(inks: ContrastInks) -> Palette {
         net_class_ground: ground.info,
         net_class_supply: ground.warn,
         net_class_clock: ground.magenta,
+        canvas_text: inks.window_text,
+        canvas_text_dim: blend(inks.window, inks.window_text, 88),
+        canvas_text_faint: blend(inks.window, inks.window_text, 75),
+        canvas_cursor_a: inks.highlight,
+        canvas_cursor_b: inks.window_text,
         traces: ground.traces,
         shadow_color: Color32::TRANSPARENT,
         shadow_geom: (0, 0),
@@ -345,13 +375,23 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     net_class_ground: Color32::from_rgb(0x7c, 0xb8, 0xe8),
     net_class_supply: Color32::from_rgb(234, 147, 68),
     net_class_clock: Color32::from_rgb(217, 132, 176),
+    canvas_text: Color32::from_rgb(215, 219, 222),
+    canvas_text_dim: Color32::from_rgb(147, 153, 158),
+    canvas_text_faint: Color32::from_rgb(126, 133, 138),
+    canvas_cursor_a: Color32::from_rgb(242, 184, 36),
+    canvas_cursor_b: Color32::from_rgb(205, 212, 217),
+    // Blue, coral, green, violet, cyan, rose, lime, peach: at least 0.1
+    // apart in OKLab, and none of them the amber of cursor A or the grey of
+    // cursor B, so a cursor never reads as a curve.
     traces: [
-        Color32::from_rgb(242, 184, 36),
-        Color32::from_rgb(124, 184, 232),
-        Color32::from_rgb(217, 132, 176),
-        Color32::from_rgb(89, 212, 131),
-        Color32::from_rgb(120, 165, 239),
-        Color32::from_rgb(242, 113, 106),
+        Color32::from_rgb(100, 170, 245),
+        Color32::from_rgb(250, 105, 90),
+        Color32::from_rgb(110, 215, 110),
+        Color32::from_rgb(175, 145, 255),
+        Color32::from_rgb(60, 215, 210),
+        Color32::from_rgb(235, 120, 190),
+        Color32::from_rgb(200, 230, 80),
+        Color32::from_rgb(255, 175, 140),
     ],
     shadow_color: Color32::from_rgba_premultiplied(0, 0, 0, 107),
     shadow_geom: (14, 42),
@@ -408,13 +448,23 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     net_class_ground: Color32::from_rgb(0, 124, 58),
     net_class_supply: Color32::from_rgb(194, 110, 18),
     net_class_clock: Color32::from_rgb(168, 83, 126),
+    canvas_text: Color32::from_rgb(31, 37, 40),
+    canvas_text_dim: Color32::from_rgb(83, 89, 93),
+    canvas_text_faint: Color32::from_rgb(0x5c, 0x63, 0x67),
+    canvas_cursor_a: Color32::from_rgb(143, 100, 0),
+    canvas_cursor_b: Color32::from_rgb(52, 60, 66),
+    // Blue, crimson, green, violet, teal, magenta, orange, navy: each deep
+    // enough to stand 4.5:1 off paper, at least 0.1 apart in OKLab, and none
+    // of them the gold of cursor A or the slate of cursor B.
     traces: [
-        Color32::from_rgb(161, 97, 0),
-        Color32::from_rgb(61, 114, 168),
-        Color32::from_rgb(168, 83, 126),
-        Color32::from_rgb(0, 137, 66),
-        Color32::from_rgb(48, 101, 190),
-        Color32::from_rgb(189, 56, 56),
+        Color32::from_rgb(30, 105, 190),
+        Color32::from_rgb(190, 30, 80),
+        Color32::from_rgb(0, 128, 60),
+        Color32::from_rgb(110, 70, 190),
+        Color32::from_rgb(0, 122, 128),
+        Color32::from_rgb(160, 50, 150),
+        Color32::from_rgb(195, 80, 0),
+        Color32::from_rgb(10, 60, 150),
     ],
     shadow_color: Color32::from_rgba_premultiplied(7, 8, 9, 46),
     shadow_geom: (14, 42),
@@ -440,8 +490,62 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x44, 0x8c, 0x60) as usize];
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x4e, 0x34, 0x00) as usize];
 
+/// sRGB relative luminance (WCAG 2.x).
+fn relative_luminance(color: Color32) -> f64 {
+    let [red, green, blue] = linear_rgb(color);
+    0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+fn linear_rgb(color: Color32) -> [f64; 3] {
+    let linear = |channel: u8| {
+        let channel = f64::from(channel) / 255.0;
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    [linear(color.r()), linear(color.g()), linear(color.b())]
+}
+
+/// How far an ink stands off the ground it is painted on, as the WCAG
+/// contrast ratio. Channel values cannot answer this: on a dark ground a
+/// brighter grey stands further off, on a light ground it stands closer.
+pub fn contrast_ratio(ink: Color32, ground: Color32) -> f64 {
+    let (ink, ground) = (relative_luminance(ink), relative_luminance(ground));
+    let (brighter, darker) = if ink > ground {
+        (ink, ground)
+    } else {
+        (ground, ink)
+    };
+    (brighter + 0.05) / (darker + 0.05)
+}
+
+/// How different two colours look: their distance in OKLab, where 0.02 is
+/// about the smallest step an eye sees and two hues a reader names apart
+/// stand 0.09 or more apart.
+pub fn perceptual_distance(a: Color32, b: Color32) -> f64 {
+    let oklab = |color: Color32| {
+        let [r, g, b] = linear_rgb(color);
+        let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
+        let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
+        let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
+        [
+            0.210_454_255_3 * l + 0.793_617_785 * m - 0.004_072_046_8 * s,
+            1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s,
+            0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s,
+        ]
+    };
+    let (a, b) = (oklab(a), oklab(b));
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Selection, the wire and the canvas stand apart in both palettes: a
@@ -465,40 +569,12 @@ mod tests {
                     palette.canvas_bg,
                 ),
             ] {
-                let ratio = contrast(ink, ground);
+                let ratio = contrast_ratio(ink, ground);
                 assert!(ratio >= 3.0, "{mode} {pair} is only {ratio:.2}:1");
             }
             assert_ne!(palette.canvas_select, palette.canvas_net_highlight);
             assert_ne!(palette.canvas_select, palette.accent, "{mode}");
         }
-    }
-
-    /// sRGB relative luminance (WCAG 2.x).
-    fn relative_luminance(color: Color32) -> f64 {
-        fn linear(channel: u8) -> f64 {
-            let channel = f64::from(channel) / 255.0;
-            if channel <= 0.040_45 {
-                channel / 12.92
-            } else {
-                ((channel + 0.055) / 1.055).powf(2.4)
-            }
-        }
-        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
-    }
-
-    /// How far an ink stands off the ground it is painted on, as the WCAG
-    /// contrast ratio. Channel values cannot answer this: on a dark ground a
-    /// brighter grey stands further off, on a light ground it stands closer,
-    /// which is exactly how the dark tertiary tone came to be brighter than
-    /// the secondary one and nobody noticed.
-    fn contrast(ink: Color32, ground: Color32) -> f64 {
-        let (ink, ground) = (relative_luminance(ink), relative_luminance(ground));
-        let (brighter, darker) = if ink > ground {
-            (ink, ground)
-        } else {
-            (ground, ink)
-        };
-        (brighter + 0.05) / (darker + 0.05)
     }
 
     /// Primary, secondary, tertiary: each tone must stand off its ground less
@@ -512,7 +588,7 @@ mod tests {
     /// The contrast themes Windows ships, light ground and dark, and the one
     /// the Color mode row selects. What each sets is its own; what is drawn
     /// from it has to stand off its ground on all of them.
-    const CONTRAST_THEMES: [(&str, ContrastInks); 3] = [
+    pub(crate) const CONTRAST_THEMES: [(&str, ContrastInks); 3] = [
         ("black", ContrastInks::BLACK),
         (
             "desert",
@@ -555,22 +631,22 @@ mod tests {
                 ("wire", palette.wire, 4.5),
                 ("symbol", palette.symbol, 7.0),
             ] {
-                let measured = contrast(ink, ground);
+                let measured = contrast_ratio(ink, ground);
                 assert!(measured >= needed, "{theme} {name}: {measured:.2}:1");
             }
             assert!(
-                contrast(palette.text, palette.bg_hover) >= 4.5
-                    && contrast(palette.text, palette.bg_active) >= 4.5
-                    && contrast(palette.text, palette.accent_dim) >= 4.5,
+                contrast_ratio(palette.text, palette.bg_hover) >= 4.5
+                    && contrast_ratio(palette.text, palette.bg_active) >= 4.5
+                    && contrast_ratio(palette.text, palette.accent_dim) >= 4.5,
                 "{theme}: text on the row fills"
             );
             assert!(
-                contrast(palette.accent_ink, palette.accent) >= 4.5,
+                contrast_ratio(palette.accent_ink, palette.accent) >= 4.5,
                 "{theme}"
             );
             for trace in palette.traces {
                 assert!(
-                    contrast(trace, palette.canvas_bg) >= 4.5,
+                    contrast_ratio(trace, palette.canvas_bg) >= 4.5,
                     "{theme} {trace:?}"
                 );
             }
@@ -591,7 +667,7 @@ mod tests {
                 syntax.parameter_name,
             ] {
                 for fill in [palette.bg_inset, syntax.current_line, syntax.selection] {
-                    let measured = contrast(ink, fill);
+                    let measured = contrast_ratio(ink, fill);
                     assert!(
                         measured >= 4.5,
                         "{theme} {ink:?} on {fill:?}: {measured:.2}:1"
@@ -619,9 +695,9 @@ mod tests {
                 ("bg_inset", palette.bg_inset),
                 ("bg_elevated", palette.bg_elevated),
             ] {
-                let text = contrast(palette.text, ground);
-                let dim = contrast(palette.text_dim, ground);
-                let faint = contrast(palette.text_faint, ground);
+                let text = contrast_ratio(palette.text, ground);
+                let dim = contrast_ratio(palette.text_dim, ground);
+                let faint = contrast_ratio(palette.text_faint, ground);
                 assert!(
                     dim < text,
                     "{mode} text_dim ({dim:.2}:1) must be fainter than text ({text:.2}:1) on {surface}"
@@ -673,14 +749,14 @@ mod tests {
                 ("selection", syntax.selection),
             ] {
                 for (ink, color) in inks {
-                    let ratio = contrast(color, ground);
+                    let ratio = contrast_ratio(color, ground);
                     assert!(
                         ratio >= 4.5,
                         "{mode} {ink} is only {ratio:.2}:1 on the {fill}"
                     );
                 }
             }
-            let selection = contrast(syntax.selection, palette.bg_inset);
+            let selection = contrast_ratio(syntax.selection, palette.bg_inset);
             assert!(
                 selection >= 1.2,
                 "{mode} selection stands only {selection:.2}:1 off the code well"

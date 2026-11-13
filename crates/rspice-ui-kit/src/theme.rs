@@ -157,8 +157,8 @@ pub struct Theme {
     pub mode: Mode,
     /// Control density.
     pub density: Density,
-    /// Substitute the Okabe–Ito colorblind-safe set for the trace colors
-    /// (≈8 % of male engineers cannot separate the default red/green pairs).
+    /// Tell traces apart by dash and marker as well as by hue (≈8 % of male
+    /// engineers cannot separate red from green).
     #[serde(default = "default_color_safe_traces")]
     pub colorblind_traces: bool,
     /// Symbol/grid separation on engineering canvases. `62` is the reviewed
@@ -251,17 +251,6 @@ impl Default for Theme {
     }
 }
 
-/// The Okabe–Ito colorblind-safe categorical set (less yellow/black/grey,
-/// which fail on one of the two surface modes).
-const OKABE_ITO_TRACES: [Color32; 6] = [
-    Color32::from_rgb(0x00, 0x72, 0xB2), // blue
-    Color32::from_rgb(0xE6, 0x9F, 0x00), // orange
-    Color32::from_rgb(0x00, 0x9E, 0x73), // bluish green
-    Color32::from_rgb(0xD5, 0x5E, 0x00), // vermillion
-    Color32::from_rgb(0x56, 0xB4, 0xE9), // sky blue
-    Color32::from_rgb(0xCC, 0x79, 0xA7), // reddish purple
-];
-
 fn system_contrast_id() -> egui::Id {
     egui::Id::new("rspice.theme.system-contrast")
 }
@@ -275,11 +264,12 @@ impl Theme {
         if self.mode == Mode::HighContrast {
             return tokens;
         }
+        // Color-safe traces keep the canvas theme's own eight hues, each of
+        // which stands off that canvas, and add a dash and a marker per slot.
+        // A substitute set would have to stand 4.5:1 off both canvases, which
+        // the colourblind sets' sky blue and orange do not on paper.
         let canvas_palette = self.canvas_theme.palette();
         apply_engineering_canvas_palette(&mut tokens, canvas_palette);
-        if self.colorblind_traces {
-            tokens.color.traces = OKABE_ITO_TRACES;
-        }
         apply_canvas_contrast(&mut tokens, self.canvas_contrast, canvas_palette.text);
         tokens
     }
@@ -363,6 +353,11 @@ fn apply_engineering_canvas_palette(tokens: &mut Tokens, canvas: Palette) {
     tokens.color.net_class_ground = canvas.net_class_ground;
     tokens.color.net_class_supply = canvas.net_class_supply;
     tokens.color.net_class_clock = canvas.net_class_clock;
+    tokens.color.canvas_text = canvas.canvas_text;
+    tokens.color.canvas_text_dim = canvas.canvas_text_dim;
+    tokens.color.canvas_text_faint = canvas.canvas_text_faint;
+    tokens.color.canvas_cursor_a = canvas.canvas_cursor_a;
+    tokens.color.canvas_cursor_b = canvas.canvas_cursor_b;
     tokens.color.traces = canvas.traces;
 }
 
@@ -873,5 +868,93 @@ mod tests {
         let b = Color32::from_rgb(255, 255, 255);
         assert_eq!(mix(a, b, 0.0), a);
         assert_eq!(mix(a, b, 1.0), b);
+    }
+
+    /// Every canvas the preferences can produce, and the contrast themes an
+    /// operating system can impose.
+    fn every_canvas_palette() -> Vec<(String, Palette)> {
+        let mut palettes: Vec<(String, Palette)> = Vec::new();
+        for mode in Mode::ALL {
+            for canvas_theme in EngineeringCanvasTheme::ALL {
+                for colorblind_traces in [false, true] {
+                    for canvas_contrast in [0, 62, 100] {
+                        let theme = Theme {
+                            mode,
+                            canvas_theme,
+                            colorblind_traces,
+                            canvas_contrast,
+                            ..Theme::default()
+                        };
+                        palettes.push((format!("{theme:?}"), theme.tokens().color));
+                    }
+                }
+            }
+        }
+        for (name, inks) in crate::palette::tests::CONTRAST_THEMES {
+            palettes.push((format!("{name} contrast"), high_contrast(inks)));
+        }
+        palettes
+    }
+
+    /// Text painted on a canvas reads off that canvas whatever the interface
+    /// mode beside it: a light interface over the dark canvas painted its
+    /// tick labels dark on dark.
+    #[test]
+    fn canvas_text_stands_off_every_canvas() {
+        use crate::palette::contrast_ratio;
+        for (name, c) in every_canvas_palette() {
+            for (role, ink) in [
+                ("text", c.canvas_text),
+                ("secondary text", c.canvas_text_dim),
+                ("tertiary text", c.canvas_text_faint),
+            ] {
+                let ratio = contrast_ratio(ink, c.canvas_bg);
+                assert!(ratio >= 4.5, "{name}: canvas {role} {ratio:.2}:1");
+            }
+        }
+    }
+
+    /// Eight trace hues, each 4.5:1 off its canvas and 0.09 apart from every
+    /// other in OKLab, and the cursors colours no trace is near. A contrast
+    /// theme's cursor A is the operating system's highlight, which the
+    /// palette cannot choose, so only cursor B is held there.
+    #[test]
+    fn traces_are_eight_distinct_hues_and_the_cursors_are_none_of_them() {
+        use crate::palette::{TRACE_HUES, contrast_ratio, perceptual_distance};
+        for (name, c) in every_canvas_palette() {
+            if !name.ends_with("contrast") && !name.contains("HighContrast") {
+                for (index, trace) in c.traces.iter().enumerate() {
+                    let distance = perceptual_distance(c.canvas_cursor_a, *trace);
+                    assert!(
+                        distance >= 0.09,
+                        "{name}: cursor A is {distance:.3} from trace {index}"
+                    );
+                }
+            }
+            assert_eq!(c.traces.len(), TRACE_HUES);
+            for (index, trace) in c.traces.iter().enumerate() {
+                let ratio = contrast_ratio(*trace, c.canvas_bg);
+                assert!(ratio >= 4.5, "{name}: trace {index} {ratio:.2}:1");
+                for (other, next) in c.traces.iter().enumerate().skip(index + 1) {
+                    let distance = perceptual_distance(*trace, *next);
+                    assert!(
+                        distance >= 0.09,
+                        "{name}: traces {index} and {other} are {distance:.3} apart"
+                    );
+                }
+                let distance = perceptual_distance(c.canvas_cursor_b, *trace);
+                assert!(
+                    distance >= 0.09,
+                    "{name}: cursor B is {distance:.3} from trace {index}"
+                );
+            }
+            assert!(
+                perceptual_distance(c.canvas_cursor_b, c.canvas_cursor_a) >= 0.09,
+                "{name}"
+            );
+            for cursor in [c.canvas_cursor_a, c.canvas_cursor_b] {
+                assert!(contrast_ratio(cursor, c.canvas_bg) >= 4.5, "{name}");
+            }
+        }
     }
 }

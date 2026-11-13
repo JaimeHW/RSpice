@@ -566,7 +566,8 @@ pub fn show(
     let x_unit_left = if x_end_label.is_empty() {
         f32::INFINITY
     } else {
-        let unit = painter.layout_no_wrap(x_end_label.clone(), tick_font.clone(), c.text_dim);
+        let unit =
+            painter.layout_no_wrap(x_end_label.clone(), tick_font.clone(), c.canvas_text_dim);
         plot_rect.right() - unit.size().x - 8.0
     };
     // Labels skip when they would collide with the previous label (dense
@@ -594,7 +595,7 @@ pub fn show(
         .clone()
         .unwrap_or_else(|| spec.y.unit.clone());
     let y_chrome = (!y_chrome.is_empty())
-        .then(|| painter.layout_no_wrap(y_chrome, tick_font.clone(), c.text_dim));
+        .then(|| painter.layout_no_wrap(y_chrome, tick_font.clone(), c.canvas_text_dim));
     let y_chrome_bottom = y_chrome.as_ref().map_or(f32::NEG_INFINITY, |galley| {
         rect.top() + 8.0 + galley.size().y * 0.5
     });
@@ -604,7 +605,7 @@ pub fn show(
     {
         // Stated once, in the gutter the Y labels leave free, and brighter
         // than the ticks: it is the value, and they are only the differences.
-        let galley = painter.layout_no_wrap(anchor.clone(), tick_font.clone(), c.text);
+        let galley = painter.layout_no_wrap(anchor.clone(), tick_font.clone(), c.canvas_text);
         let width = galley.size().x;
         painter.galley(
             pos2(
@@ -612,21 +613,21 @@ pub fn show(
                 rect.bottom() - 9.0 - galley.size().y * 0.5,
             ),
             galley,
-            c.text,
+            c.canvas_text,
         );
         last_label_right = rect.left() + 2.0 + width;
     }
     for (xv, label) in &spec.x.ticks {
         let px = mx(*xv);
         painter.vline(px, plot_rect.y_range(), grid);
-        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.text_dim);
+        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
         let half = galley.size().x * 0.5;
         if spec.x_axis_chrome && px + half <= x_unit_left && px - half >= last_label_right + 6.0 {
             last_label_right = px + half;
             painter.galley(
                 pos2(px - half, rect.bottom() - 9.0 - galley.size().y * 0.5),
                 galley,
-                c.text_dim,
+                c.canvas_text_dim,
             );
         }
     }
@@ -637,19 +638,19 @@ pub fn show(
     for (yv, label) in &spec.y.ticks {
         let py = my(*yv);
         painter.hline(plot_rect.x_range(), py, grid);
-        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.text_dim);
+        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
         let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
         if top + height <= last_label_top - 2.0 && top >= y_chrome_bottom + 2.0 {
             last_label_top = top;
             painter.galley(
                 pos2(plot_rect.left() - 7.0 - galley.size().x, top),
                 galley,
-                c.text_dim,
+                c.canvas_text_dim,
             );
         }
     }
     // ---- reference lines
-    let ref_stroke = Stroke::new(1.0, c.text_faint);
+    let ref_stroke = Stroke::new(1.0, c.canvas_text_faint);
     for line in &spec.ref_lines {
         if !(line.y >= spec.y.min && line.y <= spec.y.max) {
             continue;
@@ -815,7 +816,7 @@ pub fn show(
                 rect.top() + 8.0 - galley.size().y * 0.5,
             ),
             galley,
-            c.text_dim,
+            c.canvas_text_dim,
         );
     }
     if !x_end_label.is_empty() {
@@ -824,7 +825,7 @@ pub fn show(
             Align2::RIGHT_CENTER,
             x_end_label,
             tick_font.clone(),
-            c.text_dim,
+            c.canvas_text_dim,
         );
     }
 
@@ -939,10 +940,10 @@ pub fn show(
             );
         };
         if let Some(a) = pair.a {
-            draw_cursor(a, "A", c.accent);
+            draw_cursor(a, "A", c.canvas_cursor_a);
         }
         if let Some(b) = pair.b {
-            draw_cursor(b, "B", c.traces[4]);
+            draw_cursor(b, "B", c.canvas_cursor_b);
         }
     }
 
@@ -951,13 +952,13 @@ pub fn show(
         .filter(|y| y.is_finite() && *y >= spec.y.min && *y <= spec.y.max)
     {
         let py = my(y);
-        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, c.accent));
+        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, c.canvas_cursor_a));
         painter.text(
             pos2(plot_rect.left() + 4.0, py - 3.0),
             Align2::LEFT_BOTTOM,
             format!("H {}", spec.y.format_display_value(y)),
             theme::mono(9.0, FontWeight::Medium),
-            c.accent,
+            c.canvas_cursor_a,
         );
     }
 
@@ -974,7 +975,7 @@ pub fn show(
                     pos2(pointer.x, plot_rect.top()),
                     pos2(pointer.x, plot_rect.bottom()),
                 ],
-                Stroke::new(1.0, c.text_faint),
+                Stroke::new(1.0, c.canvas_text_faint),
                 3.0,
                 3.0,
             ));
@@ -1110,8 +1111,8 @@ fn handle_navigation(
             painter.rect(
                 band,
                 0.0,
-                c.accent.gamma_multiply(0.08),
-                Stroke::new(1.0, c.accent),
+                c.canvas_cursor_a.gamma_multiply(0.08),
+                Stroke::new(1.0, c.canvas_cursor_a),
                 egui::StrokeKind::Inside,
             );
         }

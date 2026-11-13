@@ -338,7 +338,7 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
         egui::Align2::CENTER_CENTER,
         text,
         theme::sans(tokens::FS_2, FontWeight::Regular),
-        t.color.text_faint,
+        t.color.canvas_text_faint,
     );
 }
 

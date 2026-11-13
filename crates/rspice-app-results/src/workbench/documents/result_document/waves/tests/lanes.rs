@@ -271,8 +271,8 @@ fn lanes_draw_on_the_panes_time_axis() {
     let lines = verticals(&frame(&ctx, &mut state, Vec::new()));
     let tokens = Tokens::get(&ctx);
     for (cursor, color, edge_net, t) in [
-        ("A", tokens.color.accent, "D(SAMP)", early),
-        ("B", tokens.color.traces[4], "D(EOC)", late),
+        ("A", tokens.color.canvas_cursor_a, "D(SAMP)", early),
+        ("B", tokens.color.canvas_cursor_b, "D(EOC)", late),
     ] {
         let crossings = cursor_lines(&lines, color);
         assert!(
@@ -610,4 +610,90 @@ fn write_the_sar_strip_picture() {
         canvas.png(canvas.height()),
     )
     .expect("the picture is written");
+}
+
+/// The analog nodes the review strip keeps, and which of them it plots.
+const REVIEW_NODES: [&str; 10] = ["VIN", "TOP", "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"];
+const REVIEW_PLOTTED: [&str; 7] = ["VIN", "TOP", "B0", "B2", "B3", "B5", "B7"];
+
+/// The review strip: ten analog nodes, three of them hidden, beside the
+/// SAMP and EOC lanes and the `code` bus, with both cursors placed; or,
+/// without lanes, its panes alone.
+fn review_strip(lanes: bool) -> ResultsTestHost {
+    let run = sar_run();
+    let eoc = history(run, "EOC");
+    let samp = history(run, "SAMP");
+    let (mut state, _) = if lanes {
+        sar_strip(BusRadix::Hex, false)
+    } else {
+        let mut state = host(run, &ANALOG);
+        let key = strip(&mut state)[0].analysis_key;
+        (state, key)
+    };
+    for analysis in &mut state.model.simulation.retained.runs[0].analyses {
+        analysis.waveforms.retain(|waveform| {
+            REVIEW_NODES.contains(&waveform.name.as_str()) || waveform.name.starts_with("I(")
+        });
+        for waveform in &mut analysis.waveforms {
+            waveform.visible = REVIEW_PLOTTED.contains(&waveform.name.as_str());
+        }
+    }
+    place_cursors(
+        &mut state,
+        Some(samp[1].0),
+        Some(eoc[eoc.len() - 1].0 + 1e-9),
+    );
+    state
+}
+
+/// The document well the viewer sits in, filled as the result document
+/// fills it before any viewer paints.
+fn well(ui: &mut Ui) {
+    let well = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
+}
+
+/// The pictures for review, written under `RSPICE_PICTURES` when it is set:
+/// the strip in the default, light, dark and mismatched themes, and its
+/// panes alone with every current hidden.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_review_pictures() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let themed = |mode, canvas_theme| crate::ui::Theme {
+        mode,
+        canvas_theme,
+        ..crate::ui::Theme::default()
+    };
+    use rspice_ui_kit::{EngineeringCanvasTheme as Canvas, tokens::Mode};
+    for (name, theme, lanes) in [
+        ("strip-default", crate::ui::Theme::default(), true),
+        ("strip-light", themed(Mode::Light, Canvas::Light), true),
+        ("strip-dark", themed(Mode::Dark, Canvas::Dark), true),
+        (
+            "strip-light-ui-dark-canvas",
+            themed(Mode::Light, Canvas::Dark),
+            true,
+        ),
+        (
+            "strip-dark-ui-light-canvas",
+            themed(Mode::Dark, Canvas::Light),
+            true,
+        ),
+        ("pane-all-hidden", crate::ui::Theme::default(), false),
+    ] {
+        let mut state = review_strip(lanes);
+        let canvas = rspice_ui_kit::raster::render_themed(theme, FRAME, |ui, _| {
+            well(ui);
+            show(ui, &mut state.results_parts());
+        });
+        std::fs::write(
+            format!("{directory}/{name}.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    }
 }

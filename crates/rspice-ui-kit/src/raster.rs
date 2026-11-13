@@ -349,6 +349,142 @@ pub fn rasterize(ctx: &egui::Context, size: Vec2, output: &egui::FullOutput) -> 
     rasterize_onto(ctx, size, background, output)
 }
 
+/// One run of text a frame painted, and how far its ink stands off what was
+/// painted behind it.
+#[derive(Debug, Clone)]
+pub struct TextContrast {
+    /// The text, as laid out.
+    pub text: String,
+    /// Where it was laid out, clipped to what was visible, in points.
+    pub rect: Rect,
+    /// The ink, composited over the ground when it is translucent.
+    pub ink: Color32,
+    /// The colour most of its box covers with the text taken away.
+    pub ground: Color32,
+    /// The WCAG contrast ratio of the two.
+    pub ratio: f64,
+}
+
+/// Every visible run of text in `output` and its contrast against the ground
+/// it sits on.
+///
+/// The ground is measured, not assumed: the frame is rasterized again with
+/// its text taken out, and each run's ground is the colour most of its box
+/// covers there. A label a theme gives the interface's ink while it sits on
+/// the canvas, whose theme is chosen separately, is caught whatever painted
+/// that canvas.
+pub fn text_contrasts(
+    ctx: &egui::Context,
+    size: Vec2,
+    output: &egui::FullOutput,
+) -> Vec<TextContrast> {
+    fn strip_text(shape: &egui::Shape) -> egui::Shape {
+        match shape {
+            egui::Shape::Text(_) => egui::Shape::Noop,
+            egui::Shape::Vec(shapes) => egui::Shape::Vec(shapes.iter().map(strip_text).collect()),
+            other => other.clone(),
+        }
+    }
+    fn collect<'a>(
+        shape: &'a egui::Shape,
+        clip: Rect,
+        out: &mut Vec<(&'a egui::epaint::TextShape, Rect)>,
+    ) {
+        match shape {
+            egui::Shape::Text(text) => out.push((text, clip)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, clip, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut bare = output.clone();
+    for clipped in &mut bare.shapes {
+        clipped.shape = strip_text(&clipped.shape);
+    }
+    let background = super::tokens::Tokens::get(ctx).color.bg_app;
+    let ground = rasterize_onto(ctx, size, background, &bare);
+    let pixels_per_point = ctx.pixels_per_point();
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, clipped.clip_rect, &mut texts);
+    }
+    let mut contrasts = Vec::new();
+    for (text, clip) in texts {
+        let rect = Rect::from_min_size(text.pos, text.galley.size())
+            .intersect(clip)
+            .intersect(Rect::from_min_size(egui::Pos2::ZERO, size));
+        let spelled = text.galley.job.text.trim();
+        if spelled.is_empty() || rect.width() < 1.0 || rect.height() < 1.0 {
+            continue;
+        }
+        let device = Rect::from_min_max(
+            (rect.min.to_vec2() * pixels_per_point).to_pos2(),
+            (rect.max.to_vec2() * pixels_per_point).to_pos2(),
+        );
+        let mut counts: std::collections::HashMap<Color32, usize> =
+            std::collections::HashMap::new();
+        for pixel in ground.pixels_in(device) {
+            *counts.entry(pixel).or_default() += 1;
+        }
+        let Some((under, _)) = counts
+            .into_iter()
+            .max_by_key(|(color, count)| (*count, color.to_array()))
+        else {
+            continue;
+        };
+        let inks: Vec<Color32> = match text.override_text_color {
+            Some(color) => vec![color],
+            None => text
+                .galley
+                .job
+                .sections
+                .iter()
+                .filter(|section| {
+                    text.galley
+                        .job
+                        .text
+                        .get(section.byte_range.start.0..section.byte_range.end.0)
+                        .is_some_and(|run| run.chars().any(|c| !c.is_whitespace()))
+                })
+                .map(|section| match section.format.color {
+                    Color32::PLACEHOLDER => text.fallback_color,
+                    color => color,
+                })
+                .collect(),
+        };
+        for ink in inks {
+            let ink = ink.gamma_multiply(text.opacity_factor);
+            let ink = composite(ink, under);
+            contrasts.push(TextContrast {
+                text: spelled.to_owned(),
+                rect,
+                ink,
+                ground: under,
+                ratio: super::palette::contrast_ratio(ink, under),
+            });
+        }
+    }
+    contrasts
+}
+
+/// `ink` (premultiplied) laid over the opaque `ground`.
+fn composite(ink: Color32, ground: Color32) -> Color32 {
+    let keep = 1.0 - f32::from(ink.a()) / 255.0;
+    let channel = |ink: u8, ground: u8| {
+        (f32::from(ink) + f32::from(ground) * keep)
+            .round()
+            .min(255.0) as u8
+    };
+    Color32::from_rgb(
+        channel(ink.r(), ground.r()),
+        channel(ink.g(), ground.g()),
+        channel(ink.b(), ground.b()),
+    )
+}
+
 /// The input of a display `size` points across at `pixels_per_point`, the way
 /// a real 2x display reports itself (its native scale, not a zoom), for a
 /// caller that drives its own context into [`rasterize`].

@@ -335,7 +335,10 @@ pub fn show_shared_x_axis(
     if let Some(cursors) = cursor_values {
         // The same colours the plot draws each cursor in and the readout
         // heads its column with, so one cursor is one colour everywhere.
-        for (label, value, color) in [("A", cursors.a, c.accent), ("B", cursors.b, c.traces[4])] {
+        for (label, value, color) in [
+            ("A", cursors.a, c.accent),
+            ("B", cursors.b, c.canvas_cursor_b),
+        ] {
             let Some(value) = value else { continue };
             if let Some(px) = flag_centre(value) {
                 let flag = egui::Rect::from_min_max(

@@ -167,7 +167,7 @@ fn severity_color(severity: MarkerSeverity, tokens: &Tokens) -> Color32 {
     match severity {
         MarkerSeverity::Fatal | MarkerSeverity::Error => tokens.color.err,
         MarkerSeverity::Warning => tokens.color.warn,
-        MarkerSeverity::Finish | MarkerSeverity::Stop => tokens.color.text_dim,
+        MarkerSeverity::Finish | MarkerSeverity::Stop => tokens.color.canvas_text_dim,
     }
 }
 
