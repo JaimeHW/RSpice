@@ -156,8 +156,15 @@ pub fn show_header(
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
     // An expression whose unit cannot be stated has a pane of its own and
-    // says so, with the reason, rather than show a unit it does not have.
-    let unit_chip = if pane.unlabeled { "no unit" } else { pane.unit };
+    // says so, with the reason, rather than show a unit it does not have. A
+    // plain number's pane has no unit to name: its axis goes unmarked, as a
+    // unitless axis does in ViVA and ADS, and the tag is left out rather than
+    // drawn as a control with nothing on it.
+    let unit_chip = if pane.unlabeled {
+        Some("no unit")
+    } else {
+        Some(pane.unit).filter(|unit| !unit.is_empty())
+    };
     let unit_hover = if pane.unlabeled {
         let reason = model
             .expression_panes
@@ -169,35 +176,42 @@ pub fn show_header(
     } else {
         format!("{} unit-scoped Y axis", pane.unit)
     };
-    let unit_label_width = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                unit_chip.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text,
-            )
-            .size()
-            .x
+    let unit_label_width = unit_chip.map(|unit_chip| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    unit_chip.to_owned(),
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    c.text,
+                )
+                .size()
+                .x
+        })
     });
-    let unit_width = name_width.unwrap_or((unit_label_width + 28.0).max(46.0));
+    // With lanes the tag column is the gutter's name column whatever it
+    // holds, so the legend starts on the edge the lane names end on.
+    let unit_width = name_width
+        .unwrap_or_else(|| unit_label_width.map_or(0.0, |width| (width + 28.0).max(46.0)));
     let PaneHeaderRegions {
         unit: unit_rect,
         legend: legend_rect,
         actions: actions_rect,
     } = header_regions(rect, unit_width, action_width);
 
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(unit_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(unit_rect);
-            let response = chip(ui, unit_chip, active).on_hover_text(unit_hover);
-            if response.clicked() {
-                host.activate_pane();
-            }
-        },
-    );
+    if let Some(unit_chip) = unit_chip {
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(unit_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.set_clip_rect(unit_rect);
+                let response = chip(ui, unit_chip, active).on_hover_text(unit_hover);
+                if response.clicked() {
+                    host.activate_pane();
+                }
+            },
+        );
+    }
 
     ui.scope_builder(
         egui::UiBuilder::new()

@@ -18,7 +18,11 @@ const CLOCK: &str = "digital(V(CLK), 0.9)";
 /// The clock lane's name in the gutter and the cursor table.
 const CLOCK_LANE: &str = "V(CLK) ≥ 0.9";
 
-fn add_expression(state: &mut ResultsTestHost, key: AnalysisPresentationKey, text: &str) {
+pub(super) fn add_expression(
+    state: &mut ResultsTestHost,
+    key: AnalysisPresentationKey,
+    text: &str,
+) {
     state
         .results
         .results
@@ -33,7 +37,7 @@ fn add_expression(state: &mut ResultsTestHost, key: AnalysisPresentationKey, tex
         });
 }
 
-fn expressions(state: &ResultsTestHost, key: AnalysisPresentationKey) -> Vec<String> {
+pub(super) fn expressions(state: &ResultsTestHost, key: AnalysisPresentationKey) -> Vec<String> {
     state
         .results
         .results
@@ -227,7 +231,7 @@ fn the_code_bus_staircase_follows_the_dac() {
 }
 
 /// Every run of text a frame painted, with where it was laid out.
-fn texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect)> {
+pub(super) fn texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect)> {
     fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
         match shape {
             egui::Shape::Text(text) => out.push((
@@ -255,7 +259,7 @@ fn press(at: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Ev
 }
 
 /// Click `button` on `at` across the frames egui needs to see it.
-fn click(
+pub(super) fn click(
     ctx: &egui::Context,
     state: &mut ResultsTestHost,
     at: egui::Pos2,
@@ -267,7 +271,7 @@ fn click(
 }
 
 /// Where the frame painted `wanted`, after the frames it takes to settle.
-fn find(ctx: &egui::Context, state: &mut ResultsTestHost, wanted: &str) -> egui::Pos2 {
+pub(super) fn find(ctx: &egui::Context, state: &mut ResultsTestHost, wanted: &str) -> egui::Pos2 {
     let shapes = frame(ctx, state, Vec::new());
     texts(&shapes)
         .into_iter()

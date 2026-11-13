@@ -21,6 +21,7 @@ mod lanes;
 mod log_x;
 mod markers;
 mod measurements;
+mod pane_legend;
 mod source_cache;
 mod strip_chrome;
 
