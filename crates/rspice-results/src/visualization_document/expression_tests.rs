@@ -208,3 +208,46 @@ fn a_schema_eleven_document_reads_unchanged_and_cannot_carry_expressions() {
         .to_string();
     assert!(error.contains("schema 12"), "{error}");
 }
+
+/// A horizontal axis switches scale; a range read on the linear axis that a
+/// logarithmic one cannot show is dropped rather than kept.
+#[test]
+fn an_axis_switches_scale_and_drops_a_range_a_log_axis_cannot_show() {
+    let (mut document, pane, _) = document();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddAxis(NewAxis {
+                pane_id: pane,
+                label: "Time".to_owned(),
+                orientation: AxisOrientation::Horizontal,
+                scale: AxisScale::Linear,
+                unit: Some("s".to_owned()),
+                range: Some(AxisRange::new(0.0, 1.0e-6).unwrap()),
+            })],
+        )
+        .unwrap();
+    let axis = receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Axis(id) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetAxisScale {
+                axis_id: axis,
+                scale: AxisScale::Logarithmic,
+            }],
+        )
+        .unwrap();
+    let held = document.axes().iter().find(|held| held.id == axis).unwrap();
+    assert_eq!(held.scale, AxisScale::Logarithmic);
+    assert_eq!(held.range, None);
+    let reloaded: VisualizationDocument =
+        serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+    assert_eq!(reloaded, document);
+}

@@ -17,6 +17,7 @@ mod frame_cost;
 mod honest_axes;
 mod interaction;
 mod lanes;
+mod log_x;
 mod markers;
 mod measurements;
 mod source_cache;

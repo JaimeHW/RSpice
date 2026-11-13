@@ -942,6 +942,18 @@ impl VisualizationDocument {
                 self.axis_mut(axis_id)?.range = range;
                 Ok(())
             }
+            DocumentEdit::SetAxisScale { axis_id, scale } => {
+                let axis = self.axis_mut(axis_id)?;
+                if let Some(range) = axis.range
+                    && scale == AxisScale::Logarithmic
+                    && range.minimum <= 0.0
+                {
+                    // A range read on the linear axis is no logarithmic one.
+                    axis.range = None;
+                }
+                axis.scale = scale;
+                Ok(())
+            }
             DocumentEdit::SetTraceVisibility { trace_id, visible } => {
                 self.trace_mut(trace_id)?.visible = visible;
                 Ok(())

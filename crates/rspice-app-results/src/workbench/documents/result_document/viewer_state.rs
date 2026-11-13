@@ -318,6 +318,22 @@ impl ResultsState {
             log_y_panes: self.project_log_y_panes(simulation),
             expression_groups: self.project_expression_groups(simulation),
             signal_sets: self.signal_sets.clone(),
+            x_scales: {
+                let mut scales: Vec<_> = self
+                    .session
+                    .x_scales
+                    .iter()
+                    .filter(|(analysis, _)| Self::dataset_is_retained(simulation, **analysis))
+                    .map(
+                        |(analysis, scale)| rspice_results::result_presentation::StripXScale {
+                            analysis: *analysis,
+                            logarithmic: *scale == crate::ui::plot::XScale::Log10,
+                        },
+                    )
+                    .collect();
+                scales.sort_by_key(|scale| scale.analysis.order_key());
+                scales
+            },
         }
     }
 

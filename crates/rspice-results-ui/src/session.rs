@@ -553,6 +553,11 @@ pub struct ResultViewerState {
     /// The unit typed in the open expression editor; empty to take the
     /// inferred one.
     pub expr_editor_unit: Box<String>,
+    /// The X scale the reader chose for a strip, in place of its analysis'
+    /// own (logarithmic for a frequency sweep, linear otherwise). Boxed to
+    /// keep the results state inside its stack budget.
+    pub x_scales:
+        Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
     /// The quick view's expressions while a document pane shows its own,
     /// boxed: the results state is built by value before it is boxed, and
     /// a stash held only while a document is open need not grow it.
@@ -1309,6 +1314,7 @@ impl ResultViewerState {
         self.analysis_exprs.retain(|analysis, _| live(*analysis));
         self.expression_units
             .retain(|(analysis, _), _| live(*analysis));
+        self.x_scales.retain(|analysis, _| live(*analysis));
         self.expr_projection_keys
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));

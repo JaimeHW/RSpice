@@ -599,6 +599,14 @@ pub struct ResultExpressionGroup {
     pub units: Vec<DeclaredExpressionUnit>,
 }
 
+/// The X scale the reader chose for one strip, in place of its analysis'
+/// own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StripXScale {
+    pub analysis: AnalysisPresentationKey,
+    pub logarithmic: bool,
+}
+
 /// The unit the reader declared for one expression, which replaces the unit
 /// unit algebra infers from its text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -649,6 +657,13 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub signal_sets: Vec<SignalSet>,
+    /// The X scales the reader chose, by strip.
+    #[serde(
+        default,
+        rename = "result_x_scales",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub x_scales: Vec<StripXScale>,
 }
 
 fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
@@ -668,6 +683,8 @@ pub struct ResultFingerprintFields<'a> {
     /// Digested as an extension only when there are any, so a project
     /// without sets keeps the digest it always had.
     pub signal_sets: &'a [SignalSet],
+    /// Digested as an extension only when there are any, as signal sets are.
+    pub x_scales: &'a [StripXScale],
 }
 
 /// Pane choices are a set, but project files and content fingerprints encode
@@ -778,6 +795,7 @@ impl ResultPresentation {
             log_y_panes,
             expression_groups,
             signal_sets,
+            x_scales,
         } = self;
         Ok(ResultFingerprintFields {
             markers,
@@ -785,6 +803,7 @@ impl ResultPresentation {
             expression_groups,
             marker_history: self.marker_allocation_history()?,
             signal_sets,
+            x_scales,
         })
     }
 }

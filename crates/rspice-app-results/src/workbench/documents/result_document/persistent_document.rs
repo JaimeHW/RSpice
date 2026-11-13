@@ -15,9 +15,9 @@ use crate::product::{
 };
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
-    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, ExpressionTrace, Marker,
-    Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace,
-    TypedValue, VisualizationDocument,
+    Annotation, Axis, AxisOrientation, AxisRange, AxisScale, Cursor, DocumentEdit, ExpressionTrace,
+    Marker, Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement,
+    Trace, TypedValue, VisualizationDocument,
 };
 use crate::simulation::SimulationController;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
@@ -1054,6 +1054,21 @@ pub fn project_pane_presentation(
             .and_then(|axis| axis.range)
             .map(|range| (range.minimum, range.maximum))
     };
+    // The pane's X scale is the one its strip draws.
+    if let Some(axis) = pane
+        .axes
+        .iter()
+        .find(|axis| axis.orientation == AxisOrientation::Horizontal)
+    {
+        let scale = if axis.scale == AxisScale::Logarithmic {
+            crate::ui::plot::XScale::Log10
+        } else {
+            crate::ui::plot::XScale::Linear
+        };
+        if state.results.session.x_scales.get(&analysis_key) != Some(&scale) {
+            state.results.session.x_scales.insert(analysis_key, scale);
+        }
+    }
     state.results.session.project_persistent_plot_view(
         viewer,
         axis_range(AxisOrientation::Horizontal),
@@ -1242,6 +1257,7 @@ pub fn capture_pane_presentation(
         ));
     }
     edits.extend(expression_edits(state, document, pane));
+    edits.extend(x_scale_edit(state, document, pane));
     if edits.is_empty() {
         return;
     }
@@ -1257,6 +1273,32 @@ pub fn capture_pane_presentation(
             "Could not keep this pane's view and cursors: {error}"
         ));
     }
+}
+
+/// The edit that makes the pane keep the X scale the reader chose for its
+/// strip, when it differs from the one it keeps.
+fn x_scale_edit(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane: &PaneProjection,
+) -> Option<DocumentEdit> {
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
+    let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let chosen = state.results.session.x_scales.get(&analysis_key)?;
+    let axis = document
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane.id && axis.orientation == AxisOrientation::Horizontal)?;
+    let scale = if *chosen == crate::ui::plot::XScale::Log10 {
+        AxisScale::Logarithmic
+    } else {
+        AxisScale::Linear
+    };
+    (axis.scale != scale).then_some(DocumentEdit::SetAxisScale {
+        axis_id: axis.id,
+        scale,
+    })
 }
 
 /// The edits that make the pane keep the expressions its strip draws: each

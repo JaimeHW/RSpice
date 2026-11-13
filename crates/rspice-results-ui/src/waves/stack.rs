@@ -20,7 +20,7 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
 use rspice_ui_kit::{
-    plot::{self, CursorPair},
+    plot::{self, CursorPair, XScale},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -616,6 +616,38 @@ struct StripFrame<'a> {
     gutter: Gutter,
 }
 
+/// Why a strip's X axis cannot be logarithmic, when it cannot: some X it
+/// shows is negative, or none is positive. A domain that starts at zero, as
+/// time does, is shown from its first positive sample.
+pub fn log_x_refusal(model: &StripModel) -> Option<String> {
+    let (mut minimum, mut maximum) = (f64::INFINITY, f64::NEG_INFINITY);
+    for x in model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .flat_map(|trace| trace.x.iter().copied())
+        .filter(|x| x.is_finite())
+    {
+        minimum = minimum.min(x);
+        maximum = maximum.max(x);
+    }
+    let name = if model.x_label.is_empty() {
+        "the X axis"
+    } else {
+        model.x_label.as_str()
+    };
+    if !maximum.is_finite() {
+        return Some("the strip shows no X values".to_owned());
+    }
+    if minimum < 0.0 {
+        return Some(format!(
+            "{name} reaches {}, and a logarithmic axis shows positive values only",
+            rspice_ui_kit::plot::fmt_si_significant(minimum, &model.x_unit, 4)
+        ));
+    }
+    (maximum <= 0.0).then(|| format!("{name} has no positive value"))
+}
+
 /// Resolve source ownership, then apply the navigator's actions to the app.
 fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame: StripFrame<'_>) {
     let StripFrame {
@@ -641,9 +673,21 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         left_margin: gutter.width(),
         quantity_policy: options.quantity,
         cursors: (cursor_owner || linked_cursor).then_some(host.session().cursors),
+        log_refusal: log_x_refusal(model),
     };
     let output = navigation::show_shared_x_axis(ui, &mut host.session_mut().derived, model, input);
     host.note_sample_reads(output.overview_samples_read, output.extrema_samples_read);
+    if output.scale_toggled {
+        let scale = match model.x_scale {
+            XScale::Log10 => XScale::Linear,
+            XScale::Linear => XScale::Log10,
+        };
+        let session = host.session_mut();
+        session.x_scales.insert(model.analysis_key, scale);
+        // A range read on one scale is no viewport on the other.
+        set_shared_x_view(session, model.analysis_key, pane_count, None);
+        return;
+    }
     if let Some(viewport) = output.viewport {
         let range = match viewport {
             navigation::SharedXViewChange::Fit => None,

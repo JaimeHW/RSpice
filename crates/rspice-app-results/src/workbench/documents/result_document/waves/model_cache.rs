@@ -69,6 +69,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             },
             waveform_visibility: &session.waveform_visibility,
             expressions,
+            x_scales: &session.x_scales,
         },
         &simulation.retained.executed_decks,
         t,

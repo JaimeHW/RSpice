@@ -24,6 +24,11 @@ pub struct ModelCacheInput<'a> {
     /// A digest of what routes the reader's expressions to panes: their
     /// text, visibility and declared units, and which failed to evaluate.
     pub expressions: u64,
+    /// The X scales the reader chose, by strip.
+    pub x_scales: &'a HashMap<
+        rspice_results::result_presentation::AnalysisPresentationKey,
+        rspice_ui_kit::plot::XScale,
+    >,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -79,6 +84,18 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
     input.viewer.hash(&mut h);
     input.projection.phase_continuous.hash(&mut h);
     input.expressions.hash(&mut h);
+    let mut x_scales = input
+        .x_scales
+        .iter()
+        .map(|(analysis, scale)| {
+            (
+                analysis.order_key(),
+                *scale == rspice_ui_kit::plot::XScale::Log10,
+            )
+        })
+        .collect::<Vec<_>>();
+    x_scales.sort_unstable();
+    x_scales.hash(&mut h);
     input.projection.complex_display.hash(&mut h);
     input.projection.ac.hash(&mut h);
     input
@@ -128,6 +145,16 @@ impl ModelsCache {
             return Arc::clone(&cached.models);
         }
         let mut built = build(input.projection, input.waveform_visibility);
+        // The reader's X scale replaces the analysis' own, unless a
+        // logarithmic axis cannot show the strip's domain.
+        for model in &mut built {
+            if let Some(scale) = input.x_scales.get(&model.analysis_key)
+                && (*scale == rspice_ui_kit::plot::XScale::Linear
+                    || super::stack::log_x_refusal(model).is_none())
+            {
+                model.x_scale = *scale;
+            }
+        }
         // Only now is it settled which traces the strip draws, so only now can
         // its shared X extent be resolved.
         extent::resolve_x_ranges(&mut built);

@@ -72,6 +72,8 @@ pub struct SharedXAxis {
     pub left_margin: f32,
     pub quantity_policy: QuantityPresentationPolicy,
     pub cursors: Option<CursorPair>,
+    /// Why the axis cannot be logarithmic, when it cannot.
+    pub log_refusal: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,6 +96,8 @@ pub struct SharedXAxisResponse {
     /// Retained sample visits charged to this draw, including cache construction.
     pub overview_samples_read: usize,
     pub extrema_samples_read: usize,
+    /// The reader switched the axis between linear and logarithmic.
+    pub scale_toggled: bool,
 }
 
 /// Draw the shared axis and overview, resolving its pointer and keyboard gestures.
@@ -321,9 +325,63 @@ pub fn show_shared_x_axis(
         egui::pos2(plot_left - 8.0, track.center().y),
         egui::Align2::RIGHT_CENTER,
         "FULL",
-        gutter_font,
+        gutter_font.clone(),
         c.text_faint,
     );
+    // The scale toggle sits in the gutter between the two rows' names. A
+    // domain a logarithmic axis cannot show refuses it with the reason.
+    let (scale_text, other) = match model.x_scale {
+        XScale::Log10 => ("LOG", "linear"),
+        XScale::Linear => ("LIN", "logarithmic"),
+    };
+    let refused = model.x_scale == XScale::Linear && input.log_refusal.is_some();
+    let scale_galley = painter.layout_no_wrap(scale_text.to_owned(), gutter_font, c.text_dim);
+    let scale_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            plot_left - 8.0 - scale_galley.size().x,
+            flag_top + (SHARED_X_FLAG_HEIGHT - scale_galley.size().y) * 0.5,
+        ),
+        scale_galley.size(),
+    )
+    .expand(2.0);
+    if scale_rect.left() > rect.left() {
+        let scale_response = ui
+            .interact(
+                scale_rect,
+                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
+                egui::Sense::click(),
+            )
+            .on_hover_text(match &input.log_refusal {
+                Some(reason) if refused => {
+                    format!("A logarithmic X axis is not available: {reason}")
+                }
+                _ => format!("X axis {}; click for {other}", scale_text.to_lowercase()),
+            });
+        scale_response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                !refused,
+                format!("X scale {scale_text}"),
+            )
+        });
+        let colour = if refused {
+            c.text_faint
+        } else if scale_response.hovered() || model.x_scale == XScale::Log10 {
+            c.accent
+        } else {
+            c.text_dim
+        };
+        if scale_response.hovered() && !refused {
+            painter.rect_stroke(
+                scale_rect,
+                2.0,
+                egui::Stroke::new(1.0, c.border),
+                egui::StrokeKind::Inside,
+            );
+        }
+        painter.galley(scale_rect.min + egui::vec2(2.0, 2.0), scale_galley, colour);
+        output.scale_toggled = scale_response.clicked() && !refused;
+    }
 
     let flag_centre = |value: f64| {
         // Flags track the viewport like the pane cursor lines above them,

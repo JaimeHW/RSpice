@@ -1062,11 +1062,23 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
         log_y_panes,
         expression_groups,
         signal_sets,
+        x_scales,
     } = presentation;
     restore_markers(state, markers, marker_id_high_water);
     restore_log_y_panes(state, log_y_panes);
     restore_expression_groups(state, expression_groups);
     state.results.signal_sets = signal_sets::sanitize_signal_sets(signal_sets);
+    *state.results.session.x_scales = x_scales
+        .into_iter()
+        .map(|scale| {
+            let x_scale = if scale.logarithmic {
+                crate::ui::plot::XScale::Log10
+            } else {
+                crate::ui::plot::XScale::Linear
+            };
+            (scale.analysis, x_scale)
+        })
+        .collect();
 }
 
 /// Restore the markers a project retained, dropping any whose analysis is not

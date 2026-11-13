@@ -224,6 +224,12 @@ pub enum DocumentEdit {
         axis_id: AxisId,
         range: Option<AxisRange>,
     },
+    /// Draw an axis on another scale: a time or a sweep on a logarithmic
+    /// axis, a frequency on a linear one.
+    SetAxisScale {
+        axis_id: AxisId,
+        scale: AxisScale,
+    },
     SetTraceVisibility {
         trace_id: TraceId,
         visible: bool,

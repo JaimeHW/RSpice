@@ -43,6 +43,7 @@ impl ResultFingerprintCache {
             fields.expression_groups,
             fields.marker_history,
             fields.signal_sets,
+            fields.x_scales,
         ))?;
         let mut cache = self.0.borrow_mut();
         if let Some(held) = cache.as_ref()
@@ -89,6 +90,7 @@ fn full_digest(
         expression_groups,
         marker_history,
         signal_sets,
+        x_scales,
     } = fields;
     let results = results.without_run_logs();
     let result_fields = (
@@ -105,10 +107,16 @@ fn full_digest(
         None => super::digest(&result_fields),
     }?;
     // Signal sets extend it the same way, and only when a project has any.
-    if signal_sets.is_empty() {
+    let digest = if signal_sets.is_empty() {
+        digest
+    } else {
+        super::digest(&("result-signal-sets-v1", digest, signal_sets))?
+    };
+    // And the reader's X scales, only when a project has any.
+    if x_scales.is_empty() {
         Ok(digest)
     } else {
-        super::digest(&("result-signal-sets-v1", digest, signal_sets))
+        super::digest(&("result-x-scales-v1", digest, x_scales))
     }
 }
 
