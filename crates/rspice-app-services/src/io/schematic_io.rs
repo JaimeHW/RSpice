@@ -993,7 +993,7 @@ mod tests {
         let json =
             serialize_schematic_file(&SchematicFile::new(original)).expect("schematic serializes");
 
-        let mut loaded = load_schematic_text(&json, Some(Path::new("corrupt-import.rsch")))
+        let loaded = load_schematic_text(&json, Some(Path::new("corrupt-import.rsch")))
             .expect("repairable schematic loads");
 
         assert_eq!(loaded.document().wires.len(), 1);
@@ -1007,10 +1007,13 @@ mod tests {
                 .any(|component| component.id == live_component_id),
             "durable component content still loads"
         );
-        assert_eq!(loaded.wire_vertex_at(Point::new(5, 5)), None);
-
-        loaded.ensure_canvas_cache();
-        assert_eq!(loaded.wire_vertex_at(Point::new(5, 5)), None);
+        assert!(
+            loaded
+                .document()
+                .wires
+                .iter()
+                .all(|wire| !wire.points.contains(&Point::new(5, 5)))
+        );
     }
 
     #[test]

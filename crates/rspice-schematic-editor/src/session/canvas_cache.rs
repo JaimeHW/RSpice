@@ -41,10 +41,6 @@ pub struct CanvasCache {
     /// into an unbounded number of spatial bins.
     oversized_wires: Vec<usize>,
 
-    /// First (wire id, vertex index) at each grid point, in wire order —
-    /// matching the linear-scan semantics of `wire_vertex_at`.
-    pub wire_vertices: FastMap<Point, (u64, usize)>,
-
     /// Junction marker positions.
     pub junctions: FastSet<Point>,
 
@@ -127,7 +123,6 @@ impl CanvasCache {
     pub(super) fn rebuild(&mut self, wires: &[Wire], junctions: &[Junction], version: u64) {
         self.wire_bounds.clear();
         self.wire_bounds.reserve(wires.len());
-        self.wire_vertices.clear();
         self.junctions.clear();
         self.wire_cells.clear();
         self.oversized_wires.clear();
@@ -143,12 +138,11 @@ impl CanvasCache {
         for wire in wires {
             let mut min = Point::new(i32::MAX, i32::MAX);
             let mut max = Point::new(i32::MIN, i32::MIN);
-            for (index, point) in wire.points.iter().enumerate() {
+            for point in &wire.points {
                 min.x = min.x.min(point.x);
                 min.y = min.y.min(point.y);
                 max.x = max.x.max(point.x);
                 max.y = max.y.max(point.y);
-                self.wire_vertices.entry(*point).or_insert((wire.id, index));
             }
             if let Some(bridge) = wire.drawn_bridge() {
                 let ([low_x, low_y], [high_x, high_y]) = bridge.stroke_bounds();

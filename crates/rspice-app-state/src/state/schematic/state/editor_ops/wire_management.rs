@@ -20,25 +20,6 @@ impl SchematicState {
         id
     }
 
-    /// Find wire vertex at a grid position for dragging
-    ///
-    /// Returns (wire_id, vertex_index) if there's a wire vertex at this position.
-    /// This is used for wire corner dragging - a professional EDA feature.
-    /// O(1) via the canvas cache when it's current; linear scan otherwise.
-    pub fn wire_vertex_at(&self, pos: Point) -> Option<(u64, usize)> {
-        if let Some(cache) = self.canvas_cache() {
-            return cache.wire_vertices.get(&pos).copied();
-        }
-        for wire in &self.design.document().wires {
-            for (idx, point) in wire.points.iter().enumerate() {
-                if *point == pos {
-                    return Some((wire.id, idx));
-                }
-            }
-        }
-        None
-    }
-
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
         if self.session.read_only {
