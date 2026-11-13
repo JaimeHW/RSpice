@@ -33,11 +33,13 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState};
 
-use super::super::rail::{self, RailDisclosure, RailFold};
-use super::super::{SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT};
 use super::{
     DesignNavigatorSection, NavigatorObject, WorkbenchIcon, empty_navigator_row, matches_query,
     navigator_object_context_menu, navigator_section_header, normalized,
+};
+use crate::workbench::docks::navigator::rail::{self, RailDisclosure, RailFold};
+use crate::workbench::docks::navigator::{
+    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
 };
 
 /// Rows the tree paints before it stops and says that it stopped.

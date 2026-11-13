@@ -12,6 +12,7 @@ use crate::state::{
 };
 use crate::ui::widgets::TreeRow;
 use crate::workbench::RSpiceApp;
+use crate::workbench::docks::navigator::empty_navigator_row;
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
@@ -22,14 +23,14 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut document = match app.state.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(reason) => {
-            super::empty_navigator_row(ui, &format!("Symbol file is corrupt: {reason}"));
+            empty_navigator_row(ui, &format!("Symbol file is corrupt: {reason}"));
             return;
         }
     };
     let metadata = match app.state.load_active_symbol_editor_metadata(&document) {
         Ok(metadata) => metadata,
         Err(reason) => {
-            super::empty_navigator_row(ui, &format!("Symbol layout data is corrupt: {reason}"));
+            empty_navigator_row(ui, &format!("Symbol layout data is corrupt: {reason}"));
             return;
         }
     };
@@ -139,7 +140,7 @@ fn pins_section(
     ui.add_space(4.0);
     if document.pins.is_empty() && ports.is_empty() {
         // The two buttons that fill the list sit directly above this line.
-        super::empty_navigator_row(ui, "No pins.");
+        empty_navigator_row(ui, "No pins.");
         return;
     }
     let mut select: Option<String> = None;

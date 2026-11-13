@@ -66,7 +66,7 @@ mod tests {
         "export.rs",
     ];
     const HOST_FILES: [&str; 3] = [
-        "workbench/docks/navigator/symbol.rs",
+        "workbench/design/navigator/symbol.rs",
         "workbench/app/dialogs/property_dialog.rs",
         "schematic/symbol_editor.rs",
     ];

@@ -47,14 +47,13 @@ use rspice_app_models::veriloga_library::{
     BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, builtin_veriloga_model,
 };
 
-use super::super::super::super::design_system::{
-    WorkbenchIcon, section_header as shelf_section_header,
-};
-use super::super::rail::{self, RailDisclosure, RailFold};
-use super::super::{
+use crate::workbench::design_system::{WorkbenchIcon, section_header as shelf_section_header};
+use crate::workbench::docks::navigator::rail::{self, RailDisclosure, RailFold};
+use crate::workbench::docks::navigator::{
     PanelSearchKeys, SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
-    empty_navigator_row, panel_search_keys, schematic_nav_row_indented_drag_response,
-    schematic_nav_row_indented_response, search_focus_requested,
+    empty_navigator_row, panel_search_keys, row_context_menu,
+    schematic_nav_row_indented_drag_response, schematic_nav_row_indented_response,
+    search_focus_requested,
 };
 use search::{MatchRank, ShelfQuery, ShelfTerms};
 
@@ -1299,7 +1298,7 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
 /// editor. Shift+F10 opens it from the keyboard, as the navigator's object
 /// menu does.
 fn shelf_pin_context_menu(response: &Response, state: &mut AppState, entry: &ShelfEntry) {
-    let (popup, _) = super::super::row_context_menu(response);
+    let (popup, _) = row_context_menu(response);
     let pinned = is_pinned(state, entry);
     popup.show(|ui| {
         if ui

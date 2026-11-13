@@ -251,7 +251,8 @@ impl Host for RSpiceApp {
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
-                use crate::workbench::docks::navigator::{design, stimulus, symbol};
+                use crate::workbench::design::navigator::{self as design, symbol};
+                use crate::workbench::docks::navigator::stimulus;
 
                 match workspace {
                     // What the reader asked of the code navigator is

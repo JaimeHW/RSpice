@@ -29,20 +29,20 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_design::connectivity::summary::DesignNet;
 
-use super::super::super::design_system::{
-    PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text,
-};
-use super::super::super::state::Workspace;
-use super::rail::{self, RailDisclosure, RailFold};
-use super::{
-    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
-    empty_navigator_row, panel_search, schematic_nav_row_indented_response, search_focus_requested,
-};
 use crate::workbench::design::commands::DesignCommand;
+use crate::workbench::design_system::{PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text};
+use crate::workbench::docks::navigator::rail::{self, RailDisclosure, RailFold};
+use crate::workbench::docks::navigator::{
+    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
+    empty_navigator_row, panel_search, row_context_menu, schematic_nav_row_indented_response,
+    search_focus_requested,
+};
+use crate::workbench::state::{ConsolePage, Workspace};
 
 mod find_matches;
 mod hierarchy_tree;
 mod shelf;
+pub(in crate::workbench) mod symbol;
 
 #[cfg(test)]
 mod tests;
@@ -1878,7 +1878,7 @@ fn navigator_object_context_menu(
     app: &mut RSpiceApp,
     object: NavigatorObject,
 ) {
-    let (popup, keyboard_open) = super::row_context_menu(response);
+    let (popup, keyboard_open) = row_context_menu(response);
     if response.secondary_clicked() || keyboard_open {
         select_navigator_object(&mut app.state, &object);
     }
@@ -1960,7 +1960,7 @@ fn find_navigator_object_references(state: &mut AppState, object: &NavigatorObje
 }
 
 fn open_measurements(state: &mut AppState) {
-    state.workbench.console_page = super::super::super::state::ConsolePage::Measurements;
+    state.workbench.console_page = ConsolePage::Measurements;
     state.workbench.console_visible = true;
     state.workbench.console_maximized = false;
 }

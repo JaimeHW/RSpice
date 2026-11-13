@@ -128,14 +128,12 @@ pub(crate) mod docks {
     }
     pub(crate) mod navigator {
         pub use rspice_app_workbench::workbench::docks::navigator::*;
-        pub(in crate::workbench) mod design;
         pub(in crate::workbench) mod netlist;
         pub(in crate::workbench) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
         pub(in crate::workbench) mod source_bundle;
         pub(in crate::workbench) mod stimulus;
-        pub(in crate::workbench) mod symbol;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
         pub(in crate::workbench) mod veriloga;
     }
