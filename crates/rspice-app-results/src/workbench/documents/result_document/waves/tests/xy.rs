@@ -381,3 +381,166 @@ fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
     capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
     assert!(kept(&state).is_empty());
 }
+
+/// A host on a run the real controller solved, its first analysis active.
+fn solved_host(deck: &str) -> ResultsTestHost {
+    let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(deck);
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    state
+}
+
+fn trace<'a>(model: &'a StripModel, name: &str) -> &'a rspice_results_ui::waves::StripTrace {
+    model
+        .traces
+        .iter()
+        .find(|trace| trace.source_waveform_name == name)
+        .unwrap_or_else(|| panic!("the strip plots {name}"))
+}
+
+/// An NMOS output family, Id against Vds for three gate voltages, from a
+/// nested DC sweep: each member's curve is that member's drain current
+/// against its own drain voltage, sample for sample, and in saturation it
+/// is the level-1 square law.
+#[test]
+fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() {
+    const KP: f64 = 100.0e-6;
+    const W_OVER_L: f64 = 10.0;
+    const VTO: f64 = 0.7;
+    const LAMBDA: f64 = 0.02;
+    let mut state = solved_host(
+        "nmos output family\n\
+         VD d 0 DC 0\n\
+         VG g 0 DC 1\n\
+         M1 d g 0 0 nch W=10u L=1u\n\
+         .model nch nmos (level=1 vto=0.7 kp=100u lambda=0.02)\n\
+         .dc VD 0 3 0.05 VG 1.5 2.5 0.5\n\
+         .end\n",
+    );
+    state.results.results.session.viewer =
+        rspice_results::result_presentation::ResultViewer::DcSweep;
+    let models = super::lanes::strip(&mut state);
+    let model = &models[0];
+    let members = [("1.5", 1), ("2", 2), ("2.5", 3)];
+    for (vgs, point) in members {
+        let suffix = format!(" [VG={vgs}; point {point}]");
+        let id = trace(model, &format!("I(VD){suffix}"));
+        let vd = trace(model, &format!("V(D){suffix}"));
+        let curve = rspice_results_ui::waves::xy::resample(
+            (vd.x.as_slice(), vd.y.as_slice()),
+            (id.x.as_slice(), id.y.as_slice()),
+            crate::ui::plot::SampleInterpolation::Linear,
+        )
+        .expect("one sweep pairs");
+        assert!(!curve.interpolated);
+        assert_eq!(curve.x.len(), 61, "Vds from 0 to 3 V in 50 mV steps");
+        for (k, (&x, &y)) in curve.x.iter().zip(&curve.y).enumerate() {
+            assert_eq!(x.to_bits(), vd.y[k].to_bits());
+            assert_eq!(y.to_bits(), id.y[k].to_bits());
+            assert!((x - 0.05 * k as f64).abs() < 1.0e-9, "Vds[{k}] = {x}");
+        }
+        // Saturation at Vds = 3 V: Id = kp/2 · W/L · (Vgs − Vto)² · (1 + λ·Vds).
+        let gate: f64 = vgs.parse().unwrap();
+        let expected = 0.5 * KP * W_OVER_L * (gate - VTO).powi(2) * (1.0 + LAMBDA * 3.0);
+        let solved = curve.y[60].abs();
+        assert!(
+            (solved - expected).abs() <= 1.0e-6 * expected,
+            "Vgs = {gate}: Id(3 V) = {solved}, the square law gives {expected}"
+        );
+    }
+
+    // The amperes pane drawn against the first member's drain voltage
+    // draws one curve per member, each with its own arrows.
+    let pane = WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: "A".to_owned(),
+    };
+    let colors: Vec<egui::Color32> = members
+        .iter()
+        .map(|(vgs, point)| trace(model, &format!("I(VD) [VG={vgs}; point {point}]")).color)
+        .collect();
+    drop(models);
+    state.results.results.session.unit_abscissas.insert(
+        pane,
+        UnitAbscissaChoice::new(Abscissa::Signal {
+            name: "V(D) [VG=1.5; point 1]".to_owned(),
+        }),
+    );
+    let ctx = theme_context();
+    frame(&ctx, &mut state, Vec::new());
+    let shapes = frame(&ctx, &mut state, Vec::new());
+    for color in colors {
+        assert!(
+            !arrowheads(&shapes, color).is_empty(),
+            "every member is drawn with its arrows"
+        );
+    }
+}
+
+/// Vout against Vin from a slow transient ramp through a resistor into a
+/// diode is the circuit's DC transfer curve: at every DC sweep point inside
+/// the ramp the two agree within the transient's tolerance, reltol · |V| +
+/// vntol.
+#[test]
+fn a_transient_ramp_drawn_against_its_input_is_the_dc_transfer_curve() {
+    let circuit = "VIN in 0 PWL(0 0 1m 2)\n\
+                   R1 in out 1k\n\
+                   D1 out 0 dmod\n\
+                   .model dmod d (is=1e-14 n=1)\n";
+    let mut transient = solved_host(&format!("diode transfer\n{circuit}.tran 1u 1m\n.end\n"));
+    let dc = solved_host(&format!(
+        "diode transfer\n{}.dc VIN 0 2 0.01\n.end\n",
+        circuit.replace("PWL(0 0 1m 2)", "DC 0")
+    ));
+    let dc_run = &dc.model.simulation.retained.runs[0].analyses[0];
+    let dc_out = dc_run
+        .waveforms
+        .iter()
+        .find(|waveform| waveform.name == "V(OUT)")
+        .expect("the sweep keeps V(OUT)");
+    let models = super::lanes::strip(&mut transient);
+    // The transient names its node columns bare; the DC sweep wraps them.
+    let vin = trace(&models[0], "IN");
+    let vout = trace(&models[0], "OUT");
+    let curve = rspice_results_ui::waves::xy::resample(
+        (vin.x.as_slice(), vin.y.as_slice()),
+        (vout.x.as_slice(), vout.y.as_slice()),
+        crate::ui::plot::SampleInterpolation::Linear,
+    )
+    .expect("one transient grid pairs");
+    let mut compared = 0;
+    for (&v_in, &v_out) in dc_out.x.iter().zip(dc_out.y.iter()) {
+        if !(0.05..=1.95).contains(&v_in) {
+            continue;
+        }
+        let drawn = rspice_results::sampling::sample_at_with(
+            &curve.x,
+            &curve.y,
+            v_in,
+            crate::ui::plot::SampleInterpolation::Linear,
+        );
+        let tolerance = 1.0e-3 * v_out.abs() + 1.0e-6;
+        assert!(
+            (drawn - v_out).abs() <= tolerance,
+            "at Vin = {v_in}: the transient draws {drawn}, the DC sweep {v_out}"
+        );
+        compared += 1;
+    }
+    assert!(compared >= 180, "{compared} sweep points compared");
+
+    // Drawn, the pane carries the curve's arrows.
+    let color = vout.color;
+    drop(models);
+    let pane = volts_pane(&mut transient);
+    transient.results.results.session.unit_abscissas.insert(
+        pane,
+        UnitAbscissaChoice::new(Abscissa::Signal {
+            name: "IN".to_owned(),
+        }),
+    );
+    let ctx = theme_context();
+    frame(&ctx, &mut transient, Vec::new());
+    assert!(!arrowheads(&frame(&ctx, &mut transient, Vec::new()), color).is_empty());
+}

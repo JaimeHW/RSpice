@@ -149,3 +149,23 @@ fn arrows_are_sparse_and_point_the_way_the_curve_travels() {
         "a gap is not travelled"
     );
 }
+
+/// A nested sweep names each member's columns with its point; a member's
+/// curve reads the abscissa's column of that same point, and a column of
+/// no nested sweep names none.
+#[test]
+fn a_nested_sweeps_member_reads_the_abscissa_of_its_own_point() {
+    assert_eq!(
+        member_abscissa_name("I(VD) [VG=2; point 2]", "V(D) [VG=1.5; point 1]").as_deref(),
+        Some("V(D) [VG=2; point 2]")
+    );
+    assert_eq!(
+        member_abscissa_name("I(VD) [VG=2; point 2]", "V(IN)").as_deref(),
+        Some("V(IN) [VG=2; point 2]")
+    );
+    assert_eq!(
+        member_abscissa_name("V(OUT)", "V(D) [VG=1.5; point 1]"),
+        None
+    );
+    assert_eq!(member_abscissa_name("D(data[3])", "V(IN)"), None);
+}

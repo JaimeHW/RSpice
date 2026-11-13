@@ -260,6 +260,28 @@ fn refusal_text(abscissa: &Abscissa, curve: &str, refusal: XyRefusal) -> String 
     }
 }
 
+/// The point a nested sweep's column names after its quantity, as in
+/// `I(VD) [VG=2; point 2]`, with its leading space.
+fn member_suffix(name: &str) -> Option<&str> {
+    name.ends_with(']')
+        .then(|| name.rfind(" ["))
+        .flatten()
+        .map(|start| &name[start..])
+}
+
+/// A column's quantity without the point a nested sweep names after it.
+fn member_base(name: &str) -> &str {
+    member_suffix(name).map_or(name, |suffix| &name[..name.len() - suffix.len()])
+}
+
+/// The column of `abscissa` a nested sweep's member `curve` reads against:
+/// the one its own point names, so `I(VD) [VG=2; point 2]` drawn against
+/// `V(D) [VG=1.5; point 1]` reads `V(D) [VG=2; point 2]`.
+fn member_abscissa_name(curve: &str, abscissa: &str) -> Option<String> {
+    let suffix = member_suffix(curve)?;
+    Some(format!("{}{suffix}", member_base(abscissa)))
+}
+
 /// The abscissa of a signal: that signal's series in each member of the
 /// strip that plots it.
 pub(crate) fn signal_abscissa(model: &StripModel, name: &str) -> Option<ResolvedAbscissa> {
@@ -428,10 +450,10 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let derived = &mut host.session_mut().derived;
     let mut pair = |name: &str,
                     key: u64,
-                    member: MemberKey,
+                    series: Option<&AbscissaSeries>,
                     (grid, values): (&SharedWaveformValues, &SharedWaveformValues)|
      -> Option<(Arc<XyCurve>, u64)> {
-        let Some(series) = operand(member) else {
+        let Some(series) = series else {
             refusals.push(format!("{name} has no {} to pair with", abscissa.text()));
             return None;
         };
@@ -460,10 +482,21 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             // The abscissa read against itself is the diagonal, not a curve.
             continue;
         }
+        // A nested sweep names each member's columns with its point,
+        // `I(VD) [VG=2; point 2]`: that curve reads against the abscissa's
+        // column of the same point.
+        let sibling = match abscissa {
+            Abscissa::Signal { name } => member_abscissa_name(&trace.source_waveform_name, name)
+                .and_then(|name| signal_abscissa(model, &name)),
+            Abscissa::Expression { .. } => None,
+        };
         let Some((data, cache_key)) = pair(
             &trace.name,
             trace_key(model, trace),
-            MemberKey::of(trace),
+            sibling
+                .as_ref()
+                .and_then(|sibling| sibling.series.first())
+                .or_else(|| operand(MemberKey::of(trace))),
             (&trace.x, &trace.y),
         ) else {
             continue;
@@ -489,8 +522,12 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             overlay: false,
             presentation_key: expr.presentation_key,
         };
-        let Some((data, cache_key)) = pair(&expr.label, expr.cache_key, member, (&expr.x, &expr.y))
-        else {
+        let Some((data, cache_key)) = pair(
+            &expr.label,
+            expr.cache_key,
+            operand(member),
+            (&expr.x, &expr.y),
+        ) else {
             continue;
         };
         let range = window(&data, window_range);
