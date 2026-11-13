@@ -508,7 +508,12 @@ fn an_automatic_field_is_lettered_like_any_other() {
     let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
         .expect("the sheet carries a title block");
     for field in &fields {
-        let caption = layout.cell(field.id).unwrap().letter_caption();
+        let caption = layout
+            .cell(field.id)
+            .unwrap()
+            .caption
+            .map(|caption| caption.letter())
+            .unwrap_or_default();
         assert!(
             text.contains(&caption),
             "{:?} must be captioned with its form's wording: {text:?}",

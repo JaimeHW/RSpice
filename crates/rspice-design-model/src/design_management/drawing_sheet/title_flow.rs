@@ -45,7 +45,7 @@ impl DrawingSheetTitleFieldId {
     /// Characters of the value this field typically holds in a flowed grid.
     /// The lengths are the ones these blocks were sized with before ISO
     /// 7200's form, and stay so that they draw as they always did; the form
-    /// is sized to the standard's own (see [`iso_7200_typical_chars`]).
+    /// is sized to the standard's own (see `iso_7200_typical_chars`).
     const fn typical_value_chars(self) -> u64 {
         match self {
             // Fixed forms, held whole.

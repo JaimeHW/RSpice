@@ -140,21 +140,6 @@ impl BusDeclaration {
         (low..=high).contains(&index)
     }
 
-    /// Position of `index` in declaration order.
-    ///
-    /// Declaration order is what a port list, an instance node list and a
-    /// projected bit set all agree on, so a bit's position — not its numeric
-    /// index — is what maps one vector onto another of the same width.
-    pub fn bit_position(&self, index: u32) -> Option<usize> {
-        self.contains_index(index).then(|| {
-            if self.msb <= self.lsb {
-                (index - self.msb) as usize
-            } else {
-                (self.msb - index) as usize
-            }
-        })
-    }
-
     /// Validate one scalar or slice against this bus's declared type.
     pub fn validate_slice(&self, slice: &BusSlice) -> Result<(), BusParseError> {
         self.validate()?;
@@ -598,17 +583,5 @@ mod tests {
             assert!(declared_vector(scalar).is_none(), "{scalar}");
             assert_eq!(declared_width(scalar), 1, "{scalar}");
         }
-    }
-
-    #[test]
-    fn bit_position_follows_declaration_order_at_either_end() {
-        let descending = BusDeclaration::parse("DATA[7:0]").unwrap();
-        assert_eq!(descending.bit_position(7), Some(0));
-        assert_eq!(descending.bit_position(0), Some(7));
-        assert_eq!(descending.bit_position(8), None);
-
-        let ascending = BusDeclaration::parse("DATA[0:7]").unwrap();
-        assert_eq!(ascending.bit_position(7), Some(7));
-        assert_eq!(ascending.bit_position(0), Some(0));
     }
 }

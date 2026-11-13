@@ -196,6 +196,7 @@ impl DesignManagementCatalog {
     }
 
     /// Publish the project default used by sheets that inherit project setup.
+    #[cfg(test)]
     pub fn update_drawing_sheet_default(
         &mut self,
         expected_revision: u64,

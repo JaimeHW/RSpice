@@ -217,6 +217,7 @@ impl DrawingSheetTitleValue {
 
     /// Whether the cell cuts `value` short, measured as [`Self::letter`]
     /// measures it.
+    #[cfg(test)]
     #[must_use]
     pub fn elides(self, value: &str) -> bool {
         self.elides_measured(value, &DrawingSheetTitleCells)
@@ -276,6 +277,7 @@ impl DrawingSheetTitleCell {
     }
 
     /// The caption as the cell letters it, or nothing for a cell without one.
+    #[cfg(test)]
     #[must_use]
     pub fn letter_caption(&self) -> String {
         self.caption

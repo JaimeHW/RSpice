@@ -20,7 +20,7 @@
 //! ```
 //!
 //! Four rows of 11.25 mm make the block 45 mm deep. The widths hold what ISO
-//! 7200's table recommends each field hold (see [`iso_7200_typical_chars`])
+//! 7200's table recommends each field hold (see `iso_7200_typical_chars`)
 //! at the form's lettering — captions 1.8 mm, values 2.5 mm, the
 //! identification number 3.5 mm — with 2 mm of padding inside each rule: the
 //! people's names 20 characters, the title and supplementary title 27, the
@@ -252,6 +252,7 @@ pub const ISO_7200_MANDATORY_FIELDS: [DrawingSheetTitleFieldId; 8] = [
 /// number reads `12 of 12`, the standard's sheet number and number of
 /// sheets together. The standard gives no length for the legal owner or the
 /// classification, and has no project field.
+#[cfg(test)]
 #[must_use]
 pub const fn iso_7200_typical_chars(field: DrawingSheetTitleFieldId) -> Option<usize> {
     match field {
