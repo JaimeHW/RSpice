@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 const BITS: [&str; 8] = ["B7", "B6", "B5", "B4", "B3", "B2", "B1", "B0"];
 /// The analog nodes the strip plots beside the lanes.
 const ANALOG: [&str; 2] = ["VIN", "TOP"];
-const FRAME: egui::Vec2 = egui::vec2(1200.0, 760.0);
+pub(super) const FRAME: egui::Vec2 = egui::vec2(1200.0, 760.0);
 
 /// A corpus deck with its netlists inlined and its HDL sources made
 /// absolute, so it runs without an imported deck origin, each line passed
@@ -44,7 +44,7 @@ fn corpus_deck(design: &str, deck: &str, edit: impl Fn(&str) -> String) -> Strin
 
 /// Two conversions of the SAR converter (C4, port-level digital), run once
 /// through the real controller.
-fn sar_run() -> &'static SimulationRun {
+pub(super) fn sar_run() -> &'static SimulationRun {
     static RUN: OnceLock<SimulationRun> = OnceLock::new();
     RUN.get_or_init(|| {
         run_manual_batch(&corpus_deck("c04-sar8", "ports.tran.cir", |line| {
@@ -67,7 +67,7 @@ fn host(run: &SimulationRun, analog: &[&str]) -> ResultsTestHost {
     state
 }
 
-fn strip(state: &mut ResultsTestHost) -> Arc<Vec<StripModel>> {
+pub(super) fn strip(state: &mut ResultsTestHost) -> Arc<Vec<StripModel>> {
     let presentation = state.model.preferences.result_presentation_policy();
     cached_models(
         &state.model.simulation,
@@ -78,7 +78,7 @@ fn strip(state: &mut ResultsTestHost) -> Arc<Vec<StripModel>> {
 }
 
 /// The committed `(time, code)` points of the digital net `net`.
-fn history(run: &SimulationRun, net: &str) -> Vec<(f64, u8)> {
+pub(super) fn history(run: &SimulationRun, net: &str) -> Vec<(f64, u8)> {
     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
         run.analyses[0].result_payload.as_ref()
     else {
@@ -136,7 +136,7 @@ fn sar_strip(radix: BusRadix, expanded: bool) -> (ResultsTestHost, AnalysisPrese
     (state, key)
 }
 
-fn place_cursors(state: &mut ResultsTestHost, a: Option<f64>, b: Option<f64>) {
+pub(super) fn place_cursors(state: &mut ResultsTestHost, a: Option<f64>, b: Option<f64>) {
     let session = &mut state.results.results.session;
     session.cursor_strip = Some(0);
     session.cursors = crate::ui::plot::CursorPair { a, b };
@@ -167,14 +167,14 @@ fn theme_context() -> egui::Context {
 
 /// A vertical stroke the frame painted.
 #[derive(Debug, Clone, Copy)]
-struct Vertical {
-    x: f32,
-    top: f32,
-    bottom: f32,
-    color: egui::Color32,
+pub(super) struct Vertical {
+    pub(super) x: f32,
+    pub(super) top: f32,
+    pub(super) bottom: f32,
+    pub(super) color: egui::Color32,
 }
 
-fn verticals(shapes: &[ClippedShape]) -> Vec<Vertical> {
+pub(super) fn verticals(shapes: &[ClippedShape]) -> Vec<Vertical> {
     fn walk(shape: &egui::Shape, out: &mut Vec<Vertical>) {
         match shape {
             egui::Shape::LineSegment { points, stroke }
@@ -200,7 +200,7 @@ fn verticals(shapes: &[ClippedShape]) -> Vec<Vertical> {
 
 /// The cursor lines of one colour, top to bottom: the lanes' first, then
 /// each pane's.
-fn cursor_lines(lines: &[Vertical], color: egui::Color32) -> Vec<Vertical> {
+pub(super) fn cursor_lines(lines: &[Vertical], color: egui::Color32) -> Vec<Vertical> {
     let mut found: Vec<Vertical> = lines
         .iter()
         .filter(|line| line.color == color && line.bottom - line.top > 8.0)
@@ -380,7 +380,7 @@ fn the_edge_step_lands_on_the_next_edge_exactly() {
     let ctx = theme_context();
     frame(&ctx, &mut state, Vec::new());
     let lines = verticals(&frame(&ctx, &mut state, Vec::new()));
-    let lanes = cursor_lines(&lines, Tokens::get(&ctx).color.accent)[0];
+    let lanes = cursor_lines(&lines, Tokens::get(&ctx).color.canvas_cursor_a)[0];
     // On SAMP's row, clear of its edges and of the cursor.
     let row = lane_row(lanes, row_of("D(SAMP)"));
     let at = egui::pos2(lanes.x + 3.0, (row.0 + row.1) * 0.5);
@@ -613,13 +613,14 @@ fn write_the_sar_strip_picture() {
 }
 
 /// The analog nodes the review strip keeps, and which of them it plots.
-const REVIEW_NODES: [&str; 10] = ["VIN", "TOP", "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"];
-const REVIEW_PLOTTED: [&str; 7] = ["VIN", "TOP", "B0", "B2", "B3", "B5", "B7"];
+pub(super) const REVIEW_NODES: [&str; 10] =
+    ["VIN", "TOP", "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"];
+pub(super) const REVIEW_PLOTTED: [&str; 7] = ["VIN", "TOP", "B0", "B2", "B3", "B5", "B7"];
 
 /// The review strip: ten analog nodes, three of them hidden, beside the
 /// SAMP and EOC lanes and the `code` bus, with both cursors placed; or,
 /// without lanes, its panes alone.
-fn review_strip(lanes: bool) -> ResultsTestHost {
+pub(super) fn review_strip(lanes: bool) -> ResultsTestHost {
     let run = sar_run();
     let eoc = history(run, "EOC");
     let samp = history(run, "SAMP");
@@ -648,7 +649,7 @@ fn review_strip(lanes: bool) -> ResultsTestHost {
 
 /// The document well the viewer sits in, filled as the result document
 /// fills it before any viewer paints.
-fn well(ui: &mut Ui) {
+pub(super) fn well(ui: &mut Ui) {
     let well = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
