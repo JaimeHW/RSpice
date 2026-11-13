@@ -470,9 +470,9 @@ pub fn render_schematic_view(
     state.model.schematic.ensure_canvas_cache();
     // Badges are placed against the wires the canvas cache indexes, so they
     // are refreshed after it.
-    scene::refresh_voltage_badges(state);
+    scene::refresh_voltage_badges(&mut canvas_parts(state));
     drawing_sheet::refresh_overflow_summary(
-        state,
+        &mut canvas_parts(state),
         &painter,
         &viewport,
         &symbol_context,
@@ -483,7 +483,7 @@ pub fn render_schematic_view(
         &painter,
         available,
         &viewport,
-        state,
+        &canvas_facts(state),
         symbol_library,
         &symbol_context,
         &drawing_sheet,
@@ -494,7 +494,7 @@ pub fn render_schematic_view(
     draw_interaction_previews(
         &painter,
         &response,
-        state,
+        &mut canvas_parts(state),
         &viewport,
         &symbol_context,
         symbol_library,
@@ -505,7 +505,7 @@ pub fn render_schematic_view(
     {
         draw_shelf_drag_preview(
             &painter,
-            state,
+            &canvas_facts(state),
             &viewport,
             payload,
             position,

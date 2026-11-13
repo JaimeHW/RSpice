@@ -452,7 +452,7 @@ mod tests {
         let symbols = schematic_symbol_context(&state);
 
         let (candidate, result) = crate::schematic::view::preview::move_preview_candidate(
-            &state,
+            &crate::schematic::view::canvas_facts(&state),
             &symbols,
             Point::new(0, 10),
             crate::state::MoveSelectionMode::Connected,

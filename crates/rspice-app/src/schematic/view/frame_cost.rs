@@ -757,7 +757,10 @@ fn operating_point_overlay() -> FrameTimes {
     state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     time_scenario("operating-point overlay", 8.0, state, |state| {
         assert!(
-            !super::scene::operating_point_annotations(state).is_empty(),
+            !super::scene::operating_point_annotations(&crate::schematic::view::canvas_facts(
+                state
+            ))
+            .is_empty(),
             "the overlay annotates the active sheet"
         );
     })
@@ -775,7 +778,10 @@ fn operating_point_overlay_legible() -> FrameTimes {
         Some((1.0, Point::new(ORIGIN + PITCH * 4, ORIGIN + PITCH * 3))),
         |state| {
             assert!(
-                !super::scene::operating_point_annotations(state).is_empty(),
+                !super::scene::operating_point_annotations(&crate::schematic::view::canvas_facts(
+                    state
+                ))
+                .is_empty(),
                 "the overlay annotates the active sheet"
             );
             assert!(
@@ -1201,7 +1207,8 @@ fn site_cost_table() -> String {
     let near = Point::new(ORIGIN + PITCH * 3, ORIGIN + 100);
     let mode = state.design.move_selection.mode;
     // The badges at 100 %, each about a dozen mono characters on one line.
-    let badges = super::scene::operating_point_annotations(state);
+    let badges =
+        super::scene::operating_point_annotations(&crate::schematic::view::canvas_facts(state));
     let badge_sizes = vec![egui::vec2(66.0, 12.0); badges.len()];
     let placement = rspice_schematic_editor::view::scene::BadgePlacement {
         view: &design,
@@ -1337,7 +1344,7 @@ fn site_cost_table() -> String {
             "move candidate, delta (40, 0) (C-5)",
             site_ms(|| {
                 let (candidate, moved) = super::preview::move_preview_candidate(
-                    state,
+                    &crate::schematic::view::canvas_facts(state),
                     &symbols,
                     Point::new(40, 0),
                     mode,
@@ -1347,7 +1354,12 @@ fn site_cost_table() -> String {
         ),
         (
             "operating-point badges, read afresh (C-7)",
-            site_ms(|| super::scene::operating_point_annotations(state).len()),
+            site_ms(|| {
+                super::scene::operating_point_annotations(&crate::schematic::view::canvas_facts(
+                    state,
+                ))
+                .len()
+            }),
         ),
         (
             "operating-point badge layout, afresh (item 11)",

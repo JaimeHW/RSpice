@@ -12,6 +12,7 @@ use crate::workbench::app_state::{AppState, Model, model_location_anchor};
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
+use super::parts::CanvasFacts;
 use super::viewport::Viewport;
 use rspice_schematic_editor::view::violations as markers;
 
@@ -67,10 +68,12 @@ pub(crate) fn location_anchor_in(
 /// The current finding may come from a check of another cellview — a loop
 /// stated inside an instance of this one — so this asks the store for it
 /// rather than the active drawing's own results.
-pub(crate) fn related_marks(state: &AppState) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
+pub(crate) fn related_marks(
+    state: &CanvasFacts<'_>,
+) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
     let subject = state.model.workspace.content.active_schematic_reference();
     let (severity, locations) = state.current_finding_related_marks(&subject)?;
-    let view = super::schematic_design_view(state);
+    let view = state.design_view();
     let points = locations
         .iter()
         .filter_map(|location| markers::anchor(&view, location))
@@ -80,7 +83,11 @@ pub(crate) fn related_marks(state: &AppState) -> Option<(DrcSeverity, Vec<crate:
 
 /// Draw only check results that remain current for the active schematic,
 /// with the current finding's other objects marked beneath them.
-pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, state: &AppState) {
+pub(super) fn draw_violation_markers(
+    painter: &Painter,
+    viewport: &Viewport,
+    state: &CanvasFacts<'_>,
+) {
     if let Some((severity, points)) = related_marks(state) {
         markers::draw_related_marks(painter, viewport, &points, severity);
     }
@@ -95,7 +102,7 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
     markers::draw_violation_markers(
         painter,
         viewport,
-        &super::schematic_design_view(state),
+        &state.design_view(),
         result.violations(),
         state.design.canvas_hover,
     );

@@ -6,8 +6,8 @@
 //! a modal dialog was open is lent as it stood when the parts were taken: the
 //! canvas opens nothing modal before it reads either fact.
 //!
-//! What only asks, such as which rows the canvas menu offers, reads
-//! [`CanvasFacts`]: the design slot and the model, shared.
+//! What only asks or paints, such as which rows the canvas menu offers or
+//! the scene, reads [`CanvasFacts`]: the same parts, shared.
 
 use crate::state::{BusDeclaration, BusParseError, CellViewRef, Point};
 use crate::workbench::{
@@ -24,6 +24,7 @@ use crate::workbench::{
     slots::{DesignState, PlatformState, ResultsState, RunsState},
     state::WorkbenchSession,
 };
+use rspice_design::drc::{DrcLocation, DrcSeverity};
 use rspice_schematic_editor::view::design_view::DesignView;
 use rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag;
 
@@ -64,11 +65,16 @@ impl AsRef<Model> for CanvasParts<'_> {
     }
 }
 
-/// What the canvas's answers read: the design slot and the model.
+/// What the canvas's answers and its paint read: the design slot, the
+/// model, the runs (whose slot facts say which check results are current)
+/// and the results slot (the selected trace and the cursor a transient is
+/// annotated at).
 #[derive(Clone, Copy)]
 pub(crate) struct CanvasFacts<'a> {
     pub(crate) design: &'a DesignState,
     pub(crate) model: &'a Model,
+    pub(crate) runs: &'a RunsState,
+    pub(crate) results: &'a ResultsState,
 }
 
 /// The canvas's facts from the application's state.
@@ -76,6 +82,8 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
     CanvasFacts {
         design: &state.design,
         model: &state.model,
+        runs: &state.runs,
+        results: &state.results,
     }
 }
 
@@ -123,6 +131,19 @@ impl<'a> CanvasFacts<'a> {
     pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
         self.model.selected_instance_generated_line().err()
     }
+
+    /// The current finding's other objects in `cell_view`, as the runs'
+    /// slot facts let the check store answer.
+    pub(crate) fn current_finding_related_marks(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<(DrcSeverity, Vec<DrcLocation>)> {
+        self.model.current_finding_related_marks(
+            cell_view,
+            self.runs
+                .slot_facts(self.design.schematic_visibility.review_markers),
+        )
+    }
 }
 
 impl CanvasParts<'_> {
@@ -131,6 +152,8 @@ impl CanvasParts<'_> {
         CanvasFacts {
             design: self.design,
             model: self.model,
+            runs: self.runs,
+            results: self.results,
         }
     }
 

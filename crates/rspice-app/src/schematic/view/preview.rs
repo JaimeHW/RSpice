@@ -1,14 +1,16 @@
 //! App-owned preview orchestration and canonical transform candidates.
 
 use super::super::symbols::SymbolLibrary;
-use super::{DesignState, Model, model_design_view};
+use super::{
+    DesignState, Model, model_design_view,
+    parts::{CanvasFacts, CanvasParts},
+};
 use super::{
     SchematicShelfDragPayload, SchematicSymbolContext, array_interaction::array_placement,
     snap_resolution::resolve_grid_pointer, viewport::Viewport,
 };
 use crate::state::transform_preview_memo::{TransformPreviewKey, TransformPreviewOutcome};
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
-use crate::workbench::app_state::AppState;
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
 use std::sync::Arc;
@@ -37,7 +39,7 @@ pub(super) fn transform_preview_style<'a>(
 pub(super) fn draw_interaction_previews(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
@@ -53,7 +55,7 @@ pub(super) fn draw_interaction_previews(
     super::floating_paste::draw_floating_paste_preview(
         painter,
         response,
-        &mut super::canvas_parts(state),
+        state,
         viewport,
         symbol_context,
         symbol_library,
@@ -69,7 +71,7 @@ pub(super) fn draw_interaction_previews(
     );
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
-    let view = preview_view(&state.model, &state.design);
+    let view = preview_view(state.model, state.design);
     preview::draw_bus_tap_preview(painter, response, &view, viewport);
     preview::draw_junction_preview(painter, response, &view, viewport);
     preview::draw_net_label_preview(painter, response, &view, viewport, symbol_context);
@@ -86,12 +88,12 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     preview::draw_selection_rect(painter, &view, viewport);
-    super::zoom_box::paint_zoom_box(painter, &state.model, viewport);
-    draw_placement_badge(painter, response, state);
+    super::zoom_box::paint_zoom_box(painter, state.model, viewport);
+    draw_placement_badge(painter, response, &state.facts());
 }
 
 /// Show the next sequenced placement and the model's current refusal, if any.
-fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState) {
+fn draw_placement_badge(painter: &Painter, response: &Response, state: &CanvasFacts<'_>) {
     let Some(sequence) = state
         .model
         .schematic
@@ -125,7 +127,7 @@ fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState
 fn draw_move_selection_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
@@ -158,9 +160,9 @@ fn draw_move_selection_preview(
         preview::draw_move_diff(
             painter,
             viewport,
-            &preview_view(&state.model, &state.design),
+            &preview_view(state.model, state.design),
             diff,
-            &transform_preview_style(&state.design, symbol_context, symbol_library),
+            &transform_preview_style(state.design, symbol_context, symbol_library),
             || state.model.workspace.content.active_view.display_path(),
         );
     }
@@ -179,7 +181,7 @@ fn draw_move_selection_preview(
 fn draw_stretch_selection_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
@@ -243,9 +245,9 @@ fn draw_stretch_selection_preview(
 
 /// The preview held for `key`, or the one `compute` finds, held from now on.
 fn held_transform_preview(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     key: TransformPreviewKey,
-    compute: impl FnOnce(&AppState) -> TransformPreviewOutcome,
+    compute: impl FnOnce(&CanvasFacts<'_>) -> TransformPreviewOutcome,
 ) -> TransformPreviewOutcome {
     if let Some(outcome) = state
         .model
@@ -256,7 +258,7 @@ fn held_transform_preview(
     {
         return outcome;
     }
-    let outcome = compute(state);
+    let outcome = compute(&state.facts());
     state
         .model
         .schematic
@@ -269,7 +271,7 @@ fn held_transform_preview(
 /// What the armed Move would change, computed once per delta, mode,
 /// selection and drawing rather than once per frame.
 pub(super) fn move_preview_diff(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
     delta: Point,
     mode: crate::state::MoveSelectionMode,
@@ -296,7 +298,7 @@ pub(super) fn move_preview_diff(
 /// What the armed Stretch would change, computed once per delta, target,
 /// policy and drawing rather than once per frame.
 pub(super) fn stretch_preview_diff(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
     delta: Point,
     target: crate::state::StretchTarget,
@@ -322,7 +324,7 @@ pub(super) fn stretch_preview_diff(
 
 /// The document the armed Move would leave, and whether it would move.
 pub(super) fn move_preview_candidate(
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     symbol_context: &SchematicSymbolContext,
     delta: Point,
     mode: crate::state::MoveSelectionMode,
@@ -348,7 +350,7 @@ pub(super) fn move_preview_candidate(
 
 /// The document the armed Stretch would leave.
 pub(super) fn stretch_preview_candidate(
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     symbol_context: &SchematicSymbolContext,
     delta: Point,
     target: crate::state::StretchTarget,
@@ -370,7 +372,7 @@ pub(super) fn stretch_preview_candidate(
 fn draw_array_selection_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
@@ -400,7 +402,7 @@ fn draw_array_selection_preview(
     };
     let plan = match crate::workbench::app::armed_array_selection_plan(
         &state.design.array_selection,
-        &state.model,
+        state.model,
         placement,
     ) {
         Ok(plan) => plan,
@@ -457,9 +459,9 @@ fn draw_array_selection_preview(
     preview::draw_array_candidate(
         painter,
         viewport,
-        &preview_view(&state.model, &state.design),
+        &preview_view(state.model, state.design),
         preview,
-        &transform_preview_style(&state.design, symbol_context, symbol_library),
+        &transform_preview_style(state.design, symbol_context, symbol_library),
         || state.model.workspace.content.active_view.display_path(),
     );
 
@@ -481,7 +483,7 @@ fn draw_array_selection_preview(
 fn draw_bus_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
 ) {
     if state.schematic_edit_read_only()
@@ -491,7 +493,7 @@ fn draw_bus_preview(
         return;
     }
     if let Some(hover) = response.hover_pos() {
-        let position = resolve_grid_pointer(&state.model, viewport, hover).snapped_position;
+        let position = resolve_grid_pointer(state.model, viewport, hover).snapped_position;
         state
             .model
             .schematic
@@ -501,17 +503,13 @@ fn draw_bus_preview(
             .update_preview(position);
     }
 
-    preview::draw_bus_preview(
-        painter,
-        &preview_view(&state.model, &state.design),
-        viewport,
-    );
+    preview::draw_bus_preview(painter, &preview_view(state.model, state.design), viewport);
 }
 
 fn draw_wire_preview(
     painter: &Painter,
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
@@ -523,7 +521,7 @@ fn draw_wire_preview(
     let snap_feedback = if wire_active {
         response.hover_pos().and_then(|hover_pos| {
             let result = preview::resolve_wire_preview_snap(
-                &preview_view(&state.model, &state.design),
+                &preview_view(state.model, state.design),
                 symbol_context,
                 viewport,
                 hover_pos,
@@ -553,7 +551,7 @@ fn draw_wire_preview(
 
     preview::draw_wire_preview(
         painter,
-        &preview_view(&state.model, &state.design),
+        &preview_view(state.model, state.design),
         viewport,
         snap_feedback.as_ref(),
     );
@@ -562,7 +560,7 @@ fn draw_wire_preview(
 /// Resolve a shelf payload lazily against current libraries and document buffers.
 pub(super) fn draw_shelf_drag_preview(
     painter: &Painter,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     viewport: &Viewport,
     payload: &SchematicShelfDragPayload,
     pointer_pos: egui::Pos2,
@@ -570,7 +568,7 @@ pub(super) fn draw_shelf_drag_preview(
 ) {
     preview::draw_shelf_drag_preview(
         painter,
-        &preview_view(&state.model, &state.design),
+        &preview_view(state.model, state.design),
         viewport,
         preview::ShelfPreview {
             component_type: payload.component_type(),
@@ -590,6 +588,7 @@ pub(super) fn draw_shelf_drag_preview(
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::ComponentType;
@@ -643,16 +642,36 @@ mod tests {
         let symbols = schematic_symbol_context(&state);
         let mode = state.design.move_selection.mode;
         let delta = Point::new(40, 0);
-        let first = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+        let first = held_diff(move_preview_diff(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+            delta,
+            mode,
+        ));
         assert!(Arc::ptr_eq(
             &first,
-            &held_diff(move_preview_diff(&mut state, &symbols, delta, mode))
+            &held_diff(move_preview_diff(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &symbols,
+                delta,
+                mode
+            ))
         ));
 
         let fresh = |state: &mut AppState, delta: Point, mode| {
             let symbols = schematic_symbol_context(state);
-            let before = held_diff(move_preview_diff(state, &symbols, Point::new(40, 0), mode));
-            let after = held_diff(move_preview_diff(state, &symbols, delta, mode));
+            let before = held_diff(move_preview_diff(
+                &mut crate::schematic::view::canvas_parts(state),
+                &symbols,
+                Point::new(40, 0),
+                mode,
+            ));
+            let after = held_diff(move_preview_diff(
+                &mut crate::schematic::view::canvas_parts(state),
+                &symbols,
+                delta,
+                mode,
+            ));
             !Arc::ptr_eq(&before, &after)
         };
         assert!(fresh(&mut state, Point::new(60, 0), mode), "delta");
@@ -661,8 +680,18 @@ mod tests {
         } else {
             crate::state::MoveSelectionMode::Connected
         };
-        let before = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
-        let after = held_diff(move_preview_diff(&mut state, &symbols, delta, other_mode));
+        let before = held_diff(move_preview_diff(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+            delta,
+            mode,
+        ));
+        let after = held_diff(move_preview_diff(
+            &mut crate::schematic::view::canvas_parts(&mut state),
+            &symbols,
+            delta,
+            other_mode,
+        ));
         assert!(!Arc::ptr_eq(&before, &after), "mode");
 
         type Change = (&'static str, fn(&mut AppState));
@@ -714,10 +743,20 @@ mod tests {
         for (input, change) in changes {
             let mut state = movable_state();
             let symbols = schematic_symbol_context(&state);
-            let before = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+            let before = held_diff(move_preview_diff(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &symbols,
+                delta,
+                mode,
+            ));
             change(&mut state);
             let symbols = schematic_symbol_context(&state);
-            let after = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+            let after = held_diff(move_preview_diff(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &symbols,
+                delta,
+                mode,
+            ));
             assert!(!Arc::ptr_eq(&before, &after), "{input}");
         }
     }
@@ -743,7 +782,13 @@ mod tests {
         let policy = crate::state::StretchOrthogonalPolicy::default();
         let symbols = schematic_symbol_context(&state);
         let diff = |state: &mut AppState, delta: Point| {
-            held_diff(stretch_preview_diff(state, &symbols, delta, target, policy))
+            held_diff(stretch_preview_diff(
+                &mut crate::schematic::view::canvas_parts(state),
+                &symbols,
+                delta,
+                target,
+                policy,
+            ))
         };
         let first = diff(&mut state, Point::new(0, 20));
         assert!(Arc::ptr_eq(&first, &diff(&mut state, Point::new(0, 20))));
@@ -751,9 +796,15 @@ mod tests {
             *first,
             preview::TransformCandidateDiff::between(
                 state.model.schematic.document(),
-                &stretch_preview_candidate(&state, &symbols, Point::new(0, 20), target, policy)
-                    .expect("valid stretch")
-                    .expect("it changes the wire"),
+                &stretch_preview_candidate(
+                    &crate::schematic::view::canvas_facts(&state),
+                    &symbols,
+                    Point::new(0, 20),
+                    target,
+                    policy
+                )
+                .expect("valid stretch")
+                .expect("it changes the wire"),
             )
         );
         assert!(!Arc::ptr_eq(&first, &diff(&mut state, Point::new(0, 40))));

@@ -438,10 +438,6 @@ pub(super) fn select_in_rect_on_active_sheet(
         .saturating_sub(selected_before)
 }
 
-pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
-    super::schematic_design_view(state).active_wire_at(point)
-}
-
 /// Run a topology operation with hidden-sheet conductors removed from the
 /// mutable working set, then restore them unchanged. Operations such as
 /// junction dragging and cleanup intentionally scan the entire wire graph;
@@ -498,13 +494,13 @@ pub(crate) fn off_active_sheet(
 /// document with the other sheets' objects left out: borrowed when the cell
 /// view has one sheet, otherwise a copy of the active sheet's objects alone.
 pub(super) fn active_sheet_connectivity(
-    state: &AppState,
+    model: &Model,
 ) -> Cow<'_, rspice_design::schematic::document::SchematicDocument> {
-    let document = state.model.schematic.document();
-    if multi_sheet_catalog(state).is_none() {
+    let document = model.schematic.document();
+    if model.multi_sheet_catalog().is_none() {
         return Cow::Borrowed(document);
     }
-    let off_sheet = off_active_sheet(&state.model.workspace);
+    let off_sheet = off_active_sheet(&model.workspace);
     let on_sheet = |id: u64| !off_sheet(id);
     Cow::Owned(rspice_design::schematic::document::SchematicDocument {
         components: kept(&document.components, |object| on_sheet(object.id)),
@@ -546,70 +542,61 @@ pub(crate) fn finish_wire_on_active_sheet(model: &mut Model) -> Option<u64> {
         .finish_wire(off_active_sheet(&model.workspace))
 }
 
-pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
-    state
-        .model
+pub(super) fn active_sheet_has_objects(model: &Model) -> bool {
+    model
         .schematic
         .document()
         .components
         .iter()
-        .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+        .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .wires
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .buses
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .bus_taps
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .junctions
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .net_labels
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .design_notes
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .documentation_shapes
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
-        || state
-            .model
+            .any(|object| object_is_on_active_sheet(model, object.id))
+        || model
             .schematic
             .document()
             .probes
             .iter()
-            .any(|object| object_is_on_active_sheet(state, object.id))
+            .any(|object| object_is_on_active_sheet(model, object.id))
 }
 
 /// A cell view with two sheets: `active_ids` stay on the active Sheet 1 and

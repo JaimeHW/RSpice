@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity};
+use rspice_design::drc::DrcResult;
 
 #[cfg(test)]
 use super::design_checks::DesignCheckStatus;
@@ -18,6 +18,7 @@ use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
 #[cfg(test)]
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use super::{AppState, Model, SlotFacts};
+#[cfg(test)]
 use crate::state::CellViewRef;
 use crate::time_compat::Instant;
 
@@ -156,14 +157,6 @@ impl AppState {
     ) -> Option<&DrcResult> {
         self.model
             .current_design_check(subject, scope, self.slot_facts())
-    }
-
-    pub(crate) fn current_finding_related_marks(
-        &self,
-        cell_view: &CellViewRef,
-    ) -> Option<(DrcSeverity, Vec<DrcLocation>)> {
-        self.model
-            .current_finding_related_marks(cell_view, self.slot_facts())
     }
 
     // Application half of a model operation; it becomes a request.

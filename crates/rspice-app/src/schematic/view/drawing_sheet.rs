@@ -1,8 +1,13 @@
 //! The drawing sheet on the schematic canvas: its frame, and the overflow
 //! advisories the model holds for it, painted every frame.
 
+#[cfg(test)]
+use super::AppState;
 use super::viewport::Viewport;
-use super::{AppState, SchematicSymbolContext};
+use super::{
+    SchematicSymbolContext,
+    parts::{CanvasFacts, CanvasParts},
+};
 use egui::{Painter, Rect};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
@@ -14,7 +19,7 @@ pub(super) fn draw_base(
     painter: &Painter,
     available: Rect,
     viewport: &Viewport,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     sheet: &ActiveDrawingSheet,
 ) {
     sheet_view::draw_base(
@@ -35,7 +40,7 @@ pub(super) fn draw_overflow_advisories(
     painter: &Painter,
     available: Rect,
     viewport: &Viewport,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) {
@@ -49,7 +54,7 @@ pub(super) fn draw_overflow_advisories(
 }
 
 /// The review markers the drawing shows.
-fn review_markers(state: &AppState) -> SchematicReviewMarkerVisibility {
+fn review_markers(state: &CanvasFacts<'_>) -> SchematicReviewMarkerVisibility {
     state.design.schematic_visibility.review_markers
 }
 
@@ -57,14 +62,14 @@ fn review_markers(state: &AppState) -> SchematicReviewMarkerVisibility {
 /// changed, and only at a zoom that shows them. Runs once a frame, before
 /// painting, where the session can hold them.
 pub(super) fn refresh_overflow_summary(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     painter: &Painter,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) {
     if sheet_view::overflow_advisories_shown(painter, viewport) {
-        let review_markers = review_markers(state);
+        let review_markers = review_markers(&state.facts());
         state
             .model
             .hold_overflow_summary(review_markers, symbol_context, sheet);
@@ -79,9 +84,11 @@ pub(super) fn drawing_sheet_overflow_summary(
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> sheet_view::DrawingSheetOverflowSummary {
-    state
-        .model
-        .overflow_summary(review_markers(state), symbol_context, sheet)
+    state.model.overflow_summary(
+        review_markers(&super::canvas_facts(state)),
+        symbol_context,
+        sheet,
+    )
 }
 
 #[cfg(test)]
@@ -157,7 +164,7 @@ mod tests {
             drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).items[0].center()
         };
 
-        let markers = review_markers(&state);
+        let markers = review_markers(&crate::schematic::view::canvas_facts(&state));
         assert!(state.model.show_first_drawing_sheet_overflow(markers));
         assert_eq!(
             state.model.schematic.session.editor.selection.single_wire(),
@@ -203,7 +210,7 @@ mod tests {
         };
         let hold = |state: &mut AppState, sheet: &ActiveDrawingSheet| {
             let symbol_context = schematic_symbol_context(state);
-            let review_markers = review_markers(state);
+            let review_markers = review_markers(&crate::schematic::view::canvas_facts(state));
             state
                 .model
                 .hold_overflow_summary(review_markers, &symbol_context, sheet);
