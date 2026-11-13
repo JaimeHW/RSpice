@@ -25,12 +25,21 @@ const SCREEN: egui::Vec2 = egui::vec2(1_680.0, 1_020.0);
 /// Carlo trial is, so the members overlap the way a real family does and the
 /// pane fits one Y range to all of them.
 fn crowded_transient(traces: usize, samples: usize) -> ResultsTestHost {
+    transient_in_units(traces, samples, &["V"])
+}
+
+/// [`crowded_transient`] with `traces` members in each of `units`: one pane
+/// per unit, every curve on the same time grid.
+fn transient_in_units(traces: usize, samples: usize, units: &[&str]) -> ResultsTestHost {
     let time: Arc<Vec<f64>> = Arc::new((0..samples).map(|index| index as f64 * 1.0e-9).collect());
     // About three periods across the window whatever the sample count, so
     // every column of the strip holds a real minimum and maximum.
     let step = 20.0 / samples as f64;
-    let waveforms = (0..traces)
-        .map(|member| {
+    let waveforms = units
+        .iter()
+        .enumerate()
+        .flat_map(|(pane, unit)| (0..traces).map(move |member| (pane, *unit, member)))
+        .map(|(pane, unit, member)| {
             let spread = member as f64 / traces.max(1) as f64 - 0.5;
             let gain = 0.1f64.mul_add(spread, 1.0);
             let phase = 0.4 * spread;
@@ -38,11 +47,12 @@ fn crowded_transient(traces: usize, samples: usize) -> ResultsTestHost {
                 .map(|index| gain * (index as f64).mul_add(step, phase).sin())
                 .collect();
             RetainedTrace::new(
-                format!("V(mc{member})"),
+                format!("p{pane}m{member}"),
                 Arc::clone(&time),
                 values,
                 "#00aaff",
             )
+            .with_unit(unit)
         })
         .collect();
     let mut state = ResultsTestHost::default();
@@ -258,4 +268,75 @@ fn measure_monte_carlo_family_frame_cost() {
 fn measure_long_transient_frame_cost() {
     let mut state = crowded_transient(20, 5_000_000);
     report("20 traces x 5M points", &mut state);
+}
+
+/// The widest pane that is still stroked curve by curve.
+#[test]
+#[ignore = "measurement harness"]
+fn measure_crowd_limit_frame_cost() {
+    let mut state = crowded_transient(64, 100_000);
+    report("64 traces x 100k points", &mut state);
+}
+
+/// A strip that strokes more curves than the envelope cache's stale bound —
+/// five panes of sixty — reuses every envelope on its warm and hovered
+/// frames. With a hard 256-entry bound it evicted and rebuilt most of them on
+/// every repaint.
+#[test]
+fn a_strip_stroking_more_curves_than_the_cache_bound_rebuilds_nothing_warm_or_hovered() {
+    let mut state = transient_in_units(60, 1_000, &["V", "A", "W", "F", "H"]);
+    let ctx = new_context();
+    let cold = frame(&ctx, &mut state, Vec::new());
+    assert_eq!(cold.work.rebuilds, 300, "every curve is reduced once");
+    for _ in 0..3 {
+        let warm = frame(&ctx, &mut state, Vec::new());
+        assert_eq!(
+            (warm.work.rebuilds, warm.work.evictions),
+            (0, 0),
+            "a warm frame rebuilt or evicted an envelope"
+        );
+    }
+    for position in hover_positions(6) {
+        let hover = frame(&ctx, &mut state, vec![egui::Event::PointerMoved(position)]);
+        assert_eq!(hover.work.rebuilds, 0, "a hover rebuilt an envelope");
+    }
+}
+
+/// Review pictures of a 500-member family: the strip as drawn, and with the
+/// pointer over the family. Written only when `RSPICE_PICTURES` names a
+/// folder.
+#[test]
+#[ignore = "writes review pictures"]
+fn write_the_family_pictures() {
+    /// The picture, in points; it is drawn at twice that, as a 2x display does.
+    const SIZE: egui::Vec2 = egui::vec2(1280.0, 820.0);
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let mut state = crowded_transient(500, 4_000);
+    let ctx = new_context();
+    let draw = |state: &mut ResultsTestHost, events: Vec<egui::Event>| {
+        let mut input = rspice_ui_kit::raster::display_input(SIZE, 2.0);
+        input.events = events;
+        ctx.run_ui(input, |ctx| {
+            crate::workbench::documents::result_document::prepare_viewer_state(
+                &mut state.results_parts(),
+            );
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+        })
+    };
+    let pointer = egui::Event::PointerMoved(egui::pos2(700.0, 300.0));
+    for (name, events) in [("family", Vec::new()), ("family-pointer", vec![pointer])] {
+        draw(&mut state, events);
+        for _ in 0..4 {
+            draw(&mut state, Vec::new());
+        }
+        let output = draw(&mut state, Vec::new());
+        let canvas = rspice_ui_kit::raster::rasterize(&ctx, SIZE, &output);
+        std::fs::write(
+            format!("{directory}/{name}.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    }
 }

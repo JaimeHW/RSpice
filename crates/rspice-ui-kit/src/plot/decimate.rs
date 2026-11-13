@@ -134,8 +134,20 @@ pub struct TraceView {
     pub rows: usize,
 }
 
-/// Entry-count bound; old views evict once it's exceeded.
-const CACHE_CAP: usize = 256;
+/// Entry bound for envelopes no frame is drawing any more.
+///
+/// It bounds the views the reader has left, never the one on screen. A frame
+/// that draws more traces than this keeps every envelope it drew: with a hard
+/// bound, a 500-run family read in a cycle missed on every lookup and rebuilt
+/// every envelope on every repaint, a hover included. What the current frame
+/// draws is bounded by the byte budget and [`ENTRY_CEILING`] alone.
+const STALE_ENTRY_CAP: usize = 256;
+
+/// Absolute entry bound, the current frame's own envelopes included.
+///
+/// Eviction scans every entry for the least recently used one, so the scan
+/// stays cheap even for a caller that never advances the frame tick.
+const ENTRY_CEILING: usize = 16_384;
 
 /// Default resident budget for reconstructable display envelopes.
 ///
@@ -197,19 +209,27 @@ impl DecimationCache {
     }
 
     fn evict_to_fit(&mut self, incoming_bytes: usize) {
-        while (!self.held.map.is_empty())
-            && (self.held.map.len() >= CACHE_CAP
-                || self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity)
-        {
-            let Some(oldest) = self
+        while !self.held.map.is_empty() {
+            let over_budget =
+                self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity;
+            let over_ceiling = self.held.map.len() >= ENTRY_CEILING;
+            if !over_budget && !over_ceiling && self.held.map.len() < STALE_ENTRY_CAP {
+                break;
+            }
+            let Some((oldest, last_used)) = self
                 .held
                 .map
                 .iter()
                 .min_by_key(|(_, entry)| entry.last_used)
-                .map(|(key, _)| *key)
+                .map(|(key, entry)| (*key, entry.last_used))
             else {
                 break;
             };
+            // Past the stale bound alone, only an envelope this frame has not
+            // drawn gives way; see `STALE_ENTRY_CAP`.
+            if !over_budget && !over_ceiling && last_used == self.tick {
+                break;
+            }
             if let Some(removed) = self.held.map.remove(&oldest) {
                 self.resident_bytes = self
                     .resident_bytes
@@ -959,5 +979,57 @@ mod tests {
             second.as_ref(),
             "a log reduction was served from the linear cache entry"
         );
+    }
+
+    /// One frame of `traces` curves at `view`, as the renderer asks for them.
+    fn draw_frame(cache: &mut DecimationCache, traces: u64, x: &[f64], y: &[f64], view: TraceView) {
+        cache.ensure_version(1);
+        for trace in 0..traces {
+            let _ = cache.series(trace, x, y, view, false, None);
+        }
+    }
+
+    /// A frame that draws more curves than the stale bound keeps every
+    /// envelope it drew. With a hard 256-entry bound, a 500-run family read in
+    /// a cycle missed on every lookup: every repaint rebuilt every envelope.
+    #[test]
+    fn a_frame_drawing_more_traces_than_the_stale_bound_rebuilds_nothing_on_the_next() {
+        let x: Vec<f64> = (0..2_000).map(f64::from).collect();
+        let y: Vec<f64> = x.iter().map(|value| (value * 0.01).sin()).collect();
+        let view = sweep_view(0.0, 1_999.0);
+        let mut cache = DecimationCache::default();
+        draw_frame(&mut cache, 500, &x, &y, view);
+        assert_eq!(cache.work().rebuilds, 500);
+        let first = cache.work();
+        for _ in 0..3 {
+            draw_frame(&mut cache, 500, &x, &y, view);
+        }
+        let steady = cache.work().since(first);
+        assert_eq!(
+            (steady.rebuilds, steady.evictions, steady.hits),
+            (0, 0, 1_500),
+            "a steady frame must reuse every envelope it drew on the frame before"
+        );
+    }
+
+    /// The stale bound still bounds what the reader has left: a view nobody
+    /// draws any more gives way to the one on screen.
+    #[test]
+    fn envelopes_of_a_view_the_reader_left_are_bounded_by_the_stale_cap() {
+        let x: Vec<f64> = (0..2_000).map(f64::from).collect();
+        let y: Vec<f64> = x.iter().map(|value| (value * 0.01).sin()).collect();
+        let mut cache = DecimationCache::default();
+        draw_frame(&mut cache, 500, &x, &y, sweep_view(0.0, 1_999.0));
+        assert_eq!(cache.held.map.len(), 500);
+        draw_frame(&mut cache, 10, &x, &y, sweep_view(0.0, 999.0));
+        assert!(
+            cache.held.map.len() <= STALE_ENTRY_CAP,
+            "{} entries survived a view change",
+            cache.held.map.len()
+        );
+        // The ten curves the reader is looking at are all still there.
+        let before = cache.work();
+        draw_frame(&mut cache, 10, &x, &y, sweep_view(0.0, 999.0));
+        assert_eq!(cache.work().since(before).rebuilds, 0);
     }
 }
