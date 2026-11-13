@@ -1,8 +1,8 @@
 //! The nominal sizes of a drawn sheet's strokes and marks, in world units.
 //!
-//! A vector drawing (the SVG export, the printed page) draws exactly these;
-//! the canvas scales them with the zoom between floors and ceilings of its
-//! own. One table, so a page and an export carry the same weights.
+//! The printed page draws exactly these; the canvas scales them with the
+//! zoom between floors and ceilings of its own. One table, so the page and
+//! the screen carry the same weights.
 
 /// A wire's stroke.
 pub const WIRE_WIDTH_WORLD: f32 = 1.1;

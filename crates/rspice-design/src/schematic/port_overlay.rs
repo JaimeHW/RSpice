@@ -1,6 +1,5 @@
 //! Runtime direction marks layered over the canonical interface-port body,
-//! in world units: the canvas, the SVG export and the printed page draw the
-//! same arrow.
+//! in world units: the canvas and the printed page draw the same arrow.
 
 use rspice_design_model::port::PortDirection;
 

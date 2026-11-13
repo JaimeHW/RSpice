@@ -39,7 +39,7 @@ crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 
 ## Boundaries
 
-- Canvas painting, gestures, editor sessions and SVG export belong to
+- Canvas painting, gestures and editor sessions belong to
   [`rspice-schematic-editor`](../rspice-schematic-editor).
 - Netlist generation and simulation preparation belong to
   [`rspice-simulation`](../rspice-simulation); turning a stimulus definition

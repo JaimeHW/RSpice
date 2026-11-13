@@ -1,6 +1,6 @@
 //! Where a schematic's text stands, in world units.
 //!
-//! The canvas, the SVG export and the printed page each place an instance's
+//! The canvas and the printed page each place an instance's
 //! name and value, a net label's name and connector tab, a bus declaration,
 //! a tap's bit slice and a probe's reference through this one layout, so a
 //! reviewer finds every label in the same place on screen, in an export and
@@ -182,8 +182,8 @@ impl ValueClass {
 
 /// The class an instance's value is lettered in: a port's value is the name
 /// of the net it carries across the sheet, so it reads as a net name does;
-/// every other part's is an instance value. The canvas, the SVG export and
-/// the printed page all ask here.
+/// every other part's is an instance value. The canvas and the printed page
+/// both ask here.
 pub fn instance_value_class(component: &Component) -> ValueClass {
     if component.kind == ComponentType::Port {
         ValueClass::NetName

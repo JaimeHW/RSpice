@@ -12,7 +12,6 @@ use rspice_design_model::port::PortDirection;
 use rspice_ui_kit::{Theme, raster::display_input, tokens::Tokens};
 
 use super::*;
-use crate::view::resolved_symbol_render::write_resolved_symbol_svg;
 use crate::view::symbol_context::SchematicSymbolContext;
 
 const SIZE: Vec2 = vec2(900.0, 900.0);
@@ -97,19 +96,6 @@ fn an_imported_inductor_shows_no_straight_piece_at_any_zoom() {
             }
         }
     }
-}
-
-#[test]
-fn an_exported_curve_is_a_true_arc() {
-    let inductor = imported_inductor();
-    let mut svg = String::new();
-    write_resolved_symbol_svg(
-        &mut svg,
-        &inductor,
-        inductor.source_symbol().expect("carried artwork"),
-        &crate::export::SvgExportConfig::default(),
-    );
-    assert_eq!(svg.matches(" A 100 100 0 1 1 ").count(), 3, "{svg}");
 }
 
 /// The widths of every stroked line `component` paints, in thousandths of a

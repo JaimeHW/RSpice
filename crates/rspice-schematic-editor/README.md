@@ -2,7 +2,7 @@
 
 The schematic and symbol editors' presentation and interaction over canonical
 design data: canvas painting, hit testing, gesture and keyboard interpretation,
-per-document editor sessions, property and placement drafts, and SVG export.
+per-document editor sessions, and property and placement drafts.
 Schematic documents are only ever borrowed read-only, and the symbol editor
 edits a draft its caller owns; what comes back is a typed request, draft or
 edit list, and `rspice-app` validates it before applying or publishing
@@ -21,12 +21,11 @@ anything. The crate stands apart so that boundary can be enforced:
 | `symbols` | `SymbolLibrary`: the embedded component artwork from `rspice-design`, with cached flattened geometry for interactive painting |
 | `component_palette` | The placeable device kinds, grouped into the sections the palette shows |
 | `symbol_editor` | The symbol editor's canvas, viewport and hit testing, pointer interaction, clipboard commands, inspector and publication form, over a caller-owned `SymbolDocument` draft |
-| `export` | Schematic SVG export, `SvgExportConfig` and `SvgDesignContext`, drawn with the same resolved-symbol and bus-tap geometry as the canvas |
 | `component_properties`, `object_properties` | Component-parameter and object-property drafts and their forms, which prepare a validated field delta without mutating the design |
 | `property_values` | Typed value editors for property rows: mono inputs for numbers, strings and expressions, chips for small enums, checks for booleans |
 | `pwl_editor` | The piecewise-linear point table shared by source-property surfaces |
 | `annotations`, `bus_tap_placement`, `net_label_placement`, `pin_placement`, `xspice_placement` | Placement forms for design notes and documentation shapes, bus taps, net labels and off-sheet connectors, pins, and built-in XSPICE vector widths |
-| `bus_geometry` | The angled bus-tap breakout shared by the canvas, hit testing, selection and SVG export |
+| `bus_geometry` | The angled bus-tap breakout shared by the canvas, hit testing and selection |
 | `vector_preview` | The deck bit names a declared pin or tap range expands to, shown while the range is still a draft |
 | `port_overlay` | Direction marks layered over the interface-port body |
 | `source_labels` | Concise source-value labels for the canvas, independent of netlist serialization |
@@ -44,8 +43,8 @@ anything. The crate stands apart so that boundary can be enforced:
 
 ## Entry points
 
-- `SymbolLibrary::load_embedded` for the component artwork the scene and
-  export painters draw.
+- `SymbolLibrary::load_embedded` for the component artwork the scene painter
+  draws.
 - `session::EditorSession`, one per open schematic document.
 - `view::scene::draw_content` with `SceneView`, `SceneSymbols` and
   `SceneOverlays` to paint the active sheet.
@@ -58,8 +57,6 @@ anything. The crate stands apart so that boundary can be enforced:
   sections.
 - `symbol_editor::draw_canvas` and `symbol_editor::interaction::edit_canvas`
   with a `SymbolEditorSession`.
-- `export::export_to_svg_with_symbol_resolver_and_context` with an
-  `SvgExportConfig`.
 
 ## Feature flags
 

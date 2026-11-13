@@ -74,49 +74,14 @@ fn display_name(label: &NetLabel) -> &str {
     label_layout::net_label_display_name(label)
 }
 
-/// A net label in world units, as a zoomless drawing (the SVG) places it.
-pub(crate) struct NetLabelWorldLayout<'a> {
-    /// What the label reads: its name, or the placeholder for a blank one.
-    pub(crate) name: &'a str,
-    pub(crate) font_size: f32,
-    /// The bottom-left corner of the name's text box.
-    pub(crate) corner: Pos2,
-    /// The name reads upward, turned a quarter counter-clockwise about
-    /// `corner`.
-    pub(crate) upward: bool,
-    /// Half the diagonal of the attachment diamond, 0 when it draws none.
-    pub(crate) diamond_half: f32,
-    /// Half the side of the open-pin square, 0 when it draws none.
-    pub(crate) open_pin_half: f32,
-    /// An off-sheet connector's tab after a name of the estimated width.
-    pub(crate) tab: Option<(Rect, CrossSheetPortDirection)>,
-}
-
 fn layout_rect(rect: LayoutRect) -> Rect {
     Rect::from_min_max(layout_pos(rect.min), layout_pos(rect.max))
 }
 
 /// The world corner a label's name stands on: the canvas hangs the shaped
-/// name above it at every zoom, and the SVG sets its baseline from it.
+/// name above it at every zoom.
 fn name_corner_world(label: &NetLabel) -> Pos2 {
     layout_pos(label_layout::net_label_name_corner(label))
-}
-
-/// The shared net-label layout (`label_layout::net_label_layout`) in egui
-/// types.
-pub(crate) fn world_layout(label: &NetLabel) -> NetLabelWorldLayout<'_> {
-    let layout = label_layout::net_label_layout(label);
-    NetLabelWorldLayout {
-        name: layout.name,
-        font_size: layout.font_size,
-        corner: layout_pos(layout.corner),
-        upward: layout.upward,
-        diamond_half: layout.diamond_half,
-        open_pin_half: layout.open_pin_half,
-        tab: layout
-            .tab
-            .map(|(rect, direction)| (layout_rect(rect), direction)),
-    }
 }
 
 /// The one layout paint and hit testing share. A name below the legibility
@@ -270,9 +235,6 @@ fn paint_connector_tab(
         painter.line_segment(segment, stroke);
     }
 }
-
-pub(crate) const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 =
-    label_layout::CONNECTOR_TAB_STROKE_PER_HEIGHT;
 
 /// The shared connector-tab marks (`label_layout::connector_tab_marks`), in
 /// whatever space `rect` is in.

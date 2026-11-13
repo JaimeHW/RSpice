@@ -1009,7 +1009,7 @@ impl Component {
 
     /// Local pin layout with the body edge each pin is drawn against.
     ///
-    /// Everything that draws a block — canvas, SVG export, printed sheet —
+    /// Everything that draws a block — canvas, printed sheet —
     /// needs the edge, not just the point: it is what decides which way a
     /// lead runs and which way its name reads. An unnamed legacy terminal
     /// comes back with an empty name.

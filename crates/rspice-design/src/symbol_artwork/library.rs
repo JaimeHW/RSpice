@@ -436,8 +436,8 @@ impl SymbolLibrary {
 
     /// The artwork `component` draws with and the turn it draws it at: the
     /// skin it names, else the flag of the tool a ground was imported from,
-    /// else its kind's symbol. The canvas, the SVG export and the hardcopy
-    /// all draw a part from this.
+    /// else its kind's symbol. The canvas and the hardcopy both draw a part
+    /// from this.
     pub fn component_symbol(&self, component: &Component) -> Option<(&Symbol, i32)> {
         if component.kind == ComponentType::Ground
             && component.symbol_variant.is_none()

@@ -1,20 +1,16 @@
 //! Drawing a resolved symbol.
 //!
 //! Paints a symbol document once its body and pins have been resolved against
-//! the instance that uses it, to either the canvas or an SVG export. Both
-//! paths share this so a printed sheet matches the screen.
+//! the instance that uses it.
 //!
-//! Authored text is one of the body's shapes, so it is drawn, exported and
-//! measured beside the artwork it letters rather than in a pass of its own.
+//! Authored text is one of the body's shapes, so it is drawn and measured
+//! beside the artwork it letters rather than in a pass of its own.
 //! Its anchor moves with the instance; its glyphs stay upright, because a
 //! label nobody can read is worth less than one in the wrong corner.
 
-use std::fmt::Write;
-
-use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
+use egui::{Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
 use super::lod;
-use crate::export::{SvgExportConfig, escape_xml};
 use crate::symbols::PinLeads;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
@@ -83,17 +79,6 @@ pub fn draw_resolved_symbol_with_visibility(
         parameter_labels,
         palette,
     );
-}
-
-pub(crate) fn write_resolved_symbol_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    config: &SvgExportConfig,
-) {
-    write_symbol_body_svg(svg, component, symbol, config);
-    write_symbol_pins_svg(svg, component, symbol, config);
-    write_symbol_labels_svg(svg, component, symbol, config);
 }
 
 pub fn resolved_symbol_world_bounds(
@@ -406,439 +391,6 @@ fn instance_label_align(
     super::drawing::text_align(placed.horizontal, placed.vertical)
 }
 
-fn write_symbol_body_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    config: &SvgExportConfig,
-) {
-    for shape in &symbol.document().body {
-        match shape {
-            SymbolShape::Polyline { points, closed } => {
-                if points.is_empty() {
-                    continue;
-                }
-                svg.push_str(r#"<path class="symbol" d=""#);
-                for (index, point) in points.iter().enumerate() {
-                    let (x, y) = to_svg_symbol(component, symbol, *point, config);
-                    if index == 0 {
-                        write!(svg, "M {x} {y}").unwrap();
-                    } else {
-                        write!(svg, " L {x} {y}").unwrap();
-                    }
-                }
-                if *closed {
-                    svg.push_str(" Z");
-                }
-                svg.push_str("\"/>\n");
-            }
-            SymbolShape::Circle { center, radius } => {
-                let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
-                let radius = *radius as f64 * config.units_per_world;
-                writeln!(
-                    svg,
-                    r#"<circle class="symbol" cx="{cx}" cy="{cy}" r="{radius}"/>"#
-                )
-                .unwrap();
-            }
-            SymbolShape::Arc {
-                center,
-                radius,
-                start_degrees,
-                sweep_degrees,
-            } => {
-                let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
-                write_curve_svg(svg, component, symbol, &arc, config);
-            }
-            SymbolShape::Curve(curve) => write_curve_svg(svg, component, symbol, curve, config),
-            SymbolShape::Arrow {
-                tip,
-                rotation_quarters,
-            } => {
-                write_polygon_svg(
-                    svg,
-                    component,
-                    symbol,
-                    &arrow_points(*tip, *rotation_quarters),
-                    config,
-                );
-            }
-            SymbolShape::Dot { center, radius } => {
-                let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
-                let radius = *radius as f64 * config.units_per_world;
-                writeln!(
-                    svg,
-                    r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="{fill}" stroke="none"/>"#,
-                    fill = config.symbol_color
-                )
-                .unwrap();
-            }
-            SymbolShape::Text {
-                anchor,
-                text,
-                size,
-                align,
-            } => {
-                let at = to_svg_symbol(component, symbol, *anchor, config);
-                let height = f64::from(size.height()) * config.units_per_world;
-                write_body_text_svg(svg, at, text, symbol_text_align(component, *align), height);
-            }
-        }
-    }
-}
-
-fn write_symbol_pins_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    config: &SvgExportConfig,
-) {
-    for pin in symbol.connectable_pins() {
-        let offset = symbol.effective_pin_offset(pin);
-        let (x1, y1) = to_svg(component, offset, config);
-        let (x2, y2) = to_svg(component, symbol.pin_lead_inner(pin), config);
-        writeln!(
-            svg,
-            r#"<line class="symbol" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
-        )
-        .unwrap();
-        write_direction_mark_svg(svg, (x1, y1), (x2, y2), pin.direction, config);
-        if pin.name_hidden {
-            continue;
-        }
-        let at = to_svg(component, symbol.pin_label_anchor(pin), config);
-        let hang = component.pin_name_hang(pin);
-        let align = super::drawing::text_align(hang.horizontal, hang.vertical);
-        let name = displayed_pin_name(symbol.document(), &pin.name);
-        let size = f64::from(symbol.document().pin_name_world()) * config.units_per_world;
-        write_upward_svg(svg, at, hang.upward, |svg| {
-            if symbol.document().pin_name_size.is_some() {
-                write_sized_text_svg(svg, "lettered-pin", at, &name, align, size);
-            } else {
-                write_text_svg(svg, "pin", at, &name, align, size);
-            }
-        });
-    }
-}
-
-/// The same signal-flow arrow the canvas paints on a pin's lead.
-fn write_direction_mark_svg(
-    svg: &mut String,
-    terminal: (f64, f64),
-    inner: (f64, f64),
-    direction: PortDirection,
-    config: &SvgExportConfig,
-) {
-    if !matches!(direction, PortDirection::In | PortDirection::Out) {
-        return;
-    }
-    let lead = (inner.0 - terminal.0, inner.1 - terminal.1);
-    let span = lead.0.hypot(lead.1);
-    if span <= f64::EPSILON {
-        return;
-    }
-    let inward = (lead.0 / span, lead.1 / span);
-    let length = (f64::from(MARK_LENGTH) * config.units_per_world).min(span * 0.5);
-    let base_offset = (span - length) * 0.5;
-    let at = |distance: f64| {
-        (
-            terminal.0 + inward.0 * distance,
-            terminal.1 + inward.1 * distance,
-        )
-    };
-    let (tip, base) = if direction == PortDirection::In {
-        (at(base_offset + length), at(base_offset))
-    } else {
-        (at(base_offset), at(base_offset + length))
-    };
-    let across = (
-        -inward.1 * f64::from(MARK_HALF_WIDTH) * config.units_per_world,
-        inward.0 * f64::from(MARK_HALF_WIDTH) * config.units_per_world,
-    );
-    writeln!(
-        svg,
-        r#"<polygon points="{},{} {},{} {},{}" fill="{fill}" stroke="none"/>"#,
-        tip.0,
-        tip.1,
-        base.0 + across.0,
-        base.1 + across.1,
-        base.0 - across.0,
-        base.1 - across.1,
-        fill = config.symbol_color
-    )
-    .unwrap();
-}
-
-fn write_symbol_labels_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    config: &SvgExportConfig,
-) {
-    let name_anchor = symbol.document().name_anchor;
-    let (x, y) = to_svg(component, Point::default(), config);
-    let origin = LayoutPoint::new(x as f32, y as f32);
-    let placed = |position: LabelPosition| {
-        position
-            .placed_text(origin, config.units_per_world as f32)
-            .map(|placed| {
-                let at = super::drawing::layout_pos(placed.anchor);
-                (
-                    (f64::from(at.x), f64::from(at.y)),
-                    super::drawing::text_align(placed.horizontal, placed.vertical),
-                    placed.upward,
-                )
-            })
-    };
-    if component
-        .display_mode
-        .show_name(SchematicParameterLabelVisibility::NamesAndValues)
-        && !component.name.is_empty()
-    {
-        let (at, align, upward) = placed(component.name_label_pos).unwrap_or_else(|| {
-            (
-                to_svg_symbol(component, symbol, name_anchor, config),
-                instance_label_align(component, symbol, name_anchor),
-                false,
-            )
-        });
-        write_upward_svg(svg, at, upward, |svg| {
-            write_sized_text_svg(
-                svg,
-                InstanceLabel::Name.class(),
-                at,
-                &component.name,
-                align,
-                InstanceLabel::Name.size(config)
-                    * f64::from(component.name_label_pos.size_percent())
-                    / 100.0,
-            );
-        });
-    }
-    let shown = component
-        .display_mode
-        .show_value(SchematicParameterLabelVisibility::NamesAndValues);
-    if let Some(pieces) = value_pieces(component) {
-        if shown {
-            for piece in pieces {
-                let Some(placed) = piece
-                    .position
-                    .placed_text(origin, config.units_per_world as f32)
-                else {
-                    continue;
-                };
-                if piece.text.trim().is_empty() {
-                    continue;
-                }
-                let at = super::drawing::layout_pos(placed.anchor);
-                let at = (f64::from(at.x), f64::from(at.y));
-                write_upward_svg(svg, at, placed.upward, |svg| {
-                    write_sized_text_svg(
-                        svg,
-                        InstanceLabel::Value.class(),
-                        at,
-                        &piece.text,
-                        super::drawing::text_align(placed.horizontal, placed.vertical),
-                        InstanceLabel::Value.size(config) * f64::from(piece.size_percent) / 100.0,
-                    );
-                });
-            }
-        }
-        return;
-    }
-    let value = instance_value(component);
-    let value_anchor = symbol.document().value_anchor;
-    if component
-        .display_mode
-        .show_value(SchematicParameterLabelVisibility::NamesAndValues)
-        && !value.is_empty()
-    {
-        let (at, align, upward) = placed(component.value_label_pos).unwrap_or_else(|| {
-            (
-                to_svg_symbol(component, symbol, value_anchor, config),
-                instance_label_align(component, symbol, value_anchor),
-                false,
-            )
-        });
-        write_upward_svg(svg, at, upward, |svg| {
-            InstanceLabel::Value.write(svg, at, value, align, config);
-        });
-    }
-}
-
-/// The runs `write` writes, turned a quarter counter-clockwise about `at`
-/// when they read upward, as LTspice letters a vertical window.
-pub(crate) fn write_upward_svg(
-    svg: &mut String,
-    (x, y): (f64, f64),
-    upward: bool,
-    write: impl FnOnce(&mut String),
-) {
-    if upward {
-        writeln!(svg, r#"<g transform="rotate(-90 {x} {y})">"#).unwrap();
-        write(svg);
-        svg.push_str("</g>\n");
-    } else {
-        write(svg);
-    }
-}
-
-/// Which instance label an SVG run is: the name, the value, or a port's
-/// name, which is set as a net name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InstanceLabel {
-    Name,
-    Value,
-    NetName,
-}
-
-impl InstanceLabel {
-    /// The run a value of `class` is: a port's name is set as a net name.
-    pub(crate) const fn value(class: label_layout::ValueClass) -> Self {
-        match class {
-            label_layout::ValueClass::Value => Self::Value,
-            label_layout::ValueClass::NetName => Self::NetName,
-        }
-    }
-
-    /// The label's size in SVG units: the canvas's world size times the
-    /// export's units per world unit.
-    pub(crate) fn size(self, config: &SvgExportConfig) -> f64 {
-        use super::drawing::INSTANCE_NAME_WORLD;
-        let world = match self {
-            Self::Name => INSTANCE_NAME_WORLD,
-            Self::Value => label_layout::ValueClass::Value.size_world(),
-            Self::NetName => label_layout::ValueClass::NetName.size_world(),
-        };
-        f64::from(world) * config.units_per_world
-    }
-
-    /// The style class that carries the label's type and ink.
-    pub(crate) const fn class(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Value => "value",
-            Self::NetName => "net-name",
-        }
-    }
-
-    /// The label hung off `at` as the canvas hangs it.
-    pub(crate) fn write(
-        self,
-        svg: &mut String,
-        at: (f64, f64),
-        text: &str,
-        align: Align2,
-        config: &SvgExportConfig,
-    ) {
-        write_text_svg(svg, self.class(), at, text, align, self.size(config));
-    }
-}
-
-/// Plex's ascent and descent, in em: a line box is 1.3 em, its baseline
-/// sits 1.025 em below its top, and so 0.375 em below its middle.
-const ASCENT_EM: f64 = 1.025;
-const DESCENT_EM: f64 = 0.275;
-const BASELINE_BELOW_MIDDLE_EM: f64 = 0.375;
-
-/// The baseline of a run of `size` hung off `y` the way egui's vertical
-/// alignment hangs a galley off its anchor.
-pub(crate) fn svg_text_baseline(y: f64, align: Align, size: f64) -> f64 {
-    match align {
-        Align::Min => y + ASCENT_EM * size,
-        Align::Center => y + BASELINE_BELOW_MIDDLE_EM * size,
-        Align::Max => y - DESCENT_EM * size,
-    }
-}
-
-/// A run of SVG text hung off its anchor as the canvas hangs it:
-/// `text-anchor` from the horizontal justification, and the baseline set
-/// from Plex's metrics rather than `dominant-baseline`, which renderers
-/// disagree on. The class carries the family, weight, ink and size; `size`
-/// only places the baseline.
-pub(crate) fn write_text_svg(
-    svg: &mut String,
-    class: &str,
-    (x, y): (f64, f64),
-    text: &str,
-    align: Align2,
-    size: f64,
-) {
-    writeln!(
-        svg,
-        r#"<text class="{class}" x="{x}" y="{}" text-anchor="{}">{}</text>"#,
-        svg_text_baseline(y, align.y(), size),
-        svg_text_anchor(align.x()),
-        escape_xml(text)
-    )
-    .unwrap();
-}
-
-/// A run of SVG text as [`write_text_svg`] sets it, at a size of its own
-/// rather than its class's.
-pub(crate) fn write_sized_text_svg(
-    svg: &mut String,
-    class: &str,
-    (x, y): (f64, f64),
-    text: &str,
-    align: Align2,
-    size: f64,
-) {
-    writeln!(
-        svg,
-        r#"<text class="{class}" x="{x}" y="{}" text-anchor="{}" style="font-size:{size}px">{}</text>"#,
-        svg_text_baseline(y, align.y(), size),
-        svg_text_anchor(align.x()),
-        escape_xml(text)
-    )
-    .unwrap();
-}
-
-fn write_polygon_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    points: &[Point],
-    config: &SvgExportConfig,
-) {
-    svg.push_str("<polygon points=\"");
-    for (index, point) in points.iter().enumerate() {
-        let (x, y) = to_svg_symbol(component, symbol, *point, config);
-        if index > 0 {
-            svg.push(' ');
-        }
-        write!(svg, "{x},{y}").unwrap();
-    }
-    writeln!(
-        svg,
-        r#"" fill="{fill}" stroke="none"/>"#,
-        fill = config.symbol_color
-    )
-    .unwrap();
-}
-
-/// Authored body text, whose size is part of the artwork rather than the
-/// sheet's type scale, so it carries its own.
-fn write_body_text_svg(svg: &mut String, (x, y): (f64, f64), text: &str, align: Align2, size: f64) {
-    writeln!(
-        svg,
-        r#"<text class="symbol-text" x="{x}" y="{}" font-size="{size}" text-anchor="{}">{}</text>"#,
-        svg_text_baseline(y, align.y(), size),
-        svg_text_anchor(align.x()),
-        escape_xml(text)
-    )
-    .unwrap();
-}
-
-/// SVG's spelling of a horizontal justification.
-pub(crate) const fn svg_text_anchor(align: Align) -> &'static str {
-    match align {
-        Align::Min => "start",
-        Align::Center => "middle",
-        Align::Max => "end",
-    }
-}
-
 fn to_screen(origin: Pos2, scale: f32, component: &Component, point: Point) -> Pos2 {
     let transformed = component.transform_point(point);
     origin + vec2(transformed.x as f32 * scale, transformed.y as f32 * scale)
@@ -852,23 +404,6 @@ fn to_screen_symbol(
     point: Point,
 ) -> Pos2 {
     to_screen(origin, scale, component, symbol.effective_point(point))
-}
-
-fn to_svg(component: &Component, point: Point, config: &SvgExportConfig) -> (f64, f64) {
-    let transformed = component.pos + component.transform_point(point);
-    (
-        transformed.x as f64 * config.units_per_world,
-        transformed.y as f64 * config.units_per_world,
-    )
-}
-
-fn to_svg_symbol(
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    point: Point,
-    config: &SvgExportConfig,
-) -> (f64, f64) {
-    to_svg(component, symbol.effective_point(point), config)
 }
 
 /// Signal-flow arrow on a pin's lead: an input points into the body it
@@ -972,54 +507,6 @@ pub(super) fn paint_placed_curve(
     } else {
         painter.add(Shape::line(points, stroke));
     }
-}
-
-/// Writes `curve` as a true ellipse or elliptical arc.
-fn write_curve_svg(
-    svg: &mut String,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    curve: &SymbolCurve,
-    config: &SvgExportConfig,
-) {
-    let placed = placed_curve(component, symbol, curve);
-    write_placed_curve_svg(svg, component.pos, &placed, config);
-}
-
-/// Writes `placed`, whose numbers are world units from `origin`, as a true
-/// ellipse or elliptical arc.
-pub(crate) fn write_placed_curve_svg(
-    svg: &mut String,
-    origin: Point,
-    placed: &SymbolCurve,
-    config: &SvgExportConfig,
-) {
-    let unit = config.units_per_world;
-    let page = |[x, y]: [f64; 2]| {
-        (
-            (f64::from(origin.x) + x) * unit,
-            (f64::from(origin.y) + y) * unit,
-        )
-    };
-    let (rx, ry) = (placed.radii[0] * unit, placed.radii[1] * unit);
-    if placed.is_whole() {
-        let (cx, cy) = page(placed.center);
-        writeln!(
-            svg,
-            r#"<ellipse class="symbol" cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}"/>"#
-        )
-        .unwrap();
-        return;
-    }
-    let (x0, y0) = page(placed.start_point());
-    let (x1, y1) = page(placed.end_point());
-    let large = i32::from(placed.sweep_degrees > 180.0);
-    // A curve runs clockwise on a y-down page, which is SVG's sweep flag 1.
-    writeln!(
-        svg,
-        r#"<path class="symbol" d="M {x0} {y0} A {rx} {ry} 0 {large} 1 {x1} {y1}"/>"#
-    )
-    .unwrap();
 }
 
 fn arrow_points(tip: Point, rotation_quarters: i32) -> [Point; 3] {
@@ -1143,9 +630,8 @@ fn cardinal_bounds(center: Point, radius: i32) -> [Point; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::pos2;
+    use egui::{Align, pos2};
 
-    use crate::export::SvgExportConfig;
     use rspice_design::{
         schematic::{component_type::ComponentType, rotation::Rotation},
         symbol::{SymbolDocument, SymbolPin, SymbolTextSize},
@@ -1270,35 +756,6 @@ mod tests {
         assert_eq!(bounds, (Point::new(100, 50), Point::new(150, 60)));
     }
 
-    #[test]
-    fn resolved_symbol_svg_coordinates_are_relative_to_symbol_origin() {
-        let symbol = symbol_with_shifted_origin();
-        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let mut svg = String::new();
-        let config = SvgExportConfig {
-            units_per_world: 1.0,
-            ..SvgExportConfig::default()
-        };
-
-        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
-
-        assert!(
-            svg.contains(r#"<path class="symbol" d="M 100 50 L 130 60"/>"#),
-            "svg must place authored body points relative to the symbol origin: {svg}"
-        );
-        // The terminal stands 20 off the body's right edge, and the lead
-        // spans all of it: a pin that stops short of the artwork reads as an
-        // unconnected pin.
-        assert!(
-            svg.contains(r#"<line class="symbol" x1="150" y1="50" x2="130" y2="50"/>"#),
-            "svg must run authored pin leads to the body, relative to the symbol origin: {svg}"
-        );
-        assert!(
-            svg.contains(r#"text-anchor="end""#),
-            "a right-edge pin name must read inward from the body edge: {svg}"
-        );
-    }
-
     /// A turned or mirrored cell's name and value stay upright and are
     /// justified to grow away from the body, as the design's table for the
     /// generated symbol gives them (name above its left corner, value below
@@ -1374,47 +831,6 @@ mod tests {
         }
     }
 
-    /// The SVG hangs an instance label as the canvas does: the justification
-    /// becomes `text-anchor`, and the baseline is set from the Plex metrics
-    /// in place of `dominant-baseline`.
-    #[test]
-    fn a_turned_cell_exports_its_labels_justified_like_the_canvas() {
-        let symbol = ResolvedCellSymbol::from_generated(&[
-            port("in", PortDirection::In),
-            port("out", PortDirection::Out),
-        ]);
-        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
-        component.name = "X1".to_owned();
-        component.value = "ota".to_owned();
-        component.rotation = Rotation::R90;
-        let mut svg = String::new();
-        let config = SvgExportConfig {
-            units_per_world: 1.0,
-            ..SvgExportConfig::default()
-        };
-        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
-        let line = |text: &str| {
-            svg.lines()
-                .find(|line| line.ends_with(&format!(">{text}</text>")))
-                .unwrap_or_else(|| panic!("no {text} in {svg}"))
-                .to_owned()
-        };
-        let (name_x, name_y) =
-            to_svg_symbol(&component, &symbol, symbol.document().name_anchor, &config);
-        let name = line("X1");
-        assert!(name.contains(r#"text-anchor="start""#), "{name}");
-        assert!(
-            name.contains(&format!(r#"x="{name_x}" y="{}""#, name_y + 1.025 * 10.0)),
-            "the name hangs below its anchor by the Plex ascent: {name}"
-        );
-        // The type is the page's name and value classes (C-10).
-        assert!(name.starts_with(r#"<text class="name""#), "{name}");
-        let value = line("ota");
-        assert!(value.contains(r#"text-anchor="end""#), "{value}");
-        assert!(value.starts_with(r#"<text class="value""#), "{value}");
-        assert!(!name.contains("dominant-baseline"), "{name}");
-    }
-
     /// A cell pin carries no solder dot, on the canvas or in the SVG: a
     /// filled dot means a junction of three or more conductors, and an open
     /// pin takes the scene's hollow open-pin mark instead.
@@ -1422,18 +838,6 @@ mod tests {
     fn a_cell_pin_has_no_solder_dot() {
         let symbol = symbol_with_shifted_origin();
         let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let mut svg = String::new();
-        write_resolved_symbol_svg(
-            &mut svg,
-            &component,
-            &symbol,
-            &SvgExportConfig {
-                units_per_world: 1.0,
-                ..SvgExportConfig::default()
-            },
-        );
-        assert!(!svg.contains("<circle"), "the SVG pin has a dot: {svg}");
-
         let painter = Painter::new(
             egui::Context::default(),
             egui::LayerId::background(),
@@ -1461,7 +865,7 @@ mod tests {
     /// A name its drawing lettered on its side reads upward on the canvas and
     /// in the SVG, about the same anchor.
     #[test]
-    fn a_pin_name_on_its_side_reads_upward_on_canvas_and_in_svg() {
+    fn a_pin_name_on_its_side_reads_upward_on_canvas() {
         let mut pin = SymbolPin::new("REF", PortDirection::In, Some(Point::new(0, -30)));
         pin.name_at = Some(rspice_design::symbol::PinNamePlacement {
             offset: Point::new(0, 5),
@@ -1481,23 +885,6 @@ mod tests {
             &[port("REF", PortDirection::In)],
         );
         let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 100));
-        let mut svg = String::new();
-        write_resolved_symbol_svg(
-            &mut svg,
-            &component,
-            &symbol,
-            &SvgExportConfig {
-                units_per_world: 1.0,
-                ..SvgExportConfig::default()
-            },
-        );
-        assert!(
-            svg.contains(r#"transform="rotate(-90 100 75)""#),
-            "turned about its anchor: {svg}"
-        );
-        assert!(svg.contains(r#"text-anchor="end""#), "{svg}");
-        assert!(svg.contains("font-size:15px"), "{svg}");
-
         let ctx = egui::Context::default();
         rspice_ui_kit::Theme::default().apply(&ctx);
         let mut angles = Vec::new();
@@ -1549,19 +936,6 @@ mod tests {
         let component = Component::new(1, ComponentType::CellInstance, Point::origin());
         for hidden in [false, true] {
             let symbol = named(hidden);
-            let mut svg = String::new();
-            write_resolved_symbol_svg(
-                &mut svg,
-                &component,
-                &symbol,
-                &SvgExportConfig {
-                    units_per_world: 1.0,
-                    ..SvgExportConfig::default()
-                },
-            );
-            assert_eq!(svg.contains(r#"class="pin""#), !hidden, "{svg}");
-            assert!(svg.contains("<line"), "the lead is drawn: {svg}");
-
             let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
                 draw_symbol_pins(
                     &ui.painter().clone(),
@@ -1780,37 +1154,6 @@ mod tests {
                 "the number leads the run: {phrase:?} against {number:?}"
             );
         }
-    }
-
-    /// T14: a mirrored instance exports one `<text>` at the mirrored anchor,
-    /// hanging off the other side of it.
-    #[test]
-    fn mirrored_instance_svg_moves_the_text_anchor_and_flips_its_side() {
-        let symbol = lettered_symbol(Point::new(20, 10), SymbolTextAlign::Left);
-        let mut component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        component.mirror_h = true;
-        let mut svg = String::new();
-        let config = SvgExportConfig {
-            units_per_world: 1.0,
-            ..SvgExportConfig::default()
-        };
-
-        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
-
-        assert_eq!(
-            svg.matches("<text").count(),
-            1,
-            "the body carries exactly one text run: {svg}"
-        );
-        assert!(
-            svg.contains(
-                // C-10: the baseline is set from Plex's metrics, 0.375 em
-                // below the anchor a centred run hangs off, as every page
-                // label's is, not left to `dominant-baseline`.
-                r#"<text class="symbol-text" x="80" y="63.375" font-size="9" text-anchor="end">AMP</text>"#
-            ),
-            "the run must export at the mirrored anchor, hanging off the other side: {svg}"
-        );
     }
 
     #[test]

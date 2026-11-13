@@ -14,8 +14,8 @@
 //! columns meeting, and tall enough to keep the busier edge on the pin
 //! pitch. Everything a renderer needs to draw one — body outline, which edge
 //! a pin belongs to, where its lead ends, where and whether its name goes —
-//! is published here, so the canvas, the SVG export, and the printed sheet
-//! cannot drift apart.
+//! is published here, so the canvas and the printed sheet cannot drift
+//! apart.
 
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
@@ -216,8 +216,8 @@ impl GeneratedSymbol {
     }
 
     /// The body as polylines, each with whether it closes. Every renderer
-    /// draws exactly these, so the canvas, the SVG export and the printed
-    /// sheet draw the same outline.
+    /// draws exactly these, so the canvas and the printed sheet draw the same
+    /// outline.
     pub fn body_outline(&self) -> Vec<(Vec<Point>, bool)> {
         let (min, max) = self.body_extent;
         let mut outline = match self.body {

@@ -1,7 +1,7 @@
 //! The value text an instance shows.
 //!
-//! Concise, descriptive source labels for the canvas, the SVG export and the
-//! printed page alike, without changing netlist serialization semantics.
+//! Concise, descriptive source labels for the canvas and the printed page
+//! alike, without changing netlist serialization semantics.
 
 use super::{component::Component, component_type::ComponentType, label_position::ValuePiece};
 use std::borrow::Cow;

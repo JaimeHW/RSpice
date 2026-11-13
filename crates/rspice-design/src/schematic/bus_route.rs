@@ -1,7 +1,7 @@
 //! Shared presentation geometry for buses and typed bus taps.
 //!
-//! The canvas, hit testing, selection, the SVG export and the printed page
-//! all consume this one tap route, so the visible angled breakout can never
+//! The canvas, hit testing, selection and the printed page all consume
+//! this one tap route, so the visible angled breakout can never
 //! disagree with interaction geometry or with paper. Electrical connectivity
 //! remains defined only by the durable `bus_point` and `connection_point`
 //! endpoints.
