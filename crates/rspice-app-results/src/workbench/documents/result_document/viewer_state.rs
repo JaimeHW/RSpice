@@ -390,6 +390,7 @@ impl ResultsState {
                                 .ok()
                         }),
                         follow_sweep_view: strip.follow_view,
+                        log_abscissa: strip.log_x,
                     })
                     .collect()
             },

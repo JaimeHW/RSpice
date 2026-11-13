@@ -168,9 +168,9 @@ fn strip_top(painted: &[(String, egui::Rect)], subtitle: &str) -> f32 {
 }
 
 /// The time strip's pane header offers the strip's signals; choosing V(a)
-/// adds a strip after it, headed "vs V(a)", whose X axis says how the two
-/// were paired. That axis label chooses again, choosing what is already
-/// shown makes nothing twice, and the strip's close button takes it away.
+/// adds a strip after it, headed "vs V(a)", whose ruler names V(a) and its
+/// unit. That caption chooses again, choosing what is already shown makes
+/// nothing twice, and the strip's close button takes it away.
 #[test]
 fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() {
     let mut state = lissajous_host();
@@ -200,9 +200,9 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
     let top = strip_top(&painted, "vs V(a)");
     let x_label = painted
         .iter()
-        .find(|(text, rect)| text.starts_with("V(a) \u{b7} at each t sample") && rect.top() > top)
+        .find(|(text, rect)| text == "V(a) \u{b7} V" && rect.top() > top)
         .map(|(_, rect)| rect.center())
-        .unwrap_or_else(|| panic!("the X axis names the abscissa and the pairing: {painted:?}"));
+        .unwrap_or_else(|| panic!("the ruler names the abscissa and its unit: {painted:?}"));
 
     // The pane's menu again, on V(a): the strip already shows it.
     let unit = volts_unit_tag(&ctx, &mut state);
@@ -215,7 +215,7 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
         "a plot shown once is not made twice"
     );
 
-    // The X axis label chooses what this strip is plotted against.
+    // The ruler's caption chooses what this strip is plotted against.
     click(&ctx, &mut state, x_label, egui::PointerButton::Primary);
     let item = find(&ctx, &mut state, "V(b)");
     click(&ctx, &mut state, item, egui::PointerButton::Primary);
@@ -240,10 +240,10 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
 }
 
 /// A strip against a signal has exactly one horizontal axis, the signal's:
-/// one row of ticks under its plot and one axis label, and no time ruler and
-/// no overview under it.
+/// one ruler under its plot, captioned with the abscissa, and no overview
+/// and no time axis under it.
 #[test]
-fn a_strip_against_a_signal_draws_one_horizontal_axis_and_no_ruler() {
+fn a_strip_against_a_signal_draws_one_horizontal_axis_on_a_ruler_without_an_overview() {
     let mut state = lissajous_host();
     open_strip(&mut state, "V", signal("V(a)"));
     let ctx = theme_context();
@@ -253,19 +253,31 @@ fn a_strip_against_a_signal_draws_one_horizontal_axis_and_no_ruler() {
         .iter()
         .filter(|(_, rect)| rect.top() > top)
         .collect();
-    // The ruler's own words stand under the time strip alone.
-    for word in ["FULL", "LIN"] {
-        assert_eq!(
-            painted.iter().filter(|(text, _)| text == word).count(),
-            1,
-            "{word}: {painted:?}"
-        );
-        assert!(
-            !below.iter().any(|(text, _)| text == word),
-            "no ruler under the strip: {below:?}"
-        );
-    }
+    let count = |texts: &[&(String, egui::Rect)], word: &str| {
+        texts.iter().filter(|(text, _)| text == word).count()
+    };
+    // The overview's word stands under the time strip alone; each ruler has
+    // its scale toggle, which reads "log" as the pane's Y toggle does and
+    // never states the linear default.
+    let all: Vec<&(String, egui::Rect)> = painted.iter().collect();
+    assert_eq!(count(&all, "FULL"), 1, "{painted:?}");
+    assert_eq!(
+        count(&below, "FULL"),
+        0,
+        "no overview under the strip: {below:?}"
+    );
+    assert_eq!(
+        count(&below, "log"),
+        2,
+        "the pane's Y toggle and the ruler's X toggle: {below:?}"
+    );
+    assert_eq!(count(&all, "LIN") + count(&all, "LOG"), 0, "{painted:?}");
     assert!(!below.iter().any(|(text, _)| text.starts_with("TIME")));
+    assert_eq!(
+        count(&below, "V(a) \u{b7} V"),
+        1,
+        "one horizontal axis caption: {below:?}"
+    );
     // Ticks in one row are a horizontal axis's; the Y axis' stand one above
     // another.
     let mut rows: std::collections::BTreeMap<i32, usize> = std::collections::BTreeMap::new();
@@ -274,13 +286,173 @@ fn a_strip_against_a_signal_draws_one_horizontal_axis_and_no_ruler() {
     }
     let axes: Vec<_> = rows.iter().filter(|(_, count)| **count >= 3).collect();
     assert_eq!(axes.len(), 1, "one row of horizontal ticks: {below:?}");
-    assert_eq!(
-        below
+}
+
+/// The strip against a signal stands on the ruler the time strip stands on:
+/// the same band in the same ink, one tick face, size, ink and row, and its
+/// caption at the same place in the gutter, in the same face. Its range is
+/// tight to the curve, as the time strip's is to its record: V(a) spans
+/// ±1 V from the plot's left edge to its right, with no margin past either.
+#[test]
+fn both_strips_stand_on_one_ruler() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    frame(&ctx, &mut state, Vec::new());
+    let shapes = frame(&ctx, &mut state, Vec::new());
+    let painted = styled_texts(&shapes);
+    let color = rspice_ui_kit::tokens::Tokens::get(&ctx).color;
+    let bands = filled_rects(&shapes, color.bg_panel);
+    let ruler = |caption: &str| {
+        let (_, rect, font, ink) = painted
             .iter()
-            .filter(|(text, _)| text.starts_with("V(a) \u{b7}"))
-            .count(),
-        1,
-        "one horizontal axis label: {below:?}"
+            .find(|(text, ..)| text == caption)
+            .cloned()
+            .unwrap_or_else(|| panic!("a ruler's caption reads {caption:?}: {painted:?}"));
+        // The ruler's band is the narrowest panel fill under its caption.
+        let band = bands
+            .iter()
+            .copied()
+            .filter(|band| band.contains(rect.center()))
+            .min_by(|a, b| a.height().total_cmp(&b.height()))
+            .unwrap_or_else(|| panic!("{caption:?} stands on a band in panel ink"));
+        // The tick row: the texts of the band's top row right of the gutter.
+        let ticks: Vec<(String, egui::Rect, egui::FontId, egui::Color32)> = painted
+            .iter()
+            .filter(|(_, tick, ..)| {
+                band.contains(tick.center())
+                    && tick.left() > rect.right()
+                    && (tick.top() - band.top()) < 10.0
+            })
+            .cloned()
+            .collect();
+        (rect, font, ink, band, ticks)
+    };
+    let (time_caption, time_font, time_ink, time_band, time_ticks) = ruler("TIME \u{b7} s");
+    let (xy_caption, xy_font, xy_ink, xy_band, xy_ticks) = ruler("V(a) \u{b7} V");
+    assert_ne!(time_band, xy_band, "each strip has a ruler of its own");
+    assert_eq!(
+        time_caption.right(),
+        xy_caption.right(),
+        "both captions end on the gutter's rule"
+    );
+    assert_eq!(
+        time_caption.top() - time_band.top(),
+        xy_caption.top() - xy_band.top(),
+        "both captions stand at one height on their bands"
+    );
+    assert_eq!((&time_font, time_ink), (&xy_font, xy_ink));
+    assert!(
+        time_ticks.len() >= 3 && xy_ticks.len() >= 3,
+        "{time_ticks:?} {xy_ticks:?}"
+    );
+    let row = |ticks: &[(String, egui::Rect, egui::FontId, egui::Color32)], band: egui::Rect| {
+        ticks
+            .iter()
+            .map(|(_, rect, font, ink)| (rect.top() - band.top(), font.clone(), *ink))
+            .collect::<Vec<_>>()
+    };
+    let expected = row(&time_ticks, time_band)[0].clone();
+    for tick in row(&time_ticks, time_band)
+        .into_iter()
+        .chain(row(&xy_ticks, xy_band))
+    {
+        assert_eq!(tick, expected, "one tick face, size, ink and row");
+    }
+    // The time ruler's first tick, t = 0, is held 2 px inside the plot's
+    // left edge; the plot's right edge is the shared right margin in.
+    let left = time_ticks
+        .iter()
+        .find(|(text, ..)| text == "0")
+        .map(|(_, rect, ..)| rect.left() - 2.0)
+        .expect("the time ruler reads 0 at its start");
+    let right = xy_band.right() - rspice_results_ui::waves::navigation::WAVE_SHARED_RIGHT_MARGIN;
+    // Every label but the end ones, which may be held inside the plot,
+    // stands centred on its value.
+    for (text, rect, ..) in &xy_ticks[1..xy_ticks.len() - 1] {
+        let value = tick(text).unwrap_or_else(|| panic!("{text:?} is a tick value"));
+        let tight = left + ((value + 1.0) / 2.0) as f32 * (right - left);
+        assert!(
+            (rect.center().x - tight).abs() < 1.5,
+            "{value} V stands at {}, a tight ±1 V range puts it at {tight}",
+            rect.center().x
+        );
+    }
+}
+
+/// The centre of the X scale toggle of the strip whose header is at `top`:
+/// the lowest "log" under it, below the pane header's Y toggle.
+fn x_toggle(painted: &[(String, egui::Rect)], top: f32) -> Option<egui::Pos2> {
+    painted
+        .iter()
+        .filter(|(text, rect)| text == "log" && rect.top() > top)
+        .max_by(|(_, a), (_, b)| a.top().total_cmp(&b.top()))
+        .map(|(_, rect)| rect.center())
+}
+
+/// The ruler's scale toggle reads the abscissa over decades and back; a
+/// signed abscissa refuses it. The strip keeps its choice.
+#[test]
+fn the_rulers_scale_toggle_reads_the_abscissa_over_decades() {
+    // A diode's current against its voltage, which never goes negative.
+    let time: Vec<f64> = (0..=200).map(|step| f64::from(step) * 1.0e-6).collect();
+    let volts: Vec<f64> = time.iter().map(|t| 1.0e-3 + 0.7 * t / 200.0e-6).collect();
+    let amps: Vec<f64> = volts
+        .iter()
+        .map(|v| 1.0e-14 * ((v / 0.025).exp() - 1.0))
+        .collect();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(d)", time.clone(), volts, "#fff").with_unit("V"),
+            RetainedTrace::new("I(D1)", time, amps, "#fff").with_unit("A"),
+        ]),
+    );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("legacy provenance");
+    run.restore_lifecycle(crate::state::SimulationRunLifecycle::LegacyUnknown, 0.0)
+        .expect("legacy lifecycle");
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    open_strip(&mut state, "A", signal("V(d)"));
+    let ctx = theme_context();
+    let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(d)");
+    let toggle = |painted: &[(String, egui::Rect)]| x_toggle(painted, top);
+    let off = toggle(&painted).expect("the strip's ruler has its log toggle");
+    click(&ctx, &mut state, off, egui::PointerButton::Primary);
+    assert!(
+        strips(&state)[0].log_x,
+        "the toggle reads V(d) over decades"
+    );
+    let painted = painted_texts(&ctx, &mut state);
+    assert!(
+        painted.iter().all(|(text, _)| text != "LIN" && text != "LOG"),
+        "{painted:?}"
+    );
+    assert!(
+        painted
+            .iter()
+            .any(|(text, rect)| rect.top() > top
+                && (text == "1m" || text == "10m" || text == "100m")),
+        "decade ticks along the abscissa: {painted:?}"
+    );
+    let on = toggle(&painted).expect("the lit toggle still reads log");
+    click(&ctx, &mut state, on, egui::PointerButton::Primary);
+    assert!(!strips(&state)[0].log_x);
+
+    // The Lissajous figure's V(a) swings negative, so its ruler stays linear.
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(a)");
+    let off = x_toggle(&painted, top).expect("the strip's ruler has its log toggle");
+    click(&ctx, &mut state, off, egui::PointerButton::Primary);
+    assert!(
+        !strips(&state)[0].log_x,
+        "a signed abscissa refuses decades"
     );
 }
 
@@ -683,7 +855,15 @@ fn a_large_family_against_a_signal_is_drawn_as_faint_hairlines() {
         .find(|(held, at)| *held == 0.0 && (at.y - bottom).abs() >= 1.0)
         .map(|(_, at)| at.y)
         .expect("the Y axis ticks 0");
-    let centre = egui::pos2(on_x(0.0) + 2.0 * (on_x(0.5) - on_x(0.0)), zero_y);
+    // The X row's first tick past the origin gives its pixels per volt.
+    let (step, at) = ticks
+        .iter()
+        .filter(|(held, at)| *held > 0.0 && (at.y - bottom).abs() < 1.0)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .copied()
+        .unwrap_or_else(|| panic!("the X axis ticks past 0: {ticks:?}"));
+    let per_volt = (at.x - on_x(0.0)) / step as f32;
+    let centre = egui::pos2(on_x(0.0) + per_volt, zero_y);
     let (arrows, ..) = draw(100, Some(centre));
     assert!(arrows > 0, "the member pointed at carries its arrows");
     let (arrows, (hairlines, stroked), _) = draw(50, None);
@@ -748,6 +928,7 @@ fn the_project_keeps_a_strip_against_a_signal_and_its_span() {
                 rspice_results::visualization_document::AxisRange::new(0.25e-3, 0.75e-3).unwrap()
             ),
             follow_sweep_view: false,
+            log_abscissa: false,
         }]
     );
     state.results.results.session.xy_strips.clear();
@@ -789,6 +970,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
                     plot.abscissa.text().to_owned(),
                     plot.sweep_range.map(|range| (range.minimum, range.maximum)),
                     plot.follow_sweep_view,
+                    plot.log_abscissa,
                 )
             })
             .collect::<Vec<_>>()
@@ -799,6 +981,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
             "V".to_owned(),
             "V(a)".to_owned(),
             Some((0.0, 0.5e-3)),
+            false,
             false
         )]
     );
@@ -821,6 +1004,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
         strip.abscissa = signal("V(b)");
         strip.sweep_range = Some((0.5e-3, 1.0e-3));
         strip.follow_view = true;
+        strip.log_x = true;
     }
     capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
     assert_eq!(
@@ -829,6 +1013,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
             "V".to_owned(),
             "V(b)".to_owned(),
             Some((0.5e-3, 1.0e-3)),
+            true,
             true
         )]
     );
@@ -847,6 +1032,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
         .unwrap();
     assert_eq!(reloaded.xy_plots()[0].abscissa, signal("V(b)"));
     assert!(reloaded.xy_plots()[0].follow_sweep_view);
+    assert!(reloaded.xy_plots()[0].log_abscissa);
 
     state.results.results.session.leave_persistent_document();
     let held = |state: &ResultsTestHost| {
@@ -857,20 +1043,21 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
                     strip.abscissa.text().to_owned(),
                     strip.sweep_range,
                     strip.follow_view,
+                    strip.log_x,
                 )
             })
             .collect::<Vec<_>>()
     };
     assert_eq!(
         held(&state),
-        [("V(a)".to_owned(), Some((0.0, 0.5e-3)), false)],
+        [("V(a)".to_owned(), Some((0.0, 0.5e-3)), false, false)],
         "the quick view has its strip back"
     );
     // Shown again, the view draws its own.
     document_frame(&mut state, document_id);
     assert_eq!(
         held(&state),
-        [("V(b)".to_owned(), Some((0.5e-3, 1.0e-3)), true)]
+        [("V(b)".to_owned(), Some((0.5e-3, 1.0e-3)), true, true)]
     );
     // The strip closed inside the view, the view forgets it.
     project_pane_presentation(&mut state.results_parts(), &pane, viewer)
@@ -974,16 +1161,30 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
         painted.iter().any(|(text, _)| text == "vs V(D)"),
         "the strip header reads \"vs V(D)\": {painted:?}"
     );
-    assert!(
-        painted
-            .iter()
-            .any(|(text, _)| text.starts_with("V(D) \u{b7} at each ")),
-        "the X axis caption reads \"V(D) \u{b7} at each … sample\": {painted:?}"
-    );
+    let caption = painted
+        .iter()
+        .find(|(text, _)| text == "V(D) \u{b7} V")
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the ruler's caption reads \"V(D) \u{b7} V\": {painted:?}"));
     assert!(
         !painted.iter().any(|(text, _)| text.starts_with("vs V(D) [")
             || text.starts_with("V(D) [VG=1.5; point 1] \u{b7}")),
         "neither names the member column it was chosen from: {painted:?}"
+    );
+    // How the curves were paired is the ruler's tooltip: at each sample of
+    // the sweep of VD.
+    ctx.all_styles_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let band = caption.center() + egui::vec2(300.0, 0.0);
+    frame(&ctx, &mut state, vec![egui::Event::PointerMoved(band)]);
+    let painted = painted_texts(&ctx, &mut state);
+    assert!(
+        painted
+            .iter()
+            .any(|(text, _)| text.starts_with("V(D) \u{b7} at each VD sample")),
+        "the ruler's tooltip says how the curves were paired: {painted:?}"
     );
 }
 

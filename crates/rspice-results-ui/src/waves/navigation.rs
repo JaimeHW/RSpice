@@ -34,6 +34,10 @@ const SHARED_X_MIN_WINDOW: f64 = 1.0 / 200.0;
 /// curve would not reach the reader as anything but the same grey band.
 const SHARED_X_OVERVIEW_POINTS: usize = 160;
 pub const WAVE_SHARED_RIGHT_MARGIN: f32 = 14.0;
+/// The height of a ruler with no overview track: its row of ticks and its
+/// row of cursor boxes, with the caption and the scale toggle in the gutter
+/// beside them.
+pub const WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW: f32 = SHARED_X_LANE_TOP;
 
 pub fn model_x_axis(
     model: &StripModel,
@@ -121,10 +125,6 @@ enum SharedXDrag {
     CursorB,
 }
 
-fn shared_x_drag_id(model: &StripModel) -> egui::Id {
-    egui::Id::new(("rspice.results.shared-x-drag", model.analysis_key))
-}
-
 /// The host supplies an already qualified source, viewport and cursor domain.
 pub struct SharedXAxis {
     pub full_domain: (f64, f64),
@@ -161,6 +161,41 @@ pub struct SharedXAxisResponse {
     pub extrema_samples_read: usize,
     /// The reader switched the axis between linear and logarithmic.
     pub scale_toggled: bool,
+    /// Where the gutter caption stands, for a host that offers a choice on
+    /// it.
+    pub caption_rect: Option<egui::Rect>,
+}
+
+/// The record a ruler's overview track mirrors: the strip, whose first
+/// visible curve the track draws in miniature, and the cache that miniature
+/// is read from.
+pub(crate) struct Overview<'a> {
+    pub derived: &'a mut DerivedSeries,
+    pub model: &'a StripModel,
+}
+
+/// What a ruler reads and how it names itself. A strip drawn against time
+/// and a strip drawn against a signal stand on the same ruler: one band, one
+/// row of ticks, one caption in the gutter.
+pub(crate) struct Ruler<'a> {
+    /// Where the ruler keeps the state of its gestures.
+    pub id: egui::Id,
+    /// The ticks of the range the plots above it show.
+    pub axis: Axis,
+    pub scale: XScale,
+    /// The axis' name, as its accessible label reads it.
+    pub name: &'a str,
+    /// The words in the gutter beside the tick values: the quantity, and its
+    /// unit.
+    pub caption: String,
+    /// A cursor's X as its box on the ruler reads it.
+    pub cursor_text: &'a dyn Fn(f64) -> String,
+    /// The record its overview track mirrors. A ruler with none has no
+    /// record to scroll: it draws no track and takes no gesture that would
+    /// move along one.
+    pub overview: Option<Overview<'a>>,
+    /// What the ruler's tooltip says in place of its overview's gestures.
+    pub hover: Option<String>,
 }
 
 /// Draw the shared axis and overview, resolving its pointer and keyboard gestures.
@@ -170,7 +205,40 @@ pub fn show_shared_x_axis(
     model: &StripModel,
     input: SharedXAxis,
 ) -> SharedXAxisResponse {
+    let (significant_digits, quantity_policy) = (input.significant_digits, input.quantity_policy);
+    let cursor_text = |value: f64| model.format_x(value, significant_digits, quantity_policy);
+    show_ruler(
+        ui,
+        Ruler {
+            id: egui::Id::new(("rspice.results.shared-x", model.analysis_key)),
+            axis: model_x_axis(model, input.current.0, input.current.1, quantity_policy),
+            scale: model.x_scale,
+            name: model.x_label(),
+            caption: shared_x_gutter_label(model.x_label(), &model.x_unit),
+            cursor_text: &cursor_text,
+            overview: Some(Overview { derived, model }),
+            hover: None,
+        },
+        input,
+    )
+}
+
+/// Draw a ruler: the ticks of the range shown, the cursors' boxes, the
+/// caption and the scale toggle in the gutter and, when it has a record to
+/// scroll, the overview track under them. Resolves its pointer and keyboard
+/// gestures.
+pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> SharedXAxisResponse {
     let mut output = SharedXAxisResponse::default();
+    let Ruler {
+        id,
+        axis,
+        scale,
+        name,
+        caption,
+        cursor_text,
+        overview,
+        hover,
+    } = ruler;
     let SharedXAxis {
         full_domain,
         current,
@@ -181,9 +249,9 @@ pub fn show_shared_x_axis(
     if height <= 1.0 {
         return output;
     }
+    let has_overview = overview.is_some();
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let axis = model_x_axis(model, current.0, current.1, input.quantity_policy);
     let cursor_summary = cursor_values.map_or_else(
         || "No A/B cursors on this axis".to_owned(),
         |cursors| {
@@ -198,15 +266,25 @@ pub fn show_shared_x_axis(
             format!("Cursor A {a}; cursor B {b}")
         },
     );
-    let accessibility_label = format!(
-        "Shared {} axis. Current range {} to {}. Full retained range {} to {}. {}. Drag the viewport window to pan or either of its edge handles to resize it, click the overview to recenter, use the wheel to zoom at the pointer, drag A or B to move a cursor, and press F to fit.",
-        model.x_label(),
-        axis.format_display_value(current.0),
-        axis.format_display_value(current.1),
-        axis.format_display_value(full_domain.0),
-        axis.format_display_value(full_domain.1),
-        cursor_summary,
-    );
+    let accessibility_label = if has_overview {
+        format!(
+            "Shared {} axis. Current range {} to {}. Full retained range {} to {}. {}. Drag the viewport window to pan or either of its edge handles to resize it, click the overview to recenter, use the wheel to zoom at the pointer, drag A or B to move a cursor, and press F to fit.",
+            name,
+            axis.format_display_value(current.0),
+            axis.format_display_value(current.1),
+            axis.format_display_value(full_domain.0),
+            axis.format_display_value(full_domain.1),
+            cursor_summary,
+        )
+    } else {
+        format!(
+            "{} axis. Current range {} to {}. {}. Press plus or minus to zoom, the arrow keys to pan, and F to fit.",
+            name,
+            axis.format_display_value(current.0),
+            axis.format_display_value(current.1),
+            cursor_summary,
+        )
+    };
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click_and_drag(),
@@ -232,20 +310,29 @@ pub fn show_shared_x_axis(
     // the panes show. Both rows name themselves into the panes' own left
     // gutter, which states the thing two stacked X scales otherwise hide:
     // the ticks are the zoomed viewport, the bar below is the full sweep.
-    let track = egui::Rect::from_min_max(
-        egui::pos2(plot_left, rect.top() + SHARED_X_LANE_TOP),
-        egui::pos2(
-            plot_right,
-            (rect.top() + SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT).min(rect.bottom()),
-        ),
-    );
+    //
+    // A ruler with no record to scroll has an empty track, which every
+    // overview gesture and the track's drawing pass over.
+    let track = if has_overview {
+        egui::Rect::from_min_max(
+            egui::pos2(plot_left, rect.top() + SHARED_X_LANE_TOP),
+            egui::pos2(
+                plot_right,
+                (rect.top() + SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT).min(rect.bottom()),
+            ),
+        )
+    } else {
+        egui::Rect::from_min_max(
+            egui::pos2(plot_left, rect.bottom()),
+            egui::pos2(plot_left, rect.bottom()),
+        )
+    };
     // The lane band owns the overview gestures and everything above it
     // belongs to the flags, so a flag grab never fights a resize handle.
     let lane_band = egui::Rangef::new(track.top() - 4.0, track.bottom() + 4.0);
     // Whether the panes show less than the whole record: the thumb takes the
     // accent and the cursors get their notches only then.
-    let (shown_start, shown_end) =
-        shared_axis_viewport_fraction(model.x_scale, full_domain, current);
+    let (shown_start, shown_end) = shared_axis_viewport_fraction(scale, full_domain, current);
     let zoomed = shown_start > 1.0e-9 || shown_end < 1.0 - 1.0e-9;
     let mut viewport = egui::Rect::NOTHING;
     let mut handle_centres = [f32::NAN; 2];
@@ -257,10 +344,11 @@ pub fn show_shared_x_axis(
             egui::Stroke::new(1.0, c.border),
             egui::StrokeKind::Inside,
         );
-        if let Some(trace) = model
-            .traces
-            .iter()
-            .find(|trace| trace.visible && !trace.overlay)
+        if let Some(Overview { derived, model }) = overview
+            && let Some(trace) = model
+                .traces
+                .iter()
+                .find(|trace| trace.visible && !trace.overlay)
         {
             // The lane's vertical fit is the trace's own finite extremes,
             // which the pane axis above it already holds under this very key.
@@ -291,9 +379,9 @@ pub fn show_shared_x_axis(
                     .into_iter()
                     // t = 0 has no place on a logarithmic axis: the miniature
                     // starts at the first positive sample, as the panes do.
-                    .filter(|(x, _)| model.x_scale == XScale::Linear || *x > 0.0)
+                    .filter(|(x, _)| scale == XScale::Linear || *x > 0.0)
                     .filter_map(|(x, y)| {
-                        let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
+                        let fraction = scale.normalize(x, full_domain.0, full_domain.1);
                         let point = egui::pos2(
                             track.left() + track.width() * fraction as f32,
                             track.bottom()
@@ -374,7 +462,7 @@ pub fn show_shared_x_axis(
     let flag_centre = |value: f64| {
         // Flags track the viewport like the pane cursor lines above them,
         // so a cursor zoomed past simply leaves the strip.
-        let fraction = model.x_scale.normalize(value, current.0, current.1);
+        let fraction = scale.normalize(value, current.0, current.1);
         (fraction.is_finite() && (-0.001..=1.001).contains(&fraction))
             .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
     };
@@ -390,7 +478,7 @@ pub fn show_shared_x_axis(
         .into_iter()
         .filter_map(|(drag, letter, value, color)| {
             let px = flag_centre(value?)?;
-            let text = model.format_x(value?, input.significant_digits, input.quantity_policy);
+            let text = cursor_text(value?);
             Some((drag, letter, px, text, color))
         })
         .collect();
@@ -460,7 +548,7 @@ pub fn show_shared_x_axis(
         painter.galley(egui::pos2(plot_left, label_top), galley, c.text);
     }
     for (value, label) in &axis.ticks {
-        let fraction = model.x_scale.normalize(*value, axis.min, axis.max);
+        let fraction = scale.normalize(*value, axis.min, axis.max);
         if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
             continue;
         }
@@ -489,26 +577,28 @@ pub fn show_shared_x_axis(
         }
     }
     let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    painter.text(
+    output.caption_rect = Some(painter.text(
         egui::pos2(plot_left - 8.0, label_top + font.size * 0.5),
         egui::Align2::RIGHT_CENTER,
-        shared_x_gutter_label(model.x_label(), &model.x_unit),
+        caption,
         gutter_font.clone(),
         c.text_faint,
-    );
-    painter.text(
-        egui::pos2(plot_left - 8.0, track.center().y),
-        egui::Align2::RIGHT_CENTER,
-        "FULL",
-        gutter_font,
-        c.text_faint,
-    );
+    ));
+    if has_overview {
+        painter.text(
+            egui::pos2(plot_left - 8.0, track.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "FULL",
+            gutter_font,
+            c.text_faint,
+        );
+    }
     // The scale toggle reads as each pane's Y toggle does: "log", lit while
     // the axis is logarithmic, in the chip's fills. It heads the gutter, in
     // the column the panes' unit tags start in, where no cursor flag reaches:
     // beside the plot's left edge it ran into cursor A's flag. A domain a
     // logarithmic axis cannot show refuses it with the reason.
-    let logarithmic = model.x_scale == XScale::Log10;
+    let logarithmic = scale == XScale::Log10;
     let refused = !logarithmic && input.log_refusal.is_some();
     let toggle_galley = painter.layout_no_wrap(
         "log".to_owned(),
@@ -521,11 +611,7 @@ pub fn show_shared_x_axis(
     );
     if toggle_rect.right() + 4.0 <= plot_left {
         let toggle = ui
-            .interact(
-                toggle_rect,
-                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
-                egui::Sense::click(),
-            )
+            .interact(toggle_rect, id.with("scale"), egui::Sense::click())
             .on_hover_text(match &input.log_refusal {
                 Some(reason) if refused => {
                     format!("A logarithmic X axis is not available: {reason}")
@@ -598,7 +684,7 @@ pub fn show_shared_x_axis(
             (cursors.b, c.canvas_cursor_b),
         ] {
             let Some(value) = value else { continue };
-            let fraction = model.x_scale.normalize(value, full_domain.0, full_domain.1);
+            let fraction = scale.normalize(value, full_domain.0, full_domain.1);
             if fraction.is_finite() {
                 let notch = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
                 painter.vline(
@@ -637,7 +723,7 @@ pub fn show_shared_x_axis(
             })
             .map(|flag| flag.drag)
     };
-    let drag_id = shared_x_drag_id(model);
+    let drag_id = id.with("drag");
     // What a drag takes hold of is decided where the button went down: egui
     // starts a drag only once the pointer has moved past the click distance,
     // by when it has left a handle's few pixels.
@@ -662,7 +748,7 @@ pub fn show_shared_x_axis(
             SharedXDrag::Viewport => {
                 let delta = ui.ctx().input(|input| input.pointer.delta().x);
                 if let Some(range) = panned_shared_x_view(
-                    model.x_scale,
+                    scale,
                     full_domain,
                     current,
                     f64::from(delta / track.width()),
@@ -672,7 +758,7 @@ pub fn show_shared_x_axis(
             }
             SharedXDrag::ResizeStart | SharedXDrag::ResizeEnd => {
                 if let Some(range) = resized_shared_x_view(
-                    model.x_scale,
+                    scale,
                     full_domain,
                     current,
                     drag == SharedXDrag::ResizeStart,
@@ -687,9 +773,7 @@ pub fn show_shared_x_axis(
                 let view_fraction = f64::from(
                     ((pointer.x - plot_left) / (plot_right - plot_left).max(1.0)).clamp(0.0, 1.0),
                 );
-                let x = model
-                    .x_scale
-                    .denormalize(view_fraction, current.0, current.1);
+                let x = scale.denormalize(view_fraction, current.0, current.1);
                 output.cursor = match drag {
                     SharedXDrag::CursorA => Some(CursorMove::A(x)),
                     SharedXDrag::CursorB => Some(CursorMove::B(x)),
@@ -710,7 +794,7 @@ pub fn show_shared_x_axis(
         ui.ctx().set_cursor_icon(
             if handle_at(pointer).is_some() || flag_at(pointer).is_some() {
                 egui::CursorIcon::ResizeHorizontal
-            } else if lane_band.contains(pointer.y) {
+            } else if has_overview && lane_band.contains(pointer.y) {
                 egui::CursorIcon::Grab
             } else {
                 egui::CursorIcon::Default
@@ -723,7 +807,7 @@ pub fn show_shared_x_axis(
         && track.contains(pointer)
         && !viewport.contains(pointer)
         && let Some(range) = recentered_shared_x_view(
-            model.x_scale,
+            scale,
             full_domain,
             current,
             f64::from((pointer.x - track.left()) / track.width()),
@@ -737,7 +821,7 @@ pub fn show_shared_x_axis(
         if scroll != 0.0
             && let Some(pointer) = response.hover_pos()
             && let Some(range) = zoomed_shared_x_view(
-                model.x_scale,
+                scale,
                 full_domain,
                 current,
                 f64::from((pointer.x - track.left()) / track.width()),
@@ -759,7 +843,7 @@ pub fn show_shared_x_axis(
         let zoom_out = ui.input(|input| input.key_pressed(egui::Key::Minus));
         if (zoom_in || zoom_out)
             && let Some(range) = zoomed_shared_x_view(
-                model.x_scale,
+                scale,
                 full_domain,
                 current,
                 0.5,
@@ -778,8 +862,7 @@ pub fn show_shared_x_axis(
             }
         });
         if direction != 0.0
-            && let Some(range) =
-                panned_shared_x_view(model.x_scale, full_domain, current, direction * 0.05)
+            && let Some(range) = panned_shared_x_view(scale, full_domain, current, direction * 0.05)
         {
             output.viewport = Some(SharedXViewChange::Range(range));
         }
@@ -789,11 +872,12 @@ pub fn show_shared_x_axis(
         output.viewport = Some(SharedXViewChange::Fit);
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_text(
+    response.on_hover_text(hover.unwrap_or_else(|| {
         "Drag an end to zoom in \u{00b7} drag the window to pan \u{00b7} click to recenter \u{00b7} \
          wheel to zoom \u{00b7} double-click or F for the full view \u{00b7} drag a cursor's box \
-         to move it",
-    );
+         to move it"
+            .to_owned()
+    }));
     output
 }
 

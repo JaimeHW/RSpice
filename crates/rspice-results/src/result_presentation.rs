@@ -689,6 +689,9 @@ pub struct StripXyPlot {
     /// strip shows, in place of `sweep_range`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub follow_sweep_view: bool,
+    /// Whether the abscissa is read on a logarithmic axis.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub log_abscissa: bool,
 }
 
 /// The unit the reader declared for one expression, which replaces the unit

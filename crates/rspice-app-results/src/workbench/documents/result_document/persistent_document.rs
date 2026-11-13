@@ -1082,13 +1082,12 @@ pub fn project_pane_presentation(
             .xy_plots()
             .iter()
             .filter(|plot| plot.pane_id == pane.id)
-            .map(|plot| {
-                (
-                    plot.unit.clone(),
-                    plot.abscissa.clone(),
-                    plot.sweep_range.map(|range| (range.minimum, range.maximum)),
-                    plot.follow_sweep_view,
-                )
+            .map(|plot| rspice_results_ui::session::DocumentXyPlot {
+                unit: plot.unit.clone(),
+                abscissa: plot.abscissa.clone(),
+                sweep_range: plot.sweep_range.map(|range| (range.minimum, range.maximum)),
+                follow_view: plot.follow_sweep_view,
+                log_x: plot.log_abscissa,
             })
             .collect();
         state
@@ -1341,6 +1340,7 @@ pub(super) fn xy_plots_of(pane_id: PaneId, strips: &[XyStrip]) -> Vec<XyPlot> {
                 .sweep_range
                 .and_then(|(minimum, maximum)| AxisRange::new(minimum, maximum).ok()),
             follow_sweep_view: strip.follow_view,
+            log_abscissa: strip.log_x,
         })
         .collect()
 }

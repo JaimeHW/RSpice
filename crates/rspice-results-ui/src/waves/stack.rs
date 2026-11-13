@@ -369,7 +369,7 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
     // The normal 50 px navigator is retained when space permits and shrinks
     // proportionally in constrained multi-pane/multi-strip arrangements.
     // The sum is exact: this function never asks the parent to grow.
-    let shared_x_height = (content * 0.28).min(WAVE_SHARED_X_HEIGHT);
+    let shared_x_height = (content * RULER_SHARE).min(WAVE_SHARED_X_HEIGHT);
     let total_weight: f32 = (0..pane_count)
         .map(|ordinal| pane_weight(ordinal, pane_count))
         .sum();
@@ -738,6 +738,9 @@ pub(crate) struct StripFrame<'a> {
     pub(crate) gutter: Gutter,
 }
 
+/// The share of a strip its ruler takes, up to the ruler's own height.
+pub(crate) const RULER_SHARE: f32 = 0.28;
+
 /// Why a strip's X axis cannot be logarithmic, when it cannot: some X it
 /// shows is negative, or none is positive. A domain that starts at zero, as
 /// time does, is shown from its first positive sample.
@@ -1071,9 +1074,9 @@ fn route_expressions(
 /// One strip plotting a unit pane's curves against a signal or an
 /// expression: a header naming the abscissa, with the span of the sweep it
 /// draws and a close button; the pane's own header, whose legend and scale
-/// it shares; and the plot, whose one horizontal axis is the abscissa. No
-/// sweep ruler and no overview stand under it. True when the reader closed
-/// it.
+/// it shares; and the plot, whose one horizontal axis is the abscissa's
+/// ruler, without the overview track the sweep's has. True when the reader
+/// closed it.
 fn show_xy_strip(
     ui: &mut Ui,
     host: &mut impl StackHost,
@@ -1269,6 +1272,8 @@ pub(crate) fn repoint_xy_strip(
     let strip = &mut session.xy_strips[index];
     strip.abscissa = abscissa;
     strip.x_view = None;
+    // Another quantity is read on a linear axis until the reader asks.
+    strip.log_x = false;
 }
 
 /// At most this share of a strip goes to event lanes when it also has panes;

@@ -6,7 +6,8 @@
 //! stack chooses which stretch of the loop is drawn. Where a curve's X turns
 //! back, sparse arrowheads say which way the sweep travels; and the strip's
 //! cursors, which stand on the sweep, are drawn where the curves are at that
-//! instant.
+//! instant. Its one horizontal axis is the abscissa's, on the same ruler the
+//! strip drawn against the sweep stands on, without the overview track.
 
 use super::pane::ResolvedExpr;
 use super::stack::{StackHost, StripFrame};
@@ -401,7 +402,18 @@ impl Curve {
     }
 }
 
-fn finite_bounds<'a>(values: impl Iterator<Item = &'a f64>, positive: bool) -> Option<(f64, f64)> {
+/// The share of its span a Y axis reaches past its curves. X is drawn tight
+/// to them, as the strip drawn against the sweep draws its axis.
+const Y_MARGIN: f64 = 0.04;
+
+/// The least and greatest finite value (positive only, for a logarithmic
+/// axis), `margin` of their span past each end. A single value spans a
+/// twentieth of itself either side, or a unit at zero.
+fn finite_bounds<'a>(
+    values: impl Iterator<Item = &'a f64>,
+    positive: bool,
+    margin: f64,
+) -> Option<(f64, f64)> {
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
     for &value in values {
         if value.is_finite() && (!positive || value > 0.0) {
@@ -416,8 +428,24 @@ fn finite_bounds<'a>(values: impl Iterator<Item = &'a f64>, positive: bool) -> O
         let pad = if low == 0.0 { 1.0 } else { low.abs() * 0.05 };
         return Some((low - pad, high + pad));
     }
-    let pad = (high - low) * 0.04;
+    let pad = (high - low) * margin;
     Some((low - pad, high + pad))
+}
+
+/// Why the abscissa cannot be read on a logarithmic axis, when it cannot:
+/// some X the curves reach is negative, or none is positive. One that starts
+/// at zero is drawn from its first positive value, as the time ruler is.
+fn log_abscissa_refusal(name: &str, unit: &str, bounds: Option<(f64, f64)>) -> Option<String> {
+    let Some((minimum, maximum)) = bounds else {
+        return Some("the curves have no X values".to_owned());
+    };
+    if minimum < 0.0 {
+        return Some(format!(
+            "{name} reaches {}, and a logarithmic axis shows positive values only",
+            rspice_ui_kit::plot::fmt_si_significant(minimum, unit, 4)
+        ));
+    }
+    (maximum <= 0.0).then(|| format!("{name} has no positive value"))
 }
 
 /// The point of `curve` at sweep value `t`, read by `interpolation`.
@@ -862,23 +890,41 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         return;
     }
 
-    let x_view = strip.x_view;
+    // X stands tight to the curves, or to the span of the sweep they are
+    // drawn over, as the strip drawn against the sweep stands on its record.
+    let linear_x = finite_bounds(curves.iter().flat_map(|curve| curve.x()), false, 0.0);
+    let log_refusal = log_abscissa_refusal(abscissa_label(abscissa), &resolved.unit, linear_x);
+    let log_x = strip.log_x && log_refusal.is_none();
+    let x_scale = if log_x { XScale::Log10 } else { XScale::Linear };
+    let x_view = strip
+        .x_view
+        .filter(|(low, high)| !log_x || (*low > 0.0 && *high > 0.0));
     let y_view = strip
         .y_view
         .filter(|(low, high)| !log_y || (*low > 0.0 && *high > 0.0));
-    let auto_x = finite_bounds(curves.iter().flat_map(|curve| curve.x()), false);
-    let auto_y = finite_bounds(curves.iter().flat_map(|curve| curve.y()), log_y);
+    let auto_x = if log_x {
+        finite_bounds(curves.iter().flat_map(|curve| curve.x()), true, 0.0)
+    } else {
+        linear_x
+    };
+    let auto_y = finite_bounds(curves.iter().flat_map(|curve| curve.y()), log_y, Y_MARGIN);
     let (Some((x0, x1)), Some((y0, y1))) = (x_view.or(auto_x), y_view.or(auto_y)) else {
         well_hint(ui, "No point of these curves lies in the window");
         return;
     };
     let interpolated = curves.iter().any(|curve| curve.data.interpolated);
-    let x_label = format!(
+    // How the curves were paired with the abscissa, which the ruler's
+    // tooltip says.
+    let pairing = format!(
         "{} \u{b7} {}",
         abscissa_label(abscissa),
         pairing_note(model.x_label(), interpolated, interpolation)
     );
-    let x_axis = Axis::linear(x0, x1, &resolved.unit).with_label(&x_label);
+    let x_axis = if log_x {
+        Axis::log_decades(x0, x1, &resolved.unit)
+    } else {
+        Axis::linear(x0, x1, &resolved.unit)
+    };
     let y_axis = if log_y {
         Axis::log_decades(y0, y1, pane.axis_unit())
     } else {
@@ -888,7 +934,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     // Arrowheads and the start and end marks go only on a curve whose X turns
     // back; a monotonic sweep reads its way off the axis.
     let turn_back_tolerance =
-        auto_x.map_or(f64::INFINITY, |(low, high)| (high - low) * TURN_BACK_SHARE);
+        linear_x.map_or(f64::INFINITY, |(low, high)| (high - low) * TURN_BACK_SHARE);
     let turning: Vec<bool> = curves
         .iter()
         .map(|curve| turns_back(curve.x(), turn_back_tolerance))
@@ -913,20 +959,41 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             .map(|refusal| format!(". {refusal}"))
             .collect::<String>()
     );
-    let mut spec = PlotSpec::new(x_axis, XScale::Linear, y_axis)
+    let mut spec = PlotSpec::new(x_axis.clone(), x_scale, y_axis)
         .accessible_name("Signal versus signal plot")
         .accessible_detail(&detail)
-        .with_right_margin(super::navigation::WAVE_SHARED_RIGHT_MARGIN);
+        .with_right_margin(super::navigation::WAVE_SHARED_RIGHT_MARGIN)
+        .without_x_axis_chrome();
     spec.left_margin = frame.gutter.width();
     if log_y {
         spec = spec.with_log_y();
     }
     spec.minor_grid = host.session().show_minor_grid;
+    // The plot takes the strip above its ruler, which takes the share the
+    // strip drawn against the sweep gives its own.
+    let ruler_height = (ui.available_height() * super::stack::RULER_SHARE)
+        .min(super::navigation::WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW);
+    let whole = ui.available_rect_before_wrap();
+    let plot_area = egui::Rect::from_min_max(
+        whole.min,
+        egui::pos2(
+            whole.right(),
+            (whole.bottom() - ruler_height).max(whole.top()),
+        ),
+    );
+    let mut plot_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("xy-plot")
+            .max_rect(plot_area)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let strip_ui = ui;
+    let ui = &mut plot_ui;
     // The hover readout reads the point nearest the pointer, on screen.
     let plot_rect = plot::plot_rect(ui, &spec);
     let to_screen = |x: f64, y: f64| {
         egui::pos2(
-            plot_rect.left() + (XScale::Linear.normalize(x, x0, x1) as f32) * plot_rect.width(),
+            plot_rect.left() + (x_scale.normalize(x, x0, x1) as f32) * plot_rect.width(),
             plot_rect.bottom() - (y_scale.normalize(y, y0, y1) as f32) * plot_rect.height(),
         )
     };
@@ -1010,7 +1077,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             let rect = mapper.rect;
             let at = |x: f64, y: f64| {
                 egui::pos2(
-                    rect.left() + (XScale::Linear.normalize(x, x0, x1) as f32) * rect.width(),
+                    rect.left() + (x_scale.normalize(x, x0, x1) as f32) * rect.width(),
                     rect.bottom() - (y_scale.normalize(y, y0, y1) as f32) * rect.height(),
                 )
             };
@@ -1074,7 +1141,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let quantity = frame.options.quantity;
     // Both coordinates, in every tag and in the hover readout, are stated to
     // the resolution of the axis they are read on.
-    let format_x = |value: f64| at_resolution(value, (x0, x1), false, &resolved.unit);
+    let format_x = |value: f64| at_resolution(value, (x0, x1), log_x, &resolved.unit);
     let format_y = |value: f64| at_resolution(value, (y0, y1), log_y, pane.axis_unit());
     let sweep_name = if model.x_label().is_empty() {
         "sweep"
@@ -1148,39 +1215,6 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         Some(&readout),
     );
 
-    // The X axis names what the strip is drawn against, and clicking that
-    // name chooses again, as ViVA's and EZwave's axis menus do.
-    let mut chosen = None;
-    if let Some(label_rect) = response.x_label_rect {
-        let label = ui
-            .interact(
-                label_rect.expand(2.0),
-                ui.id().with(("xy-x-label", model.analysis_key, pane.unit)),
-                egui::Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(format!(
-                "Choose what the {} curves are plotted against",
-                pane.unit
-            ));
-        if label.hovered()
-            || egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&label))
-        {
-            ui.painter().hline(
-                label_rect.x_range(),
-                label_rect.bottom(),
-                egui::Stroke::new(1.0, t.color.canvas_text_dim),
-            );
-        }
-        let menu = super::stack::abscissa_menu(host.session(), model, pane, Some(abscissa.clone()));
-        let draft_id = label.id.with("draft");
-        chosen = egui::Popup::menu(&label)
-            .show(|ui| {
-                super::header::abscissa_choices(ui, pane.unit, &menu, &str::to_owned, draft_id)
-            })
-            .and_then(|inner| inner.inner);
-    }
-
     // A cursor point is taken hold of and dragged along its curve: the
     // cursor moves to the instant of the sample nearest the pointer, so the
     // strips drawn against the sweep follow it, as moving the cursor there
@@ -1241,6 +1275,76 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         }
     }
 
+    // The ruler under the plot is the abscissa's: the band, the ticks and the
+    // gutter caption of the strip drawn against the sweep, and no overview,
+    // since there is no record to scroll. Its caption names the abscissa and
+    // its unit, and clicking it chooses again, as ViVA's and EZwave's axis
+    // menus do.
+    strip_ui.advance_cursor_after_rect(plot_area);
+    let caption = if resolved.unit.is_empty() {
+        abscissa_label(abscissa).to_owned()
+    } else {
+        format!("{} \u{b7} {}", abscissa_label(abscissa), resolved.unit)
+    };
+    let ruler_id = strip_ui
+        .id()
+        .with(("xy-ruler", model.analysis_key, pane.unit));
+    let ruler = super::navigation::show_ruler(
+        strip_ui,
+        super::navigation::Ruler {
+            id: ruler_id,
+            axis: x_axis,
+            scale: x_scale,
+            name: abscissa_label(abscissa),
+            caption,
+            cursor_text: &format_x,
+            overview: None,
+            hover: Some(format!(
+                "{pairing}. Double-click or press F for the whole range."
+            )),
+        },
+        super::navigation::SharedXAxis {
+            full_domain: auto_x.unwrap_or((x0, x1)),
+            current: (x0, x1),
+            height: ruler_height,
+            left_margin: frame.gutter.width(),
+            quantity_policy: quantity,
+            significant_digits,
+            cursors: None,
+            log_refusal,
+        },
+    );
+    let mut chosen = None;
+    if let Some(caption_rect) = ruler.caption_rect {
+        let label = strip_ui
+            .interact(
+                caption_rect.expand(2.0),
+                ruler_id.with("caption"),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!(
+                "Choose what the {} curves are plotted against. {pairing}.",
+                pane.unit
+            ));
+        if label.hovered()
+            || egui::Popup::is_id_open(strip_ui.ctx(), egui::Popup::default_response_id(&label))
+        {
+            strip_ui.painter().hline(
+                caption_rect.x_range(),
+                caption_rect.bottom(),
+                egui::Stroke::new(1.0, t.color.text_dim),
+            );
+        }
+        let menu = super::stack::abscissa_menu(host.session(), model, pane, Some(abscissa.clone()));
+        let draft_id = label.id.with("draft");
+        chosen = egui::Popup::menu(&label)
+            .show(|ui| {
+                super::header::abscissa_choices(ui, pane.unit, &menu, &str::to_owned, draft_id)
+            })
+            .and_then(|inner| inner.inner);
+    }
+
     // A click places the next cursor at the instant of the nearest point.
     if dragged.is_none()
         && response.clicked_x.is_some()
@@ -1283,6 +1387,18 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         if let Some(y) = response.view.y {
             held.y_view = Some(y);
         }
+    }
+    // The ruler's own gestures: its keys and double-click move the X range
+    // alone, and its scale toggle reads the abscissa over decades.
+    match ruler.viewport {
+        Some(super::navigation::SharedXViewChange::Fit) => held.x_view = None,
+        Some(super::navigation::SharedXViewChange::Range(range)) => held.x_view = Some(range),
+        None => {}
+    }
+    if ruler.scale_toggled {
+        held.log_x = !log_x;
+        // A range read on one scale is no view on the other.
+        held.x_view = None;
     }
 }
 

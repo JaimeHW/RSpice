@@ -200,6 +200,7 @@ mod tests {
             },
             sweep_range: None,
             follow_sweep_view: false,
+            log_abscissa: false,
         };
         let presentation = |plot: &StripXyPlot| ResultPresentation {
             xy_plots: vec![plot.clone()],
@@ -223,6 +224,14 @@ mod tests {
         };
         assert_ne!(
             digest(&results, &[], &[], &presentation(&following)).unwrap(),
+            digest(&results, &[], &[], &presentation(&narrowed)).unwrap()
+        );
+        let logarithmic = StripXyPlot {
+            log_abscissa: true,
+            ..narrowed.clone()
+        };
+        assert_ne!(
+            digest(&results, &[], &[], &presentation(&logarithmic)).unwrap(),
             digest(&results, &[], &[], &presentation(&narrowed)).unwrap()
         );
     }

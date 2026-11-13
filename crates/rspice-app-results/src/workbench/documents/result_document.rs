@@ -1118,6 +1118,7 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
                 })
                 .map(|range| (range.minimum, range.maximum));
             strip.follow_view = plot.follow_sweep_view;
+            strip.log_x = plot.log_abscissa;
             strip
         })
         .collect();

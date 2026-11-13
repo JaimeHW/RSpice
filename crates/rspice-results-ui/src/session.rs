@@ -285,6 +285,8 @@ pub struct XyStrip {
     /// shows, as a scope's XY display follows its zoom, in place of
     /// `sweep_range`.
     pub follow_view: bool,
+    /// Whether the abscissa is read over decades.
+    pub log_x: bool,
     /// The abscissa range shown, when the reader zoomed or panned it.
     pub x_view: Option<(f64, f64)>,
     /// The ordinate range shown, when the reader zoomed or panned it.
@@ -303,6 +305,7 @@ impl XyStrip {
             abscissa,
             sweep_range: None,
             follow_view: false,
+            log_x: false,
             x_view: None,
             y_view: None,
         }
@@ -324,15 +327,19 @@ impl XyStrip {
 /// reader made them.
 pub type XyStrips = Vec<XyStrip>;
 
-/// A strip a document pane keeps drawn against a signal or an expression:
-/// its unit, its abscissa, its sweep span, and whether the span follows the
-/// analysis' strip.
-pub type DocumentXyPlot = (
-    String,
-    rspice_results::visualization_document::Abscissa,
-    Option<(f64, f64)>,
-    bool,
-);
+/// A strip a document pane keeps drawn against a signal or an expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentXyPlot {
+    /// The unit pane whose curves it draws, by its unit.
+    pub unit: String,
+    pub abscissa: rspice_results::visualization_document::Abscissa,
+    /// The span of the sweep drawn; the whole record when `None`.
+    pub sweep_range: Option<(f64, f64)>,
+    /// Whether the span follows the analysis' strip.
+    pub follow_view: bool,
+    /// Whether the abscissa is read over decades.
+    pub log_x: bool,
+}
 
 /// The quick view's own expressions and X scales, set aside while a result
 /// document's pane shows the ones it keeps in their place.
@@ -1018,13 +1025,12 @@ impl ResultViewerState {
             .xy_strips
             .iter()
             .filter(|strip| strip.analysis == analysis)
-            .map(|strip| {
-                (
-                    strip.unit.clone(),
-                    strip.abscissa.clone(),
-                    strip.sweep_range,
-                    strip.follow_view,
-                )
+            .map(|strip| DocumentXyPlot {
+                unit: strip.unit.clone(),
+                abscissa: strip.abscissa.clone(),
+                sweep_range: strip.sweep_range,
+                follow_view: strip.follow_view,
+                log_x: strip.log_x,
             })
             .collect();
         if held == plots {
@@ -1037,14 +1043,18 @@ impl ResultViewerState {
             .cloned()
             .collect();
         self.xy_strips.retain(|strip| strip.analysis != analysis);
-        for (unit, abscissa, sweep_range, follow_view) in plots {
+        for plot in plots {
             let mut strip = previous
                 .iter()
-                .find(|strip| strip.is(analysis, &unit, &abscissa))
+                .find(|strip| strip.is(analysis, &plot.unit, &plot.abscissa))
                 .cloned()
-                .unwrap_or_else(|| XyStrip::new(analysis, unit, abscissa));
-            strip.sweep_range = sweep_range;
-            strip.follow_view = follow_view;
+                .unwrap_or_else(|| XyStrip::new(analysis, plot.unit, plot.abscissa));
+            strip.sweep_range = plot.sweep_range;
+            strip.follow_view = plot.follow_view;
+            if strip.log_x != plot.log_x {
+                strip.log_x = plot.log_x;
+                strip.x_view = None;
+            }
             self.xy_strips.push(strip);
         }
     }
