@@ -1132,7 +1132,9 @@ mod tests {
         )
         .unwrap();
         crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-            &mut app.state,
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
         )
         .unwrap();
         let names = find_dialog_names(&mut app);

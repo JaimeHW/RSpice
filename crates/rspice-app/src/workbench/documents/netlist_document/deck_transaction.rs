@@ -26,10 +26,6 @@ pub(crate) struct DeckTransaction {
     pub(crate) open_documents: HashSet<WorkspaceDocumentId>,
 }
 
-#[expect(
-    dead_code,
-    reason = "the netlist document's transactions adopt it in the next change"
-)]
 impl DeckTransaction {
     /// Begin a transaction over copies of the live deck parts.
     pub(crate) fn begin(

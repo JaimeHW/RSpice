@@ -288,8 +288,12 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
         CodeSourceFileAction::New,
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(&mut app.state)
-        .unwrap();
+    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+    )
+    .unwrap();
     assert!(source_document_dialog_is_available(
         app.state.workbench.workspace,
         &app.state.model,
@@ -443,8 +447,12 @@ fn owned_deck_app() -> RSpiceApp {
         CodeSourceFileAction::New,
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(&mut app.state)
-        .unwrap();
+    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+    )
+    .unwrap();
     open_source_document_dialog(&mut app.state).unwrap();
     app
 }

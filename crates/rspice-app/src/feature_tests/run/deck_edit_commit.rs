@@ -186,7 +186,9 @@ fn undo_past_the_editor_history_steps_the_decks_own_edit() {
     let replaced = before.replace("R1 in 0 1k", "R1 in 0 2k");
     assert_ne!(replaced, before);
     replace_owned_sources_atomically(
-        &mut replay.app.state,
+        &mut replay.app.state.model,
+        &mut replay.app.state.code.netlist,
+        &mut replay.app.state.code.netlist_open_documents,
         vec![OwnedNetlistReplacement::root(&before, replaced.clone(), 1)],
     )
     .expect("the project owns the deck");

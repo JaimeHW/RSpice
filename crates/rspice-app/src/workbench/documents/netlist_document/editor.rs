@@ -460,9 +460,20 @@ fn commit_owned_source_edit(
     now: f64,
 ) -> bool {
     let committed = if state.code.netlist.active_dependency_identity.is_some() {
-        super::replace_owned_dependency_source(state, buffer.to_owned())
+        super::replace_owned_dependency_source(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            buffer.to_owned(),
+        )
     } else {
-        super::replace_owned_source(state, buffer.to_owned())
+        super::replace_owned_source(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.workbench,
+            buffer.to_owned(),
+        )
     };
     if !committed {
         return false;

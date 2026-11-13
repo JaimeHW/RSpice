@@ -18,6 +18,8 @@ use rspice_app_state::workbench::app_state::model::{
     Model, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 
+use deck_transaction::DeckTransaction;
+
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 
 mod baseline;
@@ -256,18 +258,22 @@ fn clear_netlist_edit_journal(state: &mut NetlistDocumentState) {
 /// prepared, and every original digest is checked before the cloned candidate
 /// replaces live state.
 pub(crate) fn replace_owned_sources_atomically(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     replacements: Vec<OwnedNetlistReplacement>,
 ) -> Result<usize, String> {
-    replace_owned_sources_atomically_impl(state, replacements, true)
+    replace_owned_sources_atomically_impl(model, netlist, open_documents, replacements, true)
 }
 
 fn replace_owned_sources_atomically_impl(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     replacements: Vec<OwnedNetlistReplacement>,
     record_edit: bool,
 ) -> Result<usize, String> {
-    if let Some(holder) = state.model.live_write_locks.netlist.as_deref() {
+    if let Some(holder) = model.live_write_locks.netlist.as_deref() {
         return Err(format!(
             "{holder} holds the netlist write lease; no source was changed."
         ));
@@ -283,19 +289,16 @@ fn replace_owned_sources_atomically_impl(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let root_source = state
-        .model
+    let root_source = model
         .workspace
         .content
         .netlist_source
         .as_ref()
         .ok_or_else(|| "The project-owned root deck is no longer available.".to_owned())?;
-    let current_document = state
-        .code
-        .netlist
+    let current_document = netlist
         .owned_document
         .as_ref()
-        .or(state.model.workspace.content.netlist_document.as_ref())
+        .or(model.workspace.content.netlist_document.as_ref())
         .ok_or_else(|| "The project's netlist document is unavailable.".to_owned())?;
     if current_document.source() != root_source {
         return Err(
@@ -307,14 +310,13 @@ fn replace_owned_sources_atomically_impl(
     let original_dependencies = current_document.dependencies().to_vec();
     let original_includes = current_document.include_directives().to_vec();
     let mut next_dependencies = original_dependencies.clone();
-    let mut next_descriptor = state
-        .model
+    let mut next_descriptor = model
         .workspace
         .content
         .netlist_descriptor
         .clone()
         .ok_or_else(|| "Owned netlist metadata is unavailable.".to_owned())?;
-    let mut next_retained_decks = state.model.workspace.content.retained_netlist_decks.clone();
+    let mut next_retained_decks = model.workspace.content.retained_netlist_decks.clone();
     let mut next_root_source = root_source.clone();
     let mut root_seen = false;
     let mut dependency_seen = HashSet::new();
@@ -545,7 +547,7 @@ fn replace_owned_sources_atomically_impl(
             .map_err(|error| error.to_string())?;
     }
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     if root_changed
         && !candidate
             .model
@@ -559,10 +561,9 @@ fn replace_owned_sources_atomically_impl(
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.retained_netlist_decks = next_retained_decks;
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.code.netlist.owned_document = Some(next_document.clone());
-    if candidate.code.netlist.active_document == ActiveNetlistDocument::OwnedSource {
+    candidate.netlist.owned_document = Some(next_document.clone());
+    if candidate.netlist.active_document == ActiveNetlistDocument::OwnedSource {
         candidate.model.simulation.source.netlist_content = candidate
-            .code
             .netlist
             .active_dependency_identity
             .as_deref()
@@ -576,7 +577,7 @@ fn replace_owned_sources_atomically_impl(
             })
             .unwrap_or(next_root_source);
     }
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
     candidate
         .model
@@ -591,7 +592,7 @@ fn replace_owned_sources_atomically_impl(
             .map(OwnedNetlistReplacement::reversed)
             .collect();
         record_netlist_edit(
-            &mut candidate.code.netlist,
+            &mut candidate.netlist,
             NetlistEditJournalEntry {
                 description: format!("replace {changed_count} netlist match(es)"),
                 forward: applied_replacements,
@@ -599,7 +600,7 @@ fn replace_owned_sources_atomically_impl(
             },
         );
     }
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(changed_count)
 }
 
@@ -613,42 +614,68 @@ pub(crate) fn can_redo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
     !netlist.edit_redo.is_empty()
 }
 
-pub(crate) fn undo_netlist_edit(state: &mut AppState) -> Result<Option<String>, String> {
-    let Some(entry) = state.code.netlist.edit_undo.pop() else {
+pub(crate) fn undo_netlist_edit(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+) -> Result<Option<String>, String> {
+    let Some(entry) = netlist.edit_undo.pop() else {
         return Ok(None);
     };
-    if let Err(error) = replace_owned_sources_atomically_impl(state, entry.reverse.clone(), false) {
-        state.code.netlist.edit_undo.push(entry);
+    if let Err(error) = replace_owned_sources_atomically_impl(
+        model,
+        netlist,
+        open_documents,
+        entry.reverse.clone(),
+        false,
+    ) {
+        netlist.edit_undo.push(entry);
         return Err(error);
     }
     let description = entry.description.clone();
-    state.code.netlist.edit_redo.push(entry);
+    netlist.edit_redo.push(entry);
     Ok(Some(description))
 }
 
-pub(crate) fn redo_netlist_edit(state: &mut AppState) -> Result<Option<String>, String> {
-    let Some(entry) = state.code.netlist.edit_redo.pop() else {
+pub(crate) fn redo_netlist_edit(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+) -> Result<Option<String>, String> {
+    let Some(entry) = netlist.edit_redo.pop() else {
         return Ok(None);
     };
-    if let Err(error) = replace_owned_sources_atomically_impl(state, entry.forward.clone(), false) {
-        state.code.netlist.edit_redo.push(entry);
+    if let Err(error) = replace_owned_sources_atomically_impl(
+        model,
+        netlist,
+        open_documents,
+        entry.forward.clone(),
+        false,
+    ) {
+        netlist.edit_redo.push(entry);
         return Err(error);
     }
     let description = entry.description.clone();
-    state.code.netlist.edit_undo.push(entry);
+    netlist.edit_undo.push(entry);
     Ok(Some(description))
 }
 
 /// Atomically replace the exact project-owned source across the canonical
 /// document, persisted project projection, and visible editor buffer.
-pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
-    if let Some(holder) = state.model.live_write_locks.netlist.clone() {
-        state.prompt(format!(
+pub fn replace_owned_source(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    source: String,
+) -> bool {
+    if let Some(holder) = model.live_write_locks.netlist.clone() {
+        workbench.prompt(format!(
             "{holder} holds the netlist write lease; no source was changed."
         ));
         return false;
     }
-    replace_owned_source_unlocked(state, source)
+    replace_owned_source_unlocked(model, netlist, open_documents, workbench, source)
 }
 
 /// Adopt the project's own netlist source a live session replaced: the root
@@ -666,13 +693,19 @@ pub(crate) fn adopt_live_owned_source(
     clear_netlist_edit_journal(netlist);
 }
 
-fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
-    if state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
-        || state.code.netlist.active_dependency_identity.is_some()
+fn replace_owned_source_unlocked(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    source: String,
+) -> bool {
+    if netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || netlist.active_dependency_identity.is_some()
     {
         return false;
     }
-    let next_document = if let Some(document) = &state.code.netlist.owned_document {
+    let next_document = if let Some(document) = &netlist.owned_document {
         let Ok(next) = replace_root_document_preserving_dependencies(document, &source) else {
             return false;
         };
@@ -680,7 +713,7 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
     } else {
         None
     };
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     if !candidate
         .model
         .workspace
@@ -701,21 +734,21 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
             prune_owned_include_authority(descriptor, &document);
         }
         candidate.model.workspace.content.netlist_document = Some(document.clone());
-        candidate.code.netlist.owned_document = Some(document);
+        candidate.netlist.owned_document = Some(document);
     }
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     let Err(error) = candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
     else {
-        state.commit_candidate(candidate);
+        candidate.commit_deck(model, netlist, open_documents);
         return true;
     };
-    state.prompt(format!(
+    workbench.prompt(format!(
         "The netlist edit was not applied because it would break the project's sources: {error}"
     ));
     false
@@ -1009,19 +1042,22 @@ pub(crate) fn close_active_dependency_in(
 /// Promote the visible read-only dependency into explicit project ownership.
 /// Its stable project identity is persisted, while its exact source bytes stay
 /// in the canonical dependency closure used by execution and export.
-pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::Uuid, String> {
-    if state.code.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
+pub fn copy_active_dependency_to_project(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+) -> Result<uuid::Uuid, String> {
+    if netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
         return Err(
             "Open the dependency from a project-owned root before copying it into the project."
                 .to_owned(),
         );
     }
-    let dependency = active_dependency_in(&state.model, &state.code.netlist)
+    let dependency = active_dependency_in(model, netlist)
         .cloned()
         .ok_or_else(|| "The selected dependency is no longer available.".to_owned())?;
     let identity = dependency.locator().logical_identity();
-    if let Some(existing) = state
-        .model
+    if let Some(existing) = model
         .workspace
         .content
         .netlist_descriptor
@@ -1033,7 +1069,7 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
 
     let include = crate::state::OwnedNetlistIncludeDescriptor::try_new(&dependency)?;
     let document_id = include.document_id;
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     candidate
         .model
         .workspace
@@ -1050,10 +1086,10 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.code.netlist.completion_open = false;
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
+    candidate.netlist.completion_open = false;
     candidate.model.invalidate_source_evidence();
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(document_id)
 }
 
@@ -1061,20 +1097,22 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
 /// its exact bytes and include edge in the canonical closure. This is the
 /// reversible counterpart to copy-to-project: the document becomes read-only
 /// again, and no source text or external artifact is deleted.
-pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<(), String> {
-    if state.code.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
+pub fn release_active_dependency_from_project(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+) -> Result<(), String> {
+    if netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
         return Err(
             "Only an include opened from the owned top deck can release project ownership."
                 .to_owned(),
         );
     }
-    let identity = state
-        .code
-        .netlist
+    let identity = netlist
         .active_dependency_identity
         .clone()
         .ok_or_else(|| "No include document is active.".to_owned())?;
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     let descriptor = candidate
         .model
         .workspace
@@ -1090,17 +1128,17 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
         return Err("The active include is not project-owned.".to_owned());
     }
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.code.netlist.completion_open = false;
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
+    candidate.netlist.completion_open = false;
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(())
 }
 
@@ -1108,14 +1146,19 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
 /// deck text is unchanged; its canonical dependency closure, project
 /// projection, ownership digest, validation evidence, and revision advance in
 /// one validated transaction.
-pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> bool {
-    if !active_dependency_is_owned_in(&state.model, &state.code.netlist) {
+pub fn replace_owned_dependency_source(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    source: String,
+) -> bool {
+    if !active_dependency_is_owned_in(model, netlist) {
         return false;
     }
-    let Some(identity) = state.code.netlist.active_dependency_identity.clone() else {
+    let Some(identity) = netlist.active_dependency_identity.clone() else {
         return false;
     };
-    let Some(current_document) = state.code.netlist.owned_document.as_ref().cloned() else {
+    let Some(current_document) = netlist.owned_document.as_ref().cloned() else {
         return false;
     };
     let Some(index) = current_document
@@ -1145,7 +1188,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
         return false;
     }
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     let Some(descriptor) = candidate
         .model
         .workspace
@@ -1169,11 +1212,11 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     include.content_digest = crate::state::content_digest(&source);
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.code.netlist.owned_document = Some(next_document);
+    candidate.netlist.owned_document = Some(next_document);
     candidate.model.simulation.source.netlist_content = source;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     if candidate
         .model
         .workspace
@@ -1183,7 +1226,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     {
         return false;
     }
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     true
 }
 
@@ -1456,26 +1499,25 @@ pub(crate) fn begin_owned_include_lifecycle_action(
 }
 
 pub(crate) fn commit_owned_include_lifecycle_action(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
 ) -> Result<String, String> {
-    let transaction = state
-        .code
-        .netlist
+    let transaction = netlist
         .lifecycle_dialog
         .include_transaction
         .clone()
         .ok_or_else(|| "No owned-include lifecycle transaction is open.".to_owned())?;
-    let document = state
-        .model
+    let document = model
         .workspace
         .content
         .netlist_document
         .as_ref()
         .ok_or_else(|| "The owned root document is unavailable.".to_owned())?;
-    if state.model.workspace.content.project.id() != transaction.project_id
+    if model.workspace.content.project.id() != transaction.project_id
         || document.id() != transaction.root_document_id
         || document.revision() != transaction.root_revision
-        || state.code.netlist.active_dependency_identity.as_deref()
+        || netlist.active_dependency_identity.as_deref()
             != Some(transaction.logical_identity.as_str())
     {
         return Err(
@@ -1500,7 +1542,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     let locator = crate::state::SourceLocator::try_new(proposed.clone(), display_name.clone())
         .map_err(|error| error.to_string())?;
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     let mut next_document = document.clone();
     next_document
         .rename_dependency_identity(
@@ -1536,24 +1578,24 @@ pub(crate) fn commit_owned_include_lifecycle_action(
         root: transaction.root_document_id,
         logical_identity: proposed.clone(),
     };
-    if candidate.code.netlist_open_documents.remove(&old_tab) {
-        candidate.code.netlist_open_documents.insert(new_tab);
+    if candidate.open_documents.remove(&old_tab) {
+        candidate.open_documents.insert(new_tab);
     }
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.code.netlist.owned_document = Some(next_document);
-    candidate.code.netlist.active_dependency_identity = Some(proposed.clone());
-    candidate.code.netlist.lifecycle_dialog.include_transaction = None;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.owned_document = Some(next_document);
+    candidate.netlist.active_dependency_identity = Some(proposed.clone());
+    candidate.netlist.lifecycle_dialog.include_transaction = None;
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(format!(
         "{} project-owned include as {proposed} without changing its retained source bytes.",
         if transaction.action == CodeSourceFileAction::Rename {
@@ -1614,10 +1656,12 @@ pub(crate) fn begin_netlist_lifecycle_action_in(
     Ok(())
 }
 
-pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<String, String> {
-    let transaction = state
-        .code
-        .netlist
+pub(crate) fn commit_netlist_lifecycle_action(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+) -> Result<String, String> {
+    let transaction = netlist
         .lifecycle_dialog
         .transaction
         .clone()
@@ -1627,8 +1671,8 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
         transaction.document_id,
         transaction.document_revision,
         transaction.content_digest,
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state.model.workspace.content.netlist_document.as_ref(),
+        model.workspace.content.netlist_descriptor.as_ref(),
+        model.workspace.content.netlist_document.as_ref(),
     ) {
         (
             Some(deck_id),
@@ -1645,18 +1689,18 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
         }
         (None, None, None, None, None, None) => {
             transaction.action == CodeSourceFileAction::New
-                && state.model.workspace.content.netlist_source.is_none()
+                && model.workspace.content.netlist_source.is_none()
         }
         _ => false,
     };
-    if state.model.workspace.content.project.id() != transaction.project_id || !revision_matches {
+    if model.workspace.content.project.id() != transaction.project_id || !revision_matches {
         return Err(
             "The active top deck changed while the lifecycle dialog was open; review it and retry."
                 .to_owned(),
         );
     }
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     let message = match transaction.action {
         CodeSourceFileAction::New => {
             let path = normalized_top_deck_path(&transaction.proposed_path)?;
@@ -1687,7 +1731,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
             }
             install_active_top_deck(
                 &mut candidate.model,
-                &mut candidate.code.netlist,
+                &mut candidate.netlist,
                 next_descriptor,
                 next,
                 None,
@@ -1764,7 +1808,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
             retain_active_top_deck(&mut candidate.model)?;
             install_active_top_deck(
                 &mut candidate.model,
-                &mut candidate.code.netlist,
+                &mut candidate.netlist,
                 duplicate_descriptor,
                 duplicate,
                 None,
@@ -1787,7 +1831,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                     .return_to_generated_netlist();
                 install_active_top_deck(
                     &mut candidate.model,
-                    &mut candidate.code.netlist,
+                    &mut candidate.netlist,
                     next.descriptor,
                     next.document,
                     next.source_path,
@@ -1798,54 +1842,55 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                     .workspace
                     .content
                     .return_to_generated_netlist();
-                candidate.code.netlist.owned_document = None;
+                candidate.netlist.owned_document = None;
                 candidate.model.netlist_artifacts.generated_source = candidate
                     .model
                     .netlist_artifacts
                     .generated_document
                     .as_ref()
                     .map_or_else(String::new, |generated| generated.source().to_owned());
-                candidate.code.netlist.active_document = ActiveNetlistDocument::Generated;
-                candidate.code.netlist.active_dependency_identity = None;
-                candidate.code.netlist.active_dependency_root = None;
+                candidate.netlist.active_document = ActiveNetlistDocument::Generated;
+                candidate.netlist.active_dependency_identity = None;
+                candidate.netlist.active_dependency_root = None;
                 candidate.model.simulation.source.netlist_content =
                     candidate.model.netlist_artifacts.generated_source.clone();
-                candidate.code.netlist.externally_saved_content_digest = None;
+                candidate.netlist.externally_saved_content_digest = None;
             }
             format!(
                 "Removed project top deck {removed}. Any separately published native file was not deleted."
             )
         }
     };
-    candidate.code.netlist.lifecycle_dialog.transaction = None;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.code.netlist.completion_open = false;
-    candidate.code.netlist.selected_byte_range = None;
+    candidate.netlist.lifecycle_dialog.transaction = None;
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
+    candidate.netlist.completion_open = false;
+    candidate.netlist.selected_byte_range = None;
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(message)
 }
 
 pub(crate) fn select_retained_top_deck(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     deck_id: uuid::Uuid,
 ) -> Result<(), String> {
-    let index = state
-        .model
+    let index = model
         .workspace
         .content
         .retained_netlist_decks
         .iter()
         .position(|deck| deck.descriptor.deck_id == deck_id)
         .ok_or_else(|| "The selected retained top deck no longer exists.".to_owned())?;
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     let next = candidate
         .model
         .workspace
@@ -1855,23 +1900,23 @@ pub(crate) fn select_retained_top_deck(
     retain_active_top_deck(&mut candidate.model)?;
     install_active_top_deck(
         &mut candidate.model,
-        &mut candidate.code.netlist,
+        &mut candidate.netlist,
         next.descriptor,
         next.document,
         next.source_path,
     );
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.code.netlist.lifecycle_dialog.transaction = None;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.lifecycle_dialog.transaction = None;
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
+    clear_netlist_edit_journal(&mut candidate.netlist);
     candidate
         .model
         .workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(())
 }
 

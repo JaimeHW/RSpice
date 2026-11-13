@@ -349,7 +349,12 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
         CodeSourceFileAction::New,
     )
     .expect("a new top deck is offered");
-    commit_netlist_lifecycle_action(&mut app.state).expect("the project owns a top deck");
+    commit_netlist_lifecycle_action(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+    )
+    .expect("the project owns a top deck");
     app.state
         .model
         .schematic
@@ -420,7 +425,13 @@ fn netlist_transactions_keep_an_export_in_flight() {
     );
     assert_export_survived(&app, &plan, "a live-session update");
 
-    assert!(replace_owned_source(&mut app.state, EDITED_DECK.to_owned()));
+    assert!(replace_owned_source(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+        &mut app.state.workbench,
+        EDITED_DECK.to_owned()
+    ));
     assert_eq!(
         app.state.model.workspace.content.netlist_source.as_deref(),
         Some(EDITED_DECK)

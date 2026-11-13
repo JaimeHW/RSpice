@@ -1372,7 +1372,10 @@ mod tests {
         );
         assert!(
             crate::workbench::documents::netlist_document::replace_owned_source(
-                &mut state,
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+                &mut state.workbench,
                 "owned edit\n.end\n".to_owned()
             )
         );

@@ -61,8 +61,11 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
     ));
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
-            &mut app.state,
-            edited.to_owned(),
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
+            &mut app.state.workbench,
+            edited.to_owned()
         )
     );
     let edited_digest = crate::state::content_digest(edited);

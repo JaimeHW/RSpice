@@ -25,7 +25,9 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
 
     if let Some(replacements) = scoped_replacements {
         match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-            state,
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
             replacements,
         ) {
             Ok(count) if count > 0 => {
@@ -55,7 +57,10 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             if let Some(deck_id) = target.deck_id
                 && let Err(error) =
                     crate::workbench::documents::netlist_document::select_retained_top_deck(
-                        state, deck_id,
+                        &mut state.model,
+                        &mut state.code.netlist,
+                        &mut state.code.netlist_open_documents,
+                        deck_id,
                     )
             {
                 state.prompt(error);
@@ -154,7 +159,9 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                         false
                     } else {
                         match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-                            state,
+                            &mut state.model,
+                            &mut state.code.netlist,
+                            &mut state.code.netlist_open_documents,
                             vec![edit],
                         ) {
                             Ok(_) => true,
@@ -167,7 +174,9 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                     if replaced {
                         if let Some(deck_id) = target.deck_id
                             && let Err(error) = crate::workbench::documents::netlist_document::select_retained_top_deck(
-                                state,
+                                &mut state.model,
+                                &mut state.code.netlist,
+                                &mut state.code.netlist_open_documents,
                                 deck_id,
                             )
                         {
@@ -175,7 +184,13 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                             return;
                         }
                         if let Some(identity) = target.dependency_identity.as_deref()
-                            && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency_in(&mut state.model, &mut state.code.netlist, &mut state.code.netlist_open_documents, &mut state.runs, identity)
+                            && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency_in(
+                                &mut state.model,
+                                &mut state.code.netlist,
+                                &mut state.code.netlist_open_documents,
+                                &mut state.runs,
+                                identity,
+                            )
                         {
                             state.prompt(error);
                             return;

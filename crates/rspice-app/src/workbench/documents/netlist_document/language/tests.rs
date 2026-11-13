@@ -560,7 +560,12 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
             .contains(".ends amplifier")
     );
     assert!(super::super::can_undo_netlist_edit(&state.code.netlist));
-    super::super::undo_netlist_edit(&mut state).unwrap();
+    super::super::undo_netlist_edit(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+    )
+    .unwrap();
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(root)
@@ -593,7 +598,12 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     assert!(renamed.contains("{x*drive}"));
     assert!(renamed.contains("Rgain in 0 drive"));
     assert!(renamed.contains("{shape(drive)}"));
-    super::super::undo_netlist_edit(&mut state).unwrap();
+    super::super::undo_netlist_edit(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+    )
+    .unwrap();
 
     state.code.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
     begin_rename_at_cursor(&mut state).unwrap();

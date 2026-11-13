@@ -41,7 +41,9 @@ fn deck_page() -> Replay {
         .clone()
         .expect("the project owns the deck");
     replace_owned_sources_atomically(
-        &mut replay.app.state,
+        &mut replay.app.state.model,
+        &mut replay.app.state.code.netlist,
+        &mut replay.app.state.code.netlist_open_documents,
         vec![OwnedNetlistReplacement::root(&typed, DECK.to_owned(), 1)],
     )
     .expect("the project owns the deck");

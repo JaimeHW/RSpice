@@ -1077,7 +1077,12 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)
     };
-    super::replace_owned_sources_atomically(state, vec![edit])?;
+    super::replace_owned_sources_atomically(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        vec![edit],
+    )?;
     Ok(format!("Applied quick fix: {}", fix.label))
 }
 
@@ -1264,7 +1269,12 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
             include_locations.len(),
         ));
     }
-    let count = super::replace_owned_sources_atomically(state, replacements)?;
+    let count = super::replace_owned_sources_atomically(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        replacements,
+    )?;
     state.code.netlist.rename_dialog = NetlistRenameDialogState::default();
     Ok(count)
 }

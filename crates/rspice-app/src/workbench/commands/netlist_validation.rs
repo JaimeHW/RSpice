@@ -142,7 +142,9 @@ pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
         if formatted == source {
             app.state.prompt("The include file is already formatted.");
         } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
-            &mut app.state,
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
             formatted,
         ) {
             app.state
@@ -197,7 +199,10 @@ pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
         return;
     }
     if crate::workbench::documents::netlist_document::replace_owned_source(
-        &mut app.state,
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+        &mut app.state.workbench,
         formatted,
     ) {
         app.state

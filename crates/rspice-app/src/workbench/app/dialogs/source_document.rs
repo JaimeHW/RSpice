@@ -741,7 +741,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::Commit => {
-            match netlist_document::commit_netlist_lifecycle_action(state) {
+            match netlist_document::commit_netlist_lifecycle_action(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+            ) {
                 Ok(message) => {
                     state.record(LogSeverity::Info, LogSource::Studio, message);
                 }
@@ -757,12 +761,21 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::SelectDeck(deck_id) => {
-            if let Err(error) = netlist_document::select_retained_top_deck(state, deck_id) {
+            if let Err(error) = netlist_document::select_retained_top_deck(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+                deck_id,
+            ) {
                 state.prompt(error);
             }
         }
         NetlistLifecycleAction::CopyIncludeOwnership => {
-            match netlist_document::copy_active_dependency_to_project(state) {
+            match netlist_document::copy_active_dependency_to_project(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+            ) {
                 Ok(_) => {
                     state.record(
                         LogSeverity::Info,
@@ -776,7 +789,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::ReleaseIncludeOwnership => {
-            match netlist_document::release_active_dependency_from_project(state) {
+            match netlist_document::release_active_dependency_from_project(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+            ) {
                 Ok(()) => {
                     state.record(
                         LogSeverity::Info,
@@ -799,7 +816,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::CommitInclude => {
-            match netlist_document::commit_owned_include_lifecycle_action(state) {
+            match netlist_document::commit_owned_include_lifecycle_action(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+            ) {
                 Ok(message) => {
                     state.record(LogSeverity::Info, LogSource::Studio, message);
                 }
@@ -981,7 +1002,11 @@ fn render_new_top_deck_form(
 /// shell, and close the dialog once it is made; a refusal stays in the
 /// form's footer.
 pub(in crate::workbench) fn commit_new_top_deck(state: &mut AppState) {
-    match netlist_document::commit_netlist_lifecycle_action(state) {
+    match netlist_document::commit_netlist_lifecycle_action(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+    ) {
         Ok(message) => {
             state.record(LogSeverity::Info, LogSource::Studio, message);
             state.code.code_workspace.source_document_dialog = false;

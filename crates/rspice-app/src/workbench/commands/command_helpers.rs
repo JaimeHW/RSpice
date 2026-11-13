@@ -210,12 +210,16 @@ fn netlist_history_step(
     direction: HistoryDirection,
 ) -> Result<Option<String>, String> {
     match direction {
-        HistoryDirection::Undo => {
-            crate::workbench::documents::netlist_document::undo_netlist_edit(&mut app.state)
-        }
-        HistoryDirection::Redo => {
-            crate::workbench::documents::netlist_document::redo_netlist_edit(&mut app.state)
-        }
+        HistoryDirection::Undo => crate::workbench::documents::netlist_document::undo_netlist_edit(
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
+        ),
+        HistoryDirection::Redo => crate::workbench::documents::netlist_document::redo_netlist_edit(
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
+        ),
     }
 }
 
@@ -266,9 +270,17 @@ pub(in crate::workbench) fn answer_netlist_editor_request(
         ),
         NetlistEditorRequest::StepHistory(step) => {
             let stepped = if step == StandardCommand::Undo {
-                crate::workbench::documents::netlist_document::undo_netlist_edit(state)
+                crate::workbench::documents::netlist_document::undo_netlist_edit(
+                    &mut state.model,
+                    &mut state.code.netlist,
+                    &mut state.code.netlist_open_documents,
+                )
             } else {
-                crate::workbench::documents::netlist_document::redo_netlist_edit(state)
+                crate::workbench::documents::netlist_document::redo_netlist_edit(
+                    &mut state.model,
+                    &mut state.code.netlist,
+                    &mut state.code.netlist_open_documents,
+                )
             };
             if let Err(error) = stepped {
                 state.prompt(error);
@@ -442,7 +454,12 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 }
                 None => OwnedNetlistReplacement::root(&original, replacement, 1),
             };
-            match replace_owned_sources_atomically(&mut app.state, vec![edit]) {
+            match replace_owned_sources_atomically(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                vec![edit],
+            ) {
                 Ok(_) => app.state.prompt(selected),
                 Err(error) => app.state.prompt(error),
             }
@@ -543,7 +560,9 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::CopyNetlistDependency => {
             let messages = app.state.workbench.messages();
             match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
             ) {
                 Ok(_) => {
                     app.state.record(

@@ -350,7 +350,10 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
 
     if selected_source != review.local_source
         && !crate::workbench::documents::netlist_document::replace_owned_source(
-            &mut candidate,
+            &mut candidate.model,
+            &mut candidate.code.netlist,
+            &mut candidate.code.netlist_open_documents,
+            &mut candidate.workbench,
             selected_source.clone(),
         )
     {

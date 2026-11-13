@@ -189,7 +189,12 @@ mod tests {
             ),
             None => OwnedNetlistReplacement::root(&rewrite.original, rewrite.replacement, 1),
         };
-        replace_owned_sources_atomically(state, vec![edit])?;
+        replace_owned_sources_atomically(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            vec![edit],
+        )?;
         Ok(rewrite.selected)
     }
 
@@ -327,7 +332,12 @@ mod tests {
             "a rewritten card is an unsaved change"
         );
 
-        undo_netlist_edit(&mut state).expect("the rewrite is one journal entry");
+        undo_netlist_edit(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+        )
+        .expect("the rewrite is one journal entry");
         assert_eq!(
             state.model.workspace.content.netlist_source.as_deref(),
             Some(ROOT),

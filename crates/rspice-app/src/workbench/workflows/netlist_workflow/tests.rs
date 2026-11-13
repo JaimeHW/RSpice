@@ -198,8 +198,11 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
     let utf8_source = "* caf\u{00e9} and \u{03a9}\nV1 out 0 1\n.op\n.end\n";
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
-            &mut app.state,
-            utf8_source.to_owned(),
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            &mut app.state.code.netlist_open_documents,
+            &mut app.state.workbench,
+            utf8_source.to_owned()
         )
     );
     assert!(app.state.model.netlist_artifacts.validation.is_none());
@@ -456,8 +459,11 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .document_revision;
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
-            &mut state,
-            modified.to_owned(),
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.workbench,
+            modified.to_owned()
         )
     );
     let modified_revision = state
@@ -1003,8 +1009,11 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
         .compatibility_accepted = true;
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
-            &mut state,
-            "* changed after review\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.workbench,
+            "* changed after review\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n".to_owned()
         )
     );
 
