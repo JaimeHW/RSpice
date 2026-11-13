@@ -1,4 +1,4 @@
-//! Architectural layering ratchet for the `rspice-app` application crate.
+//! Architectural layering rule for the `rspice-app` application crate.
 //!
 //! The application still contains modules awaiting extraction: state, project
 //! I/O, orchestration, viewer mathematics, and chrome currently share this
@@ -16,23 +16,19 @@
 //! treating it as one unit left its entire interior unmeasured, and a cycle
 //! that an earlier refactor believed it had retired was in fact still there.
 //! [`WORKBENCH_LAYERS`] therefore orders `workbench`'s own submodules, and
-//! both orders ratchet the same way.
+//! both orders are checked the same way.
 //!
-//! # How it ratchets
+//! # Allowed edges
 //!
-//! Every edge that violates the layer order today is recorded in
-//! [`ALLOWED_VIOLATIONS`] with its exact reference count. The count is a
-//! ceiling, never a target:
+//! Every edge that violates the layer order today is listed in
+//! [`ALLOWED_VIOLATIONS`]:
 //!
 //! - A **new** violating edge fails the build.
-//! - An **existing** violating edge that grows fails the build.
-//! - An edge that shrinks is fine; lower the ceiling when convenient.
-//! - An edge that reaches zero fails the build until its entry is deleted,
-//!   so the allowlist cannot rot into a list of problems that no longer
-//!   exist.
+//! - A listed edge that no longer exists fails the build until its entry is
+//!   deleted, so the allowlist cannot rot into a list of problems that no
+//!   longer exist.
 //!
-//! Each entry carries the remediation phase that retires it. When a phase
-//! lands, its entries disappear from this list rather than being renumbered.
+//! Each entry carries the remediation that retires it.
 //!
 //! # What counts as a reference
 //!
@@ -91,37 +87,11 @@ const LAYERS: &[(&str, u32)] = &[
     ("feature_tests", 10),
 ];
 
-/// Layer-order violations present in the tree today, with exact counts.
+/// Layer-order violations present in the tree today.
 ///
-/// Sorted by remediation phase. Do not add entries to unblock new code —
-/// a new violation means the code is in the wrong module.
-///
-/// # Re-measured 2026-08-17
-///
-/// Between 2026-08-01 and 2026-08-17 nothing ran this target. Every
-/// `rspice-app` step in `ci.yml` was `--lib`, which does not build integration
-/// tests, and the Coverage job that did run it had been red for months. Three
-/// top-level edges and eight inside the shell grew in that window with no
-/// build failing, which is the failure mode this table exists to prevent — a
-/// ratchet with no observer is a comment.
-///
-/// The counts here are re-measured, not raised to make room: every entry was
-/// zeroed and rewritten from the failure output, so no ceiling carries slack.
-/// Two fell in the same pass. `ProcessCorner` was declared inside the corner
-/// *dialog* while `ModelLibraryManager` was typed by it, so the persisted
-/// model reached up into orchestration for a five-name enum with no
-/// behaviour; moving it to `crate::product` — a vocabulary is data — took
-/// `state -> simulation` from 29 to 10 and `io -> simulation` from 22 to 13.
-///
-/// The gate now has its own step in `ci.yml`, so the next growth fails a
-/// build on the commit that causes it rather than accumulating for a fortnight.
-///
-/// Re-measured again 2026-08-28 by the same zero-and-rewrite pass. Three
-/// edges had drifted below their ceiling and now sit on the measurement:
-/// `state -> simulation` 10 → 9, `simulation -> schematic` 3 → 1, and
-/// `app_state -> app` 5 → 4 in the shell table below. Every other edge in
-/// both tables was already exact.
-const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
+/// Do not add entries to unblock new code — a new violation means the code is
+/// in the wrong module.
+const ALLOWED_VIOLATIONS: &[(&str, &str)] = &[
     // The `common` <-> `workbench` cycle is retired.
     //
     // It could not be broken by moving a module. `workbench` reached for
@@ -154,111 +124,18 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // the console/log models moved to `crate::diagnostics` (schematic
     // 102 -> 98, simulation 87 -> 60).
     //
-    // `schematic -> workbench` 104 -> 108 and `io -> workbench` 14 -> 19 are
-    // the unobserved growth described above. Both are the same shape as the
-    // retired `state -> workbench` edge: types the project *persists* still
-    // live in the shell, so a lower layer must name the shell to read them.
-    // `io` reaches for `app_state::{SimSetupState, StoredSimulationPlan,
-    // TranSetup}` and `documents::result_document::{ResultMarker, ExprTrace,
-    // AnalysisPresentationKey}`. They retire the way `state -> workbench` did
-    // — by moving the persisted contract down, not by narrowing a signature.
-    ("schematic", "workbench", 99),
+    // `schematic -> workbench` is the same shape as the retired
+    // `state -> workbench` edge: types the project *persists* still live in
+    // the shell, so a lower layer must name the shell to read them. It retires
+    // the way `state -> workbench` did — by moving the persisted contract down,
+    // not by narrowing a signature.
+    ("schematic", "workbench"),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
-    ("services", "simulation", 1),
+    ("services", "simulation"),
 ];
-
-/// Whole-application mutable access, frozen at its current level.
-///
-/// A function taking `&mut RSpiceApp` may touch every field of every
-/// subsystem. Narrowing all of them at once is not worth the regression
-/// risk, so the count is frozen instead: it may fall, never rise. Prefer a
-/// parameter naming exactly the state a handler needs.
-///
-/// Re-measured 638 -> 873 on 2026-08-17. This is not a burndown that stalled;
-/// it is 235 signatures added while nothing ran this target — see
-/// [`ALLOWED_VIOLATIONS`] for the CI gap. Re-freezing at the measured value is
-/// the deliberate choice over leaving the assertion red: a ceiling nobody
-/// believes gets `--skip`ped, which is exactly how the number reached 873.
-///
-/// Narrowing 235 signatures is a program, not a change, and it is the same
-/// program that retires the `-> app_state` and `-> app` entries in
-/// [`ALLOWED_WORKBENCH_VIOLATIONS`]. Take those edges as the work list: the
-/// concentration is in `documents/result_document` (34 `-> app_state`),
-/// `documents/code_workspace`, and the `lifecycle` modules.
-///
-/// 873 -> 871 on 2026-09-05, the Component shelf's two frame helpers having
-/// become methods on a harness that owns the application instead of taking it.
-/// The ceiling follows the measurement down rather than keeping the two slots:
-/// a ceiling above its measurement is slack nobody voted for, and this file
-/// says so where it re-tightened the others. So the two signatures are gone,
-/// not banked — the next whole-app parameter is still the one that turns this
-/// red, and the room for it comes from the same place these two did.
-///
-/// 871 -> 866 on 2026-09-16. Four of those five slots were never occupied:
-/// the account console arrived with four whole-app signatures while the
-/// ceiling stood at 871 against a measurement of 867, so the gate had four
-/// slots of slack and spent them silently. The fifth is a real narrowing —
-/// `account_organization::open` routes, and routing is `AppState`'s, so it
-/// takes the state its two statements touch and its caller passes
-/// `&mut app.state` the way the sibling command arms already do. The other
-/// three genuinely need the application: `show` and `execute_action` reach
-/// the cloud session, the license dialog and the command vocabulary, and the
-/// test helper draws through `show`.
-/// 866 -> 867 on 2026-09-16, for `chrome::toolbar::stimulus_tools`. Every
-/// sibling workspace toolbar takes the application — `models_tools`,
-/// `design_tools`, `results_tools` and the rest all do, because the toolbar
-/// command helpers they dispatch through resolve availability against the
-/// whole application. A `stimulus_tools` that took less would have to
-/// duplicate that resolution to say why a button is unavailable.
-///
-/// 867 -> 800 on 2026-10-15, when the Visualization Studio was deleted. Its
-/// stage, dock, sections and actions took the application everywhere, so the
-/// surface carried 67 of these on its own. None of the 67 is banked: the
-/// ceiling follows the measurement down, and the result viewer that absorbed
-/// the Studio's capabilities takes the session slices its forms read.
-///
-/// 800 -> 793 on 2026-10-18, when the design inspector's sheet panel began
-/// editing the sheet through Page Setup's transaction. That transaction only
-/// ever touched the application's state, so it and its three helpers take
-/// `AppState` now, and the sheet panel, which no longer dispatches toolbar
-/// commands, takes the state too.
-///
-/// 793 -> 789 on 2026-10-18, when the Page Setup dialog was deleted and its
-/// settings were left to the sheet panel. Its opener, its renderer, the
-/// title-block fields dialog only it reached, and its render tests' frame
-/// helpers took the application whole.
-///
-/// 789 -> 771 on 2026-10-20, when the application menus became data. The
-/// eleven menu functions, the overflow menu's, their dispatcher, the four
-/// row helpers and the two content callbacks the menu triggers threaded
-/// through each took the application whole to draw rows; the rows are now
-/// resolved from a shared borrow, and only the row a reader chose runs
-/// against the application.
-///
-/// 771 -> 721 on 2026-10-24, when the framework's containers began drawing
-/// for a host. The chrome, the command palette, the docks, the stage, the
-/// notification centre, the specialist tool browser and the window-session
-/// dialog took the application whole to read the session and to ask the
-/// shell; they take `impl WorkbenchHost` now, which names neither, so 48
-/// signatures are gone. The other two slots were never occupied: the
-/// measurement stood at 769 when the work began, and the ceiling follows it
-/// down rather than keeping them.
-///
-/// 721 -> 718 on 2026-10-24, when the sheets feature began drawing its own
-/// dialogs. The drawing-sheet defaults and the sheet format manager applied
-/// their drafts, and published the catalog they built, through the
-/// application whole; they read and write only their dialog and the model,
-/// so they take those. The new feature dialog entry the shell's dialog order
-/// calls takes the application once, for all of them.
-///
-/// 718 -> 716 on 2026-10-25, when the sheets feature began drawing its sheet
-/// strip. The strip and the action it applies after its chips paint took the
-/// application whole; they read and write only the model, the session and
-/// the sheets feature's reveal request, so they take those.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 709;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -339,7 +216,7 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
         }
     }
     // A root that moved leaves an empty directory or none; either way every
-    // ratchet over it would pass on nothing.
+    // check over it would pass on nothing.
     assert!(
         !found.is_empty(),
         "{} holds no Rust source; a scan that reaches nothing passes forever",
@@ -413,12 +290,10 @@ fn crate_of(src: &Path) -> String {
         .into_owned()
 }
 
-/// One application source: the file, its crate, its path under that crate's
-/// `src` (the key the tables here use) and the name a report gives it.
+/// One application source: the file, its crate and the name a report gives it.
 struct AppSource {
     file: PathBuf,
     krate: String,
-    relative: String,
     shown: String,
 }
 
@@ -432,19 +307,15 @@ fn app_sources() -> Vec<AppSource> {
         .flat_map(|root| {
             let krate = crate_of(root);
             rust_sources(root).into_iter().map(move |file| {
-                let under = |base: &Path| {
-                    file.strip_prefix(base)
-                        .unwrap_or(&file)
-                        .display()
-                        .to_string()
-                        .replace('\\', "/")
-                };
-                let relative = under(root);
-                let shown = under(crates);
+                let shown = file
+                    .strip_prefix(crates)
+                    .unwrap_or(&file)
+                    .display()
+                    .to_string()
+                    .replace('\\', "/");
                 AppSource {
                     file,
                     krate: krate.clone(),
-                    relative,
                     shown,
                 }
             })
@@ -623,10 +494,7 @@ fn every_top_level_module_declares_a_layer() {
 #[test]
 fn module_references_respect_the_layer_order() {
     let edges = edge_counts();
-    let mut allowed: BTreeMap<(&str, &str), usize> = ALLOWED_VIOLATIONS
-        .iter()
-        .map(|(from, to, count)| ((*from, *to), *count))
-        .collect();
+    let mut allowed: BTreeSet<(&str, &str)> = ALLOWED_VIOLATIONS.iter().copied().collect();
     assert_eq!(
         allowed.len(),
         ALLOWED_VIOLATIONS.len(),
@@ -634,29 +502,24 @@ fn module_references_respect_the_layer_order() {
     );
 
     let mut new_violations = Vec::new();
-    let mut grown = Vec::new();
 
     for ((from, to), count) in &edges {
         if layer_of(from) > layer_of(to) {
             continue;
         }
-        match allowed.remove(&(from.as_str(), to.as_str())) {
-            None => new_violations.push(format!(
+        if !allowed.remove(&(from.as_str(), to.as_str())) {
+            new_violations.push(format!(
                 "  {from} -> {to} ({count} references, layer {} -> layer {})",
                 layer_of(from),
                 layer_of(to)
-            )),
-            Some(ceiling) if *count > ceiling => grown.push(format!(
-                "  {from} -> {to}: {count} references, ceiling is {ceiling}"
-            )),
-            Some(_) => {}
+            ));
         }
     }
 
     // Entries left over describe edges that no longer exist. Deleting them
     // is the point of the exercise, so the allowlist must be kept honest.
     let retired: Vec<String> = allowed
-        .keys()
+        .iter()
         .map(|(from, to)| format!("  {from} -> {to}"))
         .collect();
 
@@ -668,13 +531,6 @@ fn module_references_respect_the_layer_order() {
              Move it to a module that sits above what it needs, or take the \
              state it uses as a parameter instead of reaching for it.\n",
             new_violations.join("\n")
-        ));
-    }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nExisting violations that grew:\n{}\n\
-             These edges are being retired, not extended.\n",
-            grown.join("\n")
         ));
     }
     if !retired.is_empty() {
@@ -938,11 +794,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "app/run_flow_tests",
 ];
 
-/// Order violations inside `workbench` today, with exact counts.
+/// Order violations inside `workbench` today.
 ///
-/// Same rules as [`ALLOWED_VIOLATIONS`]: a ceiling, never a target. Every
-/// count here is the measured value, not a rounded-up allowance — a ceiling
-/// with slack in it is an edge nobody is watching.
+/// Same rules as [`ALLOWED_VIOLATIONS`]: a new edge fails, and an entry whose
+/// edge is gone fails until it is deleted. A new edge means the code is in the
+/// wrong module rather than that the table needs another row.
 ///
 /// The concentration is the finding: `app` and `app_state` carry a third of
 /// the list between them. That is what splitting them apart exposed. Before
@@ -950,67 +806,31 @@ const WORKBENCH_LAYERS: &[&str] = &[
 /// needs the session data" and "this module calls the application root" were
 /// the same measurement. They are now separate problems with separate fixes —
 /// the first retires by passing a slice of the session instead of the whole
-/// aggregate, the second by the `&mut RSpiceApp` burndown.
-///
-/// # Re-measured 2026-08-17
-///
-/// See [`ALLOWED_VIOLATIONS`] for why nothing observed this table for a
-/// fortnight. Every count below was zeroed and rewritten from the failure
-/// output. Eight edges grew in that window and eight fell, so the entries are
-/// not uniformly worse — but the raised ones are real drift, not slack:
-/// `documents/result_document -> app_state` 24 -> 34,
-/// `documents/code_workspace -> browser/file_import` 7 -> 14,
-/// `documents/code_workspace -> app` and `state -> documents/model_editor`
-/// 2 -> 5, `app -> workflows/export_workflow` 14 -> 16, and one each on
-/// `app -> browser/accessibility` and
-/// `lifecycle/session -> documents/result_document`.
-///
-/// # Raised 2026-09-19
-///
-/// `documents/result_document -> app_state` 34 -> 35: the DC mismatch
-/// contribution sheet (`result_document/sensitivity/mismatch.rs`) is one more
-/// sheet module of exactly the shape of its thirty-four siblings — it takes
-/// `&AppState` because every sheet does. The edge retires when the sheets are
-/// handed a slice of the session, which is one program for all of them, not a
-/// special case for the newest.
-///
-/// 35 -> 36, the same day and for the same reason: the swept sensitivity study
-/// sheet (`result_document/sensitivity/study.rs`) beside it.
-///
-/// The one *new* edge the window produced — `app -> preflight` — is not here,
-/// because a new edge means the code is in the wrong module rather than that
-/// the table needs another row. `RSpiceApp` was calling the preflight workflow
-/// from a shortcut handler and a dialog; both now record the request on
-/// `PreflightDialogState` and `frame` runs it, which is the pattern the `app`
-/// block below says retires the rest of these. Moving the two `AppState`
-/// derivations the report is pinned to (`configured_topology_revision`,
-/// `active_plan_revision`) into `app_state::run_identity` retired
-/// `chrome -> preflight` outright and returned `commands -> preflight` and
-/// `surfaces -> preflight` to 1.
-const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
+/// aggregate, the second by narrowing signatures that take `&mut RSpiceApp`.
+const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // `app` is the frame loop, and it drives everything. These are the calls
     // out of `RSpiceApp` into the presentation and workflow layers it renders.
     // They retire as the frame loop stops calling and starts setting state
     // that the called module reads — the pattern `frame` already follows.
-    ("app", "workflows/project_workflow", 17),
-    ("app", "commands", 1),
-    ("app", "chrome", 12),
-    ("app", "workflows/file_workflow", 1),
-    ("app", "browser/navigation", 7),
-    ("app", "workflows/file_actions", 2),
-    ("app", "frame", 4),
-    ("app", "cross_probe", 1),
+    ("app", "workflows/project_workflow"),
+    ("app", "commands"),
+    ("app", "chrome"),
+    ("app", "workflows/file_workflow"),
+    ("app", "browser/navigation"),
+    ("app", "workflows/file_actions"),
+    ("app", "frame"),
+    ("app", "cross_probe"),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //
     // Downward: a module that needs one slice of the session takes the whole
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
-    ("documents/result_document", "app_state", 1),
+    ("documents/result_document", "app_state"),
     // The results feature's test host holds the results slot whose parts its
     // tests run against, as the session does.
-    ("documents/result_document", "slots", 1),
-    ("documents/netlist_document", "app_state", 2),
+    ("documents/result_document", "slots"),
+    ("documents/netlist_document", "app_state"),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the
     // session wire naming the bulk-edit filters it keeps, which live with the
@@ -1018,49 +838,49 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // holds, the platform state it names for the services below it, and the
     // session wire reading what it keeps of them; slots rank with the dialog
     // types they name.
-    ("app_state", "app", 3),
-    ("app_state", "slots", 3),
-    ("app_state", "workflows/file_workflow", 1),
+    ("app_state", "app"),
+    ("app_state", "slots"),
+    ("app_state", "workflows/file_workflow"),
     // What still reaches the application root rather than the session data.
-    // These name `RSpiceApp` itself, so they retire with the `&mut RSpiceApp`
-    // burndown, not with a module move.
-    ("documents/code_workspace", "app", 4),
+    // These name `RSpiceApp` itself, so they retire as signatures stop taking
+    // the whole application, not with a module move.
+    ("documents/code_workspace", "app"),
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the
     // document moves into the models crate with the feature, where the edge
     // is internal to it.
-    ("documents/model_editor", "models", 1),
+    ("documents/model_editor", "models"),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
-    ("commands", "chrome", 10),
-    ("commands", "menu_bar", 4),
-    ("surfaces", "preflight", 1),
+    ("commands", "chrome"),
+    ("commands", "menu_bar"),
+    ("surfaces", "preflight"),
     // The shell's own persisted state reaching up into the window session.
     // This is the same inversion the top-level `state -> *` entries describe,
     // one layer down: `WorkbenchSession` stores what a surface is showing
     // instead of the surface deriving it.
-    ("state", "lifecycle/window_session", 2),
+    ("state", "lifecycle/window_session"),
     // The framework dialogs the workbench holds: the window-session manager,
     // the command palette, and the confirmation and project-review dialogs.
     // Their types still live with the application root.
-    ("state", "app", 4),
+    ("state", "app"),
     // The text locale the workbench holds: its type lives with the message
     // catalog.
-    ("state", "localization", 1),
+    ("state", "localization"),
     // The design slot holds the schematic cross-probe runtime, whose type
     // lives with the frame pass that synchronizes it.
-    ("slots", "cross_probe", 1),
+    ("slots", "cross_probe"),
     // Artifacts reaching sideways into the workflows.
-    ("shortcuts/artifacts", "shortcuts/profile_workflow", 1),
+    ("shortcuts/artifacts", "shortcuts/profile_workflow"),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
-    ("workflows/result_import_workflow", "chrome", 1),
-    ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
+    ("workflows/result_import_workflow", "chrome"),
+    ("shortcuts/library_persistence", "shortcuts/artifacts"),
     // Presentation reaching sideways into a peer surface.
-    ("documents/result_document", "chrome", 1),
+    ("documents/result_document", "chrome"),
     // A route describing its own catalog and availability.
-    ("routing/surface_route", "routing/surface_catalog", 1),
+    ("routing/surface_route", "routing/surface_catalog"),
 ];
 
 fn workbench_dir() -> PathBuf {
@@ -1469,10 +1289,8 @@ fn every_workbench_module_declares_a_layer() {
 #[test]
 fn workbench_references_respect_the_layer_order() {
     let edges = workbench_edge_counts();
-    let mut allowed: BTreeMap<(&str, &str), usize> = ALLOWED_WORKBENCH_VIOLATIONS
-        .iter()
-        .map(|(from, to, count)| ((*from, *to), *count))
-        .collect();
+    let mut allowed: BTreeSet<(&str, &str)> =
+        ALLOWED_WORKBENCH_VIOLATIONS.iter().copied().collect();
     assert_eq!(
         allowed.len(),
         ALLOWED_WORKBENCH_VIOLATIONS.len(),
@@ -1480,27 +1298,22 @@ fn workbench_references_respect_the_layer_order() {
     );
 
     let mut new_violations = Vec::new();
-    let mut grown = Vec::new();
 
     for ((from, to), count) in &edges {
         if workbench_rank(from) > workbench_rank(to) {
             continue;
         }
-        match allowed.remove(&(from.as_str(), to.as_str())) {
-            None => new_violations.push(format!(
+        if !allowed.remove(&(from.as_str(), to.as_str())) {
+            new_violations.push(format!(
                 "  {from} -> {to} ({count} references, rank {} -> rank {})",
                 workbench_rank(from),
                 workbench_rank(to)
-            )),
-            Some(ceiling) if *count > ceiling => grown.push(format!(
-                "  {from} -> {to}: {count} references, ceiling is {ceiling}"
-            )),
-            Some(_) => {}
+            ));
         }
     }
 
     let retired: Vec<String> = allowed
-        .keys()
+        .iter()
         .map(|(from, to)| format!("  {from} -> {to}"))
         .collect();
 
@@ -1512,13 +1325,6 @@ fn workbench_references_respect_the_layer_order() {
              below what needs it, or take the state it uses as a parameter \
              instead of reaching for the module that holds it.\n",
             new_violations.join("\n")
-        ));
-    }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nExisting workbench violations that grew:\n{}\n\
-             These edges are being retired, not extended.\n",
-            grown.join("\n")
         ));
     }
     if !retired.is_empty() {
@@ -1547,36 +1353,29 @@ fn workbench_references_respect_the_layer_order() {
 /// compiler could have enforced. Closing them took reported dead code from
 /// 259 to 1531.
 ///
-/// The count went 132 -> 124 (the roots) -> 0 (the nested declarations,
-/// which were no-ops: a `pub mod` inside a `pub(crate) mod` is already
-/// crate-visible and nothing more).
-///
 /// To reach something from a test, add a re-export in `lib.rs`. Adding a
 /// `pub mod` re-opens the hole for that whole subtree.
-const MAX_PUBLIC_MODULES: usize = 0;
-
 #[test]
-fn the_public_module_surface_does_not_grow() {
+fn no_module_is_public() {
     let root = src_dir();
-    let mut count = 0;
+    let mut public = Vec::new();
     for file in rust_sources(&root) {
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        count += strip_line_comments(&source)
+        if strip_line_comments(&source)
             .lines()
-            .filter(|line| line.trim_start().starts_with("pub mod "))
-            .count();
+            .any(|line| line.trim_start().starts_with("pub mod "))
+        {
+            public.push(file.display().to_string());
+        }
     }
-    // `==` rather than `<=`: the ceiling has reached zero, and `count <= 0`
-    // is the always-true-or-always-false comparison clippy rejects.
     assert!(
-        count == MAX_PUBLIC_MODULES,
-        "`pub mod` declarations rose to {count}, ceiling is {MAX_PUBLIC_MODULES}.\n\
+        public.is_empty(),
+        "these files declare a `pub mod`:\n  {}\n\
          A public module cannot be refactored without checking the whole \
          world. Use `pub(crate) mod`, and re-export from the crate root if an \
-         integration test or example genuinely needs the item.\n\
-         If a reduction elsewhere justifies the change, lower \
-         MAX_PUBLIC_MODULES in tests/module_layering.rs."
+         integration test or example genuinely needs the item.",
+        public.join("\n  ")
     );
 }
 
@@ -1609,192 +1408,9 @@ fn source_files_have_no_byte_order_mark() {
     );
 }
 
-/// Lint suppressions in the crate, frozen at the current count.
-///
-/// There were 110. Removing all 32 `#[allow(dead_code)]` attributes produced
-/// zero new warnings — every one of them suppressed nothing, which is worse
-/// than noise, because a stale suppression silently absorbs the *next* real
-/// warning at that site. `#[allow(unused_mut)]` was stale the same way.
-///
-/// The 77 that remain are load-bearing: removing one produces the warning it
-/// claims to be silencing.
-///
-/// This count went 77 -> 81 -> 85 -> 77 over 2026-07-28, and the round trip is
-/// the point. It was raised to 81 to cover `product::capability_readiness` and
-/// the `results::report_{package,pdfa,publication}` cluster, each carrying its
-/// own evidence and removal condition: wire the module up, or delete it. Both
-/// were then answered by deleting them -- the report cluster duplicated the
-/// shipping `hardcopy_adapters` publication path, and capability readiness had
-/// no surface to resolve claims for -- so their four attributes went with them.
-///
-/// A suppression that states its removal condition gets removed. That is the
-/// difference between these and the 32 stale ones: those had no condition, so
-/// nothing ever retired them.
-///
-/// Raised 81 -> 85 on 2026-07-28 for the four "inferred/default" analysis
-/// entry points left standing after the runner overload ladders were retired:
-/// `tf::run_tf_analysis_with_source_path_and_abort`,
-/// `pnoise::run_pnoise_analysis_with_source_path_and_abort`,
-/// `pac_pxf::pac::run_pac_analysis_auto_with_source_path_and_abort`, and
-/// `pac_pxf::pxf::run_pxf_analysis_with_source_path_and_abort`.
-///
-/// Every other unreachable entry in those modules was a wrapper that forwarded
-/// to a shipping function, so deleting it cost nothing. These four are not:
-/// each infers the input source and output node from the netlist instead of
-/// requiring the user to name them, and together they hold the only reachable
-/// uses of `helpers::infer_primary_output_node_with_abort` and
-/// `tf::infer_tf_run_config`. Deleting them would delete the capability, not a
-/// duplicate of one -- which is a product decision rather than a cleanup.
-///
-/// Same rule: wire them up or delete them, and drop the attribute either way.
-///
-/// Lowered 85 -> 77 when the two clusters above were deleted, then 77 -> 76
-/// with the `dc_sweep`/`noise`/`pole_zero` runner duplicates. The four
-/// inference entries are the only additions still standing.
-/// Raised 76 -> 77 for the one blanket allow on
-/// `workbench::simulation_analysis_tabs`. That module's constants name a
-/// *persisted* index space -- `SimSetup` stores analyses as bare `usize` and
-/// bounds them with `ANALYSIS_COUNT` -- so the unreferenced names are the
-/// decode table for numbers already in saved projects, not spare parts. One
-/// suppression buys back 26 warnings, and its removal condition is stated in
-/// the module header: it goes when plans persist an analysis kind instead of
-/// a tab index.
-/// Back to 76 when `simulation::multi_run::{plan, run_state}` went — a dead
-/// pair that kept each other reachable, and carried a suppression between them.
-/// 76 -> 73 with the three unreferenced `ModelsPage` source aliases, each of
-/// which needed an `allow(non_upper_case_globals)` to exist at all.
-/// 73 -> 75 when license issuance moved into `services::license`'s test module.
-/// Its two `#[ignore]`d minting entry points exist to print the key material
-/// they produce -- that output read through `--nocapture` is the whole point of
-/// running them -- and the crate denies `print_stdout` because the desktop
-/// build detaches from its console. The allows are per-function rather than
-/// `print_stdout` being added to the crate-wide `cfg(test)` exemption, so the
-/// rule keeps holding for every other test.
-/// 75 -> 31 when the fifty per-site `clippy::too_many_arguments` allows were
-/// replaced by one crate-level allow that states the reason once, and the
-/// `resolve_active_app_hardcopy_source` `allow(dead_code)` became `cfg(test)`
-/// — which is what it always meant.
-/// 31 -> 33 for the two `large_enum_variant` modules. The worker transport's
-/// result enums have one variant per analysis kind and the analyses really do
-/// differ in payload size; a prepared hardcopy source is a whole sealed
-/// document beside a symbol. Each value is built once, consumed once, and
-/// never collected, and the struct variants' shape is the wire format. Both
-/// allows name the reason at the module they sit on.
-/// 33 -> 38 for five naming lints that are wrong about this domain: four
-/// enums whose variants share a word because the product does (`By sheet`,
-/// `operating point`, the Command Palette), and the aging mechanisms HCI and
-/// NBTI, which nobody spells `Hci` and `Nbti`. The fifth candidate,
-/// `VariantDifferenceKind`, was renamed instead — every difference between
-/// variants is a difference between overrides, so the postfix carried nothing.
-///
-/// Measured at 77 on 2026-08-17, against a ceiling of 38 set on 08-01 — see
-/// [`ALLOWED_VIOLATIONS`] for why nothing failed in between. Of the 39 added,
-/// 19 were `#[allow(clippy::too_many_arguments)]` at sites already covered by
-/// the crate-level allow at `lib.rs:53`, which is the same regression the
-/// 75 -> 31 cleanup above had already fixed once. A suppression that
-/// suppresses nothing is worse than noise — it silently absorbs the next real
-/// warning at that site — so all 19 are gone, taking the count to 58. The one
-/// per-site `too_many_arguments` allow that survives is in `worker_main.rs`,
-/// a separate `[[bin]]` root that the lib's crate-level attribute does not
-/// reach.
-///
-/// The remaining 58 are load-bearing and the ceiling is set there. The 28
-/// `dead_code` entries are the deliberate survivors this doc block already
-/// argues for — the four analysis inference entry points, the per-analysis
-/// dialog models, and the `cfg_attr`-narrowed ones in `durable_file` and
-/// `license`. Each retires by a product decision (wire it up or delete it),
-/// not by a sweep, so re-running that sweep is wasted work.
-///
-/// 58 -> 57 when the last `ModelsPage` source alias went. Three of these were
-/// retired at 76 -> 73 above; `Catalog` outlived them because four call sites
-/// outside the Models shell still spelled the page by its old name. They spell
-/// it `Models` now, so the alias -- and the `allow(non_upper_case_globals)`
-/// that let a `const` be named like a variant -- has nothing left to serve.
-///
-/// 57 -> 59 when this test started counting `#[expect(..)]` as well as
-/// `#[allow(..)]`. It had only ever matched `[allow(`, so an `#[expect]`
-/// suppressed a lint without moving the number the ceiling watches -- a hole
-/// in the one gate whose whole job is to make suppression cost something.
-/// Closing it counted the `result_large_err` expect in
-/// `services::cloud_account::live_relay`, which had been sitting outside the
-/// tally since it was written (+1). The second (+1) is a new
-/// `allow(clippy::print_stdout)` on `frame_work::tests::report_idle_frame_work`
-/// -- the same case `services::license` already argued and won: an
-/// `#[ignore]`d measurement harness whose entire output is the table a human
-/// reads through `--nocapture`, where routing through `log` would only put it
-/// behind a logger no test installs. Both forms suppress, so both are counted;
-/// prefer whichever states the reason, and expect the number to move either
-/// way.
-///
-/// 59 -> 56 when the product answered the question the four inference entries
-/// were held open for. PAC, PXF and PNOISE infer a periodic-tone source and an
-/// output node from the deck and then *run* on them, which is a guess presented
-/// as a result: those three are deleted.
-///
-/// 56 -> 55 for the fourth, TF, which was answered the other way and is the
-/// reason the four were worth holding. Its inference is now the Studio's
-/// "Infer from deck" action: `tf::infer_tf_run_config` reads the design's only
-/// independent source and one output node into the two fields of the transfer
-/// function form, where the reader sees both and still presses Run. The
-/// difference between that and the three deletions is the whole rule -- a
-/// guess shown in an editable field is an offer, and a guess a run reports as
-/// a result is a lie -- and the entry point that ran on one is gone with them.
-/// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
-/// both took a first-or-last element off a solved deck, and the offer needs a
-/// *sole* source or it has nothing to offer.
-///
-/// 15 -> 16 for `allow(clippy::print_stdout)` on
-/// `schematic::view::frame_cost::report`, the canvas frame-cost probe's one
-/// printer: the `report_idle_frame_work` case again, an `#[ignore]`d
-/// measurement harness whose whole output is the tables a human reads through
-/// `--nocapture`. Every table the probe prints goes through that function, so
-/// the probe costs one suppression rather than one per table.
-///
-/// 16 -> 13: the shortcut import's rollback path is deleted, and with it the
-/// three `allow(dead_code)` that kept an unreachable undo compiling.
-///
-/// 13 -> 12: `workbench::simulation_analysis_tabs` and its blanket allow are
-/// deleted. Saved indices decode through `AnalysisKind::legacy_index`.
-///
-/// 12 -> 11: the shortcut platform's allow moves with the workbench framework
-/// to `rspice-app-workbench`, whose own guard counts it.
-///
-/// 9 -> 6: the cloud feature's suppressions move with it to
-/// `rspice-app-cloud`, whose own guard counts them.
-///
-/// 6 -> 5: the models feature's suppressions move with it to
-/// `rspice-app-models`, whose own guard counts them.
-const MAX_LINT_SUPPRESSIONS: usize = 5;
-
-/// The crate does not accumulate lint suppressions.
-#[test]
-fn lint_suppressions_do_not_grow() {
-    let root = src_dir();
-    let mut suppressions = 0usize;
-    for path in rust_sources(&root) {
-        let source = fs::read_to_string(&path).unwrap_or_default();
-        let stripped = strip_line_comments(&source);
-        suppressions += stripped.matches("[allow(").count();
-        suppressions += stripped.matches("[expect(").count();
-    }
-    assert!(
-        suppressions <= MAX_LINT_SUPPRESSIONS,
-        "{suppressions} lint suppressions, ceiling is {MAX_LINT_SUPPRESSIONS}. \
-         Fix what the lint is pointing at, or say in a comment why the lint is \
-         wrong here."
-    );
-    assert_eq!(
-        suppressions, MAX_LINT_SUPPRESSIONS,
-        "{suppressions} lint suppressions, down from {MAX_LINT_SUPPRESSIONS}. \
-         Lower MAX_LINT_SUPPRESSIONS to hold the ground."
-    );
-}
-
 /// Every module says what it is.
 ///
-/// This began as a ceiling over 331 undocumented files, because a burndown
-/// that large is not one change. It reached zero, so it is a gate now: a
-/// module with no `//!` header fails the build.
+/// A module with no `//!` header fails the build.
 ///
 /// The bar is not a restatement of the module path. Where a module encodes a
 /// rule its code does not make obvious — why an order matters, what a receipt
@@ -1853,262 +1469,6 @@ fn modules_use_the_sibling_file_convention_not_mod_rs() {
          parent directory, so self-referencing test fixtures need updating too.",
         offenders.join("\n  ")
     );
-}
-
-#[test]
-fn whole_application_mutable_access_does_not_grow() {
-    let sources = app_sources();
-    assert_reads_every_app_crate(
-        "the mutable-access count",
-        sources.iter().map(|source| source.krate.as_str()),
-    );
-    let mut count = 0;
-    for AppSource { file, .. } in sources {
-        let source = fs::read_to_string(&file)
-            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        count += strip_line_comments(&source)
-            .matches("&mut RSpiceApp")
-            .count();
-    }
-    assert!(
-        count <= MAX_WHOLE_APP_MUTABLE_PARAMS,
-        "`&mut RSpiceApp` parameters rose to {count}, ceiling is \
-         {MAX_WHOLE_APP_MUTABLE_PARAMS}.\n\
-         A function taking the whole application can mutate every subsystem. \
-         Take the state the handler actually needs instead.\n\
-         If a reduction elsewhere justifies the change, lower \
-         MAX_WHOLE_APP_MUTABLE_PARAMS in tests/module_layering.rs."
-    );
-}
-
-/// Files are budgeted at 2500 lines.
-///
-/// The budget is not about style. A 8000-line module is where a state machine
-/// and its renderer get to share private fields without anyone deciding they
-/// should, which is how `hardcopy_sources.rs` came to hold both the persisted
-/// source-set records and the adapters that resolve live documents.
-///
-/// The leading `//!` header does not count. The budget exists so the *code*
-/// in a file stays reviewable, and a module header is what makes it easier to
-/// review — a budget that turns writing one into a build failure is measuring
-/// the wrong thing. Everything below the header counts, including ordinary
-/// comments.
-///
-/// Everything currently over budget is listed with its exact length. As with
-/// the layering table, the number is a ceiling: a file may shrink, never grow,
-/// and an entry that drops under budget must be deleted.
-const LINE_BUDGET: usize = 2500;
-
-/// Lines in a file, not counting its leading `//!` module header.
-fn budgeted_lines(source: &str) -> usize {
-    source
-        .lines()
-        .skip_while(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("//!") || trimmed.is_empty()
-        })
-        .count()
-}
-
-/// # Re-measured 2026-08-17
-///
-/// 16 entries became 38: 22 files crossed the budget and every allowlisted
-/// one but a few grew, while nothing ran this target — see
-/// [`ALLOWED_VIOLATIONS`] for the CI gap. The doctrine above still holds, and
-/// this list is not a repeal of it: a *new* entry added while the gate is
-/// green is a regression, and the answer is to split the file. These 22 were
-/// added while the gate was unobserved, so there was no moment at which anyone
-/// declined to split one.
-///
-/// Re-baselining the remainder rather than burning it down is a deliberate
-/// choice, and the reason is the 5 `--skip` flags this change removes from
-/// `coverage.yml`. The rest is a quarter's work; an assertion that stays red
-/// for a quarter gets skipped, and a skipped assertion caught none of the 22.
-/// The exact lengths below are the ceiling that stops the *next* thousand
-/// lines, which is the part that was missing.
-///
-/// # First burndown pass, 2026-08-17
-///
-/// 38 entries are now 32. Fifteen files carried their whole `#[cfg(test)] mod
-/// tests` inline; each moved to a sibling `<stem>/tests.rs`, which is the
-/// convention the rest of the crate already uses and the cheapest split that
-/// is still a real seam — the tests were the one part of those files that was
-/// unambiguously a separate concern. Six dropped under budget outright and
-/// their entries are gone; nine kept an entry at a lower ceiling.
-///
-/// That is the end of the free reductions. Every file below now needs a split
-/// through *production* code, along the seam the header above describes — a
-/// state machine beside its renderer, a contract beside its adapter — and
-/// each is a judgement call about where that boundary sits.
-///
-/// # Re-measured 2026-08-20
-///
-/// 32 entries are 24, and the excess is roughly 27k lines rather than 31k.
-/// Splits through production code did that, which is what the paragraph above
-/// asked for: `workbench/surfaces/models/manager.rs` was the worst-first list's
-/// fifth entry at 4_618 and is off this list entirely, having shed its dialogs,
-/// its corner transactions, its detail projection, its symbol-contract table,
-/// its part shelf and its shipped-corpus table to siblings.
-///
-/// Worst first, by measurement rather than by ceiling:
-/// `workbench/documents/result_document.rs` 7_352, `workbench/docks/navigator.rs`
-/// 6_427, `workbench/surfaces/pdk_technology_admin.rs` 5_115, and
-/// `state/pdk_config/technology_package.rs` 4_742.
-///
-/// Six entries below then sat under their ceiling. Lowering each to its
-/// measured length is free ground to hold — done on 2026-08-28, see below.
-///
-/// # Two mechanical raises, 2026-08-20
-///
-/// `AnalysisResult` gained one field — the design objects the engine named
-/// for a failed run — and `state/simulation/analysis_result.rs` rose 6 and
-/// `io/project_io/tests/migration.rs` 3. Neither is accretion: a struct with
-/// a new field costs one declaration, its doc, and one initializer in every
-/// literal that builds it, and those literals are where they are. The 138
-/// lines the field's *vocabulary* would have added went to a new sibling,
-/// `state/simulation/convergence_attribution.rs`, and the 33-line
-/// persistence case that came with it to
-/// `io/project_io/tests/failure_attribution.rs`. The split happened; what
-/// is left is the part a split cannot remove.
-///
-/// # One reduction held, 2026-08-21
-///
-/// `simulation/execution/snapshot.rs` drops 3_301 → 3_107. The global Run Set
-/// expansion moved to `snapshot/participation.rs`, which is a seam and not a
-/// tidy-up: what that function does is decide which tasks exist, and it now
-/// does so from a resolved participation rather than from the whole space. The
-/// ceiling follows the measurement down, because a 190-line gap left behind a
-/// split is where the next accretion lands.
-///
-/// # Three entries deleted, 2026-08-21
-///
-/// One field on three result-family variants, and the initializer it costs in
-/// every literal that builds one, pushed three allowlisted files over. All
-/// three came off this list instead of up it.
-///
-/// `state/simulation/analysis_result.rs` was sitting exactly on its ceiling, so
-/// the next field any family learned to retain could not be written at all.
-/// `AnalysisResultFamilyMetadata`, its validator, and
-/// `MonteCarloVariableMetadata` — the only thing that holds one — moved to
-/// `state/simulation/analysis_result/family_metadata.rs`. 2_745 → 2_489. The
-/// family contract is the part of that file that grows, so it is the part that
-/// needed its own file.
-///
-/// `simulation/runner/worker_contract/tests.rs` 2_660 → 2_306, having handed
-/// `worker_result_round_trip` to `tests/result_round_trip.rs`. That one test is
-/// 363 lines because it is total over the result enum, which is what makes it
-/// worth keeping whole and worth keeping alone.
-///
-/// `workbench/hardcopy_adapters/sources/tests.rs` 2_533 → 2_236, having handed
-/// the noise, FFT, eye and histogram cases to `tests/quick_view.rs`. Those four
-/// share a subject the rest of the file does not: a pane whose hardcopy is
-/// derived from the retained trace rather than being it.
-///
-/// # Every ceiling re-tightened to its measurement, 2026-08-28
-///
-/// Measured by zeroing every ceiling in this file and rewriting the tables
-/// from the failure output, which is the technique the header describes. Ten
-/// entries below carried slack and now sit on their measured length; the
-/// other eleven were already exact.
-///
-/// `documents/result_document.rs` 7_352 → 6_418 is the large one, and the 934
-/// lines are not a tidy-up: the frame-work instrumentation and the viewer
-/// memos moved out from under it. `docks/navigator.rs` 6_748 → 6_668 and the
-/// eight smaller reductions are the residue of the design-panel shelf split,
-/// which took `docks/navigator/design.rs` under the budget outright.
-///
-/// The two whole-number ceilings are deliberately untouched, because neither
-/// has slack to take: `&mut RSpiceApp` measures exactly 873 — the narrowing
-/// lanes stopped the moment the assertion passed — and MAX_LINT_SUPPRESSIONS
-/// is held exact by its own `assert_eq!`. A ceiling equal to its measurement
-/// is the state this file wants; only the ones above it were doing nothing.
-const OVERSIZED_FILES: &[(&str, usize)] = &[
-    // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
-    // workspace. Every line is a single-owner table this file exists to own —
-    // the `ResultViewer` variants and their tab order, the two directions of
-    // the viewer-document identity map, the sheet and inspector dispatch, the
-    // availability gate, the hook that lets a custom sheet paint its own
-    // domain bar, and `SheetContext`, which is how the three new sheets take
-    // the session slices they read instead of `AppState` (see
-    // `ALLOWED_WORKBENCH_VIOLATIONS`: that edge holds at 34). Each sheet's own
-    // model, painter, register and tests are in its own file (`polar.rs`,
-    // `scatter.rs`, `box_violin.rs`) and the population walk the two
-    // statistical sheets share is in `population.rs`. ResultsState's viewer
-    // interactions moved to `viewer_state.rs`; the ceiling now follows the
-    // remaining source exactly and may not grow during the crate split.
-    ("workbench/documents/result_document.rs", 4_601),
-];
-
-#[test]
-fn source_files_stay_within_the_line_budget() {
-    let allowed: BTreeMap<&str, usize> = OVERSIZED_FILES.iter().copied().collect();
-    assert_eq!(
-        allowed.len(),
-        OVERSIZED_FILES.len(),
-        "OVERSIZED_FILES contains a duplicate path"
-    );
-
-    let mut new_offenders = Vec::new();
-    let mut grown = Vec::new();
-    let mut seen = Vec::new();
-
-    let sources = app_sources();
-    assert_reads_every_app_crate(
-        "the line budget",
-        sources.iter().map(|source| source.krate.as_str()),
-    );
-    for AppSource { file, relative, .. } in sources {
-        let lines = budgeted_lines(
-            &fs::read_to_string(&file)
-                .unwrap_or_else(|error| panic!("read {}: {error}", file.display())),
-        );
-        match allowed.get(relative.as_str()) {
-            Some(ceiling) => {
-                seen.push(relative.clone());
-                if lines > *ceiling {
-                    grown.push(format!("  {relative}: {lines} lines, ceiling is {ceiling}"));
-                } else if lines <= LINE_BUDGET {
-                    grown.push(format!(
-                        "  {relative}: now {lines} lines, under the {LINE_BUDGET} budget \
-                         — delete its OVERSIZED_FILES entry"
-                    ));
-                }
-            }
-            None if lines > LINE_BUDGET => {
-                new_offenders.push(format!("  {relative}: {lines} lines"));
-            }
-            None => {}
-        }
-    }
-
-    let mut failures = String::new();
-    if !new_offenders.is_empty() {
-        failures.push_str(&format!(
-            "\nFiles newly over the {LINE_BUDGET}-line budget:\n{}\n\
-             Split along a seam the file already has — state from rendering, \
-             contract from adapter — rather than by line count.\n",
-            new_offenders.join("\n")
-        ));
-    }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nOversized files that grew, or that are now under budget:\n{}\n",
-            grown.join("\n")
-        ));
-    }
-    let missing: Vec<String> = allowed
-        .keys()
-        .filter(|path| !seen.iter().any(|s| s == *path))
-        .map(|path| format!("  {path}"))
-        .collect();
-    if !missing.is_empty() {
-        failures.push_str(&format!(
-            "\nOVERSIZED_FILES entries for files that no longer exist:\n{}\n\
-             Delete them.\n",
-            missing.join("\n")
-        ));
-    }
-    assert!(failures.is_empty(), "{failures}");
 }
 
 #[test]

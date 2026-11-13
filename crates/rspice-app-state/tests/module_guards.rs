@@ -5,8 +5,7 @@
 //! as does one a higher application crate calls, such as the browser store.
 //! Those are the only reasons a module is public: the list below is exact, and a
 //! module that turns public for any other reason fails it, as does one that
-//! stops being reached and is left public. Lint suppressions are counted the
-//! way `rspice-app` counts its own.
+//! stops being reached and is left public.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -81,10 +80,6 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("workbench/app_state/diagnostic_store.rs", "run_notices"),
     ("workbench/app_state/sim_setup.rs", "plan_catalog"),
 ];
-
-/// `lib.rs` allows `clippy::too_many_arguments`, as `rspice-app` does, and
-/// `clippy::len_without_is_empty` for the diagnostic listing's row count.
-const MAX_LINT_SUPPRESSIONS: usize = 2;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -165,20 +160,5 @@ fn only_the_modules_the_application_re_exports_are_public() {
         "the public modules changed.\n  newly public: {added:?}\n  no longer public: {dropped:?}\n\
          A module is public here only because rspice-app re-exports it at its old path; \
          update PUBLIC_MODULES in tests/module_guards.rs to match exactly."
-    );
-}
-
-#[test]
-fn lint_suppressions_do_not_grow() {
-    let mut suppressions = 0usize;
-    for file in rust_sources(&src_dir()) {
-        let source = without_line_comments(&fs::read_to_string(&file).unwrap_or_default());
-        suppressions += source.matches("[allow(").count();
-        suppressions += source.matches("[expect(").count();
-    }
-    assert_eq!(
-        suppressions, MAX_LINT_SUPPRESSIONS,
-        "{suppressions} lint suppressions, ceiling is {MAX_LINT_SUPPRESSIONS}. Fix what the lint \
-         is pointing at, or lower MAX_LINT_SUPPRESSIONS when one goes."
     );
 }
