@@ -631,6 +631,17 @@ fn fill_triangle(
     if area.abs() < f32::EPSILON {
         return;
     }
+    // What a person sees fills a pixel centre on an edge only when that edge
+    // is a top or a left one, as a GPU's fill rule has it, so two triangles
+    // sharing the edge fill it once between them. Filled by both, a
+    // translucent fill drew its triangles' seam as a darker line that no
+    // screen shows: a modal's scrim, split corner to corner, crossed a square
+    // render with a diagonal. The regression channel keeps filling the centre
+    // from both sides, so every reviewed baseline still authenticates the
+    // render it was approved on; moving it to the same rule is a re-baselining
+    // of its own.
+    let owns_edge = [(1, 2), (2, 0), (0, 1)]
+        .map(|(from, to)| top_left_edge(positions[from], positions[to], area.is_sign_positive()));
 
     for y in min_y..=(max_y as usize) {
         for x in min_x..=(max_x as usize) {
@@ -641,6 +652,10 @@ fn fill_triangle(
             if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
                 continue;
             }
+            let seen = [w0, w1, w2]
+                .into_iter()
+                .zip(owns_edge)
+                .all(|(weight, owned)| weight > 0.0 || owned);
             let weights = [w0, w1, w2];
             let mut color = [0.0f32; 4];
             let mut uv = egui::Vec2::ZERO;
@@ -660,10 +675,11 @@ fn fill_triangle(
             if color[3] <= 0.5 {
                 continue;
             }
-            if glyph_triangle {
-                canvas.blend_visual_only(x, y, color);
-            } else {
-                canvas.blend(x, y, color);
+            match (glyph_triangle, seen) {
+                (true, true) => canvas.blend_visual_only(x, y, color),
+                (true, false) => {}
+                (false, true) => canvas.blend(x, y, color),
+                (false, false) => canvas.blend_regression_only(x, y, color),
             }
         }
     }
@@ -671,6 +687,18 @@ fn fill_triangle(
 
 fn edge(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Whether the edge `from`→`to` of a triangle is a left edge, whose inside
+/// lies towards +x, or a top edge, level with its inside below it (+y on
+/// screen). `positive` is the sign of the triangle's area, which says on
+/// which side of the edge its inside lies.
+fn top_left_edge(from: egui::Pos2, to: egui::Pos2, positive: bool) -> bool {
+    // The gradient of `edge(from, to, p)` in p, turned to point inside.
+    let sign = if positive { 1.0 } else { -1.0 };
+    let inward_x = -(to.y - from.y) * sign;
+    let inward_y = (to.x - from.x) * sign;
+    inward_x > 0.0 || (inward_x == 0.0 && inward_y > 0.0)
 }
 
 /// Glyph alpha at a normalized atlas coordinate.
@@ -802,6 +830,34 @@ fn a_render_at_two_pixels_per_point_lands_in_device_pixels() {
     assert!(inside.iter().all(|pixel| *pixel == ink));
     assert_eq!(canvas.pixel(62, 20), Some(canvas.background()));
     assert_eq!(canvas.pixel(40, 38), Some(canvas.background()));
+}
+
+/// A translucent rect over a square render is one tone throughout: the seam
+/// between its two triangles, whose diagonal runs through pixel centres, is
+/// filled once, as a screen fills it.
+#[test]
+fn a_translucent_fill_shows_no_seam_between_its_triangles() {
+    let size = egui::vec2(40.0, 40.0);
+    let ctx = egui::Context::default();
+    super::Theme::default().apply(&ctx);
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(display_input(size, 2.0), |ui| {
+            let screen = ui.ctx().content_rect();
+            ui.painter()
+                .rect_filled(screen, 0.0, Color32::from_black_alpha(100));
+        }));
+    }
+    let canvas = rasterize(&ctx, size, &output.expect("three passes"));
+    let centre = canvas.pixel(41, 37).expect("inside the canvas");
+    assert_ne!(centre, canvas.background());
+    let inner = Rect::from_min_max(egui::pos2(2.0, 2.0), egui::pos2(78.0, 78.0));
+    let seam: Vec<(usize, Color32)> = (2..78)
+        .map(|at| (at, canvas.pixel(at, at).expect("on the diagonal")))
+        .filter(|(_, pixel)| *pixel != centre)
+        .collect();
+    assert!(seam.is_empty(), "the diagonal is another tone: {seam:?}");
+    assert!(canvas.pixels_in(inner).all(|pixel| pixel == centre));
 }
 
 /// A surface that paints the host's own vocabulary — a shortcut keycap reads
