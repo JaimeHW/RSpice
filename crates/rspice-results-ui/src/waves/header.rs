@@ -28,6 +28,29 @@ pub trait PaneHeaderHost {
     fn add_expression(&mut self, _text: String) {}
 }
 
+/// One of the strip's expressions on this pane, as its legend entry states
+/// it: a pane names every curve it draws, an expression's as a signal's.
+pub struct PaneExpression {
+    /// Its place in the strip's expression list.
+    pub slot: usize,
+    /// The expression as typed, which a conversion of it reads.
+    pub text: String,
+    /// The name its entry gives it.
+    pub label: String,
+    pub color: egui::Color32,
+    /// Its dash and marker, as the pane draws its curve.
+    pub swatch: SwatchStyle,
+    /// Whether it is drawn. A hidden one waits behind the pane's hidden
+    /// control, as a hidden signal does.
+    pub visible: bool,
+    /// What it reads at cursor A, in the pane's unit, when A is placed.
+    pub at_cursor: Option<String>,
+    /// How many curves it draws: one for each member of a family.
+    pub curves: usize,
+    /// Its values, where Digital's threshold starts.
+    pub values: rspice_results::waveform::SharedWaveformValues,
+}
+
 /// Display state qualified by the host for this pane and its own cursor domain.
 pub struct PaneHeader {
     pub height: f32,
@@ -39,6 +62,8 @@ pub struct PaneHeader {
     /// tag takes exactly that width, so the legend starts on the edge the
     /// lane names end on.
     pub name_width: Option<f32>,
+    /// The strip's expressions on this pane, drawn ones first.
+    pub expressions: Vec<PaneExpression>,
 }
 
 pub use rspice_ui_kit::panels::elide_chars as elide;
@@ -69,6 +94,11 @@ pub struct UnitPaneHeaderResponse {
     pub toggle_log_y: bool,
     /// The name column's new width, while the reader drags its edge here.
     pub resize_name: Option<f32>,
+    /// The expression, by its place in the strip's list, whose entry was
+    /// hidden or shown.
+    pub toggle_expression: Option<usize>,
+    /// The expression whose entry's Remove was chosen.
+    pub remove_expression: Option<usize>,
 }
 
 /// The three regions of a pane header, across its row.
@@ -134,6 +164,7 @@ pub fn show_header(
         log_y_available,
         cursor_a: cursor_a_value,
         name_width,
+        expressions,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -213,6 +244,7 @@ pub fn show_header(
         );
     }
 
+    let mut output = UnitPaneHeaderResponse::default();
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(legend_rect)
@@ -228,25 +260,37 @@ pub fn show_header(
                 .collect();
             let (plotted, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
                 traces.into_iter().partition(|trace| trace.visible);
+            let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
+                .iter()
+                .partition(|expression| expression.visible);
+            // The pane names every curve it draws: its signals, then the
+            // strip's expressions routed to it.
+            let entries: Vec<Entry<'_>> = plotted
+                .iter()
+                .map(|trace| Entry::Signal(trace))
+                .chain(drawn_expressions.iter().map(|e| Entry::Expression(e)))
+                .collect();
             // A name gives way only past a share of the row: hierarchical
             // names keep their leaf, cut from the middle as ViVA cuts them.
             let name_budget = (legend_rect.width() * 0.4).max(72.0);
-            let chips: Vec<LegendEntry> = plotted
+            let chips: Vec<LegendEntry> = entries
                 .iter()
-                .map(|trace| {
-                    legend_entry(
+                .map(|entry| match entry {
+                    Entry::Signal(trace) => legend_entry(
                         ui,
                         model,
                         trace,
                         &cursor_a_value,
                         name_budget,
                         &display_name,
-                    )
+                    ),
+                    Entry::Expression(expression) => expression_entry(ui, expression, name_budget),
                 })
                 .collect();
-            let hidden_label = format!("{} hidden", hidden.len());
+            let hidden_count = hidden.len() + hidden_expressions.len();
+            let hidden_label = format!("{hidden_count} hidden");
             let reserve = |label: &str| control_width(ui, label) + 3.0;
-            let hidden_width = if hidden.is_empty() {
+            let hidden_width = if hidden_count == 0 {
                 0.0
             } else {
                 reserve(&hidden_label)
@@ -254,14 +298,14 @@ pub fn show_header(
             let fitted = fitted_chips(&chips, legend_rect.width() - hidden_width, |overflow| {
                 reserve(&format!("+{overflow}"))
             });
-            for (trace, entry) in plotted.iter().zip(&chips).take(fitted) {
-                legend_chip(ui, trace, entry, &display_name, host);
+            for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
+                entry.show(ui, chip, &display_name, host, &mut output);
             }
             if fitted < chips.len() {
-                let overflow = &plotted[fitted..];
+                let overflow = &entries[fitted..];
                 ui.menu_button(format!("+{}", overflow.len()), |ui| {
-                    for (trace, entry) in overflow.iter().zip(&chips[fitted..]) {
-                        ui.horizontal(|ui| legend_chip(ui, trace, entry, &display_name, host));
+                    for (entry, chip) in overflow.iter().zip(&chips[fitted..]) {
+                        ui.horizontal(|ui| entry.show(ui, chip, &display_name, host, &mut output));
                     }
                 })
                 .response
@@ -271,7 +315,7 @@ pub fn show_header(
                     pane.unit
                 ));
             }
-            if !hidden.is_empty() {
+            if hidden_count > 0 {
                 ui.menu_button(&hidden_label, |ui| {
                     for trace in &hidden {
                         let mut shown = false;
@@ -282,6 +326,16 @@ pub fn show_header(
                             host.toggle_trace_visibility(trace);
                         }
                     }
+                    for expression in &hidden_expressions {
+                        let mut shown = false;
+                        if ui
+                            .checkbox(&mut shown, &expression.label)
+                            .on_hover_text(&expression.text)
+                            .clicked()
+                        {
+                            output.toggle_expression = Some(expression.slot);
+                        }
+                    }
                 })
                 .response
                 .on_hover_text(format!("Hidden traces of the {} pane", pane.unit));
@@ -289,18 +343,15 @@ pub fn show_header(
         },
     );
 
-    let mut output = UnitPaneHeaderResponse {
-        resize_name: name_width.and_then(|width| {
-            super::logic::name_column_grip(
-                ui,
-                rect,
-                width,
-                ui.id()
-                    .with(("pane-name-grip", model.analysis_key, pane.unit)),
-            )
-        }),
-        ..UnitPaneHeaderResponse::default()
-    };
+    output.resize_name = name_width.and_then(|width| {
+        super::logic::name_column_grip(
+            ui,
+            rect,
+            width,
+            ui.id()
+                .with(("pane-name-grip", model.analysis_key, pane.unit)),
+        )
+    });
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(actions_rect)
@@ -373,6 +424,104 @@ fn legend_entry(
     };
     let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
     LegendEntry { label, width }
+}
+
+/// One entry of a pane's legend: a signal, or one of the strip's expressions.
+enum Entry<'a> {
+    Signal(&'a StripTrace),
+    Expression(&'a PaneExpression),
+}
+
+impl Entry<'_> {
+    fn show(
+        &self,
+        ui: &mut Ui,
+        chip: &LegendEntry,
+        display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+        host: &mut impl PaneHeaderHost,
+        output: &mut UnitPaneHeaderResponse,
+    ) {
+        match self {
+            Self::Signal(trace) => legend_chip(ui, trace, chip, display_name, host),
+            Self::Expression(expression) => expression_chip(ui, expression, chip, host, output),
+        }
+    }
+}
+
+/// An expression's entry, measured as a signal's is: its name, its value at
+/// cursor A, and how many curves it stands for when it draws a family.
+fn expression_entry(ui: &Ui, expression: &PaneExpression, name_budget: f32) -> LegendEntry {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let name = rspice_ui_kit::panels::elide_middle(ui, &expression.label, &font, name_budget);
+    let label = match &expression.at_cursor {
+        Some(value) => format!("{name}  {value}"),
+        None => name,
+    };
+    let label = if expression.curves > 1 {
+        format!("{label}  ×{}", expression.curves)
+    } else {
+        label
+    };
+    let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
+    LegendEntry { label, width }
+}
+
+/// An expression's chip, as a signal's: its swatch hides it, its name
+/// activates the pane, and its menu offers Digital, as a trace's does, and
+/// Remove. The expression as typed is on hover.
+fn expression_chip(
+    ui: &mut Ui,
+    expression: &PaneExpression,
+    entry: &LegendEntry,
+    host: &mut impl PaneHeaderHost,
+    output: &mut UnitPaneHeaderResponse,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
+    paint_trace_swatch(
+        ui.painter(),
+        swatch,
+        expression.color,
+        expression.swatch.look(t.color_safe_traces),
+        t.color.bg_panel,
+    );
+    swatch_response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            true,
+            true,
+            format!("Toggle {} visibility", expression.text),
+        )
+    });
+    theme::paint_focus_ring(ui, &swatch_response, swatch);
+    if swatch_response
+        .on_hover_text(format!("Hide {}", expression.text))
+        .clicked()
+    {
+        output.toggle_expression = Some(expression.slot);
+    }
+    let label = ui
+        .selectable_label(false, entry.label.as_str())
+        .on_hover_text(&expression.text);
+    if label.clicked() {
+        host.activate_pane();
+    }
+    label.context_menu(|ui| {
+        ui.menu_button("Digital", |ui| {
+            if let Some(text) = super::logic::convert::digital_form_of(
+                ui,
+                &expression.text,
+                expression.values.as_slice(),
+            ) {
+                host.add_expression(text);
+            }
+        });
+        ui.separator();
+        if ui.button("Remove expression").clicked() {
+            output.remove_expression = Some(expression.slot);
+            ui.close();
+        }
+    });
 }
 
 /// The width a button-like control labelled `label` takes.

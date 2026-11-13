@@ -58,7 +58,13 @@ struct Draft {
 /// hysteresis; and a time to X, past which a signal held in the band is X.
 /// Returns the expression once the reader adds it.
 pub fn digital_form(ui: &mut Ui, signal: &str, values: &[f64]) -> Option<String> {
-    let id = ui.id().with(("digital-form", signal));
+    digital_form_of(ui, &signal_reference(signal), values)
+}
+
+/// The same form for a value the strip already spells as an expression,
+/// which `digital()` reads as it is typed.
+pub fn digital_form_of(ui: &mut Ui, reference: &str, values: &[f64]) -> Option<String> {
+    let id = ui.id().with(("digital-form", reference));
     let mut draft = ui
         .data(|data| data.get_temp::<Draft>(id))
         .unwrap_or_else(|| Draft {
@@ -108,7 +114,7 @@ pub fn digital_form(ui: &mut Ui, signal: &str, values: &[f64]) -> Option<String>
         .clicked();
     if add {
         ui.data_mut(|data| data.remove::<Draft>(id));
-        let mut args = vec![signal_reference(signal), draft.threshold.trim().to_owned()];
+        let mut args = vec![reference.to_owned(), draft.threshold.trim().to_owned()];
         if !draft.low.trim().is_empty() {
             args.push(draft.low.trim().to_owned());
         }

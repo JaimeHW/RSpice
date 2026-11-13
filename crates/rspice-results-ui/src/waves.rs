@@ -220,8 +220,8 @@ pub struct StripModel {
     /// records and finish, its assertion violations, and its stop time when
     /// expected outputs lie beyond it. `None` when they put nothing there.
     pub event_markers: Option<Arc<logic::RunMarkers>>,
-    /// Where the reader's visible expressions are drawn, by the unit unit
-    /// algebra states for each. Left empty by [`build_models`] and filled in
+    /// Where the reader's expressions are drawn, by the unit unit algebra
+    /// states for each, hidden ones with where they would be. Left empty by [`build_models`] and filled in
     /// by the host, which owns the expressions.
     pub expression_panes: Vec<ExpressionPane>,
 }
@@ -240,6 +240,9 @@ pub struct ExpressionPane {
     pub unit: String,
     /// Why no unit can be stated, when none can.
     pub unknown: Option<String>,
+    /// Whether the reader shows it. A hidden expression is drawn nowhere and
+    /// waits in the legend of the pane of its unit.
+    pub visible: bool,
 }
 
 impl ExpressionPane {
@@ -250,6 +253,7 @@ impl ExpressionPane {
             slot,
             unit: format!("{text} \u{2014} no unit"),
             unknown: Some(reason),
+            visible: true,
         }
     }
 }
@@ -463,6 +467,7 @@ impl StripModel {
                     unit,
                     traces: trace.visible.then_some(index).into_iter().collect(),
                     expressions: Vec::new(),
+                    hidden_expressions: Vec::new(),
                     unlabeled: false,
                 }),
             }
@@ -480,35 +485,44 @@ impl StripModel {
                     unit,
                     traces: Vec::new(),
                     expressions: Vec::new(),
+                    hidden_expressions: Vec::new(),
                     unlabeled: false,
                 });
             }
         }
         // An expression joins the pane whose unit is its own however the two
         // are spelled (`W` and `V·A`), else opens the pane of its unit; one
-        // with no unit opens an unlabeled pane of its own.
-        for expression in &self.expression_panes {
+        // with no unit opens an unlabeled pane of its own. A hidden one opens
+        // no pane, and waits in the legend of the pane of its unit when there
+        // is one.
+        let owner = |panes: &[UnitPane<'_>], expression: &ExpressionPane| {
+            if expression.unknown.is_some() {
+                return None;
+            }
             let unit = expression.unit.as_str();
-            let owner = if expression.unknown.is_some() {
-                None
-            } else {
-                let parsed = rspice_results::calculator::value::Unit::parse(unit);
-                panes.iter().position(|pane| {
-                    !pane.unlabeled
-                        && (pane.unit == unit
-                            || parsed.is_some()
-                                && rspice_results::calculator::value::Unit::parse(pane.unit)
-                                    == parsed)
-                })
-            };
-            match owner {
+            let parsed = rspice_results::calculator::value::Unit::parse(unit);
+            panes.iter().position(|pane| {
+                !pane.unlabeled
+                    && (pane.unit == unit
+                        || parsed.is_some()
+                            && rspice_results::calculator::value::Unit::parse(pane.unit) == parsed)
+            })
+        };
+        for expression in self.expression_panes.iter().filter(|e| e.visible) {
+            match owner(&panes, expression) {
                 Some(owner) => panes[owner].expressions.push(expression.slot),
                 None => panes.push(UnitPane {
-                    unit,
+                    unit: expression.unit.as_str(),
                     traces: Vec::new(),
                     expressions: vec![expression.slot],
+                    hidden_expressions: Vec::new(),
                     unlabeled: expression.unknown.is_some(),
                 }),
+            }
+        }
+        for expression in self.expression_panes.iter().filter(|e| !e.visible) {
+            if let Some(owner) = owner(&panes, expression) {
+                panes[owner].hidden_expressions.push(expression.slot);
             }
         }
         let (quantity, phase): (Vec<_>, Vec<_>) = panes
@@ -654,6 +668,9 @@ pub struct UnitPane<'a> {
     /// The expressions drawn on this pane's axis, by their place in the
     /// strip's expression list.
     pub expressions: Vec<usize>,
+    /// The hidden expressions this pane would draw, by the same places,
+    /// which its legend offers to show again.
+    pub hidden_expressions: Vec<usize>,
     /// Whether this is the pane of an expression whose unit cannot be
     /// stated: its axis carries no unit, and `unit` is only its identity.
     pub unlabeled: bool,

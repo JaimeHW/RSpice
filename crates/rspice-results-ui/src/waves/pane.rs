@@ -753,13 +753,20 @@ pub fn show_plot<'a>(
         spec.traces.push(plot_trace);
     }
     for expr in exprs {
-        spec.traces.push(apply_family_trace_style(
+        let mut trace = apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
                 .width(input.trace_width * SECONDARY_TRACE_RATIO)
                 .cache_key(expr.cache_key)
                 .shape(&expr.shape),
             expr.family_style,
-        ));
+        );
+        // An expression's dash and marker follow its hue, as a signal's do,
+        // so its legend swatch is its curve wherever the pane lists it. A
+        // real lane's step trace is no expression.
+        if expr.slot != usize::MAX {
+            trace = trace.palette_slot(super::stack::expression_hue_slot(model, expr.slot));
+        }
+        spec.traces.push(trace);
     }
 
     // A family reads out the member the reader points at, not the first six

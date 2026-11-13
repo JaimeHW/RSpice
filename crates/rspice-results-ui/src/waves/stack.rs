@@ -21,7 +21,7 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
 use rspice_ui_kit::{
-    plot::{self, CursorId, CursorPair, XScale},
+    plot::{self, CursorId, CursorPair, XScale, sample::sample_at_with_shape},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -531,13 +531,21 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                         // building) — only the space is reserved.
                         let plot_rect = ui.available_rect_before_wrap();
                         if ui.is_rect_visible(plot_rect) {
+                            let mut edits = ExpressionEdits::default();
                             show_strip_plot(
                                 ui,
                                 host,
                                 model,
                                 linked_cursor_domain.as_ref(),
                                 options,
+                                &mut edits,
                             );
+                            if let Some(slot) = edits.toggle {
+                                toggle_expr = Some((model.analysis_key, slot));
+                            }
+                            if let Some(slot) = edits.remove {
+                                remove_expr = Some((model.analysis_key, slot));
+                            }
                         } else {
                             ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
                         }
@@ -723,12 +731,22 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
 /// Signals route to the pane that owns their unit; the panes stack and
 /// share the strip's X domain, so a strip stays one measurement read
 /// against as many scales as it genuinely needs.
+/// What a pane's legend asked of the strip's expressions this frame,
+/// applied with the strip header's own once every strip is drawn, so no
+/// pane drawn after it reads a list it has changed.
+#[derive(Default)]
+struct ExpressionEdits {
+    toggle: Option<usize>,
+    remove: Option<usize>,
+}
+
 fn show_strip_plot(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
+    edits: &mut ExpressionEdits,
 ) {
     let t = Tokens::get(ui.ctx());
     let Some(x_domain) = model.x_range else {
@@ -813,7 +831,7 @@ fn show_strip_plot(
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_height(pane_height);
-                show_unit_pane(ui, host, pane, ordinal, &pane_exprs, frame);
+                show_unit_pane(ui, host, pane, ordinal, &pane_exprs, frame, edits);
             },
         );
     }
@@ -823,6 +841,92 @@ fn show_strip_plot(
         geometry.shared_x_height
     };
     show_shared_x_axis(ui, host, shared_x_height, frame);
+}
+
+/// The legend entries of the strip's expressions on `pane`: one for each
+/// expression it draws, standing for all the curves of a family, then one
+/// for each hidden expression it would draw.
+fn pane_expressions(
+    host: &impl StackHost,
+    model: &StripModel,
+    pane: &UnitPane,
+    exprs: &[ResolvedExpr],
+    cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
+    t: &Tokens,
+) -> Vec<pane_header::PaneExpression> {
+    let Some(list) = host.session().analysis_exprs.get(&model.analysis_key) else {
+        return Vec::new();
+    };
+    let label = |expr: &ExprTrace| {
+        expression_label(
+            expr,
+            host.expression_is_complex(model.analysis_key, &expr.text),
+        )
+    };
+    let swatch = |slot: usize, family_style| pane_view::SwatchStyle {
+        palette_slot: Some(expression_hue_slot(model, slot)),
+        family_style,
+        ordinal: 0,
+    };
+    let mut slots: Vec<usize> = Vec::new();
+    for expr in exprs {
+        // A real lane's step trace has no place in the expression list.
+        if expr.slot != usize::MAX && !slots.contains(&expr.slot) {
+            slots.push(expr.slot);
+        }
+    }
+    let drawn = slots.into_iter().filter_map(|slot| {
+        let expr = list.get(slot)?;
+        let members: Vec<&ResolvedExpr> = exprs.iter().filter(|e| e.slot == slot).collect();
+        let first = members.first()?;
+        let at_cursor = cursor_a.map(|(x, presentation, _)| {
+            let value = sample_at_with_shape(
+                &first.x,
+                &first.y,
+                &first.shape,
+                x,
+                cursor_interpolation(presentation.cursor_interpolation()),
+            );
+            super::units::fmt_in_unit_readout(
+                value,
+                pane.axis_unit(),
+                usize::from(presentation.displayed_significant_digits().get()),
+            )
+        });
+        Some(pane_header::PaneExpression {
+            slot,
+            text: expr.text.clone(),
+            label: label(expr),
+            color: first.color,
+            swatch: swatch(slot, first.family_style),
+            visible: true,
+            at_cursor,
+            curves: members.len(),
+            values: Arc::clone(&first.y),
+        })
+    });
+    let hidden = pane.hidden_expressions.iter().filter_map(|&slot| {
+        let expr = list.get(slot)?;
+        Some(pane_header::PaneExpression {
+            slot,
+            text: expr.text.clone(),
+            label: label(expr),
+            color: expr_color(t, expr_palette_slot(model, slot)),
+            swatch: swatch(slot, None),
+            visible: false,
+            at_cursor: None,
+            curves: 0,
+            values: Arc::default(),
+        })
+    });
+    drawn.chain(hidden).collect()
+}
+
+/// The hue an expression's curve takes among the palette's, which also
+/// picks its dash and marker when traces are drawn colour-safe, as a
+/// signal's hue picks its own.
+pub(crate) fn expression_hue_slot(model: &StripModel, slot: usize) -> usize {
+    expr_palette_slot(model, slot) % rspice_ui_kit::palette::TRACE_HUES
 }
 
 /// At most this share of a strip goes to event lanes when it also has panes;
@@ -926,6 +1030,7 @@ fn show_unit_pane(
     ordinal: usize,
     exprs: &[ResolvedExpr],
     frame: StripFrame<'_>,
+    edits: &mut ExpressionEdits,
 ) {
     let StripFrame {
         model,
@@ -983,8 +1088,11 @@ fn show_unit_pane(
         log_y_available,
         cursor_a,
         name_width: (gutter.name > 0.0).then_some(gutter.name),
+        expressions: pane_expressions(host, model, pane, exprs, cursor_a, &t),
     };
     let header = host.pane_header(ui, model, pane, ordinal, input);
+    edits.toggle = edits.toggle.or(header.toggle_expression);
+    edits.remove = edits.remove.or(header.remove_expression);
     if let Some(width) = header.resize_name {
         host.session_mut().lane_name_width = Some(clamp_name_width(width));
     }

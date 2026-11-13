@@ -395,11 +395,12 @@ pub(super) fn expression_unit(
         .map(|unit| unit.label())
 }
 
-/// Send each strip's visible expressions to the pane of their unit: the
-/// unit the reader declared, else the one unit algebra states. One whose
-/// unit cannot be stated gets an unlabeled pane of its own. An expression
-/// that failed to evaluate draws nothing, so it opens no pane, and a
-/// `digital()` conversion is a logic lane, not a value on any pane.
+/// Send each strip's expressions to the pane of their unit: the unit the
+/// reader declared, else the one unit algebra states. One whose unit cannot
+/// be stated gets an unlabeled pane of its own. A hidden one is routed too,
+/// so the pane of its unit can offer it again. An expression that failed to
+/// evaluate draws nothing, so it opens no pane, and a `digital()` conversion
+/// is a logic lane, not a value on any pane.
 pub(super) fn route_expressions(
     models: &mut [StripModel],
     simulation: &SimulationState,
@@ -421,9 +422,7 @@ pub(super) fn route_expressions(
             .iter()
             .enumerate()
             .filter(|(_, expr)| {
-                expr.visible
-                    && !draws_as_logic(&expr.text)
-                    && !failed(model.analysis_key, &expr.text)
+                !draws_as_logic(&expr.text) && !failed(model.analysis_key, &expr.text)
             })
             .map(|(slot, expr)| {
                 let declared = declared.get(&(model.analysis_key, expr.text.clone()));
@@ -435,10 +434,14 @@ pub(super) fn route_expressions(
                         slot,
                         unit,
                         unknown: None,
+                        visible: expr.visible,
                     },
-                    Err(reason) => rspice_results_ui::waves::ExpressionPane::unlabeled(
-                        slot, &expr.text, reason,
-                    ),
+                    Err(reason) => rspice_results_ui::waves::ExpressionPane {
+                        visible: expr.visible,
+                        ..rspice_results_ui::waves::ExpressionPane::unlabeled(
+                            slot, &expr.text, reason,
+                        )
+                    },
                 }
             })
             .collect();

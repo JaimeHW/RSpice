@@ -1,35 +1,104 @@
 //! The pane legend on the SAR converter's run (C4), judged through the
-//! frame the reader sees: every control it draws says what it is.
+//! frame the reader sees: every control it draws says what it is, and every
+//! curve a pane draws is named in that pane, an expression's as a signal's.
 
-use super::conversion::add_expression;
+use super::conversion::{add_expression, expressions, texts};
 use super::lanes::{FRAME, sar_strip, theme_context};
 use super::*;
+use egui::FullOutput;
 use egui::accesskit::Role;
 use rspice_results::visualization_document::BusRadix;
 
-/// Every control the settled frame publishes, by its role and its name.
-fn controls(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<(Role, Option<String>)> {
+/// One frame of the Waves sheet, as the reader's window lays it out.
+fn run(ctx: &egui::Context, state: &mut ResultsTestHost, events: Vec<egui::Event>) -> FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, FRAME)),
+        events,
+        ..Default::default()
+    };
+    ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+    })
+}
+
+/// A settled frame, the pointer off the strip so no hover readout covers
+/// it: evaluation, routing and sizing take a pass each.
+fn settled(ctx: &egui::Context, state: &mut ResultsTestHost) -> FullOutput {
     ctx.enable_accesskit();
-    let mut output = None;
-    for _ in 0..3 {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, FRAME)),
-            ..Default::default()
-        };
-        output = Some(ctx.run_ui(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
-        }));
-    }
+    run(ctx, state, vec![egui::Event::PointerGone]);
+    run(ctx, state, Vec::new());
+    run(ctx, state, Vec::new())
+}
+
+/// Every control the frame publishes, by its role, its name and where it is.
+fn controls(output: &FullOutput) -> Vec<(Role, Option<String>, Option<egui::Rect>)> {
     output
-        .and_then(|output| output.platform_output.accesskit_update)
+        .platform_output
+        .accesskit_update
+        .as_ref()
         .map(|update| {
             update
                 .nodes
                 .iter()
-                .map(|(_, node)| (node.role(), node.label().map(str::to_owned)))
+                .map(|(_, node)| {
+                    let rect = node.bounds().map(|bounds| {
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        )
+                    });
+                    (node.role(), node.label().map(str::to_owned), rect)
+                })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Where the control named `name` is.
+fn control(output: &FullOutput, name: &str) -> egui::Rect {
+    controls(output)
+        .into_iter()
+        .find_map(|(_, label, rect)| (label.as_deref() == Some(name)).then_some(rect).flatten())
+        .unwrap_or_else(|| panic!("the frame publishes {name:?}"))
+}
+
+/// Where the last run of text that starts with `wanted` was painted.
+fn text(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
+    texts(&output.shapes)
+        .into_iter()
+        .rev()
+        .find(|(text, _)| text.starts_with(wanted))
+        .map(|(_, rect)| rect)
+}
+
+/// Where the last run of text that reads `wanted` exactly was painted.
+fn exact(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
+    texts(&output.shapes)
+        .into_iter()
+        .rev()
+        .find(|(text, _)| text == wanted)
+        .map(|(_, rect)| rect)
+}
+
+fn press(at: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: at,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    }
+}
+
+/// Click `button` on `at` across the frames egui needs to see it.
+fn click(
+    ctx: &egui::Context,
+    state: &mut ResultsTestHost,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+) {
+    run(ctx, state, vec![egui::Event::PointerMoved(at)]);
+    run(ctx, state, vec![press(at, button, true)]);
+    run(ctx, state, vec![press(at, button, false)]);
 }
 
 /// The `analog()` staircase is a plain number, and its pane names no unit:
@@ -39,18 +108,193 @@ fn a_plain_numbers_pane_draws_no_blank_control() {
     let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
     add_expression(&mut state, key, "analog(D(code))");
     let ctx = theme_context();
-    let controls = controls(&ctx, &mut state);
+    let controls = controls(&settled(&ctx, &mut state));
     let blank: Vec<_> = controls
         .iter()
-        .filter(|(role, label)| {
+        .filter(|(role, label, _)| {
             *role == Role::Button && label.as_deref().is_none_or(|label| label.trim().is_empty())
         })
         .collect();
     assert!(
         controls
             .iter()
-            .any(|(_, label)| label.as_deref() == Some("V")),
+            .any(|(_, label, _)| label.as_deref() == Some("V")),
         "the volts pane keeps its tag: {controls:?}"
     );
     assert!(blank.is_empty(), "a button says nothing: {blank:?}");
+}
+
+/// The staircase is drawn in a pane of its own, and that pane names it: an
+/// entry under the volts pane's header row, with its swatch, as each of
+/// TOP and VIN has in the volts pane.
+#[test]
+fn an_expression_on_a_pane_of_its_own_is_named_in_it() {
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, "analog(D(code))");
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let volts = text(&output, "45 hidden").expect("the volts pane's header row");
+    let entry = text(&output, "analog(D(code))").expect("the staircase is named");
+    assert!(
+        entry.top() > volts.bottom(),
+        "the staircase's entry is in its own pane, under the volts pane's row: \
+         entry {entry:?}, volts row {volts:?}"
+    );
+    let swatch = control(&output, "Toggle analog(D(code)) visibility");
+    assert!(
+        (swatch.center().y - entry.center().y).abs() < 4.0 && swatch.right() <= entry.left(),
+        "the entry's swatch leads it on its row: swatch {swatch:?}, entry {entry:?}"
+    );
+}
+
+/// An expression on a pane of signals hides from its entry's swatch as a
+/// signal does, then waits behind the pane's hidden control, and ticking it
+/// there draws it again.
+#[test]
+fn an_expression_hides_and_shows_from_its_pane_legend() {
+    const DOUBLE: &str = "V(TOP)*2";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, DOUBLE);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    assert!(
+        text(&output, DOUBLE).is_some_and(|entry| {
+            text(&output, "45 hidden")
+                .is_some_and(|row| (entry.center().y - row.center().y).abs() < 4.0)
+        }),
+        "the volts expression is named on the volts pane's row"
+    );
+    let swatch = control(&output, &format!("Toggle {DOUBLE} visibility"));
+    click(
+        &ctx,
+        &mut state,
+        swatch.center(),
+        egui::PointerButton::Primary,
+    );
+    let visible =
+        |state: &ResultsTestHost| state.results.results.session.analysis_exprs[&key][0].visible;
+    assert!(!visible(&state), "the swatch hides the expression");
+    let output = settled(&ctx, &mut state);
+    let hidden = text(&output, "46 hidden").expect("the pane counts the hidden expression");
+    click(
+        &ctx,
+        &mut state,
+        hidden.center(),
+        egui::PointerButton::Primary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    let item = text(&menu, DOUBLE).expect("the hidden control lists the expression");
+    click(
+        &ctx,
+        &mut state,
+        item.center(),
+        egui::PointerButton::Primary,
+    );
+    assert!(visible(&state), "ticking it draws it again");
+    assert_eq!(expressions(&state, key), [DOUBLE], "nothing else changed");
+}
+
+/// An expression's entry offers what a signal's does: Digital, which reads
+/// the expression as typed, and Remove, which takes it off the strip.
+#[test]
+fn an_expressions_entry_converts_and_removes_it() {
+    const DOUBLE: &str = "V(TOP)*2";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, DOUBLE);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let entry = text(&output, DOUBLE).expect("the expression is named");
+    click(
+        &ctx,
+        &mut state,
+        entry.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    let digital = text(&menu, "Digital").expect("the entry's menu offers Digital");
+    run(
+        &ctx,
+        &mut state,
+        vec![egui::Event::PointerMoved(digital.center())],
+    );
+    click(
+        &ctx,
+        &mut state,
+        digital.center(),
+        egui::PointerButton::Primary,
+    );
+    let form = run(&ctx, &mut state, Vec::new());
+    let add = text(&form, "Add digital lane").expect("Digital opens its threshold form");
+    click(&ctx, &mut state, add.center(), egui::PointerButton::Primary);
+    let added = expressions(&state, key);
+    assert!(
+        added.len() == 2 && added[1].starts_with(&format!("digital({DOUBLE}, ")),
+        "Digital reads the expression as typed: {added:?}"
+    );
+
+    let output = settled(&ctx, &mut state);
+    // The digital lane's name in the gutter starts with the expression too.
+    let entry = exact(&output, DOUBLE).expect("the expression is still named");
+    click(
+        &ctx,
+        &mut state,
+        entry.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    let remove = text(&menu, "Remove expression").expect("the entry's menu offers Remove");
+    click(
+        &ctx,
+        &mut state,
+        remove.center(),
+        egui::PointerButton::Primary,
+    );
+    settled(&ctx, &mut state);
+    assert_eq!(
+        expressions(&state, key),
+        [added[1].clone()],
+        "Remove takes the expression off the strip and leaves its conversion"
+    );
+}
+
+/// The pictures for review, written under `RSPICE_PICTURES` when it is set:
+/// the staircase named in its own pane beside the DAC, and an expression of
+/// volts named in the volts pane with cursor A's reading, then hidden there.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_pane_legend_pictures() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let write = |name: &str, state: &mut ResultsTestHost| {
+        let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
+            super::lanes::well(ui);
+            show(ui, &mut state.results_parts());
+        });
+        std::fs::write(
+            format!("{directory}/{name}.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
+    };
+    let eoc = super::lanes::history(super::lanes::sar_run(), "EOC");
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, "V(TOP)*2");
+    add_expression(&mut state, key, "analog(D(code))");
+    super::lanes::place_cursors(&mut state, Some(eoc[0].0 + 1e-9), None);
+    write("pane-legend-expressions", &mut state);
+    state
+        .results
+        .results
+        .session
+        .analysis_exprs
+        .get_mut(&key)
+        .expect("the strip has expressions")[0]
+        .visible = false;
+    state
+        .results
+        .results
+        .session
+        .sync_expression_projection(key, 0);
+    write("pane-legend-expression-hidden", &mut state);
 }
