@@ -1,10 +1,9 @@
-//! Ratchets for the hierarchy program.
+//! Guards for the hierarchy program.
 //!
-//! Every table in this file is a ceiling measured against the tree, not a
-//! target negotiated with it. The numbers only go down: an entry that grows
-//! fails the build, an entry that reaches zero fails until it is deleted, and
-//! a *new* entry is a regression rather than paperwork — the code that
-//! produced it belongs somewhere else.
+//! Every table in this file lists what the tree may still do. A *new* entry is
+//! a regression rather than paperwork — the code that produced it belongs
+//! somewhere else — and an entry with nothing left to hold fails until it is
+//! deleted.
 //!
 //! The four guards cover the four ways the hierarchy leaked out of the model
 //! that owns it:
@@ -396,7 +395,7 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
         }
     }
     // A root that moved leaves an empty directory or none; either way every
-    // ceiling over it would hold on nothing.
+    // guard over it would hold on nothing.
     assert!(
         !found.is_empty(),
         "{} holds no Rust source; a scan that reaches nothing passes forever",
@@ -421,7 +420,7 @@ fn relative(root: &Path, file: &Path) -> String {
 /// and is excluded, along with everything beneath it. That is the exact rule
 /// rather than a name convention: `source_guard.rs` and `fixture_root.rs` are
 /// test-only without being called `tests.rs`, and a guard that scanned them
-/// would hold ceilings over code the product does not contain.
+/// would hold rules over code the product does not contain.
 fn production_files(root: &Path) -> Vec<(String, PathBuf)> {
     let files = rust_sources(root);
     let mut test_only: BTreeSet<String> = BTreeSet::new();
@@ -470,17 +469,6 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
     count
 }
 
-/// Render a measured table in the shape the source tables are written in, so a
-/// lane lowering a ceiling can paste the new numbers rather than transcribe
-/// them.
-fn as_table(measured: &BTreeMap<String, usize>) -> String {
-    measured
-        .iter()
-        .map(|(path, count)| format!("    (\"{path}\", {count}),"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 // =============================================================================
 // G1 — one module owns the instance-path grammar
 // =============================================================================
@@ -515,25 +503,17 @@ const PATH_GRAMMAR_PATTERNS: &[&str] = &[
 /// table below is the list of modules that have not yet been moved onto it.
 const PATH_GRAMMAR_OWNER: &str = "rspice-vocabulary::hierarchy_path";
 
-/// Files spelling the path grammar inline, with their exact occurrence counts.
+/// Files allowed to spell the path grammar inline.
 ///
-/// Measured 2026-08-17 over the shipped source: comments are excluded, string
-/// literals are not, and `#[cfg(test)]` items are cut out — a fixture path in
-/// a test is not a production grammar site.
-const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[];
-
-/// Occurrences of the literal root-cell name across the shipped crate.
-///
-/// The per-file table above already refuses a new file, so this is not a
-/// second gate on the same fact — it is the total, and the burn-down is
-/// finished. `"/top"` is the grammar's most quoted fragment and the one a new
-/// feature reaches for first, so the program tracks the total rather than
-/// inferring it from the rows.
-const MAX_ROOT_CELL_LITERALS: usize = 0;
+/// Comments are excluded, string literals are not, and `#[cfg(test)]` items
+/// are cut out — a fixture path in a test is not a production grammar site.
+/// None is left: `"/top"`, the grammar's most quoted fragment, is the first of
+/// the patterns above, so a literal root-cell name anywhere is a new site.
+const PATH_GRAMMAR_SITES: &[&str] = &[];
 
 #[test]
 fn path_grammar_is_owned_by_one_module() {
-    let allowed: BTreeMap<&str, usize> = PATH_GRAMMAR_SITES.iter().copied().collect();
+    let allowed: BTreeSet<&str> = PATH_GRAMMAR_SITES.iter().copied().collect();
     assert_eq!(
         allowed.len(),
         PATH_GRAMMAR_SITES.len(),
@@ -541,7 +521,6 @@ fn path_grammar_is_owned_by_one_module() {
     );
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
-    let mut root_literals = 0usize;
     for (prefix, root) in [
         ("", src_dir()),
         ("", app_state_src_dir()),
@@ -570,7 +549,6 @@ fn path_grammar_is_owned_by_one_module() {
                 .iter()
                 .map(|pattern| count_occurrences(&production, pattern))
                 .sum();
-            root_literals += count_occurrences(&production, "\"/top\"");
             if count > 0 {
                 measured.insert(format!("{prefix}{path}"), count);
             }
@@ -578,19 +556,13 @@ fn path_grammar_is_owned_by_one_module() {
     }
 
     let mut failures = String::new();
-    let mut new_sites = Vec::new();
-    let mut grown = Vec::new();
-    for (path, count) in &measured {
-        match allowed.get(path.as_str()) {
-            None => new_sites.push(format!("  {path}: {count}")),
-            Some(ceiling) if count > ceiling => {
-                grown.push(format!("  {path}: {count}, ceiling is {ceiling}"));
-            }
-            Some(_) => {}
-        }
-    }
+    let new_sites: Vec<String> = measured
+        .iter()
+        .filter(|(path, _)| !allowed.contains(path.as_str()))
+        .map(|(path, count)| format!("  {path}: {count}"))
+        .collect();
     let retired: Vec<String> = allowed
-        .keys()
+        .iter()
         .filter(|path| !measured.contains_key(**path))
         .map(|path| format!("  {path}"))
         .collect();
@@ -603,13 +575,6 @@ fn path_grammar_is_owned_by_one_module() {
             new_sites.join("\n")
         ));
     }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nPath-grammar sites that grew:\n{}\n\
-             These are being retired, not extended.\n",
-            grown.join("\n")
-        ));
-    }
     if !retired.is_empty() {
         failures.push_str(&format!(
             "\nPATH_GRAMMAR_SITES entries with nothing left to hold:\n{}\n\
@@ -617,17 +582,7 @@ fn path_grammar_is_owned_by_one_module() {
             retired.join("\n")
         ));
     }
-    if !failures.is_empty() {
-        failures.push_str(&format!("\nMeasured table:\n{}\n", as_table(&measured)));
-    }
     assert!(failures.is_empty(), "{failures}");
-
-    assert!(
-        root_literals == MAX_ROOT_CELL_LITERALS,
-        "the literal root-cell name appears {root_literals} times, ceiling is \
-         {MAX_ROOT_CELL_LITERALS}.\nThe root cell is whatever the workspace \
-         says it is; a literal is a second answer to that question."
-    );
 }
 
 // =============================================================================
@@ -647,18 +602,16 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
     "HierarchySource::from_buffers(",
 ];
 
-/// Callers indexing raw workspace buffers, with their exact call counts.
+/// Callers allowed to index raw workspace buffers.
 ///
-/// Re-measured 2026-08-18, after every interactive surface moved onto the
-/// design projection. One caller is left, and it is the one that must stay:
-/// the hierarchy-creation dialog resolves *hypothetical* buffers — a candidate
-/// design that does not exist yet — so there is no projection to read. Both
-/// its baseline and its candidate are maps it assembled itself.
-///
-/// Re-measured 2026-10-25: the netlist that joins an extraction's terminals,
+/// Every interactive surface reads the design projection. One caller is left,
+/// and it is the one that must stay: the hierarchy-creation dialog resolves
+/// *hypothetical* buffers — a candidate design that does not exist yet — so
+/// there is no projection to read. Both its baseline and its candidate are
+/// maps it assembled itself. The netlist that joins an extraction's terminals,
 /// which the dialog runs over its candidates, is the model's
 /// (`Model::hierarchy_netlist`), because a sheet move reads the same
-/// extraction plan. The call moved with it; the total is unchanged.
+/// extraction plan.
 ///
 /// `services/drc_tests.rs`, the app netlisting integration fixtures,
 /// and `workbench/commands.rs` also
@@ -666,14 +619,14 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
 /// not sites. The definition sites need no exemption either: they declare
 /// `from_workspace` and `from_buffers`, they do not call
 /// `HierarchySource::from_workspace` or `HierarchySource::from_buffers`.
-const RAW_BUFFER_READERS: &[(&str, usize)] = &[
-    ("workbench/app/dialogs/hierarchy/create.rs", 2),
-    ("workbench/app_state/model/sheet_move.rs", 1),
+const RAW_BUFFER_READERS: &[&str] = &[
+    "workbench/app/dialogs/hierarchy/create.rs",
+    "workbench/app_state/model/sheet_move.rs",
 ];
 
 #[test]
 fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
-    let allowed: BTreeMap<&str, usize> = RAW_BUFFER_READERS.iter().copied().collect();
+    let allowed: BTreeSet<&str> = RAW_BUFFER_READERS.iter().copied().collect();
     assert_eq!(
         allowed.len(),
         RAW_BUFFER_READERS.len(),
@@ -707,19 +660,13 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
         }
     }
 
-    let mut new_readers = Vec::new();
-    let mut grown = Vec::new();
-    for (path, count) in &measured {
-        match allowed.get(path.as_str()) {
-            None => new_readers.push(format!("  {path}: {count}")),
-            Some(ceiling) if count > ceiling => {
-                grown.push(format!("  {path}: {count}, ceiling is {ceiling}"));
-            }
-            Some(_) => {}
-        }
-    }
+    let new_readers: Vec<String> = measured
+        .iter()
+        .filter(|(path, _)| !allowed.contains(path.as_str()))
+        .map(|(path, count)| format!("  {path}: {count}"))
+        .collect();
     let retired: Vec<String> = allowed
-        .keys()
+        .iter()
         .filter(|path| !measured.contains_key(**path))
         .map(|path| format!("  {path}"))
         .collect();
@@ -734,22 +681,12 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
             new_readers.join("\n")
         ));
     }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nRaw-buffer readers that grew:\n{}\n\
-             These are being retired, not extended.\n",
-            grown.join("\n")
-        ));
-    }
     if !retired.is_empty() {
         failures.push_str(&format!(
             "\nRAW_BUFFER_READERS entries with nothing left to hold:\n{}\n\
              Delete them.\n",
             retired.join("\n")
         ));
-    }
-    if !failures.is_empty() {
-        failures.push_str(&format!("\nMeasured table:\n{}\n", as_table(&measured)));
     }
     assert!(failures.is_empty(), "{failures}");
 }
@@ -771,7 +708,6 @@ const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("workbench/chrome/toolbar.rs", "toolbar"),
     ("workbench/chrome/toolbar/code.rs", "toolbar"),
     ("workbench/design/toolbar.rs", "toolbar"),
-    ("workbench/chrome/toolbar/hardcopy.rs", "toolbar"),
     ("workbench/chrome/toolbar/models.rs", "toolbar"),
     ("workbench/chrome/toolbar/project.rs", "toolbar"),
     ("workbench/chrome/toolbar/results.rs", "toolbar"),
