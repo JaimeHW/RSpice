@@ -90,7 +90,11 @@ impl Finger {
             |ui| {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 *canvas = ui.available_rect_before_wrap();
-                crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                crate::schematic::view::render_schematic_view(
+                    ui,
+                    &mut crate::schematic::view::canvas_frame(&mut app.state),
+                    None,
+                );
                 show(&ui.ctx().clone(), &mut strip_cx(app), *canvas);
                 app.after_contribution();
                 app.state.reconcile_schematic_drag(ui.ctx(), true);

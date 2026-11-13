@@ -9,13 +9,14 @@ use std::collections::BTreeMap;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::schematic::view::CanvasFrame;
 use crate::state::pdk_config::{PdkDisplayFillStyle, PdkDisplayLayerStyle};
 use crate::state::{
     CellViewRef, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId, LayoutPoint,
     LayoutShape, PhysicalLayoutDocument,
 };
 use crate::ui::tokens::Tokens;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{Problem, problem_line};
 
 const DEFAULT_ZOOM_PX_PER_DBU: f32 = 0.05;
@@ -81,29 +82,28 @@ struct ResolvedDisplayContract {
     ordered_layers: Vec<LayoutLayerPurpose>,
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>) {
     // The status bar reads the cursor from here; a frame with no canvas
     // under the pointer has none.
-    app.state.design.canvas_hover = None;
-    let owner = app.state.model.workspace.content.active_view.clone();
+    canvas.design.canvas_hover = None;
+    let owner = canvas.model.workspace.content.active_view.clone();
     let session_id = ui.id().with(("physical-layout-editor", owner.key()));
     let mut session = ui.ctx().data_mut(|data| {
         data.get_temp::<LayoutEditorSession>(session_id)
             .unwrap_or_default()
     });
 
-    let Some(document) = app
-        .state
+    let Some(document) = canvas
         .model
         .workspace
         .content
         .physical_layout_document(&owner)
         .cloned()
     else {
-        show_missing_document(ui, app, &owner);
+        show_missing_document(ui, canvas, &owner);
         return;
     };
-    let display = match resolve_display_contract(app, &document) {
+    let display = match resolve_display_contract(canvas.model, &document) {
         Ok(display) => display,
         Err(error) => {
             show_fail_closed(ui, &error);
@@ -121,7 +121,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut pending_edits = None;
     show_toolbar(
         ui,
-        app,
+        canvas.model,
         &document,
         &display,
         &mut session,
@@ -131,11 +131,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if pending_edits.is_none() {
         pending_edits = show_canvas(ui, &document, &display, &mut session);
     }
-    app.state.design.canvas_hover = session.hover.map(|point| (point.x as f64, point.y as f64));
+    canvas.design.canvas_hover = session.hover.map(|point| (point.x as f64, point.y as f64));
 
     if let Some(edits) = pending_edits {
-        match app
-            .state
+        match canvas
+            .model
             .apply_physical_layout_transaction(&owner, document.revision(), &edits)
         {
             Ok(_) => {
@@ -163,7 +163,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .data_mut(|data| data.insert_temp(session_id, session));
 }
 
-fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) {
+fn show_missing_document(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, owner: &CellViewRef) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_panel)
@@ -174,13 +174,16 @@ fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) 
                 "{} is a Layout view but has no authoritative physical document.",
                 owner.display_path()
             ));
-            let enabled = !app.state.active_view_read_only();
+            let enabled = !canvas.model.active_view_read_only();
             let initialize =
                 ui.add_enabled(enabled, egui::Button::new("Initialize from project PDK"));
             if initialize.clicked() {
-                match app.state.initialize_physical_layout_document(owner.clone()) {
+                match canvas
+                    .model
+                    .initialize_physical_layout_document(owner.clone())
+                {
                     Ok(_) => {
-                        app.state.record(
+                        canvas.model.record(
                             LogSeverity::Info,
                             LogSource::Studio,
                             format!(
@@ -189,7 +192,7 @@ fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) 
                             ),
                         );
                     }
-                    Err(error) => app.state.prompt(error),
+                    Err(error) => canvas.prompt(error),
                 }
             }
             if !enabled {
@@ -214,10 +217,10 @@ fn show_fail_closed(ui: &mut Ui, error: &str) {
 }
 
 fn resolve_display_contract(
-    app: &RSpiceApp,
+    model: &Model,
     document: &PhysicalLayoutDocument,
 ) -> Result<ResolvedDisplayContract, String> {
-    let package = app.state.model.exact_project_pdk_package()?;
+    let package = model.exact_project_pdk_package()?;
     let technology = document.technology();
     if package.manifest_digest() != technology.manifest_digest()
         || package.archive_digest() != technology.archive_digest()
@@ -232,9 +235,7 @@ fn resolve_display_contract(
             document.owner().display_path()
         ));
     }
-    let active = app
-        .state
-        .model
+    let active = model
         .pdk_config
         .display_profile_registry
         .active_for_package(package.metadata());
@@ -284,7 +285,7 @@ fn resolve_display_contract(
 
 fn show_toolbar(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    model: &Model,
     document: &PhysicalLayoutDocument,
     display: &ResolvedDisplayContract,
     session: &mut LayoutEditorSession,
@@ -333,7 +334,7 @@ fn show_toolbar(
                 if ui.button("Fit").clicked() {
                     session.fit_requested = true;
                 }
-                let can_delete = session.selected.is_some() && !app.state.active_view_read_only();
+                let can_delete = session.selected.is_some() && !model.active_view_read_only();
                 if ui
                     .add_enabled(can_delete, egui::Button::new("Delete selected"))
                     .clicked()
@@ -925,6 +926,7 @@ fn rgba(value: [u8; 4]) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     fn app_with_layout() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
@@ -945,6 +947,7 @@ mod tests {
             .workspace
             .open_view(owner.clone(), crate::state::ViewType::Layout);
         app.state
+            .model
             .initialize_physical_layout_document(owner)
             .expect("initialize governed physical layout");
         app
@@ -960,7 +963,12 @@ mod tests {
                 ..Default::default()
             },
             |context| {
-                egui::CentralPanel::default().show(context, |ui| show(ui, app));
+                egui::CentralPanel::default().show(context, |ui| {
+                    show(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                    );
+                });
             },
         )
     }
@@ -984,7 +992,12 @@ mod tests {
                     ..Default::default()
                 },
                 |context| {
-                    egui::CentralPanel::default().show(context, |ui| show(ui, &mut app));
+                    egui::CentralPanel::default().show(context, |ui| {
+                        show(
+                            ui,
+                            &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        );
+                    });
                 },
             );
             if step == 2 {

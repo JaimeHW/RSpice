@@ -6,15 +6,16 @@ mod tool_options;
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
+use crate::schematic::view::{CanvasFacts, CanvasFrame, canvas_frame_in};
 use crate::state::ViewType;
 use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::features;
-use crate::workbench::framework::feature::CloudSessionPort;
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::framework::feature::{CloudSessionPort, Cx};
 
 use super::super::design_system::{Problem, empty_state, paint_problem_mark};
 
@@ -23,38 +24,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         netlist_first::show(ui, &mut app.state);
         return;
     }
-    if app.state.active_view_read_only() {
-        read_only_banner(ui);
-    }
-    occurrence_scope_banner(ui, &app.state.model);
-    tool_options::show(ui, &mut app.state);
-    let content_rect = ui.available_rect_before_wrap();
     let view_type = app.state.model.workspace.content.active_view_type();
     let canvas_document = matches!(view_type, ViewType::Schematic | ViewType::Testbench);
-    match view_type {
-        ViewType::Schematic | ViewType::Testbench => {
-            crate::schematic::view::render_schematic_view(
-                ui,
-                &mut app.state,
-                app.symbol_library.as_ref(),
-            );
-            paint_live_cursors(ui, &app.state.model, &app.cloud, content_rect);
-        }
-        ViewType::Symbol => {
-            crate::schematic::symbol_editor::show(ui, &mut app.state, app.symbol_library.as_ref())
-        }
-        ViewType::Layout => layout_editor::show(ui, app),
-        ViewType::VerilogA => super::veriloga::show_in_design(ui, app),
-        ViewType::Spice | ViewType::Verilog => {
-            source_reference_document(ui, &app.state.model, view_type);
-        }
-        view_type => unsupported_document(ui, &app.state.model, view_type),
-    }
-    // A Verilog-A view is a document, not a drawing: it is no level of a
-    // descent, and its own heading and the navigator's path already name it.
-    // A crumb floating over the source would only cover the first line.
-    if view_type != ViewType::VerilogA {
-        breadcrumb(ui.ctx(), &mut app.state, content_rect);
+    let content_rect = show_document(
+        ui,
+        &mut features::surface_cx::<DesignFeature>(app, |_| false),
+        view_type,
+    );
+    // Code's Verilog-A tab draws a Verilog-A view's source, under the
+    // banners and the tool options.
+    if view_type == ViewType::VerilogA {
+        super::veriloga::show_in_design(ui, app);
     }
     if canvas_document
         && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
@@ -69,6 +49,41 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             content_rect,
         );
     }
+}
+
+/// The document in front, in the design feature's context: its banners and
+/// the armed tool's options, the page its view draws, then the crumb of
+/// where it sits in the hierarchy. A Verilog-A view's page is code's, drawn
+/// after; the area the page fills is returned.
+fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: ViewType) -> Rect {
+    if cx.model.active_view_read_only() {
+        read_only_banner(ui);
+    }
+    occurrence_scope_banner(ui, cx.model);
+    tool_options::show(ui, cx.model, cx.state);
+    let content_rect = ui.available_rect_before_wrap();
+    let symbols = cx.handles.symbols;
+    match view_type {
+        ViewType::Schematic | ViewType::Testbench => {
+            crate::schematic::view::render_schematic_view(ui, &mut canvas_frame_in(cx), symbols);
+            paint_live_cursors(ui, cx.model, cx.peers.cloud_session(), content_rect);
+        }
+        ViewType::Symbol => {
+            crate::schematic::symbol_editor::show(ui, &mut canvas_frame_in(cx), symbols);
+        }
+        ViewType::Layout => layout_editor::show(ui, &mut canvas_frame_in(cx)),
+        // A Verilog-A view is a document, not a drawing: it is no level of a
+        // descent, and its own heading and the navigator's path already name
+        // it. A crumb floating over the source would only cover the first
+        // line.
+        ViewType::VerilogA => return content_rect,
+        ViewType::Spice | ViewType::Verilog => {
+            source_reference_document(ui, cx.model, view_type);
+        }
+        view_type => unsupported_document(ui, cx.model, view_type),
+    }
+    breadcrumb(ui.ctx(), &mut canvas_frame_in(cx), content_rect);
+    content_rect
 }
 
 fn paint_live_cursors(ui: &mut Ui, model: &Model, cloud: &dyn CloudSessionPort, canvas: Rect) {
@@ -170,7 +185,7 @@ const CANVAS_BREADCRUMB_ELISION: &str = "\u{2026}";
 /// One crumb on the canvas breadcrumb: what it reads, and the occurrence level
 /// it opens.
 ///
-/// `level` is the argument [`AppState::focus_workspace_breadcrumb`] takes, so a
+/// `level` is the argument `focus_workspace_breadcrumb` takes, so a
 /// crumb navigates through the occurrence routes rather than by rewriting the
 /// derived hierarchy projection. A crumb that names something other than a
 /// level — the library the design root lives in, the view that is open, the
@@ -192,11 +207,11 @@ impl BreadcrumbCrumb {
     }
 }
 
-fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
+fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_rect: Rect) {
     let t = Tokens::get(ctx);
-    let in_place = symbol_in_place_breadcrumb_segments(state);
+    let in_place = symbol_in_place_breadcrumb_segments(&canvas.facts());
     let leaves_in_place = in_place.is_some();
-    let crumbs = in_place.unwrap_or_else(|| hierarchy_breadcrumb_segments(state));
+    let crumbs = in_place.unwrap_or_else(|| hierarchy_breadcrumb_segments(canvas.model));
     let maximum_frame_width = (content_rect.width() * 0.5 - 16.0).max(80.0);
     let mut focused_level = None;
 
@@ -237,22 +252,28 @@ fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
         // A level of the parent is a way out of the in-place edit, which
         // asks first when it holds unsaved edits.
         Some(level) if leaves_in_place => {
-            state.request_symbol_in_place_exit(
-                crate::workbench::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Level(
-                    level,
-                ),
-            );
+            canvas
+                .design
+                .navigation_parts(canvas.model, canvas.workbench, canvas.runs)
+                .request_symbol_in_place_exit(
+                    crate::workbench::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Level(
+                        level,
+                    ),
+                );
         }
-        Some(level) => state.focus_workspace_breadcrumb(level),
+        Some(level) => canvas
+            .design
+            .navigation_parts(canvas.model, canvas.workbench, canvas.runs)
+            .focus_workspace_breadcrumb(level),
         None => {}
     }
 }
 
 /// The parent's whole occurrence path, then the instance whose symbol is
 /// edited in place and the symbol view, while one is.
-fn symbol_in_place_breadcrumb_segments(state: &AppState) -> Option<Vec<BreadcrumbCrumb>> {
-    let session = state.symbol_in_place()?;
-    let occurrence = state
+fn symbol_in_place_breadcrumb_segments(facts: &CanvasFacts<'_>) -> Option<Vec<BreadcrumbCrumb>> {
+    let session = facts.symbol_in_place()?;
+    let occurrence = facts
         .model
         .workspace
         .content
@@ -394,10 +415,9 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
 
 /// The whole occurrence path, library first; a row too narrow for it elides
 /// the middle rather than any choice dropping levels.
-fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
-    let active = &state.model.workspace.content.active_view;
-    let occurrence = state
-        .model
+fn hierarchy_breadcrumb_segments(model: &Model) -> Vec<BreadcrumbCrumb> {
+    let active = &model.workspace.content.active_view;
+    let occurrence = model
         .workspace
         .content
         .active_occurrence()
@@ -593,13 +613,14 @@ fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::AppState;
 
     /// The canvas every render in this module uses. Wide enough that the crumb
     /// row is measured rather than elided.
     const RASTER_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
 
     fn crumb_labels(state: &AppState) -> Vec<String> {
-        hierarchy_breadcrumb_segments(state)
+        hierarchy_breadcrumb_segments(&state.model)
             .into_iter()
             .map(|crumb| crumb.label)
             .collect()
@@ -658,7 +679,7 @@ mod tests {
         descended(&mut app.state, "XAFE", "afe_core");
         descended(&mut app.state, "XBIAS", "bias");
 
-        let crumbs = hierarchy_breadcrumb_segments(&app.state);
+        let crumbs = hierarchy_breadcrumb_segments(&app.state.model);
         let levels: Vec<Option<usize>> = crumbs.iter().map(|crumb| crumb.level).collect();
         assert_eq!(
             levels,
@@ -687,7 +708,7 @@ mod tests {
             "afe_core"
         );
 
-        let root = hierarchy_breadcrumb_segments(&app.state)
+        let root = hierarchy_breadcrumb_segments(&app.state.model)
             .into_iter()
             .find(|crumb| crumb.label == "top")
             .and_then(|crumb| crumb.level)
@@ -717,7 +738,7 @@ mod tests {
             crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
                 breadcrumb(
                     ui.ctx(),
-                    &mut app.state,
+                    &mut crate::schematic::view::canvas_frame(&mut app.state),
                     Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT),
                 );
             })

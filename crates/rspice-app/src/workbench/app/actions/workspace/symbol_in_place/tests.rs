@@ -171,9 +171,17 @@ impl Fixture {
                 app.handle_shortcuts(ui.ctx());
                 *canvas = ui.available_rect_before_wrap();
                 if app.state.model.workspace.content.active_view_type() == ViewType::Symbol {
-                    crate::schematic::symbol_editor::show(ui, &mut app.state, None);
+                    crate::schematic::symbol_editor::show(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        None,
+                    );
                 } else {
-                    crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                    crate::schematic::view::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        None,
+                    );
                 }
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
             },

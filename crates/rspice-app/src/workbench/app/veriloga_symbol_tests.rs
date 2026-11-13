@@ -214,9 +214,11 @@ fn the_editor_generates_what_the_compile_drew() {
     let drawn = symbol(&app, &reference);
     app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
 
-    app.state
-        .generate_active_symbol_document()
-        .expect("the symbol generates");
+    crate::workbench::app::generate_active_symbol_document(
+        &mut app.state.design.symbol,
+        &mut app.state.model,
+    )
+    .expect("the symbol generates");
 
     assert_eq!(symbol(&app, &reference).pins, drawn.pins);
 }

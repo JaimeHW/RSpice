@@ -1,10 +1,10 @@
 //! Symbol canvas transactions: pointer gestures, undo grouping and stale-source rejection.
 
-use super::super::AppState;
 use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolPin, SymbolShape, View, ViewType,
 };
+use crate::workbench::AppState;
 use crate::workbench::SymbolTool;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;

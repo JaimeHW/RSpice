@@ -592,7 +592,13 @@ fn run_frame(
     let output = ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| super::render_schematic_view(ui, state, symbols));
+            .show(ctx, |ui| {
+                super::render_schematic_view(
+                    ui,
+                    &mut crate::schematic::view::canvas_frame(state),
+                    symbols,
+                )
+            });
     });
     let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
     (elapsed, std::hint::black_box(output.shapes.len()))
@@ -838,7 +844,11 @@ fn part_drag() -> [FrameTimes; 2] {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    super::render_schematic_view(ui, state, symbols.as_ref())
+                    super::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        symbols.as_ref(),
+                    )
                 });
         });
         let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
@@ -1457,7 +1467,11 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        super::render_schematic_view(ui, &mut state, symbols.as_ref());
+                        super::render_schematic_view(
+                            ui,
+                            &mut crate::schematic::view::canvas_frame(&mut state),
+                            symbols.as_ref(),
+                        );
                     });
             })
             .shapes;

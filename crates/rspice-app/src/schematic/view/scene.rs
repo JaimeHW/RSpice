@@ -1546,7 +1546,11 @@ mod tests {
             },
             |ui| {
                 canvas = ui.available_rect_before_wrap();
-                super::super::render_schematic_view(ui, state, None);
+                super::super::render_schematic_view(
+                    ui,
+                    &mut crate::schematic::view::canvas_frame(state),
+                    None,
+                );
             },
         );
         let mut marks = output

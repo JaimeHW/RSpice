@@ -44,9 +44,11 @@ fn project_with_two_authoritative_layout_documents() -> (ProjectSnapshot, CellVi
         library.add_cell(child_cell);
     }
     state
+        .model
         .initialize_physical_layout_document(top.clone())
         .expect("top layout initializes");
     state
+        .model
         .initialize_physical_layout_document(child.clone())
         .expect("child layout initializes");
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)

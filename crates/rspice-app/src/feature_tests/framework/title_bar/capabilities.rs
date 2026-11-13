@@ -129,7 +129,13 @@ fn canvas_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
             time: Some(time),
             ..Default::default()
         },
-        |ui| crate::schematic::view::render_schematic_view(ui, &mut app.state, None),
+        |ui| {
+            crate::schematic::view::render_schematic_view(
+                ui,
+                &mut crate::schematic::view::canvas_frame(&mut app.state),
+                None,
+            )
+        },
     );
 }
 

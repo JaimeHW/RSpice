@@ -807,4 +807,31 @@ mod tests {
             }
         }
     }
+
+    /// The design canvas reads its feature's own dialogs live while the
+    /// surface draws (`design::own_modal_dialog_open`), so the feature's
+    /// table must count each one with the modality this order lists it
+    /// under, and no design state may hold a gate outside its dialogs.
+    #[test]
+    fn the_design_feature_counts_its_dialogs_as_the_order_lists_them() {
+        let design: Vec<_> = DIALOG_ORDER
+            .iter()
+            .filter(|spec| spec.key.0.starts_with("design."))
+            .collect();
+        assert!(!design.is_empty());
+        for spec in design {
+            assert_eq!(
+                crate::workbench::design::dialog_modality(spec.key),
+                spec.modality,
+                "{:?}",
+                spec.key
+            );
+        }
+        assert!(
+            !MODAL_ONLY
+                .iter()
+                .any(|spec| spec.key.0.starts_with("design.")),
+            "a design state holds a gate outside the feature's dialogs"
+        );
+    }
 }

@@ -157,11 +157,6 @@ impl AppState {
         self.model.schematic_edit_read_only()
     }
 
-    /// [`read_only_master_message`] for the session's model.
-    pub(crate) fn read_only_master_message(&self) -> String {
-        read_only_master_message(&self.model)
-    }
-
     /// [`NavigationParts::navigate_to_log_anchor`] for the session.
     pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
         self.navigation().navigate_to_log_anchor(anchor);
@@ -224,22 +219,6 @@ impl AppState {
         let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
         let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
         highlight_failed_run_sites(&mut self.model, &mut self.workbench, &nets, &devices)
-    }
-
-    pub(crate) fn generate_active_symbol_document(&mut self) -> Result<(), String> {
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        let before = self.model.load_active_symbol_document()?;
-        let ports = self.active_symbol_ports();
-        let document = self
-            .model
-            .generated_symbol_document(&self.model.workspace.content.active_view, &ports);
-        if document != before {
-            self.record_symbol_metadata_edit(&before);
-        }
-        self.store_active_symbol_document(&document)?;
-        Ok(())
     }
 
     /// Migrate persisted sessions away from the legacy seeded "primitives"

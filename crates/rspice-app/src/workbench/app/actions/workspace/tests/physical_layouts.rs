@@ -29,9 +29,11 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     }
     state.provision_test_project_technology_contract();
     state
+        .model
         .initialize_physical_layout_document(amp_layout.clone())
         .expect("amp layout initializes from exact project PDK pin");
     state
+        .model
         .initialize_physical_layout_document(wrapper_layout.clone())
         .expect("wrapper layout initializes from exact project PDK pin");
 
@@ -166,6 +168,7 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
             .add_view(View::new("layout", ViewType::Layout));
     }
     state
+        .model
         .initialize_physical_layout_document(CellViewRef::new("user", "amp", "layout"))
         .expect("layout initializes from the exact project PDK pin");
 
@@ -206,6 +209,7 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
             .add_view(View::new("layout", ViewType::Layout));
     }
     state
+        .model
         .initialize_physical_layout_document(CellViewRef::new("user", "amp", "layout"))
         .expect("layout initializes from the exact project PDK pin");
 

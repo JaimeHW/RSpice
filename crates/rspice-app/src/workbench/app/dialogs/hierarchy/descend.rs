@@ -637,7 +637,7 @@ mod tests {
             "returning to the reference document still refuses writes"
         );
         assert!(
-            !state.symbol_editor_copy_available(),
+            !crate::workbench::app::symbol_editor_copy_available(&state.model),
             "the symbol editor's escape hatch follows the same document"
         );
     }

@@ -17,6 +17,7 @@ mod export_name;
 mod generated_instance;
 mod library_catalog;
 mod owned_source;
+mod physical_layout;
 mod plan_outcome;
 mod project_technology;
 mod run_specifications;

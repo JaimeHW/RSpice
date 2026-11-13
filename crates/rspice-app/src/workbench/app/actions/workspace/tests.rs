@@ -488,9 +488,11 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
     );
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
-    state
-        .generate_active_symbol_document()
-        .expect("symbol document generated");
+    super::symbol_document::generate_active_symbol_document(
+        &mut state.design.symbol,
+        &mut state.model,
+    )
+    .expect("symbol document generated");
 
     let view = state
         .model
@@ -542,9 +544,11 @@ fn generate_symbol_document_is_one_undoable_transaction() {
     );
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
-    state
-        .generate_active_symbol_document()
-        .expect("symbol document generated");
+    super::symbol_document::generate_active_symbol_document(
+        &mut state.design.symbol,
+        &mut state.model,
+    )
+    .expect("symbol document generated");
 
     assert!(
         state.can_undo_active_symbol_document(),
@@ -620,9 +624,11 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         "fixture starts without authored symbol metadata"
     );
 
-    state
-        .generate_active_symbol_document()
-        .expect("symbol document generated");
+    super::symbol_document::generate_active_symbol_document(
+        &mut state.design.symbol,
+        &mut state.model,
+    )
+    .expect("symbol document generated");
     assert!(
         state
             .model
@@ -1245,9 +1251,11 @@ fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
         expected
     );
     assert_eq!(
-        state
-            .generate_active_symbol_document()
-            .expect_err("generate should be refused"),
+        super::symbol_document::generate_active_symbol_document(
+            &mut state.design.symbol,
+            &mut state.model,
+        )
+        .expect_err("generate should be refused"),
         expected
     );
     assert_eq!(

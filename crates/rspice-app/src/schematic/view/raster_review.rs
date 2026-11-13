@@ -496,7 +496,11 @@ pub(super) fn render_pointing(
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
-                    super::render_schematic_view(ui, state, symbols.as_ref());
+                    super::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        symbols.as_ref(),
+                    );
                 });
         }));
     }

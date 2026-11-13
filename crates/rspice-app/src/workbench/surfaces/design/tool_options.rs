@@ -13,15 +13,18 @@ use crate::state::{MoveSelectionMode, StretchOrthogonalPolicy, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, segmented};
+#[cfg(test)]
 use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::slots::DesignState;
 
 /// Air between the command's name and its options.
 const NAME_GAP: f32 = 12.0;
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn show(ui: &mut Ui, model: &mut Model, design: &mut DesignState) {
     let top = ui.cursor().top();
-    options(ui, state);
-    hold_drawing_still(ui, state, ui.cursor().top() - top);
+    options(ui, model, design);
+    hold_drawing_still(ui, model, ui.cursor().top() - top);
 }
 
 /// The strip takes its height from the top of the canvas, so the canvas
@@ -29,10 +32,10 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 /// must not move with it: whatever the pointer was over when M or S was
 /// pressed is still under it for the click that follows. The pan takes the
 /// change, once per change of height, per document.
-fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
+fn hold_drawing_still(ui: &Ui, model: &mut Model, height: f32) {
     let id = egui::Id::new((
         "tool-options-strip-height",
-        state.model.workspace.content.active_key(),
+        model.workspace.content.active_key(),
     ));
     let last = ui.data_mut(|data| {
         let last = data.get_temp::<f32>(id);
@@ -42,15 +45,15 @@ fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
     if let Some(last) = last
         && last != height
     {
-        state.model.schematic.session.editor.pan.1 -= f64::from(height - last);
+        model.schematic.session.editor.pan.1 -= f64::from(height - last);
     }
 }
 
-fn options(ui: &mut Ui, state: &mut AppState) {
-    match state.model.schematic.session.editor.tool {
-        Tool::MoveSelection if state.design.move_selection.armed => {
+fn options(ui: &mut Ui, model: &Model, design: &mut DesignState) {
+    match model.schematic.session.editor.tool {
+        Tool::MoveSelection if design.move_selection.armed => {
             strip(ui, "Move", |ui| {
-                let mode = &mut state.design.move_selection.mode;
+                let mode = &mut design.move_selection.mode;
                 let mut selected = MoveSelectionMode::ALL
                     .iter()
                     .position(|candidate| candidate == mode)
@@ -67,9 +70,9 @@ fn options(ui: &mut Ui, state: &mut AppState) {
                 }
             });
         }
-        Tool::StretchSelection if state.design.stretch_selection.armed => {
+        Tool::StretchSelection if design.stretch_selection.armed => {
             strip(ui, "Stretch", |ui| {
-                let policy = &mut state.design.stretch_selection.policy;
+                let policy = &mut design.stretch_selection.policy;
                 let mut orthogonal = *policy == StretchOrthogonalPolicy::PreserveOrthogonal;
                 if ui
                     .checkbox(&mut orthogonal, "Keep wires orthogonal")
@@ -154,7 +157,7 @@ mod tests {
             let mut shown = false;
             let _ = crate::ui::raster::render(egui::vec2(900.0, 60.0), |ui, _background| {
                 let before = ui.cursor().top();
-                show(ui, state);
+                show(ui, &mut state.model, &mut state.design);
                 shown = ui.cursor().top() > before;
             });
             shown
@@ -183,7 +186,7 @@ mod tests {
         let frame = |state: &mut AppState| {
             let mut measured = (0.0, 0.0);
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-                show(ui, state);
+                show(ui, &mut state.model, &mut state.design);
                 let canvas_top = f64::from(ui.cursor().top());
                 measured = (
                     canvas_top,

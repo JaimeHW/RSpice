@@ -180,7 +180,11 @@ fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(ui, state, None);
+                    crate::schematic::view::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        None,
+                    );
                 });
         },
     );
@@ -370,7 +374,11 @@ fn drive_schematic_canvas(state: &mut AppState, ctx: &egui::Context, events: Vec
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(ui, state, None);
+                    crate::schematic::view::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        None,
+                    );
                 });
         },
     );

@@ -79,7 +79,7 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
-use crate::workbench::framework::dialogs::DialogKey;
+use crate::workbench::framework::dialogs::{DialogKey, Modality};
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
 };
@@ -1158,6 +1158,31 @@ const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
         render: DesignFeature::render_shared_properties_dialog,
     },
 ];
+
+/// How each of the feature's dialogs holds the workbench while it is open,
+/// as the shell's dialog order lists it: the property form holds the
+/// application modal, the descent chooser is drawn beside the canvas, and
+/// every other dialog holds the dialog gate.
+pub(crate) fn dialog_modality(key: DialogKey) -> Modality {
+    match key.0 {
+        "design.property" => Modality::Application,
+        "design.descend_hierarchy" => Modality::Modeless,
+        _ => Modality::Dialog,
+    }
+}
+
+/// Whether one of the feature's own dialogs is open in `design` that holds
+/// the application modal or, with `dialog_gate`, the dialog gate.
+pub(crate) fn own_modal_dialog_open(design: &DesignState, dialog_gate: bool) -> bool {
+    DIALOGS.iter().any(|dialog| {
+        let counts = match dialog_modality(dialog.key) {
+            Modality::Dialog => true,
+            Modality::Application => !dialog_gate,
+            Modality::Modeless | Modality::None => false,
+        };
+        counts && (dialog.is_open)(design)
+    })
+}
 
 /// The feature's dialog steps, each over the parts of the design slot it
 /// owns.

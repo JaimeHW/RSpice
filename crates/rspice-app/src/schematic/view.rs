@@ -8,7 +8,9 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
-use crate::workbench::app_state::{AppState, Model, model_design_view};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{Model, model_design_view};
 use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
 use super::symbols::SymbolLibrary;
@@ -75,8 +77,10 @@ pub(crate) use self::interaction::{
 pub(crate) use self::mobile_controls::ASKED_COMMANDS as TOUCH_STRIP_ASKED_COMMANDS;
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::parts::{
-    CanvasFacts, CanvasParts, canvas_application_modal_open, canvas_facts, canvas_parts,
+    CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts,
 };
+#[cfg(test)]
+pub(crate) use self::parts::{canvas_application_modal_open, canvas_facts, canvas_frame};
 pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -290,12 +294,12 @@ fn full_crosshair_at(
 
 pub fn render_schematic_view(
     ui: &mut Ui,
-    state: &mut AppState,
+    canvas: &mut CanvasFrame<'_>,
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let available = ui.available_rect_before_wrap();
-    let mut symbol_context = frame_symbol_context(&mut state.model);
-    let drawing_sheet = state.model.active_drawing_sheet();
+    let mut symbol_context = frame_symbol_context(canvas.model);
+    let drawing_sheet = canvas.model.active_drawing_sheet();
     let (canvas_width, canvas_height) = (available.width() as f64, available.height() as f64);
     let min_zoom = crate::state::SchematicState::zoom_floor_for_sheet(
         drawing_sheet.geometry.paper.as_tuple(),
@@ -304,32 +308,43 @@ pub fn render_schematic_view(
         drawing_sheet::FIT_SCREEN_INSET,
     );
 
-    if state.model.schematic.session.editor.needs_drawing_sheet_fit {
-        state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
-        state.model.schematic.session.editor.needs_fit = false;
-        state.model.schematic.zoom_to_fit_world_rect(
+    if canvas
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit
+    {
+        canvas
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
+        canvas.model.schematic.session.editor.needs_fit = false;
+        canvas.model.schematic.zoom_to_fit_world_rect(
             drawing_sheet.geometry.paper.as_tuple(),
             canvas_width,
             canvas_height,
             drawing_sheet::FIT_SCREEN_INSET,
             min_zoom,
         );
-    } else if state.model.schematic.session.editor.needs_fit {
-        state.model.schematic.session.editor.needs_fit = false;
-        let bounds = symbol_context.content_bounds(state.model.schematic.document());
-        state
+    } else if canvas.model.schematic.session.editor.needs_fit {
+        canvas.model.schematic.session.editor.needs_fit = false;
+        let bounds = symbol_context.content_bounds(canvas.model.schematic.document());
+        canvas
             .model
             .schematic
             .zoom_to_fit_bounds(bounds, canvas_width, canvas_height, min_zoom);
     }
-    if let Some(target) = state.model.schematic.session.editor.center_request.take() {
-        state
+    if let Some(target) = canvas.model.schematic.session.editor.center_request.take() {
+        canvas
             .model
             .schematic
             .center_view_on(target, canvas_width, canvas_height);
     }
-    if let Some(request) = state.model.schematic.session.editor.zoom_request.take() {
-        state.model.schematic.apply_zoom_request(
+    if let Some(request) = canvas.model.schematic.session.editor.zoom_request.take() {
+        canvas.model.schematic.apply_zoom_request(
             request,
             canvas_width,
             canvas_height,
@@ -339,10 +354,10 @@ pub fn render_schematic_view(
     }
 
     let response = canvas::interact(ui, available, || {
-        canvas_application_modal_open(state) || state.workbench.drawer.is_some()
+        canvas.application_modal_open() || canvas.workbench.drawer.is_some()
     });
     if response.clicked() || response.secondary_clicked() || response.drag_started() {
-        state.design.interaction.schematic_keyboard_focus = None;
+        canvas.design.interaction.schematic_keyboard_focus = None;
     }
     ui.advance_cursor_after_rect(available);
     let painter = ui.painter_at(available);
@@ -351,24 +366,24 @@ pub fn render_schematic_view(
     // the camera is built and the scene is painted — the old order drew
     // last frame's state, so the canvas trailed the cursor by a full
     // frame during pans and drags.
-    let canvas_navigation = state.model.preferences.canvas_navigation();
+    let canvas_navigation = canvas.model.preferences.canvas_navigation();
     handle_viewport_navigation(
         ui,
         &response,
         available,
-        &mut state.model.schematic.session.editor.zoom,
-        &mut state.model.schematic.session.editor.pan,
+        &mut canvas.model.schematic.session.editor.zoom,
+        &mut canvas.model.schematic.session.editor.pan,
         min_zoom,
         canvas_navigation,
     );
-    edge_pan::edge_pan(ui, &response, available, &mut canvas_parts(state));
-    let editor = &mut state.model.schematic.session.editor;
+    edge_pan::edge_pan(ui, &response, available, &mut canvas.parts());
+    let editor = &mut canvas.model.schematic.session.editor;
     editor
         .view_history
         .observe((editor.zoom, editor.pan), ui.input(|input| input.time));
     let viewport = viewport_from_camera(
-        state.model.schematic.session.editor.pan,
-        state.model.schematic.session.editor.zoom,
+        canvas.model.schematic.session.editor.pan,
+        canvas.model.schematic.session.editor.zoom,
         available,
         ui.ctx().pixels_per_point(),
     );
@@ -377,17 +392,17 @@ pub fn render_schematic_view(
         .as_ref()
         .and_then(|_| ui.ctx().pointer_hover_pos());
     let shelf_drag_over_canvas = shelf_drag.is_some() && shelf_drag_position.is_some();
-    handle_placement_transform_keys(&response, &mut canvas_parts(state), shelf_drag_over_canvas);
+    handle_placement_transform_keys(&response, &mut canvas.parts(), shelf_drag_over_canvas);
     let shelf_drop = shelf_drag
         .as_deref()
-        .map(|payload| can_accept_shelf_drop(&canvas_facts(state), payload));
+        .map(|payload| can_accept_shelf_drop(&canvas.facts(), payload));
     let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
     // Keep the pre-interaction route state available to the context-menu
     // layer for diagnostics. Secondary click is exclusively a context-menu
     // gesture; routes commit with Enter or primary double-click.
-    let routing_was_active = state.model.schematic.session.editor.wire_drawing.active
-        || state.model.schematic.session.editor.bus_drawing.active
-        || !state
+    let routing_was_active = canvas.model.schematic.session.editor.wire_drawing.active
+        || canvas.model.schematic.session.editor.bus_drawing.active
+        || !canvas
             .model
             .schematic
             .session
@@ -397,63 +412,63 @@ pub fn render_schematic_view(
             .is_empty();
     if let (Some(payload), Some(position)) = (dropped_payload.as_deref(), shelf_drag_position) {
         let drop_position =
-            snap_resolution::resolve_grid_pointer(&state.model, &viewport, position)
+            snap_resolution::resolve_grid_pointer(&*canvas.model, &viewport, position)
                 .snapped_position;
-        match commit_shelf_drop(&mut canvas_parts(state), payload, drop_position) {
+        match commit_shelf_drop(&mut canvas.parts(), payload, drop_position) {
             // The canvas shows the part where it was dropped.
             ShelfDropOutcome::Placed => {}
             ShelfDropOutcome::ReadOnly => {
-                state.prompt("The active schematic is read-only; no component was placed.");
+                canvas.prompt("The active schematic is read-only; no component was placed.");
             }
             ShelfDropOutcome::RequiresConfiguration => {
-                state.prompt("A pin needs a name. Use Create pins (Shift+P).");
+                canvas.prompt("A pin needs a name. Use Create pins (Shift+P).");
             }
         }
     } else {
         // A long click over overlapping objects opens the chooser. The
         // chooser takes its keys before the tools see them, and the click
         // that opens or closes it selects nothing on the canvas.
-        if state.model.schematic.session.editor.tool == crate::state::Tool::Select
+        if canvas.model.schematic.session.editor.tool == crate::state::Tool::Select
             && let Some(position) = pick_chooser::observe_long_click(&response)
         {
             pick_chooser::open_chooser_at(
                 ui.ctx(),
-                &canvas_facts(state),
+                &canvas.facts(),
                 position,
                 &symbol_context,
                 &viewport,
             );
         }
-        pick_chooser::show_chooser(ui.ctx(), &mut canvas_parts(state));
+        pick_chooser::show_chooser(ui.ctx(), &mut canvas.parts());
         handle_tool_interactions(
             ui,
             &response,
-            &mut canvas_parts(state),
+            &mut canvas.parts(),
             &viewport,
             &symbol_context,
         );
     }
-    refresh_symbol_context_after_interactions(&mut state.model, &mut symbol_context);
+    refresh_symbol_context_after_interactions(canvas.model, &mut symbol_context);
     context_menu::handle_context_menu(
         &response,
-        &mut canvas_parts(state),
+        &mut canvas.parts(),
         &viewport,
         routing_was_active,
         &symbol_context,
     );
-    handle_keyboard_object_navigation(&response, &mut canvas_parts(state), &symbol_context);
-    set_canvas_cursor(ui, &response, &canvas_facts(state), shelf_drop);
-    let crosshair = full_crosshair_at(ui, &response, &canvas_facts(state), &viewport);
-    refresh_symbol_context_after_interactions(&mut state.model, &mut symbol_context);
+    handle_keyboard_object_navigation(&response, &mut canvas.parts(), &symbol_context);
+    set_canvas_cursor(ui, &response, &canvas.facts(), shelf_drop);
+    let crosshair = full_crosshair_at(ui, &response, &canvas.facts(), &viewport);
+    refresh_symbol_context_after_interactions(canvas.model, &mut symbol_context);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
-    state.model.schematic.ensure_canvas_cache();
+    canvas.model.schematic.ensure_canvas_cache();
     // Badges are placed against the wires the canvas cache indexes, so they
     // are refreshed after it.
-    scene::refresh_voltage_badges(&mut canvas_parts(state));
+    scene::refresh_voltage_badges(&mut canvas.parts());
     drawing_sheet::refresh_overflow_summary(
-        &mut canvas_parts(state),
+        &mut canvas.parts(),
         &painter,
         &viewport,
         &symbol_context,
@@ -464,7 +479,7 @@ pub fn render_schematic_view(
         &painter,
         available,
         &viewport,
-        &canvas_facts(state),
+        &canvas.facts(),
         symbol_library,
         &symbol_context,
         &drawing_sheet,
@@ -475,18 +490,18 @@ pub fn render_schematic_view(
     draw_interaction_previews(
         &painter,
         &response,
-        &mut canvas_parts(state),
+        &mut canvas.parts(),
         &viewport,
         &symbol_context,
         symbol_library,
     );
     if dropped_payload.is_none()
         && let (Some(payload), Some(position)) = (shelf_drag.as_deref(), shelf_drag_position)
-        && can_accept_shelf_drop(&canvas_facts(state), payload)
+        && can_accept_shelf_drop(&canvas.facts(), payload)
     {
         draw_shelf_drag_preview(
             &painter,
-            &canvas_facts(state),
+            &canvas.facts(),
             &viewport,
             payload,
             position,
@@ -504,25 +519,25 @@ pub fn render_schematic_view(
             / grid;
         (x, y)
     };
-    state.design.canvas_hover = shelf_drag_position
+    canvas.design.canvas_hover = shelf_drag_position
         .or_else(|| response.hover_pos())
-        .map(|cursor| to_grid_units(cursor, &state.model));
-    state.design.canvas_view_center = Some(to_grid_units(available.center(), &state.model));
+        .map(|cursor| to_grid_units(cursor, &*canvas.model));
+    canvas.design.canvas_view_center = Some(to_grid_units(available.center(), &*canvas.model));
 
     let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
     let shortcuts =
-        schematic_accessibility_shortcuts(&state.model, shortcut_platform, operating_system);
+        schematic_accessibility_shortcuts(&*canvas.model, shortcut_platform, operating_system);
     canvas::finish(
         ui,
         &response,
         available,
-        &canvas_accessibility_view(&canvas_facts(state)),
+        &canvas_accessibility_view(&canvas.facts()),
         &shortcuts,
     );
     crate::workbench::app_state::report_engineering_canvas_focus(
         &response,
-        state.model.workspace.content.active_view_type(),
+        canvas.model.workspace.content.active_view_type(),
     );
 }
 
@@ -1026,7 +1041,13 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| render_schematic_view(ui, &mut state, None));
+                    .show(ctx, |ui| {
+                        render_schematic_view(
+                            ui,
+                            &mut crate::schematic::view::canvas_frame(&mut state),
+                            None,
+                        )
+                    });
             },
         );
         let nodes = output
@@ -1090,7 +1111,11 @@ mod tests {
                 },
                 |ui| {
                     canvas = ui.available_rect_before_wrap();
-                    render_schematic_view(ui, state, None);
+                    render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        None,
+                    );
                 },
             ));
         }
@@ -1187,7 +1212,13 @@ mod tests {
                     events: vec![event],
                     ..Default::default()
                 },
-                |ui| render_schematic_view(ui, state, None),
+                |ui| {
+                    render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        None,
+                    )
+                },
             );
         }
     }

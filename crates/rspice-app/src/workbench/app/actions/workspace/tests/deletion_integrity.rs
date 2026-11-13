@@ -84,6 +84,7 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
     ];
     for owner in &owned {
         state
+            .model
             .initialize_physical_layout_document(owner.clone())
             .expect("layout initializes from the exact project PDK pin");
     }

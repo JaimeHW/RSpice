@@ -10,14 +10,15 @@ use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use super::symbols::SymbolLibrary;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::schematic::view::{
-    CanvasFacts, CanvasParts, DesignSurfaceRequest, canvas_application_modal_open, canvas_facts,
-    canvas_parts,
-};
+use crate::schematic::view::{CanvasFacts, CanvasFrame, CanvasParts, DesignSurfaceRequest};
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme;
 use crate::ui::widgets::DialogChoice;
-use crate::workbench::AppState;
+use crate::workbench::app::{
+    active_symbol_ports, deny_read_only_edit, generate_active_symbol_document,
+    load_active_symbol_editor_metadata, symbol_editor_copy_available, symbol_editor_lock_message,
+    symbol_editor_request_source,
+};
 pub(crate) use rspice_schematic_editor::symbol_editor::draw_document_preview;
 use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
@@ -64,16 +65,16 @@ fn symbol_canvas_accessibility_label(
 
 /// The symbol canvas: in its own view, or in place on a parent schematic
 /// whose built-in part symbols `symbol_library` draws.
-pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLibrary>) {
-    let ports = state.active_symbol_ports();
-    let mut document = match state.model.load_active_symbol_document() {
+pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&SymbolLibrary>) {
+    let ports = active_symbol_ports(canvas.model);
+    let mut document = match canvas.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(error) => {
             surface::invalid_symbol_document_state(ui, &error);
             return;
         }
     };
-    let mut editor = match state.load_active_symbol_editor_metadata(&document) {
+    let mut editor = match load_active_symbol_editor_metadata(canvas.model, &document) {
         Ok(metadata) => metadata,
         Err(error) => {
             surface::invalid_symbol_document_state(ui, &error);
@@ -81,44 +82,44 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         }
     };
 
-    let source = state.symbol_editor_request_source();
-    if state.active_view_read_only()
+    let source = symbol_editor_request_source(canvas.model, canvas.workbench);
+    if canvas.model.active_view_read_only()
         && let Some(request) = surface::read_only_banner(
             ui,
             &source,
-            &state.symbol_editor_lock_message(),
-            state.symbol_editor_copy_available(),
+            &symbol_editor_lock_message(canvas.model),
+            symbol_editor_copy_available(canvas.model),
         )
     {
-        apply_surface_request(state, request);
+        apply_surface_request(canvas, request);
     }
-    let dirty = state
+    let dirty = canvas
         .design
         .symbol
         .history
-        .is_dirty(&state.model.workspace.content.active_key());
+        .is_dirty(&canvas.model.workspace.content.active_key());
     if document.body.is_empty()
         && !ports.is_empty()
         && let Some(request) = surface::empty_generate_state(
             ui,
             &source,
             &ports,
-            !state.active_view_read_only(),
-            state
+            !canvas.model.active_view_read_only(),
+            canvas
                 .model
-                .symbol_contract_source(&state.model.workspace.content.active_view),
+                .symbol_contract_source(&canvas.model.workspace.content.active_view),
         )
     {
-        if !apply_surface_request(state, request) {
+        if !apply_surface_request(canvas, request) {
             return;
         }
-        document = state
+        document = canvas
             .model
             .load_active_symbol_document()
             .unwrap_or_else(|_| SymbolDocument::generated_from_ports(&ports));
     }
 
-    interaction::bind_active_canvas(&mut canvas_parts(state));
+    interaction::bind_active_canvas(&mut canvas.parts());
     // The stage is full-bleed: tools live in the workspace toolbar, the pin
     // contract in the left panel, and object editing in the inspector, so
     // the canvas keeps the whole document area.
@@ -128,15 +129,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         ui.spacing_mut().item_spacing.x = 0.0;
         let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-        let navigation = state.model.preferences.canvas_navigation();
+        let navigation = canvas.model.preferences.canvas_navigation();
         // Edited in place, the canvas frames the parent sheet and the symbol
         // stands where its instance does.
-        let in_place = in_place::frame(ui, &mut canvas_parts(state), rect, &response);
+        let in_place = in_place::frame(ui, &mut canvas.parts(), rect, &response);
         let viewport = match &in_place {
             Some(frame) => frame.symbol,
             None => update_viewport(
                 ui,
-                &mut state.design.symbol.editor,
+                &mut canvas.design.symbol.editor,
                 rect,
                 &document,
                 &response,
@@ -144,7 +145,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
             ),
         };
         interaction::handle_canvas(
-            &mut canvas_parts(state),
+            &mut canvas.parts(),
             &mut document,
             &mut editor,
             viewport,
@@ -154,7 +155,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
             Some(frame) => {
                 in_place::draw(
                     ui,
-                    &canvas_facts(state),
+                    &canvas.facts(),
                     frame,
                     &document,
                     &editor,
@@ -168,8 +169,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 &document,
                 &editor,
                 &ports,
-                &state.design.symbol.editor,
-                &state.model.workspace.content.active_view,
+                &canvas.design.symbol.editor,
+                &canvas.model.workspace.content.active_view,
             ),
         }
         // Edited in place, the canvas is the parent sheet, and leaving with
@@ -191,8 +192,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 ui.is_enabled(),
                 symbol_canvas_accessibility_label(
                     &document,
-                    &canvas_facts(state),
-                    state.active_view_read_only(),
+                    &canvas.facts(),
+                    canvas.model.active_view_read_only(),
                     shortcut_platform,
                     operating_system,
                 ),
@@ -203,7 +204,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         });
         crate::workbench::app_state::report_engineering_canvas_focus(
             &response,
-            state.model.workspace.content.active_view_type(),
+            canvas.model.workspace.content.active_view_type(),
         );
     });
     // No breadcrumb overlay: the document tab and the inspector's eyebrow
@@ -211,12 +212,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
     surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
     show_save_symbol_dialog(
         ui.ctx(),
-        &mut canvas_parts(state),
+        &mut canvas.parts(),
         &document,
         &mut editor,
         &ports,
     );
-    in_place::show_leaving_question(ui.ctx(), &mut canvas_parts(state));
+    in_place::show_leaving_question(ui.ctx(), &mut canvas.parts());
 }
 
 fn show_save_symbol_dialog(
@@ -266,9 +267,9 @@ fn show_save_symbol_dialog(
     }
 }
 
-fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) -> bool {
-    if request.source != state.symbol_editor_request_source()
-        || canvas_application_modal_open(state)
+fn apply_surface_request(canvas: &mut CanvasFrame<'_>, request: SymbolSurfaceRequest) -> bool {
+    if request.source != symbol_editor_request_source(canvas.model, canvas.workbench)
+        || canvas.application_modal_open()
     {
         return false;
     }
@@ -277,11 +278,11 @@ fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) ->
         // Until then the surface reads it as open, as it did when the
         // banner opened it in place.
         SymbolSurfaceAction::CopyToEditableLibrary => {
-            if !state.symbol_editor_copy_available() {
+            if !symbol_editor_copy_available(canvas.model) {
                 return false;
             }
             let reference = &request.source.document;
-            state
+            canvas
                 .workbench
                 .outbox
                 .push(DesignSurfaceRequest::CopyToEditableLibrary {
@@ -290,11 +291,13 @@ fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) ->
                 });
         }
         SymbolSurfaceAction::GenerateFromSchematic => {
-            if state.deny_read_only_edit() {
+            if deny_read_only_edit(canvas.model, canvas.workbench) {
                 return false;
             }
-            if let Err(error) = state.generate_active_symbol_document() {
-                state.prompt(error);
+            if let Err(error) =
+                generate_active_symbol_document(&mut canvas.design.symbol, canvas.model)
+            {
+                canvas.prompt(error);
             }
         }
     }

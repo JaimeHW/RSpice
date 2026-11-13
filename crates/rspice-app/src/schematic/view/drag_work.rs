@@ -112,7 +112,11 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    super::render_schematic_view(ui, state, symbols.as_ref())
+                    super::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        symbols.as_ref(),
+                    )
                 });
         });
         let tally = work_tally::take();

@@ -943,7 +943,11 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
-                    crate::schematic::view::render_schematic_view(ui, state, symbols.as_ref());
+                    crate::schematic::view::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(state),
+                        symbols.as_ref(),
+                    );
                 });
         }));
     }

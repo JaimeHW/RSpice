@@ -139,42 +139,9 @@ impl AppState {
         )
     }
 
-    /// The refusal message for the symbol editor's read-only banner, naming
-    /// which of the four owners holds the lock.
-    pub(crate) fn symbol_editor_lock_message(&self) -> String {
-        if let Some(holder) = self
-            .model
-            .live_write_locks
-            .schematic_views
-            .get(&self.model.workspace.content.active_key())
-        {
-            return format!("{holder} holds the write lease on this symbol");
-        }
-        if self.model.live_write_locks.mirror {
-            return "This is the host's working copy; request the write lease from the live session to edit."
-                .to_owned();
-        }
-        self.read_only_master_message()
-    }
-
-    /// Whether copying the cell into an editable library is a route out of
-    /// the lock. It is not one when the whole project refuses writes.
-    pub(crate) fn symbol_editor_copy_available(&self) -> bool {
-        !self.model.safe_mode.project_read_only()
-            && !self.model.live_write_locks.mirror
-            && !self.model.workspace.content.active_read_only_reference()
-    }
-
     /// [`record_symbol_edit`] for the session.
     pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
         record_symbol_edit(&mut self.design.symbol, &self.model, before);
-    }
-
-    pub(super) fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
-        const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.model.workspace.content.active_key();
-        let snapshot = active_symbol_metadata_snapshot(&self.model, before);
-        push_symbol_undo_snapshot(&mut self.design.symbol, key, snapshot, MAX_SYMBOL_UNDO);
     }
 
     #[cfg(test)]
@@ -545,6 +512,57 @@ fn active_symbol_snapshot(model: &Model, fallback: &SymbolDocument) -> SymbolDoc
             symbol_snapshot_from_view(view, fallback, preserve_missing_metadata)
         })
         .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+}
+
+/// The refusal message for the symbol editor's read-only banner, naming
+/// which of the four owners holds the lock.
+pub(crate) fn symbol_editor_lock_message(model: &Model) -> String {
+    if let Some(holder) = model
+        .live_write_locks
+        .schematic_views
+        .get(&model.workspace.content.active_key())
+    {
+        return format!("{holder} holds the write lease on this symbol");
+    }
+    if model.live_write_locks.mirror {
+        return "This is the host's working copy; request the write lease from the live session to edit."
+            .to_owned();
+    }
+    read_only_master_message(model)
+}
+
+/// Whether copying the cell into an editable library is a route out of
+/// the lock. It is not one when the whole project refuses writes.
+pub(crate) fn symbol_editor_copy_available(model: &Model) -> bool {
+    !model.safe_mode.project_read_only()
+        && !model.live_write_locks.mirror
+        && !model.workspace.content.active_read_only_reference()
+}
+
+/// Draw the active symbol from its ports, as one undoable edit of the
+/// symbol when the drawing changes.
+pub(crate) fn generate_active_symbol_document(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+) -> Result<(), String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    let before = model.load_active_symbol_document()?;
+    let ports = active_symbol_ports(model);
+    let document = model.generated_symbol_document(&model.workspace.content.active_view, &ports);
+    if document != before {
+        record_symbol_metadata_edit(symbol, model, &before);
+    }
+    store_active_symbol_document(symbol, model, &document)?;
+    Ok(())
+}
+
+fn record_symbol_metadata_edit(symbol: &mut SymbolUiState, model: &Model, before: &SymbolDocument) {
+    const MAX_SYMBOL_UNDO: usize = 128;
+    let key = model.workspace.content.active_key();
+    let snapshot = active_symbol_metadata_snapshot(model, before);
+    push_symbol_undo_snapshot(symbol, key, snapshot, MAX_SYMBOL_UNDO);
 }
 
 pub(crate) fn store_active_symbol_document(

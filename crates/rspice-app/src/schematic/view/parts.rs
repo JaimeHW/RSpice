@@ -11,6 +11,10 @@
 //! moment it asked, though the shell opens it only once the surface has
 //! drawn: [`canvas_application_modal_open`] is that one fact.
 //!
+//! A page of the design surface draws over a [`CanvasFrame`]: the same
+//! parts for the whole pass, with the modal facts lent as it began, from
+//! which each step takes its own parts.
+//!
 //! What only asks or paints, such as which rows the canvas menu offers or
 //! the scene, reads [`CanvasFacts`]: the same parts, shared.
 //!
@@ -33,7 +37,7 @@ use crate::workbench::{
         veriloga_master_of_component, veriloga_source_for_component,
     },
     app_state::{AppState, DragType, Model, model_design_view},
-    design::DesignFeature,
+    design::{DesignFeature, own_modal_dialog_open},
     framework::{feature::Cx, ports::ResultsPort},
     slots::{DesignState, RunsState},
     state::WorkbenchSession,
@@ -81,7 +85,9 @@ pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
 /// as the shell lent them.
 pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasParts<'a> {
     let application_modal = canvas_application_modal_open_in(cx);
-    let dialog_modal = cx.dialog_modal_open() || asked_dialog_waits(cx.wb);
+    let dialog_modal = cx.dialog_modal_open()
+        || own_modal_dialog_open(cx.state, true)
+        || asked_dialog_waits(cx.wb);
     CanvasParts {
         design: &mut *cx.state,
         model: &mut *cx.model,
@@ -94,9 +100,114 @@ pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasPa
 }
 
 /// [`canvas_application_modal_open`] in the design feature's context: the
-/// fact the shell lent it, or a dialog the surface asked for that waits.
+/// fact the shell lent it, a modal dialog of the feature's own that has
+/// opened since, or a dialog the surface asked for that waits.
 pub(crate) fn canvas_application_modal_open_in(cx: &Cx<'_, DesignFeature>) -> bool {
-    cx.application_modal_open() || asked_dialog_waits(cx.wb)
+    cx.application_modal_open()
+        || own_modal_dialog_open(cx.state, false)
+        || asked_dialog_waits(cx.wb)
+}
+
+/// What a page of the design surface draws over for one pass: the parts the
+/// canvas reads and writes, with the two modal facts as they stood when the
+/// pass began.
+///
+/// Each step of the pass takes its own parts ([`Self::parts`]), whose modal
+/// facts are the lent ones, a modal dialog of the design feature's own, or
+/// one the surface asked for that waits, read as the step takes them. The
+/// surface closes no modal dialog and opens another feature's only by
+/// asking, so a step reads what the whole application would tell it.
+pub(crate) struct CanvasFrame<'a> {
+    pub(crate) design: &'a mut DesignState,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) runs: &'a mut RunsState,
+    pub(crate) results: &'a dyn ResultsPort,
+    application_modal: bool,
+    dialog_modal: bool,
+}
+
+/// The canvas frame over the application's state, with its modal facts as
+/// they stand now.
+#[cfg(test)]
+pub(crate) fn canvas_frame(state: &mut AppState) -> CanvasFrame<'_> {
+    let application_modal = state.application_modal_open();
+    let dialog_modal = state.dialog_modal_open();
+    CanvasFrame {
+        design: &mut state.design,
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+        runs: &mut state.runs,
+        results: &*state.results,
+        application_modal,
+        dialog_modal,
+    }
+}
+
+/// The canvas frame over the design feature's context, with its modal facts
+/// as the shell lent them.
+pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFrame<'a> {
+    let application_modal = cx.application_modal_open();
+    let dialog_modal = cx.dialog_modal_open();
+    CanvasFrame {
+        design: &mut *cx.state,
+        model: &mut *cx.model,
+        workbench: &mut *cx.wb,
+        runs: &mut *cx.runs,
+        results: cx.peers.results(),
+        application_modal,
+        dialog_modal,
+    }
+}
+
+impl CanvasFrame<'_> {
+    /// The parts one step of the pass takes, with the modal facts as the
+    /// step begins.
+    pub(crate) fn parts(&mut self) -> CanvasParts<'_> {
+        let application_modal = self.application_modal_open();
+        let dialog_modal = self.dialog_modal_open();
+        CanvasParts {
+            design: &mut *self.design,
+            model: &mut *self.model,
+            workbench: &mut *self.workbench,
+            runs: &mut *self.runs,
+            results: self.results,
+            application_modal,
+            dialog_modal,
+        }
+    }
+
+    /// What the canvas's answers and its paint read, from this frame.
+    pub(crate) fn facts(&self) -> CanvasFacts<'_> {
+        CanvasFacts {
+            design: &*self.design,
+            model: &*self.model,
+            runs: &*self.runs,
+            results: self.results,
+            probed_trace: probed_trace(&*self.workbench),
+        }
+    }
+
+    /// Whether anything that holds the application modal is open, as the
+    /// surface reads it.
+    pub(crate) fn application_modal_open(&self) -> bool {
+        self.application_modal
+            || own_modal_dialog_open(self.design, false)
+            || asked_dialog_waits(self.workbench)
+    }
+
+    /// Whether anything the dialog gate counts is open, as the surface
+    /// reads it.
+    pub(crate) fn dialog_modal_open(&self) -> bool {
+        self.dialog_modal
+            || own_modal_dialog_open(self.design, true)
+            || asked_dialog_waits(self.workbench)
+    }
+
+    /// A refusal or transient feedback on the status bar.
+    pub(crate) fn prompt(&mut self, text: impl Into<String>) {
+        self.workbench.prompt(text);
+    }
 }
 
 /// Whether the design surface reads a modal dialog as open: one that is,
@@ -135,6 +246,7 @@ pub(crate) struct CanvasFacts<'a> {
 }
 
 /// The canvas's facts from the application's state.
+#[cfg(test)]
 pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
     CanvasFacts {
         design: &state.design,

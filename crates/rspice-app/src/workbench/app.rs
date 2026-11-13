@@ -189,8 +189,10 @@ pub(crate) use actions::workspace::{
     copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
     selected_hierarchy_master, selected_instance_veriloga_source,
     symbol_document::{
-        active_symbol_save_checks, finish_symbol_parent_edit, publish_active_symbol_revision,
-        record_symbol_edit, store_symbol_canvas_frame, symbol_editor_request_source,
+        active_symbol_ports, active_symbol_save_checks, finish_symbol_parent_edit,
+        generate_active_symbol_document, load_active_symbol_editor_metadata,
+        publish_active_symbol_revision, record_symbol_edit, store_symbol_canvas_frame,
+        symbol_editor_copy_available, symbol_editor_lock_message, symbol_editor_request_source,
     },
     symbol_in_place::{
         SymbolInPlace, SymbolInPlaceRefusal, in_place_placement, in_place_session,
