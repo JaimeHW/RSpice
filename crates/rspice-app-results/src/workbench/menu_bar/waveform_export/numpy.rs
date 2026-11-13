@@ -115,11 +115,16 @@ pub(super) fn export_numpy(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     kind: NumpyKind,
+    signals: super::ExportedSignals,
 ) {
     let prepared = match displayed.primary_analysis(state.results_reads()) {
         Some(analysis) => {
-            let waveforms =
-                exported_waveforms(state.results_reads(), displayed.dataset_id, analysis);
+            let waveforms = exported_waveforms(
+                state.results_reads(),
+                displayed.dataset_id,
+                analysis,
+                signals,
+            );
             if waveforms.is_empty() {
                 Err(if analysis.waveforms.is_empty() {
                     NO_SAMPLES_MESSAGE.to_owned()

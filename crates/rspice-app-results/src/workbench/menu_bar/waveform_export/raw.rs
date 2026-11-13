@@ -9,13 +9,14 @@
 //!
 //! One analysis: a transient, an AC sweep as a complex plot of its retained
 //! rectangular samples, or a DC sweep. The traces are the ones the export
-//! publishes, and a transient's digital and real lanes follow the analysis
-//! plot as the engine's own per-node event plots, so a mixed run's logic
-//! travels exactly, strength and all, where a VCD keeps four bit states.
+//! publishes, and a transient's digital and real lanes — the plotted ones, or
+//! every one when the export writes all signals — follow the analysis plot as
+//! the engine's own per-node event plots, so a mixed run's logic travels
+//! exactly, strength and all, where a VCD keeps four bit states.
 
 use super::{
-    ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_failure, note_result_export_success,
+    ALL_TRACES_HIDDEN_MESSAGE, ExportedSignals, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE,
+    exported_waveforms, note_result_export_failure, note_result_export_success,
 };
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -76,11 +77,12 @@ pub(super) fn export_raw(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     format: RawFormat,
+    signals: ExportedSignals,
 ) {
     let reads = state.results_reads();
     let prepared = match displayed.primary_analysis(reads) {
         Some(analysis) => {
-            let waveforms = exported_waveforms(reads, displayed.dataset_id, analysis);
+            let waveforms = exported_waveforms(reads, displayed.dataset_id, analysis, signals);
             if waveforms.is_empty() {
                 Err(if analysis.waveforms.is_empty() {
                     NO_SAMPLES_MESSAGE.to_owned()
@@ -88,8 +90,10 @@ pub(super) fn export_raw(
                     ALL_TRACES_HIDDEN_MESSAGE.to_owned()
                 })
             } else {
-                let lanes =
-                    |node: &str| plotted_event_lane(reads, displayed.dataset_id, analysis, node);
+                let lanes = |node: &str| {
+                    signals == ExportedSignals::All
+                        || plotted_event_lane(reads, displayed.dataset_id, analysis, node)
+                };
                 encode_result_raw(
                     analysis,
                     &waveforms,

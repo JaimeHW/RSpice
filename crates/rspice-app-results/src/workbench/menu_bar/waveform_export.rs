@@ -20,7 +20,10 @@ use rspice_formats::waveform_io::result::{
 use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
 
-pub use format_picker::{DatasetExportPicker, dataset_export_picker, show_dataset_export_picker};
+pub use format_picker::{
+    DatasetExportChoice, DatasetExportForm, DatasetExportPicker, ExportedSignals,
+    dataset_export_form, dataset_export_picker, show_dataset_export_picker,
+};
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
@@ -41,7 +44,7 @@ fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 /// from one that wrote the dataset, so the hidden traces are named as the
 /// reason rather than reported as an absence of samples.
 const ALL_TRACES_HIDDEN_MESSAGE: &str = "Every trace in the displayed analysis is hidden, so there is nothing to export. \
-     Show at least one trace first.";
+     Show at least one trace, or choose All signals in Export dataset\u{2026}.";
 
 // Touchstone carries an S-parameter network on a frequency axis and nothing
 // else, so each table route names what it holds instead of the reader being
@@ -52,7 +55,7 @@ const RESULTS_SHEET_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with this Results sheet; select CSV export.";
 const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with the active typed result; select CSV export.";
-const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export.";
+const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one analysis; choose it in Export dataset\u{2026} or select CSV export.";
 
 fn note_result_export_failure(state: &mut ResultsParts<'_>, detail: impl Into<String>) {
     let data_version = state.model.simulation.view.data_version;
@@ -235,17 +238,41 @@ pub fn action_export_result_selection_with_io(
     }
 }
 
+/// Export the displayed result in the stored format as the view shows it:
+/// the plotted traces of the displayed analyses.
 pub fn action_export_csv_with_io(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
+    action_export_dataset_with_io(state, io, &DatasetExportChoice::default());
+}
+
+/// Export the displayed result in the stored format, narrowed to what the
+/// export form chose: one of the displayed analyses, and the plotted signals
+/// or every one the analysis retains.
+pub fn action_export_dataset_with_io(
+    state: &mut ResultsParts<'_>,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    choice: &DatasetExportChoice,
+) {
+    let mut displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
         Ok(displayed) => displayed,
         Err(message) => {
             state.prompt(message);
             return;
         }
     };
+    // The analysis the form chose stands in for the view's own, so every
+    // route below writes it exactly as it writes a maximized strip.
+    if let Some(index) = choice.analysis {
+        if !displayed.analysis_indices.contains(&index) {
+            state.prompt("The analysis chosen for export is no longer displayed. Export again.");
+            return;
+        }
+        displayed.analysis_indices = vec![index];
+        displayed.primary_analysis_index = Some(index);
+    }
+    let signals = choice.signals;
     // Viewer compatibility intentionally excludes quarantined analyses. Check
     // the retained dataset itself here so that filtering cannot turn corrupt
     // evidence into an apparently empty, exportable presentation.
@@ -301,8 +328,8 @@ pub fn action_export_csv_with_io(
     };
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
         state.prompt(
-            "This export supports one analysis, and this view shows several. Maximize one \
-             displayed strip to export it, or choose CSV/TSV to export the displayed stack.",
+            "This export supports one analysis, and this view shows several. Choose the \
+             analysis in Export dataset\u{2026}, or choose CSV/TSV to export the displayed stack.",
         );
         return;
     }
@@ -319,7 +346,7 @@ pub fn action_export_csv_with_io(
         // must not quietly substitute that source for a derived or tabular
         // sheet that the reader is currently looking at.
         let owns_non_waveform_view =
-            prepare_displayed_table(state.results_reads(), &displayed).is_some();
+            prepare_displayed_table(state.results_reads(), &displayed, signals).is_some();
         if owns_non_waveform_view {
             state.prompt(
                 "RSpice bundles export one waveform analysis with a shared x-axis. Select a \
@@ -327,7 +354,7 @@ pub fn action_export_csv_with_io(
             );
             return;
         }
-        export_native_result_bundle(state, io, &displayed, kind);
+        export_native_result_bundle(state, io, &displayed, kind, signals);
         return;
     }
     // Binary payloads of the retained analysis, each publishing its own bytes
@@ -344,27 +371,39 @@ pub fn action_export_csv_with_io(
             return;
         }
         EngineeringExportFormat::NumpyArray => {
-            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array);
+            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array, signals);
             return;
         }
         EngineeringExportFormat::NumpyArchive => {
-            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive);
+            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive, signals);
             return;
         }
         EngineeringExportFormat::Hdf5EngineeringDataset => {
-            hdf5::export_hdf5(state, io, &displayed);
+            hdf5::export_hdf5(state, io, &displayed, signals);
             return;
         }
         EngineeringExportFormat::MatlabV5File => {
-            matlab::export_matlab(state, io, &displayed);
+            matlab::export_matlab(state, io, &displayed, signals);
             return;
         }
         EngineeringExportFormat::SpiceRawBinary => {
-            raw::export_raw(state, io, &displayed, rspice_core::io::RawFormat::Binary);
+            raw::export_raw(
+                state,
+                io,
+                &displayed,
+                rspice_core::io::RawFormat::Binary,
+                signals,
+            );
             return;
         }
         EngineeringExportFormat::SpiceRawAscii => {
-            raw::export_raw(state, io, &displayed, rspice_core::io::RawFormat::Ascii);
+            raw::export_raw(
+                state,
+                io,
+                &displayed,
+                rspice_core::io::RawFormat::Ascii,
+                signals,
+            );
             return;
         }
         _ => {}
@@ -396,7 +435,7 @@ pub fn action_export_csv_with_io(
     // reading a retained vector, so routing on the payload alone handed back
     // the transient samples the spectrum was computed from and called it the
     // result.
-    if let Some(table) = prepare_displayed_table(state.results_reads(), &displayed) {
+    if let Some(table) = prepare_displayed_table(state.results_reads(), &displayed, signals) {
         match table {
             Ok((prepared, touchstone_refusal)) => {
                 export_prepared_table(state, io, export_format, &prepared, touchstone_refusal);
@@ -416,6 +455,7 @@ pub fn action_export_csv_with_io(
             export_format,
             TabularExportFormat::TouchstoneWhereCompatible
         ),
+        signals,
     ) {
         Ok(prepared) => prepared,
         Err(message) => {
@@ -446,6 +486,7 @@ struct PreparedTypedResultCsv {
 fn prepare_displayed_table(
     state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    signals: ExportedSignals,
 ) -> Option<Result<(PreparedTypedResultCsv, &'static str), String>> {
     if let Some(derived) = prepare_active_derived_view_csv(state, displayed) {
         return Some(derived.map(|derived| (derived, DERIVED_VIEWER_TOUCHSTONE_REFUSAL)));
@@ -455,7 +496,7 @@ fn prepare_displayed_table(
     }
     if displayed.analysis_indices.len() > 1 {
         return Some(
-            prepare_displayed_analysis_stack_csv(state, displayed)
+            prepare_displayed_analysis_stack_csv(state, displayed, signals)
                 .map(|prepared| (prepared, ANALYSIS_STACK_TOUCHSTONE_REFUSAL)),
         );
     }
@@ -828,6 +869,7 @@ fn export_native_result_bundle(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     kind: rspice_formats::native_bundle::NativeBundleKind,
+    signals: ExportedSignals,
 ) {
     use rspice_formats::native_bundle::encode_native_bundle;
     use rspice_formats::native_bundle::result::project_native_bundle;
@@ -853,7 +895,12 @@ fn export_native_result_bundle(
             return;
         }
     };
-    let waveforms = exported_waveforms(state.results_reads(), displayed.dataset_id, analysis);
+    let waveforms = exported_waveforms(
+        state.results_reads(),
+        displayed.dataset_id,
+        analysis,
+        signals,
+    );
     if waveforms.is_empty() {
         state.prompt(if analysis.waveforms.is_empty() {
             NO_SAMPLES_MESSAGE
@@ -1138,10 +1185,14 @@ fn export_touchstone(
 /// dataset flag, and the single-analysis route read neither, so hiding a
 /// trace changed the file only when the viewer happened to be showing two
 /// analyses or more.
+///
+/// Every signal the analysis retains, when the export form says so: a trace
+/// off the plot is still a retained result.
 fn exported_waveforms<'a>(
     state: ResultsReads<'_>,
     dataset_id: crate::product::DatasetId,
     analysis: &'a crate::state::AnalysisResult,
+    signals: ExportedSignals,
 ) -> Vec<&'a crate::state::RetainedTrace> {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
@@ -1151,12 +1202,30 @@ fn exported_waveforms<'a>(
         .waveforms
         .iter()
         .filter(|waveform| {
-            state.results.session.waveform_visibility(
-                &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
-                waveform.visible,
-            )
+            signals == ExportedSignals::All
+                || state.results.session.waveform_visibility(
+                    &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
+                    waveform.visible,
+                )
         })
         .collect()
+}
+
+/// The event nodes a transient retains, digital then real: the nets its
+/// lanes draw.
+fn event_nodes(analysis: &crate::state::AnalysisResult) -> Vec<&str> {
+    match analysis.result_payload.as_ref() {
+        Some(crate::state::AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            ..
+        }) => digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .chain(real_traces.iter().map(|trace| trace.node_name.as_str()))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Why a dataset offers the displayed view no analysis at all.
@@ -1186,6 +1255,7 @@ fn prepare_waveform_dataset(
     state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     touchstone: bool,
+    signals: ExportedSignals,
 ) -> Result<crate::io::WaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
@@ -1196,7 +1266,7 @@ fn prepare_waveform_dataset(
     let analysis = displayed
         .primary_analysis(state)
         .ok_or_else(|| NO_ACTIVE_ANALYSIS_MESSAGE.to_string())?;
-    let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
+    let waveforms = exported_waveforms(state, displayed.dataset_id, analysis, signals);
     if waveforms.is_empty() && !analysis.waveforms.is_empty() {
         return Err(ALL_TRACES_HIDDEN_MESSAGE.to_owned());
     }
@@ -1211,6 +1281,7 @@ fn prepare_waveform_dataset(
 fn prepare_displayed_analysis_stack_csv(
     state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    signals: ExportedSignals,
 ) -> Result<PreparedTypedResultCsv, String> {
     let analyses = displayed.analyses(state).collect::<Vec<_>>();
     if analyses.is_empty() {
@@ -1219,7 +1290,7 @@ fn prepare_displayed_analysis_stack_csv(
     let mut csv = rspice_formats::result_csv::AnalysisStackCsv::new();
     let mut traces = 0_usize;
     for analysis in analyses {
-        for waveform in exported_waveforms(state, displayed.dataset_id, analysis) {
+        for waveform in exported_waveforms(state, displayed.dataset_id, analysis, signals) {
             csv.append_component(
                 displayed.dataset_id,
                 analysis,

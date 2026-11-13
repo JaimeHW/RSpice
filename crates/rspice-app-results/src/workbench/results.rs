@@ -228,16 +228,28 @@ fn render_result_import(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
     );
 }
 
-/// "Export dataset…" asks for a format, then writes the displayed result in
-/// it.
+/// "Export dataset…" asks for a format, the analysis and the signals, then
+/// writes the displayed result as chosen. What the form offers is read from
+/// the view once, on the frame it opens.
 fn render_dataset_export(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
-    if crate::workbench::menu_bar::show_dataset_export_picker(
+    if cx.state.dataset_export_form.is_none() {
+        let form = crate::workbench::menu_bar::waveform_export::dataset_export_form(
+            cx.state.reads(cx.model, cx.wb),
+        );
+        cx.state.dataset_export_form = Some(Box::new(form));
+    }
+    if let Some(choice) = crate::workbench::menu_bar::show_dataset_export_picker(
         ctx,
         &mut cx.state.dataset_export,
+        &mut cx.state.dataset_export_form,
         &mut cx.model.preferences,
     ) {
         let io = cx.handles.export_io;
-        crate::workbench::menu_bar::action_export_csv_with_io(&mut results_parts(cx), io);
+        crate::workbench::menu_bar::waveform_export::action_export_dataset_with_io(
+            &mut results_parts(cx),
+            io,
+            &choice,
+        );
     }
 }
 

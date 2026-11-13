@@ -110,9 +110,7 @@ pub mod workbench {
         pub mod result_document;
     }
     pub mod menu_bar {
-        pub(crate) use waveform_export::{
-            DatasetExportPicker, action_export_csv_with_io, show_dataset_export_picker,
-        };
+        pub(crate) use waveform_export::{DatasetExportPicker, show_dataset_export_picker};
 
         pub mod waveform_export;
     }

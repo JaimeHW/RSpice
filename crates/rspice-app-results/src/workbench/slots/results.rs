@@ -13,6 +13,11 @@ use crate::workbench::state::WorkbenchSession;
 pub struct ResultsState {
     /// The format question "Export dataset…" asks, while it is open.
     pub dataset_export: Option<crate::workbench::menu_bar::DatasetExportPicker>,
+    /// The rest of that form, the analysis and the signals, read from the
+    /// view when it opens and dropped when it is answered. Boxed: the slot
+    /// holds it only while the form is open.
+    pub dataset_export_form:
+        Option<Box<crate::workbench::menu_bar::waveform_export::DatasetExportForm>>,
     /// Run details…: the provenance of one retained run. Boxed: the
     /// manifest it carries would otherwise outgrow the slot's stack budget.
     pub run_details: Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
