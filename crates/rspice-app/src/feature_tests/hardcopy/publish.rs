@@ -338,13 +338,17 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
     use crate::state::{Point, Wire};
     use crate::workbench::documents::CodeSourceFileAction;
     use crate::workbench::documents::netlist_document::{
-        begin_netlist_lifecycle_action, commit_netlist_lifecycle_action,
+        begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
     };
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
     let mut app = RSpiceApp::test_instance();
-    begin_netlist_lifecycle_action(&mut app.state, CodeSourceFileAction::New)
-        .expect("a new top deck is offered");
+    begin_netlist_lifecycle_action_in(
+        &app.state.model,
+        &mut app.state.code.netlist,
+        CodeSourceFileAction::New,
+    )
+    .expect("a new top deck is offered");
     commit_netlist_lifecycle_action(&mut app.state).expect("the project owns a top deck");
     app.state
         .model

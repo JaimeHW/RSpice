@@ -63,9 +63,11 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             }
             match target.active_document {
                 ActiveNetlistDocument::Generated => {
-                    let _ = crate::workbench::documents::netlist_document::open_generated_primary(
-                        state,
-                    );
+                    let _ =
+                        crate::workbench::documents::netlist_document::open_generated_primary_in(
+                            &mut state.model,
+                            &mut state.code.netlist,
+                        );
                 }
                 ActiveNetlistDocument::OwnedSource => {
                     let _ = open_owned_source(state);
@@ -74,8 +76,12 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             }
             if let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =
-                    crate::workbench::documents::netlist_document::open_netlist_dependency(
-                        state, identity,
+                    crate::workbench::documents::netlist_document::open_netlist_dependency_in(
+                        &mut state.model,
+                        &mut state.code.netlist,
+                        &mut state.code.netlist_open_documents,
+                        &mut state.runs,
+                        identity,
                     )
             {
                 state.prompt(error);
@@ -96,8 +102,12 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
             if target.deck_id.is_none()
                 && let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =
-                    crate::workbench::documents::netlist_document::open_netlist_dependency(
-                        state, identity,
+                    crate::workbench::documents::netlist_document::open_netlist_dependency_in(
+                        &mut state.model,
+                        &mut state.code.netlist,
+                        &mut state.code.netlist_open_documents,
+                        &mut state.runs,
+                        identity,
                     )
             {
                 state.prompt(error);
@@ -165,10 +175,7 @@ pub(crate) fn apply_netlist_find_step(state: &mut AppState, step: NetlistFindSte
                             return;
                         }
                         if let Some(identity) = target.dependency_identity.as_deref()
-                            && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency(
-                                state,
-                                identity,
-                            )
+                            && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency_in(&mut state.model, &mut state.code.netlist, &mut state.code.netlist_open_documents, &mut state.runs, identity)
                         {
                             state.prompt(error);
                             return;

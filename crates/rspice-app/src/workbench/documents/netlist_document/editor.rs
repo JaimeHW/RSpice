@@ -447,7 +447,7 @@ pub(crate) fn commit_edit(state: &mut AppState, buffer: &str, cursor_line: usize
     if commit_owned_source_edit(state, buffer, cursor_line, now)
         && state.code.netlist.active_dependency_identity.is_none()
     {
-        super::refresh_diff_pips_from_baseline(state);
+        super::refresh_diff_pips_from_baseline_in(&state.model, &mut state.runs);
     }
 }
 

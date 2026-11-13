@@ -74,11 +74,15 @@ fn schematic_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
     let state = &app.state;
     let elsewhere = if undo {
         (netlist_page_is_visible(state)
-            && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
+            && crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+                &state.code.netlist,
+            ))
             || state.model.can_undo_project_design()
     } else {
         (netlist_page_is_visible(state)
-            && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
+            && crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+                &state.code.netlist,
+            ))
             || state.model.can_redo_project_design()
     };
     if elsewhere
@@ -175,10 +179,14 @@ pub(super) fn netlist_history_steps(
     netlist_page_is_visible(state)
         && match direction {
             HistoryDirection::Undo => {
-                crate::workbench::documents::netlist_document::can_undo_netlist_edit(state)
+                crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+                    &state.code.netlist,
+                )
             }
             HistoryDirection::Redo => {
-                crate::workbench::documents::netlist_document::can_redo_netlist_edit(state)
+                crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+                    &state.code.netlist,
+                )
             }
         }
 }
@@ -606,8 +614,9 @@ fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
             code_workspace::cancel_automation_workflow(&mut app.code_workspace_parts())
         }
         AutomationRequest::OpenGeneratedNetlist => {
-            let _ = crate::workbench::documents::netlist_document::open_generated_primary(
-                &mut app.state,
+            let _ = crate::workbench::documents::netlist_document::open_generated_primary_in(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
             );
             app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Netlist;
         }

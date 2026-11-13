@@ -732,8 +732,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
         | NetlistLifecycleAction::CancelInclude
         | NetlistLifecycleAction::SetIncludeSearchPaths(_) => {}
         NetlistLifecycleAction::Begin(file_action) => {
-            if let Err(error) = netlist_document::begin_netlist_lifecycle_action(state, file_action)
-            {
+            if let Err(error) = netlist_document::begin_netlist_lifecycle_action_in(
+                &state.model,
+                &mut state.code.netlist,
+                file_action,
+            ) {
                 state.prompt(error);
             }
         }
@@ -787,9 +790,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::BeginInclude(file_action) => {
-            if let Err(error) =
-                netlist_document::begin_owned_include_lifecycle_action(state, file_action)
-            {
+            if let Err(error) = netlist_document::begin_owned_include_lifecycle_action(
+                &state.model,
+                &mut state.code.netlist,
+                file_action,
+            ) {
                 state.prompt(error);
             }
         }
@@ -812,7 +817,11 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
             }
         }
         NetlistLifecycleAction::SaveSourceAs => {
-            netlist_document::open_netlist_save_dialog(state, true);
+            netlist_document::open_netlist_save_dialog_in(
+                &state.model,
+                &mut state.code.netlist,
+                true,
+            );
             state.code.code_workspace.source_document_dialog = false;
         }
     }

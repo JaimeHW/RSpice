@@ -113,7 +113,10 @@ fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
     assert_eq!(edited.line_count(), first.line_count() + 1);
 
     // Switching documents changes the buffer without editing it.
-    assert!(open_generated_primary(&mut state));
+    assert!(open_generated_primary_in(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
     assert!(visible_source_index_in(&state.model, &mut state.code.netlist).describes(ROOT));
 }
 
@@ -255,12 +258,22 @@ fn a_live_source_update_the_editor_adopts_leaves_it_on_the_models_document() {
 #[test]
 fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     assert_eq!(
         state.model.simulation.source.netlist_content,
         ORIGINAL_INCLUDE
     );
-    assert!(!active_dependency_is_owned(&state));
+    assert!(!active_dependency_is_owned_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert!(!replace_owned_dependency_source(
         &mut state,
         EDITED_INCLUDE.to_owned()
@@ -272,7 +285,10 @@ fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
         document_id,
         "copy-to-project is idempotent and preserves stable identity"
     );
-    assert!(active_dependency_is_owned(&state));
+    assert!(active_dependency_is_owned_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert!(replace_owned_dependency_source(
         &mut state,
         EDITED_INCLUDE.to_owned()
@@ -350,13 +366,25 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
 #[test]
 fn owned_include_authority_can_be_released_and_reacquired_without_losing_bytes() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     let first_id = copy_active_dependency_to_project(&mut state).unwrap();
 
     release_active_dependency_from_project(&mut state).unwrap();
-    assert!(!active_dependency_is_owned(&state));
+    assert!(!active_dependency_is_owned_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert_eq!(
-        active_dependency(&state).unwrap().source(),
+        active_dependency_in(&state.model, &state.code.netlist)
+            .unwrap()
+            .source(),
         Some(ORIGINAL_INCLUDE)
     );
     assert!(
@@ -373,9 +401,14 @@ fn owned_include_authority_can_be_released_and_reacquired_without_losing_bytes()
 
     let second_id = copy_active_dependency_to_project(&mut state).unwrap();
     assert_ne!(first_id, second_id);
-    assert!(active_dependency_is_owned(&state));
+    assert!(active_dependency_is_owned_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert_eq!(
-        active_dependency(&state).unwrap().source(),
+        active_dependency_in(&state.model, &state.code.netlist)
+            .unwrap()
+            .source(),
         Some(ORIGINAL_INCLUDE)
     );
     state
@@ -389,9 +422,21 @@ fn owned_include_authority_can_be_released_and_reacquired_without_losing_bytes()
 #[test]
 fn owned_include_rename_is_revision_bound_and_preserves_consumer_and_bytes() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     let document_id = copy_active_dependency_to_project(&mut state).unwrap();
-    begin_owned_include_lifecycle_action(&mut state, CodeSourceFileAction::Rename).unwrap();
+    begin_owned_include_lifecycle_action(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Rename,
+    )
+    .unwrap();
     state
         .code
         .netlist
@@ -407,7 +452,7 @@ fn owned_include_rename_is_revision_bound_and_preserves_consumer_and_bytes() {
         state.code.netlist.active_dependency_identity.as_deref(),
         Some(identity)
     );
-    let dependency = active_dependency(&state).unwrap();
+    let dependency = active_dependency_in(&state.model, &state.code.netlist).unwrap();
     assert_eq!(dependency.requested_locator(), INCLUDE_IDENTITY);
     assert_eq!(dependency.locator().logical_identity(), identity);
     assert_eq!(dependency.source(), Some(ORIGINAL_INCLUDE));
@@ -433,7 +478,14 @@ fn owned_include_rename_is_revision_bound_and_preserves_consumer_and_bytes() {
 #[test]
 fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_ownership() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(close_active_dependency_in(
         &mut state.model,
@@ -509,7 +561,14 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
     let before_source = state.model.simulation.source.netlist_content.clone();
     let before_document = state.code.netlist.active_document;
 
-    let error = open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap_err();
+    let error = open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap_err();
     assert!(error.contains("Close an include tab"));
     assert_eq!(state.code.netlist.active_document, before_document);
     assert!(state.code.netlist.active_dependency_root.is_none());
@@ -520,7 +579,14 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
 #[test]
 fn workspace_replacement_commits_root_and_owned_include_together() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     let edited_root = ROOT.replace("V1 out 0 1", "VINPUT out 0 1");
     let edits = vec![
@@ -579,7 +645,14 @@ fn workspace_replacement_commits_root_and_owned_include_together() {
 #[test]
 fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     let edited_root = ROOT.replace("V1 out 0 1", "VINPUT out 0 1");
     let edits = vec![
@@ -592,7 +665,7 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
         ),
     ];
     replace_owned_sources_atomically(&mut state, edits).unwrap();
-    assert!(can_undo_netlist_edit(&state));
+    assert!(can_undo_netlist_edit(&state.code.netlist));
 
     assert!(undo_netlist_edit(&mut state).unwrap().is_some());
     assert_eq!(
@@ -611,7 +684,7 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
             .source(),
         Some(ORIGINAL_INCLUDE)
     );
-    assert!(can_redo_netlist_edit(&state));
+    assert!(can_redo_netlist_edit(&state.code.netlist));
 
     assert!(redo_netlist_edit(&mut state).unwrap().is_some());
     assert_eq!(
@@ -641,7 +714,14 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
 #[test]
 fn workspace_replacement_rejects_stale_include_without_partial_root_edit() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     let stale_edits = vec![
         OwnedNetlistReplacement::root(ROOT, ROOT.replace("V1 out 0 1", "VINPUT out 0 1"), 1),
@@ -675,7 +755,14 @@ fn workspace_replacement_rejects_stale_include_without_partial_root_edit() {
 #[test]
 fn ordinary_root_edit_retains_authenticated_dependency_closure() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(close_active_dependency_in(
         &mut state.model,
@@ -707,7 +794,14 @@ fn ordinary_root_edit_retains_authenticated_dependency_closure() {
 #[test]
 fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(close_active_dependency_in(
         &mut state.model,
@@ -755,7 +849,14 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
 #[test]
 fn owned_dependency_identity_and_bytes_survive_project_round_trip() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     let document_id = copy_active_dependency_to_project(&mut state).unwrap();
     assert!(replace_owned_dependency_source(
         &mut state,
@@ -802,7 +903,14 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
         .unwrap()
         .retain_revision(&baseline_document, "Before include ownership")
         .unwrap();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(replace_owned_dependency_source(
         &mut state,
@@ -847,13 +955,32 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
 fn dependency_transitions_fail_closed_for_stale_or_generated_ownership() {
     let mut state = owned_dependency_state();
     let before = state.model.simulation.source.netlist_content.clone();
-    assert!(open_netlist_dependency(&mut state, "missing.inc").is_err());
+    assert!(
+        open_netlist_dependency_in(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.runs,
+            "missing.inc"
+        )
+        .is_err()
+    );
     assert_eq!(state.model.simulation.source.netlist_content, before);
     assert!(state.code.netlist.active_dependency_identity.is_none());
 
-    open_generated_primary(&mut state);
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
-    assert!(!active_dependency_is_owned(&state));
+    open_generated_primary_in(&mut state.model, &mut state.code.netlist);
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
+    assert!(!active_dependency_is_owned_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert!(copy_active_dependency_to_project(&mut state).is_err());
     assert!(!replace_owned_dependency_source(
         &mut state,
@@ -864,7 +991,14 @@ fn dependency_transitions_fail_closed_for_stale_or_generated_ownership() {
 #[test]
 fn project_validation_rejects_owned_include_digest_drift() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     state
         .model
@@ -897,7 +1031,7 @@ fn relink_reacquires_origin_and_replaces_exact_retained_bytes() {
     )
     .unwrap();
 
-    let dependency = active_dependency(&state).unwrap();
+    let dependency = active_dependency_in(&state.model, &state.code.netlist).unwrap();
     assert_eq!(dependency.source(), Some(EDITED_INCLUDE));
     assert_eq!(
         dependency.locator().display_name(),
@@ -959,7 +1093,7 @@ fn relink_rejects_late_picker_completion_after_document_revision_changes() {
 #[test]
 fn generated_dependency_relink_updates_only_the_generated_artifact() {
     let mut state = owned_dependency_state();
-    open_generated_primary(&mut state);
+    open_generated_primary_in(&mut state.model, &mut state.code.netlist);
     begin_dependency_relink(&mut state, INCLUDE_IDENTITY).unwrap();
     commit_dependency_relink(
         &mut state,
@@ -970,7 +1104,9 @@ fn generated_dependency_relink_updates_only_the_generated_artifact() {
     .unwrap();
 
     assert_eq!(
-        active_dependency(&state).unwrap().source(),
+        active_dependency_in(&state.model, &state.code.netlist)
+            .unwrap()
+            .source(),
         Some(EDITED_INCLUDE)
     );
     assert_eq!(
@@ -1000,7 +1136,12 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         .unwrap()
         .deck_id;
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Rename).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Rename,
+    )
+    .unwrap();
     state
         .code
         .netlist
@@ -1011,7 +1152,12 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         .proposed_path = "renamed.cir".to_owned();
     commit_netlist_lifecycle_action(&mut state).unwrap();
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Move).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Move,
+    )
+    .unwrap();
     state
         .code
         .netlist
@@ -1022,7 +1168,12 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         .proposed_path = "decks/renamed.cir".to_owned();
     commit_netlist_lifecycle_action(&mut state).unwrap();
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Duplicate,
+    )
+    .unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
     let duplicate_id = state
         .model
@@ -1068,7 +1219,12 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         duplicate_id
     );
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::New).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::New,
+    )
+    .unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
     assert_eq!(
         state.model.workspace.content.retained_netlist_decks.len(),
@@ -1079,7 +1235,12 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         Some("* New RSpice top deck\n.end\n")
     );
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Delete).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Delete,
+    )
+    .unwrap();
     let message = commit_netlist_lifecycle_action(&mut state).unwrap();
     assert!(message.contains("native file was not deleted"));
     assert_eq!(
@@ -1103,7 +1264,12 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     assert!(state.model.workspace.content.netlist_descriptor.is_none());
     assert!(state.model.workspace.content.netlist_document.is_none());
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::New).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::New,
+    )
+    .unwrap();
     let transaction = state
         .code
         .netlist
@@ -1152,7 +1318,14 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
 #[test]
 fn project_replace_is_atomic_across_active_and_retained_top_decks() {
     let mut state = owned_dependency_state();
-    open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        INCLUDE_IDENTITY,
+    )
+    .unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(open_owned_primary_in(
         &mut state.model,
@@ -1167,7 +1340,12 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
         .unwrap()
         .deck_id;
 
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Duplicate,
+    )
+    .unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
     let active_id = state
         .model
@@ -1248,7 +1426,12 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
 #[test]
 fn top_deck_lifecycle_rejects_a_stale_document_revision() {
     let mut state = owned_dependency_state();
-    begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Rename).unwrap();
+    begin_netlist_lifecycle_action_in(
+        &state.model,
+        &mut state.code.netlist,
+        CodeSourceFileAction::Rename,
+    )
+    .unwrap();
     assert!(replace_owned_source(
         &mut state,
         ROOT.replace("V1 out 0 1", "V1 out 0 2")
@@ -1312,7 +1495,10 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         ActiveNetlistDocument::RunSnapshot
     );
     assert_eq!(state.model.simulation.source.netlist_content, RAN);
-    assert!(!active_netlist_source_is_editable(&state));
+    assert!(!active_netlist_source_is_editable_in(
+        &state.model,
+        &state.code.netlist
+    ));
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(EDITED)
@@ -1431,7 +1617,7 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
     );
     assert_eq!(state.model.simulation.source.netlist_content, HOT);
     assert!(
-        !active_netlist_source_is_editable(&state),
+        !active_netlist_source_is_editable_in(&state.model, &state.code.netlist),
         "an executed deck is a viewer, never a buffer"
     );
     assert_eq!(

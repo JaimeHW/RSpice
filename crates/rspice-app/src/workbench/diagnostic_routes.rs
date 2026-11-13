@@ -250,7 +250,10 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 .generated_document
                 .is_some()
             {
-                netlist_document::open_generated_primary(&mut app.state);
+                netlist_document::open_generated_primary_in(
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                );
             } else {
                 app.state.prompt(
                     "No generated netlist is retained yet; the Netlist workspace opens on the source it holds.",

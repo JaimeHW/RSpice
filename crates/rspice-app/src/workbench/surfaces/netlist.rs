@@ -1377,7 +1377,12 @@ mod tests {
             )
         );
 
-        assert!(crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
+        assert!(
+            crate::workbench::documents::netlist_document::open_generated_primary_in(
+                &mut state.model,
+                &mut state.code.netlist
+            )
+        );
         assert_eq!(
             state.model.simulation.source.netlist_content,
             retained_generated
@@ -1386,7 +1391,12 @@ mod tests {
             state.model.workspace.content.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
-        assert!(!crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
+        assert!(
+            !crate::workbench::documents::netlist_document::open_generated_primary_in(
+                &mut state.model,
+                &mut state.code.netlist
+            )
+        );
     }
 
     #[test]
@@ -1650,8 +1660,9 @@ mod tests {
         assert_eq!(projection.phase, RunStripPhase::Snapshot);
         assert_eq!(projection.run_id, 7);
         assert!(
-            !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-                &state
+            !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
+                &state.model,
+                &state.code.netlist
             )
         );
     }

@@ -10,7 +10,7 @@
 // `app_state` is being retired, and a submodule of it does not need its own
 // edge to it — the same route `comparison` takes.
 use super::{
-    AppState, CodeWorkspacePage, canonical_root_document, open_netlist_dependency_from_root,
+    AppState, CodeWorkspacePage, canonical_root_document_in, open_netlist_dependency_from_root_in,
 };
 
 /// Open the exact source location owned by a canonical diagnostic. Problems,
@@ -69,25 +69,33 @@ pub(crate) fn open_source_location(
         .active_dependency_root
         .unwrap_or(state.code.netlist.active_document);
     if let Some(source_path) = included_source {
-        let dependency_identity = canonical_root_document(state, root)
-            .and_then(|document| {
-                document.dependencies().iter().find(|dependency| {
-                    let locator = dependency.locator();
-                    locator
-                        .native_origin()
-                        .is_some_and(|origin| std::path::Path::new(origin) == source_path)
-                        || std::path::Path::new(locator.logical_identity()) == source_path
-                        || std::path::Path::new(locator.locator()) == source_path
+        let dependency_identity =
+            canonical_root_document_in(&state.model, &state.code.netlist, root)
+                .and_then(|document| {
+                    document.dependencies().iter().find(|dependency| {
+                        let locator = dependency.locator();
+                        locator
+                            .native_origin()
+                            .is_some_and(|origin| std::path::Path::new(origin) == source_path)
+                            || std::path::Path::new(locator.logical_identity()) == source_path
+                            || std::path::Path::new(locator.locator()) == source_path
+                    })
                 })
-            })
-            .map(|dependency| dependency.locator().logical_identity().to_owned())
-            .ok_or_else(|| {
-                format!(
-                    "Diagnostic source {} is no longer among the deck's included files.",
-                    source_path.display()
-                )
-            })?;
-        open_netlist_dependency_from_root(state, root, &dependency_identity)?;
+                .map(|dependency| dependency.locator().logical_identity().to_owned())
+                .ok_or_else(|| {
+                    format!(
+                        "Diagnostic source {} is no longer among the deck's included files.",
+                        source_path.display()
+                    )
+                })?;
+        open_netlist_dependency_from_root_in(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.runs,
+            root,
+            &dependency_identity,
+        )?;
     }
 
     state.code.code_workspace.page = CodeWorkspacePage::Netlist;

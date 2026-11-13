@@ -165,7 +165,7 @@ fn completion_reaches_a_document_that_has_content_in_it() {
     state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.code.netlist.active_document_initialized = true;
     assert!(
-        super::super::active_netlist_source_is_editable(&state),
+        super::super::active_netlist_source_is_editable_in(&state.model, &state.code.netlist),
         "fixture must be an editable owned document"
     );
 

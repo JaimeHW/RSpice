@@ -1125,8 +1125,9 @@ mod tests {
             "a second status line in the body"
         );
 
-        crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-            &mut app.state,
+        crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+            &app.state.model,
+            &mut app.state.code.netlist,
             crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
         )
         .unwrap();

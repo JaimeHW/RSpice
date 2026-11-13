@@ -96,16 +96,9 @@ impl OwnedNetlistPublicationState {
     }
 }
 
-#[must_use]
-pub(crate) fn owned_netlist_publication_state(
-    state: &AppState,
-    digest: crate::product::ContentDigest,
-) -> OwnedNetlistPublicationState {
-    owned_netlist_publication_state_in(&state.model, &state.code.netlist, digest)
-}
-
-/// [`owned_netlist_publication_state`], over the model and the netlist
-/// editor's state.
+/// The publication state of the owned deck whose visible content has this
+/// digest: whether it is saved, validated against the project's revision and
+/// eligible to run. It reads the model and the netlist editor's state.
 #[must_use]
 pub(crate) fn owned_netlist_publication_state_in(
     model: &Model,
@@ -610,13 +603,13 @@ fn replace_owned_sources_atomically_impl(
 }
 
 #[must_use]
-pub(crate) fn can_undo_netlist_edit(state: &AppState) -> bool {
-    !state.code.netlist.edit_undo.is_empty()
+pub(crate) fn can_undo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
+    !netlist.edit_undo.is_empty()
 }
 
 #[must_use]
-pub(crate) fn can_redo_netlist_edit(state: &AppState) -> bool {
-    !state.code.netlist.edit_redo.is_empty()
+pub(crate) fn can_redo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
+    !netlist.edit_redo.is_empty()
 }
 
 pub(crate) fn undo_netlist_edit(state: &mut AppState) -> Result<Option<String>, String> {
@@ -727,15 +720,9 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
     false
 }
 
-fn canonical_root_document(
-    state: &AppState,
-    root: ActiveNetlistDocument,
-) -> Option<&crate::state::NetlistDocument> {
-    canonical_root_document_in(&state.model, &state.code.netlist, root)
-}
-
-/// [`canonical_root_document`], over the model and the netlist editor's
-/// state.
+/// The canonical document a root names: the generated primary, or the
+/// netlist editor's owned document; revision comparisons and run snapshots
+/// have none. It reads the model and the netlist editor's state.
 fn canonical_root_document_in<'a>(
     model: &'a Model,
     netlist: &'a NetlistDocumentState,
@@ -751,11 +738,7 @@ fn canonical_root_document_in<'a>(
 /// Exact retained dependency currently projected as a first-class source
 /// document. The dependency source remains canonical inside its root
 /// `NetlistDocument`; this function never synthesizes a second source store.
-pub fn active_dependency(state: &AppState) -> Option<&crate::state::DependencyMetadata> {
-    active_dependency_in(&state.model, &state.code.netlist)
-}
-
-/// [`active_dependency`], over the model and the netlist editor's state.
+/// It reads the model and the netlist editor's state.
 pub(crate) fn active_dependency_in<'a>(
     model: &'a Model,
     netlist: &'a NetlistDocumentState,
@@ -769,14 +752,8 @@ pub(crate) fn active_dependency_in<'a>(
 }
 
 /// Whether the visible retained include has been explicitly copied into the
-/// project and is therefore an editable project document.
-#[must_use]
-pub fn active_dependency_is_owned(state: &AppState) -> bool {
-    active_dependency_is_owned_in(&state.model, &state.code.netlist)
-}
-
-/// [`active_dependency_is_owned`], over the model and the netlist editor's
-/// state.
+/// project and is therefore an editable project document. It reads the model
+/// and the netlist editor's state.
 #[must_use]
 pub(crate) fn active_dependency_is_owned_in(model: &Model, netlist: &NetlistDocumentState) -> bool {
     let Some(identity) = netlist.active_dependency_identity.as_deref() else {
@@ -792,14 +769,8 @@ pub(crate) fn active_dependency_is_owned_in(model: &Model, netlist: &NetlistDocu
             .is_some()
 }
 
-/// Whether editor mutations are authorized for the exact visible source.
-#[must_use]
-pub fn active_netlist_source_is_editable(state: &AppState) -> bool {
-    active_netlist_source_is_editable_in(&state.model, &state.code.netlist)
-}
-
-/// [`active_netlist_source_is_editable`], over the model and the netlist
-/// editor's state.
+/// Whether editor mutations are authorized for the exact visible source. It
+/// reads the model and the netlist editor's state.
 #[must_use]
 pub(crate) fn active_netlist_source_is_editable_in(
     model: &Model,
@@ -924,19 +895,8 @@ pub(crate) fn manual_deck_run_block_reason_in(
 
 /// Open a resolved direct or transitive dependency without changing its root
 /// document selection or ownership. Unresolved and stale identities fail
-/// closed and leave the current buffer unchanged.
-pub fn open_netlist_dependency(state: &mut AppState, logical_identity: &str) -> Result<(), String> {
-    open_netlist_dependency_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
-        logical_identity,
-    )
-}
-
-/// [`open_netlist_dependency`], over the model, the netlist editor's state,
-/// the include tabs the reader opened and the runs.
+/// closed and leave the current buffer unchanged. It works over the model, the
+/// netlist editor's state, the include tabs the reader opened and the runs.
 pub(crate) fn open_netlist_dependency_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -957,22 +917,7 @@ pub(crate) fn open_netlist_dependency_in(
     )
 }
 
-pub(crate) fn open_netlist_dependency_from_root(
-    state: &mut AppState,
-    root: ActiveNetlistDocument,
-    logical_identity: &str,
-) -> Result<(), String> {
-    open_netlist_dependency_from_root_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
-        root,
-        logical_identity,
-    )
-}
-
-/// [`open_netlist_dependency_from_root`], over the model, the netlist
+/// Open a dependency of the given root document, over the model, the netlist
 /// editor's state, the include tabs the reader opened and the runs, whose
 /// manual run forgets the lines edited in the deck it leaves.
 pub(crate) fn open_netlist_dependency_from_root_in(
@@ -1070,7 +1015,7 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
                 .to_owned(),
         );
     }
-    let dependency = active_dependency(state)
+    let dependency = active_dependency_in(&state.model, &state.code.netlist)
         .cloned()
         .ok_or_else(|| "The selected dependency is no longer available.".to_owned())?;
     let identity = dependency.locator().logical_identity();
@@ -1163,7 +1108,7 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
 /// projection, ownership digest, validation evidence, and revision advance in
 /// one validated transaction.
 pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> bool {
-    if !active_dependency_is_owned(state) {
+    if !active_dependency_is_owned_in(&state.model, &state.code.netlist) {
         return false;
     }
     let Some(identity) = state.code.netlist.active_dependency_identity.clone() else {
@@ -1241,26 +1186,27 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     true
 }
 
-/// Select the immutable generated primary without deleting or changing an
-/// owned source or generated-diff document. This is an explicit document
-/// transition; navigating among Code workspace pages must not call it.
 /// Take the reader to the generated deck from another workspace: its page in
-/// the Netlist workspace, with the generated primary in front.
-pub(crate) fn show_generated_deck(state: &mut AppState) {
-    let _ = open_generated_primary(state);
-    state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    if state.workbench.workspace != crate::workbench::state::Workspace::Netlist {
-        state
-            .workbench
-            .activate(crate::workbench::state::Workspace::Netlist);
+/// the Netlist workspace, with the generated primary in front. It works over
+/// the model, the netlist editor's state, the Code workspace's page and the
+/// workbench.
+pub(crate) fn show_generated_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    page: &mut CodeWorkspacePage,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+) {
+    let _ = open_generated_primary_in(model, netlist);
+    *page = CodeWorkspacePage::Netlist;
+    if workbench.workspace != crate::workbench::state::Workspace::Netlist {
+        workbench.activate(crate::workbench::state::Workspace::Netlist);
     }
 }
 
-pub fn open_generated_primary(state: &mut AppState) -> bool {
-    open_generated_primary_in(&mut state.model, &mut state.code.netlist)
-}
-
-/// [`open_generated_primary`], over the model and the netlist editor's state.
+/// Select the immutable generated primary without deleting or changing an
+/// owned source or generated-diff document. This is an explicit document
+/// transition; navigating among Code workspace pages must not call it. It
+/// works over the model and the netlist editor's state.
 pub(crate) fn open_generated_primary_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -1468,8 +1414,11 @@ pub(crate) struct NetlistIncludeLifecycleTransaction {
     pub error: Option<String>,
 }
 
+/// Open the lifecycle transaction for a Rename or Move of the active owned
+/// include, over the model and the netlist editor's state.
 pub(crate) fn begin_owned_include_lifecycle_action(
-    state: &mut AppState,
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
     action: CodeSourceFileAction,
 ) -> Result<(), String> {
     if !matches!(
@@ -1478,34 +1427,30 @@ pub(crate) fn begin_owned_include_lifecycle_action(
     ) {
         return Err("Owned include lifecycle supports Rename and Move here.".to_owned());
     }
-    if !active_dependency_is_owned(state) {
+    if !active_dependency_is_owned_in(model, netlist) {
         return Err(
             "Copy the active include into the project before renaming or moving it.".to_owned(),
         );
     }
-    let logical_identity = state
-        .code
-        .netlist
+    let logical_identity = netlist
         .active_dependency_identity
         .clone()
         .ok_or_else(|| "No include document is active.".to_owned())?;
-    let document = state
-        .model
+    let document = model
         .workspace
         .content
         .netlist_document
         .as_ref()
         .ok_or_else(|| "The owned root document is unavailable.".to_owned())?;
-    state.code.netlist.lifecycle_dialog.include_transaction =
-        Some(NetlistIncludeLifecycleTransaction {
-            action,
-            project_id: state.model.workspace.content.project.id(),
-            root_document_id: document.id(),
-            root_revision: document.revision(),
-            proposed_identity: logical_identity.clone(),
-            logical_identity,
-            error: None,
-        });
+    netlist.lifecycle_dialog.include_transaction = Some(NetlistIncludeLifecycleTransaction {
+        action,
+        project_id: model.workspace.content.project.id(),
+        root_document_id: document.id(),
+        root_revision: document.revision(),
+        proposed_identity: logical_identity.clone(),
+        logical_identity,
+        error: None,
+    });
     Ok(())
 }
 
@@ -1618,15 +1563,9 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     ))
 }
 
-pub(crate) fn begin_netlist_lifecycle_action(
-    state: &mut AppState,
-    action: CodeSourceFileAction,
-) -> Result<(), String> {
-    begin_netlist_lifecycle_action_in(&state.model, &mut state.code.netlist, action)
-}
-
-/// [`begin_netlist_lifecycle_action`], over the model and the netlist
-/// editor's state.
+/// Open the lifecycle transaction for a New, Rename, Move, Duplicate or
+/// Delete of the active top deck, with the path it proposes, over the model
+/// and the netlist editor's state.
 pub(crate) fn begin_netlist_lifecycle_action_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -1734,7 +1673,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
             );
             next_descriptor.retain_revision(&next, "Created new top deck")?;
             if candidate.model.workspace.content.netlist_document.is_some() {
-                retain_active_top_deck(&mut candidate)?;
+                retain_active_top_deck(&mut candidate.model)?;
             } else if candidate
                 .model
                 .workspace
@@ -1745,7 +1684,13 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
             {
                 return Err("The empty netlist workspace is internally inconsistent.".to_owned());
             }
-            install_active_top_deck(&mut candidate, next_descriptor, next, None);
+            install_active_top_deck(
+                &mut candidate.model,
+                &mut candidate.code.netlist,
+                next_descriptor,
+                next,
+                None,
+            );
             format!("Created and selected project top deck {path}.")
         }
         CodeSourceFileAction::Rename => {
@@ -1815,8 +1760,14 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                 include.document_id = uuid::Uuid::new_v4();
             }
             duplicate_descriptor.retain_revision(&duplicate, "Duplicated top deck")?;
-            retain_active_top_deck(&mut candidate)?;
-            install_active_top_deck(&mut candidate, duplicate_descriptor, duplicate, None);
+            retain_active_top_deck(&mut candidate.model)?;
+            install_active_top_deck(
+                &mut candidate.model,
+                &mut candidate.code.netlist,
+                duplicate_descriptor,
+                duplicate,
+                None,
+            );
             format!("Duplicated and selected project top deck {path}.")
         }
         CodeSourceFileAction::Delete => {
@@ -1834,7 +1785,8 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                     .content
                     .return_to_generated_netlist();
                 install_active_top_deck(
-                    &mut candidate,
+                    &mut candidate.model,
+                    &mut candidate.code.netlist,
                     next.descriptor,
                     next.document,
                     next.source_path,
@@ -1899,9 +1851,10 @@ pub(crate) fn select_retained_top_deck(
         .content
         .retained_netlist_decks
         .remove(index);
-    retain_active_top_deck(&mut candidate)?;
+    retain_active_top_deck(&mut candidate.model)?;
     install_active_top_deck(
-        &mut candidate,
+        &mut candidate.model,
+        &mut candidate.code.netlist,
         next.descriptor,
         next.document,
         next.source_path,
@@ -1921,61 +1874,66 @@ pub(crate) fn select_retained_top_deck(
     Ok(())
 }
 
-pub(crate) fn retain_active_top_deck(state: &mut AppState) -> Result<(), String> {
-    let descriptor = state
-        .model
+/// Move the model's active top deck into its retained decks, leaving no
+/// active deck.
+pub(crate) fn retain_active_top_deck(model: &mut Model) -> Result<(), String> {
+    let descriptor = model
         .workspace
         .content
         .netlist_descriptor
         .take()
         .ok_or_else(|| "No active top-deck descriptor could be retained.".to_owned())?;
-    let document = state
-        .model
+    let document = model
         .workspace
         .content
         .netlist_document
         .take()
         .ok_or_else(|| "No active top-deck document could be retained.".to_owned())?;
-    if state.model.workspace.content.netlist_source.as_deref() != Some(document.source()) {
+    if model.workspace.content.netlist_source.as_deref() != Some(document.source()) {
         return Err("The active top-deck source projection is inconsistent.".to_owned());
     }
-    state.model.workspace.content.netlist_source = None;
-    state.model.workspace.content.retained_netlist_decks.push(
-        crate::state::RetainedOwnedNetlistDeck {
+    model.workspace.content.netlist_source = None;
+    model
+        .workspace
+        .content
+        .retained_netlist_decks
+        .push(crate::state::RetainedOwnedNetlistDeck {
             descriptor,
             document,
-            source_path: state.model.workspace.content.netlist_source_path.take(),
-        },
-    );
+            source_path: model.workspace.content.netlist_source_path.take(),
+        });
     Ok(())
 }
 
+/// Make this deck the model's active top deck and the netlist editor's owned
+/// document, in front.
 pub(crate) fn install_active_top_deck(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
     descriptor: crate::state::OwnedNetlistDescriptor,
     document: crate::state::NetlistDocument,
     source_path: Option<std::path::PathBuf>,
 ) {
     let source = document.source().to_owned();
-    state.model.workspace.content.netlist_source = Some(source.clone());
-    state.model.workspace.content.netlist_document = Some(document.clone());
-    state.model.workspace.content.netlist_descriptor = Some(descriptor);
-    state.model.workspace.content.netlist_source_path = source_path;
-    state.model.workspace.content.netlist_source_dirty = true;
-    state.code.netlist.externally_saved_content_digest = document.saved_digest();
-    state.code.netlist.owned_document = Some(document);
-    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = source;
-    if state.is_netlist_first_without_schematic() {
+    model.workspace.content.netlist_source = Some(source.clone());
+    model.workspace.content.netlist_document = Some(document.clone());
+    model.workspace.content.netlist_descriptor = Some(descriptor);
+    model.workspace.content.netlist_source_path = source_path;
+    model.workspace.content.netlist_source_dirty = true;
+    netlist.externally_saved_content_digest = document.saved_digest();
+    netlist.owned_document = Some(document);
+    netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = source;
+    if model.is_netlist_first_without_schematic() {
         // The bootstrap schematic is an implementation detail, not a second
         // design authority. Retaining its DRC receipt would leak stale
         // schematic findings into a project now owned by an authored deck.
-        state.model.clear_all_design_checks();
-        state.model.design_checks.drc_results = None;
-        state.model.design_checks.drc_checked_version = 0;
+        model.clear_all_design_checks();
+        model.design_checks.drc_results = None;
+        model.design_checks.drc_checked_version = 0;
     }
 }
 
@@ -2040,7 +1998,9 @@ fn ensure_top_deck_path_available(
     Ok(())
 }
 
-fn unique_top_deck_path(model: &Model, preferred: &str) -> String {
+/// The preferred top-deck path when no deck of the model owns it, else the
+/// first free numbered variant of it.
+pub(crate) fn unique_top_deck_path(model: &Model, preferred: &str) -> String {
     if ensure_top_deck_path_available(model, preferred, None).is_ok() {
         return preferred.to_owned();
     }
@@ -2068,10 +2028,6 @@ fn unique_top_deck_path(model: &Model, preferred: &str) -> String {
         }
     }
     format!("deck_{}.cir", uuid::Uuid::new_v4().simple())
-}
-
-pub(crate) fn available_top_deck_path(state: &AppState, preferred: &str) -> String {
-    unique_top_deck_path(&state.model, preferred)
 }
 
 fn duplicate_top_deck_path(model: &Model, source: &str) -> String {
@@ -2151,12 +2107,8 @@ impl Default for NetlistSaveDialogState {
     }
 }
 
-pub(crate) fn open_netlist_save_dialog(state: &mut AppState, save_as: bool) {
-    open_netlist_save_dialog_in(&state.model, &mut state.code.netlist, save_as);
-}
-
-/// [`open_netlist_save_dialog`], over the model and the netlist editor's
-/// state.
+/// Open the owned deck's save dialog, or its Save As, in the deck's own
+/// encoding, over the model and the netlist editor's state.
 pub(crate) fn open_netlist_save_dialog_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -2450,11 +2402,8 @@ pub(crate) fn request_netlist_manual_deck_run_in(
     }
 }
 
-pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
-    refresh_diff_pips_from_baseline_in(&state.model, &mut state.runs);
-}
-
-/// [`refresh_diff_pips_from_baseline`], over the model and the runs.
+/// Mark the deck's lines that differ from the last manual run's buffer, over
+/// the model and the runs.
 fn refresh_diff_pips_from_baseline_in(model: &Model, runs: &mut RunsState) {
     let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() else {
         return;

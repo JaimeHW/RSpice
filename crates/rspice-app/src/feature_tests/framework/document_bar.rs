@@ -113,19 +113,28 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         2,
         "resolved closures are available in the navigator, not opened as thousands of tabs"
     );
-    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root(
-        &mut state,
+    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated,
         "models/resistor.inc",
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root(
-        &mut state,
+    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource,
         "models/resistor.inc",
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::open_generated_primary(&mut state);
+    crate::workbench::documents::netlist_document::open_generated_primary_in(
+        &mut state.model,
+        &mut state.code.netlist,
+    );
     let descriptors = document_descriptors(&state);
     assert_eq!(descriptors.len(), 4);
     assert!(matches!(

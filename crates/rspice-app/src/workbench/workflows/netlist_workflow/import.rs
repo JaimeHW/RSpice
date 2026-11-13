@@ -130,14 +130,13 @@ fn install_imported_netlist(
     let mut candidate = state.clone();
     if !initializing_netlist_project && candidate.model.workspace.content.netlist_document.is_some()
     {
-        crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
+        crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate.model)
             .map_err(ImportFailure::Failed)?;
     }
-    descriptor.artifact_name =
-        crate::workbench::documents::netlist_document::available_top_deck_path(
-            &candidate,
-            &descriptor.artifact_name,
-        );
+    descriptor.artifact_name = crate::workbench::documents::netlist_document::unique_top_deck_path(
+        &candidate.model,
+        &descriptor.artifact_name,
+    );
     // Importing a new source deck changes future execution authority but does
     // not delete immutable datasets or a previously active top deck.
     candidate.model.design_execution_epoch = candidate.model.design_execution_epoch.wrapping_add(1);

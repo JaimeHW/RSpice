@@ -97,10 +97,17 @@ fn generated_netlist_tool(
         .workbench()
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
-    if !take_projected_tool_slot(ui, layout) {
-        let action = overflow::OverflowAction::Run(
-            crate::workbench::documents::netlist_document::show_generated_deck,
+    // The overflow row and the button take the reader to the same place.
+    let show_generated_deck: fn(&mut AppState) = |state| {
+        crate::workbench::documents::netlist_document::show_generated_deck(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.code_workspace.page,
+            &mut state.workbench,
         );
+    };
+    if !take_projected_tool_slot(ui, layout) {
+        let action = overflow::OverflowAction::Run(show_generated_deck);
         let (icon, selected) = (WorkbenchIcon::Netlist, false);
         overflow::set_aside(
             ui,
@@ -132,7 +139,7 @@ fn generated_netlist_tool(
         )
     };
     if response.clicked() {
-        crate::workbench::documents::netlist_document::show_generated_deck(app.session_mut());
+        show_generated_deck(app.session_mut());
     }
 }
 

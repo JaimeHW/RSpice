@@ -27,7 +27,7 @@ pub(crate) fn begin_dependency_relink(
         .netlist
         .active_dependency_root
         .unwrap_or(state.code.netlist.active_document);
-    let document = canonical_root_document(state, root)
+    let document = canonical_root_document_in(&state.model, &state.code.netlist, root)
         .ok_or_else(|| "The selected source has no dependency list.".to_owned())?;
     if !document
         .dependencies()
@@ -61,7 +61,7 @@ pub(crate) fn commit_dependency_relink(
         .dependency_relink
         .clone()
         .ok_or_else(|| "No dependency relink transaction is active.".to_owned())?;
-    let current = canonical_root_document(state, transaction.root)
+    let current = canonical_root_document_in(&state.model, &state.code.netlist, transaction.root)
         .cloned()
         .ok_or_else(|| "The relink root document is no longer available.".to_owned())?;
     if current.id() != transaction.expected_document_id

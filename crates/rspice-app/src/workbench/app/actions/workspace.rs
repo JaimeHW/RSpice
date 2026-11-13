@@ -394,7 +394,10 @@ impl AppState {
         let Ok(location) = self.model.selected_instance_generated_line() else {
             return;
         };
-        crate::workbench::documents::netlist_document::open_generated_primary(self);
+        crate::workbench::documents::netlist_document::open_generated_primary_in(
+            &mut self.model,
+            &mut self.code.netlist,
+        );
         self.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         self.workbench

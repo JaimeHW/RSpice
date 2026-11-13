@@ -119,8 +119,10 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
 /// without errors, and the deck only when it validates, after validating
 /// it when its validation is not current.
 pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
-    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
-    {
+    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
+        &app.state.model,
+        &app.state.code.netlist,
+    ) {
         return;
     }
     let source = app.state.model.simulation.source.netlist_content.clone();

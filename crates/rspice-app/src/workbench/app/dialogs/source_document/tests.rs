@@ -282,8 +282,9 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     assert!(refusal.contains("read-only"), "{refusal}");
     assert!(!app.state.code.code_workspace.source_document_dialog);
 
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-        &mut app.state,
+    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+        &app.state.model,
+        &mut app.state.code.netlist,
         CodeSourceFileAction::New,
     )
     .unwrap();
@@ -436,8 +437,9 @@ fn owned_deck_app() -> RSpiceApp {
         true,
     );
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-        &mut app.state,
+    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+        &app.state.model,
+        &mut app.state.code.netlist,
         CodeSourceFileAction::New,
     )
     .unwrap();

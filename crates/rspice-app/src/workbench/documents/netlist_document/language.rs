@@ -1048,7 +1048,7 @@ impl BoundQuickFix {
 }
 
 fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String, String> {
-    if !super::active_netlist_source_is_editable(state) {
+    if !super::active_netlist_source_is_editable_in(&state.model, &state.code.netlist) {
         return Err("Quick fixes cannot edit this read-only source.".to_owned());
     }
     let source = state.model.simulation.source.netlist_content.clone();
@@ -2291,7 +2291,7 @@ M1 d g s b nch W={w} L={l*2}\n\
                 .unwrap()
                 .contains(".ends amplifier")
         );
-        assert!(super::super::can_undo_netlist_edit(&state));
+        assert!(super::super::can_undo_netlist_edit(&state.code.netlist));
         super::super::undo_netlist_edit(&mut state).unwrap();
         assert_eq!(
             state.model.workspace.content.netlist_source.as_deref(),

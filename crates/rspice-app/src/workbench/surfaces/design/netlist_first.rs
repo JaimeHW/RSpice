@@ -25,7 +25,7 @@ use crate::workbench::design_system::{
     property_card, property_row, property_row_problem,
 };
 use crate::workbench::documents::netlist_document::{
-    OwnedNetlistPublicationState, owned_netlist_publication_state, root_deck_source_index,
+    OwnedNetlistPublicationState, owned_netlist_publication_state_in, root_deck_source_index,
 };
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Execute;
@@ -619,8 +619,13 @@ fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
             .count();
         (document.dependencies().len(), unresolved)
     });
-    let publication =
-        document.map(|document| owned_netlist_publication_state(state, document.content_digest()));
+    let publication = document.map(|document| {
+        owned_netlist_publication_state_in(
+            &state.model,
+            &state.code.netlist,
+            document.content_digest(),
+        )
+    });
 
     DeckFacts {
         name,
