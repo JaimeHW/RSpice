@@ -7,9 +7,9 @@ use crate::state::VerificationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{YieldLimitBound, YieldLimitDraft};
+use crate::workbench::surfaces::verify::raster::fixture_yield_results;
 use crate::workbench::surfaces::verify::raster::{page_input, page_pass};
 use crate::workbench::surfaces::verify::show;
-use crate::workbench::surfaces::verify::tests::yield_histogram::fixture_yield_results;
 
 /// Edit specifications pressed while a limit is being typed: the press takes
 /// the cell's focus, so the typed limit is the plan's in that frame, and the

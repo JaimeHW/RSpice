@@ -19,12 +19,15 @@ use crate::state::{
     SpecEntry, SpecPointScope,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::SimulateFeature;
-use crate::workbench::simulate::test_host::SimulateTestHost;
 use crate::workbench::state::Workspace;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
+
+use super::tuning::sync_tuning_session;
+use super::verification_yield_results;
 
 pub(crate) const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
@@ -169,33 +172,6 @@ pub(crate) fn page_geometry(mut stage: impl VerifyStage, page: VerificationPage)
     geometry
 }
 
-/// One page rasterized as a 2x display shows it, with where its widgets put
-/// things on the rasterized pass. The canvas is in device pixels, the
-/// geometry in points.
-pub(super) fn page_render(
-    mut stage: impl VerifyStage,
-    page: VerificationPage,
-) -> (rspice_ui_kit::raster::Canvas, PageGeometry) {
-    stage.open(page);
-    let ctx = egui::Context::default();
-    ctx.set_os(egui::os::OperatingSystem::Nix);
-    rspice_ui_kit::Theme::default().apply(&ctx);
-    let size = vec2(PAGE_WIDTH, PAGE_HEIGHT);
-    let mut last = None;
-    for _ in 0..3 {
-        last = Some(page_pass(
-            &ctx,
-            rspice_ui_kit::raster::display_input(size, 2.0),
-            |ui| stage.draw(ui),
-        ));
-    }
-    let (output, geometry) = last.expect("three passes ran");
-    (
-        rspice_ui_kit::raster::rasterize(&ctx, size, &output),
-        geometry,
-    )
-}
-
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_to(analysis, AnalysisInstanceId::new(), ObjectRevision::INITIAL)
 }
@@ -272,195 +248,12 @@ fn sealed_run_at(
     run
 }
 
-/// The canonical execution tag a transient task carries, which the receipt
-/// checks its result against.
-const TRANSIENT_TASK_TAG: u8 = 5;
-
-/// A second-order step response settling to 1 V.
-fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
-    let root = (1.0 - damping * damping).sqrt();
-    let damped = natural_rad_s * root;
-    time.iter()
-        .map(|t| {
-            1.0 - (-damping * natural_rad_s * t).exp()
-                * ((damped * t).cos() + damping / root * (damped * t).sin())
-        })
-        .collect()
-}
-
-/// Three microseconds of a step, at 12.5 ns.
-fn step_time() -> Vec<f64> {
-    (0..=240).map(|index| f64::from(index) * 12.5e-9).collect()
-}
-
-/// A transient step of the active plan's one analysis, with its measurements.
-fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
-    let time = step_time();
-    AnalysisResult::new(1, AnalysisType::Transient, "Step")
-        .with_waveforms(vec![
-            RetainedTrace::new(
-                "V(out)",
-                time.clone(),
-                step_response(damping, natural_rad_s, &time),
-                "#4c9be8",
-            )
-            .with_unit("V"),
-        ])
-        .with_measurements(
-            measurements
-                .iter()
-                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
-                .collect(),
-        )
-}
-
-/// A plan with one tuned resistor and two limits, and two runs of it: Run 3,
-/// the baseline the tuning session opened on, whose overshoot fails, and
-/// Run 4, the committed candidate, whose settling time is near its limit.
-pub(super) fn tuning_app() -> FeatureHarness<SimulateFeature> {
-    use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableScope, DesignVariableSweepEligibility,
-    };
-
-    let mut harness = SimulateTestHost::harness();
-    let plan_id = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let variable = DesignVariable::new(
-        "RGAIN",
-        "499 ohm",
-        DesignVariableQuantity::Resistance,
-        DesignVariableScope::Project,
-        "Closed-loop gain-setting resistor",
-        Some(DesignVariableRange {
-            minimum: "350 ohm".to_owned(),
-            maximum: "750 ohm".to_owned(),
-        }),
-        DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("valid tuning variable");
-    harness
-        .model
-        .workspace
-        .content
-        .add_design_variable(plan_id, variable)
-        .expect("the variable enters the active plan");
-    set_limits(
-        &mut harness.model,
-        vec![
-            limit("tsettle", None, Some(2.0e-6), "s"),
-            limit("overshoot", None, Some(10.0), "%"),
-        ],
-    );
-    let source = AnalysisInstanceId::new();
-    let baseline = sealed_run(
-        3,
-        plan_id,
-        source,
-        TRANSIENT_TASK_TAG,
-        step_analysis(0.55, 4.49e6, &[("tsettle", 1.62e-6), ("overshoot", 12.6)]),
-    );
-    let candidate = sealed_run(
-        4,
-        plan_id,
-        source,
-        TRANSIENT_TASK_TAG,
-        step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
-    );
-    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
-    harness.model.simulation.view.active_run_idx = Some(0);
-    super::tuning::sync_tuning_session(&mut harness.cx());
-    harness.model.simulation.view.active_run_idx = Some(1);
-    harness
-}
-
-/// Run 4 of the active plan against its baseline, Run 3: four measurements and
-/// the output waveform. Bandwidth breaks its 2 % rule, overshoot has no rule,
-/// and the waveform is selected, so its comparison opens under the table.
-pub(super) fn regression_app() -> FeatureHarness<SimulateFeature> {
-    use crate::state::{
-        RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
-        RegressionTargetSelector, RegressionToleranceRule,
-    };
-
-    let mut harness = SimulateTestHost::harness();
-    let plan_id = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let source = AnalysisInstanceId::new();
-    let run = |number: u64, damping: f64, natural: f64, values: [f64; 4]| {
-        sealed_run(
-            number,
-            plan_id,
-            source,
-            TRANSIENT_TASK_TAG,
-            step_analysis(
-                damping,
-                natural,
-                &[
-                    ("gain", values[0]),
-                    ("bw", values[1]),
-                    ("tsettle", values[2]),
-                    ("overshoot", values[3]),
-                ],
-            ),
-        )
-    };
-    let baseline = run(3, 0.55, 4.49e6, [42.30, 18.2e6, 1.62e-6, 12.6]);
-    let candidate = run(4, 0.56, 4.45e6, [42.28, 17.1e6, 1.64e-6, 12.1]);
-    let baseline_id = baseline.run_id;
-    let rule = |target: RegressionTargetSelector, absolute: f64, relative: f64| {
-        let waveform = target.kind == crate::state::RegressionTargetKind::Waveform;
-        RegressionToleranceRule {
-            target,
-            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
-            absolute_tolerance: absolute,
-            relative_tolerance: relative,
-            time_skew_allowance: if waveform { 20.0e-9 } else { 0.0 },
-            comparison_window: waveform.then_some(RegressionComparisonWindow {
-                start: 0.0,
-                end: 3.0e-6,
-            }),
-        }
-    };
-    let mut rules = super::derive_regression_checks(&baseline, &candidate)
-        .into_iter()
-        .filter_map(|check| match check.name.as_str() {
-            "gain" => Some(rule(check.target, 0.1, 0.005)),
-            "bw" => Some(rule(check.target, 0.0, 0.02)),
-            "tsettle" => Some(rule(check.target, 0.0, 0.05)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let waveform = super::regression_waveform_pairs(&baseline, &candidate)
-        .first()
-        .map(|pair| pair.target.clone())
-        .expect("both runs hold V(out)");
-    rules.push(rule(waveform.clone(), 0.02, 0.02));
-    let payload = harness
-        .model
-        .workspace
-        .content
-        .ensure_active_plan_data(plan_id);
-    payload.regression_tolerances = rules;
-    payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
-    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
-    assert!(harness.model.simulation.select_run(1));
-    super::commit_regression_baseline(&mut harness.cx(), baseline_id)
-        .expect("the baseline commits");
-    harness.state.verification.regression_selected_target = Some(waveform);
-    harness
-}
-
-fn limit(measurement: &str, min: Option<f64>, max: Option<f64>, unit: &str) -> SpecEntry {
+pub(super) fn limit(
+    measurement: &str,
+    min: Option<f64>,
+    max: Option<f64>,
+    unit: &str,
+) -> SpecEntry {
     SpecEntry {
         measurement: measurement.to_owned(),
         expression: String::new(),
@@ -537,14 +330,6 @@ fn gain_campaign(samples: Vec<f64>) -> AnalysisResult {
     )
 }
 
-/// Forty trials of the plan's Monte Carlo analysis, judged against its 40 dB
-/// gain floor as the frame judges them: three are under it.
-pub(super) fn monte_carlo_app() -> FeatureHarness<SimulateFeature> {
-    let mut harness = SimulateTestHost::harness();
-    seed_monte_carlo(&mut harness.model);
-    harness
-}
-
 /// The Monte Carlo fixture's seeding: forty trials of the plan's Monte Carlo
 /// analysis and its 40 dB gain floor, judged as the frame judges them.
 pub(crate) fn seed_monte_carlo(model: &mut Model) {
@@ -592,15 +377,6 @@ pub(super) const FIXTURE_CORNERS: [(&str, f64, f64); 7] = [
     ("SF", 1.8, 27.0),
     ("FS", 1.8, 27.0),
 ];
-
-/// A seven-corner run of four limited outputs and two node voltages: gain
-/// fails at SS 125 °C, and phase margin and supply current sit near their
-/// limits at FF 125 °C.
-pub(super) fn corner_app() -> FeatureHarness<SimulateFeature> {
-    let mut harness = SimulateTestHost::harness();
-    seed_corner(&mut harness.model);
-    harness
-}
 
 /// The corner fixture's seeding: its run is the model's one run, and the
 /// limits its outputs are judged by.
@@ -685,7 +461,7 @@ pub(crate) fn seed_corner(model: &mut Model) {
 }
 
 /// Make `specs` the limits the active plan judges its outputs by.
-fn set_limits(model: &mut Model, specs: Vec<SpecEntry>) {
+pub(super) fn set_limits(model: &mut Model, specs: Vec<SpecEntry>) {
     match model
         .sim_setup
         .stable_analysis_plan()
@@ -819,13 +595,6 @@ pub(crate) fn seed_soa(model: &mut Model) {
     );
 }
 
-/// Twenty-four optimizer iterations over two variables, converged.
-pub(super) fn optimization_app() -> FeatureHarness<SimulateFeature> {
-    let mut harness = SimulateTestHost::harness();
-    seed_optimization(&mut harness.model);
-    harness
-}
-
 /// The optimization fixture's seeding: its run is the model's one run.
 pub(crate) fn seed_optimization(model: &mut Model) {
     let iterations = (0..24).map(f64::from).collect::<Vec<_>>();
@@ -861,4 +630,92 @@ pub(crate) fn seed_optimization(model: &mut Model) {
                 converged: true,
             }),
     );
+}
+
+pub(crate) fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
+    let plan_id = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let variable = crate::state::DesignVariable::new(
+        "RGAIN",
+        "499 ohm",
+        crate::state::DesignVariableQuantity::Resistance,
+        crate::state::DesignVariableScope::Project,
+        "Closed-loop gain-setting resistor",
+        Some(crate::state::DesignVariableRange {
+            minimum: "350 ohm".to_owned(),
+            maximum: "750 ohm".to_owned(),
+        }),
+        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+    )
+    .expect("valid tuning variable");
+    let id = variable.id;
+    model
+        .workspace
+        .content
+        .add_design_variable(plan_id, variable)
+        .expect("variable enters active plan payload");
+    id
+}
+
+pub(crate) fn stage_literal_tuning_binding(
+    cx: &mut Cx<'_, SimulateFeature>,
+    component_id: u64,
+    variable_name: &str,
+) -> crate::product::DesignVariableId {
+    sync_tuning_session(cx);
+    let component = cx
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .expect("component exists");
+    let source_view = cx.model.workspace.content.active_schematic_reference();
+    let typed_expression = format!("{} ohm", component.value.trim());
+    let variable = crate::state::DesignVariable::new(
+        variable_name,
+        &typed_expression,
+        crate::state::DesignVariableQuantity::Resistance,
+        crate::state::DesignVariableScope::Project,
+        format!("Value of {}", component.name),
+        None,
+        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+    )
+    .expect("test literal is a valid resistance");
+    let variable_id = variable.id;
+    cx.state
+        .verification
+        .tuning_variables
+        .push(crate::workbench::state::TuningVariableDraft {
+            variable_id,
+            baseline_expression: typed_expression.clone(),
+            candidate_expression: typed_expression,
+            validation_error: None,
+            proposed: true,
+        });
+    cx.state.verification.tuning_instance_binding =
+        Some(crate::workbench::state::TuningInstanceBindingDraft {
+            component_id,
+            component_name: component.name,
+            source_view,
+            source_topology_version: cx.model.schematic.topology_version(),
+            source_value: component.value,
+            binding_expression: format!("{{{variable_name}}}"),
+            variable,
+            creates_variable: true,
+        });
+    variable_id
+}
+
+pub(crate) fn fixture_yield_results(
+    model: &Model,
+) -> Vec<rspice_results::yield_analysis::YieldResult> {
+    verification_yield_results(model).to_vec()
 }

@@ -3,12 +3,46 @@
 //! judge counted, and the histogram drawn under the table.
 
 use super::super::super::super::state::{YieldLimitBound, YieldLimitDraft};
+use super::raster::{
+    PAGE_HEIGHT, PAGE_WIDTH, PageGeometry, VerifyStage, fixture_yield_results, page_pass,
+    seed_monte_carlo,
+};
 use super::*;
+use egui::vec2;
 
-pub(crate) fn fixture_yield_results(
-    model: &Model,
-) -> Vec<rspice_results::yield_analysis::YieldResult> {
-    verification_yield_results(model).to_vec()
+/// One page rasterized as a 2x display shows it, with where its widgets put
+/// things on the rasterized pass. The canvas is in device pixels, the
+/// geometry in points.
+fn page_render(
+    mut stage: impl VerifyStage,
+    page: VerificationPage,
+) -> (rspice_ui_kit::raster::Canvas, PageGeometry) {
+    stage.open(page);
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let size = vec2(PAGE_WIDTH, PAGE_HEIGHT);
+    let mut last = None;
+    for _ in 0..3 {
+        last = Some(page_pass(
+            &ctx,
+            rspice_ui_kit::raster::display_input(size, 2.0),
+            |ui| stage.draw(ui),
+        ));
+    }
+    let (output, geometry) = last.expect("three passes ran");
+    (
+        rspice_ui_kit::raster::rasterize(&ctx, size, &output),
+        geometry,
+    )
+}
+
+/// Forty trials of the plan's Monte Carlo analysis, judged against its 40 dB
+/// gain floor as the frame judges them: three are under it.
+fn monte_carlo_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_monte_carlo(&mut harness.model);
+    harness
 }
 
 /// A Spec cell and an axis tick state a quantity the way the measured values
@@ -53,7 +87,7 @@ fn a_limit_and_a_tick_are_spelled_like_the_values_beside_them() {
 /// retained samples, and its yield is the population the judge counted.
 #[test]
 fn yield_rows_compute_their_statistics_from_the_samples() {
-    let harness = super::raster::monte_carlo_app();
+    let harness = monte_carlo_app();
     let results = fixture_yield_results(&harness.model);
     let analysis = harness
         .model
@@ -130,7 +164,7 @@ fn the_shown_histogram_is_the_readers_pick_or_the_lowest_yield() {
 /// A lower limit above the upper one is refused with the plan unchanged.
 #[test]
 fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
-    let mut harness = super::raster::monte_carlo_app();
+    let mut harness = monte_carlo_app();
     let plan_id = verification_plan_id(&harness.model).expect("default plan");
     let definitions = |harness: &FeatureHarness<SimulateFeature>| {
         harness
@@ -254,7 +288,7 @@ fn type_limit(
 /// on what was typed.
 #[test]
 fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
-    let mut harness = super::raster::monte_carlo_app();
+    let mut harness = monte_carlo_app();
     harness.state.verification_page = VerificationPage::Yield;
     let plan_id = verification_plan_id(&harness.model).expect("default plan");
     let ctx = egui::Context::default();
@@ -313,7 +347,7 @@ fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
 /// bar breaks the limit and every sample in a neutral bar meets it.
 #[test]
 fn histogram_bins_put_the_limit_on_an_edge_and_keep_every_sample() {
-    let harness = super::raster::monte_carlo_app();
+    let harness = monte_carlo_app();
     let results = fixture_yield_results(&harness.model);
     let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
         .expect("forty samples bin");
@@ -345,7 +379,7 @@ fn histogram_bins_put_the_limit_on_an_edge_and_keep_every_sample() {
 /// histogram is painted in the accent.
 #[test]
 fn histogram_bars_are_neutral_and_failing_bars_muted_error() {
-    let harness = super::raster::monte_carlo_app();
+    let harness = monte_carlo_app();
     let results = fixture_yield_results(&harness.model);
     let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
         .expect("forty samples bin");
@@ -386,8 +420,7 @@ fn histogram_bars_are_neutral_and_failing_bars_muted_error() {
 /// above it, and the table keeps the page's grammar.
 #[test]
 fn the_yield_page_draws_the_selected_histogram_under_the_table() {
-    let geometry =
-        super::raster::page_geometry(super::raster::monte_carlo_app(), VerificationPage::Yield);
+    let geometry = super::raster::page_geometry(monte_carlo_app(), VerificationPage::Yield);
     let rows = geometry.all("table.row");
     assert_eq!(rows.len(), 1);
     let split = geometry
@@ -414,7 +447,7 @@ fn the_yield_page_draws_the_selected_histogram_under_the_table() {
 #[ignore = "writes a PNG for review"]
 fn the_yield_page_renders_with_a_limit_cell_open() {
     const SCALE: f32 = 2.0;
-    let mut harness = super::raster::monte_carlo_app();
+    let mut harness = monte_carlo_app();
     harness.state.verification.yield_limit_draft = Some(YieldLimitDraft {
         output: "gain".to_owned(),
         bound: YieldLimitBound::Lower,
@@ -422,7 +455,7 @@ fn the_yield_page_renders_with_a_limit_cell_open() {
         seed: "40 dB".to_owned(),
         focus: true,
     });
-    let (canvas, geometry) = super::raster::page_render(harness, VerificationPage::Yield);
+    let (canvas, geometry) = page_render(harness, VerificationPage::Yield);
     let path = std::env::var_os("RSPICE_REVIEW_PNG").map_or_else(
         || std::env::temp_dir().join("rspice-verify-yield.png"),
         std::path::PathBuf::from,

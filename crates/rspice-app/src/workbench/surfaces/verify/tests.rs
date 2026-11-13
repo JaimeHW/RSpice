@@ -4,7 +4,10 @@
 //! XML control characters are refused rather than escaped away, and a receipt
 //! whose tolerance digest does not match its contract is rejected.
 
-use super::raster::sealed_run;
+use super::raster::{
+    add_tuning_variable, limit, sealed_run, seed_corner, seed_optimization, set_limits,
+    stage_literal_tuning_binding,
+};
 use super::tuning::{revert_tuning_session, tuning_is_dirty};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -102,88 +105,6 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
             .and_then(|payload| payload.regression_baseline_run),
         Some(baseline_id)
     );
-}
-
-pub(crate) fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
-    let plan_id = model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let variable = crate::state::DesignVariable::new(
-        "RGAIN",
-        "499 ohm",
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
-        "Closed-loop gain-setting resistor",
-        Some(crate::state::DesignVariableRange {
-            minimum: "350 ohm".to_owned(),
-            maximum: "750 ohm".to_owned(),
-        }),
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("valid tuning variable");
-    let id = variable.id;
-    model
-        .workspace
-        .content
-        .add_design_variable(plan_id, variable)
-        .expect("variable enters active plan payload");
-    id
-}
-
-pub(crate) fn stage_literal_tuning_binding(
-    cx: &mut Cx<'_, SimulateFeature>,
-    component_id: u64,
-    variable_name: &str,
-) -> crate::product::DesignVariableId {
-    sync_tuning_session(cx);
-    let component = cx
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .cloned()
-        .expect("component exists");
-    let source_view = cx.model.workspace.content.active_schematic_reference();
-    let typed_expression = format!("{} ohm", component.value.trim());
-    let variable = crate::state::DesignVariable::new(
-        variable_name,
-        &typed_expression,
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
-        format!("Value of {}", component.name),
-        None,
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("test literal is a valid resistance");
-    let variable_id = variable.id;
-    cx.state
-        .verification
-        .tuning_variables
-        .push(crate::workbench::state::TuningVariableDraft {
-            variable_id,
-            baseline_expression: typed_expression.clone(),
-            candidate_expression: typed_expression,
-            validation_error: None,
-            proposed: true,
-        });
-    cx.state.verification.tuning_instance_binding =
-        Some(crate::workbench::state::TuningInstanceBindingDraft {
-            component_id,
-            component_name: component.name,
-            source_view,
-            source_topology_version: cx.model.schematic.topology_version(),
-            source_value: component.value,
-            binding_expression: format!("{{{variable_name}}}"),
-            variable,
-            creates_variable: true,
-        });
-    variable_id
 }
 
 fn retain_preflight_report(harness: &mut FeatureHarness<SimulateFeature>) {
@@ -1554,7 +1475,7 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
         );
     }
 
-    let mut harness = super::raster::corner_app();
+    let mut harness = corner_app();
     assert_eq!(
         verification_evidence_domain(&harness.model),
         EvidenceDomain::Legacy,
@@ -1634,7 +1555,7 @@ fn corner_labels_read_back_into_their_point() {
 }
 
 fn fixture_corner_matrix() -> CornerMatrix {
-    let harness = super::raster::corner_app();
+    let harness = corner_app();
     let run = verification_run(&harness.model).expect("the fixture selects its run");
     let family = latest_analysis(&harness.model, AnalysisType::Corner)
         .expect("the fixture holds a corner run");
@@ -1708,7 +1629,7 @@ fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
 
 #[test]
 fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
-    let harness = super::raster::corner_app();
+    let harness = corner_app();
     let run = verification_run(&harness.model).expect("run");
     let family = latest_analysis(&harness.model, AnalysisType::Corner).expect("corner run");
     let matrix = corner_matrix(
@@ -1727,7 +1648,7 @@ fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
 
 #[test]
 fn optimization_iterations_put_the_cost_first_and_name_the_best() {
-    let harness = super::raster::optimization_app();
+    let harness = optimization_app();
     let result =
         latest_analysis(&harness.model, AnalysisType::Optimization).expect("optimization run");
     let table = IterationTable::from_result(result).expect("iterations");
@@ -1766,7 +1687,7 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
 /// candidate run.
 #[test]
 fn the_tuning_page_is_two_panes_over_the_limits_table() {
-    use super::raster::{PAGE_WIDTH, page_geometry, tuning_app};
+    use super::raster::{PAGE_WIDTH, page_geometry};
 
     let geometry = page_geometry(tuning_app(), VerificationPage::Tuning);
     let toolbar = geometry.one("toolbar").expect("toolbar");
@@ -1799,7 +1720,7 @@ fn the_tuning_page_is_two_panes_over_the_limits_table() {
 /// target's detail in a pane directly under it.
 #[test]
 fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
-    use super::raster::{PAGE_WIDTH, page_geometry, regression_app};
+    use super::raster::{PAGE_WIDTH, page_geometry};
 
     let geometry = page_geometry(regression_app(), VerificationPage::Regression);
     let toolbar = geometry.one("toolbar").expect("toolbar");
@@ -1829,4 +1750,212 @@ fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
         assert_eq!(edges.len(), 1, "{column}: numbers end on one edge");
     }
     assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
+}
+
+// ---------------------------------------------------------------------------
+// The fixtures only these cases build
+// ---------------------------------------------------------------------------
+
+/// The canonical execution tag a transient task carries, which the receipt
+/// checks its result against.
+const TRANSIENT_TASK_TAG: u8 = 5;
+
+/// A second-order step response settling to 1 V.
+fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
+    let root = (1.0 - damping * damping).sqrt();
+    let damped = natural_rad_s * root;
+    time.iter()
+        .map(|t| {
+            1.0 - (-damping * natural_rad_s * t).exp()
+                * ((damped * t).cos() + damping / root * (damped * t).sin())
+        })
+        .collect()
+}
+
+/// Three microseconds of a step, at 12.5 ns.
+fn step_time() -> Vec<f64> {
+    (0..=240).map(|index| f64::from(index) * 12.5e-9).collect()
+}
+
+/// A transient step of the active plan's one analysis, with its measurements.
+fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
+    let time = step_time();
+    AnalysisResult::new(1, AnalysisType::Transient, "Step")
+        .with_waveforms(vec![
+            RetainedTrace::new(
+                "V(out)",
+                time.clone(),
+                step_response(damping, natural_rad_s, &time),
+                "#4c9be8",
+            )
+            .with_unit("V"),
+        ])
+        .with_measurements(
+            measurements
+                .iter()
+                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
+                .collect(),
+        )
+}
+
+/// A plan with one tuned resistor and two limits, and two runs of it: Run 3,
+/// the baseline the tuning session opened on, whose overshoot fails, and
+/// Run 4, the committed candidate, whose settling time is near its limit.
+fn tuning_app() -> FeatureHarness<SimulateFeature> {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
+        DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let variable = DesignVariable::new(
+        "RGAIN",
+        "499 ohm",
+        DesignVariableQuantity::Resistance,
+        DesignVariableScope::Project,
+        "Closed-loop gain-setting resistor",
+        Some(DesignVariableRange {
+            minimum: "350 ohm".to_owned(),
+            maximum: "750 ohm".to_owned(),
+        }),
+        DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+    )
+    .expect("valid tuning variable");
+    harness
+        .model
+        .workspace
+        .content
+        .add_design_variable(plan_id, variable)
+        .expect("the variable enters the active plan");
+    set_limits(
+        &mut harness.model,
+        vec![
+            limit("tsettle", None, Some(2.0e-6), "s"),
+            limit("overshoot", None, Some(10.0), "%"),
+        ],
+    );
+    let source = AnalysisInstanceId::new();
+    let baseline = sealed_run(
+        3,
+        plan_id,
+        source,
+        TRANSIENT_TASK_TAG,
+        step_analysis(0.55, 4.49e6, &[("tsettle", 1.62e-6), ("overshoot", 12.6)]),
+    );
+    let candidate = sealed_run(
+        4,
+        plan_id,
+        source,
+        TRANSIENT_TASK_TAG,
+        step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
+    );
+    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
+    harness.model.simulation.view.active_run_idx = Some(0);
+    super::tuning::sync_tuning_session(&mut harness.cx());
+    harness.model.simulation.view.active_run_idx = Some(1);
+    harness
+}
+
+/// Run 4 of the active plan against its baseline, Run 3: four measurements and
+/// the output waveform. Bandwidth breaks its 2 % rule, overshoot has no rule,
+/// and the waveform is selected, so its comparison opens under the table.
+fn regression_app() -> FeatureHarness<SimulateFeature> {
+    use crate::state::{
+        RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
+        RegressionTargetSelector, RegressionToleranceRule,
+    };
+
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let source = AnalysisInstanceId::new();
+    let run = |number: u64, damping: f64, natural: f64, values: [f64; 4]| {
+        sealed_run(
+            number,
+            plan_id,
+            source,
+            TRANSIENT_TASK_TAG,
+            step_analysis(
+                damping,
+                natural,
+                &[
+                    ("gain", values[0]),
+                    ("bw", values[1]),
+                    ("tsettle", values[2]),
+                    ("overshoot", values[3]),
+                ],
+            ),
+        )
+    };
+    let baseline = run(3, 0.55, 4.49e6, [42.30, 18.2e6, 1.62e-6, 12.6]);
+    let candidate = run(4, 0.56, 4.45e6, [42.28, 17.1e6, 1.64e-6, 12.1]);
+    let baseline_id = baseline.run_id;
+    let rule = |target: RegressionTargetSelector, absolute: f64, relative: f64| {
+        let waveform = target.kind == crate::state::RegressionTargetKind::Waveform;
+        RegressionToleranceRule {
+            target,
+            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
+            absolute_tolerance: absolute,
+            relative_tolerance: relative,
+            time_skew_allowance: if waveform { 20.0e-9 } else { 0.0 },
+            comparison_window: waveform.then_some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 3.0e-6,
+            }),
+        }
+    };
+    let mut rules = super::derive_regression_checks(&baseline, &candidate)
+        .into_iter()
+        .filter_map(|check| match check.name.as_str() {
+            "gain" => Some(rule(check.target, 0.1, 0.005)),
+            "bw" => Some(rule(check.target, 0.0, 0.02)),
+            "tsettle" => Some(rule(check.target, 0.0, 0.05)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let waveform = super::regression_waveform_pairs(&baseline, &candidate)
+        .first()
+        .map(|pair| pair.target.clone())
+        .expect("both runs hold V(out)");
+    rules.push(rule(waveform.clone(), 0.02, 0.02));
+    let payload = harness
+        .model
+        .workspace
+        .content
+        .ensure_active_plan_data(plan_id);
+    payload.regression_tolerances = rules;
+    payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
+    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
+    assert!(harness.model.simulation.select_run(1));
+    super::commit_regression_baseline(&mut harness.cx(), baseline_id)
+        .expect("the baseline commits");
+    harness.state.verification.regression_selected_target = Some(waveform);
+    harness
+}
+
+/// A seven-corner run of four limited outputs and two node voltages: gain
+/// fails at SS 125 °C, and phase margin and supply current sit near their
+/// limits at FF 125 °C.
+fn corner_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_corner(&mut harness.model);
+    harness
+}
+
+/// Twenty-four optimizer iterations over two variables, converged.
+fn optimization_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_optimization(&mut harness.model);
+    harness
 }
