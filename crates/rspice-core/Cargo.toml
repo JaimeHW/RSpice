@@ -13,7 +13,7 @@ rust-version.workspace = true
 # the browser builds opt out via default-features = false.
 default = ["faer-parallel", "parallel"]
 parallel = [
-    "rayon",
+    "dep:rayon",
     "rspice-core-base/parallel",
     "rspice-core-netlist/parallel",
     "rspice-core-devices/parallel",
