@@ -1183,9 +1183,10 @@ pub fn open_materialized_traces(
     analysis_index: usize,
     waveform_indices: &[usize],
 ) {
-    use crate::workbench::documents::result_document::AnalysisPresentationKey;
     use crate::workbench::framework::requests::ShowWaveforms;
-    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results::result_presentation::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
     use rspice_results_ui::selection::SelectedResultTrace;
     let Some(run) = cx.model.simulation.active_run() else {
         return;
