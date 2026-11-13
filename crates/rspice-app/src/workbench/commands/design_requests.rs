@@ -26,7 +26,12 @@ pub(in crate::workbench) fn answer_surface_request(
         }
         DesignSurfaceRequest::NewVerilogADevice => open_new_veriloga_device_form(state),
         DesignSurfaceRequest::CreateSymbolFromPorts => {
-            open_create_model_bound_symbol_dialog(state);
+            open_create_model_bound_symbol_dialog(
+                &mut state.design.create_model_bound_symbol,
+                &state.model,
+                &mut state.workbench,
+                state.models.selected_model.as_deref(),
+            );
         }
         DesignSurfaceRequest::ShowInNetlist => state.show_selected_instance_in_netlist(),
         DesignSurfaceRequest::CopyToEditableLibrary { library, cell } => {

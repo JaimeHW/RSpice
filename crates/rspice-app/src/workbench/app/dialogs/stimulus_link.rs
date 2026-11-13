@@ -42,7 +42,7 @@ use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusDefinitionError, StimulusFamily,
 };
 use crate::state::stimulus_library::provenance::{AdoptionFit, ProvenanceState};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 
 use shell::MiniCache;
@@ -525,15 +525,6 @@ fn commit_extraction(
         "Saved stimulus definition {name} at r1 from {}.",
         session.reference
     ))
-}
-
-/// Open the Stimulus Library workspace on one definition.
-pub(crate) fn open_stimulus_definition(state: &mut AppState, name: &str) {
-    show_stimulus_definition(
-        &mut state.design.selected_stimulus_definition,
-        &mut state.workbench,
-        name,
-    );
 }
 
 /// Select one definition in the Stimulus Library and bring its workspace

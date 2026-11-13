@@ -13,28 +13,33 @@ use rspice_design_model::port::PinRole;
 
 use super::state::*;
 use crate::workbench::app_state::{
-    AppState, Model, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
+    Model, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
 };
 use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::WorkbenchSession;
 
-pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
-    let library = state
-        .model
+/// Open Create symbol over `model`, from the model `selected_model` names
+/// in the models workspace when it is in the library, else the library's
+/// first.
+pub(crate) fn open_create_model_bound_symbol_dialog(
+    dialog: &mut CreateModelBoundSymbolDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    selected_model: Option<&str>,
+) {
+    let library = model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
-            state
-                .model
+            model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
                 .map(|library| library.name.clone())
         })
         .or_else(|| {
-            state
-                .model
+            model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -42,25 +47,20 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
                 .map(|library| library.name.clone())
         });
     let Some(library) = library else {
-        state.prompt("Create symbol needs a writable design library.");
+        wb.prompt("Create symbol needs a writable design library.");
         return;
     };
 
-    let selected_model = state
-        .models
-        .selected_model
-        .as_deref()
+    let selected_model = selected_model
         .and_then(|selected| {
-            state
-                .model
+            model
                 .model_library_manager
                 .search_models("")
                 .into_iter()
                 .find(|(_, model)| model.name.eq_ignore_ascii_case(selected))
         })
         .or_else(|| {
-            state
-                .model
+            model
                 .model_library_manager
                 .search_models("")
                 .into_iter()
@@ -95,8 +95,8 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         }
     });
 
-    let schematic_reference = state.model.workspace.content.active_schematic_reference();
-    let schematic_ports = state.model.schematic.interface_ports();
+    let schematic_reference = model.workspace.content.active_schematic_reference();
+    let schematic_ports = model.schematic.interface_ports();
     let schematic_source = (!schematic_ports.is_empty()).then(|| CreateSymbolSchematicSource {
         reference: schematic_reference.clone(),
         pins: schematic_ports
@@ -134,7 +134,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
             default_template(source.model_type)
         });
 
-    state.design.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
+    *dialog = CreateModelBoundSymbolDialogState {
         open: true,
         target: format!("{library} / {cell}"),
         source_mode,
@@ -143,13 +143,14 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         pins,
         template,
         pin_contract_reviewed: !matches!(source_mode, CreateSymbolSourceMode::Model),
-        expected_library_revision: state.model.library_manager.revision(),
+        expected_library_revision: model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
 }
 
 pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
-    state: &mut AppState,
+    dialog: &mut CreateModelBoundSymbolDialogState,
+    model: &Model,
     source_library: String,
     subcircuit: String,
     source_path: std::path::PathBuf,
@@ -158,22 +159,19 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     section: Option<String>,
     parameter_defaults: std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
-    let target_library = state
-        .model
+    let target_library = model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
-            state
-                .model
+            model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
                 .map(|library| library.name.clone())
         })
         .or_else(|| {
-            state
-                .model
+            model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -213,7 +211,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         requires_pin_review: true,
         pins: pins.clone(),
     };
-    state.design.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
+    *dialog = CreateModelBoundSymbolDialogState {
         open: true,
         target: format!("{target_library} / {cell}"),
         source_mode: CreateSymbolSourceMode::Model,
@@ -221,7 +219,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         pins,
         template,
         pin_contract_reviewed: false,
-        expected_library_revision: state.model.library_manager.revision(),
+        expected_library_revision: model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
     Ok(())

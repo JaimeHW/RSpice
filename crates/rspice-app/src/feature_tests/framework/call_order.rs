@@ -500,7 +500,11 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8.2",
         &[
             "|app, OpenStimulusDefinition(definition)|",
-            "crate::workbench::app::open_stimulus_definition(&mut app.state, &definition);",
+            "crate::workbench::app::show_stimulus_definition(\
+             &mut app.state.design.selected_stimulus_definition,\
+             &mut app.state.workbench,\
+             &definition,\
+             );",
         ],
     ),
     (
@@ -565,7 +569,12 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "16",
         &[
             "|app, request: OpenSymbolAuthoring| match request {",
-            "crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);",
+            "crate::workbench::app::open_create_model_bound_symbol_dialog(\
+             &mut app.state.design.create_model_bound_symbol,\
+             &app.state.model,\
+             &mut app.state.workbench,\
+             app.state.models.selected_model.as_deref(),\
+             );",
             "crate::workbench::app::open_symbol_parameter_form_dialog(\
              &mut app.state.design.symbol_parameter_form,\
              &app.state.model,\

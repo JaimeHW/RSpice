@@ -317,7 +317,11 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, OpenStimulusDefinition(definition)| {
-                crate::workbench::app::open_stimulus_definition(&mut app.state, &definition);
+                crate::workbench::app::show_stimulus_definition(
+                    &mut app.state.design.selected_stimulus_definition,
+                    &mut app.state.workbench,
+                    &definition,
+                );
             },
         );
         requests::drain(
@@ -409,7 +413,12 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, request: OpenSymbolAuthoring| match request {
                 OpenSymbolAuthoring::ModelBound => {
-                    crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
+                    crate::workbench::app::open_create_model_bound_symbol_dialog(
+                        &mut app.state.design.create_model_bound_symbol,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        app.state.models.selected_model.as_deref(),
+                    );
                 }
                 OpenSymbolAuthoring::ParameterForm(None) => {
                     crate::workbench::app::open_symbol_parameter_form_dialog(
@@ -457,7 +466,8 @@ impl RSpiceApp {
                         opened_receipt,
                     } = *source;
                     let result = crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(
-                        &mut app.state,
+                        &mut app.state.design.create_model_bound_symbol,
+                        &app.state.model,
                         library,
                         subcircuit,
                         source_path,

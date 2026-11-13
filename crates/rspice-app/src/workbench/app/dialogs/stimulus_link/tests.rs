@@ -16,6 +16,7 @@ use crate::state::{ComponentType, Point};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 /// Draw the dialog as the frame's step does, over the whole state.
 fn render_stimulus_link_dialog(ctx: &egui::Context, state: &mut AppState) {

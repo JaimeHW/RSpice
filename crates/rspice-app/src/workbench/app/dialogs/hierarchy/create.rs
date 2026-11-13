@@ -18,13 +18,16 @@ use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app::actions::workspace::rebuild_active_connections_from_symbols;
+use crate::workbench::app::actions::workspace::symbol_document::SymbolUiState;
+use crate::workbench::app::actions::workspace::{
+    bump_active_schematic_epoch, rebuild_active_connections_from_symbols,
+};
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
-use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,21 +347,22 @@ fn validate_draft(
     Ok(plan)
 }
 
-pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
-    let plan = validate_draft(&state.design.create_hierarchy, &state.model)?;
-    let authority = state
-        .design
-        .create_hierarchy
+pub(in crate::workbench) fn commit_create_hierarchy(
+    dialog: &mut CreateHierarchyDialogState,
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &WorkbenchSession,
+) -> Result<(), String> {
+    let plan = validate_draft(dialog, model)?;
+    let authority = dialog
         .authority
         .as_ref()
         .cloned()
         .ok_or_else(|| "The retained source authority is unavailable.".to_owned())?;
-    authority.validate(state, "Create hierarchy")?;
-    let current_plan = state.model.hierarchy_source_plan()?;
+    authority.validate(&*model, "Create hierarchy")?;
+    let current_plan = model.hierarchy_source_plan()?;
     if current_plan
-        != state
-            .design
-            .create_hierarchy
+        != dialog
             .plan
             .clone()
             .ok_or_else(|| "The retained hierarchy plan is unavailable.".to_owned())?
@@ -366,15 +370,14 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
         return Err("The resolved connectivity or symbol geometry changed. Close and reopen Create hierarchy.".to_owned());
     }
 
-    let parent_ref = state.model.workspace.content.active_view.clone();
+    let parent_ref = model.workspace.content.active_view.clone();
     let library_name = parent_ref.library.clone();
-    let cell_name = state.design.create_hierarchy.cell_name.trim().to_owned();
-    let target_view_type = state.design.create_hierarchy.target_view;
+    let cell_name = dialog.cell_name.trim().to_owned();
+    let target_view_type = dialog.target_view;
     let target_schematic_ref = CellViewRef::new(&library_name, &cell_name, "schematic");
     let target_open_ref =
         CellViewRef::new(&library_name, &cell_name, target_view_type.display_name());
-    let candidate = state
-        .model
+    let candidate = model
         .schematic
         .materialize_hierarchy_extraction(
             &plan,
@@ -409,28 +412,28 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
     symbol_view.modified = true;
     target_cell.add_view(symbol_view);
 
-    let open_views_before = state.model.workspace.content.open_views.clone();
-    let hierarchy_stack_before = state.model.workspace.content.hierarchy_stack.clone();
-    let hierarchy_instances_before = state.model.workspace.content.hierarchy_instances.clone();
-    let before_parent = source_schematic_with_canonical_connections(state);
-    let baseline_resolution = state.model.workspace.resolve_hierarchy_with_active(
-        &state.model.library_manager,
+    let open_views_before = model.workspace.content.open_views.clone();
+    let hierarchy_stack_before = model.workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_before = model.workspace.content.hierarchy_instances.clone();
+    let before_parent = source_schematic_with_canonical_connections(model);
+    let baseline_resolution = model.workspace.resolve_hierarchy_with_active(
+        &model.library_manager,
         &parent_ref,
-        &state.model.schematic,
+        &model.schematic,
     );
     let baseline_failures = unresolved_hierarchy(&baseline_resolution);
     let baseline_generation = Model::hierarchy_netlist(
-        &state.model.schematic,
-        &state.model.workspace.content.schematic_buffers,
-        &state.model.library_manager,
+        &model.schematic,
+        &model.workspace.content.schematic_buffers,
+        &model.library_manager,
     );
 
-    let mut next_libraries = state.model.library_manager.clone();
+    let mut next_libraries = model.library_manager.clone();
     next_libraries
         .edit_library(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
         .add_cell(target_cell.clone());
-    let mut next_workspace = state.model.workspace.clone();
+    let mut next_workspace = model.workspace.clone();
     next_workspace.insert_schematic_editor(parent_ref.key(), candidate.parent.clone());
     next_workspace.insert_schematic_editor(target_schematic_ref.key(), candidate.child.clone());
     let candidate_resolution = next_workspace.resolve_hierarchy(&next_libraries);
@@ -462,18 +465,16 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
         &parent_generation.warnings,
     )?;
     validate_candidate_drc(
-        &state.model.schematic,
+        &model.schematic,
         &candidate.parent,
-        &state.model.workspace.content.schematic_buffers,
+        &model.workspace.content.schematic_buffers,
         &next_workspace.content.schematic_buffers,
-        &state.model.library_manager,
+        &model.library_manager,
         &next_libraries,
         // Both sides under the configuration the parent is checked under
         // everywhere else. A ground the extraction moves into the child is
         // still reached through the instance that places it.
-        state
-            .model
-            .design_check_config(&state.model.workspace.content.active_view),
+        model.design_check_config(&model.workspace.content.active_view),
     )?;
     candidate
         .validate_connectivity(
@@ -492,35 +493,31 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
     let hierarchy_stack_after = next_workspace.content.hierarchy_stack.clone();
     let hierarchy_instances_after = next_workspace.content.hierarchy_instances.clone();
 
-    state.model.library_manager = next_libraries;
-    state.model.workspace = next_workspace;
-    state.model.schematic = candidate.child.clone();
-    rebuild_active_connections_from_symbols(&mut state.model);
-    state.bump_active_schematic_epoch();
-    state.model.library_manager.select_view(
-        &library_name,
-        &cell_name,
-        target_view_type.display_name(),
-    );
-    state
-        .model
-        .record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
-            parent_ref,
-            target_schematic_ref,
-            target_open_ref,
-            before_parent,
-            after_parent: candidate.parent,
-            child: candidate.child,
-            target_cell,
-            open_views_before,
-            hierarchy_stack_before,
-            hierarchy_instances_before,
-            open_views_after,
-            hierarchy_stack_after,
-            hierarchy_instances_after,
-        });
-    state.design.create_hierarchy.close();
-    state.record(
+    model.library_manager = next_libraries;
+    model.workspace = next_workspace;
+    model.schematic = candidate.child.clone();
+    rebuild_active_connections_from_symbols(model);
+    bump_active_schematic_epoch(symbol, model, wb);
+    model
+        .library_manager
+        .select_view(&library_name, &cell_name, target_view_type.display_name());
+    model.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
+        parent_ref,
+        target_schematic_ref,
+        target_open_ref,
+        before_parent,
+        after_parent: candidate.parent,
+        child: candidate.child,
+        target_cell,
+        open_views_before,
+        hierarchy_stack_before,
+        hierarchy_instances_before,
+        open_views_after,
+        hierarchy_stack_after,
+        hierarchy_instances_after,
+    });
+    dialog.close();
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(
@@ -531,10 +528,9 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
     Ok(())
 }
 
-fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state::SchematicState {
-    let symbols = schematic_symbol_context(state);
-    let terminals = state
-        .model
+fn source_schematic_with_canonical_connections(model: &Model) -> crate::state::SchematicState {
+    let symbols = schematic_symbol_context(model);
+    let terminals = model
         .schematic
         .document()
         .components
@@ -546,7 +542,7 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
                 .map(move |(name, point)| (component.id, name, point))
         })
         .collect::<Vec<_>>();
-    let mut schematic = state.model.schematic.clone();
+    let mut schematic = model.schematic.clone();
     schematic.rebuild_connections_from_terminals(&terminals);
     schematic
 }
@@ -683,6 +679,7 @@ mod tests {
         SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SymbolDocument,
     };
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     fn two_selected_resistors() -> AppState {
         let mut state = AppState::default();
@@ -927,7 +924,13 @@ mod tests {
         );
         assert!(state.design.create_hierarchy.open);
         let child = state.design.create_hierarchy.cell_name.clone();
-        commit_create_hierarchy(&mut state).expect("transaction commits");
+        commit_create_hierarchy(
+            &mut state.design.create_hierarchy,
+            &mut state.design.symbol,
+            &mut state.model,
+            &state.workbench,
+        )
+        .expect("transaction commits");
 
         let target_ref = CellViewRef::new(&library_name, &child, "schematic");
         assert_eq!(state.model.workspace.content.active_view, target_ref);
@@ -1054,7 +1057,13 @@ mod tests {
         );
         assert!(state.design.create_hierarchy.open);
         let child = state.design.create_hierarchy.cell_name.clone();
-        let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
+        let error = commit_create_hierarchy(
+            &mut state.design.create_hierarchy,
+            &mut state.design.symbol,
+            &mut state.model,
+            &state.workbench,
+        )
+        .expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
         assert!(before.is_equal_document(state.model.schematic.document()));
         assert!(

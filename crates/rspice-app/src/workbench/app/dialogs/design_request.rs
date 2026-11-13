@@ -58,7 +58,13 @@ impl RSpiceApp {
                 }
             }
             DesignRequest::CreateHierarchy => {
-                if let Err(error) = commit_create_hierarchy(&mut self.state) {
+                let state = &mut self.state;
+                if let Err(error) = commit_create_hierarchy(
+                    &mut state.design.create_hierarchy,
+                    &mut state.design.symbol,
+                    &mut state.model,
+                    &state.workbench,
+                ) {
                     self.state.design.create_hierarchy.validation_error = Some(error);
                 }
             }

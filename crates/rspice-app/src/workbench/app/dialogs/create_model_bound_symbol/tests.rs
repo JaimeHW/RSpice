@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use egui::{Context, Rect, vec2};
 
 use super::controller::{
-    inferred_model_pins, open_create_model_bound_symbol_dialog,
-    open_create_subcircuit_bound_symbol_dialog, parse_target,
+    inferred_model_pins, open_create_subcircuit_bound_symbol_dialog, parse_target,
 };
 use super::state::*;
 use crate::state::{
@@ -18,6 +17,17 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::OpenInDesign;
 
 /// Draw the dialog as the frame's step does, over the application's parts.
+/// Open Create symbol over `state`'s slots, from the model the models
+/// workspace has selected.
+fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
+    super::controller::open_create_model_bound_symbol_dialog(
+        &mut state.design.create_model_bound_symbol,
+        &state.model,
+        &mut state.workbench,
+        state.models.selected_model.as_deref(),
+    );
+}
+
 fn render(app: &mut RSpiceApp, ctx: &Context) {
     let state = &mut app.state;
     super::render::render_create_model_bound_symbol_dialog(
@@ -448,7 +458,8 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
         .expect("current directory")
         .join("test-fixtures/logic-family-models.lib");
     open_create_subcircuit_bound_symbol_dialog(
-        &mut state,
+        &mut state.design.create_model_bound_symbol,
+        &state.model,
         "pack-fixture-logic-family".to_owned(),
         "7400".to_owned(),
         source,
@@ -524,7 +535,8 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
 fn a_vendor_amplifier_subcircuit_opens_with_the_amplifier_template() {
     let mut state = state_with_bound_mos_model();
     open_create_subcircuit_bound_symbol_dialog(
-        &mut state,
+        &mut state.design.create_model_bound_symbol,
+        &state.model,
         "vendor_analog".to_owned(),
         "OPA_SYNTH".to_owned(),
         PathBuf::from("/models/opa_synth.lib"),
