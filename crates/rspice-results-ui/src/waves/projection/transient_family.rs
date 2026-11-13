@@ -184,6 +184,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 shape,
                 kind: trace.kind,
                 visible: trace.visible && !context.hidden_family_traces.contains(&visibility_key),
+                hidden_by_default: trace.hidden_by_default,
                 run_id: trace.run_id,
                 overlay: false,
                 presentation_key,
