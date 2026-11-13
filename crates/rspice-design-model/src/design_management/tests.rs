@@ -7,7 +7,6 @@ mod asme_form;
 mod drawing_sheet_release;
 mod frame;
 mod manual_annotation;
-mod retired_frame;
 mod sheet_lifecycle;
 mod title_fields;
 mod title_layout;
@@ -533,21 +532,6 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
     tampered_logo["title_block"]["managed_template"]["logo"]["primitives"][0]["points"][0]["x"] =
         serde_json::Value::from(2_000);
     assert!(serde_json::from_value::<SchematicSheetFormat>(tampered_logo).is_err());
-
-    let mut legacy = serde_json::to_value(&managed).unwrap();
-    legacy["title_block"]
-        .as_object_mut()
-        .unwrap()
-        .remove("managed_template");
-    let migrated: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        migrated
-            .title_block
-            .managed_template
-            .as_ref()
-            .map(DrawingSheetManagedTemplateSnapshot::content_digest),
-        Some(DrawingSheetManagedTemplateSnapshot::default().content_digest())
-    );
 }
 
 #[test]
@@ -813,56 +797,6 @@ fn drawing_sheet_drafts_derive_compatibility_and_reject_invalid_edits_atomically
         Err(DesignManagementError::NumericRange(_))
     ));
     assert_eq!(original, SchematicSheetFormat::default());
-}
-
-/// Bleed is output media, which the print setup owns, so a sheet has none.
-/// A sheet saved with one still loads, carries it through an edit for a print
-/// setup first made for it, is the same sheet as one saved without it, and is
-/// written without it.
-#[test]
-fn a_sheet_saved_with_an_export_bleed_loads_without_one() {
-    let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-    assert!(saved.get("bleed_um").is_none());
-    saved["bleed_um"] = serde_json::json!(3_175);
-    let restored: SchematicSheetFormat = serde_json::from_value(saved.clone()).unwrap();
-    assert_eq!(restored.retired_export_bleed.micrometres(), Some(3_175));
-    assert_eq!(restored, SchematicSheetFormat::default());
-    let edited = restored
-        .try_update(|draft| draft.orientation = SchematicPageOrientation::Portrait)
-        .unwrap();
-    assert_eq!(edited.retired_export_bleed.micrometres(), Some(3_175));
-    assert!(
-        serde_json::to_value(&edited)
-            .unwrap()
-            .get("bleed_um")
-            .is_none()
-    );
-
-    // Every sheet once wrote a bleed of nothing, which carries none.
-    saved["bleed_um"] = serde_json::json!(0);
-    let unbled: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
-    assert_eq!(unbled.retired_export_bleed.micrometres(), None);
-}
-
-#[test]
-fn legacy_sheet_format_receives_contextual_defaults() {
-    let legacy = serde_json::json!({
-        "size": {"kind": "standard", "size": "us-letter"},
-        "orientation": "portrait"
-    });
-    let format: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        format.authored_size,
-        AuthoredDrawingSheetSize::Standard {
-            standard: DrawingSheetStandard::AnsiA
-        }
-    );
-    assert_eq!(
-        format.margins(),
-        DrawingSheetFrameConvention::AsmeY141.margins(false)
-    );
-    assert_eq!(format.portrait_dimensions_um(), (215_900, 279_400));
-    format.validate().unwrap();
 }
 
 #[test]

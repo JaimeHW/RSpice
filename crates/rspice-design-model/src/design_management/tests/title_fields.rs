@@ -276,18 +276,7 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
         assert!(!wide.title_block_substituted());
     }
 
-    // A sheet saved before title blocks were stored, which was drawn with the
-    // retired compact block, is on its format's standard block, naming its
-    // project as it always did.
-    let mut legacy = serde_json::to_value(&format).unwrap();
-    legacy.as_object_mut().unwrap().remove("title_block");
-    let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        restored.title_block.template,
-        DrawingSheetTitleBlockTemplate::Standard
-    );
     let project = DrawingSheetTitleFieldId::Project;
-    assert!(restored.title_block.fields[&project].visible);
     // A new sheet leaves Project off, since Cell / view leads with the same
     // name, but a sheet saved showing it keeps showing it.
     assert!(!format.title_block.fields[&project].visible);

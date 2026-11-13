@@ -396,9 +396,7 @@ impl DrawingSheetDisplayUnit {
 }
 
 /// The distance from each trimmed edge of a sheet to its frame. A sheet's
-/// margins are its standard's (see [`SchematicSheetFormat::margins`]); a
-/// sheet saved with margins of its own is read only to learn whether it was
-/// bound.
+/// margins are its standard's (see [`SchematicSheetFormat::margins`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetMargins {
@@ -424,22 +422,6 @@ impl DrawingSheetBorderTemplate {
     pub const fn supports_zones(self) -> bool {
         matches!(self, Self::Standard)
     }
-}
-
-/// The border as a sheet was written. A `plain` border was an RSpice frame
-/// set inside the margins with a narrow band and no zones; a sheet saved with
-/// one takes its standard's frame with its zones off. An
-/// `organization-managed` border was the same inset frame with a wider band,
-/// corner and fold marks and a lock against editing, and no definition of
-/// its own; a sheet saved with one takes its standard's frame as it is.
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum DrawingSheetBorderWire {
-    #[default]
-    Standard,
-    Plain,
-    None,
-    OrganizationManaged,
 }
 
 /// Whether a sheet's frame carries zones. Where they lie, how many there are
@@ -480,64 +462,6 @@ impl DrawingSheetZones {
     }
 }
 
-/// The zones as a sheet was written. Before its standard decided them, a
-/// sheet could fix its own counts (the `custom` mode), letter its columns
-/// rather than its rows or quote sheet coordinates instead (`labels`), and
-/// letter only the top and left or the bottom and right (`edges`). A sheet
-/// saved with any of them takes its standard's zones, and one that carried
-/// zones still does.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DrawingSheetZonesWire {
-    mode: DrawingSheetZoneModeWire,
-    #[serde(default, rename = "custom_columns")]
-    _custom_columns: Option<u8>,
-    #[serde(default, rename = "custom_rows")]
-    _custom_rows: Option<u8>,
-    #[serde(default, rename = "labels")]
-    _labels: PresentField<RetiredZoneLabels>,
-    #[serde(default, rename = "edges")]
-    _edges: PresentField<RetiredZoneEdges>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum DrawingSheetZoneModeWire {
-    Automatic,
-    Custom,
-    None,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum RetiredZoneLabels {
-    AlphaNumeric,
-    NumericAlpha,
-    Coordinates,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum RetiredZoneEdges {
-    All,
-    TopAndLeft,
-    TopAndRight,
-    BottomAndRight,
-}
-
-impl From<DrawingSheetZonesWire> for DrawingSheetZones {
-    fn from(wire: DrawingSheetZonesWire) -> Self {
-        Self {
-            mode: match wire.mode {
-                DrawingSheetZoneModeWire::Automatic | DrawingSheetZoneModeWire::Custom => {
-                    DrawingSheetZoneMode::Automatic
-                }
-                DrawingSheetZoneModeWire::None => DrawingSheetZoneMode::None,
-            },
-        }
-    }
-}
-
 /// The marks a frame carries besides its border and zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -545,19 +469,6 @@ pub struct DrawingSheetMarks {
     /// ISO 5457's four centring marks on the axes of symmetry, or the
     /// microfilm arrows ASME Y14.1 Fig 5-5 centres in each margin.
     pub centring: bool,
-}
-
-/// The marks as a sheet was written. Before the standard frames, a sheet
-/// asked for corner `registration` crosses, now its centring marks, and for
-/// `folding` ticks 105 mm apart, which ISO 5457 gives no basis and ASME
-/// Y14.1 does not have: that flag is read and dropped.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DrawingSheetMarksWire {
-    #[serde(default)]
-    centring: bool,
-    #[serde(default, rename = "folding")]
-    _folding: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1210,36 +1121,7 @@ pub struct SchematicSheetFormat {
     pub marks: DrawingSheetMarks,
     pub title_block: DrawingSheetTitleBlock,
     pub inheritance: DrawingSheetInheritance,
-    /// The export bleed the sheet was saved with, if it was (see
-    /// [`RetiredExportBleed`]). Never written.
-    #[serde(skip)]
-    pub retired_export_bleed: RetiredExportBleed,
 }
-
-/// Retired: the export bleed a sheet carried before the print setup became
-/// bleed's one home. Bleed is output media, which Print and Export own, so a
-/// sheet no longer has one. A sheet saved with one is read so a print setup
-/// first made for it can start from it; it is never written, so it lasts
-/// until the sheet is saved again, and it never makes two sheets differ.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RetiredExportBleed(Option<u64>);
-
-impl RetiredExportBleed {
-    /// The bleed the sheet was saved with, when it was saved with one.
-    #[must_use]
-    pub const fn micrometres(self) -> Option<u64> {
-        self.0
-    }
-}
-
-impl PartialEq for RetiredExportBleed {
-    /// A sheet is the same sheet whatever bleed it was once saved with.
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for RetiredExportBleed {}
 
 /// Canonical editable payload for a sheet's format.
 ///
@@ -1259,9 +1141,6 @@ pub struct SchematicSheetFormatDraft {
     pub marks: DrawingSheetMarks,
     pub title_block: DrawingSheetTitleBlock,
     pub inheritance: DrawingSheetInheritance,
-    /// Carried through an edit so the sheet keeps it until it is saved.
-    #[serde(skip)]
-    pub retired_export_bleed: RetiredExportBleed,
 }
 
 impl From<&SchematicSheetFormat> for SchematicSheetFormatDraft {
@@ -1276,7 +1155,6 @@ impl From<&SchematicSheetFormat> for SchematicSheetFormatDraft {
             marks: format.marks,
             title_block: format.title_block.clone(),
             inheritance: format.inheritance,
-            retired_export_bleed: format.retired_export_bleed,
         }
     }
 }
@@ -1305,27 +1183,21 @@ impl Default for SchematicSheetFormat {
     }
 }
 
+/// A sheet's format as it is written: the title block is read against the
+/// format's frame convention (see [`DrawingSheetTitleBlockWire`]).
 #[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct SchematicSheetFormatWire {
     size: SchematicSheetSize,
     orientation: SchematicPageOrientation,
-    authored_size: PresentField<AuthoredDrawingSheetSize>,
+    authored_size: AuthoredDrawingSheetSize,
     display_unit: DrawingSheetDisplayUnit,
-    /// The margins a sheet stored before they became its standard's. They
-    /// are read only to keep a bound ASME sheet bound: a sheet saved with
-    /// other margins loads on its standard's, and keeps its content where it
-    /// was on the sheet.
-    margins: PresentField<DrawingSheetMargins>,
+    #[serde(default)]
     binding_margin: bool,
-    /// Retired: the export bleed every sheet stored before the print setup
-    /// became bleed's one home. Read so a print setup first made for the
-    /// sheet can start from it (see [`RetiredExportBleed`]).
-    bleed_um: u64,
-    border: DrawingSheetBorderWire,
-    zones: PresentField<DrawingSheetZonesWire>,
-    marks: DrawingSheetMarksWire,
-    title_block: PresentField<DrawingSheetTitleBlockWire>,
+    border: DrawingSheetBorderTemplate,
+    zones: DrawingSheetZones,
+    marks: DrawingSheetMarks,
+    title_block: DrawingSheetTitleBlockWire,
     inheritance: DrawingSheetInheritance,
 }
 
@@ -1333,10 +1205,8 @@ struct SchematicSheetFormatWire {
 ///
 /// `Option<T>` is not suitable for this wire role: self-describing formats
 /// such as JSON accept a direct `T`, while RON correctly requires `Some(T)`.
-/// `SchematicSheetFormat` has always serialized these fields directly, so a
-/// wire `Option<T>` makes RON sessions written by RSpice unreadable on the
-/// next launch. Missing legacy fields still default to `None`; present fields
-/// deserialize through the exact durable type that the serializer emitted.
+/// A field written directly is read through this so a RON session written by
+/// RSpice stays readable; a missing field defaults to `None`.
 struct PresentField<T>(Option<T>);
 
 impl<T> Default for PresentField<T> {
@@ -1357,118 +1227,26 @@ where
     }
 }
 
-impl Default for SchematicSheetFormatWire {
-    fn default() -> Self {
-        Self {
-            size: SchematicSheetSize::default(),
-            orientation: SchematicPageOrientation::default(),
-            authored_size: PresentField::default(),
-            display_unit: DrawingSheetDisplayUnit::default(),
-            margins: PresentField::default(),
-            binding_margin: false,
-            bleed_um: 0,
-            border: DrawingSheetBorderWire::default(),
-            zones: PresentField::default(),
-            // A sheet saved before its marks were stored drew them.
-            marks: DrawingSheetMarksWire {
-                centring: true,
-                _folding: false,
-            },
-            title_block: PresentField::default(),
-            inheritance: DrawingSheetInheritance::default(),
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for SchematicSheetFormat {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let wire = SchematicSheetFormatWire::deserialize(deserializer)?;
-        let authored_size = wire
-            .authored_size
-            .0
-            .unwrap_or_else(|| authored_size_from_legacy(&wire.size));
-        let convention = authored_size.frame_convention();
-        let legacy_title_block = wire.title_block.0.is_none();
-        // A left margin of exactly the binding margin is how a bound sheet
-        // was stored; on a sheet of another format it was only a margin.
-        let bound = wire.binding_margin
-            || wire
-                .margins
-                .0
-                .is_some_and(|margins| margins.left_um == DRAWING_SHEET_ASME_BINDING_MARGIN_UM);
-        let zones = wire
-            .zones
-            .0
-            .map(DrawingSheetZones::from)
-            .unwrap_or_default();
-        let (border, zones) = match wire.border {
-            DrawingSheetBorderWire::Standard | DrawingSheetBorderWire::OrganizationManaged => {
-                (DrawingSheetBorderTemplate::Standard, zones)
-            }
-            DrawingSheetBorderWire::Plain => (
-                DrawingSheetBorderTemplate::Standard,
-                DrawingSheetZones::none(),
-            ),
-            DrawingSheetBorderWire::None => (DrawingSheetBorderTemplate::None, zones),
-        };
+        let convention = wire.authored_size.frame_convention();
         let mut format = Self {
             size: wire.size,
             orientation: wire.orientation,
-            authored_size,
+            authored_size: wire.authored_size,
             display_unit: wire.display_unit,
-            binding_margin: bound,
-            border,
-            zones,
-            marks: DrawingSheetMarks {
-                centring: wire.marks.centring,
-            },
-            // A block saved as the retired compact one, or a sheet saved
-            // before title blocks were stored, which was drawn with it, is on
-            // its format's standard block.
-            title_block: wire.title_block.0.map_or_else(
-                || DrawingSheetTitleBlock {
-                    template: DrawingSheetTitleBlockTemplate::for_convention(convention),
-                    ..DrawingSheetTitleBlock::default()
-                },
-                |title_block| title_block.into_title_block(convention),
-            ),
+            binding_margin: wire.binding_margin,
+            border: wire.border,
+            zones: wire.zones,
+            marks: wire.marks,
+            title_block: wire.title_block.into_title_block(convention),
             inheritance: wire.inheritance,
-            retired_export_bleed: RetiredExportBleed((wire.bleed_um > 0).then_some(wire.bleed_um)),
         };
-        format.binding_margin &= format.can_bind();
-        // A sheet saved with margins narrower than its standard's may be too
-        // small to keep a drawing area inside them. No frame of its standard
-        // fits it, so it loads without one rather than not at all.
-        if format.border != DrawingSheetBorderTemplate::None
-            && matches!(
-                format.geometry(),
-                Err(DesignManagementError::NumericRange(
-                    "drawing sheet margins" | "drawing sheet drawing area"
-                ))
-            )
-        {
-            format.border = DrawingSheetBorderTemplate::None;
-            format.zones = DrawingSheetZones::none();
-            format.marks = DrawingSheetMarks { centring: false };
-            format.binding_margin = false;
-        }
         format.title_block.normalize_title_field_set();
-        format.title_block.normalize_managed_template();
-        if legacy_title_block {
-            // A sheet saved before title blocks were stored has always been
-            // drawn naming its project, and keeps doing so: only new sheets
-            // leave Project off.
-            if let Some(project) = format
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::Project)
-            {
-                project.visible = true;
-            }
-        }
         format.validate().map_err(D::Error::custom)?;
         Ok(format)
     }
@@ -1497,7 +1275,6 @@ impl SchematicSheetFormat {
             marks: draft.marks,
             title_block: draft.title_block,
             inheritance: draft.inheritance,
-            retired_export_bleed: draft.retired_export_bleed,
         };
         // A sheet that leaves the ASME format, or its border, leaves the
         // binding margin with it.
@@ -1600,7 +1377,6 @@ impl SchematicSheetFormat {
                 .default_marks(DrawingSheetBorderTemplate::Standard),
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
-            retired_export_bleed: RetiredExportBleed::default(),
         };
         format.start_on_standard_title_block();
         debug_assert!(format.validate().is_ok());
@@ -1646,7 +1422,6 @@ impl SchematicSheetFormat {
             },
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
-            retired_export_bleed: RetiredExportBleed::default(),
         };
         format.start_on_standard_title_block();
         format.validate()?;
@@ -1962,33 +1737,6 @@ impl DrawingSheetZones {
         Self {
             mode: DrawingSheetZoneMode::None,
         }
-    }
-}
-
-fn authored_size_from_legacy(size: &SchematicSheetSize) -> AuthoredDrawingSheetSize {
-    match size {
-        SchematicSheetSize::Standard { size } => AuthoredDrawingSheetSize::Standard {
-            standard: match size {
-                SchematicPageSize::A4 => DrawingSheetStandard::IsoA4,
-                SchematicPageSize::A3 => DrawingSheetStandard::IsoA3,
-                SchematicPageSize::UsLetter => DrawingSheetStandard::AnsiA,
-                SchematicPageSize::UsLedger => DrawingSheetStandard::AnsiB,
-            },
-        },
-        SchematicSheetSize::Custom {
-            name,
-            portrait_width_um,
-            portrait_height_um,
-        } => AuthoredDrawingSheetSize::Custom {
-            snapshot: CustomDrawingSheetSnapshot {
-                preset_id: None,
-                name: name.clone(),
-                portrait_width_um: *portrait_width_um,
-                portrait_height_um: *portrait_height_um,
-                source_preset_unavailable: false,
-                started_from: None,
-            },
-        },
     }
 }
 

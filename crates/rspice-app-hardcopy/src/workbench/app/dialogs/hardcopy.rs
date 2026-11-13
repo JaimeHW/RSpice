@@ -1930,10 +1930,8 @@ mod tests {
 
     /// With nothing saved, an authored drawing sheet opens on its own paper
     /// at 1:1, with no margin, bleed or decoration band, whatever its size or
-    /// orientation. A sheet still carrying an export bleed from before bleed
-    /// was the print setup's starts without it: a page that is the sheet has
-    /// no margin to hold one. A source without a sheet starts from the
-    /// general default.
+    /// orientation: a page that is the sheet has no margin to hold a bleed.
+    /// A source without a sheet starts from the general default.
     #[test]
     fn a_sheet_with_nothing_saved_opens_on_its_own_paper_at_one_to_one() {
         use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
@@ -1960,13 +1958,8 @@ mod tests {
                 .unwrap();
             draft.build_setup().expect("the seeded draft compiles")
         };
-        let with_retired_bleed = {
-            let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-            saved["bleed_um"] = serde_json::json!(3_175);
-            serde_json::from_value::<SchematicSheetFormat>(saved).unwrap()
-        };
         let mut formats = vec![
-            with_retired_bleed,
+            SchematicSheetFormat::default(),
             SchematicSheetFormat::try_custom(
                 "Review board",
                 304_800,

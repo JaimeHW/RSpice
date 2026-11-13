@@ -15,8 +15,8 @@ use crate::state::{
     DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins, DrawingSheetMarks,
     DrawingSheetPresetScope, DrawingSheetStandard, DrawingSheetStandardSeries,
     DrawingSheetTitleBlock, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones, RetiredExportBleed,
-    SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft,
+    DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation,
+    SchematicSheetFormat, SchematicSheetFormatDraft,
 };
 
 /// What the sheet's size is drawn from.
@@ -59,9 +59,6 @@ pub(crate) struct DrawingSheetDraft {
     /// ASME Y14.1 4.1.3's binding margin. The margins are otherwise the
     /// standard's, and nothing here edits them.
     pub(crate) binding_margin: bool,
-    /// The export bleed the sheet was saved with, if it was: never edited
-    /// here, carried so the sheet keeps it for its first print setup.
-    pub(crate) retired_export_bleed: RetiredExportBleed,
     pub(crate) border: DrawingSheetBorderTemplate,
     pub(crate) zone_mode: DrawingSheetZoneMode,
     pub(crate) centring_marks: bool,
@@ -106,7 +103,6 @@ impl DrawingSheetDraft {
             save_custom_preset: false,
             custom_preset_scope: DrawingSheetPresetScope::Project,
             binding_margin: format.binding_margin,
-            retired_export_bleed: format.retired_export_bleed,
             border: format.border,
             zone_mode: format.zones.mode,
             centring_marks: format.marks.centring,
@@ -324,7 +320,6 @@ impl DrawingSheetDraft {
                 fields: self.title_fields.clone(),
             },
             inheritance: self.inheritance,
-            retired_export_bleed: self.retired_export_bleed,
         })
         .map_err(|error| error.to_string())
     }
