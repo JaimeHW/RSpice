@@ -39,11 +39,11 @@ pub struct MeasurementDraft {
 pub struct FamilyPreview {
     /// What the family is and how many members it has.
     pub family: String,
-    /// The members' distribution in one line, `Ok(None)` while nothing is
-    /// typed, or why the expression has none.
+    /// The members' distribution, one form row per line, `Ok(None)` while
+    /// nothing is typed, or why the expression has none.
     pub statistics: Result<Option<String>, String>,
-    /// The yield against the typed limits and who fails it, `None` while no
-    /// limit is typed, or why the limits are refused.
+    /// The yield against the typed limits and who fails it, one form row per
+    /// line, `None` while no limit is typed, or why the limits are refused.
     pub judged: Option<Result<String, String>>,
 }
 
@@ -159,17 +159,16 @@ pub fn show(
             // Over a family the line states the members' distribution; the
             // statistic kept is picked below it.
             let value = family.map_or(&preview.value, |family| &family.statistics);
-            rows.field_line(
-                Some(field),
-                // The line is never blank: before anything is typed it
-                // says what Add waits for, so the form keeps one pitch.
-                match (&incomplete, value) {
-                    (Some(problem), _) => FieldLine::Error(problem),
-                    (None, Ok(None)) => FieldLine::Derived(EXPRESSION_MISSING),
-                    (None, Ok(Some(value))) => FieldLine::Value(value),
-                    (None, Err(reason)) => FieldLine::Error(reason),
-                },
-            );
+            // The line is never blank: before anything is typed it says what
+            // Add waits for, so the form keeps one pitch.
+            match (&incomplete, value) {
+                (Some(problem), _) => rows.field_line(Some(field), FieldLine::Error(problem)),
+                (None, Ok(None)) => {
+                    rows.field_line(Some(field), FieldLine::Derived(EXPRESSION_MISSING));
+                }
+                (None, Ok(Some(value))) => value_rows(rows, field, value),
+                (None, Err(reason)) => rows.field_line(Some(field), FieldLine::Error(reason)),
+            }
             if let Some(family) = family {
                 family_rows(rows, draft, family, preview);
             }
@@ -285,16 +284,31 @@ fn family_rows(
     let upper = Id::new("rspice.add-measurement.upper");
     rows.quantity("Lower limit", lower, &mut draft.lower, "none", "", "");
     rows.quantity("Upper limit", upper, &mut draft.upper, "none", "", "");
-    let waiting = match (&family.judged, draft.statistic) {
-        (None, FamilyStatistic::Yield) => FieldLine::Error(LIMITS_MISSING),
-        (None, _) => FieldLine::Derived(LIMITS_MISSING),
-        (Some(Ok(line)), _) => FieldLine::Value(line),
-        (Some(Err(reason)), _) => FieldLine::Error(reason),
-    };
-    rows.field_line(Some(upper), waiting);
+    match (&family.judged, draft.statistic) {
+        (None, FamilyStatistic::Yield) => {
+            rows.field_line(Some(upper), FieldLine::Error(LIMITS_MISSING));
+        }
+        (None, _) => rows.field_line(Some(upper), FieldLine::Derived(LIMITS_MISSING)),
+        (Some(Ok(lines)), _) => value_rows(rows, upper, lines),
+        (Some(Err(reason)), _) => rows.field_line(Some(upper), FieldLine::Error(reason)),
+    }
     // What Add keeps, once the expression and the limits allow it.
     if let Ok(Some(kept)) = &preview.value {
         rows.derived_line(kept);
+    }
+}
+
+/// A value of several lines, one row each: the first belongs to `field`,
+/// the rest continue it. A family's distribution and verdict are each two
+/// short rows rather than one row the form would have to elide.
+fn value_rows(rows: &mut FormRows<'_>, field: Id, text: &str) {
+    let mut lines = text.lines();
+    rows.field_line(
+        Some(field),
+        FieldLine::Value(lines.next().unwrap_or_default()),
+    );
+    for line in lines {
+        rows.field_line(None, FieldLine::Value(line));
     }
 }
 

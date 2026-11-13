@@ -374,8 +374,9 @@ fn statistics_line(measured: &FamilyMeasurement, format: impl Fn(f64) -> String)
             statistics.unmeasured
         )
     };
+    // Two rows: where the members sit, then how far they reach.
     format!(
-        "{count} \u{b7} mean {} \u{b7} \u{3c3} {} \u{b7} min {} \u{b7} max {}",
+        "{count} \u{b7} mean {} \u{b7} \u{3c3} {}\nmin {} \u{b7} max {}",
         format(statistics.mean),
         statistics
             .std_dev
@@ -385,7 +386,8 @@ fn statistics_line(measured: &FamilyMeasurement, format: impl Fn(f64) -> String)
     )
 }
 
-/// The yield against the limits, and the members that fail it.
+/// The yield against the limits, and on a second row the members that fail
+/// it: the first two by name, then how many more.
 fn judged_line(
     measured: &FamilyMeasurement,
     judged: &rspice_results::family_measurements::FamilyYield,
@@ -398,14 +400,14 @@ fn judged_line(
     };
     let mut line = format!("{} of {} pass ({share})", judged.passed, judged.total);
     if !judged.failing.is_empty() {
-        const NAMED: usize = 4;
+        const NAMED: usize = 2;
         let names: Vec<&str> = judged
             .failing
             .iter()
             .take(NAMED)
             .map(|position| measured.members[*position].label.as_str())
             .collect();
-        line.push_str(&format!(" \u{b7} fails {}", names.join(", ")));
+        line.push_str(&format!("\nfails {}", names.join(", ")));
         if judged.failing.len() > NAMED {
             line.push_str(&format!(" +{}", judged.failing.len() - NAMED));
         }
@@ -590,7 +592,7 @@ mod tests {
         );
         assert_eq!(
             family.judged.unwrap().unwrap(),
-            "3 of 5 pass (60 %) · fails Trial 0 · seed 40, Trial 2 · seed 42"
+            "3 of 5 pass (60 %)\nfails Trial 0 · seed 40, Trial 2 · seed 42"
         );
         assert_eq!(preview.value.unwrap().unwrap(), "Keeps the yield: 60 %");
         // A quick view keeps nothing, family or not.

@@ -20,11 +20,12 @@ fn family_preview() -> MeasurementPreview {
         family: Some(FamilyPreview {
             family: "10 Monte Carlo trials, each measured on its own".to_owned(),
             statistics: Ok(Some(
-                "n 10 \u{b7} mean 1.002 V \u{b7} \u{3c3} 48.71 mV \u{b7} min 902.1 mV \u{b7} max 1.104 V"
+                "n 10 \u{b7} mean 1.002 V \u{b7} \u{3c3} 48.71 mV\nmin 902.1 mV \u{b7} max 1.104 V"
                     .to_owned(),
             )),
             judged: Some(Ok(
-                "8 of 10 pass (80 %) \u{b7} fails Trial 3 \u{b7} seed 7, Trial 8 \u{b7} seed 12".to_owned(),
+                "8 of 10 pass (80 %)\nfails Trial 3 \u{b7} seed 7, Trial 8 \u{b7} seed 12"
+                    .to_owned(),
             )),
         }),
         ..preview(Ok(Some("Keeps the yield: 80 %".to_owned())))
@@ -80,16 +81,22 @@ fn a_family_pane_offers_the_statistics_and_the_yield_limits() {
             .collect();
     }
     let family = preview.family.as_ref().unwrap();
-    for expected in [
+    // Each line of the distribution and of the verdict is a row of its own,
+    // read out whole rather than elided.
+    let statistics = family.statistics.as_ref().unwrap().as_deref().unwrap();
+    let judged = family.judged.as_ref().unwrap().as_deref().unwrap();
+    let rows = [
         "Family",
         family.family.as_str(),
         "Keep",
         "Lower limit",
         "Upper limit",
-        family.statistics.as_ref().unwrap().as_deref().unwrap(),
-        family.judged.as_ref().unwrap().as_deref().unwrap(),
-        "Keeps the yield: 80 %",
-    ] {
+    ]
+    .into_iter()
+    .chain(statistics.lines())
+    .chain(judged.lines())
+    .chain(["Keeps the yield: 80 %"]);
+    for expected in rows {
         assert!(
             read.iter().any(|text| text.contains(expected)),
             "{expected:?} is not read out: {read:?}"
