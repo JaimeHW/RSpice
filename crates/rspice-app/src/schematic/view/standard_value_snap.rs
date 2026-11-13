@@ -5,7 +5,6 @@
 //! parameter has no nearest member and is left alone, and the whole command
 //! is one undo step.
 
-use super::sheet_visibility::retain_selection_on_active_sheet_in;
 use super::{Model, WorkbenchSession, sync_active_schematic};
 use crate::state::{Component, ComponentType};
 
@@ -56,7 +55,7 @@ pub(crate) fn run_snap_to_standard_value(model: &mut Model, wb: &mut WorkbenchSe
         wb.prompt("The active schematic is read-only.");
         return;
     }
-    retain_selection_on_active_sheet_in(model);
+    model.retain_selection_on_active_sheet();
     let edits = snaps(model);
     if edits.is_empty() {
         wb.prompt("The selected values are standard values already.");

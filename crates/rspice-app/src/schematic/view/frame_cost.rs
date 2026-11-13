@@ -1279,7 +1279,12 @@ fn site_cost_table() -> String {
         ),
         (
             "selection kept to the active sheet",
-            site_ms(|| super::sheet_visibility::selection_on_active_sheet(state).count()),
+            site_ms(|| {
+                let model = &state.model;
+                model
+                    .selection_on_active_sheet(&model.schematic.session.editor.selection)
+                    .count()
+            }),
         ),
         (
             "snap target under the pointer (C-14)",

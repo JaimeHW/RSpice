@@ -119,115 +119,6 @@ fn object_is_on_active_sheet_in_workspace(
     )
 }
 
-/// Build a live selection containing only objects owned by the active sheet.
-/// This is also the sheet-switch boundary: stale IDs from a previously active
-/// sheet can never flow into keyboard commands or context-menu actions.
-#[cfg(test)]
-pub(super) fn selection_on_active_sheet(state: &impl AsRef<Model>) -> Selection {
-    selection_filtered_to_active_sheet(state, &state.as_ref().schematic.session.editor.selection)
-}
-
-pub(crate) fn selection_filtered_to_active_sheet(
-    state: &impl AsRef<Model>,
-    source: &Selection,
-) -> Selection {
-    selection_filtered_to_active_sheet_in(state.as_ref(), source)
-}
-
-/// [`selection_filtered_to_active_sheet`] over the model alone.
-pub(crate) fn selection_filtered_to_active_sheet_in(
-    model: &Model,
-    source: &Selection,
-) -> Selection {
-    let mut selection = Selection::default();
-    // This runs twice a frame. Nothing selected keeps nothing, and the sheet
-    // catalog is looked up once rather than once per object.
-    if source.is_empty() {
-        return selection;
-    }
-    let catalog = model.active_sheet_catalog();
-    let on_sheet = |id: u64| {
-        rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
-    };
-
-    for object in &model.schematic.document().components {
-        if source.has_component(object.id) && on_sheet(object.id) {
-            selection.select_component(object.id);
-        }
-    }
-    let wire_parts = !source.wire_segments.is_empty() || !source.wire_vertices.is_empty();
-    for object in &model.schematic.document().wires {
-        let whole = source.has_wire(object.id);
-        if !(whole || wire_parts) || !on_sheet(object.id) {
-            continue;
-        }
-        if whole {
-            selection.select_wire(object.id);
-        }
-        if wire_parts {
-            selection.wire_segments.extend(
-                source
-                    .wire_segments
-                    .iter()
-                    .filter(|selected| selected.wire_id == object.id)
-                    .copied(),
-            );
-            selection.wire_vertices.extend(
-                source
-                    .wire_vertices
-                    .iter()
-                    .filter(|selected| selected.wire_id == object.id)
-                    .copied(),
-            );
-        }
-    }
-    for object in &model.schematic.document().junctions {
-        if source.has_junction(object.pos) && on_sheet(object.id) {
-            selection.select_junction(object.pos);
-        }
-    }
-    for object in &model.schematic.document().buses {
-        if source.has_bus(object.id) && on_sheet(object.id) {
-            selection.select_bus(object.id);
-        }
-    }
-    for object in &model.schematic.document().bus_taps {
-        if source.has_bus_tap(object.id) && on_sheet(object.id) {
-            selection.select_bus_tap(object.id);
-        }
-    }
-    for object in &model.schematic.document().net_labels {
-        if source.has_net_label(object.id) && on_sheet(object.id) {
-            selection.select_net_label(object.id);
-        }
-    }
-    for object in &model.schematic.document().design_notes {
-        if source.has_design_note(object.id) && on_sheet(object.id) {
-            selection.select_design_note(object.id);
-        }
-    }
-    for object in &model.schematic.document().documentation_shapes {
-        if source.has_documentation_shape(object.id) && on_sheet(object.id) {
-            selection.select_documentation_shape(object.id);
-        }
-    }
-    for object in &model.schematic.document().probes {
-        if source.has_probe(object.id) && on_sheet(object.id) {
-            selection.select_probe(object.id);
-        }
-    }
-    selection
-}
-
-/// Keep in the session's selection only the objects on the active sheet.
-/// This is the sheet-switch boundary applied: stale IDs from a previously
-/// active sheet never reach keyboard commands or context-menu actions.
-pub(crate) fn retain_selection_on_active_sheet_in(model: &mut Model) {
-    let selection =
-        selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
-    model.schematic.session.editor.selection = selection;
-}
-
 /// Every complete object on the active sheet `filter`, the session's
 /// selection filter, admits.
 ///
@@ -416,7 +307,7 @@ pub(super) fn select_in_rect_on_active_sheet(
     add_to_selection: bool,
 ) -> usize {
     if add_to_selection {
-        retain_selection_on_active_sheet_in(state.model);
+        state.model.retain_selection_on_active_sheet();
     }
     let selected_before = if add_to_selection {
         state.model.schematic.session.editor.selection.count()
@@ -425,7 +316,7 @@ pub(super) fn select_in_rect_on_active_sheet(
     };
     let (document, editor) = state.model.schematic.document_and_editor();
     symbol_context.select_in_rect(document, &mut editor.selection, window, add_to_selection);
-    retain_selection_on_active_sheet_in(state.model);
+    state.model.retain_selection_on_active_sheet();
     state
         .design
         .schematic_selection_filter
@@ -749,7 +640,7 @@ mod tests {
             .selection
             .select_component(20);
 
-        retain_selection_on_active_sheet_in(&mut state.model);
+        state.model.retain_selection_on_active_sheet();
         assert!(state.model.schematic.session.editor.selection.is_empty());
 
         state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(

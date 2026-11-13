@@ -32,7 +32,6 @@ use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::parts::{CanvasFacts, CanvasParts};
 use super::requests::DesignSurfaceRequest;
 use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
-use super::sheet_visibility::retain_selection_on_active_sheet_in;
 use super::viewport::Viewport;
 
 use super::selection_layout::{
@@ -567,7 +566,7 @@ pub(super) fn handle_context_menu(
     _routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
 ) {
-    retain_selection_on_active_sheet_in(state.model);
+    state.model.retain_selection_on_active_sheet();
     #[cfg(target_arch = "wasm32")]
     let browser_keyboard_open =
         crate::workbench::browser::accessibility::take_schematic_context_menu_request();
@@ -1547,7 +1546,7 @@ fn execute_context_action(
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
-    retain_selection_on_active_sheet_in(state.model);
+    state.model.retain_selection_on_active_sheet();
     match action {
         ContextAction::Properties => {
             crate::workbench::app::open_selected_object_properties_in(

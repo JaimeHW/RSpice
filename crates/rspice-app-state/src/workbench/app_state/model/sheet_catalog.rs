@@ -11,7 +11,7 @@
 //! followed finding, it is this one operation.
 
 use super::Model;
-use crate::state::{DesignManagementCatalog, SheetCatalog, SheetId};
+use crate::state::{DesignManagementCatalog, Selection, SheetCatalog, SheetId};
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 
 impl Model {
@@ -133,6 +133,99 @@ impl Model {
         editor.net_highlight.clear();
         editor.needs_drawing_sheet_fit = true;
         editor.needs_fit = false;
+    }
+
+    /// The part of `source` on the active sheet: each object it selects that
+    /// the sheet holds, with the wire segments and vertices it selects on
+    /// those wires. Every object is on the sheet of a cell view without a
+    /// catalog.
+    pub fn selection_on_active_sheet(&self, source: &Selection) -> Selection {
+        let mut selection = Selection::default();
+        // This runs twice a frame. Nothing selected keeps nothing, and the sheet
+        // catalog is looked up once rather than once per object.
+        if source.is_empty() {
+            return selection;
+        }
+        let catalog = self.active_sheet_catalog();
+        let on_sheet = |id: u64| {
+            rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
+        };
+
+        for object in &self.schematic.document().components {
+            if source.has_component(object.id) && on_sheet(object.id) {
+                selection.select_component(object.id);
+            }
+        }
+        let wire_parts = !source.wire_segments.is_empty() || !source.wire_vertices.is_empty();
+        for object in &self.schematic.document().wires {
+            let whole = source.has_wire(object.id);
+            if !(whole || wire_parts) || !on_sheet(object.id) {
+                continue;
+            }
+            if whole {
+                selection.select_wire(object.id);
+            }
+            if wire_parts {
+                selection.wire_segments.extend(
+                    source
+                        .wire_segments
+                        .iter()
+                        .filter(|selected| selected.wire_id == object.id)
+                        .copied(),
+                );
+                selection.wire_vertices.extend(
+                    source
+                        .wire_vertices
+                        .iter()
+                        .filter(|selected| selected.wire_id == object.id)
+                        .copied(),
+                );
+            }
+        }
+        for object in &self.schematic.document().junctions {
+            if source.has_junction(object.pos) && on_sheet(object.id) {
+                selection.select_junction(object.pos);
+            }
+        }
+        for object in &self.schematic.document().buses {
+            if source.has_bus(object.id) && on_sheet(object.id) {
+                selection.select_bus(object.id);
+            }
+        }
+        for object in &self.schematic.document().bus_taps {
+            if source.has_bus_tap(object.id) && on_sheet(object.id) {
+                selection.select_bus_tap(object.id);
+            }
+        }
+        for object in &self.schematic.document().net_labels {
+            if source.has_net_label(object.id) && on_sheet(object.id) {
+                selection.select_net_label(object.id);
+            }
+        }
+        for object in &self.schematic.document().design_notes {
+            if source.has_design_note(object.id) && on_sheet(object.id) {
+                selection.select_design_note(object.id);
+            }
+        }
+        for object in &self.schematic.document().documentation_shapes {
+            if source.has_documentation_shape(object.id) && on_sheet(object.id) {
+                selection.select_documentation_shape(object.id);
+            }
+        }
+        for object in &self.schematic.document().probes {
+            if source.has_probe(object.id) && on_sheet(object.id) {
+                selection.select_probe(object.id);
+            }
+        }
+        selection
+    }
+
+    /// Keep in the session's selection only the objects on the active sheet.
+    /// This is the sheet-switch boundary applied: stale IDs from a previously
+    /// active sheet never reach keyboard commands or context-menu actions.
+    pub fn retain_selection_on_active_sheet(&mut self) {
+        let selection = self.selection_on_active_sheet(&self.schematic.session.editor.selection);
+        self.schematic.session.editor.selection = selection;
     }
 
     /// Apply one edit to the active cell view's sheet catalog and publish the

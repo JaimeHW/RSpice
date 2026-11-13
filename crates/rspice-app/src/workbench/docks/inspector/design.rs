@@ -647,11 +647,11 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect();
     let total = match scope {
         SheetScope::AllSheets => app.state.model.schematic.session.editor.selection.count(),
-        SheetScope::ActiveSheet => sheet_visibility::selection_filtered_to_active_sheet(
-            &app.state,
-            &app.state.model.schematic.session.editor.selection,
-        )
-        .count(),
+        SheetScope::ActiveSheet => app
+            .state
+            .model
+            .selection_on_active_sheet(&app.state.model.schematic.session.editor.selection)
+            .count(),
     };
     // The instances are named only when the set holds something else too: a
     // set of instances alone is counted once, by the title itself.

@@ -272,7 +272,7 @@ pub(crate) fn open_connectivity_manager(
         workbench.prompt("Connectivity and bus manager needs a schematic or testbench view.");
         return;
     }
-    crate::schematic::view::retain_selection_on_active_sheet_in(model);
+    model.retain_selection_on_active_sheet();
     crate::workbench::app::actions::workspace::sync_active_schematic(model, workbench);
     let contract = (*model.workspace.content.connectivity).clone();
     let (report, error) = match build_report(model, &contract.policy) {

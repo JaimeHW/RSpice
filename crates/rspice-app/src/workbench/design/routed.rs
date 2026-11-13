@@ -16,7 +16,6 @@
 
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
-use crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet_in;
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::symbol_in_place::{
     in_place_bounds, in_place_session, in_place_session_mut,
@@ -346,7 +345,7 @@ fn copy_selection(cx: &mut Cx<'_, DesignFeature>) {
     if symbol_editor(cx.wb.workspace, cx.model) {
         copy_selected_symbol_shape(&mut cx.state.symbol, cx.model, cx.wb);
     } else {
-        retain_selection_on_active_sheet_in(cx.model);
+        cx.model.retain_selection_on_active_sheet();
         copy_active_schematic_selection(&mut cx.state.schematic_clipboard, cx.model);
     }
 }

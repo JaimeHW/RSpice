@@ -482,7 +482,7 @@ fn open_design_management_dialog_state(
         wb.prompt("Design Management needs a schematic or testbench view.");
         return;
     }
-    crate::schematic::view::retain_selection_on_active_sheet_in(model);
+    model.retain_selection_on_active_sheet();
     let owner_key = model.workspace.content.active_schematic_reference().key();
     let selection_object_ids = selected_stable_object_ids(&model.schematic);
     let all_object_ids = all_stable_object_ids(&model.schematic);

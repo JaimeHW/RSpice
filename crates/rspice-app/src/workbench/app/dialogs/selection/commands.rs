@@ -13,8 +13,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::schematic::view::sheet_visibility::{
     SchematicObjectKind, objects_of_kind_on_active_sheet, off_active_sheet,
-    selectable_objects_on_active_sheet, selection_filtered_to_active_sheet_in,
-    with_active_wire_topology, with_active_wire_topology_in,
+    selectable_objects_on_active_sheet, with_active_wire_topology, with_active_wire_topology_in,
 };
 use crate::state::{
     CellViewRef, DuplicateExternalNets, Point, SchematicSelectionFilter, SchematicState, Selection,
@@ -76,8 +75,7 @@ pub(crate) fn delete_schematic_selection(model: &mut Model, wb: &mut WorkbenchSe
     if refuse_read_only(model) {
         return false;
     }
-    let mut target =
-        selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
+    let mut target = model.selection_on_active_sheet(&model.schematic.session.editor.selection);
     promote_wire_handles_to_complete_wires(&model.schematic, &mut target);
     let count = complete_selection_count(&model.schematic, &target);
     if count == 0 {
@@ -113,8 +111,7 @@ pub(crate) fn cut_schematic_selection(
     if refuse_read_only(model) {
         return false;
     }
-    let target =
-        selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
+    let target = model.selection_on_active_sheet(&model.schematic.session.editor.selection);
     let count = complete_selection_count(&model.schematic, &target);
     if count == 0 {
         refuse_empty(wb);
@@ -179,8 +176,7 @@ pub(crate) fn duplicate_schematic_selection_at(
     if refuse_read_only(model) {
         return false;
     }
-    let target =
-        selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
+    let target = model.selection_on_active_sheet(&model.schematic.session.editor.selection);
     let count = complete_selection_count(&model.schematic, &target);
     if count == 0 {
         refuse_empty(wb);

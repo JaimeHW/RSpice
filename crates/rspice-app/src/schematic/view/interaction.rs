@@ -26,9 +26,7 @@ use super::navigation::primary_pan_gesture_active;
 use super::parts::CanvasParts;
 use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
 use super::selection_drag::handle_select_dragging;
-use super::sheet_visibility::{
-    finish_wire_on_active_sheet, retain_selection_on_active_sheet_in, with_active_wire_topology_in,
-};
+use super::sheet_visibility::{finish_wire_on_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
@@ -58,7 +56,7 @@ pub(super) fn handle_tool_interactions(
     if state.reconcile_conductor_route(ui.ctx()) {
         return;
     }
-    retain_selection_on_active_sheet_in(state.model);
+    state.model.retain_selection_on_active_sheet();
     if primary_pan_gesture_active(ui, response) {
         return;
     }

@@ -78,7 +78,6 @@ pub(crate) use self::parts::{
     CanvasFacts, CanvasParts, canvas_application_modal_open, canvas_facts, canvas_parts,
 };
 pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
-pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
 };

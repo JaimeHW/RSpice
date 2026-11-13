@@ -4,7 +4,7 @@
 //! keys during a move share this one route, so the pivot, the sheet scope and
 //! the undo step cannot differ by how the edit was asked for.
 
-use super::sheet_visibility::{retain_selection_on_active_sheet_in, with_active_wire_topology_in};
+use super::sheet_visibility::with_active_wire_topology_in;
 use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::Point;
 pub(crate) use rspice_design::schematic::component_edit::SelectionTransform;
@@ -33,7 +33,7 @@ pub(crate) fn transform_selection_on_active_sheet(
     if model.schematic_edit_read_only() {
         return false;
     }
-    retain_selection_on_active_sheet_in(model);
+    model.retain_selection_on_active_sheet();
     let Some(bounds) = symbol_context.selection_bounds(
         model.schematic.document(),
         &model.schematic.session.editor.selection,

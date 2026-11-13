@@ -7,7 +7,7 @@
 //! command is one undo step, and the cell view's other sheets are out of
 //! reach while the wiring is carried and tidied.
 
-use super::sheet_visibility::{retain_selection_on_active_sheet_in, with_active_wire_topology_in};
+use super::sheet_visibility::with_active_wire_topology_in;
 use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::{MoveSelectionMode, Point, Selection};
 use crate::workbench::app::on_grid;
@@ -49,7 +49,7 @@ pub(crate) fn snap_selection_to_grid(
     if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    retain_selection_on_active_sheet_in(model);
+    model.retain_selection_on_active_sheet();
     let snaps = snaps(model, symbols);
     if snaps.is_empty() {
         return Ok(0);
