@@ -590,7 +590,7 @@ fn generated_noise_processes_take_their_xyce_branch_names() {
     // DIODE_CMC's thermal source sits on the flow-probed branch (aik,k), so
     // it injects through that branch's flow unknown but keeps its name.
     let netlist = Netlist::parse_with_options(
-        include_str!("../../../tests/xyce/Netlists/DIODE_CMC/DiodeClipper_noise.cir"),
+        include_str!("../../../../tests/xyce/Netlists/DIODE_CMC/DiodeClipper_noise.cir"),
         NetlistParseOptions {
             expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
             ..NetlistParseOptions::default()

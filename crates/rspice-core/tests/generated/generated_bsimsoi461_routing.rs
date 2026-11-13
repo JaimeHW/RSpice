@@ -1,5 +1,3 @@
-#![cfg(feature = "veriloga-model-bsimsoi-va")]
-
 use rspice_core::SpiceDialect;
 use rspice_core::device::veriloga_builtins::builtins;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};

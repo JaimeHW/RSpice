@@ -232,10 +232,10 @@ shooting `.PSS` and takes none.
 ```bash
 cargo test -p rspice-core                             # suites in tests/
 cargo test -p rspice-core --lib                       # unit tests
-cargo test -p rspice-core --features veriloga         # + veriloga_*.rs suites
+cargo test -p rspice-core --features veriloga         # + tests/veriloga/ suites
 cargo test -p rspice-core --features veriloga-native  # same, native JIT
 cargo test -p rspice-core --features veriloga-model-diode-cmc \
-    --test generated_veriloga_feature_shards          # one generated model
+    --test generated generated_veriloga_feature_shards:: # one generated model
 cargo build -p rspice-core \
     --features veriloga-model-vbic13,veriloga-builtins-noise
 ```

@@ -1,4 +1,4 @@
-#[path = "../build_support.rs"]
+#[path = "../../build_support.rs"]
 mod build_support;
 
 use build_support::verify_declared_generated_file;

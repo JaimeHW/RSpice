@@ -804,11 +804,11 @@ mod xyce_vbic_generated {
         for (name, source) in [
             (
                 "commonEmitterBjt_vbic13",
-                include_str!("../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13.cir"),
+                include_str!("../../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13.cir"),
             ),
             (
                 "commonEmitterBjt_vbic13_3T",
-                include_str!("../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"),
+                include_str!("../../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"),
             ),
         ] {
             let netlist = Netlist::parse_with_options(
@@ -886,7 +886,7 @@ mod xyce_vbic_generated {
 #[test]
 fn a_generated_model_reports_the_outputs_its_module_describes() {
     use rspice_core::engine::SpiceDialect;
-    const CARD: &str = include_str!("../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
+    const CARD: &str = include_str!("../../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
     // gummel_n_outvars.cir at V(drain) = 0.097 V, V(gate) = 0.2 V, with the
     // source at -V(drain).
     let deck = format!(
@@ -946,7 +946,7 @@ fn a_generated_model_reports_the_outputs_its_module_describes() {
 #[test]
 fn a_generated_model_output_is_read_at_every_accepted_time_point() {
     use rspice_core::engine::SpiceDialect;
-    const CARD: &str = include_str!("../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
+    const CARD: &str = include_str!("../../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
     let deck = |gate: &str, print: &str| {
         format!(
             "* BSIM-CMG 107 output over time\n\

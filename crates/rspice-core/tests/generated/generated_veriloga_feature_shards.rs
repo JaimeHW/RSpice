@@ -1,5 +1,3 @@
-#![cfg(feature = "veriloga-builtins-base")]
-
 #[test]
 fn selected_generated_models_construct_with_validated_defaults() {
     use rspice_core::device::veriloga_builtins::builtins;
