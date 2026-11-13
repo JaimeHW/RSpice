@@ -17,7 +17,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -25,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const XYCE_CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-xyce-case-runner");
 const XYCE_AGGREGATE_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
 const XYCE_CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
+const XYCE_JOBS_ENV: &str = "RSPICE_XYCE_JOBS";
 const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 const XYCE_CLASSIFICATION_REPORT_ENV: &str = "RSPICE_XYCE_CLASSIFICATION_REPORT";
@@ -68,6 +69,59 @@ tests/xyce/grid-alignment-manifest.tsv, keeping the header. Record in the \
 commit message which engine change moved the grid, and why the weaker \
 comparison is acceptable for every deck that lost the strict one — a manifest \
 regenerated without that judgement is a gate that has been turned off.";
+
+/// Run every deck through its own watched case-runner process, several at a
+/// time.
+///
+/// Each deck is a child process with its own result file and its own hard
+/// timeout, so decks running together share nothing but the machine. Results
+/// come back in discovery order, so the summary, the reports and both manifest
+/// checks read exactly what a one-at-a-time run gives them.
+fn run_xyce_cases(
+    test_dir: &Path,
+    config: &XyceRunnerConfig,
+    decks: &[XyceDeck],
+) -> Vec<XyceTestResult> {
+    let total = decks.len();
+    let next = AtomicUsize::new(0);
+    let results = decks.iter().map(|_| OnceLock::new()).collect::<Vec<_>>();
+    thread::scope(|scope| {
+        for _ in 0..xyce_case_jobs().min(total) {
+            scope.spawn(|| {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(deck) = decks.get(index) else {
+                        break;
+                    };
+                    let result =
+                        run_xyce_case_with_watchdog(test_dir, config, deck, index + 1, total);
+                    results[index]
+                        .set(result)
+                        .expect("each Xyce deck runs exactly once");
+                }
+            });
+        }
+    });
+    results
+        .into_iter()
+        .map(|result| result.into_inner().expect("every Xyce deck ran"))
+        .collect()
+}
+
+/// How many decks run at once: `RSPICE_XYCE_JOBS` when it is a positive count,
+/// otherwise the mixed corpus's rule, a quarter of the hardware threads between
+/// 2 and 8. A deck is one child process on about one core, so this leaves the
+/// machine room for its other work.
+fn xyce_case_jobs() -> usize {
+    std::env::var(XYCE_JOBS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|jobs| *jobs > 0)
+        .unwrap_or_else(|| {
+            let threads = thread::available_parallelism().map_or(1, usize::from);
+            (threads / 4).clamp(2, 8)
+        })
+}
 
 fn run_xyce_case_with_watchdog(
     test_dir: &Path,
@@ -1294,12 +1348,7 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         .iter()
         .filter(|deck| deck.section == XyceDeckSection::Netlists)
         .count();
-    let total = discovered.len();
-    let results = discovered
-        .iter()
-        .enumerate()
-        .map(|(index, deck)| run_xyce_case_with_watchdog(&root, &config, deck, index + 1, total))
-        .collect::<Vec<_>>();
+    let results = run_xyce_cases(&root, &config, &discovered);
     XyceTestRunner::print_summary(&results);
 
     // Before any assertion: this census is what a re-baseline is written from,
