@@ -10,8 +10,6 @@
 mod cells;
 mod grid;
 mod instances;
-#[cfg(test)]
-mod tests;
 
 use super::*;
 
@@ -35,7 +33,7 @@ enum ToolbarIntent {
     Open(ConfigurationDialogRequest),
 }
 
-pub(super) fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub(crate) fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let resolution = cx.state.configuration.resolution(
         &cx.model.workspace,
         &cx.model.library_manager,

@@ -114,7 +114,7 @@ pub(crate) mod docks {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
         pub(in crate::workbench) mod code_workspace;
         pub(crate) mod design;
-        pub(in crate::workbench) mod project;
+        pub(crate) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
         #[cfg(test)]
@@ -219,7 +219,7 @@ pub(crate) mod surfaces {
     pub(super) mod automation;
     pub(super) mod library_cellview_manager;
     pub(super) mod netlist;
-    pub(super) mod project;
+    pub(crate) mod project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(super) mod stimulus;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;

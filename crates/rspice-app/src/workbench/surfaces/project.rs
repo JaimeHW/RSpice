@@ -4,7 +4,7 @@
 //! project. Every page reads authoritative project state and dispatches real
 //! workbench workflows; no mockup fixture data is admitted here.
 
-mod configuration;
+pub(crate) mod configuration;
 mod dependencies;
 mod landing;
 mod library;

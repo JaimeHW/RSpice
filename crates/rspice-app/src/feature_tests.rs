@@ -14,6 +14,7 @@ mod framework;
 mod hardcopy;
 mod model;
 mod models;
+mod project;
 // The browser jobs' clicks and keys through eframe's native test frame.
 #[cfg(not(target_arch = "wasm32"))]
 mod replay;

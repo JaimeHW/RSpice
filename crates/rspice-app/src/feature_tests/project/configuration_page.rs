@@ -2,10 +2,14 @@
 //! and on a configured hierarchy, the words it never uses, and how often it
 //! resolves the design.
 
-use super::*;
+use egui::Color32;
 
+use crate::ui::tokens::Tokens;
+use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
+use crate::workbench::features;
 use crate::workbench::project::configuration_state::ConfigurationSelection;
+use crate::workbench::surfaces::project::configuration::configuration;
 
 /// Words that name the implementation rather than anything an engineer
 /// acts on. None may reach the page.

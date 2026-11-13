@@ -46,7 +46,7 @@ enum InspectorAction {
 /// edits it asks for land on the page as it draws; using a configuration for
 /// runs commits a project transaction, so the target is handed back for the
 /// shell to carry out.
-pub(super) fn project_configuration(
+pub(crate) fn project_configuration(
     ui: &mut Ui,
     page: &mut ConfigurationPageState,
     model: &Model,
@@ -662,6 +662,3 @@ fn committed_text(
     ui.add_space(4.0);
     committed
 }
-
-#[cfg(test)]
-mod tests;

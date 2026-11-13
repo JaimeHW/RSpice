@@ -1,10 +1,10 @@
 //! The Configuration inspector: what it states with and without a row, and
 //! that typing into it never re-resolves the design.
 
-use super::*;
-
 use crate::workbench::RSpiceApp;
+use crate::workbench::docks::inspector::project::configuration::project_configuration;
 use crate::workbench::examples::hierarchy_reference;
+use crate::workbench::project::configuration_state::{ConfigurationRow, instance_binding};
 
 fn reference_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

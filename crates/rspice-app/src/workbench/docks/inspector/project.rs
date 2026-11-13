@@ -1,7 +1,7 @@
 //! The Project workspace's inspector: the overview, library, configuration,
 //! dependency and recovery pages.
 
-mod configuration;
+pub(crate) mod configuration;
 
 use egui::Ui;
 use rspice_app_models::veriloga_library::BuiltinVerilogAModel;
