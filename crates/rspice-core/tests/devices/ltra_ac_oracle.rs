@@ -17,7 +17,7 @@
 use rspice_core::Netlist;
 use rspice_core::engine::{Engine, SimulationConfig};
 
-const ORACLE_TABLE: &str = include_str!("testdata/ltra_ac_ngspice46.dat");
+const ORACLE_TABLE: &str = include_str!("../testdata/ltra_ac_ngspice46.dat");
 
 const TESTBENCH_DECK: &str = "\
 LTRA AC parity testbench

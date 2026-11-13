@@ -4,10 +4,7 @@
 //! solver path and verify that MOS3 routes through the native Berkeley model
 //! rather than the simplified short-channel fallback.
 
-#![allow(clippy::excessive_precision)]
-
-#[path = "common/waveform.rs"]
-mod waveform;
+use super::waveform;
 
 use rspice_core::circuit::DeviceOpEntry;
 use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};

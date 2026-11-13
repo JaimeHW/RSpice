@@ -5,8 +5,7 @@
 //! parallel. Every test below checks that property (or composition of the
 //! factor through subcircuit hierarchy) at the operating point.
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use op_point::op_voltage;
 use rspice_core::config::{ExpressionDialect, SpiceDialect};

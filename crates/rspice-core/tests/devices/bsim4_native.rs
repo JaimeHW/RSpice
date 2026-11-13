@@ -14,14 +14,11 @@
 //! - RDSMOD=1 external source/drain resistance creates native prime-node
 //!   topology and matches ngspice on a one-point operating point.
 
-#![allow(clippy::excessive_precision)]
-
 use rspice_core::Complex64;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 /// The module's own oracle model cards (n45/p90, LEVEL=54, CAPMOD=2), read in
 /// whichever crate of the family holds the model.

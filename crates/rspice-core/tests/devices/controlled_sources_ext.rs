@@ -5,8 +5,7 @@
 //! same mathematics, plus closed-form operating-point checks for the
 //! voltage-output forms where signs are unambiguous.
 
-#[path = "common/op_point.rs"]
-mod op_point;
+use super::op_point;
 
 use op_point::op_voltage;
 use rspice_core::engine::{Engine, SimulationConfig};

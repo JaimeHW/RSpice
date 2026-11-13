@@ -52,7 +52,7 @@ fn primitive_noise_absolute_densities_use_each_dialects_constants() {
 
 #[test]
 fn gp_bfs17_excess_phase_matches_independent_six_bias_complex_currents() {
-    let original = include_str!("../../../tests/paranoia/control_structs/foreach_bjt_ft.sp");
+    let original = include_str!("../../../../tests/paranoia/control_structs/foreach_bjt_ft.sp");
     let mut in_control = false;
     let mut source = String::new();
     for line in original.lines() {
@@ -71,7 +71,7 @@ fn gp_bfs17_excess_phase_matches_independent_six_bias_complex_currents() {
         "\n.end\n",
         "\n.options RELTOL=1e-10 ABSTOL=1e-18 VNTOL=1e-12 GMIN=0\n.end\n",
     );
-    let data = include_str!("testdata/gp_bfs17_ptf_ngspice46.tsv");
+    let data = include_str!("../testdata/gp_bfs17_ptf_ngspice46.tsv");
     let mut failures = Vec::new();
     for current in ["0.5e-3", "1e-3", "5e-3", "10e-3", "50e-3", "100e-3"] {
         for phase in ["0", "21"] {

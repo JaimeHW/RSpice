@@ -23,7 +23,7 @@
 use rspice_core::Netlist;
 use rspice_core::engine::{Engine, SimulationConfig};
 
-const ORACLE_TABLE: &str = include_str!("testdata/vbic_xf_ce_ngspice46.dat");
+const ORACLE_TABLE: &str = include_str!("../testdata/vbic_xf_ce_ngspice46.dat");
 
 const TESTBENCH_DECK: &str = "\
 VBIC excess-phase transient testbench (diffamp N1 card, stable CE stage)

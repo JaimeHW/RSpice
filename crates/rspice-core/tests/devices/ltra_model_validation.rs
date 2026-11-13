@@ -48,7 +48,7 @@ fn invalid_and_tiny_g_ltra_cards_fail_during_build_before_small_signal_stamping(
 }
 
 /// The finite-length RG line is the one nonzero-`G` case ngspice and Xyce
-/// implement, so it executes natively. `crates/rspice-core/tests/ltra_rg_line.rs`
+/// implement, so it executes natively. `crates/rspice-core/tests/devices/ltra_rg_line.rs`
 /// owns its numerical qualification; this only pins that the classifier routes
 /// it to execution instead of to a rejection.
 #[test]

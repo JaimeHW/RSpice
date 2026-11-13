@@ -4,8 +4,7 @@
 //! classic level-1 JFET path and related `J`/`Z` family behavior to external
 //! simulator oracles.
 
-#[path = "common/waveform.rs"]
-mod waveform;
+use super::waveform;
 
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;

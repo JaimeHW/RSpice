@@ -15,8 +15,7 @@
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 /// The module's own oracle model cards (n018/p018, LEVEL=49, CAPMOD=3), read
 /// in whichever crate of the family holds the model.

@@ -16,8 +16,7 @@ use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
-#[path = "common/log_capture.rs"]
-mod log_capture;
+use super::log_capture;
 
 fn op_deck(model_line: &str, options_line: &str) -> String {
     format!(

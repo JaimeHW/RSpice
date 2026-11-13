@@ -2,7 +2,7 @@
 # The old pointwise tail reference is not converged: at 10.05 ns ngspice 46
 # gives 513.65/408.52/397.81/343.18 uV at 100/20/5/1 ps max steps. The
 # independent telegrapher solution is 391.285 uV; repaired CPL converges to
-# 392.977 uV. See core/tests/cpl_telegrapher.rs for 2 uV qualification of all
+# 392.977 uV. See core/tests/devices/cpl_telegrapher.rs for 2 uV qualification of all
 # four ports at three disputed tail times, independent of ngspice.
 # Retain the canonical duplicate's edge, settled-level and peak contracts.
 v(v1)	cross	level=0.3	dir=rise	n=1	tol=200e-12

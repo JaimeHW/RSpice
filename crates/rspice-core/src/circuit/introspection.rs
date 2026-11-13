@@ -1581,7 +1581,7 @@ impl CircuitData {
     /// storage. Work lists awaiting resolution, frozen load schedules,
     /// per-step residual scratch, and node/topology metadata are the second.
     ///
-    /// `tests/device_count_inventory.rs` fails if a `CircuitData` collection
+    /// `tests/devices/device_count_inventory.rs` fails if a `CircuitData` collection
     /// is neither counted by [`Self::device_inventory`] nor named in that
     /// test's exclusion list, so this stays a whole inventory as new device
     /// families arrive.

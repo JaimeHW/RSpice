@@ -4,10 +4,7 @@
 //! parser-builder-solver path, because the old RSpice behavior accepted the
 //! deck but silently evaluated it with the level-1 Shichman-Hodges model.
 
-#![allow(clippy::excessive_precision)]
-
-#[path = "common/waveform.rs"]
-mod waveform;
+use super::waveform;
 
 use rspice_core::device::Jfet;
 use rspice_core::engine::{DcSweepRange, Engine, JfetLevel2Model, SimulationConfig, SpiceDialect};

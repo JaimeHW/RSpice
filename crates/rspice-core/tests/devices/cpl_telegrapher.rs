@@ -7,7 +7,7 @@ use rspice_core::{Engine, Netlist};
 
 #[test]
 fn coupled_line_tail_matches_independent_telegrapher_equations() {
-    let source = include_str!("../../../tests/paranoia/TransmissionLines/cpl_ibm2.sp");
+    let source = include_str!("../../../../tests/paranoia/TransmissionLines/cpl_ibm2.sp");
     let netlist = Netlist::parse(source).unwrap();
     let engine = Engine::new(SimulationConfig {
         convergence_config: ConvergenceConfig::robust(),
@@ -16,7 +16,7 @@ fn coupled_line_tail_matches_independent_telegrapher_equations() {
         ..SimulationConfig::default()
     });
     let result = engine.run_tran(&netlist, 20e-9, 5e-12).unwrap();
-    let reference = include_str!("testdata/qualification/cpl_ibm2_telegrapher.tsv");
+    let reference = include_str!("../testdata/qualification/cpl_ibm2_telegrapher.tsv");
     let columns = ["v1", "v2", "v3", "v4"].map(|node| {
         result
             .node_names

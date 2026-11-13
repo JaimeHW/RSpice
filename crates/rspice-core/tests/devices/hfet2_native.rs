@@ -1,7 +1,6 @@
 //! Native HFET2 (`Z`/`NHFET LEVEL=6`) validation against ngspice 46.
 
-#[path = "common/waveform.rs"]
-mod waveform;
+use super::waveform;
 
 use rspice_core::Value;
 use rspice_core::circuit::DeviceOpReport;

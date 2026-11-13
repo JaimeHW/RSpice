@@ -5530,7 +5530,7 @@ fn private_bjt_charge_solver_cannot_be_disabled_by_obsolete_flags() {
         let output = std::process::Command::new(&executable)
             .args([
                 "--exact",
-                "private_bjt_transient_small_instances_preserve_rc_response",
+                "bjt_level_policy::private_bjt_transient_small_instances_preserve_rc_response",
                 "--nocapture",
             ])
             .env_remove("RSPICE_LEGACY_BJT_BACKEND")

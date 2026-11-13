@@ -5,10 +5,7 @@
 //! these tests ensure the Xyce-compatible level routes to a native SOI port
 //! without opting into the simplified bulk-MOS approximation.
 
-#![allow(clippy::excessive_precision)]
-
-#[path = "common/waveform.rs"]
-mod waveform;
+use super::waveform;
 
 use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
@@ -64,23 +61,23 @@ fn xyce_level10_default_gain_stage() -> &'static str {
 }
 
 fn b3soidd_n1_model_card() -> &'static str {
-    include_str!("../../../tests/ngspice/bsim3soidd/nmosdd.mod")
+    include_str!("../../../../tests/ngspice/bsim3soidd/nmosdd.mod")
 }
 
 fn pd_n1_model_card() -> &'static str {
-    include_str!("../../../tests/ngspice/bsim3soipd/nmospd.mod")
+    include_str!("../../../../tests/ngspice/bsim3soipd/nmospd.mod")
 }
 
 fn pd_p1_model_card() -> &'static str {
-    include_str!("../../../tests/ngspice/bsim3soipd/pmospd.mod")
+    include_str!("../../../../tests/ngspice/bsim3soipd/pmospd.mod")
 }
 
 fn fd_n1_model_card() -> &'static str {
-    include_str!("../../../tests/ngspice/bsim3soifd/nmosfd.mod")
+    include_str!("../../../../tests/ngspice/bsim3soifd/nmosfd.mod")
 }
 
 fn xyce_bsim3soi_self_heating_model_card() -> &'static str {
-    include_str!("testdata/xyce_bsim3soi_nmos_3_2.mod")
+    include_str!("../testdata/xyce_bsim3soi_nmos_3_2.mod")
 }
 
 fn xyce_bsim3soi_self_heating_model_card_with_cth(cth0: Value) -> String {
@@ -2695,7 +2692,7 @@ fn bypass_engine(reltol: Value, abstol: Value) -> Engine {
 }
 
 fn b3soidd_p1_model_card() -> &'static str {
-    include_str!("../../../tests/ngspice/bsim3soidd/pmosdd.mod")
+    include_str!("../../../../tests/ngspice/bsim3soidd/pmosdd.mod")
 }
 
 /// A B3SOIDD inverter chain driven through its switching region: enough
