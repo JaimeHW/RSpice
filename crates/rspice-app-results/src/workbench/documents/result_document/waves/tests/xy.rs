@@ -272,14 +272,14 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
                 && text.ends_with("s \u{b7} V(a) 1 V \u{b7} 500 mV")),
         "{painted:?}"
     );
-    // At half a period sin(ωt) is zero to the last bit f64 holds, and
-    // sin(π + π/3) = −√3/2 = −0.8660254.
+    // At half a period sin(ωt) is 1.2e-16 V, which the ±1.08 V axis
+    // resolves as 0 V, and sin(π + π/3) = −√3/2 reads −866 mV, both to the
+    // axis' millivolt.
     assert!(
         painted
             .iter()
             .any(|text| text.starts_with("B \u{b7} t 500 ")
-                && text.contains("s \u{b7} V(a) ")
-                && text.ends_with(" \u{b7} -866.0254 mV")),
+                && text.ends_with("s \u{b7} V(a) 0 V \u{b7} -866 mV")),
         "{painted:?}"
     );
 }

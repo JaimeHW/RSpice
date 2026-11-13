@@ -181,3 +181,27 @@ fn a_nested_sweeps_member_reads_the_abscissa_of_its_own_point() {
     ));
     assert!(!is_own_abscissa("V(b)", "V(a)"));
 }
+
+/// A Lissajous coordinate on its own ±1.08 V axis: half a period of a 1 kHz
+/// sine is sin(π), whose last bit is 1.2e-16 V. Read at the axis'
+/// millivolt resolution it is 0 V, not 122 aV, and every other coordinate
+/// on that axis states the same millivolt digit.
+#[test]
+fn a_coordinate_reads_to_the_resolution_of_its_axis() {
+    let axis = (-1.08, 1.08);
+    let half_period = (2.0 * PI * 1.0e3 * 500.0e-6).sin();
+    assert!(half_period != 0.0 && half_period.abs() < 1.0e-15);
+    assert_eq!(at_resolution(half_period, axis, false, "V"), "0 V");
+    assert_eq!(at_resolution(-half_period, axis, false, "V"), "0 V");
+    assert_eq!(at_resolution(1.0, axis, false, "V"), "1 V");
+    assert_eq!(at_resolution(0.5, axis, false, "V"), "500 mV");
+    assert_eq!(
+        at_resolution(-(3.0f64.sqrt()) / 2.0, axis, false, "V"),
+        "-866 mV"
+    );
+    // Zoomed in tenfold, one more digit means something.
+    assert_eq!(
+        at_resolution(0.866_225_4, (0.8, 0.9), false, "V"),
+        "866.2 mV"
+    );
+}

@@ -387,6 +387,29 @@ fn point_at(curve: &Curve, t: f64, interpolation: SampleInterpolation) -> Option
     Some((curve.x()[index], curve.y()[index]))
 }
 
+/// Significant digits of a coordinate on a logarithmic axis, whose
+/// resolution is relative to the value.
+const LOG_AXIS_DIGITS: usize = 4;
+
+/// `value` read on an axis spanning `span`, stated to that axis' resolution:
+/// a thousandth of its span, rounded down to a decade, is the last digit
+/// shown, and a value finer than that reads as zero in the axis unit. Half a
+/// period of a sine on a 2 V axis is `0 V`, not the `122 aV` its last bit
+/// holds. A logarithmic axis resolves a share of the value instead.
+fn at_resolution(value: f64, (low, high): (f64, f64), log: bool, unit: &str) -> String {
+    let span = (high - low).abs();
+    if log || !value.is_finite() || !(span.is_finite() && span > 0.0) {
+        return super::fmt_in_unit_readout(value, unit, LOG_AXIS_DIGITS);
+    }
+    let resolution = 10f64.powf(span.log10().floor() - 3.0);
+    let snapped = (value / resolution).round() * resolution;
+    if snapped == 0.0 {
+        return super::fmt_in_unit_readout(0.0, unit, 1);
+    }
+    let digits = snapped.abs().log10().floor() - resolution.log10().round() + 1.0;
+    super::fmt_in_unit_readout(snapped, unit, digits.max(1.0) as usize)
+}
+
 /// What a pane drawn against an abscissa needs from the stack.
 pub(crate) struct XyInput<'a> {
     pub pane: &'a UnitPane<'a>,
@@ -744,10 +767,10 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             && frame.linked_cursor_domain == Some(&model.cursor_domain())))
     .then_some(host.session().cursors);
     let quantity = frame.options.quantity;
-    let format_x =
-        |value: f64| super::fmt_in_unit_readout(value, &resolved.unit, significant_digits);
-    let format_y =
-        |value: f64| super::fmt_in_unit_readout(value, pane.axis_unit(), significant_digits);
+    // Both coordinates, in every tag and in the hover readout, are stated to
+    // the resolution of the axis they are read on.
+    let format_x = |value: f64| at_resolution(value, (x0, x1), false, &resolved.unit);
+    let format_y = |value: f64| at_resolution(value, (y0, y1), log_y, pane.axis_unit());
     let sweep_name = if model.x_label().is_empty() {
         "sweep"
     } else {
