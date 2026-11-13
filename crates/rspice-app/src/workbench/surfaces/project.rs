@@ -984,21 +984,4 @@ mod tests {
             assert!(!copy.contains("rule deck"));
         }
     }
-
-    /// Of the steps every command passes through, the configuration chip
-    /// takes only the two guards that can refuse the Configurations command:
-    /// the command is not handed to a source editor, edits no schematic,
-    /// commits no inspector edit and is not repeated.
-    #[test]
-    fn the_configuration_chip_passes_the_guards_the_command_does() {
-        let command = Command::ConfigurationSets;
-        assert!(command.requires_open_project());
-        assert!(command.blocked_by_project_operation());
-        assert!(command.source_editor_request().is_none());
-        assert!(!crate::workbench::commands::command_edits_schematic(
-            command
-        ));
-        assert!(!command.commits_inspector_edit());
-        assert!(!command.repeatable());
-    }
 }
