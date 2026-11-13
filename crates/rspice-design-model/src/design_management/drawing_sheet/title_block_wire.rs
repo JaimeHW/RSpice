@@ -27,8 +27,9 @@ pub(super) struct DrawingSheetTitleBlockWire {
     offset_x_um: PresentField<i64>,
     #[serde(default)]
     offset_y_um: PresentField<i64>,
+    /// The retired declared scale, read only to be let go.
     #[serde(default)]
-    scale: PresentField<RetiredDrawingSheetScale>,
+    scale: PresentField<serde::de::IgnoredAny>,
     #[serde(default)]
     managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
     fields: BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
@@ -68,19 +69,6 @@ enum RetiredTitleBlockRotation {
     Upright,
     Clockwise90,
     CounterClockwise90,
-}
-
-/// Retired: the scale a sheet's title block once declared, before the block
-/// stopped lettering one. Read so the sheets that declare one load, and so a
-/// package sealed with one is respelled as written (see `sheet_package`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub(crate) enum RetiredDrawingSheetScale {
-    NotToScale,
-    Ratio {
-        drawing_units: u32,
-        reality_units: u32,
-    },
 }
 
 impl DrawingSheetTitleBlockWire {
