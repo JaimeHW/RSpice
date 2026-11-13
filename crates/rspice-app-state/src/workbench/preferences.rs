@@ -246,6 +246,9 @@ pub enum EngineeringExportFormat {
     SpiceRawBinary,
     /// [`Self::SpiceRawBinary`] with ASCII values, every bit spelled out.
     SpiceRawAscii,
+    /// One trace as a SPICE PWL source, so a recorded waveform can drive
+    /// another simulation.
+    SpicePwl,
 }
 
 impl EngineeringExportFormat {
@@ -263,6 +266,7 @@ impl EngineeringExportFormat {
             Self::MatlabV5File => 9,
             Self::SpiceRawBinary => 10,
             Self::SpiceRawAscii => 11,
+            Self::SpicePwl => 12,
         }
     }
 
@@ -280,6 +284,7 @@ impl EngineeringExportFormat {
             9 => Ok(Self::MatlabV5File),
             10 => Ok(Self::SpiceRawBinary),
             11 => Ok(Self::SpiceRawAscii),
+            12 => Ok(Self::SpicePwl),
             _ => Err("engineering export index is outside its domain"),
         }
     }
@@ -2118,17 +2123,17 @@ mod tests {
         );
     }
 
-    /// Twelve offered indices, and nothing past them.
+    /// Thirteen offered indices, and nothing past them.
     #[test]
     fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {
-        for index in 0..=11 {
+        for index in 0..=12 {
             UserPreferences::default()
                 .set_choice(ChoicePreference::EngineeringExport, index)
                 .unwrap_or_else(|error| panic!("index {index} is offered: {error}"));
         }
         assert!(
             UserPreferences::default()
-                .set_choice(ChoicePreference::EngineeringExport, 12)
+                .set_choice(ChoicePreference::EngineeringExport, 13)
                 .is_err()
         );
     }
@@ -2177,6 +2182,7 @@ mod tests {
                 EngineeringExportFormat::SpiceRawAscii,
                 "spice-raw-ascii",
             ),
+            (12, EngineeringExportFormat::SpicePwl, "spice-pwl"),
         ] {
             let mut preferences = UserPreferences::default();
             preferences

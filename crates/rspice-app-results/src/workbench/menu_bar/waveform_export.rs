@@ -5,6 +5,7 @@ mod hdf5;
 mod matlab;
 mod noise_stack;
 mod numpy;
+mod pwl;
 mod raw;
 mod typed_csv;
 mod vcd;
@@ -96,10 +97,11 @@ enum ResultExportFormat {
     Vcd,
     SpiceRawBinary,
     SpiceRawAscii,
+    SpicePwl,
 }
 
 impl ResultExportFormat {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
@@ -112,6 +114,7 @@ impl ResultExportFormat {
         Self::Vcd,
         Self::SpiceRawBinary,
         Self::SpiceRawAscii,
+        Self::SpicePwl,
     ];
 
     const fn canonical_id(self) -> &'static str {
@@ -128,6 +131,7 @@ impl ResultExportFormat {
             Self::Vcd => "vcd",
             Self::SpiceRawBinary => "spice-raw-binary",
             Self::SpiceRawAscii => "spice-raw-ascii",
+            Self::SpicePwl => "spice-pwl",
         }
     }
 }
@@ -305,6 +309,7 @@ pub fn action_export_dataset_with_io(
         EngineeringExportFormat::MatlabV5File => ResultExportFormat::MatlabV5,
         EngineeringExportFormat::SpiceRawBinary => ResultExportFormat::SpiceRawBinary,
         EngineeringExportFormat::SpiceRawAscii => ResultExportFormat::SpiceRawAscii,
+        EngineeringExportFormat::SpicePwl => ResultExportFormat::SpicePwl,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
         state.prompt(error);
@@ -324,7 +329,8 @@ pub fn action_export_dataset_with_io(
         | EngineeringExportFormat::Hdf5EngineeringDataset
         | EngineeringExportFormat::MatlabV5File
         | EngineeringExportFormat::SpiceRawBinary
-        | EngineeringExportFormat::SpiceRawAscii => true,
+        | EngineeringExportFormat::SpiceRawAscii
+        | EngineeringExportFormat::SpicePwl => true,
     };
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
         state.prompt(
@@ -396,6 +402,10 @@ pub fn action_export_dataset_with_io(
             );
             return;
         }
+        EngineeringExportFormat::SpicePwl => {
+            pwl::export_pwl(state, io, &displayed, choice.trace.as_deref());
+            return;
+        }
         EngineeringExportFormat::SpiceRawAscii => {
             raw::export_raw(
                 state,
@@ -424,9 +434,10 @@ pub fn action_export_dataset_with_io(
         | EngineeringExportFormat::Hdf5EngineeringDataset
         | EngineeringExportFormat::MatlabV5File
         | EngineeringExportFormat::SpiceRawBinary
-        | EngineeringExportFormat::SpiceRawAscii => {
+        | EngineeringExportFormat::SpiceRawAscii
+        | EngineeringExportFormat::SpicePwl => {
             unreachable!(
-                "native bundle, dump, NumPy, HDF5, MATLAB and rawfile formats dispatch above"
+                "native bundle, dump, NumPy, HDF5, MATLAB, rawfile and PWL formats dispatch above"
             )
         }
     };

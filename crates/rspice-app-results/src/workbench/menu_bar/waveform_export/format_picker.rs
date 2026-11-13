@@ -8,8 +8,8 @@
 //! It also asks what to write. A view of several analyses offers each of
 //! them, the active strip's chosen until the reader picks another, so a
 //! one-analysis format no longer sends the reader off to maximize a strip;
-//! and the reader chooses between the signals on the plot and every signal
-//! the analysis retains.
+//! the reader chooses between the signals on the plot and every signal the
+//! analysis retains; and a PWL source asks which trace it is written from.
 
 use egui::Context;
 
@@ -45,6 +45,9 @@ pub struct DatasetExportChoice {
     /// the view shows.
     pub analysis: Option<usize>,
     pub signals: ExportedSignals,
+    /// The trace a PWL source is written from, or `None` for the first one
+    /// on the plot.
+    pub trace: Option<String>,
 }
 
 /// One displayed analysis the form offers, with what each signal choice
@@ -59,6 +62,8 @@ struct OfferedAnalysis {
     /// Event nodes of a transient: its digital and real lanes.
     lanes: usize,
     plotted_lanes: usize,
+    /// The traces a PWL source can be written from, the plotted ones first.
+    pwl_traces: Vec<String>,
 }
 
 /// The form's answers while it is open, and what it offers.
@@ -77,11 +82,13 @@ pub struct DatasetExportForm {
     /// Position in `analyses` of the one chosen; `None` for every one.
     analysis: Option<usize>,
     signals: ExportedSignals,
+    /// The PWL trace chosen, by name; `None` for the analysis' first.
+    trace: Option<String>,
 }
 
 /// Every format the export writes, in the order the stored choice numbers
 /// them, and whether it can hold only one analysis.
-const FORMATS: [(&str, bool); 12] = [
+const FORMATS: [(&str, bool); 13] = [
     ("CSV", false),
     ("Touchstone where compatible", false),
     ("TSV", false),
@@ -94,12 +101,14 @@ const FORMATS: [(&str, bool); 12] = [
     ("MATLAB v5 \u{00b7} column vectors, complex for AC", true),
     ("SPICE raw \u{00b7} binary, for ngspice and LTspice", true),
     ("SPICE raw \u{00b7} ASCII values", true),
+    ("SPICE PWL \u{00b7} one trace as a source", true),
 ];
 
 /// Stored indices of the formats that have something particular to ask.
 const VCD: usize = 5;
 const RAW_BINARY: usize = 10;
 const RAW_ASCII: usize = 11;
+const PWL: usize = 12;
 
 /// The first entry of the analysis list, which a table format writes as one
 /// long-form file and a one-analysis format cannot hold.
@@ -143,13 +152,16 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
         let Some(analysis) = run.analyses.get(index) else {
             continue;
         };
-        let plotted_traces = super::exported_waveforms(
+        let plotted = super::exported_waveforms(
             state,
             displayed.dataset_id,
             analysis,
             ExportedSignals::Plotted,
-        )
-        .len();
+        );
+        let mut pwl_traces = super::pwl::pwl_traces(analysis)
+            .map(|waveform| waveform.name.clone())
+            .collect::<Vec<_>>();
+        pwl_traces.sort_by_key(|name| !plotted.iter().any(|waveform| &waveform.name == name));
         let nodes = super::event_nodes(analysis);
         let plotted_lanes = nodes
             .iter()
@@ -173,9 +185,10 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
             index,
             label,
             traces: analysis.waveforms.len(),
-            plotted_traces,
+            plotted_traces: plotted.len(),
             lanes: nodes.len(),
             plotted_lanes,
+            pwl_traces,
         });
     }
     let active = displayed
@@ -192,6 +205,7 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
         analyses,
         active,
         signals: ExportedSignals::Plotted,
+        trace: None,
     }
 }
 
@@ -211,7 +225,24 @@ impl DatasetExportForm {
                 .and_then(|position| self.analyses.get(position))
                 .map(|offered| offered.index),
             signals: self.signals,
+            trace: (format == PWL)
+                .then(|| self.pwl_trace(format).map(str::to_owned))
+                .flatten(),
         }
+    }
+
+    /// The trace a PWL source in `format` is written from: the one chosen
+    /// when the written analysis has it, else that analysis' first, plotted
+    /// ones leading. `None` when the analysis has no waveform in time.
+    fn pwl_trace(&self, format: usize) -> Option<&str> {
+        let traces = &self
+            .analyses
+            .get(self.written_position(format)?)?
+            .pwl_traces;
+        self.trace
+            .as_deref()
+            .filter(|chosen| traces.iter().any(|trace| trace == chosen))
+            .or(traces.first().map(String::as_str))
     }
 
     /// How many signals each choice writes in `format`, plotted and all:
@@ -251,23 +282,28 @@ pub fn show_dataset_export_picker(
     let (owns_table, offers_analyses) = (draft.owns_table, !draft.analyses.is_empty());
     // A sheet that owns its table writes it whole, and a dump is the whole
     // event schedule: neither has a choice of signals to make.
-    let asks_signals = move |format: usize| !owns_table && format != VCD && offers_analyses;
+    // A PWL source asks for its one trace instead.
+    let asks_signals =
+        move |format: usize| !owns_table && !matches!(format, VCD | PWL) && offers_analyses;
     let (plotted, all) = draft.signal_counts(picker.format);
-    let nothing_plotted = asks_signals(picker.format)
+    let refusal = if asks_signals(picker.format)
         && draft.signals == ExportedSignals::Plotted
         && plotted == 0
-        && all > 0;
+        && all > 0
+    {
+        Some("Nothing in this analysis is plotted. Choose All to export its signals.")
+    } else if picker.format == PWL && offers_analyses && draft.pwl_trace(PWL).is_none() {
+        Some("A PWL source is a waveform in time. Choose a transient analysis.")
+    } else {
+        None
+    };
     // Each question stands on the label/value grid every form uses, its
     // control across the control column.
     let choice = CommandForm::new("Export dataset", "Export\u{2026}")
         .wide()
         .describe("Choose the file format for the displayed result.")
-        .primary_enabled(!nothing_plotted)
-        .status(if nothing_plotted {
-            Err("Nothing in this analysis is plotted. Choose All to export its signals.")
-        } else {
-            Ok(None)
-        })
+        .primary_enabled(refusal.is_none())
+        .status(refusal.map_or(Ok(None), Err))
         .show(ctx, |rows| {
             let format = rows.select_with_disabled(
                 "Format",
@@ -299,6 +335,9 @@ pub fn show_dataset_export_picker(
                         ExportedSignals::Plotted
                     };
                 }
+            }
+            if picker.format == PWL {
+                show_trace_row(rows, draft);
             }
             // The first field takes the focus, as Export generated netlist's
             // does; the form opened with nothing focused.
@@ -362,6 +401,31 @@ fn show_analysis_row(
         .picked;
     if let Some(index) = picked {
         draft.analysis = index.checked_sub(1);
+    }
+}
+
+/// The trace a PWL source is written from, out of the written analysis'
+/// waveforms in time, the plotted ones first.
+fn show_trace_row(rows: &mut crate::ui::widgets::FormRows<'_>, draft: &mut DatasetExportForm) {
+    let Some(selected) = draft.pwl_trace(PWL).map(str::to_owned) else {
+        return;
+    };
+    let Some(offered) = draft
+        .written_position(PWL)
+        .and_then(|position| draft.analyses.get(position))
+    else {
+        return;
+    };
+    let picked = rows
+        .select(
+            "Trace",
+            "results.export-dataset.trace",
+            &selected,
+            &offered.pwl_traces,
+        )
+        .and_then(|index| offered.pwl_traces.get(index).cloned());
+    if picked.is_some() {
+        draft.trace = picked;
     }
 }
 

@@ -333,6 +333,7 @@ fn the_form_exports_the_chosen_analysis_and_signals() {
             &DatasetExportChoice {
                 analysis: Some(analysis),
                 signals,
+                trace: None,
             },
         );
         let files = io.byte_files.borrow();
@@ -391,6 +392,77 @@ fn nothing_plotted_holds_export_back_and_says_why() {
     );
 }
 
+/// A PWL source asks which trace in place of the signal choice, offering
+/// the plotted one first, and writes the one picked.
+#[test]
+fn a_pwl_source_asks_for_its_trace_in_place_of_the_signals() {
+    let mut state = two_strip_state();
+    open_form(&mut state, PWL);
+    let nodes = form_nodes(&mut state);
+    let trace = nodes
+        .values()
+        .find(|node| {
+            node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Trace")
+        })
+        .expect("the form asks which trace");
+    assert_eq!(trace.value(), Some("V(out)"));
+    let words = spoken(&nodes);
+    assert!(
+        !words.iter().any(|word| word.starts_with("Plotted")),
+        "{words:?}"
+    );
+    let form = state.results.dataset_export_form.as_mut().unwrap();
+    assert_eq!(form.choice(PWL).trace.as_deref(), Some("V(out)"));
+    form.trace = Some("V(mid)".to_owned());
+    assert_eq!(form.choice(PWL).trace.as_deref(), Some("V(mid)"));
+    assert_eq!(
+        form.choice(RAW_BINARY).trace,
+        None,
+        "only a PWL source names one"
+    );
+}
+
+/// Over a frequency sweep a PWL source has no trace to take: the form says
+/// so and holds Export back.
+#[test]
+fn a_pwl_source_over_a_frequency_sweep_says_why_it_cannot() {
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+    use crate::workbench::documents::result_document::test_fixtures::waveform;
+
+    let mut run = SimulationRun::new(3);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC Analysis").with_waveforms(vec![
+            waveform("|V(out)|", vec![1.0e3, 1.0e4], vec![1.0, 0.5]).with_complex_components(
+                "V(out)",
+                vec![1.0, 0.3],
+                vec![0.0, -0.4],
+            ),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let dataset_id = state.model.simulation.retained.runs[0].dataset_id;
+    state.workbench.documents.activate(
+        crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+    );
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
+    open_form(&mut state, PWL);
+    let nodes = form_nodes(&mut state);
+    assert!(
+        nodes
+            .values()
+            .find(|node| node.label() == Some("Export\u{2026}"))
+            .is_some_and(egui::accesskit::Node::is_disabled)
+    );
+    let words = spoken(&nodes);
+    assert!(
+        words.iter().any(|word| word.contains("waveform in time")),
+        "{words:?}"
+    );
+}
+
 /// A picture of the form over two strips, for review. Written only when
 /// `RSPICE_PICTURES` names a folder.
 #[test]
@@ -400,27 +472,29 @@ fn write_the_export_form_picture() {
         return;
     };
     let size = egui::vec2(760.0, 420.0);
-    let mut state = two_strip_state();
-    open_form(&mut state, RAW_BINARY);
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut output = None;
-    for _ in 0..12 {
-        output = Some(
-            ctx.run_ui(rspice_ui_kit::raster::display_input(size, 2.0), |ctx| {
-                show_dataset_export_picker(
-                    ctx,
-                    &mut state.results.dataset_export,
-                    &mut state.results.dataset_export_form,
-                    &mut state.model.preferences,
-                );
-            }),
-        );
+    for (format, name) in [(RAW_BINARY, "export-form"), (PWL, "export-form-pwl")] {
+        let mut state = two_strip_state();
+        open_form(&mut state, format);
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut output = None;
+        for _ in 0..12 {
+            output = Some(
+                ctx.run_ui(rspice_ui_kit::raster::display_input(size, 2.0), |ctx| {
+                    show_dataset_export_picker(
+                        ctx,
+                        &mut state.results.dataset_export,
+                        &mut state.results.dataset_export_form,
+                        &mut state.model.preferences,
+                    );
+                }),
+            );
+        }
+        let canvas = rspice_ui_kit::raster::rasterize(&ctx, size, &output.unwrap());
+        std::fs::write(
+            format!("{directory}/{name}.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
     }
-    let canvas = rspice_ui_kit::raster::rasterize(&ctx, size, &output.unwrap());
-    std::fs::write(
-        format!("{directory}/export-form.png"),
-        canvas.png(canvas.height()),
-    )
-    .expect("the picture is written");
 }

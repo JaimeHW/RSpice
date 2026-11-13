@@ -12,6 +12,7 @@ use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 mod binary_formats;
 mod periodic_noise;
+mod pwl;
 mod soa;
 mod spice_raw;
 mod typed_csv;
@@ -66,6 +67,7 @@ fn export_registry_matches_the_contract_ids_and_refuses_any_other() {
             "vcd",
             "spice-raw-binary",
             "spice-raw-ascii",
+            "spice-pwl",
         ]
     );
     // Every id in the vocabulary has an encoder now that MATLAB v5 has one,
