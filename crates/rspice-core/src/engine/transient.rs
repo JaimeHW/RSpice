@@ -3882,17 +3882,6 @@ impl Engine {
     /// values, sources, models, outputs, external dependency contents, and all
     /// trajectory-affecting transient controls. Checkpoints written before the
     /// restart identity was introduced fail closed.
-    pub fn run_tran_restart_resume(
-        &self,
-        netlist: &Netlist,
-        checkpoint: &TransientCheckpoint,
-        tstop: Value,
-        max_step: Value,
-    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
-        self.run_tran_restart_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
-    }
-
-    /// Cancellable form of [`Engine::run_tran_restart_resume`].
     pub fn run_tran_restart_resume_with_abort(
         &self,
         netlist: &Netlist,
@@ -16692,7 +16681,7 @@ D1 D 0 DMOD
         );
 
         let (continued, _) = engine
-            .run_tran_restart_resume(&restarted, &checkpoint, 50.0e-6, 1.0e-6)
+            .run_tran_restart_resume_with_abort(&restarted, &checkpoint, 50.0e-6, 1.0e-6, &NoAbort)
             .expect("dedicated authored-restart API accepts the compatible deck");
         assert_eq!(continued.time.first().copied(), Some(checkpoint.time));
         assert_eq!(continued.time.last().copied(), Some(50.0e-6));
@@ -16754,7 +16743,7 @@ D1 D 0 DMOD
             .expect("the nonquiescent 5 ns checkpoint survives serialization");
         let checkpoint_time = checkpoint.time;
         let (continued, _) = engine
-            .run_tran_restart_resume(&restarted, &checkpoint, 50.0e-9, 0.25e-9)
+            .run_tran_restart_resume_with_abort(&restarted, &checkpoint, 50.0e-9, 0.25e-9, &NoAbort)
             .expect("the 5 ns lossless-line state resumes to the extended horizon");
         assert_eq!(continued.time.first().copied(), Some(checkpoint_time));
         assert_eq!(continued.time.last().copied(), Some(50.0e-9));

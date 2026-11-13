@@ -37,7 +37,6 @@ disallowed-methods = [
     { path = "rspice_core::engine::Engine::run_tran_checkpointed_with_startup_mode", reason = "use run_tran_checkpointed_with_startup_mode_and_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_tran_checkpoint_schedule_with_startup_mode", reason = "use the _and_abort form (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_tran_resume", reason = "use run_tran_resume_with_abort (plan rule 6)" },
-    { path = "rspice_core::engine::Engine::run_tran_restart_resume", reason = "use run_tran_restart_resume_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::preflight_transient_checkpoint", reason = "use preflight_transient_checkpoint_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::transient_source_event_times", reason = "use transient_source_event_times_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::transient_source_names", reason = "use transient_source_names_with_abort (plan rule 6)" },
