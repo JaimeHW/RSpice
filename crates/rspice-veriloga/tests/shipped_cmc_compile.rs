@@ -67,7 +67,7 @@ struct CompletedCompileJob {
 }
 
 #[test]
-#[ignore = "full shipped CMC compile qualification; run explicitly while the compiler frontier is still moving"]
+#[ignore = "HiSIM_HV 2.5.1 (hisimhv_va, hisimhv_n5_va) exceeds the per-module compile timeout in a debug build"]
 fn shipped_veriloga_models_compile_end_to_end() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
