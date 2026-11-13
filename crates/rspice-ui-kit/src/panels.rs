@@ -2016,6 +2016,49 @@ pub fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> S
     format!("{}{}", graphemes[..low].concat(), ellipsis)
 }
 
+/// Shorten `text` from the middle to fit `max_width`, keeping its start and
+/// more of its end: a hierarchical signal name is told apart by its leaf, so
+/// the tail is the part an end-truncation must not cut. Returns the text as
+/// it is when it fits.
+pub fn elide_middle(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    let fits = |candidate: &str| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+    };
+    if fits(text) {
+        return text.to_owned();
+    }
+    let graphemes = UnicodeSegmentation::graphemes(text, true).collect::<Vec<_>>();
+    let candidate = |kept: usize| {
+        let head = kept * 2 / 5;
+        format!(
+            "{}\u{2026}{}",
+            graphemes[..head].concat(),
+            graphemes[graphemes.len() - (kept - head)..].concat()
+        )
+    };
+    let mut low = 0;
+    let mut high = graphemes.len().saturating_sub(1);
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        if fits(&candidate(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    if low == 0 && !fits("\u{2026}") {
+        return String::new();
+    }
+    candidate(low)
+}
+
 /// Shorten `text` to at most `max` characters, the last of them a typographic
 /// ellipsis: for a label budgeted in characters rather than in points, which
 /// [`elide_text`] fits.
