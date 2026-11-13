@@ -823,9 +823,12 @@ fn event_lane_band(
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
             ui.set_height(height);
+            // A scroll area is at least 64 points tall unless told otherwise,
+            // which would push the panes below the strip for one or two lanes.
             egui::ScrollArea::vertical()
                 .id_salt(("event-lanes", model.analysis_index))
                 .max_height(height)
+                .min_scrolled_height(height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| host.show_event_lanes(ui, model, frame));
         },

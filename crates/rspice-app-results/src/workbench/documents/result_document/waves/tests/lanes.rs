@@ -429,6 +429,50 @@ fn the_edge_step_lands_on_the_next_edge_exactly() {
     );
 }
 
+/// A lane band is as tall as its rows: one lane moves the panes down by its
+/// row and the seam under it, not by a scroll area's 64-point floor that
+/// would push the strip's bottom out of its well.
+#[test]
+fn one_lane_moves_the_panes_down_by_its_row_alone() {
+    let run = sar_run();
+    let samp = history(run, "SAMP");
+    let ctx = theme_context();
+    let tokens = Tokens::get(&ctx);
+    let pane_top = |lanes: &[&str]| {
+        let mut state = host(run, &ANALOG);
+        let key = strip(&mut state)[0].analysis_key;
+        for lane in lanes {
+            set_event_net_plotted(&mut state.results_parts(), key, lane, true);
+        }
+        place_cursors(&mut state, Some(samp[1].0), None);
+        frame(&ctx, &mut state, Vec::new());
+        let lines = cursor_lines(
+            &verticals(&frame(&ctx, &mut state, Vec::new())),
+            tokens.color.canvas_cursor_a,
+        );
+        // The plotted pane's is the tallest; the overview draws one too.
+        let pane = lines
+            .iter()
+            .copied()
+            .max_by(|a, b| (a.bottom - a.top).total_cmp(&(b.bottom - b.top)))
+            .expect("the pane's cursor line");
+        (pane.top, pane.bottom, lines.len())
+    };
+    let (bare_top, bare_bottom, bare_lines) = pane_top(&[]);
+    let (top, bottom, lines) = pane_top(&["D(SAMP)"]);
+    assert_eq!(lines, bare_lines + 1, "the lane adds its own cursor line");
+    assert_eq!(
+        top - bare_top,
+        LOGIC_ROW_HEIGHT + 1.0,
+        "the panes move down by the lane's row and its seam"
+    );
+    assert!(
+        (bottom - bare_bottom).abs() <= 0.5,
+        "the pane still ends where it did, inside the strip: {bare_top}..{bare_bottom} and \
+         {top}..{bottom}"
+    );
+}
+
 /// One frame of the active project result document.
 fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultDocumentId) {
     let ctx = theme_context();
