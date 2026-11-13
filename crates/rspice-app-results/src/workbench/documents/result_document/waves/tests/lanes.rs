@@ -729,7 +729,8 @@ pub(super) fn well(ui: &mut Ui) {
 
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the strip in the default, light, dark and mismatched themes, and its
-/// panes alone with every current hidden.
+/// panes alone, with the currents nobody plotted and with every current
+/// hidden by the reader.
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_review_pictures() {
@@ -742,23 +743,50 @@ fn write_the_review_pictures() {
         ..crate::ui::Theme::default()
     };
     use rspice_ui_kit::{EngineeringCanvasTheme as Canvas, tokens::Mode};
-    for (name, theme, lanes) in [
-        ("strip-default", crate::ui::Theme::default(), true),
-        ("strip-light", themed(Mode::Light, Canvas::Light), true),
-        ("strip-dark", themed(Mode::Dark, Canvas::Dark), true),
+    for (name, theme, lanes, reader_hid) in [
+        ("strip-default", crate::ui::Theme::default(), true, false),
+        (
+            "strip-light",
+            themed(Mode::Light, Canvas::Light),
+            true,
+            false,
+        ),
+        ("strip-dark", themed(Mode::Dark, Canvas::Dark), true, false),
         (
             "strip-light-ui-dark-canvas",
             themed(Mode::Light, Canvas::Dark),
             true,
+            false,
         ),
         (
             "strip-dark-ui-light-canvas",
             themed(Mode::Dark, Canvas::Light),
             true,
+            false,
         ),
-        ("pane-all-hidden", crate::ui::Theme::default(), false),
+        (
+            "pane-never-plotted",
+            crate::ui::Theme::default(),
+            false,
+            false,
+        ),
+        ("pane-all-hidden", crate::ui::Theme::default(), false, true),
     ] {
         let mut state = review_strip(lanes);
+        if reader_hid {
+            // The reader plots a current and hides it again.
+            let (analysis, waveform) = {
+                let models = strip(&mut state);
+                let current = models[0]
+                    .traces
+                    .iter()
+                    .find(|trace| trace.source_waveform_name.starts_with("I("))
+                    .expect("the review keeps its currents");
+                (models[0].analysis_index(), current.waveform_index)
+            };
+            toggle_visibility(&mut state.results_parts(), analysis, waveform);
+            toggle_visibility(&mut state.results_parts(), analysis, waveform);
+        }
         let canvas = rspice_ui_kit::raster::render_themed(theme, FRAME, |ui, _| {
             well(ui);
             show(ui, &mut state.results_parts());
