@@ -85,38 +85,6 @@ pub fn draw_resolved_symbol_with_visibility(
     );
 }
 
-/// The symbol's artwork without its type: body and pin leads, and no pin,
-/// instance or value names. For a thumbnail too small to letter, where names
-/// would be noise rather than type.
-pub fn draw_resolved_symbol_artwork(
-    painter: &Painter,
-    origin: Pos2,
-    scale: f32,
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-    stroke: Stroke,
-) {
-    draw_symbol_body(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke,
-        &PinLeads::NONE,
-    );
-    draw_symbol_pins(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke,
-        false,
-        &PinLeads::NONE,
-    );
-}
-
 pub(crate) fn write_resolved_symbol_svg(
     svg: &mut String,
     component: &Component,
@@ -1076,8 +1044,8 @@ fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMu
     fold_symbol_artwork_points(symbol, include);
 }
 
-/// The extent of what [`draw_resolved_symbol_artwork`] paints: pins and
-/// body, and none of the instance's labels.
+/// The extent of a symbol's artwork: pins and body, and none of the
+/// instance's labels.
 fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnMut(Point)) {
     for pin in symbol.connectable_pins() {
         include(symbol.effective_pin_offset(pin));

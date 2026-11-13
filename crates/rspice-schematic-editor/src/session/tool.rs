@@ -136,14 +136,6 @@ impl Tool {
         )
     }
 
-    /// Get the component type being placed (if any)
-    pub fn placing(&self) -> Option<ComponentType> {
-        match self {
-            Tool::Place(kind) => Some(*kind),
-            _ => None,
-        }
-    }
-
     /// The tool's own canvas cursor. Select keeps the arrow, since the hover
     /// pre-highlight already says what a click takes; Move and Stretch show
     /// the move cross; every tool that places or draws at a point, labels and
