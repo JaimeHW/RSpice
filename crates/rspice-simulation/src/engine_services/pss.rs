@@ -447,7 +447,7 @@ mod tests {
     }
 
     /// The one oscillator in the workspace that self-starts and converges in
-    /// autonomous shooting mode. `crates/rspice-core/tests/pss_shooting.rs`
+    /// autonomous shooting mode. `crates/rspice-core/tests/periodic/pss_shooting.rs`
     /// solves this same deck and pins its period against the van der Pol
     /// closed form. `i1` is a one-shot startup kick, not a periodic drive.
     const NEGATIVE_RESISTANCE_OSCILLATOR: &str = "* negative-resistance lc oscillator\n\

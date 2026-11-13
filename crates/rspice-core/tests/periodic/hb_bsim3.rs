@@ -8,8 +8,7 @@ use rspice_core::engine::{Engine, HbAnalysisResult};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 /// The BSIM3v3 oracle cards (n018/p018, LEVEL=49, CAPMOD=3), read from the
 /// device model that owns them in whichever crate of the family holds it.
