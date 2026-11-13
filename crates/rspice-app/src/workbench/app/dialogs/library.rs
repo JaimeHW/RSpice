@@ -7,5 +7,6 @@
 
 pub(crate) mod new_veriloga_device;
 mod shared;
-pub(in crate::workbench) use shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
+pub(crate) use shared::LIBRARY_CATALOG_STALE_MESSAGE;
+pub(in crate::workbench) use shared::validate_lcv_name;
 pub(in crate::workbench) mod veriloga_import;

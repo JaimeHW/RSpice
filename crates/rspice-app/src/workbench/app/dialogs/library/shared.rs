@@ -1,7 +1,7 @@
 //! Shared library-dialog helpers, including library/cell/view name
 //! validation.
 
-pub(in crate::workbench) const LIBRARY_CATALOG_STALE_MESSAGE: &str =
+pub(crate) const LIBRARY_CATALOG_STALE_MESSAGE: &str =
     "The library catalog changed after this dialog opened. Cancel and reopen the operation.";
 
 pub(in crate::workbench) fn validate_lcv_name(name: &str, field_label: &str) -> Option<String> {

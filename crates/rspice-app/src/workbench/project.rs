@@ -639,4 +639,6 @@ impl CommandSet for ProjectCommand {
 }
 
 #[cfg(test)]
+mod test_host;
+#[cfg(test)]
 pub(crate) mod tests;

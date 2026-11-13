@@ -5,8 +5,8 @@
 mod cell_ops;
 pub(crate) mod deletion;
 mod library_ops;
-mod new_cell;
-mod new_view;
+pub(crate) mod new_cell;
+pub(crate) mod new_view;
 mod rename_view;
 
 pub(super) use new_view::new_view_target;
