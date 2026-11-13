@@ -2,7 +2,7 @@
 //! step that goes to its finding, and the run strip at every phase.
 
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::surfaces::netlist::tests::seal_manual_run;
+use crate::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use crate::workbench::surfaces::netlist::{
     RUN_STRIP_HEIGHT, RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared,
     step_netlist_problem, toolbar,

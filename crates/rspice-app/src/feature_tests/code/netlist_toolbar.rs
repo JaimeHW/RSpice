@@ -2,7 +2,7 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::surfaces::netlist::tests::retain_generated;
+use crate::workbench::surfaces::netlist::fixtures::retain_generated;
 use crate::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 use egui::vec2;
 
