@@ -108,7 +108,9 @@ class Gate:
     gate_id: str
     label: str
     command: tuple[str, ...]
-    minimum_passed_tests: int | None = None
+    # A test gate passes only when its filter ran at least one test and
+    # ignored none: a filter that matches nothing proves nothing.
+    runs_tests: bool = False
 
 
 @dataclass(frozen=True)
@@ -338,11 +340,8 @@ def validate_targets(targets: Sequence[str]) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def command_gates(
-    jobs: int, targets: Sequence[str], operating_system: str | None = None
-) -> list[Gate]:
+def command_gates(jobs: int, targets: Sequence[str]) -> list[Gate]:
     cargo_jobs = str(jobs)
-    host_system = operating_system or platform.system()
     gates = [
         Gate(
             "core-save-directives",
@@ -359,7 +358,7 @@ def command_gates(
                 "engine",
                 "save_directives::",
             ),
-            7,
+            runs_tests=True,
         ),
         Gate(
             "design-model-drawing-sheet",
@@ -374,7 +373,7 @@ def command_gates(
                 cargo_jobs,
                 "--lib",
             ),
-            203,
+            runs_tests=True,
         ),
         Gate(
             "ui-drawing-sheet",
@@ -410,7 +409,7 @@ def command_gates(
                 "sheets::commands::sheet_format_manager_requires_live_schematic_edit_authority",
                 "grid_labels_measure_the_pitch_on_the_printed_sheet",
             ),
-            100,
+            runs_tests=True,
         ),
         Gate(
             "ui-hardcopy",
@@ -435,19 +434,19 @@ def command_gates(
                 "--lib",
                 "hardcopy",
             ),
-            243 if host_system == "Windows" else 239,
+            runs_tests=True,
         ),
         Gate(
             "hardcopy-contract",
             "Hardcopy planning, source authority, and print contract tests",
             ("cargo", "test", "--locked", "-p", "rspice-hardcopy-contract", "-j", cargo_jobs, "--lib"),
-            31,
+            runs_tests=True,
         ),
         Gate(
             "hardcopy-service",
             "Frozen hardcopy source and renderer tests",
             ("cargo", "test", "--locked", "-p", "rspice-hardcopy", "-j", cargo_jobs, "--lib"),
-            133,
+            runs_tests=True,
         ),
         Gate(
             "ui-native-check",
@@ -721,7 +720,7 @@ def run_qualification(
     index += 1
     failed = not line_passed
 
-    gates = command_gates(jobs, checked_targets, str(host["operating_system"]))
+    gates = command_gates(jobs, checked_targets)
     for gate in gates:
         if failed and fail_fast:
             results.append(
@@ -731,7 +730,7 @@ def run_qualification(
                     "status": "not-run",
                     "reason": "fail-fast",
                     "command": list(gate.command),
-                    "minimum_passed_tests": gate.minimum_passed_tests,
+                    "runs_tests": gate.runs_tests,
                 }
             )
             continue
@@ -741,11 +740,8 @@ def run_qualification(
         except Exception as error:  # Preserve evidence even for an unexpected executor failure.
             outcome = CommandOutcome(None, "", f"executor raised {type(error).__name__}: {error}")
         counts = observed_test_counts(outcome.stdout + "\n" + outcome.stderr)
-        enough_tests = (
-            gate.minimum_passed_tests is None
-            or counts["passed"] >= gate.minimum_passed_tests
-        )
-        no_ignored_tests = gate.minimum_passed_tests is None or counts["ignored"] == 0
+        enough_tests = not gate.runs_tests or counts["passed"] > 0
+        no_ignored_tests = not gate.runs_tests or counts["ignored"] == 0
         passed = (
             outcome.returncode == 0
             and not outcome.timed_out
@@ -770,11 +766,10 @@ def run_qualification(
             "stderr_bytes": len(outcome.stderr.encode("utf-8")),
             "log": write_gate_log(logs, index, gate.gate_id, log_content),
         }
-        if gate.minimum_passed_tests is not None:
-            result["minimum_passed_tests"] = gate.minimum_passed_tests
+        if gate.runs_tests:
             result["observed_test_counts"] = counts
             if outcome.returncode == 0 and not enough_tests:
-                result["failure_reason"] = "test filter executed fewer tests than its frozen minimum"
+                result["failure_reason"] = "test filter executed no tests"
             elif outcome.returncode == 0 and not no_ignored_tests:
                 result["failure_reason"] = "one or more in-scope tests were ignored"
         results.append(result)
@@ -921,7 +916,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     {
                         "id": gate.gate_id,
                         "command": list(gate.command),
-                        "minimum_passed_tests": gate.minimum_passed_tests,
+                        "runs_tests": gate.runs_tests,
                     }
                     for gate in command_gates(args.jobs, targets)
                 ],

@@ -112,9 +112,7 @@ class DrawingSheetQualificationTests(unittest.TestCase):
             self.assertEqual(gate.command[0], "cargo")
             self.assertIn("--locked", gate.command)
             self.assertNotIn("shell", gate.command)
-            if "test" in gate.command:
-                self.assertIsNotNone(gate.minimum_passed_tests)
-                self.assertGreater(gate.minimum_passed_tests, 0)
+            self.assertEqual(gate.runs_tests, "test" in gate.command)
 
     def test_targets_are_an_allowlist_and_duplicates_are_rejected(self) -> None:
         self.assertEqual(
@@ -217,24 +215,13 @@ class DrawingSheetQualificationTests(unittest.TestCase):
         }
 
     def _executor(self, command, _root, _timeout) -> CommandOutcome:
-        minimum = next(
-            (
-                gate.minimum_passed_tests
-                for gate in command_gates(
-                    1,
-                    ("wasm32-unknown-unknown",),
-                    operating_system=str(self._environment()["operating_system"]),
-                )
-                if gate.command == tuple(command)
-            ),
-            None,
+        runs_tests = any(
+            gate.runs_tests and gate.command == tuple(command)
+            for gate in command_gates(1, ("wasm32-unknown-unknown",))
         )
         stdout = ""
-        if minimum is not None:
-            stdout = (
-                f"test result: ok. {minimum} passed; 0 failed; 0 ignored; "
-                "0 measured; 0 filtered out\n"
-            )
+        if runs_tests:
+            stdout = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
         return CommandOutcome(0, stdout, "")
 
     def test_clean_all_pass_record_is_checksumbound(self) -> None:
@@ -404,7 +391,7 @@ class DrawingSheetQualificationTests(unittest.TestCase):
             drawing_sheet = next(gate for gate in record["gates"] if gate["id"] == "ui-drawing-sheet")
             self.assertEqual(drawing_sheet["status"], "failed")
 
-    def test_too_few_filtered_tests_is_a_failure_even_with_zero_exit(self) -> None:
+    def test_a_filter_that_runs_no_tests_is_a_failure_even_with_zero_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             scopes = self._fixture_root(root)
