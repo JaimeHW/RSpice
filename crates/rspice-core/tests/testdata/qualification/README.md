@@ -6,7 +6,7 @@ Keep development plans and host-specific execution reports outside the repositor
 ## Structural baseline
 
 `rspice-qualification-v1.json` is consumed by
-[`qualification_baseline.rs`](../../qualification_baseline.rs).
+[`qualification_baseline.rs`](../../contracts/qualification_baseline.rs).
 
 It records capabilities, toolchain/features, oracle evidence, result-document
 structure, and operation/storage counts. It contains no wall-clock timing or
@@ -18,7 +18,7 @@ behavior change:
 
 ```sh
 RSPICE_UPDATE_QUALIFICATION_BASELINE=1 \
-  cargo test --locked -p rspice-core --test qualification_baseline
+  cargo test --locked -p rspice-core --test contracts qualification_baseline::
 ```
 
 Review the resulting diff before committing. Machine-specific timing baselines

@@ -19,8 +19,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 use family_src::{family_relative, family_src_roots, read_family_src};
 use rspice_core::analysis::harmonic_balance::{
@@ -913,7 +912,7 @@ fn public_surface_does_not_grow() {
         total + STALE_CEILING_SLACK >= MAX_PUBLIC_ITEMS,
         "public surface is {total} items but the ceiling is still \
          {MAX_PUBLIC_ITEMS}, a gap of {}.\n\n\
-         Lower MAX_PUBLIC_ITEMS in tests/public_surface.rs to {total}. A \
+         Lower MAX_PUBLIC_ITEMS in tests/contracts/public_surface.rs to {total}. A \
          ceiling left far above the real count is not a ratchet — it is \
          headroom for the surface to grow back into.",
         MAX_PUBLIC_ITEMS - total
@@ -936,7 +935,7 @@ fn hidden_family_surface_does_not_grow() {
         hidden + STALE_CEILING_SLACK >= MAX_HIDDEN_FAMILY_ITEMS,
         "the hidden surface is {hidden} items but the ceiling is still \
          {MAX_HIDDEN_FAMILY_ITEMS}. Lower MAX_HIDDEN_FAMILY_ITEMS in \
-         tests/public_surface.rs to {hidden}."
+         tests/contracts/public_surface.rs to {hidden}."
     );
 }
 

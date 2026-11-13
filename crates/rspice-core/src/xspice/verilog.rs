@@ -22,7 +22,7 @@
 //! # Why it lives under `xspice`
 //!
 //! Not because it is an XSPICE code model; it is not. Because of the layering
-//! ratchet in `tests/module_layering.rs`. This host is built on
+//! ratchet in `tests/contracts/module_layering.rs`. This host is built on
 //! [`event_scheduler`](super::event_scheduler), the discrete-event kernel,
 //! which sits at rank 9 for reasons its own module documentation gives. A
 //! module that names the kernel must sit strictly above rank 9, and the only

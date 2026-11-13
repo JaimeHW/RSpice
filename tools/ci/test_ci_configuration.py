@@ -1080,7 +1080,7 @@ class CiConfigurationTests(unittest.TestCase):
             workflow_step_body(conformance, "Core library units (release)"),
         )
         baseline = workflow_step_body(conformance, "Qualification baseline (release)")
-        self.assertIn("--test qualification_baseline --test no_panic_corpus", baseline)
+        self.assertIn("--test contracts --test no_panic_corpus", baseline)
 
     def test_veriloga_gated_core_suites_run_on_both_routes(self) -> None:
         """A `veriloga`-gated core suite cannot be added without a lane.

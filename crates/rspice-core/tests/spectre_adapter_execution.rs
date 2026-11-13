@@ -8,7 +8,7 @@
 //! adapter also refuses, that a lowered BSIMSOI model actually reaches the
 //! native LEVEL=10 PD route, and that a Spectre scale factor sets the value a
 //! device is solved with. Driving an `Engine` from inside `netlist` would
-//! invert the layer order (see `tests/module_layering.rs`), so they are
+//! invert the layer order (see `tests/contracts/module_layering.rs`), so they are
 //! integration tests, entered through the crate's public surface.
 
 use std::path::{Path, PathBuf};

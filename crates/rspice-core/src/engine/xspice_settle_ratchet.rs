@@ -194,7 +194,7 @@ const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 3;
 /// How far under its ceiling a count may sit before the ceiling is considered
 /// stale and must be lowered, as a percentage of the ceiling.
 ///
-/// A percentage rather than the absolute slack `tests/public_surface.rs` uses,
+/// A percentage rather than the absolute slack `tests/contracts/public_surface.rs` uses,
 /// because these three counts differ from each other by orders of magnitude
 /// and one absolute would be either meaningless on the largest or unusable on
 /// the smallest.

@@ -10,7 +10,7 @@
 //! The computation lives here rather than on `Engine` because
 //! [`TopologyFingerprint`] is a planning identity: it is consumed by the deck
 //! materializer that publishes coordinate output, and an engine that reached
-//! up for it would invert the layer order (see `tests/module_layering.rs`).
+//! up for it would invert the layer order (see `tests/contracts/module_layering.rs`).
 //! Both directions of the work are still done exactly once — the engine
 //! elaborates, this module names the result.
 

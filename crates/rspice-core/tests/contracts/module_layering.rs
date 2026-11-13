@@ -67,8 +67,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[path = "common/family_src.rs"]
-mod family_src;
+use super::family_src;
 
 use family_src::family_src_roots;
 
@@ -673,7 +672,7 @@ fn layer_of(module: &str) -> u32 {
         .unwrap_or_else(|| {
             panic!(
                 "module `{module}` has no declared layer.\n\
-                 Add it to LAYERS in tests/module_layering.rs, placing it \
+                 Add it to LAYERS in tests/contracts/module_layering.rs, placing it \
                  strictly above everything it may reference."
             )
         })
@@ -819,7 +818,7 @@ fn every_top_level_module_declares_a_layer() {
     assert!(
         undeclared.is_empty(),
         "new top-level modules without a declared layer: {undeclared:?}\n\
-         Add them to LAYERS in tests/module_layering.rs. A module with no \
+         Add them to LAYERS in tests/contracts/module_layering.rs. A module with no \
          declared position in the architecture is a module nobody decided \
          the position of."
     );
@@ -905,7 +904,7 @@ fn module_references_respect_the_layer_order() {
         failures.push_str(&format!(
             "\nAllowlist entries for edges that no longer exist:\n{}\n\
              Delete them from ALLOWED_VIOLATIONS in \
-             tests/module_layering.rs.\n",
+             tests/contracts/module_layering.rs.\n",
             retired.join("\n")
         ));
     }

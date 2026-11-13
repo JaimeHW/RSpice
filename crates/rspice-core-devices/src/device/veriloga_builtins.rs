@@ -2531,7 +2531,7 @@ impl BuiltinVerilogAInstance {
 /// This exists so the adapter does not have to name `engine::SimulationError`.
 /// `device` sits at rank 8 in the crate's layer order and `engine` at rank 12,
 /// so returning the engine's error type here would be an upward edge — the
-/// exact inversion `tests/module_layering.rs` exists to forbid. The engine
+/// exact inversion `tests/contracts/module_layering.rs` exists to forbid. The engine
 /// converts on the way out, which is the direction the ranking allows, and both
 /// call sites keep the `?` they already had.
 ///

@@ -1137,7 +1137,7 @@ impl From<crate::circuit::CircuitError> for SimulationError {
 /// `device` is ranked below `engine`, which means the generated Verilog-A
 /// adapter returns its own [`BuiltinInstantiationError`] and the engine widens
 /// it at the boundary. Reading down is what the layer order permits; the
-/// reverse is what `tests/module_layering.rs` rejects.
+/// reverse is what `tests/contracts/module_layering.rs` rejects.
 ///
 /// [`BuiltinInstantiationError`]: crate::device::veriloga_builtins::BuiltinInstantiationError
 #[cfg(feature = "veriloga-builtins-base")]

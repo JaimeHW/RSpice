@@ -60,7 +60,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           cargo test --locked --release -p rspice-core
-          --test qualification_baseline --test no_panic_corpus -- --nocapture
+          --test contracts --test no_panic_corpus -- --nocapture
       - name: Xyce conformance suite (release)
         # The Xyce corpus runs in no per-push job; this step is its gate.
         if: ${{ !cancelled() }}
