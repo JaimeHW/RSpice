@@ -30,8 +30,9 @@ use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
+use crate::workbench::documents::result_document::ResultQuantityDrag;
 use crate::workbench::documents::result_document::browser_plot::{
-    BUS_ROW_PREFIX, EVENT_NET_ROW_PREFIX,
+    BUS_ROW_PREFIX, EVENT_NET_ROW_PREFIX, drag_name,
 };
 pub const EXPRESSION_HEADER_HEIGHT: f32 = 24.0;
 pub const SIGNAL_ROW_HEIGHT: f32 = 22.0;
@@ -835,6 +836,7 @@ pub(super) fn show_virtualized_result_signals(
     selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
     ordered_visible: &[ResultBrowserSelectionKey],
+    ticked: &[ResultBrowserSelectionKey],
     filtering: bool,
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
@@ -1080,6 +1082,13 @@ pub(super) fn show_virtualized_result_signals(
                                 signal_selected,
                                 signal.visible,
                             );
+                            if responses.selection.drag_started() {
+                                start_browser_drag(
+                                    ui.ctx(),
+                                    ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
+                                    ticked,
+                                );
+                            }
                             if responses.check.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
                                 update_result_browser_multi_selection(state,
@@ -1157,6 +1166,11 @@ pub(super) fn show_virtualized_result_signals(
                                 state.results
                                     .session.is_checked_result_artifact(&artifact.identity),
                             );
+                            if responses.selection.drag_started()
+                                && is_plottable_artifact(artifact.identity.canonical_name())
+                            {
+                                start_browser_drag(ui.ctx(), selection_key.clone(), ticked);
+                            }
                             if responses.check.clicked() {
                                 update_result_browser_multi_selection(state,
                                     &selection_key,
@@ -1192,6 +1206,7 @@ pub(super) fn show_virtualized_result_signals(
             });
         });
 
+    paint_browser_drag(ui.ctx());
     if signal_rows == 0 {
         muted(
             ui,
@@ -1280,8 +1295,16 @@ fn instance_row(
     let height = result_browser_row_height(&t);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
+    if response.drag_started() {
+        egui::DragAndDrop::set_payload(
+            ui.ctx(),
+            ResultQuantityDrag {
+                keys: instance_leaf_keys(runs, row),
+            },
+        );
+    }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::CollapsingHeader,
@@ -1380,6 +1403,59 @@ fn instance_row(
             ui.close();
         }
     });
+}
+
+/// Start dragging a row: the whole ticked selection when the row is part of
+/// it, the row alone otherwise, as a file manager drags.
+fn start_browser_drag(
+    ctx: &egui::Context,
+    key: ResultBrowserSelectionKey,
+    ticked: &[ResultBrowserSelectionKey],
+) {
+    let keys = if ticked.len() > 1 && ticked.contains(&key) {
+        ticked.to_vec()
+    } else {
+        vec![key]
+    };
+    egui::DragAndDrop::set_payload(ctx, ResultQuantityDrag { keys });
+}
+
+/// While rows are being dragged, their name rides beside the pointer, so
+/// the reader sees what a drop will plot before letting go.
+fn paint_browser_drag(ctx: &egui::Context) {
+    let Some(drag) = egui::DragAndDrop::payload::<ResultQuantityDrag>(ctx) else {
+        return;
+    };
+    let Some(pointer) = ctx.pointer_latest_pos() else {
+        return;
+    };
+    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+    let t = Tokens::get(ctx);
+    let text = match drag.keys.as_slice() {
+        [one] => drag_name(one).to_owned(),
+        many => format!("{} signals", many.len()),
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("workbench.results.browser-drag"),
+    ));
+    let galley = painter.layout_no_wrap(
+        text,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    let rect = egui::Rect::from_min_size(
+        pointer + egui::vec2(14.0, 10.0),
+        galley.size() + egui::vec2(12.0, 6.0),
+    );
+    painter.rect_filled(rect, t.radius, t.color.bg_panel);
+    painter.rect_stroke(
+        rect,
+        t.radius,
+        egui::Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + egui::vec2(6.0, 3.0), galley, t.color.text);
 }
 
 fn result_browser_virtual_omission(ui: &mut Ui, text: &str, row_height: f32) {
@@ -1922,7 +1998,11 @@ fn result_quantity_row(
             format!("Plot {name}"),
         )
     });
-    let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    let selection = ui.interact(
+        selection_rect,
+        id.with("selection"),
+        egui::Sense::click_and_drag(),
+    );
     // A row is spoken as its name and the kind its mark shows, then any
     // metadata it carries.
     let kind_word = label.kind.label();
@@ -2136,7 +2216,11 @@ fn result_artifact_row(
             format!("Select {name}"),
         )
     });
-    let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    let selection = ui.interact(
+        selection_rect,
+        id.with("selection"),
+        egui::Sense::click_and_drag(),
+    );
     selection.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,

@@ -34,6 +34,7 @@ mod event_markers;
 mod expression_evaluation;
 mod expressions;
 use rspice_results_ui::waves::extent::{self, FamilyEnvelopePlan};
+mod drop;
 mod lanes;
 pub(super) use lanes::plot_event_lanes;
 pub use lanes::{event_net_plotted, set_event_net_plotted};
@@ -438,6 +439,14 @@ pub fn show_noise(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 }
 
 fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
+    // The whole area the strips take is where browser rows can be dropped,
+    // including the hint that stands in for strips while there are none.
+    let zone = ui.available_rect_before_wrap();
+    show_strips(ui, state, pane_chrome);
+    drop::accept_browser_drop(ui, state, zone);
+}
+
+fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(

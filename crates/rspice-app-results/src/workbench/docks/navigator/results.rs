@@ -787,6 +787,7 @@ pub(in crate::workbench) fn results(
             selected_trace.as_ref(),
             selected_artifact.as_ref(),
             &visible_result_keys,
+            &ticked_ordered,
             !query.is_empty(),
             kind,
             scope,

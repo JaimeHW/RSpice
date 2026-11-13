@@ -409,6 +409,11 @@ impl SourceWaveformPresentationKey {
     pub const fn analysis(&self) -> AnalysisPresentationKey {
         self.analysis
     }
+
+    /// The retained waveform's name.
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
 }
 
 /// Stable identity of a non-waveform quantity retained by one immutable

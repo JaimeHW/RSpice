@@ -10,6 +10,24 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::{AnalysisPresentationKey, ResultsParts, waveform_plotted};
 
+/// Rows dragged out of the data browser: the quantities a drop on the plot
+/// puts there, in the order the browser lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultQuantityDrag {
+    pub keys: Vec<ResultBrowserSelectionKey>,
+}
+
+/// A dragged row's name: a waveform's own, an event net's or a bus's label.
+pub(crate) fn drag_name(key: &ResultBrowserSelectionKey) -> &str {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => key.source_name(),
+        ResultBrowserSelectionKey::Artifact(key) => {
+            let name = key.canonical_name();
+            name.rsplit('/').next().unwrap_or(name)
+        }
+    }
+}
+
 /// The identity a declared bus's row carries, before its `name[msb:lsb]`
 /// label: one per bus, so ticking one plots that bus alone.
 pub(crate) const BUS_ROW_PREFIX: &str = "payload/transient-events/bus/";

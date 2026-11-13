@@ -2,5 +2,6 @@
 //! query, row height, signal sets and dragging signals onto the plot.
 
 mod browser;
+mod drag;
 mod sets;
 mod tree;
