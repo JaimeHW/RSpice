@@ -217,14 +217,48 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         &updated[0],
         &pane,
     );
-    assert_eq!(
-        new.series()[0].minimum[0],
-        old.series()[0].minimum[0] + 100.0
+    let view = rspice_ui_kit::plot::TraceView {
+        x0: 1.0,
+        x1: 2.0,
+        y0: 0.0,
+        y1: 1.0,
+        x_scale: rspice_ui_kit::plot::XScale::Linear,
+        y_scale: rspice_ui_kit::plot::XScale::Linear,
+        columns: 64,
+        rows: 0,
+    };
+    // The envelope is the family's band, folded from the members the plan
+    // names in the models it was built from.
+    let columns = |model: &StripModel, members: &[usize]| {
+        let members: Vec<rspice_ui_kit::plot::BandMember<'_>> = members
+            .iter()
+            .map(|index| {
+                let trace = &model.traces[*index];
+                rspice_ui_kit::plot::BandMember {
+                    x: trace.x.as_slice(),
+                    y: trace.y.as_slice(),
+                    parametric: false,
+                    shape: Some(trace.shape.as_ref()),
+                }
+            })
+            .collect();
+        rspice_ui_kit::plot::DecimationCache::default().band(0, &members, view)
+    };
+    let old_columns = columns(&models[0], &old.series()[0].members);
+    let new_columns = columns(&updated[0], &new.series()[0].members);
+    assert!(
+        old_columns
+            .iter()
+            .all(|[low, high]| low.is_finite() && high.is_finite())
     );
-    assert_eq!(
-        new.series()[0].maximum[0],
-        old.series()[0].maximum[0] + 100.0
-    );
+    for (old_column, new_column) in old_columns.iter().zip(new_columns.iter()) {
+        for (old_value, new_value) in old_column.iter().zip(new_column) {
+            assert!(
+                (new_value - (old_value + 100.0)).abs() < 1e-9,
+                "the envelope reads the rebuilt samples: {old_value} then {new_value}"
+            );
+        }
+    }
 
     // Legend actions explicitly invalidate the model slot. Each rebuilt
     // projection must still advance past the envelope it replaces.

@@ -37,14 +37,18 @@ pub struct ResolvedExpr {
     pub family_style: Option<FamilyTraceStyle>,
 }
 
+/// The envelope of one family of curves in a pane: its members, folded per
+/// screen column when the pane draws, into the band a large family draws as.
+///
+/// A family's members need not share a single abscissa: two Monte Carlo
+/// trials of an adaptive transient step at different instants, so an
+/// envelope read only where their samples coincide is a scatter of points
+/// rather than a boundary. The fold reads each member's own stroke in every
+/// column instead; see [`plot::DecimationCache::band`].
 #[derive(Debug)]
 pub struct FamilyEnvelopeSeries {
-    pub x: Vec<f64>,
-    pub minimum: Vec<f64>,
-    pub maximum: Vec<f64>,
-    pub color: egui::Color32,
-    pub minimum_cache_key: u64,
-    pub maximum_cache_key: u64,
+    /// The family's members, as indices into the strip model's traces.
+    pub members: Vec<usize>,
 }
 
 pub fn apply_family_trace_style<'a>(
@@ -507,31 +511,24 @@ pub fn show_plot<'a>(
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
-    // Family envelopes are derived only from exact shared X coordinates.
-    // They draw behind source curves and never interpolate missing family
-    // samples into evidence that was not retained.
-    for envelope in input.family_envelopes {
-        let mut minimum = Trace::new(&envelope.x, &envelope.minimum, envelope.color)
-            .thin()
-            .dashed()
-            .cache_key(envelope.minimum_cache_key);
-        let mut maximum = Trace::new(&envelope.x, &envelope.maximum, envelope.color)
-            .thin()
-            .dashed()
-            .cache_key(envelope.maximum_cache_key);
-        if envelope.x.len() == 1 {
-            minimum = minimum.show_single_point();
-            maximum = maximum.show_single_point();
-        }
-        spec.traces.push(minimum);
-        spec.traces.push(maximum);
-    }
-
     // A large family is drawn as the band it occupies, with the member the
-    // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`.
+    // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`. A family's
+    // envelope is that same band, drawn under its members.
     let mut banded = std::collections::HashSet::new();
     let mut highlighted: Vec<usize> = Vec::new();
-    if !families.is_empty() {
+    let enveloped: Vec<Vec<(usize, &StripTrace)>> = input
+        .family_envelopes
+        .iter()
+        .map(|envelope| {
+            envelope
+                .members
+                .iter()
+                .filter_map(|index| model.traces.get(*index).map(|trace| (*index, trace)))
+                .collect::<Vec<_>>()
+        })
+        .filter(|members| members.len() >= 2)
+        .collect();
+    if !families.is_empty() || !enveloped.is_empty() {
         let plot_rect = plot::plot_rect(ui, &spec);
         // The renderer's own column bucketing, so a band is quantized as its
         // members' envelopes would have been.
@@ -551,17 +548,14 @@ pub fn show_plot<'a>(
             .filter(|position| {
                 plot_rect.contains(*position) && ui.rect_contains_pointer(plot_rect)
             });
-        let mut bands = Vec::with_capacity(families.len());
-        for family in &families {
+        let mut band = |members: &[(usize, &StripTrace)]| {
             let identity = stable_hash(
-                &family
-                    .members
+                &members
                     .iter()
                     .map(|(_, trace)| trace_key(model, trace))
                     .collect::<Vec<_>>(),
             );
-            let members: Vec<plot::BandMember<'_>> = family
-                .members
+            let members: Vec<plot::BandMember<'_>> = members
                 .iter()
                 .map(|(_, trace)| plot::BandMember {
                     x: trace.x.as_slice(),
@@ -570,11 +564,15 @@ pub fn show_plot<'a>(
                     shape: Some(trace.shape.as_ref()),
                 })
                 .collect();
+            cache.band(identity, &members, view)
+        };
+        let mut bands = Vec::with_capacity(families.len() + enveloped.len());
+        for family in &families {
             // The quantity's own hue: a band stands for every member, not for
             // the one a family encoding happened to colour first.
             let color = family.members[0].1.signal_color;
             bands.push((
-                cache.band(identity, &members, view),
+                band(&family.members),
                 if family.overlay {
                     color.gamma_multiply(0.40)
                 } else {
@@ -605,6 +603,14 @@ pub fn show_plot<'a>(
                         .map(|(index, _)| *index),
                 );
             }
+        }
+        // An envelope over a family already drawn as its band would be the
+        // same band twice.
+        for members in &enveloped {
+            if members.iter().all(|(index, _)| banded.contains(index)) {
+                continue;
+            }
+            bands.push((band(members), members[0].1.signal_color));
         }
         let (band_scale, band_range) = (spec.y_scale, (spec.y.min, spec.y.max));
         spec.underlay = Some(Box::new(move |painter, mapper| {

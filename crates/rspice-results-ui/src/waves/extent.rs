@@ -136,12 +136,12 @@ fn envelope_key(models_generation: u64, model: &StripModel, pane: &UnitPane) -> 
 
 /// The envelope series for one pane, computed at most once per generation.
 ///
-/// The walk is over every sample of every family member, collected into a
-/// map keyed by exact X coordinate and then sorted — for a swept family of a
-/// million points that is the most expensive thing the wave stack does, and
-/// the sheet bar asks for it a second time just to decide whether to offer
-/// the control that draws it. Held per pane, because every pane of a strip
-/// asks on the same frame; see [`FamilyEnvelopeCache`].
+/// A plan names each family the pane carries and holds its members; the
+/// samples are folded per screen column only when the pane draws, against
+/// the view it draws in (see [`FamilyEnvelopeSeries::columns`]). The sheet
+/// bar asks for the plan too, to decide whether to offer the control that
+/// draws it. Held per pane, because every pane of a strip asks on the same
+/// frame; see [`FamilyEnvelopeCache`].
 pub fn family_envelopes(
     cache: &mut FamilyEnvelopeCache,
     models_generation: u64,
@@ -165,66 +165,32 @@ pub fn family_envelopes(
 
 fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
     note_extent(1);
-    let mut groups = HashMap::<(String, u8), Vec<&StripTrace>>::new();
-    for trace in pane
+    let mut groups = HashMap::<(String, u8), Vec<(usize, &StripTrace)>>::new();
+    for (index, trace) in pane
         .traces
         .iter()
-        .filter_map(|index| model.traces.get(*index))
-        .filter(|trace| trace.visible && !trace.overlay && trace.family_group_ordinal.is_some())
+        .filter_map(|index| model.traces.get(*index).map(|trace| (*index, trace)))
+        .filter(|(_, trace)| {
+            trace.visible && !trace.overlay && trace.family_group_ordinal.is_some()
+        })
     {
         groups
             .entry((trace.source_waveform_name.clone(), trace.kind as u8))
             .or_default()
-            .push(trace);
+            .push((index, trace));
     }
 
     let mut envelopes = Vec::new();
-    for ((source_name, kind), traces) in groups {
+    for traces in groups.into_values() {
         let family_groups = traces
             .iter()
-            .map(|trace| trace.presentation_key)
+            .map(|(_, trace)| trace.presentation_key)
             .collect::<HashSet<_>>();
         if family_groups.len() < 2 {
             continue;
         }
-
-        let mut points = HashMap::<u64, (f64, f64, f64, usize)>::new();
-        for trace in &traces {
-            for (&x, &y) in trace.x.iter().zip(trace.y.iter()) {
-                if !x.is_finite() || !y.is_finite() {
-                    continue;
-                }
-                points
-                    .entry(x.to_bits())
-                    .and_modify(|(_, minimum, maximum, count)| {
-                        *minimum = minimum.min(y);
-                        *maximum = maximum.max(y);
-                        *count += 1;
-                    })
-                    .or_insert((x, y, y, 1));
-            }
-        }
-        let mut points = points
-            .into_values()
-            .filter(|(_, _, _, count)| *count >= 2)
-            .collect::<Vec<_>>();
-        points.sort_by(|left, right| left.0.total_cmp(&right.0));
-        if points.is_empty() {
-            continue;
-        }
-
-        let presentation_keys = traces
-            .iter()
-            .map(|trace| trace.presentation_key)
-            .collect::<Vec<_>>();
-        let identity = stable_hash(&(model.analysis_key, source_name, kind, presentation_keys));
         envelopes.push(FamilyEnvelopeSeries {
-            x: points.iter().map(|point| point.0).collect(),
-            minimum: points.iter().map(|point| point.1).collect(),
-            maximum: points.iter().map(|point| point.2).collect(),
-            color: traces[0].signal_color.gamma_multiply(0.78),
-            minimum_cache_key: identity ^ 0x1357_9BDF_2468_ACE0,
-            maximum_cache_key: identity ^ 0x0246_8ACE_1357_9BDF,
+            members: traces.iter().map(|(index, _)| *index).collect(),
         });
     }
     envelopes
