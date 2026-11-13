@@ -485,3 +485,106 @@ fn write_the_tiny_value_legend_picture() {
     )
     .expect("the picture is written");
 }
+
+/// Three Monte Carlo trials of a flat output, each on a time grid of its own
+/// that shares no instant with the others', as adaptive steps leave them.
+fn three_trials() -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
+    let run = state.model.simulation.start_run();
+    for (index, (time, level)) in [
+        (vec![0.0, 0.31, 0.72, 1.0], 0.2),
+        (vec![0.01, 0.45, 0.99], 0.5),
+        (vec![0.02, 0.55, 0.98], 0.8),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let provenance = AnalysisResultProvenance::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([3; 32]),
+            Vec::new(),
+        )
+        .and_then(|provenance| {
+            provenance.with_family_member(Some(
+                rspice_results::provenance::AnalysisResultFamilyMember::MonteCarloTrial { index },
+            ))
+        })
+        .expect("a trial's provenance");
+        let levels = vec![level; time.len()];
+        let mut trace = RetainedTrace::new("V(out)", time, levels, "").with_unit("V");
+        trace.visible = true;
+        run.add_analysis(
+            AnalysisResult::new(index as u64 + 1, AnalysisType::Transient, "Transient")
+                .with_waveforms(vec![trace])
+                .with_provenance(provenance),
+        );
+    }
+    state
+}
+
+/// The trial strokes and the envelope fill a frame painted in `hue`: each
+/// long stroke's width and whether it is at full strength, and how many
+/// vertices of fill the envelope took.
+fn trial_strokes(output: &egui::FullOutput, hue: egui::Color32) -> (Vec<(f32, bool)>, usize) {
+    fn walk(
+        shape: &egui::Shape,
+        hue: egui::Color32,
+        strokes: &mut Vec<(f32, bool)>,
+        fill: &mut usize,
+    ) {
+        match shape {
+            egui::Shape::Path(path) if path.points.len() >= 2 => {
+                let span = path.points.last().map_or(0.0, |last| last.x) - path.points[0].x;
+                if let egui::epaint::ColorMode::Solid(color) = path.stroke.color
+                    && span > 300.0
+                {
+                    if color == hue {
+                        strokes.push((path.stroke.width, true));
+                    } else if color == hue.gamma_multiply(0.40) {
+                        strokes.push((path.stroke.width, false));
+                    }
+                }
+            }
+            egui::Shape::Mesh(mesh) => {
+                *fill += mesh
+                    .vertices
+                    .iter()
+                    .filter(|vertex| vertex.color == hue.gamma_multiply(0.28))
+                    .count();
+            }
+            egui::Shape::Vec(inner) => inner
+                .iter()
+                .for_each(|shape| walk(shape, hue, strokes, fill)),
+            _ => {}
+        }
+    }
+    let (mut strokes, mut fill) = (Vec::new(), 0);
+    for clipped in &output.shapes {
+        walk(&clipped.shape, hue, &mut strokes, &mut fill);
+    }
+    (strokes, fill)
+}
+
+/// Trials that never share an instant still have an envelope: the band they
+/// occupy, filled across the plot, where an envelope read only at shared
+/// instants had nothing to draw.
+#[test]
+fn trials_on_their_own_grids_have_a_continuous_envelope() {
+    let mut state = three_trials();
+    state.results.results.session.show_family_envelope = true;
+    let ctx = themed_context(crate::ui::Theme::default());
+    let output = settled(&ctx, &mut state);
+    let hue = state.results.results.models.last_built().expect("models")[0].traces[0].signal_color;
+    let (strokes, fill) = trial_strokes(&output, hue);
+    assert_eq!(
+        strokes.len(),
+        5,
+        "each trial is stroked, and the envelope's two edges: {strokes:?}"
+    );
+    // Two fill vertices a screen column, across a plot of some 1100 columns.
+    assert!(
+        fill > 2 * 1000,
+        "the envelope fills the plot: {fill} vertices"
+    );
+}
