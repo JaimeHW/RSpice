@@ -26,8 +26,6 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
 tempfile = "3"
 
 [lints]

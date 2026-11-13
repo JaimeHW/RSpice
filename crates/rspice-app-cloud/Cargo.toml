@@ -38,17 +38,9 @@ rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-# Keypair generation for license issuance in the `services::license` tests.
-# The matching `rand_core` feature on ed25519-dalek is dev-only for the same
-# reason: `cargo test` unions it in, `cargo build` never sees it.
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # License verification is pure Rust on every target. Native clients retain
-# dalek's precomputed tables for maximum throughput; key generation remains
-# test-only through the dev-dependency above.
+# dalek's precomputed tables for maximum throughput.
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }

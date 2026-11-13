@@ -13,11 +13,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    ignore:
-      # Pinned by workspace determinism requirements: every Monte Carlo and
-      # agauss stream in the corpus is reproduced against this generator, so a
-      # proposed major can never merge as-is.
-      - dependency-name: "rand"
 
   - package-ecosystem: "github-actions"
     directory: "/"

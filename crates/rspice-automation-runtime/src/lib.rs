@@ -1134,7 +1134,6 @@ pub enum RuntimeError {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer as _, SigningKey};
-    use rand::rngs::OsRng;
 
     fn requirement() -> RuntimeRequirement {
         RuntimeRequirement {
@@ -1186,7 +1185,7 @@ mod tests {
         };
         manifest.runtime_digest_sha256 = encode_hex(&runtime_inventory_digest(&manifest).unwrap());
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
-        let signing = SigningKey::generate(&mut OsRng);
+        let signing = SigningKey::from_bytes(&[0x5a; 32]);
         let signature = signing.sign(&manifest_bytes);
         let signature_document = ManifestSignature {
             key_id: "test-release-key".to_owned(),
