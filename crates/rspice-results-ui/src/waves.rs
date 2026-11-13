@@ -210,6 +210,11 @@ pub struct StripModel {
     pub event_lanes: Option<Arc<logic::EventLanes>>,
     /// The analysis' `D()` and `E()` columns drawn from that history.
     pub lane_traces: Vec<LaneTrace>,
+    /// The hues the logic and bus rows take in turn, in their natural order:
+    /// the canvas palette from the first place after the curves and real
+    /// lanes the strip shows. Empty until the reader's visibility is applied,
+    /// and a row then takes its lane's own colour.
+    pub lane_hues: Vec<egui::Color32>,
     /// What the run's checks put on the strip's time axis: its HDL severity
     /// records and finish, its assertion violations, and its stop time when
     /// expected outputs lie beyond it. `None` when they put nothing there.

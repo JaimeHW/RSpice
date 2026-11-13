@@ -867,6 +867,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             x_range: None,
             event_lanes,
             lane_traces,
+            lane_hues: Vec::new(),
             event_markers: analysis
                 .waveforms
                 .first()

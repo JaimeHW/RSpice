@@ -705,3 +705,37 @@ fn write_the_review_pictures() {
         .expect("the picture is written");
     }
 }
+
+/// The lanes take the palette's hues after the curves the strip plots: on
+/// the SAR strip VIN and TOP are curves, and SAMP, EOC and the `code` bus
+/// take the next three hues, none a curve's.
+#[test]
+fn lane_rows_take_hues_after_the_plotted_curves() {
+    let (mut state, key) = sar_strip(BusRadix::Hex, false);
+    let models = strip(&mut state);
+    let model = &models[0];
+    let curves: Vec<egui::Color32> = model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .map(|trace| trace.color)
+        .collect();
+    let layout = state.results.results.session.event_lanes.get(&key);
+    let rows: Vec<(String, egui::Color32)> = lane_specs(model, layout)
+        .iter()
+        .map(|spec| (spec.label().to_owned(), spec.color()))
+        .collect();
+    let palette = Tokens::default().color.traces;
+    assert_eq!(curves, palette[..2], "VIN and TOP take the first two hues");
+    // In the rows' natural order, the columns' own: the bus where its first
+    // bit falls, then EOC, then SAMP. The reader's order moves none of them.
+    assert_eq!(
+        rows,
+        [
+            ("SAMP".to_owned(), palette[4]),
+            ("EOC".to_owned(), palette[3]),
+            ("code".to_owned(), palette[2])
+        ],
+        "the rows take the next three"
+    );
+}

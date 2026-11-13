@@ -185,7 +185,7 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                     .family_visibility_key
                     .is_none_or(|key| !hidden_family_traces.contains(&key));
         }
-        rank_palette_slots(model, analysis, &source_visible, palette);
+        let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, palette);
         for lane in &mut model.lane_traces {
             let key = SourceWaveformPresentationKey::new(
                 model.analysis_key,
@@ -198,7 +198,66 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 .is_some_and(|waveform| waveform.visible);
             lane.visible = overrides.get(&key).copied().unwrap_or(dataset_default);
         }
+        rank_lane_hues(model, analysis, first_lane_slot, palette);
     }
+}
+
+/// Give the lanes of `model` hues from the palette's cycle in turn after the
+/// curves the strip shows: each real lane, which is a curve in its unit's
+/// pane, and then the logic and bus rows ([`StripModel::lane_hues`]).
+///
+/// A lane's hue was its place among the analysis' columns, so whether it
+/// repeated a plotted curve's hue was chance: on the SAR review strip EOC
+/// drew in exactly the green of B3's curve. Ranked after the shown curves,
+/// no lane shares a hue with one until the curves and lanes together
+/// outnumber the palette.
+/// As with curves, the real lanes the dataset plots rank first and keep that
+/// rank whatever the reader hides, then the ones the reader added; a column
+/// that stores a colour keeps it.
+fn rank_lane_hues(
+    model: &mut StripModel,
+    analysis: &AnalysisResult<RetainedTrace>,
+    first_slot: usize,
+    palette: &[egui::Color32],
+) {
+    use super::LaneTraceKind;
+    if palette.is_empty() {
+        return;
+    }
+    let column = |lane: &super::LaneTrace| {
+        lane.waveform_index
+            .and_then(|index| analysis.waveforms.get(index))
+    };
+    let dataset = |lane: &super::LaneTrace| column(lane).is_some_and(|waveform| waveform.visible);
+    let real = |lane: &super::LaneTrace| lane.kind == LaneTraceKind::Real;
+    let plotted = model
+        .lane_traces
+        .iter()
+        .filter(|lane| real(lane) && dataset(lane))
+        .count();
+    let added = model
+        .lane_traces
+        .iter()
+        .filter(|lane| real(lane) && !dataset(lane) && lane.visible)
+        .count();
+    let (mut plotted_rank, mut added_rank, mut spare_rank) = (0, plotted, plotted + added);
+    for lane in model.lane_traces.iter_mut().filter(|lane| real(lane)) {
+        let counter = if dataset(lane) {
+            &mut plotted_rank
+        } else if lane.visible {
+            &mut added_rank
+        } else {
+            &mut spare_rank
+        };
+        let slot = first_slot + *counter;
+        *counter += 1;
+        let stored = column(lane).map_or("", |waveform| waveform.color.as_str());
+        lane.color = crate::presentation::trace_color(stored, palette[slot % palette.len()]);
+    }
+    let rows_from = first_slot + plotted + added;
+    model.lane_hues = (0..palette.len())
+        .map(|k| palette[(rows_from + k) % palette.len()])
+        .collect();
 }
 
 /// Give each curve of `model` its place in the palette's cycle, and the hue
@@ -212,16 +271,17 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
 /// dash. A real and an imaginary part rank apart; a family's members share
 /// their source's place; an overlay run's curve takes the place of the
 /// active run's curve it is merged with. `source_visible` is each trace's
-/// source visibility with the reader's overrides applied.
+/// source visibility with the reader's overrides applied. Returns the first
+/// place after the shown curves'.
 fn rank_palette_slots(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     source_visible: &[bool],
     palette: &[egui::Color32],
-) {
+) -> usize {
     use super::TraceKind;
     if palette.is_empty() {
-        return;
+        return 0;
     }
     let ranked = |trace: &super::StripTrace| trace.palette_slot.is_some() && !trace.overlay;
     let mut sources: Vec<((usize, TraceKind), bool, bool)> = Vec::new();
@@ -290,4 +350,5 @@ fn rank_palette_slots(
             trace.color = color;
         }
     }
+    plotted + added
 }

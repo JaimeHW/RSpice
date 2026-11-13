@@ -262,6 +262,16 @@ pub fn lane_specs(model: &StripModel, layout: Option<&EventLaneLayout>) -> Vec<L
             });
         }
     }
+    // The rows take the strip's lane hues in their natural order, so moving
+    // one recolours none of them.
+    if !model.lane_hues.is_empty() {
+        for (index, spec) in natural.iter_mut().enumerate() {
+            let hue = model.lane_hues[index % model.lane_hues.len()];
+            match spec {
+                LaneSpec::Logic { color, .. } | LaneSpec::Bus { color, .. } => *color = hue,
+            }
+        }
+    }
     let Some(layout) = layout else {
         return natural;
     };
