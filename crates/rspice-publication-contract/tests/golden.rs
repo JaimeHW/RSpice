@@ -757,25 +757,3 @@ fn golden_manifest_round_trips_through_canonical_bytes() {
         manifest
     );
 }
-
-/// Rewrites the golden files from the builders. Run only after a deliberate
-/// schema change, then review the diff like any other contract change:
-/// `cargo test -p rspice-publication-contract --test golden regenerate_fixtures -- --ignored`
-#[test]
-#[ignore = "regenerates golden fixtures; run explicitly after a deliberate schema change"]
-fn regenerate_fixtures() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    std::fs::create_dir_all(&root).expect("fixture directory");
-    std::fs::write(root.join("rc-lowpass.json"), pretty(&rc_lowpass_snapshot()))
-        .expect("write rc-lowpass fixture");
-    std::fs::write(
-        root.join("multi-analysis.json"),
-        pretty(&multi_analysis_snapshot()),
-    )
-    .expect("write multi-analysis fixture");
-    std::fs::write(
-        root.join("figure-manifest.json"),
-        pretty(&rc_lowpass_manifest()),
-    )
-    .expect("write figure-manifest fixture");
-}

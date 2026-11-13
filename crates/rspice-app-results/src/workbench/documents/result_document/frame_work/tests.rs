@@ -835,29 +835,6 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
 // table, read through `--nocapture`. Routing it through `log` would put the
 // table behind a logger no test installs. The allow is per-function so the
 // rule keeps holding for every other test in the crate.
-#[test]
-#[allow(clippy::print_stdout)]
-#[ignore = "measurement harness"]
-fn report_idle_frame_work() {
-    for (name, viewer) in surfaces() {
-        let mut state = state_for(viewer);
-        let first = WorkCounts::reset();
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        frame(&ctx, &mut state, &mut |ui, state| {
-            show_surface(viewer, ui, state);
-        });
-        let first = first.since();
-        let steady = steady_state_work(&mut state, |ui, state| show_surface(viewer, ui, state));
-        println!(
-            "{name:14} first frame {:5} | {IDLE_FRAMES} idle frames {:6} | idle detail {:?}",
-            first.total(),
-            steady.total(),
-            steady.nonzero()
-        );
-    }
-}
-
 /// Retained samples one surface may read across [`IDLE_FRAMES`] steady frames.
 ///
 /// What is drawn sets it. The only surface that legitimately reads the dataset

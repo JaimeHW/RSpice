@@ -380,19 +380,6 @@ fn lanes_and_the_value_pane_render_on_one_measured_time_axis() {
     }
 }
 
-/// Writes the render for review. Set `RSPICE_REVIEW_DIR` to choose where.
-#[test]
-#[ignore = "writes a PNG for review"]
-fn write_lane_render_png() {
-    let render = render();
-    let directory = std::env::var_os("RSPICE_REVIEW_DIR")
-        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
-    let path = directory.join("logic-lanes.png");
-    let height = render.canvas.height();
-    std::fs::write(&path, render.canvas.png(height)).expect("write lane render");
-    println!("lane render: {}", path.display());
-}
-
 /// The columns of a full-zoom render of a clock that goes unknown for one
 /// change in thousands, above a lane of lone unknowns narrower than a pixel
 /// at sub-pixel offsets, and where each unknown starts: (canvas, levels of
@@ -479,17 +466,4 @@ fn every_unknown_stretch_is_drawn_at_least_a_pixel_wide_at_full_zoom() {
         "unknowns drawn without the error ink:\n{}",
         missing.join("\n")
     );
-}
-
-/// The full-zoom unknowns for review. Set `RSPICE_REVIEW_DIR` to choose
-/// where.
-#[test]
-#[ignore = "writes a PNG for review"]
-fn write_unknown_slivers_png() {
-    let (canvas, ..) = unknown_slivers();
-    let directory = std::env::var_os("RSPICE_REVIEW_DIR")
-        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
-    let path = directory.join("logic-unknown-slivers.png");
-    std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
-    println!("{}", path.display());
 }
