@@ -18,8 +18,8 @@
 // The application's entry points come through the menu's own imports: this
 // group reaches nothing the menu does not already reach.
 use super::{
-    AppState, ContextAction, StimulusLinkMode, clicked_source, open_stimulus_definition,
-    open_stimulus_link,
+    CanvasFacts, CanvasParts, ContextAction, StimulusLinkMode, clicked_source, open_stimulus_link,
+    show_stimulus_definition,
 };
 
 /// Whether `action` is one of this group's.
@@ -34,7 +34,7 @@ pub(super) const fn owns(action: ContextAction) -> bool {
 }
 
 /// The definition the selected source names, while the library still holds it.
-fn held_definition(state: &AppState) -> Option<&str> {
+fn held_definition<'a>(state: &CanvasFacts<'a>) -> Option<&'a str> {
     let name = clicked_source(state)?
         .stimulus_provenance
         .as_ref()?
@@ -51,7 +51,7 @@ fn held_definition(state: &AppState) -> Option<&str> {
 }
 
 /// Whether the library has a revision to copy back onto the selected source.
-fn offers_readoption(state: &AppState) -> bool {
+fn offers_readoption(state: &CanvasFacts<'_>) -> bool {
     held_definition(state).is_some()
         && clicked_source(state).is_some_and(|source| {
             state
@@ -65,7 +65,7 @@ fn offers_readoption(state: &AppState) -> bool {
 }
 
 /// Whether this verb is part of the menu for what is selected.
-pub(super) fn shown(action: ContextAction, state: &AppState) -> bool {
+pub(super) fn shown(action: ContextAction, state: &CanvasFacts<'_>) -> bool {
     if clicked_source(state).is_none() {
         return false;
     }
@@ -78,7 +78,7 @@ pub(super) fn shown(action: ContextAction, state: &AppState) -> bool {
 }
 
 /// Whether this verb can be taken now, and what to say when it cannot.
-pub(super) fn availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
+pub(super) fn availability(action: ContextAction, state: &CanvasFacts<'_>) -> (bool, &'static str) {
     let writable = !state.schematic_edit_read_only();
     match action {
         ContextAction::AdoptStimulus
@@ -99,8 +99,8 @@ pub(super) fn availability(action: ContextAction, state: &AppState) -> (bool, &'
 }
 
 /// Take the verb, through the entry point Component Properties uses for it.
-pub(super) fn execute(action: ContextAction, state: &mut AppState) {
-    let Some((component_id, definition)) = clicked_source(state).map(|source| {
+pub(super) fn execute(action: ContextAction, state: &mut CanvasParts<'_>) {
+    let Some((component_id, definition)) = clicked_source(&state.facts()).map(|source| {
         (
             source.id,
             source
@@ -114,14 +114,14 @@ pub(super) fn execute(action: ContextAction, state: &mut AppState) {
     let outcome = match action {
         ContextAction::AdoptStimulus => open_stimulus_link(
             &mut state.design.stimulus_link,
-            &state.model,
+            state.model,
             component_id,
             StimulusLinkMode::Adopt,
         )
         .map(|()| None),
         ContextAction::SaveStimulus => open_stimulus_link(
             &mut state.design.stimulus_link,
-            &state.model,
+            state.model,
             component_id,
             StimulusLinkMode::Extract,
         )
@@ -135,7 +135,11 @@ pub(super) fn execute(action: ContextAction, state: &mut AppState) {
         },
         ContextAction::OpenStimulusDefinition => {
             if let Some(definition) = definition {
-                open_stimulus_definition(state, &definition);
+                show_stimulus_definition(
+                    &mut state.design.selected_stimulus_definition,
+                    state.workbench,
+                    &definition,
+                );
             }
             Ok(None)
         }

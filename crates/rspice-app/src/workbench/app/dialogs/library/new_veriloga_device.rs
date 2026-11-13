@@ -94,11 +94,6 @@ pub(crate) fn open_new_veriloga_device_form_in(
 
 /// Whether New Verilog-A device… can make anything at all: it needs a
 /// library it can write.
-pub(crate) fn new_veriloga_device_available(state: &AppState) -> bool {
-    new_veriloga_device_available_in(&state.model)
-}
-
-/// [`new_veriloga_device_available`], read from the model alone.
 pub(crate) fn new_veriloga_device_available_in(model: &Model) -> bool {
     !writable_libraries(&model.library_manager).is_empty()
 }

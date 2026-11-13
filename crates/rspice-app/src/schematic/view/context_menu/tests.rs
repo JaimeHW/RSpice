@@ -15,6 +15,90 @@ use crate::state::{
     NetLabel, Wire,
 };
 
+use super::super::{AppState, apply_menu_follow_up, canvas_facts, canvas_parts};
+
+// The menu answers over the canvas's facts and acts over its parts. These
+// lend both from a test's state under the menu's own names, and take a step
+// the menu leaves to the application as the canvas takes it.
+
+fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
+    super::action_availability(action, &canvas_facts(state))
+}
+
+fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
+    super::menu_entries(&canvas_facts(state), target)
+}
+
+fn menu_summary(state: &AppState, target: ContextTarget) -> Option<String> {
+    super::menu_summary(&canvas_facts(state), target)
+}
+
+fn selection_summary(state: &AppState, target: ContextTarget) -> String {
+    super::selection_summary(&canvas_facts(state), target)
+}
+
+fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
+    super::context_menu_binding(&canvas_facts(state))
+}
+
+fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
+    super::context_menu_view(&canvas_facts(state), ctx)
+}
+
+fn execute_context_action(
+    action: ContextAction,
+    state: &mut AppState,
+    click_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let follow_up =
+        super::execute_context_action(action, &mut canvas_parts(state), click_pos, symbol_context);
+    follow(state, follow_up);
+}
+
+fn apply_context_request(
+    state: &mut AppState,
+    request: ContextMenuRequest,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let follow_up = super::apply_context_request(&mut canvas_parts(state), request, symbol_context);
+    follow(state, follow_up);
+}
+
+fn follow(state: &mut AppState, follow_up: Option<MenuFollowUp>) {
+    if let Some(follow_up) = follow_up {
+        apply_menu_follow_up(state, follow_up);
+    }
+}
+
+fn open_operating_point(state: &mut AppState) {
+    super::open_operating_point(&mut canvas_parts(state));
+}
+
+fn select_pointer_target(
+    state: &mut AppState,
+    hit: PointerHit,
+    hit_radius: i32,
+    symbol_context: &SchematicSymbolContext,
+    ctx: &Context,
+    viewport: &Viewport,
+    pointer_pos: egui::Pos2,
+) -> ContextTarget {
+    super::select_pointer_target(
+        &mut canvas_parts(state),
+        hit,
+        hit_radius,
+        symbol_context,
+        ctx,
+        viewport,
+        pointer_pos,
+    )
+}
+
+fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
+    super::select_context_target(&mut canvas_parts(state), target)
+}
+
 fn pointer_viewport() -> Viewport {
     Viewport {
         offset: egui::Pos2::ZERO,
@@ -534,7 +618,10 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
 fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     let mut behind = state_with_selected_source(1, true);
     assert!(action_availability(ContextAction::ReadoptStimulus, &behind).0);
-    stimulus::execute(ContextAction::ReadoptStimulus, &mut behind);
+    stimulus::execute(
+        ContextAction::ReadoptStimulus,
+        &mut canvas_parts(&mut behind),
+    );
     let source = &behind.model.schematic.document().components[0];
     assert!(source.params.contains("freq=2k"), "{}", source.params);
     assert_eq!(
@@ -549,11 +636,14 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     );
 
     let mut local = state_with_selected_source(0, false);
-    stimulus::execute(ContextAction::SaveStimulus, &mut local);
+    stimulus::execute(ContextAction::SaveStimulus, &mut canvas_parts(&mut local));
     assert!(local.design.stimulus_link.open);
 
     let mut adopted = state_with_selected_source(0, true);
-    stimulus::execute(ContextAction::OpenStimulusDefinition, &mut adopted);
+    stimulus::execute(
+        ContextAction::OpenStimulusDefinition,
+        &mut canvas_parts(&mut adopted),
+    );
     assert_eq!(
         adopted.design.selected_stimulus_definition.as_deref(),
         Some("sensor_drive")

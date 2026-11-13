@@ -118,7 +118,7 @@ pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
 pub(crate) use dialogs::library::new_veriloga_device::{
-    new_veriloga_device_available, open_new_veriloga_device_form,
+    new_veriloga_device_available_in, open_new_veriloga_device_form,
 };
 pub(crate) use dialogs::project::{
     TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
@@ -175,20 +175,21 @@ pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };
 pub(crate) use dialogs::stimulus_link::{
-    StimulusLinkMode, open_stimulus_definition, open_stimulus_link,
+    StimulusLinkMode, open_stimulus_definition, open_stimulus_link, show_stimulus_definition,
 };
 pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 
 pub(crate) use actions::property_edit::{
     PropertyFormParts, authoritative_component_property_sheet, open_property_editor,
-    open_selected_object_properties, open_selected_object_properties_in,
-    selected_object_properties_available,
+    open_selected_object_properties_in, selected_object_properties_available_in,
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
 pub(crate) use actions::workspace::{
     copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
-    sync_active_schematic, veriloga_source_for_component,
+    selected_hierarchy_master, selected_instance_veriloga_source,
+    symbol_in_place::{SymbolInPlaceRefusal, selected_symbol_in_place_target},
+    sync_active_schematic, veriloga_master_of_component, veriloga_source_for_component,
 };
 pub(crate) use dialogs::find_replace::find_replace_matches;
 #[cfg(test)]

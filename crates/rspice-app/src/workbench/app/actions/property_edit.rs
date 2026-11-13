@@ -531,6 +531,7 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
 
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
+#[cfg(test)]
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     selected_object_properties_available_in(&state.design.property_registry, &state.model)
 }
@@ -777,6 +778,7 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
 /// schematic object. Component instances retain their schema-driven editor;
 /// buses, taps, and wire-resolved named nets use the topology-aware generic
 /// transaction specified by the workbench mockup.
+#[cfg(test)]
 pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     let mut parts = state.design.property_form_parts();
     open_selected_object_properties_in(&mut parts, &mut state.model, &mut state.workbench)

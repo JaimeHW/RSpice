@@ -10,7 +10,7 @@ use egui::{Context, Response};
 
 use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
-use crate::workbench::app_state::{AppState, ContextTarget};
+use crate::workbench::app_state::ContextTarget;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
@@ -18,9 +18,9 @@ use crate::workbench::{
     app::{
         StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
         delete_schematic_selection, duplicate_schematic_selection_at,
-        new_veriloga_device_available, open_new_veriloga_device_form, open_replace_instance_dialog,
-        open_stimulus_definition, open_stimulus_link, paste_schematic_clipboard_at,
-        replace_instance_available, schematic_grid_step,
+        new_veriloga_device_available_in, open_replace_instance_dialog, open_stimulus_link,
+        paste_schematic_clipboard_at, replace_instance_available, schematic_grid_step,
+        show_stimulus_definition,
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
@@ -30,8 +30,9 @@ use crate::workbench::{
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
+use super::parts::{CanvasFacts, CanvasParts};
 use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
-use super::sheet_visibility::retain_selection_on_active_sheet;
+use super::sheet_visibility::retain_selection_on_active_sheet_in;
 use super::viewport::Viewport;
 
 use super::selection_layout::{
@@ -288,7 +289,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
 
 /// The one independent source the menu is about, when that is all that is
 /// selected.
-fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
+fn clicked_source<'a>(state: &CanvasFacts<'a>) -> Option<&'a crate::state::Component> {
     let id = state
         .model
         .schematic
@@ -321,7 +322,7 @@ enum MenuSubject {
     Object,
 }
 
-fn menu_subject(state: &AppState, target: ContextTarget) -> MenuSubject {
+fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
     if clicked_source(state).is_some() {
         return MenuSubject::Source;
     }
@@ -335,7 +336,7 @@ fn menu_subject(state: &AppState, target: ContextTarget) -> MenuSubject {
 }
 
 /// A click on empty sheet with nothing selected.
-fn is_bare_canvas(state: &AppState, target: ContextTarget) -> bool {
+fn is_bare_canvas(state: &CanvasFacts<'_>, target: ContextTarget) -> bool {
     menu_subject(state, target) == MenuSubject::Canvas
         && state.model.schematic.session.editor.selection.is_empty()
 }
@@ -434,14 +435,18 @@ const fn arrange_turn(action: ArrangeAction) -> Option<(SelectionTransform, Plac
 
 /// Turn what floats, the placement ghost or what Move carries, as R and M
 /// would; with nothing floating, turn the selection on the sheet.
-fn turn(state: &mut AppState, symbol_context: &SchematicSymbolContext, action: ArrangeAction) {
+fn turn(
+    state: &mut CanvasParts<'_>,
+    symbol_context: &SchematicSymbolContext,
+    action: ArrangeAction,
+) {
     let Some((selection, floating)) = arrange_turn(action) else {
         return;
     };
     if !turn_what_floats(state, floating) {
         transform_selection_on_active_sheet(
-            &mut state.model,
-            &mut state.workbench,
+            state.model,
+            state.workbench,
             symbol_context,
             selection,
         );
@@ -451,7 +456,7 @@ fn turn(state: &mut AppState, symbol_context: &SchematicSymbolContext, action: A
 /// The rows a menu opened on the bare canvas, with nothing selected, leaves
 /// out: they act on a selection there is none of, so they could only ever be
 /// disabled there.
-fn selection_only(action: ContextAction, state: &AppState) -> bool {
+fn selection_only(action: ContextAction, state: &CanvasFacts<'_>) -> bool {
     match action {
         ContextAction::Properties
         | ContextAction::Rotate
@@ -494,7 +499,7 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
 
 /// Whether the selection holds a part whose value a series rounds: a menu
 /// opened on anything else has no use for the row.
-fn selection_holds_a_standard_value(state: &AppState) -> bool {
+fn selection_holds_a_standard_value(state: &CanvasFacts<'_>) -> bool {
     let selection = &state.model.schematic.session.editor.selection;
     state
         .model
@@ -520,7 +525,7 @@ fn selection_holds_a_standard_value(state: &AppState) -> bool {
 /// stimulus-library group instead of the master rows, which is also what lets
 /// the group in without turning the menu into a scroller. A rule with nothing
 /// left under it goes too.
-fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
+fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
     let bare_canvas = is_bare_canvas(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
@@ -555,14 +560,27 @@ fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
     entries
 }
 
+/// A step the menu leaves to the application, which takes it in the menu's
+/// place: each reaches a slot the canvas's parts do not hold, the code
+/// feature's form and netlist or the models feature's selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MenuFollowUp {
+    /// New Verilog-A device… opens the code feature's form.
+    NewVerilogADevice,
+    /// Create symbol from ports starts from the selected model, if any.
+    CreateSymbolFromPorts,
+    /// Show in netlist opens the generated deck at the instance's card.
+    ShowInNetlist,
+}
+
 pub(super) fn handle_context_menu(
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     _routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
-) {
-    retain_selection_on_active_sheet(state);
+) -> Option<MenuFollowUp> {
+    retain_selection_on_active_sheet_in(state.model);
     #[cfg(target_arch = "wasm32")]
     let browser_keyboard_open =
         crate::workbench::browser::accessibility::take_schematic_context_menu_request();
@@ -573,35 +591,40 @@ pub(super) fn handle_context_menu(
         context_surface::close(response);
         forget_choices(&response.ctx);
         state.design.interaction.context_target = None;
-        return;
+        return None;
     }
     let anchor = if opening.secondary_clicked {
         capture_pointer_target(response, state, viewport, symbol_context)
     } else {
         if opening.keyboard_open {
             forget_choices(&response.ctx);
-            let (target, click_pos) = keyboard_target(state, viewport, response.rect.center());
+            let (target, click_pos) =
+                keyboard_target(&state.facts(), viewport, response.rect.center());
             state.design.interaction.context_target = Some((target, (click_pos.x, click_pos.y)));
         }
         None
     };
-    let Some(view) = context_menu_view(state, &response.ctx) else {
+    let Some(view) = context_menu_view(&state.facts(), &response.ctx) else {
         context_surface::close(response);
-        return;
+        return None;
     };
     let output = context_surface::show(response, opening, anchor, &view);
-    match output.request {
+    let follow_up = match output.request {
         Some(ContextMenuRequest {
             binding,
             action: ContextAction::Choose(target),
-        }) => choose_target(state, &view, &binding, target),
+        }) => {
+            choose_target(state, &view, &binding, target);
+            None
+        }
         Some(request) => apply_context_request(state, request, symbol_context),
-        None => {}
-    }
+        None => None,
+    };
     if !output.open {
         forget_choices(&response.ctx);
         state.design.interaction.context_target = None;
     }
+    follow_up
 }
 
 fn choices_id() -> egui::Id {
@@ -614,7 +637,7 @@ fn forget_choices(ctx: &Context) {
 
 fn capture_pointer_target(
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) -> Option<egui::Pos2> {
@@ -623,7 +646,7 @@ fn capture_pointer_target(
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
     let target = if response.long_touched() {
-        let target = touch_target(&response.ctx, state, viewport, symbol_context, pos);
+        let target = touch_target(&response.ctx, &state.facts(), viewport, symbol_context, pos);
         select_context_target(state, target)
     } else {
         forget_choices(&response.ctx);
@@ -648,27 +671,27 @@ fn capture_pointer_target(
 /// 9 and 10, audit G-9).
 fn touch_target(
     ctx: &Context,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     position: egui::Pos2,
 ) -> Option<PointerTarget> {
     let query = ToolPointerView {
-        design: super::schematic_design_view(state),
+        design: state.design_view(),
         snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
     let candidates = super::pick_chooser::candidates_at(
         ctx,
-        &state.model,
-        &state.design,
+        state.model,
+        state.design,
         query,
         symbol_context,
         viewport,
     );
     let choices = if candidates.len() >= 2 {
-        super::pick_chooser::chooser_rows(state, &candidates)
+        super::pick_chooser::chooser_rows(state.model, &candidates)
     } else {
         Vec::new()
     };
@@ -683,12 +706,12 @@ fn touch_target(
 
 /// Make one of the objects under the long press the selection.
 fn choose_target(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     view: &ContextMenuView,
     binding: &ContextMenuBinding,
     target: PointerTarget,
 ) {
-    if context_menu_binding(state).as_ref() != Some(binding)
+    if context_menu_binding(&state.facts()).as_ref() != Some(binding)
         || state.application_modal_open()
         || !view.choices.iter().any(|choice| choice.target == target)
     {
@@ -703,11 +726,11 @@ fn choose_target(
             alt_held: false,
         },
     };
-    super::requests::apply_editor_request(&mut super::canvas_parts(state), request);
+    super::requests::apply_editor_request(state, request);
 }
 
 fn select_pointer_target(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
@@ -716,7 +739,7 @@ fn select_pointer_target(
     pointer_pos: egui::Pos2,
 ) -> ContextTarget {
     let target = pointer_target(
-        &super::canvas_parts(state),
+        state,
         hit,
         hit_radius,
         symbol_context,
@@ -730,11 +753,14 @@ fn select_pointer_target(
 /// Select what the menu opens on, unless it is already in the selection,
 /// and name it as the menu's target. A net highlight stays lit on an
 /// instance the menu can descend into, so Descend carries it.
-fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
+fn select_context_target(
+    state: &mut CanvasParts<'_>,
+    target: Option<PointerTarget>,
+) -> ContextTarget {
     let Some(target) = target else {
         return ContextTarget::Canvas;
     };
-    if !super::requests::picks_instance_to_descend(&state.model, Some(target)) {
+    if !super::requests::picks_instance_to_descend(state.model, Some(target)) {
         state.model.schematic.session.editor.net_highlight.clear();
     }
     match target {
@@ -903,7 +929,7 @@ fn point_midpoint(first: Point, last: Point) -> Point {
 }
 
 fn keyboard_target(
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
@@ -1026,11 +1052,11 @@ fn keyboard_target(
 }
 
 /// What the menu's header names, which on a bare canvas is nothing.
-fn menu_summary(state: &AppState, target: ContextTarget) -> Option<String> {
+fn menu_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> Option<String> {
     (!is_bare_canvas(state, target)).then(|| selection_summary(state, target))
 }
 
-fn selection_summary(state: &AppState, target: ContextTarget) -> String {
+fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> String {
     let selection = &state.model.schematic.session.editor.selection;
     let count = selection.components.len()
         + selection.wires.len()
@@ -1187,7 +1213,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
 }
 
-fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
+fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (bool, &'static str) {
     let selection = &state.model.schematic.session.editor.selection;
     // Components, complete wires, and explicit junctions are clipboard and
     // deletion objects. Wire segments and vertices remain edit handles.
@@ -1363,7 +1389,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     let writable = !state.model.schematic.session.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
-            crate::workbench::app::selected_object_properties_available(state),
+            crate::workbench::app::selected_object_properties_available_in(
+                &state.design.property_registry,
+                state.model,
+            ),
             "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
         // While a part is being placed, or Move carries the selection, these
@@ -1387,7 +1416,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match selection_layout_availability(
-                &state.model,
+                state.model,
                 state.design.schematic_visibility.review_markers,
                 layout,
             ) {
@@ -1453,7 +1482,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             Err(refusal) => (false, refusal.sentence()),
         },
         ContextAction::NewVerilogADevice => (
-            new_veriloga_device_available(state),
+            new_veriloga_device_available_in(state.model),
             "Make a writable design library available",
         ),
         ContextAction::UpdateInstanceInterface => (
@@ -1469,7 +1498,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         // connected terminal contract. Restating any of that here would offer
         // the row where the dialog would immediately refuse.
         ContextAction::ReplaceInstance => (
-            replace_instance_available(&state.design.property_registry, &state.model),
+            replace_instance_available(&state.design.property_registry, state.model),
             "Select one editable instance that a different ready master can stand in for",
         ),
         ContextAction::CreateHierarchy => (
@@ -1516,7 +1545,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "The active schematic view is read-only; reopen it in an editable context to place a probe",
         ),
         ContextAction::SnapToStandardValue => {
-            let blocked = super::standard_value_snap::snap_block_reason(&state.model);
+            let blocked = super::standard_value_snap::snap_block_reason(state.model);
             (blocked.is_none(), blocked.unwrap_or_default())
         }
         ContextAction::OperatingPoint => (
@@ -1531,14 +1560,18 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
 
 fn execute_context_action(
     action: ContextAction,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
-) {
-    retain_selection_on_active_sheet(state);
+) -> Option<MenuFollowUp> {
+    retain_selection_on_active_sheet_in(state.model);
     match action {
         ContextAction::Properties => {
-            crate::workbench::app::open_selected_object_properties(state);
+            crate::workbench::app::open_selected_object_properties_in(
+                &mut state.design.property_form_parts(),
+                state.model,
+                state.workbench,
+            );
         }
         ContextAction::Rotate => {
             turn(state, symbol_context, ArrangeAction::RotateClockwise);
@@ -1553,15 +1586,15 @@ fn execute_context_action(
         ContextAction::Arrange => {}
         ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => {
             super::grid_snap_selection::run_snap_selection_to_grid(
-                &mut state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
                 symbol_context,
             );
         }
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match apply_selection_layout(
-                &mut state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
                 state.design.schematic_visibility.review_markers,
                 symbol_context,
                 layout,
@@ -1602,18 +1635,18 @@ fn execute_context_action(
         ContextAction::Cut => {
             cut_schematic_selection(
                 &mut state.design.schematic_clipboard,
-                &mut state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
             );
         }
         ContextAction::Copy => {
-            copy_active_schematic_selection(&mut state.design.schematic_clipboard, &state.model);
+            copy_active_schematic_selection(&mut state.design.schematic_clipboard, state.model);
         }
         ContextAction::Paste => {
             let refusal = match paste_schematic_clipboard_at(
                 state.design.floating_copy_parts(),
-                &mut state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
                 click_pos,
             ) {
                 Ok(true) => None,
@@ -1625,16 +1658,16 @@ fn execute_context_action(
             }
         }
         ContextAction::Duplicate => {
-            let step = schematic_grid_step(&state.model);
+            let step = schematic_grid_step(state.model);
             duplicate_schematic_selection_at(
                 state.design.floating_copy_parts(),
-                &mut state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
                 click_pos + step,
             );
         }
         ContextAction::Delete => {
-            delete_schematic_selection(&mut state.model, &mut state.workbench);
+            delete_schematic_selection(state.model, state.workbench);
         }
         ContextAction::DescendHierarchy | ContextAction::OpenVerilogAView => {
             state.open_selected_instance_master();
@@ -1642,9 +1675,7 @@ fn execute_context_action(
         ContextAction::EditSymbolInPlace => {
             state.edit_selected_symbol_in_place();
         }
-        ContextAction::NewVerilogADevice => {
-            open_new_veriloga_device_form(state);
-        }
+        ContextAction::NewVerilogADevice => return Some(MenuFollowUp::NewVerilogADevice),
         ContextAction::UpdateInstanceInterface => {
             let outcome = state.model.schematic.update_selected_instance_interface(
                 &state.model.library_manager,
@@ -1658,35 +1689,31 @@ fn execute_context_action(
         ContextAction::ReplaceInstance => open_replace_instance_dialog(
             &mut state.design.replace_instance,
             &state.design.property_registry,
-            &state.model,
-            &mut state.workbench,
+            state.model,
+            state.workbench,
         ),
         ContextAction::CreateHierarchy => {
             crate::workbench::app::open_create_hierarchy_dialog(
                 &mut state.design.create_hierarchy,
-                &state.model,
-                &mut state.workbench,
+                state.model,
+                state.workbench,
             );
         }
-        ContextAction::CreateSymbolFromPorts => {
-            crate::workbench::app::open_create_model_bound_symbol_dialog(state);
-        }
+        ContextAction::CreateSymbolFromPorts => return Some(MenuFollowUp::CreateSymbolFromPorts),
         ContextAction::SheetProperties => show_sheet_properties(state),
         ContextAction::FitContent => {
             state.model.schematic.session.editor.needs_fit = true;
             state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
         }
-        ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
+        ContextAction::ShowInNetlist => return Some(MenuFollowUp::ShowInNetlist),
         ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::SnapToStandardValue => {
-            super::standard_value_snap::run_snap_to_standard_value(
-                &mut state.model,
-                &mut state.workbench,
-            );
+            super::standard_value_snap::run_snap_to_standard_value(state.model, state.workbench);
         }
         ContextAction::Choose(_) => {}
     }
+    None
 }
 
 /// Show the open sheet's properties: with nothing selected the inspector is
@@ -1694,7 +1721,7 @@ fn execute_context_action(
 /// where it is closed, before the scene is drawn, and the sheets feature is
 /// asked to bring its Sheet section into view. Only an editable sheet is
 /// shown so; anywhere else nothing changes.
-fn show_sheet_properties(state: &mut AppState) {
+fn show_sheet_properties(state: &mut CanvasParts<'_>) {
     if !(state.workbench.shows_design_surface() && state.model.drawing_sheet_writable()) {
         return;
     }
@@ -1705,14 +1732,14 @@ fn show_sheet_properties(state: &mut AppState) {
     state.workbench.outbox.push(RevealSheetSection);
 }
 
-fn open_operating_point(state: &mut AppState) {
+fn open_operating_point(state: &mut CanvasParts<'_>) {
     // The inspector renders the *selected* analysis, so the hop selects the
     // operating point before it routes. Without this a run of [OP, TRAN] with
     // the transient selected landed on "not a DC operating-point result" —
     // the workspace and the viewer were right and the one thing that decides
     // what they show was left wherever the reader had put it.
-    let clicked = clicked_instance_name(state);
-    let target = operating_point_analysis_index(state, clicked.as_deref());
+    let clicked = clicked_instance_name(&state.facts());
+    let target = operating_point_analysis_index(&state.facts(), clicked.as_deref());
     if let Some(index) = target {
         state.model.simulation.select_analysis(index);
     }
@@ -1726,7 +1753,8 @@ fn open_operating_point(state: &mut AppState) {
     // as if it had worked.
     state.results.results.session.op_filter = clicked
         .filter(|name| {
-            target.is_some_and(|index| analysis_reports_device(state, index, name.as_str()))
+            target
+                .is_some_and(|index| analysis_reports_device(&state.facts(), index, name.as_str()))
         })
         .unwrap_or_default();
     state.results.results.session.viewer = ResultViewer::Op;
@@ -1739,7 +1767,7 @@ fn open_operating_point(state: &mut AppState) {
 /// The name comparison downstream is the one
 /// [`crate::workbench::documents::result_document::op_inspector`] uses to walk
 /// the other way, so the two directions agree on what "this device" means.
-fn clicked_instance_name(state: &AppState) -> Option<String> {
+fn clicked_instance_name(state: &CanvasFacts<'_>) -> Option<String> {
     let id = state
         .model
         .schematic
@@ -1768,7 +1796,7 @@ fn clicked_instance_name(state: &AppState) -> Option<String> {
 /// answer the question the click asked. Falling back to the first keeps the hop
 /// working for a device no report names — the inspector then opens unfiltered,
 /// which is a whole report rather than an empty one.
-fn operating_point_analysis_index(state: &AppState, device: Option<&str>) -> Option<usize> {
+fn operating_point_analysis_index(state: &CanvasFacts<'_>, device: Option<&str>) -> Option<usize> {
     let run = state.model.simulation.active_run()?;
     let is_operating_point = |analysis: &crate::state::AnalysisResult| {
         analysis.analysis_type == crate::state::AnalysisType::DcOp
@@ -1790,7 +1818,7 @@ fn operating_point_analysis_index(state: &AppState, device: Option<&str>) -> Opt
 }
 
 /// Whether one analysis of the active run reports `name`.
-fn analysis_reports_device(state: &AppState, index: usize, name: &str) -> bool {
+fn analysis_reports_device(state: &CanvasFacts<'_>, index: usize, name: &str) -> bool {
     state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.get(index).is_some_and(|analysis| {
             analysis.device_op.as_ref().is_some_and(|report| {
@@ -1803,7 +1831,7 @@ fn analysis_reports_device(state: &AppState, index: usize, name: &str) -> bool {
     })
 }
 
-fn operating_point_available(state: &AppState) -> bool {
+fn operating_point_available(state: &CanvasFacts<'_>) -> bool {
     state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.iter().any(|analysis| {
             analysis
@@ -1814,7 +1842,7 @@ fn operating_point_available(state: &AppState) -> bool {
     })
 }
 
-fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
+fn context_menu_binding(state: &CanvasFacts<'_>) -> Option<ContextMenuBinding> {
     let (target, (x, y)) = state.design.interaction.context_target?;
     Some(ContextMenuBinding {
         source: super::requests::editor_request_source(state),
@@ -1825,7 +1853,7 @@ fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
     })
 }
 
-fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
+fn context_menu_view(state: &CanvasFacts<'_>, ctx: &Context) -> Option<ContextMenuView> {
     let binding = context_menu_binding(state)?;
     let resolve = |entries: &[ContextEntry]| {
         entries
@@ -1847,7 +1875,7 @@ fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView>
 /// One catalog entry as the menu draws it: available or not and why, with
 /// its key.
 fn resolve_entry(
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     ctx: &Context,
     entry: ContextEntry,
 ) -> context_surface::ContextEntry {
@@ -1876,28 +1904,29 @@ fn resolve_entry(
 }
 
 fn apply_context_request(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
-) {
+) -> Option<MenuFollowUp> {
     let offered = |entries: &[ContextEntry]| {
         entries.iter().any(|entry| {
             matches!(entry, ContextEntry::Command(command) if command.action == request.action)
         })
     };
-    if context_menu_binding(state).as_ref() != Some(&request.binding)
+    if context_menu_binding(&state.facts()).as_ref() != Some(&request.binding)
         || state.application_modal_open()
-        || !action_availability(request.action, state).0
-        || !(offered(&menu_entries(state, request.binding.target)) || offered(ARRANGE_ENTRIES))
+        || !action_availability(request.action, &state.facts()).0
+        || !(offered(&menu_entries(&state.facts(), request.binding.target))
+            || offered(ARRANGE_ENTRIES))
     {
-        return;
+        return None;
     }
     execute_context_action(
         request.action,
         state,
         request.binding.click_pos,
         symbol_context,
-    );
+    )
 }
 
 #[cfg(test)]

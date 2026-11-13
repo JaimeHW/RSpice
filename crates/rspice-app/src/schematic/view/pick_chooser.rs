@@ -238,7 +238,7 @@ pub(super) fn open_chooser_at(
     if candidates.len() < 2 {
         return;
     }
-    let rows = chooser_rows(state, &candidates);
+    let rows = chooser_rows(&state.model, &candidates);
     if let Some(chooser) = PickChooser::open(position, rows, pointer_target::canvas_touch_mode(ctx))
     {
         ctx.data_mut(|data| {
@@ -285,26 +285,25 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
 }
 
 /// The chooser's rows: each candidate's kind and identity.
-pub(super) fn chooser_rows(state: &AppState, candidates: &[PointerTarget]) -> Vec<ChooserRow> {
-    let document = state.model.schematic.document();
+pub(super) fn chooser_rows(model: &Model, candidates: &[PointerTarget]) -> Vec<ChooserRow> {
+    let document = model.schematic.document();
     let nets = candidates
         .iter()
         .any(|target| matches!(target, PointerTarget::Wire(_)))
         .then(|| {
-            state
-                .model
+            model
                 .workspace
                 .design_projection(
-                    &state.model.library_manager,
-                    &state.model.workspace.content.active_view,
-                    &state.model.schematic,
+                    &model.library_manager,
+                    &model.workspace.content.active_view,
+                    &model.schematic,
                 )
                 .ok()
                 .map(|projection| {
                     projection_nets(
-                        state.model.library_manager.catalog(),
+                        model.library_manager.catalog(),
                         &projection,
-                        &state.model.workspace.content.active_view.key(),
+                        &model.workspace.content.active_view.key(),
                     )
                 })
         })

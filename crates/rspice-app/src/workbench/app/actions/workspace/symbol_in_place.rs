@@ -281,13 +281,6 @@ pub(crate) fn in_place_bounds(
 }
 
 impl AppState {
-    /// [`selected_symbol_in_place_target`] for the session's model.
-    pub(crate) fn selected_symbol_in_place_target(
-        &self,
-    ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
-        selected_symbol_in_place_target(&self.model)
-    }
-
     /// [`in_place_session`] for the session's model.
     pub(crate) fn symbol_in_place(&self) -> Option<&SymbolInPlace> {
         in_place_session(&self.design.symbol.in_place, &self.model)

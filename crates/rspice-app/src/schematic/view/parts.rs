@@ -5,12 +5,17 @@
 //! results workspace that a probe and a requirement link write into. Whether
 //! a modal dialog was open is lent as it stood when the parts were taken: the
 //! canvas opens nothing modal before it reads either fact.
+//!
+//! What only asks, such as which rows the canvas menu offers, reads
+//! [`CanvasFacts`]: the design slot and the model, shared.
 
 use crate::state::{BusDeclaration, BusParseError, CellViewRef, Point};
 use crate::workbench::{
     app::{
-        deny_read_only_edit, hierarchy_master_for_component, place_floating_paste,
-        reconcile_conductor_route, start_canvas_bus, start_canvas_wire, sync_active_schematic,
+        SymbolInPlaceRefusal, deny_read_only_edit, hierarchy_master_for_component,
+        place_floating_paste, reconcile_conductor_route, selected_hierarchy_master,
+        selected_instance_veriloga_source, selected_symbol_in_place_target, start_canvas_bus,
+        start_canvas_wire, sync_active_schematic, veriloga_master_of_component,
         veriloga_source_for_component,
     },
     app_state::{AppState, DragType, Model, model_design_view},
@@ -59,7 +64,76 @@ impl AsRef<Model> for CanvasParts<'_> {
     }
 }
 
+/// What the canvas's answers read: the design slot and the model.
+#[derive(Clone, Copy)]
+pub(crate) struct CanvasFacts<'a> {
+    pub(crate) design: &'a DesignState,
+    pub(crate) model: &'a Model,
+}
+
+/// The canvas's facts from the application's state.
+pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
+    CanvasFacts {
+        design: &state.design,
+        model: &state.model,
+    }
+}
+
+impl AsRef<Model> for CanvasFacts<'_> {
+    fn as_ref(&self) -> &Model {
+        self.model
+    }
+}
+
+impl<'a> CanvasFacts<'a> {
+    pub(crate) fn schematic_edit_read_only(&self) -> bool {
+        self.model.schematic_edit_read_only()
+    }
+
+    pub(crate) fn active_view_read_only(&self) -> bool {
+        self.model.active_view_read_only()
+    }
+
+    /// The design the canvas shows: the model's, with the review markers
+    /// the design slot asks for.
+    pub(crate) fn design_view(&self) -> DesignView<'a> {
+        model_design_view(self.model, self.design.schematic_visibility.review_markers)
+    }
+
+    pub(crate) fn veriloga_master_of_component(&self, component_id: u64) -> Option<CellViewRef> {
+        veriloga_master_of_component(self.model, component_id)
+    }
+
+    pub(crate) fn selected_hierarchy_master(&self) -> Option<(String, CellViewRef)> {
+        selected_hierarchy_master(self.model)
+    }
+
+    pub(crate) fn selected_veriloga_source(&self) -> Option<CellViewRef> {
+        selected_instance_veriloga_source(self.model)
+    }
+
+    pub(crate) fn selected_symbol_in_place_target(
+        &self,
+    ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
+        selected_symbol_in_place_target(self.model)
+    }
+
+    /// Why the selected instance cannot be shown in the generated deck, or
+    /// `None` when it can.
+    pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
+        self.model.selected_instance_generated_line().err()
+    }
+}
+
 impl CanvasParts<'_> {
+    /// What the canvas's answers read, from these parts.
+    pub(crate) fn facts(&self) -> CanvasFacts<'_> {
+        CanvasFacts {
+            design: self.design,
+            model: self.model,
+        }
+    }
+
     /// Whether anything that holds the application modal was open.
     pub(crate) fn application_modal_open(&self) -> bool {
         self.application_modal
@@ -120,6 +194,12 @@ impl CanvasParts<'_> {
         self.design
             .navigation_parts(self.model, self.workbench, self.runs)
             .open_veriloga_source_for_component(component_id)
+    }
+
+    pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .edit_selected_symbol_in_place()
     }
 
     pub(crate) fn ascend_workspace_level(&mut self) {

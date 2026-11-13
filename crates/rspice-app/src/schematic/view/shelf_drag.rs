@@ -7,6 +7,7 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
+use super::parts::{CanvasFacts, CanvasParts};
 use crate::state::{
     ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point, functional_part,
 };
@@ -205,7 +206,7 @@ fn apply_placement_transform(
 /// Whether something floats under the pointer for R and M to turn: a
 /// floating paste or duplicate, a selection Move is carrying, or the
 /// placement ghost.
-pub(super) fn something_floats(state: &AppState) -> bool {
+pub(super) fn something_floats(state: &CanvasFacts<'_>) -> bool {
     state.design.floating_paste.is_some()
         || state.design.move_selection.armed
         || state.model.schematic.session.editor.tool.is_place_tool()
@@ -214,7 +215,7 @@ pub(super) fn something_floats(state: &AppState) -> bool {
 /// Turn what floats under the pointer. R and M take this path, and so do
 /// Rotate and Mirror on the touch strip and the canvas menu while something
 /// floats, since a tablet has no R or M key. Returns whether anything did.
-pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransform) -> bool {
+pub(super) fn turn_what_floats(state: &mut CanvasParts<'_>, transform: PlacementTransform) -> bool {
     if state.design.floating_paste.is_some() {
         crate::workbench::app::turn_floating_paste(
             &mut state.design.floating_paste,
@@ -259,7 +260,7 @@ pub(crate) fn handle_pre_render_placement_transform(
         let Some(transform) = ctx.input_mut(consume_placement_transform) else {
             return false;
         };
-        turn_what_floats(state, transform);
+        turn_what_floats(&mut super::canvas_parts(state), transform);
         ctx.request_repaint();
         return true;
     }
@@ -279,15 +280,11 @@ pub(crate) fn handle_pre_render_placement_transform(
 
 /// While Move carries the selection, a turn applies about its own middle,
 /// and the move carries on from where the pointer is.
-fn turn_the_move(state: &mut AppState, transform: PlacementTransform) {
+fn turn_the_move(state: &mut CanvasParts<'_>, transform: PlacementTransform) {
     let transform = selection_transform(transform);
-    let symbol_context = super::schematic_symbol_context(state);
-    if transform_selection_on_active_sheet(
-        &mut state.model,
-        &mut state.workbench,
-        &symbol_context,
-        transform,
-    ) {
+    let symbol_context = state.model.schematic_symbol_context();
+    if transform_selection_on_active_sheet(state.model, state.workbench, &symbol_context, transform)
+    {
         // The move was armed against the drawing as it stood; it now
         // carries the turned selection.
         state.design.move_selection.authority = Some(

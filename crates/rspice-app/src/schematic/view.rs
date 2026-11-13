@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
+use crate::workbench::app::{
+    open_create_model_bound_symbol_dialog, open_new_veriloga_device_form, symbol_context_revision,
+    sync_active_schematic,
+};
 use crate::workbench::app_state::{AppState, Model, model_design_view};
 use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
@@ -73,6 +76,7 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
+use self::parts::canvas_facts;
 pub(crate) use self::parts::canvas_parts;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
@@ -98,6 +102,18 @@ pub(super) fn schematic_design_view(
         &state.model,
         state.design.schematic_visibility.review_markers,
     )
+}
+
+/// Take the step the canvas menu left to the application, where the menu
+/// would have taken it.
+fn apply_menu_follow_up(state: &mut AppState, follow_up: context_menu::MenuFollowUp) {
+    match follow_up {
+        context_menu::MenuFollowUp::NewVerilogADevice => open_new_veriloga_device_form(state),
+        context_menu::MenuFollowUp::CreateSymbolFromPorts => {
+            open_create_model_bound_symbol_dialog(state);
+        }
+        context_menu::MenuFollowUp::ShowInNetlist => state.show_selected_instance_in_netlist(),
+    }
 }
 
 /// Compose the editor's resolved symbols from the current app-owned sources,
@@ -434,13 +450,16 @@ pub fn render_schematic_view(
         );
     }
     refresh_symbol_context_after_interactions(state, &mut symbol_context);
-    context_menu::handle_context_menu(
+    let menu_follow_up = context_menu::handle_context_menu(
         &response,
-        state,
+        &mut canvas_parts(state),
         &viewport,
         routing_was_active,
         &symbol_context,
     );
+    if let Some(follow_up) = menu_follow_up {
+        apply_menu_follow_up(state, follow_up);
+    }
     handle_keyboard_object_navigation(&response, state, &symbol_context);
     set_canvas_cursor(ui, &response, state, shelf_drop);
     let crosshair = full_crosshair_at(ui, &response, state, &viewport);

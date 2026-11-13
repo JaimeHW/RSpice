@@ -390,47 +390,6 @@ impl AppState {
             .open_veriloga_source_for_component(component_id)
     }
 
-    /// [`selected_hierarchy_master`] for the session's model.
-    pub(crate) fn selected_hierarchy_master(&self) -> Option<(String, CellViewRef)> {
-        selected_hierarchy_master(&self.model)
-    }
-
-    /// The Verilog-A view one instance is bound to, whether or not that view
-    /// resolves to a module yet. This says what kind of master the instance
-    /// has; [`veriloga_source_for_component`] says whether it can be
-    /// opened.
-    pub(crate) fn veriloga_master_of_component(&self, component_id: u64) -> Option<CellViewRef> {
-        let binding = self
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)
-            .filter(|component| component.kind == ComponentType::CellInstance)?
-            .library_cell
-            .as_ref()?;
-        let reference = CellViewRef::new(
-            binding.library.clone(),
-            binding.cell.clone(),
-            binding.view.clone(),
-        );
-        (self
-            .model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(|view| view.view_type)
-            == Some(ViewType::VerilogA))
-        .then_some(reference)
-    }
-
-    /// [`selected_instance_veriloga_source`] for the session's model.
-    pub(crate) fn selected_veriloga_source(&self) -> Option<CellViewRef> {
-        selected_instance_veriloga_source(&self.model)
-    }
-
     /// [`NavigationParts::open_selected_instance_master`] for the session.
     pub(crate) fn open_selected_instance_master(&mut self) {
         self.navigation().open_selected_instance_master();
@@ -440,6 +399,7 @@ impl AppState {
     /// `None` when it can. Every surface that offers the jump asks this one
     /// question, so a disabled row, a disabled palette entry and the refusal
     /// the action itself would report cannot word the same block differently.
+    #[cfg(test)]
     pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
         self.model.selected_instance_generated_line().err()
     }
@@ -540,6 +500,38 @@ pub(crate) fn hierarchical_edit_in_place_enabled(model: &Model) -> bool {
     model
         .preferences
         .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
+}
+
+/// The Verilog-A view one instance is bound to, whether or not that view
+/// resolves to a module yet. This says what kind of master the instance
+/// has; [`veriloga_source_for_component`] says whether it can be
+/// opened.
+pub(crate) fn veriloga_master_of_component(
+    model: &Model,
+    component_id: u64,
+) -> Option<CellViewRef> {
+    let binding = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .filter(|component| component.kind == ComponentType::CellInstance)?
+        .library_cell
+        .as_ref()?;
+    let reference = CellViewRef::new(
+        binding.library.clone(),
+        binding.cell.clone(),
+        binding.view.clone(),
+    );
+    (model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| view.view_type)
+        == Some(ViewType::VerilogA))
+    .then_some(reference)
 }
 
 /// Return the exact project-owned Verilog-A source view bound to one

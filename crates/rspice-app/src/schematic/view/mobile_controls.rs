@@ -66,7 +66,7 @@ fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => true,
         MobileCanvasAction::Cancel => operation_live(app),
         MobileCanvasAction::Rotate | MobileCanvasAction::Mirror
-            if super::shelf_drag::something_floats(&app.state) =>
+            if super::shelf_drag::something_floats(&super::canvas_facts(&app.state)) =>
         {
             true
         }
@@ -111,7 +111,10 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
             // The placement ghost, or the selection Move carries, turns as
             // R and M turn it; the selection on the sheet turns otherwise.
             let floated = floating_transform(action).is_some_and(|transform| {
-                super::shelf_drag::turn_what_floats(&mut app.state, transform)
+                super::shelf_drag::turn_what_floats(
+                    &mut super::canvas_parts(&mut app.state),
+                    transform,
+                )
             });
             if !floated && let Some(key) = product_command(action) {
                 app.execute_command_key(key);

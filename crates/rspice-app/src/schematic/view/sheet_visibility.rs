@@ -116,6 +116,7 @@ fn object_is_on_active_sheet_in_workspace(
 /// Build a live selection containing only objects owned by the active sheet.
 /// This is also the sheet-switch boundary: stale IDs from a previously active
 /// sheet can never flow into keyboard commands or context-menu actions.
+#[cfg(test)]
 pub(super) fn selection_on_active_sheet(state: &AppState) -> Selection {
     selection_filtered_to_active_sheet(state, &state.model.schematic.session.editor.selection)
 }
@@ -212,6 +213,7 @@ pub(crate) fn selection_filtered_to_active_sheet_in(
     selection
 }
 
+#[cfg(test)]
 pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     let selection = selection_on_active_sheet(state);
     state.model.schematic.session.editor.selection = selection;
