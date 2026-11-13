@@ -45,10 +45,3 @@ include directories to that package.
 
 No root-level BSIM4 Verilog-A source is bundled. Native BSIM4 v4.8 is
 implemented in `rspice-core` for MOS `LEVEL=14/54`.
-
-## `soa/`
-
-Safe-operating-area curve formats. [`soa/FORMAT.md`](soa/FORMAT.md) specifies
-the current/voltage SOA curve tables an SOA rule accepts: the column and row
-conventions, the pulse and DC row rules, and what the curve check does and does
-not infer about thermal conditions.
