@@ -92,37 +92,37 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, SymbolTool); 
         SymbolTool::Select,
     ),
     (
-        Command::SymbolPinTool.key(),
+        DesignCommand::SymbolPinTool.key(),
         WorkbenchIcon::Probe,
         SymbolTool::PlacePin,
     ),
     (
-        Command::SymbolPolylineTool.key(),
+        DesignCommand::SymbolPolylineTool.key(),
         WorkbenchIcon::Wire,
         SymbolTool::Line,
     ),
     (
-        Command::SymbolRectangleTool.key(),
+        DesignCommand::SymbolRectangleTool.key(),
         WorkbenchIcon::Grid,
         SymbolTool::Rectangle,
     ),
     (
-        Command::SymbolCircleTool.key(),
+        DesignCommand::SymbolCircleTool.key(),
         WorkbenchIcon::Target,
         SymbolTool::Circle,
     ),
     (
-        Command::SymbolArcTool.key(),
+        DesignCommand::SymbolArcTool.key(),
         WorkbenchIcon::Refresh,
         SymbolTool::Arc,
     ),
     (
-        Command::SymbolPolygonTool.key(),
+        DesignCommand::SymbolPolygonTool.key(),
         WorkbenchIcon::Layers,
         SymbolTool::Polygon,
     ),
     (
-        Command::SymbolTextTool.key(),
+        DesignCommand::SymbolTextTool.key(),
         WorkbenchIcon::Label,
         SymbolTool::Text,
     ),
@@ -350,14 +350,14 @@ pub(in crate::workbench) fn symbol_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolRotatePin.key(),
+        DesignCommand::SymbolRotatePin.key(),
         WorkbenchIcon::Rotate,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolMirrorPin.key(),
+        DesignCommand::SymbolMirrorPin.key(),
         WorkbenchIcon::Mirror,
         layout,
     );
@@ -367,7 +367,7 @@ pub(in crate::workbench) fn symbol_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolUpdatePinsFromContract.key(),
+        DesignCommand::SymbolUpdatePinsFromContract.key(),
         WorkbenchIcon::Pin,
         layout,
     );
@@ -422,7 +422,7 @@ pub(in crate::workbench) fn symbol_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::SymbolSave.key(),
+        DesignCommand::SymbolSave.key(),
         WorkbenchIcon::Save,
         "Save symbol",
         layout,
@@ -432,7 +432,7 @@ pub(in crate::workbench) fn symbol_tools(
         toolbar_text_command(
             ui,
             app,
-            Command::ExitSymbolInPlace.key(),
+            DesignCommand::ExitSymbolInPlace.key(),
             icon,
             label,
             layout,

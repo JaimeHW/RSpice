@@ -109,8 +109,8 @@ fn pins_section(
     // it belongs beside the list it rewrites, not in a menu two surfaces
     // away. It is offered only when there is an interface to reconcile with.
     let contract_command =
-        crate::workbench::commands::vocabulary::Command::SymbolUpdatePinsFromContract;
-    if contract_command.availability(app).is_available() {
+        crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract.key();
+    if app.command_availability(contract_command).is_available() {
         let source = app
             .state
             .model
@@ -127,7 +127,7 @@ fn pins_section(
             )
             .clicked()
             {
-                contract_command.execute(app);
+                app.execute_command_key(contract_command);
                 // The command rewrote the stored view; the rows below must
                 // list what it produced rather than the pins it replaced.
                 if let Ok(refreshed) = app.state.model.load_active_symbol_document() {

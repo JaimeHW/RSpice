@@ -268,7 +268,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let master_rows = [
         (
             "Edit symbol in place",
-            Some(Command::EditSymbolInPlace.key()),
+            Some(DesignCommand::EditSymbolInPlace.key()),
         ),
         (
             "Update instance interface",

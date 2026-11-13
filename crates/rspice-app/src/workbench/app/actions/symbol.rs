@@ -20,35 +20,6 @@ use rspice_schematic_editor::symbol_editor::session::{
 };
 
 impl RSpiceApp {
-    pub(crate) fn activate_symbol_tool(&mut self, tool: SymbolTool) {
-        let document = (tool == SymbolTool::PlacePin)
-            .then(|| self.state.model.load_active_symbol_document().ok())
-            .flatten();
-        commands::activate_tool(
-            &mut self.state.design.symbol.editor,
-            tool,
-            document.as_ref(),
-        );
-    }
-
-    pub(crate) fn transform_selected_symbol_pin(&mut self, transform: SymbolPinTransform) {
-        if self
-            .state
-            .design
-            .symbol
-            .editor
-            .effective_selection()
-            .pins
-            .len()
-            != 1
-            || self.state.deny_read_only_edit()
-        {
-            return;
-        }
-        let request = edit_request(&self.state, SymbolEditAction::TransformPin(transform));
-        apply_edit_request(&mut self.state, request);
-    }
-
     pub(in crate::workbench) fn finish_pending_symbol_polyline(&mut self) {
         // A command can arrive after navigation and before the new canvas has rendered.
         let source = self.state.symbol_editor_request_source();
@@ -63,6 +34,32 @@ impl RSpiceApp {
         let request = edit_request(&self.state, SymbolEditAction::FinishPolyline { points });
         apply_edit_request(&mut self.state, request);
     }
+}
+
+/// Arm `tool` on the symbol canvas. A pin starts from the document in front,
+/// so the tool offers the next pin it would place.
+pub(crate) fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, tool: SymbolTool) {
+    let document = (tool == SymbolTool::PlacePin)
+        .then(|| model.load_active_symbol_document().ok())
+        .flatten();
+    commands::activate_tool(&mut symbol.editor, tool, document.as_ref());
+}
+
+/// Turn the one selected pin to the next side, or across the body, as one
+/// edit. `modal_open` is whether anything holding the application modal is
+/// open, which refuses the edit.
+pub(crate) fn transform_selected_symbol_pin(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    modal_open: bool,
+    transform: SymbolPinTransform,
+) {
+    if symbol.editor.effective_selection().pins.len() != 1 || deny_read_only_edit(model, wb) {
+        return;
+    }
+    let request = symbol_edit_request(symbol, model, wb, SymbolEditAction::TransformPin(transform));
+    apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
 /// Turn or flip the selected pins and shapes as one edit. `modal_open` is

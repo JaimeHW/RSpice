@@ -174,20 +174,7 @@ impl Command {
             | Self::ZoomWindow
             | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
-            Self::SymbolPinTool
-            | Self::SymbolPolylineTool
-            | Self::SymbolRectangleTool
-            | Self::SymbolCircleTool
-            | Self::SymbolArcTool
-            | Self::SymbolPolygonTool
-            | Self::SymbolTextTool
-            | Self::SymbolRotatePin
-            | Self::SymbolMirrorPin
-            | Self::SymbolUpdatePinsFromContract
-            | Self::SymbolSave
-            | Self::EditSymbolInPlace
-            | Self::ExitSymbolInPlace
-            | Self::Cancel => CommandOwner::Design,
+            Self::Cancel => CommandOwner::Design,
         }
     }
 
@@ -397,40 +384,6 @@ impl Command {
                     &mut app.state,
                 );
             }
-            Self::SymbolPinTool => app.activate_symbol_tool(super::SymbolTool::PlacePin),
-            Self::SymbolPolylineTool => app.activate_symbol_tool(super::SymbolTool::Line),
-            Self::SymbolRectangleTool => app.activate_symbol_tool(super::SymbolTool::Rectangle),
-            Self::SymbolCircleTool => app.activate_symbol_tool(super::SymbolTool::Circle),
-            Self::SymbolArcTool => app.activate_symbol_tool(super::SymbolTool::Arc),
-            Self::SymbolPolygonTool => app.activate_symbol_tool(super::SymbolTool::Polygon),
-            Self::SymbolTextTool => app.activate_symbol_tool(super::SymbolTool::Text),
-            Self::SymbolRotatePin => app.transform_selected_symbol_pin(
-                rspice_schematic_editor::symbol_editor::commands::SymbolPinTransform::Rotate,
-            ),
-            Self::SymbolMirrorPin => app.transform_selected_symbol_pin(
-                rspice_schematic_editor::symbol_editor::commands::SymbolPinTransform::Mirror,
-            ),
-            Self::SymbolUpdatePinsFromContract => {
-                match app.state.update_active_symbol_pins_from_contract() {
-                    Ok(text) | Err(text) => app.state.prompt(text),
-                }
-            }
-            // The checks run before the dialog opens, so a symbol that cannot
-            // be published says which row blocked it instead of presenting a
-            // save transaction with a disabled primary control.
-            Self::SymbolSave => match app.state.refuse_unsavable_active_symbol() {
-                Some(refusal) => app.state.prompt(refusal),
-                None => {
-                    app.state.design.symbol.editor.save_dialog_open = true;
-                    app.state.design.symbol.editor.save_error = None;
-                }
-            },
-            Self::EditSymbolInPlace => {
-                app.state.edit_selected_symbol_in_place();
-            }
-            Self::ExitSymbolInPlace => app.state.request_symbol_in_place_exit(
-                super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
-            ),
             Self::Cancel => {
                 if active_symbol_editor(app) && app.state.symbol_in_place_canvas_idle() {
                     // Nothing on the canvas to cancel: Escape leaves the

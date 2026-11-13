@@ -208,7 +208,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::EditSymbolInPlace,
         icon: ContextIcon::Hierarchy,
         label: "Edit symbol in place",
-        shortcut_command: Some(Command::EditSymbolInPlace.key()),
+        shortcut_command: Some(DesignCommand::EditSymbolInPlace.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::NewVerilogADevice,

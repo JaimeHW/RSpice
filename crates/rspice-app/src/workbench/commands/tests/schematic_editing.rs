@@ -1010,8 +1010,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
     assert!(
-        !Command::SymbolUpdatePinsFromContract
-            .availability(&app)
+        !app.command_availability(DesignCommand::SymbolUpdatePinsFromContract.key())
             .is_available(),
         "no declared interface is nothing to reconcile against"
     );
@@ -1031,12 +1030,11 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
     );
 
     assert!(
-        Command::SymbolUpdatePinsFromContract
-            .availability(&app)
+        app.command_availability(DesignCommand::SymbolUpdatePinsFromContract.key())
             .is_available()
     );
 
-    Command::SymbolUpdatePinsFromContract.execute(&mut app);
+    app.execute_command_key(DesignCommand::SymbolUpdatePinsFromContract.key());
 
     let document = app
         .state
@@ -1051,14 +1049,13 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
     app.state.model.safe_mode.active = true;
     app.state.model.safe_mode.applied.open_project_read_only = true;
     assert!(
-        !Command::SymbolUpdatePinsFromContract
-            .availability(&app)
+        !app.command_availability(DesignCommand::SymbolUpdatePinsFromContract.key())
             .is_available(),
         "safe mode locks the symbol editor's edit commands"
     );
 }
 
-/// `Command::SymbolSave` owns the same contract the dialog renders. Opening
+/// `DesignCommand::SymbolSave` owns the same contract the dialog renders. Opening
 /// the transaction on a symbol that cannot be published would present a save
 /// the user cannot complete and never say why.
 #[test]
@@ -1088,7 +1085,7 @@ fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
-    Command::SymbolSave.execute(&mut app);
+    app.execute_command_key(DesignCommand::SymbolSave.key());
 
     assert!(
         !app.state.design.symbol.editor.save_dialog_open,

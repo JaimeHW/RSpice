@@ -10,6 +10,9 @@ mod tests;
 
 use crate::state::{CellViewRef, ComponentType, ViewType};
 use crate::workbench::app_state::{AppState, Model};
+
+use super::symbol_document::SymbolUiState;
+use super::{NavigationParts, commit_pending_inspector_edit};
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 
 /// A symbol edited in place on the schematic that places one of its
@@ -300,103 +303,9 @@ impl AppState {
         in_place_placement(self.symbol_in_place()?, &self.model)
     }
 
-    /// Open the selected instance's symbol where the instance stands.
+    /// [`NavigationParts::edit_selected_symbol_in_place`] for the session.
     pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
-        match self.selected_symbol_in_place_target() {
-            Ok((instance, symbol)) => self.edit_symbol_in_place(instance, symbol),
-            Err(refusal) => {
-                self.prompt(format!(
-                    "Edit symbol in place is unavailable: {}.",
-                    refusal.reason()
-                ));
-                false
-            }
-        }
-    }
-
-    fn edit_symbol_in_place(&mut self, instance_id: u64, symbol: CellViewRef) -> bool {
-        let Some(instance_name) = self
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == instance_id)
-            .map(|component| component.name.clone())
-        else {
-            return false;
-        };
-        let baseline = match self
-            .model
-            .load_symbol_document(&symbol)
-            .and_then(|document| {
-                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
-                Ok((document, metadata))
-            }) {
-            Ok(baseline) => baseline,
-            Err(error) => {
-                self.prompt(error);
-                return false;
-            }
-        };
-        let parent = self.model.workspace.content.active_view.clone();
-        let (pan, zoom) = (
-            self.model.schematic.session.editor.pan,
-            self.model.schematic.session.editor.zoom,
-        );
-        let symbol_was_open = self
-            .model
-            .workspace
-            .content
-            .open_views
-            .iter()
-            .any(|open| open.reference == symbol);
-        self.open_workspace_view(symbol.clone());
-        if self.model.workspace.content.active_view != symbol {
-            // An inspector edit that could not be committed kept the parent.
-            return false;
-        }
-        self.design.symbol.editor.tool = crate::workbench::SymbolTool::Select;
-        self.design.symbol.editor.clear_selection();
-        self.design.symbol.in_place = Some(Box::new(SymbolInPlace {
-            origin: baseline.0.origin,
-            baseline_depth: self.design.symbol.history.undo_depth(&symbol.key()),
-            symbol: symbol.clone(),
-            parent: parent.clone(),
-            instance_id,
-            instance_name: instance_name.clone(),
-            pan,
-            zoom,
-            zoom_request: None,
-            view_history: Default::default(),
-            symbol_was_open,
-            baseline,
-            leaving: None,
-            exit_after_save: None,
-            parent_editor: Default::default(),
-        }));
-        self.prompt(format!(
-            "Editing the {} symbol in place on {instance_name}. Esc or Return goes back to {}.",
-            symbol.cell, parent.cell
-        ));
-        true
-    }
-
-    /// Whether the session holds edits the symbol has not been saved with.
-    pub(crate) fn symbol_in_place_has_unsaved_edits(&self) -> bool {
-        let Some(session) = self.symbol_in_place() else {
-            return false;
-        };
-        if !self.design.symbol.history.is_dirty(&session.symbol.key()) {
-            return false;
-        }
-        let Ok(document) = self.model.load_symbol_document(&session.symbol) else {
-            return false;
-        };
-        let metadata = self
-            .model
-            .load_symbol_editor_metadata(&session.symbol, &document);
-        document != session.baseline.0 || metadata.ok().as_ref() != Some(&session.baseline.1)
+        self.navigation().edit_selected_symbol_in_place()
     }
 
     /// Whether Esc has nothing of the canvas's own to cancel first, so it
@@ -415,19 +324,9 @@ impl AppState {
             && !editor.dragging_origin
     }
 
-    /// Leave the in-place edit for `exit`, asking first when the session
-    /// holds unsaved edits.
+    /// [`NavigationParts::request_symbol_in_place_exit`] for the session.
     pub(crate) fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
-        if self.symbol_in_place().is_none() || !self.commit_pending_inspector_edit() {
-            return;
-        }
-        if self.symbol_in_place_has_unsaved_edits() {
-            if let Some(session) = self.symbol_in_place_mut() {
-                session.leaving = Some(exit);
-            }
-        } else {
-            self.finish_symbol_in_place(exit);
-        }
+        self.navigation().request_symbol_in_place_exit(exit);
     }
 
     /// Save, then leave: the symbol editor's own save transaction runs, and
@@ -460,7 +359,7 @@ impl AppState {
             return;
         };
         match self.discard_symbol_in_place_edits() {
-            Ok(()) => self.finish_symbol_in_place(exit),
+            Ok(()) => self.navigation().finish_symbol_in_place(exit),
             Err(error) => self.prompt(format!("The symbol edits were not discarded: {error}")),
         }
     }
@@ -494,7 +393,7 @@ impl AppState {
             session.baseline_depth = depth;
         }
         if let Some(exit) = session.exit_after_save.take() {
-            self.finish_symbol_in_place(exit);
+            self.navigation().finish_symbol_in_place(exit);
         }
     }
 
@@ -533,16 +432,135 @@ impl AppState {
         }
         Ok(())
     }
+}
+
+/// Whether the session `symbol` holds over the open document has edits the
+/// symbol has not been saved with.
+fn in_place_has_unsaved_edits(symbol: &SymbolUiState, model: &Model) -> bool {
+    let Some(session) = in_place_session(&symbol.in_place, model) else {
+        return false;
+    };
+    if !symbol.history.is_dirty(&session.symbol.key()) {
+        return false;
+    }
+    let Ok(document) = model.load_symbol_document(&session.symbol) else {
+        return false;
+    };
+    let metadata = model.load_symbol_editor_metadata(&session.symbol, &document);
+    document != session.baseline.0 || metadata.ok().as_ref() != Some(&session.baseline.1)
+}
+
+impl NavigationParts<'_> {
+    /// Open the selected instance's symbol where the instance stands.
+    pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
+        match selected_symbol_in_place_target(self.model) {
+            Ok((instance, symbol)) => self.edit_symbol_in_place(instance, symbol),
+            Err(refusal) => {
+                self.wb.prompt(format!(
+                    "Edit symbol in place is unavailable: {}.",
+                    refusal.reason()
+                ));
+                false
+            }
+        }
+    }
+
+    fn edit_symbol_in_place(&mut self, instance_id: u64, symbol: CellViewRef) -> bool {
+        let Some(instance_name) = self
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == instance_id)
+            .map(|component| component.name.clone())
+        else {
+            return false;
+        };
+        let baseline = match self
+            .model
+            .load_symbol_document(&symbol)
+            .and_then(|document| {
+                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
+                Ok((document, metadata))
+            }) {
+            Ok(baseline) => baseline,
+            Err(error) => {
+                self.wb.prompt(error);
+                return false;
+            }
+        };
+        let parent = self.model.workspace.content.active_view.clone();
+        let (pan, zoom) = (
+            self.model.schematic.session.editor.pan,
+            self.model.schematic.session.editor.zoom,
+        );
+        let symbol_was_open = self
+            .model
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .any(|open| open.reference == symbol);
+        self.open_workspace_view(symbol.clone());
+        if self.model.workspace.content.active_view != symbol {
+            // An inspector edit that could not be committed kept the parent.
+            return false;
+        }
+        self.restore.symbol.editor.tool = crate::workbench::SymbolTool::Select;
+        self.restore.symbol.editor.clear_selection();
+        self.restore.symbol.in_place = Some(Box::new(SymbolInPlace {
+            origin: baseline.0.origin,
+            baseline_depth: self.restore.symbol.history.undo_depth(&symbol.key()),
+            symbol: symbol.clone(),
+            parent: parent.clone(),
+            instance_id,
+            instance_name: instance_name.clone(),
+            pan,
+            zoom,
+            zoom_request: None,
+            view_history: Default::default(),
+            symbol_was_open,
+            baseline,
+            leaving: None,
+            exit_after_save: None,
+            parent_editor: Default::default(),
+        }));
+        self.wb.prompt(format!(
+            "Editing the {} symbol in place on {instance_name}. Esc or Return goes back to {}.",
+            symbol.cell, parent.cell
+        ));
+        true
+    }
+
+    /// Leave the in-place edit for `exit`, asking first when the session
+    /// holds unsaved edits.
+    pub(crate) fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
+        if in_place_session(&self.restore.symbol.in_place, self.model).is_none()
+            || !commit_pending_inspector_edit(self.model, self.wb)
+        {
+            return;
+        }
+        if in_place_has_unsaved_edits(self.restore.symbol, self.model) {
+            if let Some(session) =
+                in_place_session_mut(&mut self.restore.symbol.in_place, self.model)
+            {
+                session.leaving = Some(exit);
+            }
+        } else {
+            self.finish_symbol_in_place(exit);
+        }
+    }
 
     /// End the session and land where `exit` says, the parent reopening with
     /// the instance selected and its canvas where the session left it.
-    fn finish_symbol_in_place(&mut self, exit: SymbolInPlaceExit) {
-        let Some(session) = self.design.symbol.in_place.take() else {
+    pub(crate) fn finish_symbol_in_place(&mut self, exit: SymbolInPlaceExit) {
+        let Some(session) = self.restore.symbol.in_place.take() else {
             return;
         };
         self.open_workspace_view(session.parent.clone());
         if self.model.workspace.content.active_view != session.parent {
-            self.design.symbol.in_place = Some(session);
+            self.restore.symbol.in_place = Some(session);
             return;
         }
         if !session.symbol_was_open {
@@ -559,7 +577,7 @@ impl AppState {
                 self.focus_workspace_breadcrumb(level);
             }
             SymbolInPlaceExit::Level(_) | SymbolInPlaceExit::Parent => {
-                self.prompt(format!(
+                self.wb.prompt(format!(
                     "Back on {} with {} selected.",
                     session.parent.cell, session.instance_name
                 ));

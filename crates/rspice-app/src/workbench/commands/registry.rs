@@ -166,26 +166,8 @@ const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false
 /// browser.
 const ZOOM_PREVIOUS: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, true, "Shift+W"), ALL)];
-const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
-const SYMBOL_POLYLINE: &[ShortcutBinding] =
-    &[primary(chord(Key::L, false, false, false, "L"), ALL)];
-const SYMBOL_RECTANGLE: &[ShortcutBinding] =
-    &[primary(chord(Key::R, false, false, false, "R"), ALL)];
-const SYMBOL_CIRCLE: &[ShortcutBinding] = &[primary(chord(Key::C, false, false, false, "C"), ALL)];
-const SYMBOL_ARC: &[ShortcutBinding] = &[primary(chord(Key::A, false, false, false, "A"), ALL)];
-const SYMBOL_POLYGON: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
-const SYMBOL_TEXT: &[ShortcutBinding] = &[primary(chord(Key::T, false, false, false, "T"), ALL)];
-const SYMBOL_ROTATE_PIN: &[ShortcutBinding] =
-    &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
-const SYMBOL_MIRROR_PIN: &[ShortcutBinding] =
-    &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
 const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
-    ALL,
-)];
-// Return leaves an in-place symbol edit, as Esc does once nothing is in flight.
-const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
-    chord(Key::Enter, false, false, false, "Enter"),
     ALL,
 )];
 
@@ -264,19 +246,7 @@ impl Command {
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
-            Self::EditSymbolInPlace | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
-            Self::SymbolPinTool
-            | Self::SymbolPolylineTool
-            | Self::SymbolRectangleTool
-            | Self::SymbolCircleTool
-            | Self::SymbolArcTool
-            | Self::SymbolPolygonTool
-            | Self::SymbolTextTool
-            | Self::SymbolRotatePin
-            | Self::SymbolMirrorPin
-            | Self::SymbolUpdatePinsFromContract
-            | Self::SymbolSave
-            | Self::ExitSymbolInPlace => ShortcutContext::SymbolCanvas,
+            Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             _ => ShortcutContext::Global,
         }
     }
@@ -321,19 +291,6 @@ impl Command {
             Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
             Self::ConfigurationSets => NONE,
-            Self::SymbolPinTool => SYMBOL_PIN,
-            Self::SymbolPolylineTool => SYMBOL_POLYLINE,
-            Self::SymbolRectangleTool => SYMBOL_RECTANGLE,
-            Self::SymbolCircleTool => SYMBOL_CIRCLE,
-            Self::SymbolArcTool => SYMBOL_ARC,
-            Self::SymbolPolygonTool => SYMBOL_POLYGON,
-            Self::SymbolTextTool => SYMBOL_TEXT,
-            Self::SymbolRotatePin => SYMBOL_ROTATE_PIN,
-            Self::SymbolMirrorPin => SYMBOL_MIRROR_PIN,
-            Self::SymbolUpdatePinsFromContract => NONE,
-            Self::SymbolSave => NONE,
-            Self::EditSymbolInPlace => NONE,
-            Self::ExitSymbolInPlace => EXIT_SYMBOL_IN_PLACE,
             Self::CommandPalette => COMMAND_PALETTE,
             Self::Cancel => CANCEL,
             _ => NONE,
@@ -388,12 +345,6 @@ impl Command {
             Self::Cut | Self::Copy | Self::Duplicate | Self::Delete => "select an editable object",
             Self::ConfigurationSets => "open a project",
             Self::Paste => "clipboard has no compatible content",
-            Self::EditSymbolInPlace => app
-                .state
-                .selected_symbol_in_place_target()
-                .err()
-                .map_or("select one instance", |refusal| refusal.reason()),
-            Self::ExitSymbolInPlace => "no symbol is being edited in place",
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
@@ -563,20 +514,21 @@ mod tests {
 
     #[test]
     fn symbol_tool_defaults_are_complete_portable_and_view_scoped() {
-        for (command, label) in [
-            (Command::SymbolPinTool, "P"),
-            (Command::SymbolPolylineTool, "L"),
-            (Command::SymbolRectangleTool, "R"),
-            (Command::SymbolCircleTool, "C"),
-            (Command::SymbolArcTool, "A"),
-            (Command::SymbolPolygonTool, "G"),
-            (Command::SymbolTextTool, "T"),
-            (Command::SymbolRotatePin, "Ctrl+R"),
-            (Command::SymbolMirrorPin, "Ctrl+M"),
+        for (command, chord) in [
+            (DesignCommand::SymbolPinTool, "P"),
+            (DesignCommand::SymbolPolylineTool, "L"),
+            (DesignCommand::SymbolRectangleTool, "R"),
+            (DesignCommand::SymbolCircleTool, "C"),
+            (DesignCommand::SymbolArcTool, "A"),
+            (DesignCommand::SymbolPolygonTool, "G"),
+            (DesignCommand::SymbolTextTool, "T"),
+            (DesignCommand::SymbolRotatePin, "Ctrl+R"),
+            (DesignCommand::SymbolMirrorPin, "Ctrl+M"),
         ] {
-            assert_eq!(command.shortcut_context(), ShortcutContext::SymbolCanvas);
+            let spec = command.declared_spec();
+            assert_eq!(spec.context, ShortcutContext::SymbolCanvas);
             for platform in CommandPlatform::ALL {
-                assert_eq!(command.default_shortcut_label(platform), label);
+                assert_eq!(label(spec.bindings, platform), chord);
             }
         }
 
@@ -611,21 +563,27 @@ mod tests {
         let probe = DesignCommand::PlaceProbe.declared_spec();
         assert_eq!(probe.context, ShortcutContext::EngineeringCanvas);
         assert_eq!(
-            Command::SymbolPinTool.shortcut_context(),
+            DesignCommand::SymbolPinTool.declared_spec().context,
             ShortcutContext::SymbolCanvas
         );
 
         for platform in CommandPlatform::ALL {
             assert_eq!(label(pin.bindings, platform), "Shift+P");
             assert_eq!(label(probe.bindings, platform), "P");
-            assert_eq!(Command::SymbolPinTool.default_shortcut_label(platform), "P");
+            assert_eq!(
+                label(
+                    DesignCommand::SymbolPinTool.declared_spec().bindings,
+                    platform
+                ),
+                "P"
+            );
             assert_eq!(
                 ordered_binding_owners(pin.bindings[0].chord, platform),
                 vec![pin.key]
             );
             assert_eq!(
                 ordered_binding_owners(probe.bindings[0].chord, platform),
-                vec![probe.key, Command::SymbolPinTool.key()]
+                vec![probe.key, DesignCommand::SymbolPinTool.key()]
             );
         }
     }
@@ -645,10 +603,10 @@ mod tests {
             );
             assert_eq!(
                 ordered_binding_owners(bus_tap.bindings[0].chord, platform),
-                vec![bus_tap.key, Command::SymbolTextTool.key()]
+                vec![bus_tap.key, DesignCommand::SymbolTextTool.key()]
             );
             assert_eq!(
-                Command::SymbolTextTool.shortcut_context(),
+                DesignCommand::SymbolTextTool.declared_spec().context,
                 ShortcutContext::SymbolCanvas
             );
         }

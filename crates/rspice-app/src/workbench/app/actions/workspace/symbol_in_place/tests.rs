@@ -12,6 +12,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 use rspice_schematic_editor::view::coordinates::viewport_from_camera;
@@ -184,7 +185,8 @@ impl Fixture {
         let id = self.instances[instance];
         let editor = &mut self.app.state.model.schematic.session.editor;
         editor.selection.select_only_component(id);
-        Command::EditSymbolInPlace.execute(&mut self.app);
+        self.app
+            .execute_command_key(DesignCommand::EditSymbolInPlace.key());
         assert_eq!(
             self.app.state.model.workspace.content.active_view,
             self.symbol

@@ -120,47 +120,6 @@ impl Command {
                     .iter()
                     .any(|document| document.open && document.closable)
             }
-            Self::SymbolPinTool
-            | Self::SymbolPolylineTool
-            | Self::SymbolRectangleTool
-            | Self::SymbolCircleTool
-            | Self::SymbolArcTool
-            | Self::SymbolPolygonTool
-            | Self::SymbolTextTool => active_symbol_editor(app) && !state.active_view_read_only(),
-            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
-                active_symbol_editor(app)
-                    && !state.active_view_read_only()
-                    && state.design.symbol.editor.effective_selection().pins.len() == 1
-                    && state
-                        .design
-                        .symbol
-                        .editor
-                        .effective_selection()
-                        .shapes
-                        .is_empty()
-                    && state
-                        .design
-                        .symbol
-                        .editor
-                        .effective_selection()
-                        .attributes
-                        .is_empty()
-            }
-            // Nothing to reconcile against without a declared interface, and
-            // the command must say so by reporting unavailable rather than
-            // opening on an empty contract.
-            Self::SymbolUpdatePinsFromContract => {
-                active_symbol_editor(app)
-                    && !state.active_view_read_only()
-                    && !state.active_symbol_ports().is_empty()
-            }
-            Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
-            Self::EditSymbolInPlace => {
-                active_schematic_editor(app) && state.selected_symbol_in_place_target().is_ok()
-            }
-            Self::ExitSymbolInPlace => {
-                active_symbol_editor(app) && state.symbol_in_place().is_some()
-            }
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {

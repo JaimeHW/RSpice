@@ -264,7 +264,14 @@ fn safe_mode_locks_the_symbol_editor_and_the_banner_names_it() {
             .store_active_symbol_editor_bundle(&document, &metadata)
             .is_err()
     );
-    assert!(state.update_active_symbol_pins_from_contract().is_err());
+    assert!(
+        update_active_symbol_pins_from_contract(
+            &mut state.design.symbol,
+            &mut state.model,
+            &mut state.workbench,
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -284,9 +291,12 @@ fn updating_pins_from_the_contract_adds_only_what_is_missing() {
         .store_active_symbol_editor_bundle(&document, &metadata)
         .expect("edit stores");
 
-    let summary = state
-        .update_active_symbol_pins_from_contract()
-        .expect("the contract update runs");
+    let summary = update_active_symbol_pins_from_contract(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("the contract update runs");
     assert!(summary.contains("1 added"), "{summary}");
     assert!(summary.contains("1 left orphaned"), "{summary}");
 
@@ -329,9 +339,12 @@ fn the_contract_update_reorders_only_on_an_exact_name_match() {
         .store_active_symbol_editor_bundle(&document, &metadata)
         .expect("edit stores");
 
-    state
-        .update_active_symbol_pins_from_contract()
-        .expect("the contract update runs");
+    update_active_symbol_pins_from_contract(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("the contract update runs");
 
     let updated = state
         .model

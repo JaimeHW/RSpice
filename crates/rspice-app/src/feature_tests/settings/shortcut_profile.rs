@@ -89,16 +89,16 @@ fn default_profile_is_valid_with_complete_symbol_tool_registry() {
     assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
 
     for command in [
-        Command::SymbolPinTool,
-        Command::SymbolPolylineTool,
-        Command::SymbolCircleTool,
-        Command::SymbolArcTool,
-        Command::ZoomFit,
-        Command::Cancel,
+        DesignCommand::SymbolPinTool.key(),
+        DesignCommand::SymbolPolylineTool.key(),
+        DesignCommand::SymbolCircleTool.key(),
+        DesignCommand::SymbolArcTool.key(),
+        Command::ZoomFit.key(),
+        Command::Cancel.key(),
     ] {
         assert!(
             !preferences
-                .effective_bindings(&CommandRegistry, command.key())
+                .effective_bindings(&CommandRegistry, command)
                 .is_empty(),
             "missing effective symbol-editor binding: {command:?}"
         );

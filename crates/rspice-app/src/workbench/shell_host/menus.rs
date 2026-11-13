@@ -400,11 +400,11 @@ const DESIGN_MENU: &[MenuEntry] = &[
     // way in did, on the same letter.
     MenuEntry::Only(
         MenuContext::NotSymbolView,
-        &[command(Command::EditSymbolInPlace).access('E')],
+        &[design(DesignCommand::EditSymbolInPlace).access('E')],
     ),
     MenuEntry::Only(
         MenuContext::SymbolView,
-        &[command(Command::ExitSymbolInPlace).access('E')],
+        &[design(DesignCommand::ExitSymbolInPlace).access('E')],
     ),
     design(DesignCommand::CreateHierarchy).access('H'),
     project(ProjectCommand::CreateSymbol).access('F'),
@@ -442,7 +442,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
     ),
     MenuEntry::Only(
         MenuContext::SymbolView,
-        &[command(Command::SymbolSave).access('V')],
+        &[design(DesignCommand::SymbolSave).access('V')],
     ),
     MenuEntry::submenu("Violations", VIOLATIONS_MENU).access('I'),
     design(DesignCommand::RuleSetup).access('G'),
@@ -490,17 +490,17 @@ const PLACE_MENU: &[MenuEntry] = &[
 
 /// What a symbol view places: its drawing tools, then the edits to one pin.
 const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
-    command_as(Command::SymbolPinTool, "Pin").access('P'),
-    command_as(Command::SymbolPolylineTool, "Line").access('L'),
-    command_as(Command::SymbolRectangleTool, "Rectangle").access('R'),
-    command_as(Command::SymbolCircleTool, "Circle").access('C'),
-    command_as(Command::SymbolArcTool, "Arc").access('A'),
-    command_as(Command::SymbolPolygonTool, "Polygon").access('G'),
-    command_as(Command::SymbolTextTool, "Text").access('T'),
+    design_as(DesignCommand::SymbolPinTool, "Pin").access('P'),
+    design_as(DesignCommand::SymbolPolylineTool, "Line").access('L'),
+    design_as(DesignCommand::SymbolRectangleTool, "Rectangle").access('R'),
+    design_as(DesignCommand::SymbolCircleTool, "Circle").access('C'),
+    design_as(DesignCommand::SymbolArcTool, "Arc").access('A'),
+    design_as(DesignCommand::SymbolPolygonTool, "Polygon").access('G'),
+    design_as(DesignCommand::SymbolTextTool, "Text").access('T'),
     Separator,
-    command(Command::SymbolRotatePin).access('N'),
-    command(Command::SymbolMirrorPin).access('M'),
-    command(Command::SymbolUpdatePinsFromContract).access('U'),
+    design(DesignCommand::SymbolRotatePin).access('N'),
+    design(DesignCommand::SymbolMirrorPin).access('M'),
+    design(DesignCommand::SymbolUpdatePinsFromContract).access('U'),
 ];
 
 /// The sheets of the active drawing, in the order the strip shows them:
@@ -867,12 +867,10 @@ const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
 /// Check design, Check and netlist and Validate would read as switched on.
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
-        Command::SymbolSave => WorkbenchIcon::Save,
         Command::Duplicate => WorkbenchIcon::Copy,
         Command::Delete => WorkbenchIcon::Trash,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
-        Command::ExitSymbolInPlace => WorkbenchIcon::ArrowUp,
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
@@ -913,6 +911,8 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::RotateSelection => Some(WorkbenchIcon::Rotate),
             DesignCommand::MirrorSelectionHorizontal => Some(WorkbenchIcon::Mirror),
             DesignCommand::MirrorSelectionVertical => Some(WorkbenchIcon::MirrorVertical),
+            DesignCommand::SymbolSave => Some(WorkbenchIcon::Save),
+            DesignCommand::ExitSymbolInPlace => Some(WorkbenchIcon::ArrowUp),
             _ => None,
         };
     }

@@ -475,7 +475,7 @@ fn canvas_focus_policy_requires_exact_canvas_focus() {
     );
     assert_eq!(
         model_symbol.command,
-        Some(Command::SymbolPolylineTool.key())
+        Some(DesignCommand::SymbolPolylineTool.key())
     );
 }
 
@@ -484,11 +484,11 @@ fn complete_symbol_tool_surface_resolves_through_the_central_registry() {
     let profile = ShortcutPreferences::default();
     let mut state = ShortcutResolverState::default();
     for (time, key, expected) in [
-        (1, Key::P, Command::SymbolPinTool),
-        (2, Key::L, Command::SymbolPolylineTool),
-        (3, Key::C, Command::SymbolCircleTool),
-        (4, Key::A, Command::SymbolArcTool),
-        (5, Key::F, Command::ZoomFit),
+        (1, Key::P, DesignCommand::SymbolPinTool.key()),
+        (2, Key::L, DesignCommand::SymbolPolylineTool.key()),
+        (3, Key::C, DesignCommand::SymbolCircleTool.key()),
+        (4, Key::A, DesignCommand::SymbolArcTool.key()),
+        (5, Key::F, Command::ZoomFit.key()),
     ] {
         let resolved = state.resolve(
             &snapshot(&[event(key, Modifiers::NONE, false)], false),
@@ -499,7 +499,7 @@ fn complete_symbol_tool_surface_resolves_through_the_central_registry() {
             Duration::from_millis(time),
             |_| true,
         );
-        assert_eq!(resolved.command, Some(expected.key()), "key {key:?}");
+        assert_eq!(resolved.command, Some(expected), "key {key:?}");
     }
 
     let unbound_select = state.resolve(
@@ -572,7 +572,7 @@ fn shift_p_resolves_schematic_place_pin_without_breaking_plain_p_contexts() {
     );
     assert_eq!(
         resolve(Key::P, Modifiers::NONE, models_symbol(true)).command,
-        Some(Command::SymbolPinTool.key())
+        Some(DesignCommand::SymbolPinTool.key())
     );
     assert_eq!(resolve(Key::P, shift, models_symbol(true)).command, None);
 }

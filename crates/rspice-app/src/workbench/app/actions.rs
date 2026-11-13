@@ -17,8 +17,9 @@ pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 mod symbol;
 pub(crate) use symbol::{
-    copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
-    paste_symbol_shape, select_all_symbol_items, transform_selected_symbol_item,
+    activate_symbol_tool, copy_selected_symbol_shape, delete_selected_symbol_item,
+    duplicate_selected_symbol_shape, paste_symbol_shape, select_all_symbol_items,
+    transform_selected_symbol_item, transform_selected_symbol_pin,
 };
 pub(crate) mod tuning_staging;
 pub(in crate::workbench) mod veriloga_placement;
@@ -667,6 +668,7 @@ mod symbol_action_tests {
     use crate::state::{
         Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
     };
+    use crate::workbench::design::commands::DesignCommand;
 
     #[test]
     fn registered_symbol_tools_are_available_and_execute_complete_state_transitions() {
@@ -695,19 +697,22 @@ mod symbol_action_tests {
         let select = crate::workbench::design::commands::DesignCommand::SelectTool.key();
         assert!(app.command_availability(select).is_available());
         for command in [
-            ShortcutCommand::SymbolPinTool,
-            ShortcutCommand::SymbolPolylineTool,
-            ShortcutCommand::SymbolRectangleTool,
-            ShortcutCommand::SymbolCircleTool,
-            ShortcutCommand::SymbolArcTool,
-            ShortcutCommand::SymbolPolygonTool,
-            ShortcutCommand::SymbolTextTool,
-            ShortcutCommand::ZoomFit,
+            DesignCommand::SymbolPinTool.key(),
+            DesignCommand::SymbolPolylineTool.key(),
+            DesignCommand::SymbolRectangleTool.key(),
+            DesignCommand::SymbolCircleTool.key(),
+            DesignCommand::SymbolArcTool.key(),
+            DesignCommand::SymbolPolygonTool.key(),
+            DesignCommand::SymbolTextTool.key(),
+            ShortcutCommand::ZoomFit.key(),
         ] {
-            assert!(command.availability(&app).is_available(), "{command:?}");
+            assert!(
+                app.command_availability(command).is_available(),
+                "{command:?}"
+            );
         }
 
-        app.execute_shortcut_command(ShortcutCommand::SymbolPinTool);
+        app.execute_command_key(DesignCommand::SymbolPinTool.key());
         assert_eq!(
             app.state.design.symbol.editor.tool,
             crate::workbench::SymbolTool::PlacePin
@@ -718,7 +723,7 @@ mod symbol_action_tests {
         );
 
         app.state.design.symbol.editor.pending_polyline = vec![Point::new(0, 0)];
-        app.execute_shortcut_command(ShortcutCommand::SymbolPolylineTool);
+        app.execute_command_key(DesignCommand::SymbolPolylineTool.key());
         assert_eq!(
             app.state.design.symbol.editor.tool,
             crate::workbench::SymbolTool::Line
@@ -727,34 +732,34 @@ mod symbol_action_tests {
 
         for (command, expected) in [
             (
-                ShortcutCommand::SymbolRectangleTool,
+                DesignCommand::SymbolRectangleTool,
                 crate::workbench::SymbolTool::Rectangle,
             ),
             (
-                ShortcutCommand::SymbolCircleTool,
+                DesignCommand::SymbolCircleTool,
                 crate::workbench::SymbolTool::Circle,
             ),
             (
-                ShortcutCommand::SymbolArcTool,
+                DesignCommand::SymbolArcTool,
                 crate::workbench::SymbolTool::Arc,
             ),
             (
-                ShortcutCommand::SymbolPolygonTool,
+                DesignCommand::SymbolPolygonTool,
                 crate::workbench::SymbolTool::Polygon,
             ),
             (
-                ShortcutCommand::SymbolTextTool,
+                DesignCommand::SymbolTextTool,
                 crate::workbench::SymbolTool::Text,
             ),
         ] {
             app.state.design.symbol.editor.shape_start = Some(Point::new(10, 10));
-            app.execute_shortcut_command(command);
+            app.execute_command_key(command.key());
             assert_eq!(app.state.design.symbol.editor.tool, expected);
             if matches!(
                 command,
-                ShortcutCommand::SymbolRectangleTool
-                    | ShortcutCommand::SymbolCircleTool
-                    | ShortcutCommand::SymbolArcTool
+                DesignCommand::SymbolRectangleTool
+                    | DesignCommand::SymbolCircleTool
+                    | DesignCommand::SymbolArcTool
             ) {
                 assert!(app.state.design.symbol.editor.shape_start.is_none());
             }

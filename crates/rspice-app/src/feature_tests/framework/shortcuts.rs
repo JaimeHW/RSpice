@@ -8,7 +8,8 @@ use crate::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
 };
 use crate::workbench::app_state::session::shortcuts::*;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
+use crate::workbench::design::commands::DesignCommand;
 
 #[test]
 fn accessibility_projection_uses_effective_custom_profile_and_host() {
@@ -16,7 +17,7 @@ fn accessibility_projection_uses_effective_custom_profile_and_host() {
     shortcuts
         .set_binding(
             &CommandRegistry,
-            Command::SymbolCircleTool.key(),
+            DesignCommand::SymbolCircleTool.key(),
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -34,7 +35,7 @@ fn accessibility_projection_uses_effective_custom_profile_and_host() {
         command_registry(),
         CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
-        &[Command::SymbolCircleTool.key()],
+        &[DesignCommand::SymbolCircleTool.key()],
     );
 
     assert_eq!(summary, " Shortcuts: Alt+F9: Draw symbol circle.");

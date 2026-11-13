@@ -6,7 +6,9 @@
 //! schematic's annotations, the selection's turns, flips, layouts and snaps,
 //! the collinear join, the project's standard-value series, selecting by
 //! kind, Move, Stretch and Create array, the symbol swap and the interface
-//! update, Highlight net and Properties.
+//! update, Highlight net and Properties, and the symbol editor's tools, pin
+//! turns, contract update and save with the way into and out of an in-place
+//! symbol edit.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -193,6 +195,34 @@ pub(crate) enum DesignCommand {
     UpdateInstanceInterface,
     /// Light the net the selection is on.
     HighlightNet,
+    /// The symbol canvas's pin tool.
+    SymbolPinTool,
+    /// The symbol canvas's line tool.
+    SymbolPolylineTool,
+    /// The symbol canvas's rectangle tool.
+    SymbolRectangleTool,
+    /// The symbol canvas's circle tool.
+    SymbolCircleTool,
+    /// The symbol canvas's arc tool.
+    SymbolArcTool,
+    /// The symbol canvas's polygon tool.
+    SymbolPolygonTool,
+    /// The symbol canvas's text tool.
+    SymbolTextTool,
+    /// Turn the one selected pin to the next side of the body.
+    SymbolRotatePin,
+    /// Flip the one selected pin across the body.
+    SymbolMirrorPin,
+    /// Bring the symbol's pins back into agreement with the interface its
+    /// schematic declares.
+    SymbolUpdatePinsFromContract,
+    /// Validate the symbol against its publication contract, then save it.
+    SymbolSave,
+    /// Edit the selected instance's symbol master where the instance stands
+    /// on its parent schematic.
+    EditSymbolInPlace,
+    /// Leave an in-place symbol edit for the parent schematic.
+    ExitSymbolInPlace,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -350,10 +380,37 @@ const MOVE_SELECTION: &[ShortcutBinding] =
     &[primary(chord(Key::M, false, false, false, "M"), EVERYWHERE)];
 const STRETCH_SELECTION: &[ShortcutBinding] =
     &[primary(chord(Key::S, false, false, false, "S"), EVERYWHERE)];
+const SYMBOL_PIN: &[ShortcutBinding] =
+    &[primary(chord(Key::P, false, false, false, "P"), EVERYWHERE)];
+const SYMBOL_POLYLINE: &[ShortcutBinding] =
+    &[primary(chord(Key::L, false, false, false, "L"), EVERYWHERE)];
+const SYMBOL_RECTANGLE: &[ShortcutBinding] =
+    &[primary(chord(Key::R, false, false, false, "R"), EVERYWHERE)];
+const SYMBOL_CIRCLE: &[ShortcutBinding] =
+    &[primary(chord(Key::C, false, false, false, "C"), EVERYWHERE)];
+const SYMBOL_ARC: &[ShortcutBinding] =
+    &[primary(chord(Key::A, false, false, false, "A"), EVERYWHERE)];
+const SYMBOL_POLYGON: &[ShortcutBinding] =
+    &[primary(chord(Key::G, false, false, false, "G"), EVERYWHERE)];
+const SYMBOL_TEXT: &[ShortcutBinding] =
+    &[primary(chord(Key::T, false, false, false, "T"), EVERYWHERE)];
+const SYMBOL_ROTATE_PIN: &[ShortcutBinding] = &[primary(
+    chord(Key::R, true, false, false, "Ctrl+R"),
+    EVERYWHERE,
+)];
+const SYMBOL_MIRROR_PIN: &[ShortcutBinding] = &[primary(
+    chord(Key::M, true, false, false, "Ctrl+M"),
+    EVERYWHERE,
+)];
+// Return leaves an in-place symbol edit, as Esc does once nothing is in flight.
+const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::Enter, false, false, false, "Enter"),
+    EVERYWHERE,
+)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 87] = [
+    pub(crate) const ALL: [Self; 100] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -441,6 +498,19 @@ impl DesignCommand {
         Self::SwapToRSpiceSymbols,
         Self::UpdateInstanceInterface,
         Self::HighlightNet,
+        Self::SymbolPinTool,
+        Self::SymbolPolylineTool,
+        Self::SymbolRectangleTool,
+        Self::SymbolCircleTool,
+        Self::SymbolArcTool,
+        Self::SymbolPolygonTool,
+        Self::SymbolTextTool,
+        Self::SymbolRotatePin,
+        Self::SymbolMirrorPin,
+        Self::SymbolUpdatePinsFromContract,
+        Self::SymbolSave,
+        Self::EditSymbolInPlace,
+        Self::ExitSymbolInPlace,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -539,6 +609,19 @@ impl DesignCommand {
             Self::SwapToRSpiceSymbols => CommandKey::new("swap-to-rspice-symbols"),
             Self::UpdateInstanceInterface => CommandKey::new("update-instance-interface"),
             Self::HighlightNet => CommandKey::new("highlight-net"),
+            Self::SymbolPinTool => CommandKey::new("symbol-pin-tool"),
+            Self::SymbolPolylineTool => CommandKey::new("symbol-line-tool"),
+            Self::SymbolRectangleTool => CommandKey::new("symbol-rectangle-tool"),
+            Self::SymbolCircleTool => CommandKey::new("symbol-circle-tool"),
+            Self::SymbolArcTool => CommandKey::new("symbol-arc-tool"),
+            Self::SymbolPolygonTool => CommandKey::new("symbol-polygon-tool"),
+            Self::SymbolTextTool => CommandKey::new("symbol-text-tool"),
+            Self::SymbolRotatePin => CommandKey::new("symbol-rotate-pin"),
+            Self::SymbolMirrorPin => CommandKey::new("symbol-mirror-pin"),
+            Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
+            Self::SymbolSave => CommandKey::new("save-symbol"),
+            Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
+            Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
         }
     }
 
@@ -602,6 +685,10 @@ impl DesignCommand {
     /// the symbol swap and the interface update edit the drawing and are
     /// chords of the canvas; Move and Stretch have chords and are ones Repeat
     /// last command runs again.
+    /// The symbol editor's commands change only the symbol canvas's own
+    /// state or its document and are chords of the symbol canvas, the tools
+    /// and the pin turns with chords of their own; editing a symbol in place
+    /// is a chord of the design workspace, and Return leaves it.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -622,6 +709,7 @@ impl DesignCommand {
             .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let violations = ShortcutContext::ViolationNavigation;
+        let symbol_canvas = ShortcutContext::SymbolCanvas;
         let checks_project = open.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let arrange = edits.with(CommandFlags::REPEATABLE, true);
         let (label, group, flags, context, bindings) = match self {
@@ -895,6 +983,91 @@ impl DesignCommand {
                 ("Update instance interface", "Design", edits, canvas, NONE)
             }
             Self::HighlightNet => ("Highlight net", "Design", palette, design, NONE),
+            Self::SymbolPinTool => (
+                "Place symbol pin",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_PIN,
+            ),
+            Self::SymbolPolylineTool => (
+                "Draw symbol line",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_POLYLINE,
+            ),
+            Self::SymbolRectangleTool => (
+                "Draw symbol rectangle",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_RECTANGLE,
+            ),
+            Self::SymbolCircleTool => (
+                "Draw symbol circle",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_CIRCLE,
+            ),
+            Self::SymbolArcTool => (
+                "Draw symbol arc",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_ARC,
+            ),
+            Self::SymbolPolygonTool => (
+                "Draw symbol polygon",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_POLYGON,
+            ),
+            Self::SymbolTextTool => (
+                "Place symbol text",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_TEXT,
+            ),
+            Self::SymbolRotatePin => (
+                "Rotate selected pin to next side",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_ROTATE_PIN,
+            ),
+            Self::SymbolMirrorPin => (
+                "Mirror selected pin across body",
+                "Design",
+                palette,
+                symbol_canvas,
+                SYMBOL_MIRROR_PIN,
+            ),
+            Self::SymbolUpdatePinsFromContract => (
+                "Update pins from contract",
+                "Design",
+                palette,
+                symbol_canvas,
+                NONE,
+            ),
+            Self::SymbolSave => (
+                "Validate and save symbol",
+                "Design",
+                palette,
+                symbol_canvas,
+                NONE,
+            ),
+            Self::EditSymbolInPlace => ("Edit symbol in place", "Design", palette, design, NONE),
+            Self::ExitSymbolInPlace => (
+                "Return to parent schematic",
+                "Design",
+                palette,
+                symbol_canvas,
+                EXIT_SYMBOL_IN_PLACE,
+            ),
         };
         CommandSpec {
             key: self.key(),

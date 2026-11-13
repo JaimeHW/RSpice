@@ -7,7 +7,9 @@ pub(crate) mod commands;
 mod routed;
 
 use egui::Context;
-use rspice_schematic_editor::symbol_editor::commands::{SymbolTransform, activate_tool};
+use rspice_schematic_editor::symbol_editor::commands::{
+    SymbolPinTransform, SymbolTransform, activate_tool,
+};
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
@@ -26,12 +28,19 @@ use crate::workbench::app::actions::property_edit::{
 };
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    active_symbol_pin_finding_count, clear_active_symbol_pin_checks, run_active_symbol_pin_checks,
+    active_symbol_pin_finding_count, active_symbol_ports, clear_active_symbol_pin_checks,
+    refuse_unsavable_active_symbol, run_active_symbol_pin_checks,
+    update_active_symbol_pins_from_contract,
+};
+use crate::workbench::app::actions::workspace::symbol_in_place::{
+    SymbolInPlaceExit, in_place_session, selected_symbol_in_place_target,
 };
 use crate::workbench::app::actions::workspace::{
     NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
 };
-use crate::workbench::app::actions::{stimulus, transform_selected_symbol_item};
+use crate::workbench::app::actions::{
+    activate_symbol_tool, stimulus, transform_selected_symbol_item, transform_selected_symbol_pin,
+};
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
 };
@@ -140,6 +149,12 @@ impl CommandSet for DesignCommand {
     /// lack. Highlight net needs a schematic, then names what keeps it from
     /// one net. Properties needs one inspectable object: a symbol's one pin
     /// or shape, or a schematic object or instances its forms can open.
+    ///
+    /// The symbol canvas's tools and its save need an editable symbol in
+    /// front; a pin turn also needs one pin selected alone, and the contract
+    /// update an interface to reconcile with. Editing a symbol in place
+    /// needs a schematic in front and an instance whose symbol can be, and
+    /// names what it lacks; leaving needs a symbol edited in place in front.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -342,6 +357,38 @@ impl CommandSet for DesignCommand {
                         || shared_properties::shared_properties_available(registry, reads.model));
                 (!inspectable).then_some("select one inspectable object")
             }
+            Self::SymbolPinTool
+            | Self::SymbolPolylineTool
+            | Self::SymbolRectangleTool
+            | Self::SymbolCircleTool
+            | Self::SymbolArcTool
+            | Self::SymbolPolygonTool
+            | Self::SymbolTextTool
+            | Self::SymbolSave => {
+                (!editable_symbol(reads)).then_some("command is unavailable in this context")
+            }
+            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
+                let selection = reads.state.symbol.editor.effective_selection();
+                let one_pin = selection.pins.len() == 1
+                    && selection.shapes.is_empty()
+                    && selection.attributes.is_empty();
+                (!(editable_symbol(reads) && one_pin))
+                    .then_some("command is unavailable in this context")
+            }
+            // Nothing to reconcile against without a declared interface, and
+            // the command must say so by reporting unavailable rather than
+            // opening on an empty contract.
+            Self::SymbolUpdatePinsFromContract => (!editable_symbol(reads)
+                || active_symbol_ports(reads.model).is_empty())
+            .then_some("command is unavailable in this context"),
+            Self::EditSymbolInPlace => match selected_symbol_in_place_target(reads.model) {
+                Ok(_) if schematic => None,
+                Ok(_) => Some("select one instance"),
+                Err(refusal) => Some(refusal.reason()),
+            },
+            Self::ExitSymbolInPlace => (!routed::symbol_editor(reads.wb.workspace, reads.model)
+                || in_place_session(&reads.state.symbol.in_place, reads.model).is_none())
+            .then_some("no symbol is being edited in place"),
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
                 Some("the active schematic is read-only")
@@ -784,6 +831,51 @@ impl CommandSet for DesignCommand {
                 let outcome = highlight_selected_net(cx.model, highlighting);
                 cx.wb.prompt(outcome);
             }
+            Self::SymbolPinTool
+            | Self::SymbolPolylineTool
+            | Self::SymbolRectangleTool
+            | Self::SymbolCircleTool
+            | Self::SymbolArcTool
+            | Self::SymbolPolygonTool
+            | Self::SymbolTextTool => {
+                activate_symbol_tool(&mut cx.state.symbol, cx.model, symbol_tool(self));
+            }
+            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
+                let transform = match self {
+                    Self::SymbolMirrorPin => SymbolPinTransform::Mirror,
+                    _ => SymbolPinTransform::Rotate,
+                };
+                let modal_open = cx.application_modal_open();
+                transform_selected_symbol_pin(
+                    &mut cx.state.symbol,
+                    cx.model,
+                    cx.wb,
+                    modal_open,
+                    transform,
+                );
+            }
+            Self::SymbolUpdatePinsFromContract => {
+                match update_active_symbol_pins_from_contract(&mut cx.state.symbol, cx.model, cx.wb)
+                {
+                    Ok(text) | Err(text) => cx.wb.prompt(text),
+                }
+            }
+            // The checks run before the dialog opens, so a symbol that cannot
+            // be published says which row blocked it instead of presenting a
+            // save transaction with a disabled primary control.
+            Self::SymbolSave => match refuse_unsavable_active_symbol(cx.model) {
+                Some(refusal) => cx.wb.prompt(refusal),
+                None => {
+                    cx.state.symbol.editor.save_dialog_open = true;
+                    cx.state.symbol.editor.save_error = None;
+                }
+            },
+            Self::EditSymbolInPlace => {
+                navigation(cx).edit_selected_symbol_in_place();
+            }
+            Self::ExitSymbolInPlace => {
+                navigation(cx).request_symbol_in_place_exit(SymbolInPlaceExit::Parent);
+            }
         }
     }
 }
@@ -849,6 +941,24 @@ fn arm_tool(cx: &mut Cx<'_, DesignFeature>, tool: Tool) {
 
 /// Whether a schematic or testbench is the document in front of the reader
 /// in the Design workspace.
+/// Whether an editable symbol is in front.
+fn editable_symbol(reads: &Reads<'_, DesignFeature>) -> bool {
+    routed::symbol_editor(reads.wb.workspace, reads.model) && !reads.model.active_view_read_only()
+}
+
+/// The tool a symbol canvas tool command arms.
+fn symbol_tool(command: DesignCommand) -> SymbolTool {
+    match command {
+        DesignCommand::SymbolPolylineTool => SymbolTool::Line,
+        DesignCommand::SymbolRectangleTool => SymbolTool::Rectangle,
+        DesignCommand::SymbolCircleTool => SymbolTool::Circle,
+        DesignCommand::SymbolArcTool => SymbolTool::Arc,
+        DesignCommand::SymbolPolygonTool => SymbolTool::Polygon,
+        DesignCommand::SymbolTextTool => SymbolTool::Text,
+        _ => SymbolTool::PlacePin,
+    }
+}
+
 fn schematic_editor(reads: &Reads<'_, DesignFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
         && matches!(

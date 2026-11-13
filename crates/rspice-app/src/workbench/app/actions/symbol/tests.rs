@@ -6,6 +6,7 @@ use crate::state::{
     SymbolShape, View, ViewType,
 };
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
 
 fn open_symbol() -> RSpiceApp {
@@ -204,14 +205,14 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     assert_eq!(metadata_encoding(&app.state), encoded);
 
     app.state.design.symbol.editor.select_pin("IN");
-    Command::SymbolRotatePin.execute(&mut app);
+    app.execute_command_key(DesignCommand::SymbolRotatePin.key());
     let rotated = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(
         rotated.pin("IN").unwrap().side(),
         crate::state::SymbolPinSide::Top
     );
     assert_eq!(rotated.pin("IN").unwrap().offset(), 10);
-    Command::SymbolMirrorPin.execute(&mut app);
+    app.execute_command_key(DesignCommand::SymbolMirrorPin.key());
     assert_eq!(
         app.state
             .model
