@@ -2,11 +2,14 @@
 //!
 //! The canvas answers a pointer or key over the design feature's state, the
 //! model, the session and the runs whose preflight a probe invalidates. It
-//! reads the results workspace. What a probe, the operating-point hop or a
-//! requirement link asks of that workspace waits in the session's outbox
-//! until the shell answers it, once the surface has drawn. Whether
-//! a modal dialog was open is lent as it stood when the parts were taken: the
-//! canvas opens nothing modal before it reads either fact.
+//! reads the results workspace. What it asks of another feature's workspace
+//! (a probe's trace, the operating-point hop, a requirement link, and the
+//! menu's Verilog-A device form, model-bound symbol and netlist card) waits
+//! in the session's outbox until the shell answers it, once the surface has
+//! drawn. Whether a modal dialog was open is lent as it stood when the parts
+//! were taken. A dialog the surface asked for counts as open from the
+//! moment it asked, though the shell opens it only once the surface has
+//! drawn: [`canvas_application_modal_open`] is that one fact.
 //!
 //! What only asks or paints, such as which rows the canvas menu offers or
 //! the scene, reads [`CanvasFacts`]: the same parts, shared.
@@ -42,7 +45,7 @@ use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 use rspice_schematic_editor::view::design_view::DesignView;
 use rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag;
 
-use super::requests::SelectProbedTrace;
+use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
 
 /// The design slot, the model, the session and the runs the canvas reads
 /// and writes, beside the results workspace and the two modal facts it
@@ -60,8 +63,8 @@ pub(crate) struct CanvasParts<'a> {
 /// The canvas's parts of the application's state, with its modal facts as
 /// they stand now.
 pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
-    let application_modal = state.application_modal_open();
-    let dialog_modal = state.dialog_modal_open();
+    let application_modal = canvas_application_modal_open(state);
+    let dialog_modal = state.dialog_modal_open() || asked_dialog_waits(&state.workbench);
     CanvasParts {
         design: &mut state.design,
         model: &mut state.model,
@@ -71,6 +74,22 @@ pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
         application_modal,
         dialog_modal,
     }
+}
+
+/// Whether the design surface reads a modal dialog as open: one that is,
+/// or one it asked another workspace to open that waits for the shell.
+/// Every dialog the surface asks for counts for the dialog gate too.
+pub(crate) fn canvas_application_modal_open(state: &AppState) -> bool {
+    state.application_modal_open() || asked_dialog_waits(&state.workbench)
+}
+
+/// Whether a dialog the design surface asked for waits in `workbench`'s
+/// outbox for the shell to open it.
+fn asked_dialog_waits(workbench: &WorkbenchSession) -> bool {
+    workbench
+        .outbox
+        .peek::<DesignSurfaceRequest>()
+        .is_some_and(DesignSurfaceRequest::opens_dialog)
 }
 
 impl AsRef<Model> for CanvasParts<'_> {

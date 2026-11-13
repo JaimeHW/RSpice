@@ -560,26 +560,13 @@ fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<ContextEn
     entries
 }
 
-/// A step the menu leaves to the application, which takes it in the menu's
-/// place: each reaches a slot the canvas's parts do not hold, the code
-/// feature's form and netlist or the models feature's selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MenuFollowUp {
-    /// New Verilog-A device… opens the code feature's form.
-    NewVerilogADevice,
-    /// Create symbol from ports starts from the selected model, if any.
-    CreateSymbolFromPorts,
-    /// Show in netlist opens the generated deck at the instance's card.
-    ShowInNetlist,
-}
-
 pub(super) fn handle_context_menu(
     response: &Response,
     state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     _routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
-) -> Option<MenuFollowUp> {
+) {
     retain_selection_on_active_sheet_in(state.model);
     #[cfg(target_arch = "wasm32")]
     let browser_keyboard_open =
@@ -591,7 +578,7 @@ pub(super) fn handle_context_menu(
         context_surface::close(response);
         forget_choices(&response.ctx);
         state.design.interaction.context_target = None;
-        return None;
+        return;
     }
     let anchor = if opening.secondary_clicked {
         capture_pointer_target(response, state, viewport, symbol_context)
@@ -606,25 +593,21 @@ pub(super) fn handle_context_menu(
     };
     let Some(view) = context_menu_view(&state.facts(), &response.ctx) else {
         context_surface::close(response);
-        return None;
+        return;
     };
     let output = context_surface::show(response, opening, anchor, &view);
-    let follow_up = match output.request {
+    match output.request {
         Some(ContextMenuRequest {
             binding,
             action: ContextAction::Choose(target),
-        }) => {
-            choose_target(state, &view, &binding, target);
-            None
-        }
+        }) => choose_target(state, &view, &binding, target),
         Some(request) => apply_context_request(state, request, symbol_context),
-        None => None,
-    };
+        None => {}
+    }
     if !output.open {
         forget_choices(&response.ctx);
         state.design.interaction.context_target = None;
     }
-    follow_up
 }
 
 fn choices_id() -> egui::Id {
@@ -1563,7 +1546,7 @@ fn execute_context_action(
     state: &mut CanvasParts<'_>,
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
-) -> Option<MenuFollowUp> {
+) {
     retain_selection_on_active_sheet_in(state.model);
     match action {
         ContextAction::Properties => {
@@ -1675,7 +1658,12 @@ fn execute_context_action(
         ContextAction::EditSymbolInPlace => {
             state.edit_selected_symbol_in_place();
         }
-        ContextAction::NewVerilogADevice => return Some(MenuFollowUp::NewVerilogADevice),
+        ContextAction::NewVerilogADevice => {
+            state
+                .workbench
+                .outbox
+                .push(DesignSurfaceRequest::NewVerilogADevice);
+        }
         ContextAction::UpdateInstanceInterface => {
             let outcome = state.model.schematic.update_selected_instance_interface(
                 &state.model.library_manager,
@@ -1699,13 +1687,18 @@ fn execute_context_action(
                 state.workbench,
             );
         }
-        ContextAction::CreateSymbolFromPorts => return Some(MenuFollowUp::CreateSymbolFromPorts),
+        ContextAction::CreateSymbolFromPorts => {
+            state
+                .workbench
+                .outbox
+                .push(DesignSurfaceRequest::CreateSymbolFromPorts);
+        }
         ContextAction::SheetProperties => show_sheet_properties(state),
         ContextAction::FitContent => {
             state.model.schematic.session.editor.needs_fit = true;
             state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
         }
-        ContextAction::ShowInNetlist => return Some(MenuFollowUp::ShowInNetlist),
+        ContextAction::ShowInNetlist => show_in_netlist(state),
         ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::SnapToStandardValue => {
@@ -1713,7 +1706,21 @@ fn execute_context_action(
         }
         ContextAction::Choose(_) => {}
     }
-    None
+}
+
+/// Show the selected instance's card in the generated deck. The Netlist
+/// workspace opens at the click, as it did, so the rest of the frame reads
+/// the route it read. The shell opens the deck at the card once the surface
+/// has drawn. An instance the deck does not state changes nothing.
+fn show_in_netlist(state: &mut CanvasParts<'_>) {
+    if state.facts().selected_instance_netlist_block().is_some() {
+        return;
+    }
+    state.workbench.activate(Workspace::Netlist);
+    state
+        .workbench
+        .outbox
+        .push(DesignSurfaceRequest::ShowInNetlist);
 }
 
 /// Show the open sheet's properties: with nothing selected the inspector is
@@ -1912,7 +1919,7 @@ fn apply_context_request(
     state: &mut CanvasParts<'_>,
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
-) -> Option<MenuFollowUp> {
+) {
     let offered = |entries: &[ContextEntry]| {
         entries.iter().any(|entry| {
             matches!(entry, ContextEntry::Command(command) if command.action == request.action)
@@ -1924,14 +1931,14 @@ fn apply_context_request(
         || !(offered(&menu_entries(&state.facts(), request.binding.target))
             || offered(ARRANGE_ENTRIES))
     {
-        return None;
+        return;
     }
     execute_context_action(
         request.action,
         state,
         request.binding.click_pos,
         symbol_context,
-    )
+    );
 }
 
 #[cfg(test)]

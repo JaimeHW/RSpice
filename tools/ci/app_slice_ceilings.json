@@ -1,13 +1,13 @@
 {
   "feature->feature": {
-    "design->code": 18,
+    "design->code": 16,
     "project->code": 1,
     "project->design": 9
   },
   "lower->upper": {},
   "whole-app": {
     "&RSpiceApp params outside shell": 39,
-    "&mut RSpiceApp params outside shell": 94,
+    "&mut RSpiceApp params outside shell": 92,
     "impl AppState methods outside session": 47,
     "impl RSpiceApp methods outside shell": 9
   }

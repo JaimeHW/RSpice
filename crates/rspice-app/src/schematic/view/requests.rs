@@ -2,10 +2,8 @@
 
 use super::parts::CanvasParts;
 use crate::workbench::{
-    ResultViewer,
     app::{delete_schematic_selection, hierarchy_master_for_component},
-    app_state::{AppState, Model},
-    documents::result_document::open_specification_editor,
+    app_state::Model,
     framework::requests::{Drain, Request},
 };
 use rspice_results_ui::selection::SelectedResultTrace;
@@ -70,9 +68,8 @@ pub(super) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorR
     }
 }
 
-/// What the canvas asks of the results workspace. The shell answers it with
-/// [`answer_surface_request`] once the design surface has drawn, in the
-/// frame the reader asked.
+/// What the design surface asks of another feature's workspace. The shell
+/// answers it once the surface has drawn, in the frame the reader asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DesignSurfaceRequest {
     /// Show the operating-point viewer with its device filter set to
@@ -81,6 +78,34 @@ pub(crate) enum DesignSurfaceRequest {
     ShowOperatingPoint { device: String },
     /// Open the project's specification editor, for a requirement link.
     OpenSpecificationEditor,
+    /// Open the code feature's New Verilog-A device form, for the canvas
+    /// menu's New Verilog-A device.
+    NewVerilogADevice,
+    /// Open Create model-bound symbol, starting from the models feature's
+    /// selected model if there is one, for the canvas menu's Create symbol
+    /// from ports.
+    CreateSymbolFromPorts,
+    /// Open the generated deck at the selected instance's card, for the
+    /// canvas menu's Show in netlist. The canvas has opened the Netlist
+    /// workspace already.
+    ShowInNetlist,
+    /// Open the project's copy-cell dialog on `cell` of `library`, for the
+    /// read-only symbol's Copy to editable library.
+    CopyToEditableLibrary { library: String, cell: String },
+}
+
+impl DesignSurfaceRequest {
+    /// Whether answering it opens a dialog that holds the application
+    /// modal. While such a request waits, the surface reads its dialog as
+    /// open, as it did when it opened the dialog in place.
+    pub(crate) const fn opens_dialog(&self) -> bool {
+        matches!(
+            self,
+            Self::NewVerilogADevice
+                | Self::CreateSymbolFromPorts
+                | Self::CopyToEditableLibrary { .. }
+        )
+    }
 }
 
 impl Request for DesignSurfaceRequest {
@@ -97,42 +122,4 @@ pub(crate) struct SelectProbedTrace(pub(crate) SelectedResultTrace);
 
 impl Request for SelectProbedTrace {
     const DRAIN: Drain = Drain::AfterContribution;
-}
-
-/// Carry out what the canvas asked of the results workspace, as the canvas
-/// once did in place.
-pub(crate) fn answer_surface_request(state: &mut AppState, request: DesignSurfaceRequest) {
-    match request {
-        DesignSurfaceRequest::ShowOperatingPoint { device } => {
-            let session = &mut state.results.results.session;
-            session.op_filter = device;
-            session.viewer = ResultViewer::Op;
-        }
-        DesignSurfaceRequest::OpenSpecificationEditor => {
-            open_specification_editor(&mut state.results_parts());
-        }
-    }
-}
-
-/// Select the trace a probe selected.
-pub(crate) fn select_probed_trace(state: &mut AppState, probed: SelectProbedTrace) {
-    let SelectProbedTrace(trace) = probed;
-    state.results.results.session.selected_trace = Some(trace);
-}
-
-/// Answer what the canvas raised, as the shell does once the surface has
-/// drawn.
-#[cfg(test)]
-pub(crate) fn answer_surface_requests(state: &mut AppState) {
-    use crate::workbench::framework::requests::drain;
-    drain(
-        state,
-        |state| &mut state.workbench.outbox,
-        select_probed_trace,
-    );
-    drain(
-        state,
-        |state| &mut state.workbench.outbox,
-        answer_surface_request,
-    );
 }

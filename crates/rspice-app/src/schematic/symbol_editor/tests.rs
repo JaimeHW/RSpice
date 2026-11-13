@@ -53,6 +53,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 action: SymbolSurfaceAction::CopyToEditableLibrary,
             };
             assert!(apply_surface_request(&mut state, request));
+            crate::workbench::commands::answer_surface_requests(&mut state);
             assert!(state.project.copy_cell_dialog);
             assert_eq!(state.project.copy_cell_source_library, "work");
             assert_eq!(state.project.copy_cell_source_cell, "amp");

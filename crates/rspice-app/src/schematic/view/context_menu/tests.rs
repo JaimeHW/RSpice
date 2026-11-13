@@ -16,11 +16,12 @@ use crate::state::{
     NetLabel, Wire,
 };
 
-use super::super::{AppState, apply_menu_follow_up, canvas_facts, canvas_parts};
+use super::super::{AppState, canvas_facts, canvas_parts};
+use crate::workbench::commands::answer_surface_requests;
 
 // The menu answers over the canvas's facts and acts over its parts. These
-// lend both from a test's state under the menu's own names, and take a step
-// the menu leaves to the application as the canvas takes it.
+// lend both from a test's state under the menu's own names, and answer what
+// the menu asked of another workspace as the shell does.
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
     super::action_availability(action, &canvas_facts(state))
@@ -52,9 +53,8 @@ fn execute_context_action(
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
-    let follow_up =
-        super::execute_context_action(action, &mut canvas_parts(state), click_pos, symbol_context);
-    follow(state, follow_up);
+    super::execute_context_action(action, &mut canvas_parts(state), click_pos, symbol_context);
+    answer_surface_requests(state);
 }
 
 fn apply_context_request(
@@ -62,19 +62,13 @@ fn apply_context_request(
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
 ) {
-    let follow_up = super::apply_context_request(&mut canvas_parts(state), request, symbol_context);
-    follow(state, follow_up);
-}
-
-fn follow(state: &mut AppState, follow_up: Option<MenuFollowUp>) {
-    if let Some(follow_up) = follow_up {
-        apply_menu_follow_up(state, follow_up);
-    }
+    super::apply_context_request(&mut canvas_parts(state), request, symbol_context);
+    answer_surface_requests(state);
 }
 
 fn open_operating_point(state: &mut AppState) {
     super::open_operating_point(&mut canvas_parts(state));
-    super::super::requests::answer_surface_requests(state);
+    answer_surface_requests(state);
 }
 
 fn select_pointer_target(
@@ -546,6 +540,35 @@ fn new_veriloga_device_opens_the_form_from_the_canvas() {
     let (enabled, reason) = action_availability(ContextAction::NewVerilogADevice, &state);
     assert!(!enabled);
     assert!(reason.contains("writable"), "{reason}");
+}
+
+/// A dialog the menu asked for counts as open from the moment it asked, so
+/// a later gesture in the same frame is refused, as it was when the menu
+/// opened the dialog in place. The shell then opens it.
+#[test]
+fn a_dialog_the_menu_asked_for_holds_the_canvas_modal_until_it_opens() {
+    let mut state = AppState::default();
+    let symbol_context = schematic_symbol_context(&state);
+    assert!(!canvas_parts(&mut state).application_modal_open());
+    super::execute_context_action(
+        ContextAction::NewVerilogADevice,
+        &mut canvas_parts(&mut state),
+        Point::origin(),
+        &symbol_context,
+    );
+    assert!(!state.code.new_veriloga_device.open);
+    assert!(!state.application_modal_open());
+    assert!(crate::schematic::view::canvas_application_modal_open(
+        &state
+    ));
+    let parts = canvas_parts(&mut state);
+    assert!(parts.application_modal_open());
+    assert!(parts.dialog_modal_open());
+
+    answer_surface_requests(&mut state);
+    assert!(state.code.new_veriloga_device.open);
+    assert!(state.application_modal_open());
+    assert!(state.dialog_modal_open());
 }
 
 /// A placed source's menu states the stimulus-library verbs its standing calls

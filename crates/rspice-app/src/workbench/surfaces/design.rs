@@ -16,7 +16,7 @@ use super::super::design_system::{Problem, empty_state, paint_problem_mark};
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.is_netlist_first_without_schematic() {
-        netlist_first::show(ui, app);
+        netlist_first::show(ui, &mut app.state);
         return;
     }
     if app.state.active_view_read_only() {

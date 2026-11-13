@@ -14,9 +14,11 @@ use egui::{
     WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use crate::state::command_catalog::CommandKey;
 use crate::state::{DependencyResolution, NetlistSourceIndex, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, action_row, centered_content_rect, elide_text, paint_problem_mark,
@@ -26,8 +28,8 @@ use crate::workbench::documents::netlist_document::{
     OwnedNetlistPublicationState, owned_netlist_publication_state, root_deck_source_index,
 };
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Execute;
 use crate::workbench::state::Workspace;
-use crate::workbench::{AppState, RSpiceApp};
 
 /// Geometry shared with the no-project landing, so the two landing surfaces
 /// sit on the same grid.
@@ -65,26 +67,33 @@ enum NetlistFirstAction {
     CreateSchematic,
 }
 
-fn execute_netlist_first_action(app: &mut RSpiceApp, action: NetlistFirstAction) {
-    match action {
-        NetlistFirstAction::OpenNetlistWorkspace => {
-            Command::OpenWorkspace(Workspace::Netlist).execute(app);
+impl NetlistFirstAction {
+    /// The command the action runs.
+    fn command_key(self) -> CommandKey {
+        match self {
+            Self::OpenNetlistWorkspace => Command::OpenWorkspace(Workspace::Netlist).key(),
+            Self::CreateSchematic => ids::NEW_CELL,
         }
-        NetlistFirstAction::CreateSchematic => app.execute_command_key(ids::NEW_CELL),
     }
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+/// Run the action's command. The shell runs it once the surface has drawn,
+/// and the surface draws nothing after the action.
+fn raise_netlist_first_action(state: &mut AppState, action: NetlistFirstAction) {
+    state.workbench.outbox.push(Execute(action.command_key()));
+}
+
+pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let mut action = None;
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            header(ui, app.state.model.workspace.content.project.name());
-            body(ui, &mut app.state, &mut action);
+            header(ui, state.model.workspace.content.project.name());
+            body(ui, state, &mut action);
         });
     if let Some(action) = action {
-        execute_netlist_first_action(app, action);
+        raise_netlist_first_action(state, action);
     }
 }
 
@@ -630,6 +639,7 @@ fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     const DECK: &str = "Precision front-end bench\n\
         * differential input stage\n\
@@ -724,7 +734,7 @@ mod tests {
         } else {
             netlist_first_app()
         };
-        crate::ui::raster::render(size, |ui, _| show(ui, &mut app))
+        crate::ui::raster::render(size, |ui, _| show(ui, &mut app.state))
     }
 
     fn regression_height(canvas: &crate::ui::raster::Canvas) -> usize {
@@ -806,10 +816,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
 
-        execute_netlist_first_action(&mut app, NetlistFirstAction::OpenNetlistWorkspace);
+        raise_netlist_first_action(&mut app.state, NetlistFirstAction::OpenNetlistWorkspace);
+        app.after_contribution();
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
 
-        execute_netlist_first_action(&mut app, NetlistFirstAction::CreateSchematic);
+        raise_netlist_first_action(&mut app.state, NetlistFirstAction::CreateSchematic);
+        app.after_contribution();
         assert!(app.state.project.new_cell_dialog);
         assert!(app.state.project.new_cell_create_schematic);
     }
@@ -876,7 +888,7 @@ mod tests {
     #[test]
     fn the_page_names_the_deck_its_actions_and_its_facts() {
         let mut app = netlist_first_app();
-        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
         for expected in [
             EYEBROW,
             "Open Netlist & Script Editor",
@@ -901,7 +913,7 @@ mod tests {
         app.state = serde_json::from_str(&session).expect("session restores");
         assert!(app.state.is_netlist_first_without_schematic());
 
-        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
         assert!(!text.contains("The deck has no source text."), "{text}");
         assert!(
             text.contains("R1 in inn 4.7k"),
@@ -917,7 +929,7 @@ mod tests {
         // An include file open in the editor, or nothing projected into it yet.
         for editor in ["* models.inc\n.model NFET NMOS (LEVEL=1)\n", ""] {
             editor.clone_into(&mut app.state.model.simulation.source.netlist_content);
-            let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+            let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
             assert!(text.contains("Precision front-end bench"), "{text}");
             assert!(!text.contains("* models.inc"), "{text}");
         }
@@ -927,7 +939,7 @@ mod tests {
     fn a_long_deck_truncates_behind_a_footer_that_counts_what_was_left_out() {
         let mut app = truncated_netlist_first_app();
 
-        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
         assert!(
             text.contains("more lines"),
             "no truncation footer in:\n{text}"
@@ -961,7 +973,7 @@ mod tests {
     fn the_two_column_landing_fills_both_columns() {
         let mut app = netlist_first_app();
         let size = vec2(1440.0, 900.0);
-        let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+        let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app.state));
 
         // Content column: 1240 centered in 1440 leaves 100 on each side. The
         // preview occupies the left column and the rail the last 322 points.

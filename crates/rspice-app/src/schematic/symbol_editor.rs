@@ -10,7 +10,10 @@ use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use super::symbols::SymbolLibrary;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts, canvas_parts};
+use crate::schematic::view::{
+    CanvasFacts, CanvasParts, DesignSurfaceRequest, canvas_application_modal_open, canvas_facts,
+    canvas_parts,
+};
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme;
 use crate::ui::widgets::DialogChoice;
@@ -264,22 +267,27 @@ fn show_save_symbol_dialog(
 }
 
 fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) -> bool {
-    if request.source != state.symbol_editor_request_source() || state.application_modal_open() {
+    if request.source != state.symbol_editor_request_source()
+        || canvas_application_modal_open(state)
+    {
         return false;
     }
     match request.action {
+        // The project's copy-cell dialog opens once the surface has drawn.
+        // Until then the surface reads it as open, as it did when the
+        // banner opened it in place.
         SymbolSurfaceAction::CopyToEditableLibrary => {
             if !state.symbol_editor_copy_available() {
                 return false;
             }
             let reference = &request.source.document;
-            if let Err(error) = state.project.open_copy_cell_dialog(
-                &state.model,
-                &reference.library,
-                &reference.cell,
-            ) {
-                state.prompt(error);
-            }
+            state
+                .workbench
+                .outbox
+                .push(DesignSurfaceRequest::CopyToEditableLibrary {
+                    library: reference.library.clone(),
+                    cell: reference.cell.clone(),
+                });
         }
         SymbolSurfaceAction::GenerateFromSchematic => {
             if state.deny_read_only_edit() {

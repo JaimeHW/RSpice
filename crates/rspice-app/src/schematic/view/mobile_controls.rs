@@ -15,6 +15,7 @@ use rspice_schematic_editor::view::mobile_controls::{
 };
 use rspice_schematic_editor::view::pointer_target::canvas_touch_mode;
 
+use super::parts::canvas_application_modal_open;
 use super::shelf_drag::PlacementTransform;
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
@@ -90,7 +91,7 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
             app.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
-        || app.state.application_modal_open()
+        || canvas_application_modal_open(&app.state)
         || !action_enabled(app, request.action)
     {
         return;

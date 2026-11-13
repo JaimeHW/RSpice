@@ -7,10 +7,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::workbench::app::{
-    open_create_model_bound_symbol_dialog, open_new_veriloga_device_form, symbol_context_revision,
-    sync_active_schematic,
-};
+use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
 use crate::workbench::app_state::{AppState, Model, model_design_view};
 use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
@@ -76,10 +73,10 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
-pub(crate) use self::parts::{CanvasFacts, CanvasParts, canvas_facts, canvas_parts};
-pub(crate) use self::requests::{
-    DesignSurfaceRequest, SelectProbedTrace, answer_surface_request, select_probed_trace,
+pub(crate) use self::parts::{
+    CanvasFacts, CanvasParts, canvas_application_modal_open, canvas_facts, canvas_parts,
 };
+pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -95,18 +92,6 @@ pub(crate) use self::shelf_drag::{
 pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
     egui::DragAndDrop::has_payload_of_type::<SchematicShelfDragPayload>(ctx)
         && canvas::contains_pointer(ctx)
-}
-
-/// Take the step the canvas menu left to the application, where the menu
-/// would have taken it.
-fn apply_menu_follow_up(state: &mut AppState, follow_up: context_menu::MenuFollowUp) {
-    match follow_up {
-        context_menu::MenuFollowUp::NewVerilogADevice => open_new_veriloga_device_form(state),
-        context_menu::MenuFollowUp::CreateSymbolFromPorts => {
-            open_create_model_bound_symbol_dialog(state);
-        }
-        context_menu::MenuFollowUp::ShowInNetlist => state.show_selected_instance_in_netlist(),
-    }
 }
 
 /// Compose the editor's resolved symbols from the current app-owned sources,
@@ -354,7 +339,7 @@ pub fn render_schematic_view(
     }
 
     let response = canvas::interact(ui, available, || {
-        state.application_modal_open() || state.workbench.drawer.is_some()
+        canvas_application_modal_open(state) || state.workbench.drawer.is_some()
     });
     if response.clicked() || response.secondary_clicked() || response.drag_started() {
         state.design.interaction.schematic_keyboard_focus = None;
@@ -449,16 +434,13 @@ pub fn render_schematic_view(
         );
     }
     refresh_symbol_context_after_interactions(&mut state.model, &mut symbol_context);
-    let menu_follow_up = context_menu::handle_context_menu(
+    context_menu::handle_context_menu(
         &response,
         &mut canvas_parts(state),
         &viewport,
         routing_was_active,
         &symbol_context,
     );
-    if let Some(follow_up) = menu_follow_up {
-        apply_menu_follow_up(state, follow_up);
-    }
     handle_keyboard_object_navigation(&response, &mut canvas_parts(state), &symbol_context);
     set_canvas_cursor(ui, &response, &canvas_facts(state), shelf_drop);
     let crosshair = full_crosshair_at(ui, &response, &canvas_facts(state), &viewport);

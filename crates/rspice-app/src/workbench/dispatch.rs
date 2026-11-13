@@ -16,9 +16,7 @@
 //! out of the registry for the one container that holds its key; no menu,
 //! shortcut profile or Repeat reaches one of those.
 
-use crate::schematic::view::{
-    DesignSurfaceRequest, SelectProbedTrace, answer_surface_request, select_probed_trace,
-};
+use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
@@ -29,8 +27,8 @@ use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
     active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, answer_void_veriloga_evidence, command_edits_schematic, file_action,
-    run_project_file_action,
+    answer_project_request, answer_surface_request, answer_void_veriloga_evidence,
+    command_edits_schematic, file_action, run_project_file_action, select_probed_trace,
 };
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -187,10 +185,12 @@ impl RSpiceApp {
     /// Answer what a feature's call raised for straight after it: first the
     /// netlist editor's commit, undo and redo, which the editor once made
     /// while the page drew, so everything else the frame raised is answered
-    /// over the committed deck; then what the schematic canvas asked of the
-    /// results workspace (the probed trace, the operating-point hop and the
-    /// specification editor), which the canvas once wrote in place, so every
-    /// later answer reads the results workspace as the canvas left it; then
+    /// over the committed deck; then what the design surface asked of
+    /// another feature's workspace (the probed trace; the operating-point
+    /// hop, the specification editor, the Verilog-A device form, the
+    /// model-bound symbol, the generated deck at an instance's card and the
+    /// copy-cell dialog), which the surface once did in place, so every
+    /// later answer reads those workspaces as the surface left them; then
     /// the commands it ran next and what it said once they had run, the print
     /// workflow it asked for, the snap that follows a new schematic grid, the
     /// shortcut resolver's reset when a shortcut library was put in use, the

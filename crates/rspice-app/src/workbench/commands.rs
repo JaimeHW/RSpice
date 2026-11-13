@@ -464,6 +464,10 @@ pub(in crate::workbench) use command_helpers::{
     answer_project_request, answer_void_veriloga_evidence, file_action, foreign_import_refusal,
     run_project_file_action,
 };
+mod design_requests;
+#[cfg(test)]
+pub(crate) use design_requests::answer_surface_requests;
+pub(in crate::workbench) use design_requests::{answer_surface_request, select_probed_trace};
 
 #[cfg(test)]
 pub(crate) mod tests;
