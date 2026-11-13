@@ -13,7 +13,6 @@
 //! yield against the reader's limits naming the failing members.
 
 use rspice_results::family_measurements::{self, FamilyMeasurement};
-use rspice_results::number_format::fmt_si_significant;
 use rspice_results::visualization_document::{FamilyMeasurementSummary, FamilyStatistic};
 use rspice_results_ui::document_dialogs::measurement::{
     FamilyPreview, MeasurementDraft, MeasurementPreview,
@@ -74,7 +73,17 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             .get(),
     );
     let family = family_of(run, analysis);
-    let format = |value: f64| fmt_si_significant(value, "", digits);
+    let x_unit = x_unit(state, run, analysis);
+    // The value reads in the expression's unit as the calculator infers it
+    // from the waveforms the expression reads, `rms(V(out))` in volts, and a
+    // family's statistics in the same; one whose unit cannot be stated is a
+    // number.
+    let unit = if expression.is_empty() {
+        String::new()
+    } else {
+        super::super::waves::measurement_unit(expression, analysis, &x_unit).unwrap_or_default()
+    };
+    let format = |value: f64| rspice_results_ui::waves::fmt_in_unit(value, &unit, digits);
     let (value, family) = match family {
         Some(noun) => {
             let measured = (!expression.is_empty())
@@ -156,7 +165,7 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         pane,
         signals,
         signal_units,
-        x_unit: x_unit(state, run, analysis),
+        x_unit,
         value,
         refusal,
         family,
@@ -746,6 +755,98 @@ mod tests {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, text)),
             _ => {}
         }
+    }
+
+    /// Add measurement's result line reads in the expression's unit, as the
+    /// calculator infers it from what the expression reads: `rms(V(out))` of
+    /// a node held at 1.5 V is 1.5 V, where the line used to read a bare
+    /// number.
+    #[test]
+    fn the_result_line_reads_in_the_expressions_unit() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.5; 3], "#fff"),
+            ]),
+        );
+        let mut host = ResultsTestHost::default();
+        host.model.simulation.retained.runs = vec![run].into();
+        assert!(host.model.simulation.select_run(0));
+        assert!(host.model.simulation.select_analysis(0));
+        host.workbench.workspace = Workspace::Results;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        // The node by its accessor and by its bare name, as rms(VOUT) is typed.
+        for expression in ["rms(V(out))", "rms(out)"] {
+            *host.results_parts().result_document_dialog =
+                Some(ResultDocumentDialog::Measurement(MeasurementDraft {
+                    expression: expression.to_owned(),
+                    ..MeasurementDraft::default()
+                }));
+            let mut text = String::new();
+            for _ in 0..3 {
+                let input = rspice_ui_kit::raster::display_input(egui::vec2(1100.0, 620.0), 1.0);
+                let output = ctx.run_ui(input, |ctx| {
+                    crate::workbench::documents::result_document::show_document_dialog(
+                        ctx,
+                        &mut host.results_parts(),
+                    );
+                });
+                text.clear();
+                for clipped in &output.shapes {
+                    collect_text(&clipped.shape, &mut text);
+                }
+            }
+            assert!(
+                text.lines().any(|line| line == "1.500000 V"),
+                "{expression} reads in volts: {text}"
+            );
+        }
+    }
+
+    /// The picture for review, written under `RSPICE_PICTURES` when it is
+    /// set: the form with `rms(V(out))` typed and its value in volts.
+    #[test]
+    #[ignore = "writes the review picture"]
+    fn write_the_result_line_picture() {
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.5; 3], "#fff"),
+            ]),
+        );
+        let mut host = ResultsTestHost::default();
+        host.model.simulation.retained.runs = vec![run].into();
+        assert!(host.model.simulation.select_run(0));
+        assert!(host.model.simulation.select_analysis(0));
+        host.workbench.workspace = Workspace::Results;
+        *host.results_parts().result_document_dialog =
+            Some(ResultDocumentDialog::Measurement(MeasurementDraft {
+                expression: "rms(V(out))".to_owned(),
+                ..MeasurementDraft::default()
+            }));
+        let size = egui::vec2(900.0, 420.0);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut output = None;
+        for _ in 0..12 {
+            let input = rspice_ui_kit::raster::display_input(size, 2.0);
+            output = Some(ctx.run_ui(input, |ctx| {
+                crate::workbench::documents::result_document::show_document_dialog(
+                    ctx,
+                    &mut host.results_parts(),
+                );
+            }));
+        }
+        let canvas = rspice_ui_kit::raster::rasterize(&ctx, size, &output.expect("a frame"));
+        std::fs::write(
+            format!("{directory}/add-measurement-unit.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
     }
 
     /// The population's result document, one histogram pane of `gain_dc`,

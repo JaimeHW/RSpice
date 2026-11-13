@@ -354,12 +354,18 @@ pub(super) fn bus_reading_fingerprint(lanes: &EventLaneLayout) -> u64 {
 struct AnalysisUnits<'a> {
     analysis: &'a AnalysisResult,
     x_unit: &'a str,
+    /// Whether a name that is none of the analysis' waveforms states no
+    /// unit, rather than the analysis' default one.
+    retained_only: bool,
 }
 
 impl rspice_results::calculator::evaluator::UnitContext for AnalysisUnits<'_> {
     fn signal_unit(&self, signal: &str, _dataset: Option<&str>) -> Option<String> {
         let waveform =
             rspice_results::calculator::retained::find_waveform(&self.analysis.waveforms, signal);
+        if self.retained_only && waveform.is_none() {
+            return None;
+        }
         let name = waveform.map_or(signal, |waveform| waveform.name.as_str());
         let unit = rspice_results_ui::waves::browser_signal_unit(
             name,
@@ -383,8 +389,38 @@ pub(super) fn expression_unit(
 ) -> Result<String, String> {
     let expr =
         calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
-    rspice_results::calculator::evaluator::infer_unit(&expr, &AnalysisUnits { analysis, x_unit })
-        .map(|unit| unit.label())
+    rspice_results::calculator::evaluator::infer_unit(
+        &expr,
+        &AnalysisUnits {
+            analysis,
+            x_unit,
+            retained_only: false,
+        },
+    )
+    .map(|unit| unit.label())
+}
+
+/// The unit a measurement's value reads in by unit algebra, from the
+/// analysis' waveforms alone: a name that is none of them (a family member's
+/// own measurement, say) states no unit, so the value reads as a number
+/// rather than in the analysis' default unit. `None` when no unit can be
+/// stated.
+pub(crate) fn measurement_unit(
+    text: &str,
+    analysis: &AnalysisResult,
+    x_unit: &str,
+) -> Option<String> {
+    let expr = calculator::parser::try_parse(text).ok()?;
+    rspice_results::calculator::evaluator::infer_unit(
+        &expr,
+        &AnalysisUnits {
+            analysis,
+            x_unit,
+            retained_only: true,
+        },
+    )
+    .ok()
+    .map(|unit| unit.label())
 }
 
 /// Send each strip's expressions to the pane of their unit: the unit the
