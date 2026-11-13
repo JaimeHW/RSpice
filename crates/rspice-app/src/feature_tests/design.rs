@@ -10,7 +10,9 @@ use crate::state::{
     ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::design::DesignFeature;
 use crate::workbench::design::commands::DesignCommand;
+use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
 
 use super::replay::Replay;
@@ -688,4 +690,86 @@ fn a_configured_device_is_armed_in_the_frame_it_is_placed() {
         "{:?}",
         state.prompt_text()
     );
+}
+
+/// One pass of the surface the design feature registers, drawn over `app`
+/// in the context the shell lends it.
+fn design_surface_pass(app: &mut RSpiceApp) {
+    let surface = DesignFeature::registry()
+        .surface_section()
+        .expect("the design feature registers its surface");
+    crate::ui::raster::render(vec2(720.0, 480.0), |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| {
+                (surface.show)(
+                    &mut features::surface_cx::<DesignFeature>(app, |_| false),
+                    ui,
+                )
+            });
+    });
+}
+
+/// Where the touch strip goes is this frame's alone: each pass of the
+/// surface sets it afresh, whatever a pass before left there.
+#[test]
+fn each_pass_of_the_surface_says_afresh_where_the_touch_strip_goes() {
+    let mut app = RSpiceApp::test_instance();
+    assert_eq!(
+        app.state.model.workspace.content.active_view_type(),
+        ViewType::Schematic
+    );
+    let stale = Rect::from_min_size(pos2(-50.0, -50.0), vec2(10.0, 10.0));
+    app.state.design.touch_strip_canvas = Some(stale);
+
+    design_surface_pass(&mut app);
+
+    let canvas = app
+        .state
+        .design
+        .touch_strip_canvas
+        .expect("a schematic's pass leaves the canvas it drew for the strip");
+    assert_ne!(
+        canvas, stale,
+        "the pass must not keep an earlier frame's canvas"
+    );
+    assert!(
+        canvas.width() > 0.0 && canvas.height() > 0.0,
+        "the strip lays out over the canvas the document drew: {canvas:?}"
+    );
+}
+
+/// The canvas the strip lays out over never crosses the session store: a
+/// restored workbench holds none until its first pass draws one.
+#[test]
+fn a_restored_session_holds_no_touch_strip_canvas() {
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.design.touch_strip_canvas =
+        Some(Rect::from_min_size(pos2(0.0, 40.0), vec2(640.0, 440.0)));
+    let mut storage = MemoryStorage::default();
+    app.state.store_session(&mut storage);
+
+    let restored = crate::workbench::AppState::restore_eframe_session(&storage)
+        .expect("RSpice must be able to restore a session it just saved");
+
+    assert_eq!(restored.design.touch_strip_canvas, None);
 }

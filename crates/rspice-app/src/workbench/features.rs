@@ -495,11 +495,12 @@ pub(super) fn show_inspector_reading<F: Registered>(
     }
 }
 
-/// Draw `F`'s surface on the stage's `ui`. The caller answers what it raised
-/// straight after.
+/// Draw `F`'s surface on the stage's `ui`, in a context holding both modal
+/// facts as the pass begins ([`surface_cx`]). The caller answers what it
+/// raised straight after.
 pub(super) fn show_surface<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {
     if let Some(surface) = F::registry().surface_section() {
-        (surface.show)(&mut cx::<F>(app), ui);
+        (surface.show)(&mut surface_cx::<F>(app, |_| false), ui);
     }
 }
 

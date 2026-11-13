@@ -6,49 +6,27 @@ mod tool_options;
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
+use super::DesignFeature;
 use crate::schematic::view::{CanvasFacts, CanvasFrame, canvas_frame_in};
 use crate::state::ViewType;
 use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
-use crate::workbench::design::DesignFeature;
-use crate::workbench::features;
 use crate::workbench::framework::feature::{CloudSessionPort, Cx};
 
 use super::super::design_system::{Problem, empty_state, paint_problem_mark};
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.is_netlist_first_without_schematic() {
-        netlist_first::show(ui, &mut app.state);
-        return;
-    }
-    let view_type = app.state.model.workspace.content.active_view_type();
-    let canvas_document = matches!(view_type, ViewType::Schematic | ViewType::Testbench);
-    let content_rect = show_document(
-        ui,
-        &mut features::surface_cx::<DesignFeature>(app, |_| false),
-        view_type,
-    );
-    // Code's Verilog-A tab draws a Verilog-A view's source, under the
-    // banners and the tool options.
-    if view_type == ViewType::VerilogA {
-        super::veriloga::show_in_design(ui, app);
-    }
-    if canvas_document
-        && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
-    {
-        // The strip reads its commands' answers only where it draws.
-        let ctx = ui.ctx().clone();
-        crate::schematic::view::show_mobile_canvas_controls(
-            &ctx,
-            &mut features::surface_cx::<DesignFeature>(app, |_| {
-                rspice_schematic_editor::view::pointer_target::canvas_touch_mode(&ctx)
-            }),
-            content_rect,
-        );
-    }
+pub(in crate::workbench) use netlist_first::show as show_netlist_first;
+
+/// The surface the design feature registers: the document in front, in the
+/// feature's context. A canvas document leaves where it drew for the touch
+/// strip, which the shell draws once the document has.
+pub(in crate::workbench) fn show_surface(cx: &mut Cx<'_, DesignFeature>, ui: &mut Ui) {
+    let view_type = cx.model.workspace.content.active_view_type();
+    let content_rect = show_document(ui, cx, view_type);
+    cx.state.touch_strip_canvas =
+        matches!(view_type, ViewType::Schematic | ViewType::Testbench).then_some(content_rect);
 }
 
 /// The document in front, in the design feature's context: its banners and
@@ -613,7 +591,7 @@ fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
+    use crate::workbench::{AppState, RSpiceApp};
 
     /// The canvas every render in this module uses. Wide enough that the crumb
     /// row is measured rather than elided.

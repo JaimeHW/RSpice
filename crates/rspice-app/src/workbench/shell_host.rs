@@ -80,10 +80,11 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
+                use crate::workbench::design::surface as design;
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::surfaces::{
-                    automation, design, library_cellview_manager, netlist, project, simulate,
-                    stimulus, verify,
+                    automation, library_cellview_manager, netlist, project, simulate, stimulus,
+                    verify, veriloga,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -145,7 +146,41 @@ impl Host for RSpiceApp {
                         }
                         project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));
                     }
-                    Workspace::Design => design::show(ui, app),
+                    // While a deck owns the project and no schematic is
+                    // drawn yet, its landing stands in for the document.
+                    Workspace::Design if app.state.is_netlist_first_without_schematic() => {
+                        design::show_netlist_first(ui, &mut app.state);
+                    }
+                    // The design feature draws the document in its context.
+                    // Code's Verilog-A tab draws a Verilog-A view's source
+                    // under the feature's banners and tool options. The touch
+                    // strip draws last, over the canvas the document drew,
+                    // reading its commands' answers only where it draws.
+                    Workspace::Design => {
+                        use crate::workbench::design::DesignFeature;
+
+                        let verilog_a = app.state.model.workspace.content.active_view_type()
+                            == ViewType::VerilogA;
+                        features::show_surface::<DesignFeature>(app, ui);
+                        if verilog_a {
+                            veriloga::show_in_design(ui, app);
+                        }
+                        if let Some(canvas) = app.state.design.touch_strip_canvas.take()
+                            && app.state.workbench.current_route().surface_id()
+                                == super::SurfaceId::Design
+                        {
+                            let ctx = ui.ctx().clone();
+                            crate::schematic::view::show_mobile_canvas_controls(
+                                &ctx,
+                                &mut features::surface_cx::<DesignFeature>(app, |_| {
+                                    rspice_schematic_editor::view::pointer_target::canvas_touch_mode(
+                                        &ctx,
+                                    )
+                                }),
+                                canvas,
+                            );
+                        }
+                    }
                     // The surface's carried-over transactions land before
                     // the shell takes the answers it reads.
                     Workspace::Simulate => {

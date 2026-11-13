@@ -127,7 +127,7 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
             "app/dialogs/selection/rename.rs",
             "app/dialogs/selection/stretch.rs",
             "app/dialogs/object_properties.rs",
-            "surfaces/design/tool_options.rs",
+            "design/surface/tool_options.rs",
         ],
         &[".color(t.color.warn"],
     ),

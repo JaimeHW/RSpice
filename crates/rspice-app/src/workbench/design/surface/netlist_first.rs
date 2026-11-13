@@ -83,7 +83,7 @@ fn raise_netlist_first_action(state: &mut AppState, action: NetlistFirstAction) 
     state.workbench.outbox.push(Execute(action.command_key()));
 }
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     let mut action = None;
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)

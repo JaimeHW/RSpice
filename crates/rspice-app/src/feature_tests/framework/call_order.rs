@@ -747,6 +747,36 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
+/// The shell's `contribute`, at the Design stage. While a deck owns the
+/// project with no schematic drawn, its landing stands in for the document.
+/// Otherwise the design feature draws the document in its context, then
+/// code's Verilog-A tab draws a Verilog-A view's source under it, then the
+/// touch strip draws over the canvas the document drew, in a lend of its
+/// own taken where it draws.
+const DESIGN_STAGE: &[Step] = &[
+    (
+        "netlist-first landing",
+        &[
+            "Workspace::Design if app.state.is_netlist_first_without_schematic() => {\
+           design::show_netlist_first(ui, &mut app.state);\
+           }",
+        ],
+    ),
+    (
+        "document",
+        &["features::show_surface::<DesignFeature>(app, ui);"],
+    ),
+    ("Verilog-A source", &["veriloga::show_in_design(ui, app);"]),
+    (
+        "touch strip",
+        &[
+            "app.state.design.touch_strip_canvas.take()",
+            "show_mobile_canvas_controls(",
+            "features::surface_cx::<DesignFeature>(app,",
+        ],
+    ),
+];
+
 /// The shell's `contribute`, at the simulate feature's points. Both surfaces
 /// draw in the feature's context and have the command they raised answered
 /// once they have drawn, before the next point draws; the Simulate surface's
@@ -1625,6 +1655,15 @@ fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         DESIGN_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn the_design_stage_draws_the_document_then_code_s_source_then_the_strip() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        DESIGN_STAGE,
     );
 }
 

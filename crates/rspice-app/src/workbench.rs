@@ -219,14 +219,13 @@ pub(crate) mod state;
 pub(crate) mod surfaces {
     pub use rspice_app_workbench::workbench::surfaces::*;
     pub(super) mod automation;
-    pub(super) mod design;
     pub(super) mod library_cellview_manager;
     pub(super) mod netlist;
     pub(super) mod project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(super) mod stimulus;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
-    mod veriloga;
+    pub(super) mod veriloga;
 }
 pub(crate) mod tools;
 pub(crate) mod workflows;

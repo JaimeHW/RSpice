@@ -5,6 +5,7 @@
 
 pub(crate) mod commands;
 mod routed;
+pub(in crate::workbench) mod surface;
 pub(crate) mod toolbar;
 
 use egui::Context;
@@ -81,7 +82,7 @@ use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::{DialogKey, Modality};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, NoHandles, Reads,
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
@@ -105,6 +106,9 @@ impl Feature for DesignFeature {
         registry.dialogs(DIALOGS);
         registry.routed(routed::ROUTED);
         registry.toolbars(toolbar::TOOLBARS);
+        registry.surface(FeatureSurface {
+            show: surface::show_surface,
+        });
     }
 }
 

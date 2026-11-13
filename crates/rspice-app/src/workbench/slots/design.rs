@@ -231,6 +231,10 @@ pub(crate) struct DesignState {
     /// The canvas's interaction state: its drag, hover, last click, context
     /// menu target and keyboard focus. Runtime-only.
     pub(crate) interaction: crate::workbench::app_state::interaction_state::InteractionState,
+    /// Where this frame's canvas document drew, for the touch strip the
+    /// shell draws over it once the document has. Each pass of the surface
+    /// sets it and the shell takes it.
+    pub(crate) touch_strip_canvas: Option<egui::Rect>,
 }
 
 impl DesignState {
