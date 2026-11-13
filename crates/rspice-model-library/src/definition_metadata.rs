@@ -1720,7 +1720,7 @@ mod tests {
                 .statistics
                 .variables
                 .iter()
-                .any(|variable| variable.name == "DVTH_GLOBAL")
+                .any(|variable| identifier_eq(&variable.name, "DVTH_GLOBAL"))
         );
         assert!(restored.temperature_law("MOBILITY").is_some());
     }
