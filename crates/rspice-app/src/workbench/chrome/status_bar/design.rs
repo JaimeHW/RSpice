@@ -1,60 +1,59 @@
 //! The status bar's Design segments: the pointer's coordinates in the open
 //! view, what is selected, and the canvas zoom behind the percentage chip.
 
-use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
+use crate::workbench::app::actions::workspace::symbol_document::SymbolUiState;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::state::{WorkbenchSession, Workspace};
 
-pub(crate) fn schematic_cursor_summary(
-    state: &crate::workbench::app_state::AppState,
-    grid_x: f64,
-    grid_y: f64,
-) -> String {
-    let grid = f64::from(state.model.schematic.document().grid_size.max(1));
-    let sheet = state.model.active_drawing_sheet();
+pub(crate) fn schematic_cursor_summary(model: &Model, grid_x: f64, grid_y: f64) -> String {
+    let grid = f64::from(model.schematic.document().grid_size.max(1));
+    let sheet = model.active_drawing_sheet();
     sheet.cursor_status(grid_x * grid, grid_y * grid)
 }
 
-fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState) -> String {
-    let unit = state.model.active_drawing_sheet().format.display_unit;
+fn empty_schematic_cursor_summary(model: &Model) -> String {
+    let unit = model.active_drawing_sheet().format.display_unit;
     format!("x — · y — {}", unit.suffix())
 }
 
 /// The coordinate segment in Design: where the pointer is in the open view's
-/// own units, or the view's empty form while the pointer is off its canvas.
+/// own units, or the view's empty form while the pointer is off its canvas
+/// (`canvas_hover`, the point the Design canvas last reported).
 pub(in crate::workbench) fn design_engineering_context(
-    state: &crate::workbench::app_state::AppState,
+    canvas_hover: Option<(f64, f64)>,
+    model: &Model,
 ) -> String {
-    let view_type = state.model.workspace.content.active_view_type();
-    state.design.canvas_hover.map_or_else(
+    let view_type = model.workspace.content.active_view_type();
+    canvas_hover.map_or_else(
         || match view_type {
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
-                empty_schematic_cursor_summary(state)
+                empty_schematic_cursor_summary(model)
             }
             crate::state::ViewType::Layout => "x — · y — layout".to_owned(),
             crate::state::ViewType::Symbol => {
                 format!(
                     "x — · y — · grid {}",
-                    state.model.schematic.document().grid_size.max(1)
+                    model.schematic.document().grid_size.max(1)
                 )
             }
             _ => String::new(),
         },
         |(x, y)| match view_type {
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
-                schematic_cursor_summary(state, x, y)
+                schematic_cursor_summary(model, x, y)
             }
             crate::state::ViewType::Layout => {
                 // The open layout's own database unit is the one its
                 // coordinates count in.
-                let content = &state.model.workspace.content;
+                let content = &model.workspace.content;
                 content
                     .physical_layout_document(&content.active_view)
                     .map(|document| document.technology().database_unit())
-                    .or(state.model.pdk_config.layout_database_unit)
+                    .or(model.pdk_config.layout_database_unit)
                     .map_or_else(
                         || format!("x {x:.0} · y {y:.0} DBU unavailable"),
                         |dbu| {
-                            let policy = state.model.preferences.quantity_presentation_policy();
+                            let policy = model.preferences.quantity_presentation_policy();
                             format!(
                                 "x {} · y {}",
                                 policy.format_layout_coordinate(x, dbu),
@@ -65,25 +64,27 @@ pub(in crate::workbench) fn design_engineering_context(
             }
             crate::state::ViewType::Symbol => format!(
                 "x {x:.0} · y {y:.0} · grid {}",
-                state.model.schematic.document().grid_size.max(1)
+                model.schematic.document().grid_size.max(1)
             ),
             _ => String::new(),
         },
     )
 }
 
-pub(crate) fn selection_summary(app: &RSpiceApp) -> String {
-    if !app.state.platform.project_lifecycle.is_open() {
+pub(crate) fn selection_summary(
+    model: &Model,
+    wb: &WorkbenchSession,
+    platform: &PlatformState,
+) -> String {
+    if !platform.project_lifecycle.is_open() {
         return "No engineering object selected".to_owned();
     }
-    if app.state.workbench.workspace == Workspace::Results {
-        return app
-            .state
-            .model
+    if wb.workspace == Workspace::Results {
+        return model
             .simulation
             .view
             .active_run_idx
-            .and_then(|index| app.state.model.simulation.retained.runs.get(index))
+            .and_then(|index| model.simulation.retained.runs.get(index))
             .map_or_else(
                 || "No result dataset selected".to_owned(),
                 |run| {
@@ -100,13 +101,12 @@ pub(crate) fn selection_summary(app: &RSpiceApp) -> String {
                 },
             );
     }
-    if app.state.workbench.workspace != Workspace::Design {
-        return app.state.workbench.workspace.label().to_owned();
+    if wb.workspace != Workspace::Design {
+        return wb.workspace.label().to_owned();
     }
-    let selection = &app.state.model.schematic.session.editor.selection;
+    let selection = &model.schematic.session.editor.selection;
     if let Some(id) = selection.single_component() {
-        app.state
-            .model
+        model
             .schematic
             .document()
             .components
@@ -123,12 +123,16 @@ pub(crate) fn selection_summary(app: &RSpiceApp) -> String {
 
 /// The canvas zoom behind the percentage chip. The Results workspace never
 /// reaches here — its chip reports plot magnification instead.
-pub(in crate::workbench) fn zoom_factor(app: &RSpiceApp) -> f64 {
-    if app.state.workbench.workspace == Workspace::Design
-        && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+pub(in crate::workbench) fn zoom_factor(
+    symbol: &SymbolUiState,
+    model: &Model,
+    wb: &WorkbenchSession,
+) -> f64 {
+    if wb.workspace == Workspace::Design
+        && model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {
-        f64::from(app.state.design.symbol.editor.zoom)
+        f64::from(symbol.editor.zoom)
     } else {
-        app.state.model.schematic.session.editor.zoom
+        model.schematic.session.editor.zoom
     }
 }

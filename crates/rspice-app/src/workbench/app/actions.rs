@@ -55,7 +55,7 @@ impl RSpiceApp {
             engineering_canvas_has_focus(ctx, self.state.workbench.workspace, active_view);
         if crate::schematic::view::handle_pre_render_placement_transform(
             ctx,
-            &mut self.state,
+            &mut crate::schematic::view::canvas_parts(&mut self.state),
             canvas_focus,
         ) {
             self.state.shortcut_resolver.reset();

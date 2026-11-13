@@ -617,7 +617,7 @@ impl Host for RSpiceApp {
         let app = self;
         match workspace {
             Workspace::Project => "Project overview".to_owned(),
-            Workspace::Design => design_title_cell(&app.state),
+            Workspace::Design => design_title_cell(&app.state.model),
             Workspace::Simulate => "Simulation plan".to_owned(),
             Workspace::Stimulus => "Stimulus Library".to_owned(),
             Workspace::Results => "Results".to_owned(),
@@ -1014,7 +1014,7 @@ impl DocumentHost for AppState {
         let state = self;
         match workspace {
             Workspace::Project => project_documents(),
-            Workspace::Design => design_documents(state),
+            Workspace::Design => design_documents(&state.model),
             Workspace::Simulate => simulation_plan_documents(),
             // The library is one project-owned record, and the shell has no
             // document identity for it yet — the instrument that edits a
@@ -1058,7 +1058,14 @@ impl DocumentHost for AppState {
 
         let state = self;
         match document {
-            WorkspaceDocumentId::CellView(reference) => activate_cell_view(state, reference),
+            WorkspaceDocumentId::CellView(reference) => activate_cell_view(
+                &mut state.design.navigation_parts(
+                    &mut state.model,
+                    &mut state.workbench,
+                    &state.runs,
+                ),
+                reference,
+            ),
             WorkspaceDocumentId::VisualizationDocument(document_id) => {
                 activate_visualization_document(&mut state.results_parts(), document_id)
             }

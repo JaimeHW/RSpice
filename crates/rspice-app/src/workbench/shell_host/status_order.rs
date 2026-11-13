@@ -200,7 +200,7 @@ fn no_project_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusT
 /// Only a drawn view has coordinates to read out; a source or document view
 /// leaves the segment empty rather than filling it.
 fn design_context_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    let context = design_engineering_context(&app.state);
+    let context = design_engineering_context(app.state.design.canvas_hover, &app.state.model);
     (!context.is_empty()).then(|| StatusText::label(context))
 }
 
@@ -215,7 +215,11 @@ fn results_context_cell<'a>(
 }
 
 fn selection_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    Some(StatusText::label(selection_summary(app)))
+    Some(StatusText::label(selection_summary(
+        &app.state.model,
+        &app.state.workbench,
+        &app.state.platform,
+    )))
 }
 
 /// The page a multi-sheet drawing is open at reads beside where the cursor
@@ -252,8 +256,13 @@ fn plot_zoom_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<S
 }
 
 fn canvas_zoom_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
+    let zoom = zoom_factor(
+        &app.state.design.symbol,
+        &app.state.model,
+        &app.state.workbench,
+    );
     Some(StatusText {
-        text: Cow::Owned(format!("{}%", (zoom_factor(app) * 100.0).round())),
+        text: Cow::Owned(format!("{}%", (zoom * 100.0).round())),
         mark: StatusMark::None,
         control: if Command::ZoomOneToOne.is_enabled(app) {
             StatusControl::Button

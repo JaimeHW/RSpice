@@ -376,7 +376,7 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
         |ctx| {
             handled = crate::schematic::view::handle_pre_render_placement_transform(
                 ctx,
-                &mut app.state,
+                &mut crate::schematic::view::canvas_parts(&mut app.state),
                 true,
             );
         },

@@ -301,7 +301,7 @@ fn adjacent_result_segments_never_print_the_same_sentence() {
     app.state.open_project_session();
 
     let coordinates = results_view_summary(&app.state.model.simulation, None);
-    let selection = selection_summary(&app);
+    let selection = selection_summary(&app.state.model, &app.state.workbench, &app.state.platform);
     assert_ne!(
         coordinates, selection,
         "two segments cannot report the same fact in the same words"
@@ -543,11 +543,11 @@ fn schematic_coordinates_use_the_permanent_sheet_origin_and_status_context() {
     let mut state = crate::workbench::app_state::AppState::default();
     state.model.schematic.document_mut_for_test().grid_size = 10;
     assert_eq!(
-        schematic_cursor_summary(&state, -14.0, -4.0),
+        schematic_cursor_summary(&state.model, -14.0, -4.0),
         "x 0 · y 0 mm"
     );
     assert_eq!(
-        schematic_cursor_summary(&state, -15.0, -4.0),
+        schematic_cursor_summary(&state.model, -15.0, -4.0),
         "x -2.5 · y 0 mm · off sheet"
     );
 }

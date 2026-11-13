@@ -364,6 +364,24 @@ impl DesignState {
         }
     }
 
+    /// The canvas gesture in flight, set aside while the shell projects
+    /// another window's document for rendering: that is not navigation, so
+    /// the gesture stays owned by its own window and document, and comes
+    /// back through [`Self::resume_gesture`].
+    pub(crate) fn set_gesture_aside(
+        &mut self,
+    ) -> crate::workbench::app_state::interaction_state::DragState {
+        std::mem::take(&mut self.interaction.drag)
+    }
+
+    /// Take back the gesture [`Self::set_gesture_aside`] set aside.
+    pub(crate) fn resume_gesture(
+        &mut self,
+        drag: crate::workbench::app_state::interaction_state::DragState,
+    ) {
+        self.interaction.drag = drag;
+    }
+
     /// Move the snap onto the grid the open schematic's editor snaps to, once
     /// the schematic's grid changed.
     pub(crate) fn follow_schematic_grid(&mut self, model: &crate::workbench::app_state::Model) {

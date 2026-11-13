@@ -11,7 +11,6 @@ use super::parts::{CanvasFacts, CanvasParts};
 use crate::state::{
     ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point, functional_part,
 };
-use crate::workbench::app_state::AppState;
 
 use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
 
@@ -251,7 +250,7 @@ const fn selection_transform(transform: PlacementTransform) -> SelectionTransfor
 /// ghost with a resistor before the canvas gets a chance to rotate it.
 pub(crate) fn handle_pre_render_placement_transform(
     ctx: &egui::Context,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     canvas_has_focus: bool,
 ) -> bool {
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
@@ -263,7 +262,7 @@ pub(crate) fn handle_pre_render_placement_transform(
         let Some(transform) = ctx.input_mut(consume_placement_transform) else {
             return false;
         };
-        turn_what_floats(&mut super::canvas_parts(state), transform);
+        turn_what_floats(state, transform);
         ctx.request_repaint();
         return true;
     }
@@ -328,6 +327,7 @@ pub(super) fn handle_placement_transform_keys(
 mod tests {
     use super::*;
     use crate::state::{Rotation, SchematicState, Tool};
+    use crate::workbench::app_state::AppState;
     use egui::{Context, Event, Id, RawInput, Rect, Sense, pos2, vec2};
 
     fn placement_key_input(key: Key, modifiers: Modifiers) -> RawInput {
@@ -551,7 +551,11 @@ mod tests {
 
         let mut handled = false;
         let _ = ctx.run_ui(placement_key_input(Key::R, Modifiers::NONE), |ctx| {
-            handled = handle_pre_render_placement_transform(ctx, &mut state, true);
+            handled = handle_pre_render_placement_transform(
+                ctx,
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                true,
+            );
         });
 
         assert!(handled);

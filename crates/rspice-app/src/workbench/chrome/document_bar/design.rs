@@ -2,16 +2,16 @@
 //! view type's mark.
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::AppState;
+use crate::workbench::app::actions::workspace::NavigationParts;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per cell view open in Design.
-pub(in crate::workbench) fn design_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    state
-        .model
+pub(in crate::workbench) fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
+    model
         .workspace
         .content
         .open_views
@@ -31,10 +31,10 @@ pub(in crate::workbench) fn design_documents(state: &AppState) -> Vec<WorkspaceD
 
 /// Show a cell view that is open in Design.
 pub(in crate::workbench) fn activate_cell_view(
-    state: &mut AppState,
+    navigation: &mut NavigationParts<'_>,
     reference: &CellViewRef,
 ) -> bool {
-    if state
+    if navigation
         .model
         .workspace
         .content
@@ -42,8 +42,8 @@ pub(in crate::workbench) fn activate_cell_view(
         .iter()
         .any(|open| open.reference == *reference)
     {
-        state.open_workspace_view(reference.clone());
-        state.model.workspace.content.active_view == *reference
+        navigation.open_workspace_view(reference.clone());
+        navigation.model.workspace.content.active_view == *reference
     } else {
         false
     }
