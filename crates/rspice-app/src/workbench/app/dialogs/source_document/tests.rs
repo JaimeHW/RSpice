@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::state::{ProjectDescriptor, ProjectSourceOwner};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use rspice_simulation::netlist_preparation::IncludeSearchChain;
 use std::path::{Path, PathBuf};
@@ -176,7 +177,8 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
     assert_eq!(facts.logical_path, original);
     assert!(facts.is_root, "the bundle root is the default document");
 
-    app.apply_lifecycle_action(
+    apply_lifecycle_action(
+        &mut app.code_workspace_parts(),
         LifecycleAction::Begin(CodeSourceFileAction::Rename),
         facts.language,
         &facts.logical_path,
@@ -190,7 +192,12 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         .expect("Rename opens a transaction");
     draft.proposed_path = "workflows/renamed_entry.py".to_owned();
 
-    app.apply_lifecycle_action(LifecycleAction::Commit, facts.language, &facts.logical_path);
+    apply_lifecycle_action(
+        &mut app.code_workspace_parts(),
+        LifecycleAction::Commit,
+        facts.language,
+        &facts.logical_path,
+    );
     assert!(
         app.state.code.code_workspace.source_file_dialog.is_none(),
         "a committed transaction closes"
@@ -241,7 +248,8 @@ fn reassigning_a_role_lifts_the_environment_lock_refusal() {
         "the lock refuses graph mutation"
     );
 
-    app.apply_lifecycle_action(
+    apply_lifecycle_action(
+        &mut app.code_workspace_parts(),
         LifecycleAction::AssignRole(None),
         before.language,
         &before.logical_path,

@@ -31,18 +31,16 @@ use std::collections::HashSet;
 use egui::Context;
 use rspice_design::symbol::generated::{PortEntryError, parse_port_entry};
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::VerilogAPlacementHandoff;
 use crate::state::workspace::{
     VERILOGA_LIBRARY_NAME, VERILOGA_VIEW, verilog_module_name, verilog_port_declaration,
 };
 use crate::state::{Cell, CellViewRef, PortDirection, PortSpec, ViewType};
+use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::model::seed_veriloga_view;
 use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::documents::code_workspace::writable_libraries;
+use crate::workbench::documents::code_workspace::{VerilogAWorkbenchState, writable_libraries};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Draft for New Verilog-A device….
@@ -109,6 +107,8 @@ enum Draft {
     Ready { cell: String, ports: Vec<PortSpec> },
 }
 
+/// The tests' form of [`draft_in`], over the application state.
+#[cfg(test)]
 fn draft(state: &AppState) -> Draft {
     draft_in(
         &state.code.new_veriloga_device,
@@ -117,7 +117,8 @@ fn draft(state: &AppState) -> Draft {
     )
 }
 
-/// [`draft`], over the form, the model and the reader's messages alone.
+/// The form's draft, measured against the model's catalog and stated in
+/// the reader's messages.
 fn draft_in(form: &NewVerilogADeviceFormState, model: &Model, messages: &MessageCatalog) -> Draft {
     if !writable_libraries(&model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
@@ -342,78 +343,72 @@ pub(in crate::workbench) fn render_new_veriloga_device_form(
     }
 }
 
-impl RSpiceApp {
-    /// Create the drafted cell in one library transaction and open its
-    /// module in Design.
-    pub(in crate::workbench) fn commit_new_veriloga_device(
-        &mut self,
-    ) -> Result<CellViewRef, String> {
-        let (cell, ports) = match draft(&self.state) {
-            Draft::Ready { cell, ports } => (cell, ports),
-            Draft::Refused(refusal) => return Err(refusal),
-            Draft::Empty => {
-                return Err(self
-                    .state
-                    .workbench
-                    .messages()
-                    .text(MessageId::VerilogADeviceCellInvalid));
-            }
-        };
-        let library = self.state.code.new_veriloga_device.library.clone();
-        let reference = CellViewRef::new(&library, &cell, VERILOGA_VIEW);
+/// What New Verilog-A device… made: the module's cell view, which opens in
+/// Design, the receipt of its starter compile, and the line the log records.
+pub(in crate::workbench) struct CreatedVerilogADevice {
+    pub(in crate::workbench) reference: CellViewRef,
+    pub(in crate::workbench) receipt: VerilogACompileReceipt,
+    pub(in crate::workbench) record: String,
+}
 
-        let mut libraries = self.state.model.library_manager.clone();
-        libraries
-            .edit_library(&library)
-            .ok_or_else(|| format!("Library '{library}' not found"))?
-            .add_cell(Cell::new(&cell));
-        let mut sources = self.state.model.workspace.content.project_sources.clone();
-        let receipt = seed_veriloga_view(
-            &self.state.model,
-            &mut libraries,
-            &mut sources,
-            &reference,
-            &ports,
-        )?;
-        let prepared = self.state.model.preflight_project_library_mutation(
-            crate::state::ProjectLibraryMutation::CreateCell {
-                library: library.clone(),
-                cell: cell.clone(),
-            },
-        )?;
-
-        self.state.model.workspace.content.project_sources = sources;
-        self.state.model.workspace.content.project_sources_dirty = true;
-        self.state.model.library_manager = libraries;
-        self.state.model.publish_project_library_mutation(prepared);
-        let form = std::mem::take(&mut self.state.code.new_veriloga_device);
-        // The starter compile above is not the reader's: the device is offered
-        // for placement after the first compile they start leaves it a port.
-        let handoffs = &mut self.state.code.code_workspace.veriloga.placement_handoffs;
-        handoffs.retain(|handoff| handoff.view != reference);
-        handoffs.push(VerilogAPlacementHandoff {
-            view: reference.clone(),
-            schematic: form.origin,
-        });
-        if library == VERILOGA_LIBRARY_NAME {
-            persist_global_veriloga_library(&mut self.state.model);
+/// Create the drafted cell in one library transaction, and remember the
+/// schematic the form came from for the placement offer. The shell opens the
+/// module in Design (commands/veriloga_commits.rs).
+pub(in crate::workbench) fn publish_new_veriloga_device(
+    model: &mut Model,
+    form: &mut NewVerilogADeviceFormState,
+    veriloga: &mut VerilogAWorkbenchState,
+    messages: &MessageCatalog,
+) -> Result<CreatedVerilogADevice, String> {
+    let (cell, ports) = match draft_in(form, model, messages) {
+        Draft::Ready { cell, ports } => (cell, ports),
+        Draft::Refused(refusal) => return Err(refusal),
+        Draft::Empty => {
+            return Err(messages.text(MessageId::VerilogADeviceCellInvalid));
         }
-        // The module is a view of the cell, so it opens as a Design document.
-        self.state.open_workspace_view(reference.clone());
-        self.state
-            .workbench
-            .activate(crate::workbench::state::Workspace::Design);
-        self.state.code.code_workspace.veriloga.receipt = Some(receipt);
-        self.state.record(
-            LogSeverity::Info,
-            LogSource::Studio,
-            format!(
-                "Created {} with a starter module and the symbol generated from its ports. Write the module and compile it.",
-                reference.display_path()
-            ),
-        );
-        Ok(reference)
+    };
+    let library = form.library.clone();
+    let reference = CellViewRef::new(&library, &cell, VERILOGA_VIEW);
+
+    let mut libraries = model.library_manager.clone();
+    libraries
+        .edit_library(&library)
+        .ok_or_else(|| format!("Library '{library}' not found"))?
+        .add_cell(Cell::new(&cell));
+    let mut sources = model.workspace.content.project_sources.clone();
+    let receipt = seed_veriloga_view(model, &mut libraries, &mut sources, &reference, &ports)?;
+    let prepared = model.preflight_project_library_mutation(
+        crate::state::ProjectLibraryMutation::CreateCell {
+            library: library.clone(),
+            cell: cell.clone(),
+        },
+    )?;
+
+    model.workspace.content.project_sources = sources;
+    model.workspace.content.project_sources_dirty = true;
+    model.library_manager = libraries;
+    model.publish_project_library_mutation(prepared);
+    let form = std::mem::take(form);
+    // The starter compile above is not the reader's: the device is offered
+    // for placement after the first compile they start leaves it a port.
+    let handoffs = &mut veriloga.placement_handoffs;
+    handoffs.retain(|handoff| handoff.view != reference);
+    handoffs.push(VerilogAPlacementHandoff {
+        view: reference.clone(),
+        schematic: form.origin,
+    });
+    if library == VERILOGA_LIBRARY_NAME {
+        persist_global_veriloga_library(model);
     }
+    let record = format!(
+        "Created {} with a starter module and the symbol generated from its ports. Write the module and compile it.",
+        reference.display_path()
+    );
+    Ok(CreatedVerilogADevice {
+        reference,
+        receipt,
+        record,
+    })
 }
 
 #[cfg(test)]

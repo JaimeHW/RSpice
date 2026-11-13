@@ -9,6 +9,6 @@
     "&RSpiceApp params outside shell": 23,
     "&mut RSpiceApp params outside shell": 69,
     "impl AppState methods outside session": 41,
-    "impl RSpiceApp methods outside shell": 9
+    "impl RSpiceApp methods outside shell": 6
   }
 }

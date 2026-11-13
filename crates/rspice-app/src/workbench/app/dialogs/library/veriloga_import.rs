@@ -13,7 +13,6 @@
 
 use egui::Context;
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::ImportedInclude;
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::workspace::{DeclaredModule, declared_cell_interface, veriloga_cell_for_module};
@@ -22,7 +21,6 @@ use crate::state::{
     ProjectSourceLanguage, ProjectSourceOwner,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{
@@ -369,76 +367,72 @@ pub(in crate::workbench) fn render_veriloga_replace_dialog(
     }
 }
 
-impl RSpiceApp {
-    /// Create the form's cells in one library transaction and open the first
-    /// in Design. Nothing is published unless every cell, view and bundle is.
-    pub(in crate::workbench) fn commit_veriloga_import(&mut self) -> Result<CellViewRef, String> {
-        let form = self
-            .state
-            .code
-            .code_workspace
-            .veriloga
-            .import_form
-            .clone()
-            .ok_or_else(|| "No Verilog-A import is open.".to_owned())?;
-        if form.project_id != self.state.model.workspace.content.project.id() {
-            return Err("The active project changed while the import was open.".to_owned());
-        }
-        if let Some(missing) = form.closure.missing().next() {
-            return Err(format!("{} is missing.", missing.path));
-        }
-        if let Err(reason) = &form.closure.modules {
-            return Err(format!("{} cannot be read: {reason}", form.file_name));
-        }
-        if !writable_libraries(&self.state.model.library_manager).contains(&form.library) {
-            return Err(format!("Library '{}' cannot be written.", form.library));
-        }
-        let plan = planned_cells(&self.state.model, &form);
-        let Some((_, first, first_is_new)) = plan.first().cloned() else {
-            return Err(format!("{} declares no module.", form.file_name));
-        };
+/// What an import made: the first module's cell view, which opens in
+/// Design, and the line the log records.
+pub(in crate::workbench) struct ImportedVerilogACells {
+    pub(in crate::workbench) first: CellViewRef,
+    pub(in crate::workbench) record: String,
+}
 
-        let root = form
-            .files
-            .get(&form.file_name)
-            .ok_or_else(|| format!("{} is not in the import.", form.file_name))?;
-        // One source for every module: the first cell's view owns it, and
-        // each other cell's view shares it, so an edit made through any of
-        // them is the source all of them compile.
-        let bundle = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::cell_view(first.clone()),
-            ProjectSourceLanguage::VerilogA,
-            form.file_name.as_str(),
-            root.as_str(),
-            imported_files(&form)?,
-            imported_edges(&form)?,
-        )
-        .map_err(|error| error.to_string())?;
-        self.state
-            .model
-            .publish_veriloga_cells(&plan, first_is_new, bundle, None)?;
-        close_veriloga_import_form(&mut self.state.code.code_workspace.veriloga);
-        if form.library == VERILOGA_LIBRARY_NAME {
-            persist_global_veriloga_library(&mut self.state.model);
-        }
-        // A cell view is a Design document; the first module opens there.
-        self.state.open_workspace_view(first.clone());
-        self.state
-            .workbench
-            .activate(crate::workbench::state::Workspace::Design);
-        let created = plan
-            .iter()
-            .map(|(_, reference, _)| reference.display_path())
-            .collect::<Vec<_>>()
-            .join(", ");
-        self.state.record(
-            LogSeverity::Info,
-            LogSource::Studio,
-            format!(
-                "Imported {} as {created}; compile it before use.",
-                form.file_name
-            ),
-        );
-        Ok(first)
+/// Create the form's cells in one library transaction. Nothing is published
+/// unless every cell, view and bundle is. The shell opens the first in Design
+/// (commands/veriloga_commits.rs).
+pub(in crate::workbench) fn publish_veriloga_import(
+    model: &mut Model,
+    veriloga: &mut VerilogAWorkbenchState,
+) -> Result<ImportedVerilogACells, String> {
+    let form = veriloga
+        .import_form
+        .clone()
+        .ok_or_else(|| "No Verilog-A import is open.".to_owned())?;
+    if form.project_id != model.workspace.content.project.id() {
+        return Err("The active project changed while the import was open.".to_owned());
     }
+    if let Some(missing) = form.closure.missing().next() {
+        return Err(format!("{} is missing.", missing.path));
+    }
+    if let Err(reason) = &form.closure.modules {
+        return Err(format!("{} cannot be read: {reason}", form.file_name));
+    }
+    if !writable_libraries(&model.library_manager).contains(&form.library) {
+        return Err(format!("Library '{}' cannot be written.", form.library));
+    }
+    let plan = planned_cells(model, &form);
+    let Some((_, first, first_is_new)) = plan.first().cloned() else {
+        return Err(format!("{} declares no module.", form.file_name));
+    };
+
+    let root = form
+        .files
+        .get(&form.file_name)
+        .ok_or_else(|| format!("{} is not in the import.", form.file_name))?;
+    // One source for every module: the first cell's view owns it, and
+    // each other cell's view shares it, so an edit made through any of
+    // them is the source all of them compile.
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::cell_view(first.clone()),
+        ProjectSourceLanguage::VerilogA,
+        form.file_name.as_str(),
+        root.as_str(),
+        imported_files(&form)?,
+        imported_edges(&form)?,
+    )
+    .map_err(|error| error.to_string())?;
+    model.publish_veriloga_cells(&plan, first_is_new, bundle, None)?;
+    close_veriloga_import_form(veriloga);
+    if form.library == VERILOGA_LIBRARY_NAME {
+        persist_global_veriloga_library(model);
+    }
+    let created = plan
+        .iter()
+        .map(|(_, reference, _)| reference.display_path())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(ImportedVerilogACells {
+        first,
+        record: format!(
+            "Imported {} as {created}; compile it before use.",
+            form.file_name
+        ),
+    })
 }

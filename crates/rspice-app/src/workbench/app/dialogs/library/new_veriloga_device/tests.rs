@@ -4,6 +4,7 @@ use super::*;
 use crate::state::{
     Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
 };
+use crate::workbench::app::RSpiceApp;
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
 

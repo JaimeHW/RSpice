@@ -24,7 +24,6 @@ use crate::ui::widgets::{
     Button, CommandForm, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
     DialogTransactionTone, Problem, band_header, paint_problem_mark,
 };
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::code::commands::{
     LifecycleAction, NetlistLifecycleAction, SourceDocumentRequest,
@@ -36,7 +35,7 @@ use crate::workbench::design_system::{
     section_block_gap, subsection_header,
 };
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, CodeWorkspaceRuntimeState,
+    self, CodeSourceFileAction, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
 };
 use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -540,110 +539,88 @@ pub(in crate::workbench) fn render_source_document_dialog(
     None
 }
 
-impl RSpiceApp {
-    /// Carry out a lifecycle choice on the Verilog-A or Automation document at
-    /// `logical_path` that the dialog handed the shell.
-    pub(in crate::workbench) fn apply_lifecycle_action(
-        &mut self,
-        action: LifecycleAction,
-        language: ProjectSourceLanguage,
-        logical_path: &str,
-    ) {
-        // Where a failure is stated is part of the action, not a guess made
-        // afterwards: a rejected rename belongs beside the path field, and a
-        // rejected restore beside the revision list. Deciding by whichever
-        // draft happens to be open would put one inside the other's section.
-        let (outcome, report) = match action {
-            // Nothing to carry out, or a choice the form applies over the Code
-            // workspace's own state (Cancel, SelectRevision, CloseHistory):
-            // the form never hands these over.
-            LifecycleAction::None
-            | LifecycleAction::Cancel
-            | LifecycleAction::SelectRevision(_)
-            | LifecycleAction::CloseHistory => return,
-            LifecycleAction::Begin(file_action) => (
-                code_workspace::open_source_file_dialog(
-                    &mut self.code_workspace_parts(),
-                    language,
-                    file_action,
-                    logical_path,
-                    logical_path,
-                ),
-                Report::Console,
+/// Carry out a lifecycle choice on the Verilog-A or Automation document at
+/// `logical_path` that the dialog handed the shell.
+pub(in crate::workbench) fn apply_lifecycle_action(
+    parts: &mut CodeWorkspaceParts<'_>,
+    action: LifecycleAction,
+    language: ProjectSourceLanguage,
+    logical_path: &str,
+) {
+    // Where a failure is stated is part of the action, not a guess made
+    // afterwards: a rejected rename belongs beside the path field, and a
+    // rejected restore beside the revision list. Deciding by whichever
+    // draft happens to be open would put one inside the other's section.
+    let (outcome, report) = match action {
+        // Nothing to carry out, or a choice the form applies over the Code
+        // workspace's own state (Cancel, SelectRevision, CloseHistory):
+        // the form never hands these over.
+        LifecycleAction::None
+        | LifecycleAction::Cancel
+        | LifecycleAction::SelectRevision(_)
+        | LifecycleAction::CloseHistory => return,
+        LifecycleAction::Begin(file_action) => (
+            code_workspace::open_source_file_dialog(
+                parts,
+                language,
+                file_action,
+                logical_path,
+                logical_path,
             ),
-            LifecycleAction::Commit => (
-                code_workspace::commit_source_file_dialog(&mut self.code_workspace_parts())
-                    .map(|_| ()),
-                Report::FileTransaction,
-            ),
-            LifecycleAction::OpenHistory => (
-                code_workspace::open_source_history(
-                    &mut self.code_workspace_parts(),
-                    language,
-                    logical_path,
-                ),
-                Report::Console,
-            ),
-            LifecycleAction::Restore => (
-                code_workspace::commit_source_history_restore(&mut self.code_workspace_parts())
-                    .map(|_| ()),
-                Report::History,
-            ),
-            LifecycleAction::Import => (
-                code_workspace::request_automation_source_import(
-                    &mut self.code_workspace_parts(),
-                    logical_path,
-                ),
-                Report::Console,
-            ),
-            LifecycleAction::ReplaceFromFile => {
-                let outcome = code_workspace::request_veriloga_source_replacement(
-                    &mut self.code_workspace_parts(),
-                    logical_path,
-                );
-                if outcome.is_ok() {
-                    // The picker and then the replacement's own confirmation
-                    // take over; this dialog would only sit behind them.
-                    self.state.code.code_workspace.source_document_dialog = false;
-                }
-                (outcome, Report::Console)
+            Report::Console,
+        ),
+        LifecycleAction::Commit => (
+            code_workspace::commit_source_file_dialog(parts).map(|_| ()),
+            Report::FileTransaction,
+        ),
+        LifecycleAction::OpenHistory => (
+            code_workspace::open_source_history(parts, language, logical_path),
+            Report::Console,
+        ),
+        LifecycleAction::Restore => (
+            code_workspace::commit_source_history_restore(parts).map(|_| ()),
+            Report::History,
+        ),
+        LifecycleAction::Import => (
+            code_workspace::request_automation_source_import(parts, logical_path),
+            Report::Console,
+        ),
+        LifecycleAction::ReplaceFromFile => {
+            let outcome = code_workspace::request_veriloga_source_replacement(parts, logical_path);
+            if outcome.is_ok() {
+                // The picker and then the replacement's own confirmation
+                // take over; this dialog would only sit behind them.
+                parts.code.source_document_dialog = false;
             }
-            LifecycleAction::AssignRole(role) => (
-                code_workspace::assign_automation_source_role(
-                    &mut self.code_workspace_parts(),
-                    logical_path,
-                    role,
-                )
-                .map(|_| ()),
-                Report::Console,
-            ),
-        };
-        let Err(error) = outcome else {
-            return;
-        };
-        let stated = match report {
-            Report::FileTransaction => self
-                .state
-                .code
-                .code_workspace
-                .source_file_dialog
-                .as_mut()
-                .map(|draft| draft.error = Some(error.clone())),
-            Report::History => self
-                .state
-                .code
-                .code_workspace
-                .source_history
-                .as_mut()
-                .map(|history| history.error = Some(error.clone())),
-            Report::Console => None,
-        };
-        // Nothing owns the failure when the draft it belonged to was cleared
-        // by the same call, so the console states it instead of losing it.
-        if stated.is_none() {
-            self.state
-                .record(LogSeverity::Error, LogSource::Studio, error);
+            (outcome, Report::Console)
         }
+        LifecycleAction::AssignRole(role) => (
+            code_workspace::assign_automation_source_role(parts, logical_path, role).map(|_| ()),
+            Report::Console,
+        ),
+    };
+    let Err(error) = outcome else {
+        return;
+    };
+    let stated = match report {
+        Report::FileTransaction => parts
+            .code
+            .source_file_dialog
+            .as_mut()
+            .map(|draft| draft.error = Some(error.clone())),
+        Report::History => parts
+            .code
+            .source_history
+            .as_mut()
+            .map(|history| history.error = Some(error.clone())),
+        Report::Console => None,
+    };
+    // Nothing owns the failure when the draft it belonged to was cleared
+    // by the same call, so the console states it instead of losing it.
+    if stated.is_none() {
+        parts
+            .model
+            .record(LogSeverity::Error, LogSource::Studio, error);
     }
 }
 

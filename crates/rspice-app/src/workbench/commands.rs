@@ -19,6 +19,7 @@ mod enablement;
 pub(crate) mod netlist_validation;
 mod registry;
 pub(crate) use rspice_app_results::workbench::commands::result_navigation;
+mod veriloga_commits;
 pub(crate) mod vocabulary;
 
 /// A test seam on the dispatch boundary. While a recording is open,

@@ -725,7 +725,12 @@ fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRe
             logical_path,
             close,
         } => {
-            app.apply_lifecycle_action(action, language, &logical_path);
+            source_document::apply_lifecycle_action(
+                &mut app.code_workspace_parts(),
+                action,
+                language,
+                &logical_path,
+            );
             if close {
                 source_document::close_document_lifecycle(&mut app.state.code.code_workspace);
             }
