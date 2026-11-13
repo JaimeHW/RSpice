@@ -3,12 +3,6 @@
 use super::*;
 
 impl TestRunner {
-    /// Run all tests in a subdirectory
-    pub fn run_suite(&self, subdir: &str) -> Vec<TestResult> {
-        let tests = self.discover_tests(subdir);
-        tests.iter().map(|p| self.run_test(p)).collect()
-    }
-
     /// Print a summary of test results
     pub fn print_summary(results: &[TestResult]) {
         let total = results.len();

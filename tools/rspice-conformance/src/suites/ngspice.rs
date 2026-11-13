@@ -9,11 +9,10 @@
 //! ```text
 //! TestRunner
 //!     ├── discover_tests()     - Find .cir files
-//!     ├── run_test()           - Execute single test
-//!     │   ├── parse_analyses() - Detect .op, .dc, .tran, .ac
-//!     │   ├── execute_analysis() - Run appropriate simulation
-//!     │   └── compare_results() - Validate against .out
-//!     └── run_suite()          - Run all tests in directory
+//!     └── run_test()           - Execute single test
+//!         ├── parse_analyses() - Detect .op, .dc, .tran, .ac
+//!         ├── execute_analysis() - Run appropriate simulation
+//!         └── compare_results() - Validate against .out
 //! ```
 
 use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
