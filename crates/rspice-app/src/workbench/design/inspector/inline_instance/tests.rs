@@ -1,6 +1,7 @@
 //! Rendered inspector edits preserve drafts, reference ownership, and history.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 
 struct Editor {
@@ -58,7 +59,7 @@ impl Editor {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     edit_row_with_hint(
                         ui,
-                        &mut self.app,
+                        &mut self.app.design_cx(),
                         &component,
                         InlineEditField::Instance,
                         "Instance",
@@ -67,7 +68,7 @@ impl Editor {
                     );
                     edit_row_with_hint(
                         ui,
-                        &mut self.app,
+                        &mut self.app.design_cx(),
                         &component,
                         InlineEditField::Value,
                         "Value",
@@ -76,7 +77,7 @@ impl Editor {
                     );
                     edit_row_with_hint(
                         ui,
-                        &mut self.app,
+                        &mut self.app.design_cx(),
                         &component,
                         InlineEditField::Parameter("note".to_owned()),
                         "Note",
@@ -85,7 +86,7 @@ impl Editor {
                     );
                     edit_row_with_hint(
                         ui,
-                        &mut self.app,
+                        &mut self.app.design_cx(),
                         &component,
                         InlineEditField::Parameters,
                         "Parameters",

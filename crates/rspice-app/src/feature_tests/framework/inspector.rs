@@ -68,7 +68,8 @@ fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
     let refusal = validate_component_model_catalog_binding(&app.state.model, pmos, "kit", "nch")
         .expect_err("an NMOS family does not suit a PMOS instance");
     assert!(!refusal.contains("no longer present"), "{refusal}");
-    bind_component_model_from_catalog(&mut app, nmos, "kit", "nch").expect("bind the family");
+    bind_component_model_from_catalog(&mut app.design_cx(), nmos, "kit", "nch")
+        .expect("bind the family");
     let params = &app
         .state
         .model
@@ -86,7 +87,7 @@ fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
 fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomically() {
     let original = r#"off note="a  b" expr={a + f(b,c)}"#;
     let (mut app, id) = catalog_test_diode(original);
-    bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
+    bind_component_model_from_catalog(&mut app.design_cx(), id, "models", "junction").unwrap();
     assert_eq!(
         app.state.model.schematic.document().components[0].params,
         format!("{original} model=junction model_library=models")
@@ -101,7 +102,7 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
     let (mut app, id) = catalog_test_diode("note='unterminated");
     let before = app.state.model.schematic.document().components[0].clone();
     assert!(
-        bind_component_model_from_catalog(&mut app, id, "models", "junction")
+        bind_component_model_from_catalog(&mut app.design_cx(), id, "models", "junction")
             .unwrap_err()
             .contains("unterminated")
     );
@@ -128,13 +129,15 @@ fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication
         error: Some("Invalid name".to_owned()),
         widget: None,
     });
-    assert!(bind_component_model_from_catalog(&mut app, id, "models", "junction").is_err());
+    assert!(
+        bind_component_model_from_catalog(&mut app.design_cx(), id, "models", "junction").is_err()
+    );
     assert_eq!(app.state.model.schematic.document().components[0], expected);
     app.state
         .workbench
         .inline_edit
         .set_draft("D42".to_owned(), Ok(candidate));
-    bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
+    bind_component_model_from_catalog(&mut app.design_cx(), id, "models", "junction").unwrap();
     assert_eq!(
         app.state.model.schematic.document().components[0].name,
         "D42"
@@ -183,7 +186,7 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
             .with_name_value("D9001", ""),
         );
 
-    bind_component_model_from_catalog(&mut app, component_id, "beta", "shared_diode")
+    bind_component_model_from_catalog(&mut app.design_cx(), component_id, "beta", "shared_diode")
         .expect("resolved provider binds");
     let params = crate::state::parse_params_string(
         &app.state
@@ -205,8 +208,13 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
         Some("beta")
     );
 
-    let error = bind_component_model_from_catalog(&mut app, component_id, "alpha", "shared_diode")
-        .expect_err("losing provider cannot bind");
+    let error = bind_component_model_from_catalog(
+        &mut app.design_cx(),
+        component_id,
+        "alpha",
+        "shared_diode",
+    )
+    .expect_err("losing provider cannot bind");
     assert!(error.contains("project-global provider 'beta'"));
 }
 
@@ -246,8 +254,9 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
         .params
         .clone();
 
-    let error = bind_component_model_from_catalog(&mut app, component_id, "models", "junction")
-        .expect_err("a diode model cannot bind to a resistor");
+    let error =
+        bind_component_model_from_catalog(&mut app.design_cx(), component_id, "models", "junction")
+            .expect_err("a diode model cannot bind to a resistor");
 
     assert!(error.contains("incompatible with the selected Resistor instance"));
     assert_eq!(

@@ -108,12 +108,14 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     assert_eq!(row("vmax").hint, "computed");
 
     let evidence = super::super::component_model_evidence(&app.state.model, &component);
-    let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let painted =
+        painted_panel(|ui| parameters_section(ui, &mut app.design_cx(), &component, &evidence));
     assert!(
         painted.lines().any(|line| line == "S") && painted.lines().any(|line| line == "V"),
         "each unit is painted beside its field:\n{painted}"
     );
-    let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let nodes =
+        accesskit_nodes(|ui| parameters_section(ui, &mut app.design_cx(), &component, &evidence));
     assert!(
         nodes.iter().any(|(_, node)| {
             node.label() == Some("gain, S")
@@ -157,8 +159,12 @@ fn a_number_typed_for_a_module_stays_as_typed_and_reads_as_the_module_writes_it(
         ("10M", "10Meg", 1e7),
         ("10m", "10m", 1e-2),
     ] {
-        assert!(begin_edit(&mut app, component.id, field.clone()));
-        update_edit(&mut app, typed.to_owned());
+        assert!(begin_edit(
+            &mut app.design_cx(),
+            component.id,
+            field.clone()
+        ));
+        update_edit(&mut app.design_cx(), typed.to_owned());
         assert!(
             app.state.commit_inline_component_edit().expect(typed),
             "{typed} commits"
@@ -192,8 +198,12 @@ fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
     assert_eq!(row.hint, "'{1k, 2}");
 
     let field = InlineEditField::Parameter("pa".to_owned());
-    assert!(begin_edit(&mut app, component.id, field.clone()));
-    update_edit(&mut app, "'{4, 5M}'".to_owned());
+    assert!(begin_edit(
+        &mut app.design_cx(),
+        component.id,
+        field.clone()
+    ));
+    update_edit(&mut app.design_cx(), "'{4, 5M}'".to_owned());
     assert!(
         app.state
             .commit_inline_component_edit()
@@ -202,10 +212,15 @@ fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
     let edited = app.state.model.schematic.document().components[0].clone();
     assert_eq!(field_value(&edited, &field), "[4 5Meg]");
 
-    assert!(begin_edit(&mut app, component.id, field.clone()));
-    update_edit(&mut app, "[1 2 3]".to_owned());
+    assert!(begin_edit(
+        &mut app.design_cx(),
+        component.id,
+        field.clone()
+    ));
+    update_edit(&mut app.design_cx(), "[1 2 3]".to_owned());
     let evidence = super::super::component_model_evidence(&app.state.model, &edited);
-    let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &edited, &evidence));
+    let nodes =
+        accesskit_nodes(|ui| parameters_section(ui, &mut app.design_cx(), &edited, &evidence));
     let error = "pa takes 2 values; this has 3";
     assert!(
         nodes.iter().any(|(_, node)| {
@@ -243,7 +258,7 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
     );
     let evidence = super::super::component_model_evidence(&app.state.model, &component);
     let painted = |app: &mut RSpiceApp, component: &Component| {
-        painted_panel(|ui| parameters_section(ui, app, component, &evidence))
+        painted_panel(|ui| parameters_section(ui, &mut app.design_cx(), component, &evidence))
     };
     assert!(
         !painted(&mut app, &component)
@@ -356,8 +371,12 @@ fn m_on_a_module_instance_is_its_typed_multiplicity() {
     assert!(rows.iter().any(|row| row.key == "m"), "{rows:?}");
 
     let field = InlineEditField::Parameter("m".to_owned());
-    assert!(begin_edit(&mut app, component.id, field.clone()));
-    update_edit(&mut app, "2".to_owned());
+    assert!(begin_edit(
+        &mut app.design_cx(),
+        component.id,
+        field.clone()
+    ));
+    update_edit(&mut app.design_cx(), "2".to_owned());
     app.state
         .commit_inline_component_edit()
         .expect("a multiplicity of 2 commits");
@@ -446,7 +465,8 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
     );
 
     let evidence = super::super::component_model_evidence(&app.state.model, &component);
-    let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let painted =
+        painted_panel(|ui| parameters_section(ui, &mut app.design_cx(), &component, &evidence));
     assert!(
         painted.contains(UNDECLARED_PARAMETER_NOTE)
             && painted.contains(REMOVE_UNDECLARED_PARAMETER),
@@ -531,7 +551,7 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     assert_eq!(evidence.model.as_deref(), Some("amp"));
     assert_eq!(evidence.problem, None, "a current compile says nothing");
 
-    let identity = painted_panel(|ui| identity_section(ui, &mut app, &component));
+    let identity = painted_panel(|ui| identity_section(ui, &mut app.design_cx(), &component));
     assert!(
         identity.lines().any(|line| line == "veriloga"),
         "{identity}"
@@ -542,7 +562,8 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
             && !identity.contains("model source"),
         "{identity}"
     );
-    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let parameters =
+        painted_panel(|ui| parameters_section(ui, &mut app.design_cx(), &component, &evidence));
     let labels = parameters.lines().collect::<Vec<_>>();
     assert!(
         !labels.contains(&"Module"),
@@ -585,7 +606,8 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
         evidence.problem.as_ref().map(|(problem, _)| *problem),
         Some(Problem::Warning)
     );
-    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let parameters =
+        painted_panel(|ui| parameters_section(ui, &mut app.design_cx(), &component, &evidence));
     assert!(parameters.contains("Recompile needed"), "{parameters}");
 }
 

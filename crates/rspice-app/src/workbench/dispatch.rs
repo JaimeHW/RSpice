@@ -30,11 +30,13 @@ use crate::workbench::commands::{
     answer_project_request, answer_surface_request, answer_void_veriloga_evidence,
     command_edits_schematic, file_action, run_project_file_action, select_probed_trace,
 };
+use crate::workbench::design::inspector::CommitSheetSection;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec, ids,
 };
 use crate::workbench::framework::feature::{Execute, held_back};
+use crate::workbench::framework::host::{Host, InspectorScope};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
     CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
@@ -183,7 +185,9 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: first the
-    /// netlist editor's commit, undo and redo, which the editor once made
+    /// sheet section's typed values, which a design inspector pass that
+    /// shows something else commits; then the netlist editor's commit, undo
+    /// and redo, which the editor once made
     /// while the page drew, so everything else the frame raised is answered
     /// over the committed deck; then what the design surface asked of
     /// another feature's workspace (the probed trace; the operating-point
@@ -207,6 +211,13 @@ impl RSpiceApp {
     /// hierarchy checked, and last what the project feature hands over and
     /// the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, CommitSheetSection(ctx)| {
+                app.commit_inspector_section(InspectorScope::Document(Workspace::Design), &ctx);
+            },
+        );
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
@@ -384,7 +395,7 @@ impl RSpiceApp {
              }| {
                 let result =
                     crate::workbench::design::inspector::bind_component_model_from_catalog(
-                        app,
+                        &mut features::cx(app),
                         component_id,
                         &library,
                         &model,

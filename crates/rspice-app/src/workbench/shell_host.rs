@@ -300,7 +300,8 @@ impl Host for RSpiceApp {
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
-                use crate::workbench::design::inspector::{self as design, symbol};
+                use crate::workbench::design::DesignFeature;
+                use crate::workbench::design::inspector as design;
                 use crate::workbench::docks::inspector::stimulus;
 
                 match workspace {
@@ -312,14 +313,6 @@ impl Host for RSpiceApp {
                         features::show_inspector::<ProjectFeature>(app, ui);
                         app.after_contribution();
                     }
-                    // A symbol cellview is edited against its pin contract,
-                    // not against a schematic selection.
-                    Workspace::Design
-                        if app.state.model.workspace.content.active_view_type()
-                            == crate::state::ViewType::Symbol =>
-                    {
-                        symbol::show(ui, &mut app.state);
-                    }
                     // A Verilog-A module is inspected for what it compiles
                     // to, not for a schematic selection it does not have.
                     Workspace::Design
@@ -328,11 +321,24 @@ impl Host for RSpiceApp {
                     {
                         features::show_inspector::<CodeFeature>(app, ui);
                     }
-                    // A hand-off the inspector raised into another
-                    // workspace is answered once it has drawn.
+                    // The design feature draws a schematic's inspector or a
+                    // symbol's. The inline edit the selection moved off is
+                    // settled first and what that raised answered, so the
+                    // answers the inspector reads are for the selection it
+                    // shows. What the inspector raised is answered once it
+                    // has drawn; then, when it inspects nothing, the sheet's
+                    // section draws in its place.
                     Workspace::Design => {
-                        design::show(ui, app);
+                        design::prepare(&mut features::cx(app));
                         app.after_contribution();
+                        features::show_inspector_modal::<DesignFeature>(app, ui, |_| true);
+                        app.after_contribution();
+                        if std::mem::take(&mut app.state.design.inspector_yields_to_sheet) {
+                            app.contribute(
+                                Point::Inspector(InspectorScope::Document(Workspace::Design)),
+                                ui,
+                            );
+                        }
                     }
                     Workspace::Simulate => {
                         features::show_inspector::<SimulateFeature>(app, ui);
@@ -533,7 +539,6 @@ impl Host for RSpiceApp {
     fn commit_inspector_section(&mut self, scope: InspectorScope<Workspace>, ctx: &egui::Context) {
         if scope == InspectorScope::Document(Workspace::Design) {
             features::commit_inspector::<SheetsFeature>(self, ctx);
-            self.after_contribution();
         }
     }
 

@@ -5,12 +5,13 @@ use crate::state::{
     Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
     ViewType,
 };
+use crate::workbench::RSpiceApp;
 use rspice_ui_kit::panels::panel_body;
 use std::collections::HashMap;
 
 struct Editor {
     ctx: egui::Context,
-    state: AppState,
+    app: RSpiceApp,
     controls: HashMap<String, egui::Rect>,
 }
 
@@ -19,7 +20,8 @@ impl Editor {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let mut state = AppState::default();
+        let mut app = RSpiceApp::test_instance();
+        let state = &mut app.state;
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -49,15 +51,15 @@ impl Editor {
         state.design.symbol.editor.select_shape(0);
         Self {
             ctx,
-            state,
+            app,
             controls: HashMap::new(),
         }
     }
 
     fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
-        let source = self.state.symbol_editor_request_source();
+        let source = self.app.state.symbol_editor_request_source();
         rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source(
-            &mut self.state.design.symbol.editor,
+            &mut self.app.state.design.symbol.editor,
             source,
         );
         let mut request = None;
@@ -73,20 +75,21 @@ impl Editor {
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     panel_body(ui, |ui| {
-                        let document = self.state.model.load_active_symbol_document().unwrap();
+                        let document = self.app.state.model.load_active_symbol_document().unwrap();
                         let metadata = self
+                            .app
                             .state
                             .load_active_symbol_editor_metadata(&document)
                             .unwrap();
                         request = Some(inspector::show(
                             ui,
-                            self.state.symbol_editor_request_source(),
+                            self.app.state.symbol_editor_request_source(),
                             document,
                             metadata,
                             &[],
-                            &self.state.design.symbol.editor,
+                            &self.app.state.design.symbol.editor,
                             SymbolEditCapabilities {
-                                edit: !self.state.schematic_edit_read_only(),
+                                edit: !self.app.state.schematic_edit_read_only(),
                             },
                         ));
                     });
@@ -111,7 +114,7 @@ impl Editor {
 
     fn pass(&mut self, events: Vec<egui::Event>) {
         let request = self.frame(events);
-        apply_request(&mut self.state, request);
+        apply_request(&mut self.app.design_cx(), request);
     }
 
     fn click(&mut self, label: &str) {
@@ -152,12 +155,18 @@ fn symbol_field_typing_survives_passive_window_projection() {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut editor = Editor::new();
-    let before = editor.state.model.load_active_symbol_document().unwrap();
-    let symbol = editor.state.model.workspace.content.active_view.clone();
+    let before = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    let symbol = editor.app.state.model.workspace.content.active_view.clone();
     let schematic = CellViewRef::new("work", "amp", "schematic");
-    let primary = editor.state.workbench.window_session.primary();
-    let layout = editor.state.workbench.current_workspace_layout();
+    let primary = editor.app.state.workbench.window_session.primary();
+    let layout = editor.app.state.workbench.current_workspace_layout();
     let secondary = editor
+        .app
         .state
         .workbench
         .window_session
@@ -172,29 +181,47 @@ fn symbol_field_typing_survives_passive_window_projection() {
     editor.click("Center X");
     editor.replace("1");
     editor
+        .app
         .state
         .workbench
         .window_session
         .set_current(secondary)
         .unwrap();
-    editor.state.open_workspace_view(schematic);
+    editor.app.state.open_workspace_view(schematic);
     editor
+        .app
         .state
         .workbench
         .window_session
         .set_current(primary)
         .unwrap();
-    editor.state.open_workspace_view(symbol.clone());
+    editor.app.state.open_workspace_view(symbol.clone());
     editor.pass(vec![egui::Event::Text("2".into())]);
-    let after = editor.state.model.load_active_symbol_document().unwrap();
+    let after = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 12));
     assert_eq!(
-        editor.state.design.symbol.history.undo_depth(&symbol.key()),
+        editor
+            .app
+            .state
+            .design
+            .symbol
+            .history
+            .undo_depth(&symbol.key()),
         1
     );
-    assert!(editor.state.undo_active_symbol_document().unwrap());
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         before
     );
 }
@@ -202,46 +229,74 @@ fn symbol_field_typing_survives_passive_window_projection() {
 #[test]
 fn symbol_field_focus_and_unfinished_text_do_not_leak_to_another_document() {
     let mut editor = Editor::new();
-    let symbol = editor.state.model.workspace.content.active_view.clone();
+    let symbol = editor.app.state.model.workspace.content.active_view.clone();
     let other = CellViewRef::new("work", "other", "symbol");
-    let before = editor.state.model.load_active_symbol_document().unwrap();
+    let before = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     let mut cell = Cell::new("other");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     editor
+        .app
         .state
         .model
         .library_manager
         .get_library_mut("work")
         .unwrap()
         .add_cell(cell);
-    editor.state.open_workspace_view(other.clone());
+    editor.app.state.open_workspace_view(other.clone());
     editor
+        .app
         .state
         .store_active_symbol_editor_bundle(&before, &SymbolEditorMetadata::for_document(&before))
         .unwrap();
-    editor.state.open_workspace_view(symbol);
-    editor.state.design.symbol.editor.select_shape(0);
+    editor.app.state.open_workspace_view(symbol);
+    editor.app.state.design.symbol.editor.select_shape(0);
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("-");
-    editor.state.open_workspace_view(other.clone());
-    editor.state.design.symbol.editor.select_shape(0);
+    editor.app.state.open_workspace_view(other.clone());
+    editor.app.state.design.symbol.editor.select_shape(0);
     editor.pass(vec![egui::Event::Text("5".into())]);
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         before
     );
     assert_eq!(
-        editor.state.design.symbol.history.undo_depth(&other.key()),
+        editor
+            .app
+            .state
+            .design
+            .symbol
+            .history
+            .undo_depth(&other.key()),
         0
     );
     editor.click("Center X");
     editor.replace("25");
-    let after = editor.state.model.load_active_symbol_document().unwrap();
+    let after = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 25));
-    assert!(editor.state.undo_active_symbol_document().unwrap());
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         before
     );
 }
@@ -249,42 +304,74 @@ fn symbol_field_focus_and_unfinished_text_do_not_leak_to_another_document() {
 #[test]
 fn symbol_coordinate_typing_is_one_undo_group_until_focus_changes() {
     let mut editor = Editor::new();
-    let before = editor.state.model.load_active_symbol_document().unwrap();
+    let before = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("1");
     editor.replace("12");
-    let key = editor.state.model.workspace.content.active_key();
-    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 1);
-    let after = editor.state.model.load_active_symbol_document().unwrap();
+    let key = editor.app.state.model.workspace.content.active_key();
+    assert_eq!(editor.app.state.design.symbol.history.undo_depth(&key), 1);
+    let after = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 12));
     editor.click("Center Y");
     editor.replace("30");
-    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 2);
-    let after_y = editor.state.model.load_active_symbol_document().unwrap();
+    assert_eq!(editor.app.state.design.symbol.history.undo_depth(&key), 2);
+    let after_y = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     editor
+        .app
         .state
         .open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     editor
+        .app
         .state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     editor.pass(Vec::new());
     editor.click("Center Y");
     editor.replace("40");
-    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 3);
-    assert!(editor.state.undo_active_symbol_document().unwrap());
+    assert_eq!(editor.app.state.design.symbol.history.undo_depth(&key), 3);
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         after_y
     );
-    assert!(editor.state.undo_active_symbol_document().unwrap());
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         after
     );
-    assert!(editor.state.undo_active_symbol_document().unwrap());
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         before
     );
 }
@@ -295,34 +382,47 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("-");
-    assert!(!editor.state.can_undo_active_symbol_document());
-    editor.state.design.symbol.editor.select_shape(1);
+    assert!(!editor.app.state.can_undo_active_symbol_document());
+    editor.app.state.design.symbol.editor.select_shape(1);
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("140");
-    let after = editor.state.model.load_active_symbol_document().unwrap();
+    let after = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 0));
     assert!(matches!(&after.body[1], SymbolShape::Circle { center, .. } if center.x == 140));
     assert_eq!(
         editor
+            .app
             .state
             .design
             .symbol
             .history
-            .undo_depth(&editor.state.model.workspace.content.active_key()),
+            .undo_depth(&editor.app.state.model.workspace.content.active_key()),
         1
     );
 
     editor.replace("-");
     editor
+        .app
         .state
         .open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     editor
+        .app
         .state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     editor.pass(Vec::new());
     assert_eq!(
-        editor.state.model.load_active_symbol_document().unwrap(),
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap(),
         after
     );
 }
@@ -330,30 +430,41 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
 #[test]
 fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {
     let mut editor = Editor::new();
-    let before = editor.state.model.load_active_symbol_document().unwrap();
+    let before = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
     for changed in 0..4 {
-        editor.state.design.symbol.editor.select_shape(0);
+        editor.app.state.design.symbol.editor.select_shape(0);
         let mut request = editor.frame(Vec::new());
         request.undo_before.push(before.clone());
         request.document.origin = Point::new(20, 30);
         request.changed = true;
         match changed {
-            0 => editor.state.design.symbol.editor.select_shape(1),
-            1 => editor.state.model.active_schematic_epoch += 1,
+            0 => editor.app.state.design.symbol.editor.select_shape(1),
+            1 => editor.app.state.model.active_schematic_epoch += 1,
             2 => {
                 editor
+                    .app
                     .state
                     .model
                     .library_manager
                     .add_library(Library::new("other"));
             }
-            _ => editor.state.model.schematic.session.read_only = true,
+            _ => editor.app.state.model.schematic.session.read_only = true,
         }
-        apply_request(&mut editor.state, request);
+        apply_request(&mut editor.app.design_cx(), request);
         assert_eq!(
-            editor.state.model.load_active_symbol_document().unwrap(),
+            editor
+                .app
+                .state
+                .model
+                .load_active_symbol_document()
+                .unwrap(),
             before
         );
-        assert!(!editor.state.can_undo_active_symbol_document());
+        assert!(!editor.app.state.can_undo_active_symbol_document());
     }
 }

@@ -76,7 +76,7 @@ pub(crate) use self::interaction::{
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::parts::{
-    CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts,
+    CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts, canvas_parts_in,
 };
 #[cfg(test)]
 pub(crate) use self::parts::{canvas_application_modal_open, canvas_facts, canvas_frame};

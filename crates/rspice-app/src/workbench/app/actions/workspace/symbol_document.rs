@@ -63,11 +63,13 @@ impl AppState {
     }
 
     /// [`active_symbol_ports`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
         active_symbol_ports(&self.model)
     }
 
     /// [`load_active_symbol_editor_metadata`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn load_active_symbol_editor_metadata(
         &self,
         document: &SymbolDocument,
@@ -100,6 +102,7 @@ impl AppState {
     }
 
     /// [`commit_active_symbol_edit`] for the session.
+    #[cfg(test)]
     pub(crate) fn commit_active_symbol_edit(
         &mut self,
         document: &SymbolDocument,

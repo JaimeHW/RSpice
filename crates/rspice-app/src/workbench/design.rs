@@ -84,8 +84,8 @@ use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::{DialogKey, Modality};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureNavigator, FeatureRegistry, FeatureSurface,
-    NoHandles, Reads, held_back,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
+    FeatureSurface, NoHandles, Reads, held_back,
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
@@ -101,9 +101,10 @@ impl Feature for DesignFeature {
     type Handles = NoHandles;
     /// The canvas's touch strip offers Rotate, Mirror, Undo, Redo and Fit as
     /// the dispatcher answers them, its guards included (Cancel, its other
-    /// command button, is offered while an operation is live), and the
-    /// navigator's row menu offers Show in netlist as the dispatcher answers
-    /// that.
+    /// command button, is offered while an operation is live). The
+    /// navigator's row menu and the inspector's netlist card offer Show in
+    /// netlist, and the inspector's tuning rows ask whether Tuning can run,
+    /// as the dispatcher answers them.
     const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] = &[
         DesignCommand::RotateSelection.key(),
         DesignCommand::MirrorSelectionHorizontal.key(),
@@ -111,6 +112,7 @@ impl Feature for DesignFeature {
         ids::REDO,
         ids::ZOOM_FIT,
         ids::SHOW_IN_NETLIST,
+        ids::TUNING,
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
@@ -124,7 +126,28 @@ impl Feature for DesignFeature {
         registry.navigator(FeatureNavigator {
             show: show_navigator,
         });
+        registry.inspector(FeatureInspector {
+            show: show_inspector,
+            commit_pending_edit: commit_pending_inspector_section,
+        });
     }
+}
+
+/// Draw the inspector of the design document in front: a symbol's
+/// selection, or a schematic's.
+fn show_inspector(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui) {
+    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        inspector::symbol::show(ui, cx);
+    } else {
+        inspector::show(ui, cx);
+    }
+}
+
+/// Commit the inline edit the inspector holds, as a command that commits
+/// one does before it runs.
+fn commit_pending_inspector_section(cx: &mut Cx<'_, DesignFeature>, _: &egui::Context) {
+    let _ =
+        crate::workbench::app::actions::workspace::commit_pending_inspector_edit(cx.model, cx.wb);
 }
 
 /// Draw the navigator of the design document in front: a symbol's pins,

@@ -424,6 +424,12 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
 /// before anything else the call raised.
 const AFTER_CONTRIBUTION: &[Step] = &[
     (
+        "-1",
+        &["|app, CommitSheetSection(ctx)| {\
+           app.commit_inspector_section(InspectorScope::Document(Workspace::Design), &ctx);\
+           }"],
+    ),
+    (
         "0",
         &["|app, request: NetlistEditorRequest| answer_netlist_editor_request(app, request)"],
     ),
@@ -751,8 +757,16 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace inspector",
         &["Workspace::Design => {\
-           design::show(ui, app);\
+           design::prepare(&mut features::cx(app));\
            app.after_contribution();\
+           features::show_inspector_modal::<DesignFeature>(app, ui, |_| true);\
+           app.after_contribution();\
+           if std::mem::take(&mut app.state.design.inspector_yields_to_sheet) {\
+           app.contribute(\
+           Point::Inspector(InspectorScope::Document(Workspace::Design)),\
+           ui,\
+           );\
+           }\
            }\
            Workspace::Simulate => {"],
     ),
@@ -1569,8 +1583,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        32,
-        "`after_contribution` answers exactly the thirty-two requests it lists"
+        33,
+        "`after_contribution` answers exactly the thirty-three requests it lists"
     );
 }
 

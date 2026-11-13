@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::SimulatePort as _;
 use crate::workbench::framework::requests::StageComponentTuning;
 use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
@@ -327,24 +326,21 @@ fn edited_component(
     Ok(component)
 }
 /// Finish the previous field before opening a draft against the live component.
-pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEditField) -> bool {
-    if app.state.model.schematic_edit_read_only() {
+pub(super) fn begin_edit(
+    cx: &mut Cx<'_, DesignFeature>,
+    component_id: u64,
+    field: InlineEditField,
+) -> bool {
+    if cx.model.schematic_edit_read_only() {
         return false;
     }
-    if app
-        .state
-        .workbench
-        .inline_edit
-        .buffer_for(component_id, &field)
-        .is_some()
-    {
+    if cx.wb.inline_edit.buffer_for(component_id, &field).is_some() {
         return true;
     }
-    if commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err() {
+    if commit_inline_component_edit(cx.model, cx.wb).is_err() {
         return false;
     }
-    let Some(component) = app
-        .state
+    let Some(component) = cx
         .model
         .schematic
         .document()
@@ -361,33 +357,32 @@ pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEd
         expected: component,
         description: edit_description(&field),
         field,
-        authority: inline_edit_authority(&app.state.model),
+        authority: inline_edit_authority(cx.model),
         error: None,
         widget: None,
     };
-    app.state.workbench.inline_edit.begin(session);
+    cx.wb.inline_edit.begin(session);
     true
 }
 
-pub(super) fn update_edit(app: &mut RSpiceApp, text: String) {
-    let Some(session) = app.state.workbench.inline_edit.session() else {
+pub(super) fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
+    let Some(session) = cx.wb.inline_edit.session() else {
         return;
     };
     let candidate = prepare_field_edit(
-        &app.state.design,
-        &app.state.model,
-        &app.state.workbench,
+        cx.state,
+        cx.model,
+        cx.wb,
         &session.expected,
         &session.field,
         &text,
     );
-    app.state.workbench.inline_edit.set_draft(text, candidate);
+    cx.wb.inline_edit.set_draft(text, candidate);
 }
 
-fn restore_edit_focus(ctx: &egui::Context, app: &RSpiceApp) {
-    if let Some(widget) = app
-        .state
-        .workbench
+fn restore_edit_focus(ctx: &egui::Context, cx: &Cx<'_, DesignFeature>) {
+    if let Some(widget) = cx
+        .wb
         .inline_edit
         .session()
         .and_then(|session| session.widget)
@@ -406,14 +401,14 @@ pub(super) fn edit_description(field: &InlineEditField) -> String {
 }
 
 pub(super) fn component_tuning_action_block_reason(
-    app: &RSpiceApp,
+    cx: &Cx<'_, DesignFeature>,
     component: &Component,
 ) -> Option<String> {
-    match app.command_availability(ids::TUNING) {
-        CommandAvailability::Available => app
-            .state
-            .simulate
-            .component_tuning_block_reason(&app.state.model, component),
+    match cx.foreign_availability(ids::TUNING) {
+        CommandAvailability::Available => cx
+            .peers
+            .simulate()
+            .component_tuning_block_reason(cx.model, component),
         CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
         CommandAvailability::Hidden => {
             Some("parameter tuning is unavailable in this context".to_owned())
@@ -429,14 +424,14 @@ pub(super) fn component_tuning_action_block_reason(
 /// session buffer, outlined and explained, and never written to the design.
 pub(super) fn edit_row(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
     field: InlineEditField,
     label: &str,
 ) -> Option<String> {
     edit_row_with_hint(
         ui,
-        app,
+        cx,
         component,
         field,
         label,
@@ -453,7 +448,7 @@ pub(super) fn edit_row(
 /// description on the label's hover, editable or not.
 pub(super) fn edit_row_with_hint(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
     field: InlineEditField,
     label: &str,
@@ -461,7 +456,7 @@ pub(super) fn edit_row_with_hint(
     caption: PropertyRowCaption<'_>,
 ) -> Option<String> {
     let captioned = caption.unit.is_some() || caption.description.is_some();
-    let editable = !app.state.model.schematic_edit_read_only();
+    let editable = !cx.model.schematic_edit_read_only();
     if !editable {
         let value = field_value(component, &field);
         let shown = if value.is_empty() { hint } else { &value };
@@ -473,39 +468,29 @@ pub(super) fn edit_row_with_hint(
         return None;
     }
 
-    let mut buffer = app
-        .state
-        .workbench
+    let mut buffer = cx
+        .wb
         .inline_edit
         .buffer_for(component.id, &field)
         .map_or_else(|| field_value(component, &field), str::to_owned);
-    let rejection = app
-        .state
-        .workbench
+    let rejection = cx
+        .wb
         .inline_edit
         .error_for(component.id, &field)
         .map(str::to_owned);
-    let cancel = app
-        .state
-        .workbench
-        .inline_edit
-        .session()
-        .is_some_and(|session| {
-            session.expected.id == component.id
-                && session.field == field
-                && session.widget.is_some_and(|widget| {
-                    ui.memory(|memory| {
-                        memory.has_focus(widget) || memory.had_focus_last_frame(widget)
-                    })
-                })
-        })
-        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let cancel = cx.wb.inline_edit.session().is_some_and(|session| {
+        session.expected.id == component.id
+            && session.field == field
+            && session.widget.is_some_and(|widget| {
+                ui.memory(|memory| memory.has_focus(widget) || memory.had_focus_last_frame(widget))
+            })
+    }) && ui.input(|input| input.key_pressed(egui::Key::Escape));
 
     let (response, tuning_response) = ui
         .push_id((component.id, &field), |ui| {
             if matches!(field, InlineEditField::Value) {
                 let tuning_block_reason = rejection.as_ref().map_or_else(
-                    || component_tuning_action_block_reason(app, component),
+                    || component_tuning_action_block_reason(cx, component),
                     |reason| {
                         Some(format!(
                             "resolve the Value validation error before tuning: {reason}"
@@ -552,11 +537,11 @@ pub(super) fn edit_row_with_hint(
         && rspice_schematic_editor::property_values::step_standard_value(
             ui,
             response.id,
-            app.state.model.workspace.content.standard_value_series,
+            cx.model.workspace.content.standard_value_series,
             &mut buffer,
         );
     if cancel {
-        app.state.workbench.inline_edit.end();
+        cx.wb.inline_edit.end();
         ui.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
         });
@@ -564,44 +549,37 @@ pub(super) fn edit_row_with_hint(
         return None;
     }
     if response.gained_focus() || response.changed() || stepped {
-        if !begin_edit(app, component.id, field.clone()) {
-            restore_edit_focus(ui.ctx(), app);
+        if !begin_edit(cx, component.id, field.clone()) {
+            restore_edit_focus(ui.ctx(), cx);
             return None;
         }
-        app.state.workbench.inline_edit.set_widget(response.id);
+        cx.wb.inline_edit.set_widget(response.id);
         if response.changed() || stepped {
-            update_edit(app, buffer);
+            update_edit(cx, buffer);
         }
     }
     if response.lost_focus()
-        && app
-            .state
-            .workbench
-            .inline_edit
-            .buffer_for(component.id, &field)
-            .is_some()
-        && commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err()
+        && cx.wb.inline_edit.buffer_for(component.id, &field).is_some()
+        && commit_inline_component_edit(cx.model, cx.wb).is_err()
     {
-        restore_edit_focus(ui.ctx(), app);
+        restore_edit_focus(ui.ctx(), cx);
     }
     if tuning_response.is_some_and(|response| response.clicked()) {
-        if commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench).is_err() {
-            restore_edit_focus(ui.ctx(), app);
-            return app
-                .state
-                .workbench
+        if commit_inline_component_edit(cx.model, cx.wb).is_err() {
+            restore_edit_focus(ui.ctx(), cx);
+            return cx
+                .wb
                 .inline_edit
                 .error_for(component.id, &field)
                 .map(str::to_owned);
         }
-        app.state.workbench.outbox.push(StageComponentTuning {
+        cx.wb.outbox.push(StageComponentTuning {
             component_id: component.id,
         });
     }
 
-    let rejection = app
-        .state
-        .workbench
+    let rejection = cx
+        .wb
         .inline_edit
         .error_for(component.id, &field)
         .map(str::to_owned);
@@ -756,14 +734,16 @@ pub(super) fn off_sheet_declaration(model: &Model, name: &str) -> Option<OffShee
     })
 }
 
-pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
+pub(super) fn net_panel(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    name: &str,
+    nets: &[DesignNet],
+) {
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
         // Fall back to the sheet rather than narrate a phantom object.
-        app.contribute(
-            Point::Inspector(InspectorScope::Document(Workspace::Design)),
-            ui,
-        );
+        cx.state.inspector_yields_to_sheet = true;
         return;
     };
     let class = net.class;
@@ -778,7 +758,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
     object_title(ui, &net_name, Some("Net"), None);
 
-    let off_sheet = off_sheet_declaration(&app.state.model, &net_name);
+    let off_sheet = off_sheet_declaration(cx.model, &net_name);
 
     section_header(ui, "Net identity", None);
     property_row(ui, "Scope", &scope);
@@ -801,8 +781,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
     } else {
         let mut select: Option<u64> = None;
         for terminal in &terminals {
-            let value = app
-                .state
+            let value = cx
                 .model
                 .schematic
                 .document()
@@ -819,13 +798,13 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                 .on_hover_text(format!("Select {} on the sheet", terminal.reference));
         }
         if let Some(id) = select {
-            select_component(app, id);
+            select_component(cx, id);
         }
     }
 
     // The node voltage the active run solved for this net, when it solved
     // one; with none the section is absent.
-    if let Some(annotation) = net_operating_point(&app.state.model, &net_name) {
+    if let Some(annotation) = net_operating_point(cx.model, &net_name) {
         if annotation.current {
             section_header(ui, "Operating point", None);
         } else {
@@ -851,11 +830,9 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
     // Only this net's own findings, and only from a check of the drawing as it
     // stands. A clean or unchecked net is the normal state.
-    let findings = current_findings(&app.state.model, |violation| {
-        violation_targets_net(violation, net)
-    });
-    let collisions = if checks_current(&app.state.model) {
-        net_name_collision_count(&app.state.model, net)
+    let findings = current_findings(cx.model, |violation| violation_targets_net(violation, net));
+    let collisions = if checks_current(cx.model) {
+        net_name_collision_count(cx.model, net)
     } else {
         0
     };
@@ -891,12 +868,15 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                 let label = format!("Plot {display}");
                 if Button::new(&label).icon(Icon::Results).show(ui).clicked() {
                     let configuration_changed = crate::schematic::view::toggle_probe_with_feedback(
-                        &mut crate::schematic::view::canvas_parts(&mut app.state),
+                        &mut crate::schematic::view::canvas_parts_in(cx),
                         &net_name,
                         &display,
                     );
                     if configuration_changed {
-                        app.invalidate_simulation_preflight();
+                        rspice_app_runs::workbench::preflight::invalidate(
+                            &mut cx.runs.preflight,
+                            &mut *cx.handles.run_controller,
+                        );
                     }
                 }
             }
@@ -906,17 +886,10 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                     .show(ui)
                     .clicked()
             {
-                app.state.model.schematic.session.editor.selection.clear();
-                app.state
-                    .model
-                    .schematic
-                    .session
-                    .editor
-                    .net_highlight
-                    .clear();
+                cx.model.schematic.session.editor.selection.clear();
+                cx.model.schematic.session.editor.net_highlight.clear();
                 for id in &connected {
-                    app.state
-                        .model
+                    cx.model
                         .schematic
                         .session
                         .editor
@@ -1089,9 +1062,8 @@ pub(super) fn normalized_net_name(name: &str) -> String {
     name.to_ascii_lowercase()
 }
 
-pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
-    let position = app
-        .state
+pub(super) fn select_component(cx: &mut Cx<'_, DesignFeature>, id: u64) {
+    let position = cx
         .model
         .schematic
         .document()
@@ -1099,30 +1071,22 @@ pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
         .iter()
         .find(|component| component.id == id)
         .map(|component| component.pos);
-    app.state
-        .model
+    cx.model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(id);
-    app.state
-        .model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .clear();
-    app.state.model.schematic.session.editor.center_request = position;
+    cx.model.schematic.session.editor.net_highlight.clear();
+    cx.model.schematic.session.editor.center_request = position;
 }
 
 /// Select every conductor of a net and highlight it — the same transaction
 /// the navigator's net rows commit.
-pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
-    app.state.model.schematic.session.editor.selection.clear();
+pub(super) fn select_net(cx: &mut Cx<'_, DesignFeature>, net: &DesignNet) {
+    cx.model.schematic.session.editor.selection.clear();
     for wire in &net.wire_ids {
-        app.state
-            .model
+        cx.model
             .schematic
             .session
             .editor
@@ -1131,8 +1095,7 @@ pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
     }
     if net.wire_ids.is_empty() {
         for component_id in net.terminals.iter().map(|terminal| terminal.component_id) {
-            app.state
-                .model
+            cx.model
                 .schematic
                 .session
                 .editor
@@ -1140,8 +1103,7 @@ pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
                 .select_component(component_id);
         }
     }
-    app.state
-        .model
+    cx.model
         .schematic
         .session
         .editor

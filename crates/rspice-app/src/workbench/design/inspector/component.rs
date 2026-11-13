@@ -11,12 +11,11 @@ use crate::workbench::framework::command_registry::ids;
 
 pub(super) fn component_panel(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     id: u64,
     sheet: &SheetConnectivity,
 ) {
-    let Some(component) = app
-        .state
+    let Some(component) = cx
         .model
         .schematic
         .document()
@@ -25,15 +24,12 @@ pub(super) fn component_panel(
         .find(|component| component.id == id)
         .cloned()
     else {
-        app.contribute(
-            Point::Inspector(InspectorScope::Document(Workspace::Design)),
-            ui,
-        );
+        cx.state.inspector_yields_to_sheet = true;
         return;
     };
-    let evidence = component_model_evidence(&app.state.model, &component);
+    let evidence = component_model_evidence(cx.model, &component);
     // The design root is implicit: on the top sheet the path says nothing.
-    let occurrence = containing_occurrence_path(&app.state.model);
+    let occurrence = containing_occurrence_path(cx.model);
     object_title(
         ui,
         &component.name,
@@ -41,11 +37,11 @@ pub(super) fn component_panel(
         (occurrence != "/").then_some(occurrence.as_str()),
     );
 
-    identity_section(ui, app, &component);
-    terminals_section(ui, app, &component, sheet);
-    parameters_section(ui, app, &component, &evidence);
-    operating_point(ui, app, &component);
-    component_checks(ui, app, &component);
+    identity_section(ui, cx, &component);
+    terminals_section(ui, cx, &component, sheet);
+    parameters_section(ui, cx, &component, &evidence);
+    operating_point(ui, cx, &component);
+    component_checks(ui, cx, &component);
 }
 
 /// The occurrence the inspected component sits in.
@@ -95,19 +91,19 @@ pub(super) fn instance_view(component: &Component) -> Option<&str> {
         .filter(|view| !view.is_empty())
 }
 
-pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
-    let editable = !app.state.model.schematic_edit_read_only();
+pub(super) fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: &Component) {
+    let editable = !cx.model.schematic_edit_read_only();
     let properties = section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
         crate::workbench::app::actions::property_edit::open_property_editor_in(
-            &mut app.state.design.property_form_parts(),
-            &mut app.state.model,
-            &mut app.state.workbench,
+            &mut cx.state.property_form_parts(),
+            cx.model,
+            cx.wb,
             component.id,
         );
     }
     properties.on_disabled_hover_text("the active document is read-only");
-    let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");
+    let instance_rejection = edit_row(ui, cx, component, InlineEditField::Instance, "Instance");
     // A built-in or a generated module runs the model its contract names, and
     // the Model row under Simulation parameters states it; it has no value.
     let runs_contract = component
@@ -117,7 +113,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     let value_rejection = if runs_contract {
         None
     } else {
-        edit_row(ui, app, component, InlineEditField::Value, "Value")
+        edit_row(ui, cx, component, InlineEditField::Value, "Value")
     };
     if let Some(binding) = component.library_cell.as_ref() {
         property_row(
@@ -129,11 +125,11 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     if let Some(view) = instance_view(component) {
         property_row(ui, "View", view);
     }
-    sheet_row(ui, &app.state.model, component.id);
+    sheet_row(ui, cx.model, component.id);
     if editable {
         rejection_slot(
             ui,
-            editing_identity_field(&app.state.workbench, component.id),
+            editing_identity_field(cx.wb, component.id),
             instance_rejection.as_deref().or(value_rejection.as_deref()),
         );
     }
@@ -153,8 +149,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             )
         })
         .filter(|reference| {
-            app.state
-                .model
+            cx.model
                 .library_manager
                 .get_library(&reference.library)
                 .and_then(|library| library.get_cell(&reference.cell))
@@ -162,20 +157,19 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 .is_some()
         });
     let symbol_writable = symbol_view.as_ref().is_some_and(|reference| {
-        app.state
-            .model
+        cx.model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| !library.read_only)
     });
-    let model_source = component_model_source_target(&app.state.model, component);
+    let model_source = component_model_source_target(cx.model, component);
     let hierarchy_master =
-        crate::workbench::app::hierarchy_master_for_component(&app.state.model, component.id)
+        crate::workbench::app::hierarchy_master_for_component(cx.model, component.id)
             .map(|(_, reference)| reference);
     // The deck the instance emits is part of its identity, so the jump to it
     // belongs beside the symbol, master and model routes rather than in a
     // section of its own. It appears only once a deck states the instance.
-    let netlist_card = app.command_key_enabled(ids::SHOW_IN_NETLIST);
+    let netlist_card = cx.foreign_available(ids::SHOW_IN_NETLIST);
     if symbol_view.is_some() || hierarchy_master.is_some() || model_source.is_some() || netlist_card
     {
         action_stack(ui, |ui| {
@@ -188,13 +182,8 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 .ghost()
                 .show(ui);
                 if response.clicked() {
-                    app.state
-                        .design
-                        .navigation_parts(
-                            &mut app.state.model,
-                            &mut app.state.workbench,
-                            &app.state.runs,
-                        )
+                    cx.state
+                        .navigation_parts(cx.model, cx.wb, cx.runs)
                         .open_workspace_view(reference);
                 }
             }
@@ -202,19 +191,14 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             if let Some(reference) = hierarchy_master.as_ref() {
                 let label = format!("Descend into {}", reference.cell);
                 if Button::new(&label).ghost().show(ui).clicked() {
-                    app.state
-                        .design
-                        .navigation_parts(
-                            &mut app.state.model,
-                            &mut app.state.workbench,
-                            &app.state.runs,
-                        )
+                    cx.state
+                        .navigation_parts(cx.model, cx.wb, cx.runs)
                         .open_selected_instance_master();
                 }
             }
 
             if netlist_card && Button::new("Show in netlist").ghost().show(ui).clicked() {
-                app.execute_command_key(ids::SHOW_IN_NETLIST);
+                cx.execute(ids::SHOW_IN_NETLIST);
             }
 
             if let Some(target) = model_source.as_ref() {
@@ -226,29 +210,21 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 };
                 let response = Button::new(label).ghost().show(ui);
                 if response.clicked() {
-                    if !commit_pending_inspector_edit(
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                    ) {
+                    if !commit_pending_inspector_edit(cx.model, cx.wb) {
                         return;
                     }
                     match target {
                         ComponentModelSourceTarget::Catalog { library, model } => {
-                            app.state.workbench.outbox.push(RevealModel {
+                            cx.wb.outbox.push(RevealModel {
                                 library: library.clone(),
                                 model: model.clone(),
                             });
                         }
                         ComponentModelSourceTarget::VerilogA(reference) => {
-                            app.state
-                                .design
-                                .navigation_parts(
-                                    &mut app.state.model,
-                                    &mut app.state.workbench,
-                                    &app.state.runs,
-                                )
+                            cx.state
+                                .navigation_parts(cx.model, cx.wb, cx.runs)
                                 .open_workspace_view(reference.clone());
-                            app.state.workbench.activate(Workspace::Design);
+                            cx.wb.activate(Workspace::Design);
                         }
                     }
                 }
@@ -536,20 +512,19 @@ pub(super) fn bound_model_section_choices(
 /// instances retain provider provenance as editor metadata, while the binding
 /// is accepted only when it agrees with the project-global executable provider.
 pub(crate) fn bind_component_model_from_catalog(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench)?;
+    commit_inline_component_edit(cx.model, cx.wb)?;
     crate::workbench::docks::inspector::validate_component_model_catalog_binding(
-        &app.state.model,
+        cx.model,
         component_id,
         library_name,
         model_name,
     )?;
-    let component = app
-        .state
+    let component = cx
         .model
         .schematic
         .document()
@@ -565,16 +540,15 @@ pub(crate) fn bind_component_model_from_catalog(
                 binding.library
             ));
         }
-        apply_bound_model_choice(app, component_id, model_name)?;
+        apply_bound_model_choice(cx, component_id, model_name)?;
         return Ok(());
     }
 
-    let effective = app
-        .state
+    let effective = cx
         .model
         .model_library_manager
         .effective_plan_definition_provider(
-            &app.state.model.sim_setup.model_bindings,
+            &cx.model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             model_name,
         )?
@@ -597,21 +571,22 @@ pub(crate) fn bind_component_model_from_catalog(
             })?;
     let mut candidate = component.clone();
     candidate.params = params;
-    app.state
-        .model
+    cx.model
         .edit_component_transaction(&component, candidate, "bind instance model")?;
-    app.invalidate_simulation_preflight();
+    rspice_app_runs::workbench::preflight::invalidate(
+        &mut cx.runs.preflight,
+        &mut *cx.handles.run_controller,
+    );
     Ok(())
 }
 
 pub(crate) fn apply_bound_model_choice(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     selected_model: &str,
 ) -> Result<bool, String> {
-    commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench)?;
-    let component = app
-        .state
+    commit_inline_component_edit(cx.model, cx.wb)?;
+    let component = cx
         .model
         .schematic
         .document()
@@ -627,14 +602,13 @@ pub(crate) fn apply_bound_model_choice(
         .clone();
 
     crate::workbench::docks::inspector::validate_component_model_catalog_binding(
-        &app.state.model,
+        cx.model,
         component_id,
         &library_name,
         selected_model,
     )?;
 
-    let library = app
-        .state
+    let library = cx
         .model
         .model_library_manager
         .get_library(&library_name)
@@ -652,27 +626,28 @@ pub(crate) fn apply_bound_model_choice(
         .then(|| cards[0].file_path.clone())
         .flatten()
         .or_else(|| library.root_path.clone());
-    let changed = app.state.model.schematic.select_instance_model(
-        component_id,
-        candidate_name,
-        candidate_source,
-    );
+    let changed =
+        cx.model
+            .schematic
+            .select_instance_model(component_id, candidate_name, candidate_source);
     if changed {
-        app.invalidate_simulation_preflight();
+        rspice_app_runs::workbench::preflight::invalidate(
+            &mut cx.runs.preflight,
+            &mut *cx.handles.run_controller,
+        );
     }
     Ok(changed)
 }
 
 pub(super) fn apply_bound_model_section(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     selected_section: &str,
 ) {
-    if !commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench) {
+    if !commit_pending_inspector_edit(cx.model, cx.wb) {
         return;
     }
-    let Some(component) = app
-        .state
+    let Some(component) = cx
         .model
         .schematic
         .document()
@@ -688,7 +663,7 @@ pub(super) fn apply_bound_model_section(
         .as_ref()
         .and_then(|binding| binding.module_name.as_deref())
         .unwrap_or(component.value.as_str());
-    let allowed = bound_model_section_choices(&app.state.model, &component, selected_model);
+    let allowed = bound_model_section_choices(cx.model, &component, selected_model);
     if !allowed
         .iter()
         .any(|(value, _)| value.eq_ignore_ascii_case(selected_section))
@@ -696,23 +671,25 @@ pub(super) fn apply_bound_model_section(
         return;
     }
     let selected = (!selected_section.trim().is_empty()).then(|| selected_section.to_owned());
-    if app
-        .state
+    if cx
         .model
         .schematic
         .select_instance_model_section(component_id, selected)
     {
-        app.invalidate_simulation_preflight();
+        rspice_app_runs::workbench::preflight::invalidate(
+            &mut cx.runs.preflight,
+            &mut *cx.handles.run_controller,
+        );
     }
 }
 
 pub(super) fn parameters_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
     evidence: &ComponentModelEvidence,
 ) {
-    let editable = !app.state.model.schematic_edit_read_only();
+    let editable = !cx.model.schematic_edit_read_only();
     section_header(
         ui,
         "Simulation parameters",
@@ -722,9 +699,9 @@ pub(super) fn parameters_section(
     // not the cell the Library cell row already names. Its Model row binds a
     // card from the project's libraries; a library section is a model-library
     // idea the deck does not give a module.
-    let runs_module = app.state.model.instantiates_veriloga_view(component);
+    let runs_module = cx.model.instantiates_veriloga_view(component);
     let model_choices = evidence.model.as_deref().map_or_else(Vec::new, |model| {
-        bound_model_choices(&app.state.model, component, model)
+        bound_model_choices(cx.model, component, model)
     });
     let mut selected_model = component
         .library_cell
@@ -746,9 +723,10 @@ pub(super) fn parameters_section(
             .as_ref()
             .and_then(|binding| binding.model_card.clone())
             .unwrap_or_default();
-        let cards = evidence.model.as_deref().map_or_else(Vec::new, |module| {
-            model_cards_of_module(&app.state.model, module)
-        });
+        let cards = evidence
+            .model
+            .as_deref()
+            .map_or_else(Vec::new, |module| model_cards_of_module(cx.model, module));
         let listed = |name: &str| cards.iter().any(|card| card.eq_ignore_ascii_case(name));
         if !cards.is_empty() || !bound_card.is_empty() {
             let choices = std::iter::once((String::new(), "None".to_owned()))
@@ -765,13 +743,16 @@ pub(super) fn parameters_section(
                 &mut bound_card,
                 &choices,
                 editable,
-            ) && commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench)
-                && app.state.model.schematic.select_instance_model_card(
+            ) && commit_pending_inspector_edit(cx.model, cx.wb)
+                && cx.model.schematic.select_instance_model_card(
                     component.id,
                     (!bound_card.is_empty()).then(|| bound_card.clone()),
                 )
             {
-                app.invalidate_simulation_preflight();
+                rspice_app_runs::workbench::preflight::invalidate(
+                    &mut cx.runs.preflight,
+                    &mut *cx.handles.run_controller,
+                );
             }
             if !bound_card.is_empty() && !listed(&bound_card) {
                 crate::workbench::design_system::problem_line(
@@ -789,9 +770,9 @@ pub(super) fn parameters_section(
             &mut selected_model,
             &model_choices,
             editable,
-        ) && let Err(error) = apply_bound_model_choice(app, component.id, &selected_model)
+        ) && let Err(error) = apply_bound_model_choice(cx, component.id, &selected_model)
         {
-            app.state.workbench.prompt(error);
+            cx.wb.prompt(error);
         }
     } else if let Some(model) = evidence.model.as_deref() {
         property_row(ui, "Model", model);
@@ -803,7 +784,7 @@ pub(super) fn parameters_section(
     let section_choices = if runs_module {
         Vec::new()
     } else {
-        bound_model_section_choices(&app.state.model, component, &selected_model)
+        bound_model_section_choices(cx.model, component, &selected_model)
     };
     let mut selected_section = component
         .library_cell
@@ -820,7 +801,7 @@ pub(super) fn parameters_section(
             editable,
         )
     {
-        apply_bound_model_section(app, component.id, &selected_section);
+        apply_bound_model_section(cx, component.id, &selected_section);
     }
 
     // Instance temperature is the `temp` parameter. Left empty it inherits
@@ -828,13 +809,13 @@ pub(super) fn parameters_section(
     let declared = crate::state::parse_params_string(&component.params);
     let inherited = format!(
         "inherit · {} °C",
-        app.state.model.sim_setup.reference_pvt.temperature_celsius
+        cx.model.sim_setup.reference_pvt.temperature_celsius
     );
-    let mut rejection = supports_instance_temperature(&app.state.model, component)
+    let mut rejection = supports_instance_temperature(cx.model, component)
         .then(|| {
             edit_row_with_hint(
                 ui,
-                app,
+                cx,
                 component,
                 InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
                 "Temperature",
@@ -847,19 +828,17 @@ pub(super) fn parameters_section(
     // Every parameter declared by the authoritative family sheet is present
     // even on a freshly placed instance whose durable parameter string is
     // still empty. Authored extension fields are appended and never hidden.
-    let parameter_contract =
-        inline_parameter_contract(&app.state.design, &app.state.model, component, &declared);
+    let parameter_contract = inline_parameter_contract(cx.state, cx.model, component, &declared);
     let raw_field = InlineEditField::Parameters;
-    let raw_editor_active = app
-        .state
-        .workbench
+    let raw_editor_active = cx
+        .wb
         .inline_edit
         .buffer_for(component.id, &raw_field)
         .is_some();
     if parameter_contract.is_empty() || raw_editor_active {
         let raw_rejection = edit_row_with_hint(
             ui,
-            app,
+            cx,
             component,
             raw_field,
             "Parameters",
@@ -870,7 +849,7 @@ pub(super) fn parameters_section(
         if editable {
             rejection_slot(
                 ui,
-                editing_parameter_field(&app.state.workbench, component.id),
+                editing_parameter_field(cx.wb, component.id),
                 rejection.as_deref(),
             );
         }
@@ -886,8 +865,7 @@ pub(super) fn parameters_section(
             let value = declared
                 .get(&parameter.key.to_ascii_lowercase())
                 .map_or("", String::as_str);
-            let note = if app
-                .state
+            let note = if cx
                 .model
                 .model_card_owns_parameter(component, &parameter.key)
             {
@@ -917,7 +895,7 @@ pub(super) fn parameters_section(
         } else if parameter.editable {
             let row_rejection = edit_row_with_hint(
                 ui,
-                app,
+                cx,
                 component,
                 InlineEditField::Parameter(parameter.key.clone()),
                 &parameter.label,
@@ -939,21 +917,23 @@ pub(super) fn parameters_section(
     if editable {
         rejection_slot(
             ui,
-            editing_parameter_field(&app.state.workbench, component.id),
+            editing_parameter_field(cx.wb, component.id),
             rejection.as_deref(),
         );
     }
     if let Some(key) = removed
-        && commit_pending_inspector_edit(&mut app.state.model, &mut app.state.workbench)
+        && commit_pending_inspector_edit(cx.model, cx.wb)
     {
-        match app
-            .state
+        match cx
             .model
             .remove_undeclared_instance_parameter(component.id, &key)
         {
-            Ok(true) => app.invalidate_simulation_preflight(),
+            Ok(true) => rspice_app_runs::workbench::preflight::invalidate(
+                &mut cx.runs.preflight,
+                &mut *cx.handles.run_controller,
+            ),
             Ok(false) => {}
-            Err(error) => app.state.workbench.prompt(format!(
+            Err(error) => cx.wb.prompt(format!(
                 "{key} was not removed from {}: {error}",
                 component.name
             )),
@@ -1235,7 +1215,7 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
 
 pub(super) fn terminals_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
     sheet: &SheetConnectivity,
 ) {
@@ -1268,7 +1248,7 @@ pub(super) fn terminals_section(
     if let Some(name) = select
         && let Some(net) = sheet.nets.iter().find(|net| net.name == name)
     {
-        select_net(app, net);
+        select_net(cx, net);
     }
 }
 
@@ -1388,11 +1368,11 @@ pub(super) fn device_engine_name(model: &Model, component: &Component) -> Option
 
 /// The active run's operating point for `component`, when the run solved one
 /// for it. With none the section is absent.
-pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let Some(engine_name) = device_engine_name(&app.state.model, component) else {
+pub(super) fn operating_point(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, component: &Component) {
+    let Some(engine_name) = device_engine_name(cx.model, component) else {
         return;
     };
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = cx.model.simulation.active_run() else {
         return;
     };
     let Some(entry) = run
@@ -1408,7 +1388,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
     else {
         return;
     };
-    if active_run_matches_design(&app.state.model) {
+    if active_run_matches_design(cx.model) {
         section_header(ui, "Operating point", None);
     } else {
         section_header_explained(
@@ -1421,7 +1401,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
             ),
         );
     }
-    let policy = app.state.model.preferences.quantity_presentation_policy();
+    let policy = cx.model.preferences.quantity_presentation_policy();
     for (label, value) in operating_point_rows(entry, policy) {
         property_row(ui, &label, &value);
     }
@@ -1431,11 +1411,11 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
 /// and its stress against the safe operating area when a run measured it.
 /// With neither, the section is absent: a clean or unchecked instance is the
 /// normal state, and the sheet's Checks section owns the check itself.
-pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let findings = current_findings(&app.state.model, |violation| {
+pub(super) fn component_checks(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, component: &Component) {
+    let findings = current_findings(cx.model, |violation| {
         violation_targets_component(violation, component)
     });
-    let soa = retained_component_soa(&app.state.model, &component.name);
+    let soa = retained_component_soa(cx.model, &component.name);
     if findings.is_empty() && soa.is_none() {
         return;
     }

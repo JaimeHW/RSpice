@@ -235,6 +235,15 @@ pub(crate) struct DesignState {
     /// shell draws over it once the document has. Each pass of the surface
     /// sets it and the shell takes it.
     pub(crate) touch_strip_canvas: Option<egui::Rect>,
+    /// Whether this frame's design inspector left its place to the sheet's
+    /// section: nothing it inspects is selected, or what is selected is
+    /// gone. Each pass of the inspector sets it and the shell takes it.
+    pub(crate) inspector_yields_to_sheet: bool,
+    /// The instance whose inline edit failed to commit as the selection
+    /// moved off it. It is selected again, and the inspector shows it
+    /// whatever else the selection would read as, so the edit can be
+    /// corrected. Each frame's inspector prepare sets it.
+    pub(crate) inspector_holds_failed_edit: Option<u64>,
 }
 
 impl DesignState {

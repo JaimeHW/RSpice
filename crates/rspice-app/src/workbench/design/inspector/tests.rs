@@ -13,11 +13,11 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
-use crate::workbench::AppState;
 use crate::workbench::docks::inspector::shared::{
     checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
 };
 use crate::workbench::framework::feature::SimulatePort as _;
+use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::drc::DrcSeverity;
 
 fn state_with_two_components() -> AppState {
@@ -100,12 +100,12 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_identity_field(&app.state.workbench, id));
     assert!(!editing_parameter_field(&app.state.workbench, id));
 
-    assert!(begin_edit(&mut app, id, InlineEditField::Value));
+    assert!(begin_edit(&mut app.design_cx(), id, InlineEditField::Value));
     assert!(editing_identity_field(&app.state.workbench, id));
     assert!(!editing_parameter_field(&app.state.workbench, id));
 
     assert!(begin_edit(
-        &mut app,
+        &mut app.design_cx(),
         id,
         InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
     ));
@@ -269,14 +269,14 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
 #[test]
 fn an_inspected_object_names_its_sheet_only_above_one_sheet() {
     let (mut multi, probe) = app_with_probe_on_last_sheet(2);
-    let painted = painted_panel(|ui| probe_panel(ui, &mut multi, probe));
+    let painted = painted_panel(|ui| probe_panel(ui, &mut multi.design_cx(), probe));
     assert!(
         painted.contains("Sheet 2 \u{00b7} Output stage"),
         "the row names the ordinal and the name the catalog carries: {painted}"
     );
 
     let (mut single, probe) = app_with_probe_on_last_sheet(1);
-    let painted = painted_panel(|ui| probe_panel(ui, &mut single, probe));
+    let painted = painted_panel(|ui| probe_panel(ui, &mut single.design_cx(), probe));
     assert!(
         !painted.contains("Input stage"),
         "a single-sheet cell view is its sheet, so the row is absent: {painted}"
@@ -606,7 +606,7 @@ fn the_net_panel_states_scope_and_pins_only() {
     app.state.sync_active_schematic_to_workspace();
     let nets = sheet_connectivity(&app.state.model).nets;
     let name = nets.first().expect("the wire is a net").name.clone();
-    let painted = painted_panel(|ui| net_panel(ui, &mut app, &name, &nets));
+    let painted = painted_panel(|ui| net_panel(ui, &mut app.design_cx(), &name, &nets));
     for gone in [
         "Class",
         "Conductors",
@@ -631,7 +631,8 @@ fn terminals_head_only_open_pins_and_vanish_without_terminals() {
         terminals: HashMap::new(),
         unresolved: None,
     };
-    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    let painted =
+        painted_panel(|ui| terminals_section(ui, &mut app.design_cx(), &component, &sheet));
     assert!(painted.is_empty(), "{painted}");
 
     sheet.terminals.insert(
@@ -641,7 +642,8 @@ fn terminals_head_only_open_pins_and_vanish_without_terminals() {
             ("2".to_owned(), Some("out".to_owned())),
         ],
     );
-    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    let painted =
+        painted_panel(|ui| terminals_section(ui, &mut app.design_cx(), &component, &sheet));
     assert!(
         painted.starts_with("Terminals\n") && !painted.contains("bound"),
         "{painted}"
@@ -654,7 +656,8 @@ fn terminals_head_only_open_pins_and_vanish_without_terminals() {
             ("2".to_owned(), Some("out".to_owned())),
         ],
     );
-    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    let painted =
+        painted_panel(|ui| terminals_section(ui, &mut app.design_cx(), &component, &sheet));
     assert!(painted.lines().any(|line| line == "1 open"), "{painted}");
 }
 
@@ -812,14 +815,14 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
 fn an_instance_has_a_checks_section_only_for_its_own_findings() {
     let (mut app, id) = app_with_model_bound_instance();
     let component = app.state.model.schematic.document().components[0].clone();
-    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    let painted = painted_panel(|ui| component_checks(ui, &app.design_cx(), &component));
     assert!(painted.is_empty(), "unchecked: {painted}");
 
     let mut result = rspice_design::drc::DrcResult::new();
     app.state.model.design_checks.drc_results = Some(result.clone());
     app.state.model.design_checks.drc_checked_version =
         app.state.model.schematic.topology_version();
-    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    let painted = painted_panel(|ui| component_checks(ui, &app.design_cx(), &component));
     assert!(painted.is_empty(), "clean: {painted}");
 
     result.add_violation(rspice_design::drc::DrcViolation::new(
@@ -834,7 +837,7 @@ fn an_instance_has_a_checks_section_only_for_its_own_findings() {
         },
     ));
     app.state.model.design_checks.drc_results = Some(result);
-    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    let painted = painted_panel(|ui| component_checks(ui, &app.design_cx(), &component));
     assert_eq!(painted, "Checks\nConnectivity\n1 finding\n");
 }
 
@@ -851,8 +854,8 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
     let field = InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned());
 
     assert_eq!(field_value(&component, &field), "");
-    assert!(begin_edit(&mut app, id, field.clone()));
-    update_edit(&mut app, "85°C".to_owned());
+    assert!(begin_edit(&mut app.design_cx(), id, field.clone()));
+    update_edit(&mut app.design_cx(), "85°C".to_owned());
     assert_eq!(
         app.state.model.schematic.document().components[0],
         component
@@ -890,9 +893,9 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
     let field = InlineEditField::Parameters;
 
     assert_eq!(field_value(&component, &field), "");
-    assert!(begin_edit(&mut app, id, field.clone()));
+    assert!(begin_edit(&mut app.design_cx(), id, field.clone()));
     for candidate in ["m=2", "m=2 tc1=0.01"] {
-        update_edit(&mut app, candidate.to_owned());
+        update_edit(&mut app.design_cx(), candidate.to_owned());
         assert_eq!(
             app.state.model.schematic.document().components[0],
             component
@@ -1180,7 +1183,7 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
     app.state.model.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
     let component = app.state.model.schematic.document().components[0].clone();
 
-    let reason = component_tuning_action_block_reason(&app, &component)
+    let reason = component_tuning_action_block_reason(&app.design_cx(), &component)
         .expect("an unsupported typed quantity cannot expose an enabled Tune action");
 
     assert_eq!(
@@ -1203,8 +1206,8 @@ fn applying_a_field_reports_whether_the_design_actually_changed() {
     let id = app.state.model.schematic.document().components[0].id;
     let before = app.state.model.schematic.topology_version();
 
-    assert!(begin_edit(&mut app, id, InlineEditField::Value));
-    update_edit(&mut app, "10k".to_owned());
+    assert!(begin_edit(&mut app.design_cx(), id, InlineEditField::Value));
+    update_edit(&mut app.design_cx(), "10k".to_owned());
     assert!(app.state.commit_inline_component_edit().unwrap());
     assert_eq!(
         app.state.model.schematic.document().components[0].value,
@@ -1213,8 +1216,8 @@ fn applying_a_field_reports_whether_the_design_actually_changed() {
     assert!(app.state.model.schematic.topology_version() > before);
 
     let settled = app.state.model.schematic.topology_version();
-    assert!(begin_edit(&mut app, id, InlineEditField::Value));
-    update_edit(&mut app, "10k".to_owned());
+    assert!(begin_edit(&mut app.design_cx(), id, InlineEditField::Value));
+    update_edit(&mut app.design_cx(), "10k".to_owned());
     assert!(
         !app.state.commit_inline_component_edit().unwrap(),
         "rewriting the same text is not a change"
@@ -1281,7 +1284,7 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
         ["NJF_MODEL"]
     );
     let before = app.state.model.schematic.topology_version();
-    let error = apply_bound_model_choice(&mut app, id, "PJF_MODEL")
+    let error = apply_bound_model_choice(&mut app.design_cx(), id, "PJF_MODEL")
         .expect_err("P-channel JFET must not replace an N-channel JFET");
     assert!(error.contains("incompatible"), "{error}");
     assert_eq!(app.state.model.schematic.topology_version(), before);
@@ -1326,7 +1329,7 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
         ["DIODE_A", "VARACTOR_B"]
     );
     assert!(
-        apply_bound_model_choice(&mut app, 52, "VARACTOR_B")
+        apply_bound_model_choice(&mut app.design_cx(), 52, "VARACTOR_B")
             .expect("same-family model transition validates")
     );
 }
@@ -1375,7 +1378,9 @@ fn bound_model_choices_offer_a_binned_family_once() {
         ])
     );
 
-    assert!(apply_bound_model_choice(&mut app, 61, "nch").expect("the family validates"));
+    assert!(
+        apply_bound_model_choice(&mut app.design_cx(), 61, "nch").expect("the family validates")
+    );
     let component = app.state.model.schematic.document().components[0].clone();
     assert_eq!(
         component
@@ -1422,7 +1427,7 @@ fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
     let (mut app, id) = app_with_model_bound_instance();
     let before = app.state.model.schematic.topology_version();
     assert!(
-        apply_bound_model_choice(&mut app, id, "OPA189_B")
+        apply_bound_model_choice(&mut app.design_cx(), id, "OPA189_B")
             .expect("same opaque cell-model family is compatible")
     );
     let binding = app.state.model.schematic.document().components[0]
@@ -1446,7 +1451,7 @@ fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
 #[test]
 fn the_default_section_choice_removes_the_instance_override() {
     let (mut app, id) = app_with_model_bound_instance();
-    apply_bound_model_section(&mut app, id, "");
+    apply_bound_model_section(&mut app.design_cx(), id, "");
     assert_eq!(
         app.state.model.schematic.document().components[0]
             .library_cell
@@ -1464,10 +1469,10 @@ fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
     let id = app.state.model.schematic.document().components[0].id;
     app.state.model.schematic.init_undo_history();
     let before = app.state.model.schematic.document().components[0].clone();
-    assert!(begin_edit(&mut app, id, InlineEditField::Value));
+    assert!(begin_edit(&mut app.design_cx(), id, InlineEditField::Value));
 
     for text in ["1", "1k", "15k"] {
-        update_edit(&mut app, text.to_owned());
+        update_edit(&mut app.design_cx(), text.to_owned());
         assert_eq!(app.state.model.schematic.document().components[0], before);
     }
     assert!(app.state.commit_inline_component_edit().unwrap());
@@ -1779,14 +1784,14 @@ fn an_unbound_probe_states_its_missing_signal_as_a_problem() {
             SchematicProbe::new(5, Point::new(10, 20), "P1", None)
                 .expect("an unbound probe is well formed"),
         );
-    let nodes = accesskit_nodes(|ui| probe_panel(ui, &mut app, 5));
+    let nodes = accesskit_nodes(|ui| probe_panel(ui, &mut app.design_cx(), 5));
     assert!(
         nodes.iter().any(|(_, node)| {
             node.label() == Some("Signal") && node.description() == Some("Warning")
         }),
         "the unbound signal carries a warning"
     );
-    let painted = painted_panel(|ui| probe_panel(ui, &mut app, 5));
+    let painted = painted_panel(|ui| probe_panel(ui, &mut app.design_cx(), 5));
     for gone in [
         "PROBE-5",
         "Anchor",
@@ -2033,7 +2038,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
 fn the_component_title_states_the_occurrence_only_below_the_root() {
     let (mut app, id) = app_with_model_bound_instance();
     let sheet = sheet_connectivity(&app.state.model);
-    let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
+    let painted = painted_panel(|ui| component_panel(ui, &mut app.design_cx(), id, &sheet));
     let first = painted.lines().next().unwrap_or_default();
     assert!(
         first.starts_with("XU1") && !first.contains('/'),
@@ -2045,7 +2050,7 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
         CellViewRef::new("user", "afe_core", "schematic"),
         ViewType::Schematic,
     );
-    let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
+    let painted = painted_panel(|ui| component_panel(ui, &mut app.design_cx(), id, &sheet));
     assert!(
         painted
             .lines()
@@ -2112,4 +2117,216 @@ fn a_sheet_row_of_waived_errors_is_not_a_failure() {
         waived_at_ms: 1,
     });
     assert_eq!(findings_problem(&[&error]), Problem::Warning);
+}
+
+/// Two resistors on the design workspace, nothing selected.
+#[cfg(not(target_arch = "wasm32"))]
+fn two_resistors() -> (RSpiceApp, u64, u64) {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    let first = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    let second = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(200, 0));
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.session.editor.selection.clear();
+    (app, first, second)
+}
+
+/// The name the document holds for the instance `id`.
+#[cfg(not(target_arch = "wasm32"))]
+fn instance_name(app: &RSpiceApp, id: u64) -> String {
+    app.state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the fixture instance exists")
+        .name
+        .clone()
+}
+
+/// An inline rename of the instance `id` begun with `buffer` typed: legal
+/// when `rename` holds the name it would take, refused otherwise.
+#[cfg(not(target_arch = "wasm32"))]
+fn begin_rename(app: &mut RSpiceApp, id: u64, buffer: &str, rename: Option<&str>) {
+    let expected = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the fixture instance exists")
+        .clone();
+    let candidate = rename.map(|name| {
+        let mut candidate = expected.clone();
+        candidate.name = name.to_owned();
+        candidate
+    });
+    let authority = inline_edit_authority(&app.state.model);
+    app.state.workbench.inline_edit.begin(InlineEditSession {
+        expected,
+        field: InlineEditField::Instance,
+        authority,
+        description: "rename instance".to_owned(),
+        buffer: buffer.to_owned(),
+        error: rename.is_none().then(|| "Invalid name".to_owned()),
+        candidate,
+        widget: None,
+    });
+}
+
+/// ASK 11-1 (b): an inline edit the selection has moved off is committed
+/// before the shell lends the inspector its context, so the panel it then
+/// draws reads the committed design. With both instances selected, the
+/// selection's list names the renamed one in the same frame.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_inspector_draws_on_the_inline_edit_the_selection_moved_off() {
+    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+
+    let (mut app, first, second) = two_resistors();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(first);
+    begin_rename(&mut app, first, "R99", Some("R99"));
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(second);
+
+    let painted = painted_panel(|ui| {
+        app.contribute(
+            HostPoint::Inspector(InspectorScope::Workspace(Workspace::Design)),
+            ui,
+        );
+    });
+
+    assert!(
+        app.state.workbench.inline_edit.session().is_none(),
+        "the edit was committed"
+    );
+    assert_eq!(instance_name(&app, first), "R99");
+    assert!(
+        painted.lines().any(|line| line == "R99"),
+        "the panel drawn after the commit lists the renamed instance: {painted}"
+    );
+}
+
+/// A commit that fails selects its instance again and keeps it in the
+/// inspector, whatever the selection then reads as, so the draft can be
+/// corrected.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_failed_inline_commit_keeps_its_instance_in_the_inspector() {
+    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+
+    let (mut app, first, second) = two_resistors();
+    let name = instance_name(&app, first);
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(first);
+    begin_rename(&mut app, first, "1 bad", None);
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(second);
+
+    let painted = painted_panel(|ui| {
+        app.contribute(
+            HostPoint::Inspector(InspectorScope::Workspace(Workspace::Design)),
+            ui,
+        );
+    });
+
+    assert!(
+        app.state.workbench.inline_edit.session().is_some(),
+        "the refused draft is kept"
+    );
+    assert_eq!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
+        Some(first),
+        "the edited instance is selected again"
+    );
+    assert_eq!(app.state.design.inspector_holds_failed_edit, Some(first));
+    assert!(
+        painted.starts_with(name.as_str()),
+        "the inspector's title names the edited instance: {painted}"
+    );
+    assert!(
+        painted.lines().any(|line| line == "1 bad") && painted.contains("Invalid name"),
+        "the refused draft stays on show, with why it was refused: {painted}"
+    );
+}
+
+/// Each pass of the inspector says afresh whether the sheet's section takes
+/// its place: with nothing selected it does, and a pass with an instance
+/// selected clears what an earlier pass left. The shell takes the answer as
+/// it draws the sheet's section.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn each_inspector_pass_says_afresh_whether_the_sheet_takes_its_place() {
+    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+
+    let (mut app, first, _) = two_resistors();
+    let _ = painted_panel(|ui| show(ui, &mut app.design_cx()));
+    assert!(
+        app.state.design.inspector_yields_to_sheet,
+        "with nothing selected the sheet's section takes the inspector's place"
+    );
+
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(first);
+    let _ = painted_panel(|ui| show(ui, &mut app.design_cx()));
+    assert!(
+        !app.state.design.inspector_yields_to_sheet,
+        "a pass that inspects an instance must not keep an earlier pass's answer"
+    );
+
+    app.state.model.schematic.session.editor.selection.clear();
+    let _ = painted_panel(|ui| {
+        app.contribute(
+            HostPoint::Inspector(InspectorScope::Workspace(Workspace::Design)),
+            ui,
+        );
+    });
+    assert!(
+        !app.state.design.inspector_yields_to_sheet,
+        "the shell takes the answer as it draws the sheet's section"
+    );
 }

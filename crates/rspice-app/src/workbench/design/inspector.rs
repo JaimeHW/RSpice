@@ -28,22 +28,22 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::workspace::{
     commit_inline_component_edit, commit_pending_inspector_edit, inline_edit_authority,
     sync_active_schematic,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::design::DesignFeature;
 use crate::workbench::design_system::{
     Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row, property_row_captioned,
     property_row_combo, property_row_flagged, property_row_input_action,
     property_row_input_captioned, property_row_input_with_hint, property_row_problem,
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::framework::host::{Host, InspectorScope, Point};
-use crate::workbench::framework::requests::RevealModel;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::requests::{Drain, Request, RevealModel};
 use crate::workbench::slots::DesignState;
-use crate::workbench::state::{InlineEditField, WorkbenchSession, Workspace};
+use crate::workbench::state::{InlineEditField, InlineEditSession, WorkbenchSession, Workspace};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcViolation};
@@ -302,88 +302,110 @@ fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
 // Entry point
 // =============================================================================
 
-pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    if let Some(session) = app.state.workbench.inline_edit.session()
-        && (session.authority != inline_edit_authority(&app.state.model)
-            || app.state.model.schematic_edit_read_only()
-            || !app
-                .state
-                .model
-                .schematic
-                .document()
-                .components
-                .contains(&session.expected))
-    {
-        if session.candidate.as_ref() == Some(&session.expected) {
-            app.state.workbench.inline_edit.end();
-        } else {
-            muted_inspector_copy(
-                ui,
-                "The design changed under your edit. Your text was not applied.",
-            );
-            // Wrapped rather than elided: the draft is the reader's own unsaved
-            // text, and all of it has to stay readable until it is discarded.
-            crate::workbench::design_system::property_row_wrapped(
-                ui,
-                &session.expected.name,
-                &session.buffer,
-            );
-            if ui.button("Discard inspector draft").clicked() {
-                app.state.workbench.inline_edit.end();
-            }
-            return;
-        }
+/// Settle the inline edit before the shell lends the inspector its context,
+/// so the dispatcher's answers it reads are taken for the selection it then
+/// shows. An edit whose instance changed under it ends silently when nothing
+/// typed would be lost; one the selection has moved off is committed, and
+/// when that fails its instance is selected again and held in the inspector
+/// so the edit can be corrected. A symbol's inspector holds no inline edit.
+pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, DesignFeature>) {
+    cx.state.inspector_holds_failed_edit = None;
+    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        return;
     }
-    let mut sheet = sheet_connectivity(&app.state.model);
+    let Some(session) = cx.wb.inline_edit.session() else {
+        return;
+    };
+    if inline_edit_is_stale(cx.model, session) {
+        if session.candidate.as_ref() == Some(&session.expected) {
+            cx.wb.inline_edit.end();
+        }
+        return;
+    }
+    let editing = session.expected.id;
+    let sheet = sheet_connectivity(cx.model);
+    if subject(cx.model, &sheet.nets) == DesignSubject::Component(editing) {
+        return;
+    }
+    if commit_inline_component_edit(cx.model, cx.wb).is_err() {
+        cx.model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(editing);
+        cx.state.inspector_holds_failed_edit = Some(editing);
+    }
+}
+
+/// Whether the design changed under the inline edit `session`: the edit
+/// authority moved, the schematic became read-only, or the instance it
+/// edits is no longer the one the document holds.
+fn inline_edit_is_stale(model: &Model, session: &InlineEditSession) -> bool {
+    session.authority != inline_edit_authority(model)
+        || model.schematic_edit_read_only()
+        || !model
+            .schematic
+            .document()
+            .components
+            .contains(&session.expected)
+}
+
+/// The request that commits what the sheet's section holds typed, raised
+/// by a pass of the design inspector that shows something other than the
+/// sheet. The shell answers it once the inspector has drawn.
+#[derive(Clone, Debug)]
+pub(crate) struct CommitSheetSection(pub(crate) egui::Context);
+
+impl Request for CommitSheetSection {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    cx.state.inspector_yields_to_sheet = false;
+    // prepare() ended a stale edit with nothing typed; one with a draft
+    // says so and offers to discard it.
+    if let Some(session) = cx.wb.inline_edit.session()
+        && inline_edit_is_stale(cx.model, session)
+        && session.candidate.as_ref() != Some(&session.expected)
+    {
+        muted_inspector_copy(
+            ui,
+            "The design changed under your edit. Your text was not applied.",
+        );
+        // Wrapped rather than elided: the draft is the reader's own unsaved
+        // text, and all of it has to stay readable until it is discarded.
+        crate::workbench::design_system::property_row_wrapped(
+            ui,
+            &session.expected.name,
+            &session.buffer,
+        );
+        if ui.button("Discard inspector draft").clicked() {
+            cx.wb.inline_edit.end();
+        }
+        return;
+    }
+    let sheet = sheet_connectivity(cx.model);
     if let Some(reason) = sheet.unresolved.as_deref() {
         unresolved_projection_note(ui, reason);
     }
-    let mut inspected = subject(&app.state.model, &sheet.nets);
-
-    // Resolve a pending field before the selection can adopt a different owner.
-    let owner = match inspected {
-        DesignSubject::Component(id) => Some(id),
-        _ => None,
+    let inspected = match cx.state.inspector_holds_failed_edit {
+        Some(editing) => DesignSubject::Component(editing),
+        None => subject(cx.model, &sheet.nets),
     };
-    if let Some(editing) = app
-        .state
-        .workbench
-        .inline_edit
-        .session()
-        .map(|session| session.expected.id)
-        && owner != Some(editing)
-    {
-        match commit_inline_component_edit(&mut app.state.model, &mut app.state.workbench) {
-            Ok(true) => sheet = sheet_connectivity(&app.state.model),
-            Ok(false) => {}
-            Err(_) => {
-                app.state
-                    .model
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .select_only_component(editing);
-                inspected = DesignSubject::Component(editing);
-            }
-        }
-    }
 
     if inspected != DesignSubject::Sheet {
-        app.commit_inspector_section(InspectorScope::Document(Workspace::Design), ui.ctx());
+        cx.wb.outbox.push(CommitSheetSection(ui.ctx().clone()));
     }
 
     match inspected {
-        DesignSubject::Component(id) => component_panel(ui, app, id, &sheet),
-        DesignSubject::Net(name) => net_panel(ui, app, &name, &sheet.nets),
-        DesignSubject::Note(id) => note_panel(ui, app, id),
-        DesignSubject::Shape(id) => shape_panel(ui, app, id),
-        DesignSubject::Probe(id) => probe_panel(ui, app, id),
-        DesignSubject::Multi => multi_panel(ui, app),
-        DesignSubject::Sheet => app.contribute(
-            Point::Inspector(InspectorScope::Document(Workspace::Design)),
-            ui,
-        ),
+        DesignSubject::Component(id) => component_panel(ui, cx, id, &sheet),
+        DesignSubject::Net(name) => net_panel(ui, cx, &name, &sheet.nets),
+        DesignSubject::Note(id) => note_panel(ui, cx, id),
+        DesignSubject::Shape(id) => shape_panel(ui, cx, id),
+        DesignSubject::Probe(id) => probe_panel(ui, cx, id),
+        DesignSubject::Multi => multi_panel(ui, cx),
+        DesignSubject::Sheet => cx.state.inspector_yields_to_sheet = true,
     }
 }
 
@@ -609,30 +631,26 @@ pub(crate) use rspice_app_sheets::workbench::docks::inspector::design::sheet;
 // Multi-selection inspector
 // =============================================================================
 
-fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
+fn multi_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     // The docks share one reading position, so a selection reaching across a
     // sheet boundary — which a navigator net row can produce — is reported
     // here exactly as the navigator lists it.
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let selected: Vec<(u64, String, String)> = app
-        .state
+    let selected: Vec<(u64, String, String)> = cx
         .model
         .schematic
         .document()
         .components
         .iter()
         .filter(|component| {
-            app.state
-                .model
+            cx.model
                 .schematic
                 .session
                 .editor
                 .selection
                 .has_component(component.id)
         })
-        .filter(|component| {
-            sheet_visibility::object_is_in_scope(&app.state.model, scope, component.id)
-        })
+        .filter(|component| sheet_visibility::object_is_in_scope(cx.model, scope, component.id))
         .map(|component| {
             (
                 component.id,
@@ -642,11 +660,10 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect();
     let total = match scope {
-        SheetScope::AllSheets => app.state.model.schematic.session.editor.selection.count(),
-        SheetScope::ActiveSheet => app
-            .state
+        SheetScope::AllSheets => cx.model.schematic.session.editor.selection.count(),
+        SheetScope::ActiveSheet => cx
             .model
-            .selection_on_active_sheet(&app.state.model.schematic.session.editor.selection)
+            .selection_on_active_sheet(&cx.model.schematic.session.editor.selection)
             .count(),
     };
     // The instances are named only when the set holds something else too: a
@@ -677,7 +694,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             .on_hover_text(format!("Reduce the selection to {name}"));
     }
     if let Some(id) = reduce {
-        select_component(app, id);
+        select_component(cx, id);
     }
 }
 
@@ -685,9 +702,8 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
 // Documentation objects
 // =============================================================================
 
-fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
-    let Some(note) = app
-        .state
+fn note_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
+    let Some(note) = cx
         .model
         .schematic
         .document()
@@ -702,15 +718,14 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     section_block_gap(ui);
     property_row(ui, "Text", &note.text);
     property_row(ui, "Layer", note.layer.label());
-    sheet_row(ui, &app.state.model, id);
+    sheet_row(ui, cx.model, id);
     if let Some(review) = note.review.as_ref() {
         property_row(ui, "Review state", review.state.keyword());
     }
 }
 
-fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
-    let Some(shape) = app
-        .state
+fn shape_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
+    let Some(shape) = cx
         .model
         .schematic
         .document()
@@ -724,12 +739,11 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     object_title(ui, "Shape", Some(shape.kind().label()), None);
     section_block_gap(ui);
     property_row(ui, "Layer", shape.layer.label());
-    sheet_row(ui, &app.state.model, id);
+    sheet_row(ui, cx.model, id);
 }
 
-fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
-    let Some(probe) = app
-        .state
+fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
+    let Some(probe) = cx
         .model
         .schematic
         .document()
@@ -751,9 +765,9 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         bound.unwrap_or("not bound"),
         bound.is_none().then_some(Problem::Warning),
     );
-    sheet_row(ui, &app.state.model, id);
+    sheet_row(ui, cx.model, id);
 
-    let writable = !app.state.model.schematic_edit_read_only();
+    let writable = !cx.model.schematic_edit_read_only();
     let mut enabled = probe.enabled;
     section_block_gap(ui);
     let enabled_response = ui.add_enabled(
@@ -774,14 +788,16 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         plot_response.on_disabled_hover_text("Save the signal before choosing to plot it.");
     }
     if enabled != probe.enabled || plot_on_materialization != probe.plot_on_materialization {
-        let changed =
-            app.state
-                .model
-                .schematic
-                .edit_probe_intent(id, enabled, plot_on_materialization);
+        let changed = cx
+            .model
+            .schematic
+            .edit_probe_intent(id, enabled, plot_on_materialization);
         if changed {
-            sync_active_schematic(&mut app.state.model, &mut app.state.workbench);
-            app.invalidate_simulation_preflight();
+            sync_active_schematic(cx.model, cx.wb);
+            rspice_app_runs::workbench::preflight::invalidate(
+                &mut cx.runs.preflight,
+                &mut *cx.handles.run_controller,
+            );
         }
     }
 
@@ -796,16 +812,19 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         {
             if writable {
                 let changed = crate::schematic::view::ensure_probe_visible_with_feedback(
-                    &mut crate::schematic::view::canvas_parts(&mut app.state),
+                    &mut crate::schematic::view::canvas_parts_in(cx),
                     expression,
                     expression,
                 );
                 if changed {
-                    app.invalidate_simulation_preflight();
+                    rspice_app_runs::workbench::preflight::invalidate(
+                        &mut cx.runs.preflight,
+                        &mut *cx.handles.run_controller,
+                    );
                 }
             } else {
                 crate::schematic::view::ensure_retained_probe_visible_with_feedback(
-                    &mut crate::schematic::view::canvas_parts(&mut app.state),
+                    &mut crate::schematic::view::canvas_parts_in(cx),
                     expression,
                     expression,
                 );

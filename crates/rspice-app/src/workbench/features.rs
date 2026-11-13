@@ -495,6 +495,19 @@ pub(super) fn show_inspector_reading<F: Registered>(
     }
 }
 
+/// [`show_inspector`], in a context holding the dispatcher's answers for the
+/// commands `F` reads when `reads(app)` says the section reads them, and
+/// both modal facts, as [`surface_cx`] takes them.
+pub(super) fn show_inspector_modal<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) {
+    if let Some(inspector) = F::registry().inspector_section() {
+        (inspector.show)(&mut surface_cx::<F>(app, reads), ui);
+    }
+}
+
 /// Draw `F`'s surface on the stage's `ui`, in a context holding both modal
 /// facts as the pass begins ([`surface_cx`]). The caller answers what it
 /// raised straight after.
@@ -568,11 +581,12 @@ pub(super) fn commit_inspector<F: Registered>(app: &mut RSpiceApp, ctx: &egui::C
 }
 
 /// The design feature's context for a test that draws one of its sections
-/// outside the shell, holding every answer the feature reads.
+/// outside the shell, holding every answer the feature reads and both modal
+/// facts.
 #[cfg(test)]
 impl RSpiceApp {
     pub(crate) fn design_cx(&mut self) -> Cx<'_, DesignFeature> {
-        cx_with_foreign_answers::<DesignFeature>(self, |_| true)
+        surface_cx::<DesignFeature>(self, |_| true)
     }
 }
 

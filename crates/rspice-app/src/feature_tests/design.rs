@@ -744,10 +744,13 @@ fn each_pass_of_the_surface_says_afresh_where_the_touch_strip_goes() {
     );
 }
 
-/// The canvas the strip lays out over never crosses the session store: a
-/// restored workbench holds none until its first pass draws one.
+/// What the design feature's passes leave for the shell never crosses the
+/// session store: the canvas the strip lays out over, whether the sheet's
+/// section takes the inspector's place, and the instance a failed inline
+/// commit holds. A restored workbench holds none of them until its first
+/// pass sets them.
 #[test]
-fn a_restored_session_holds_no_touch_strip_canvas() {
+fn a_restored_session_holds_none_of_the_design_passes_state() {
     #[derive(Default)]
     struct MemoryStorage(std::collections::HashMap<String, String>);
 
@@ -770,6 +773,8 @@ fn a_restored_session_holds_no_touch_strip_canvas() {
     let mut app = RSpiceApp::test_instance();
     app.state.design.touch_strip_canvas =
         Some(Rect::from_min_size(pos2(0.0, 40.0), vec2(640.0, 440.0)));
+    app.state.design.inspector_yields_to_sheet = true;
+    app.state.design.inspector_holds_failed_edit = Some(7);
     let mut storage = MemoryStorage::default();
     app.state.store_session(&mut storage);
 
@@ -777,4 +782,6 @@ fn a_restored_session_holds_no_touch_strip_canvas() {
         .expect("RSpice must be able to restore a session it just saved");
 
     assert_eq!(restored.design.touch_strip_canvas, None);
+    assert!(!restored.design.inspector_yields_to_sheet);
+    assert_eq!(restored.design.inspector_holds_failed_edit, None);
 }
