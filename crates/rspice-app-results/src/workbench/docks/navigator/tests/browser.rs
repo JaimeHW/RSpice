@@ -1,8 +1,13 @@
 //! The whole browser in whole frames: the tree folding and opening, a glob
 //! narrowing it, and the height its rows keep at every interface scale.
 
+use rspice_results::result_presentation::ResultArtifactPresentationKey;
+use rspice_results_ui::selection::ResultBrowserSelectionKey;
+
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
-use crate::workbench::documents::result_document::ResultsTestHost;
+use crate::workbench::documents::result_document::{
+    AnalysisPresentationKey, ResultsTestHost, set_result_quantity_ticked, test_fixtures,
+};
 
 use super::super::results::results;
 
@@ -239,4 +244,24 @@ fn rows_are_dense_and_hold_their_text_at_every_interface_scale() {
             row.height()
         );
     }
+}
+
+#[test]
+fn a_net_on_the_lanes_is_a_ticked_row() {
+    let mut host = ResultsTestHost::default();
+    host.model
+        .simulation
+        .start_run()
+        .add_analysis(test_fixtures::events_analysis());
+    let run = host.model.simulation.active_run().expect("a run");
+    let clk = ResultBrowserSelectionKey::Artifact(ResultArtifactPresentationKey::new(
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+        "payload/transient-events/net/D(clk)",
+    ));
+    set_result_quantity_ticked(&mut host.results_parts(), &clk, true);
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    // The band counts it, so a set saves it and a drag carries it.
+    assert!(find(&nodes, "1 ticked").is_some(), "{:?}", labels(&nodes));
 }

@@ -7,6 +7,7 @@ use crate::product::DatasetId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::docks::RunDetailsDialogState;
+use crate::workbench::documents::result_document::browser_plot::result_quantity_ticked;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsParts, analysis_default_unit, browser_signal_unit,
     retained_evidence_is_valid,
@@ -26,10 +27,10 @@ use super::results_actions::{
 };
 use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
-    result_analysis_browser_status, result_analysis_completeness, result_analysis_domain,
-    result_browser_manifest_row, result_quantity_kind_label, result_run_completeness,
-    result_run_operational_label, retained_result_artifacts, show_virtualized_result_signals,
-    signal_row, signal_rows,
+    is_plottable_artifact, result_analysis_browser_status, result_analysis_completeness,
+    result_analysis_domain, result_browser_manifest_row, result_quantity_kind_label,
+    result_run_completeness, result_run_operational_label, retained_result_artifacts,
+    show_virtualized_result_signals, signal_row, signal_rows,
 };
 use super::results_sets::signal_sets_menu;
 use super::results_tree::{
@@ -74,7 +75,10 @@ pub(in crate::workbench) fn results(
         state.results.session.clear_checked_signals();
     }
     let query = BrowserQuery::parse(state.workbench.navigator_filter());
-    let ticked = ticked_result_quantities(state.model, state.results);
+    let mut ticked = ticked_result_quantities(state.model, state.results);
+    // An event net's or a bus's row is ticked while its lane is on the plot,
+    // as a curve's row is while the curve is.
+    ticked.extend(plotted_event_rows(state));
     // What a set saves: the ticked quantities in the order the runs hold them.
     let ticked_ordered =
         ordered_checked_result_keys(&ticked, &state.model.simulation.retained.runs);
@@ -1411,6 +1415,31 @@ fn results_browser_toolbar(
 
 /// Tree or flat, one click apart: the layout is a pair of segments rather
 /// than a list to open.
+/// The active run's event-net and bus rows whose lanes are on the plot.
+pub(super) fn plotted_event_rows(state: &ResultsParts<'_>) -> Vec<ResultBrowserSelectionKey> {
+    let Some(run) = state.model.simulation.active_run() else {
+        return Vec::new();
+    };
+    run.analyses
+        .iter()
+        .filter(|analysis| {
+            matches!(
+                analysis.result_payload,
+                Some(crate::state::AnalysisResultPayload::TransientEvents { .. })
+            )
+        })
+        .flat_map(|analysis| {
+            retained_result_artifacts(
+                analysis,
+                AnalysisPresentationKey::new(run.dataset_id, analysis),
+            )
+        })
+        .filter(|artifact| is_plottable_artifact(artifact.identity.canonical_name()))
+        .map(|artifact| ResultBrowserSelectionKey::Artifact(artifact.identity))
+        .filter(|key| result_quantity_ticked(state, key))
+        .collect()
+}
+
 fn results_browser_layout_control(ui: &mut Ui, layout: ResultsBrowserLayout, width: f32) {
     let labels = ResultsBrowserLayout::ALL.map(ResultsBrowserLayout::label);
     let mut index = ResultsBrowserLayout::ALL
