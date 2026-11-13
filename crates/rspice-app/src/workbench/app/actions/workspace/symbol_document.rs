@@ -83,11 +83,6 @@ impl AppState {
         store_active_symbol_document(&mut self.design.symbol, &mut self.model, document)
     }
 
-    /// [`finish_symbol_parent_edit`] for the session.
-    pub(crate) fn finish_symbol_parent_edit(&mut self) {
-        finish_symbol_parent_edit(&mut self.design.symbol, &mut self.model);
-    }
-
     /// [`store_active_symbol_editor_bundle`] for the session.
     pub(crate) fn store_active_symbol_editor_bundle(
         &mut self,
@@ -120,75 +115,28 @@ impl AppState {
         )
     }
 
-    /// Publish one frame of a canvas gesture.
-    ///
-    /// The gesture is one edit however many frames publish it: the parents'
-    /// wiring is resolved at its first frame, every frame moves the held ends
-    /// from that baseline, and the canvas closes it with
-    /// [`AppState::finish_symbol_parent_edit`] when the pointer lets go.
-    pub(crate) fn store_symbol_canvas_frame(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &SymbolEditorMetadata,
-    ) -> Result<(), String> {
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        let key = self.model.workspace.content.active_key();
-        if self.design.symbol.history.parent_edit(&key).is_none() {
-            begin_symbol_parent_edit(&mut self.design.symbol, &mut self.model);
-        }
-        publish_active_symbol_edit(
-            &mut self.design.symbol,
-            &mut self.model,
-            &mut self.workbench,
-            document,
-            metadata,
-            &SymbolCommitIntent::default(),
-        )
-    }
-
-    /// [`active_symbol_save_checks`] for the session's model.
-    pub(crate) fn active_symbol_save_checks(
-        &self,
-        document: &SymbolDocument,
-        ports: &[PortSpec],
-    ) -> Vec<SymbolSaveCheck> {
-        active_symbol_save_checks(&self.model, document, ports)
-    }
-
     /// [`refuse_unsavable_active_symbol`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
         refuse_unsavable_active_symbol(&self.model)
     }
 
-    /// Publish a symbol revision, refusing on the first contract row that
-    /// fails.
-    ///
-    /// The refusal is the point: the dialog disables its primary control on
-    /// the same rows, so a command that published without consulting them
-    /// would be a second, more permissive save path for the same document.
+    /// [`publish_active_symbol_revision`] for the session.
+    #[cfg(test)]
     pub(crate) fn publish_active_symbol_revision(
         &mut self,
         document: &SymbolDocument,
         metadata: &mut SymbolEditorMetadata,
         revision_note: &str,
     ) -> Result<u64, String> {
-        let ports = self.active_symbol_ports();
-        if let Some(failed) = self
-            .active_symbol_save_checks(document, &ports)
-            .into_iter()
-            .find(|check| !check.passed)
-        {
-            return Err(failed.refusal());
-        }
-        let mut candidate = metadata.clone();
-        let revision = candidate.publish_revision(document, revision_note)?;
-        self.store_active_symbol_editor_bundle(document, &candidate)?;
-        *metadata = candidate;
-        let key = self.model.workspace.content.active_key();
-        self.design.symbol.history.mark_save_point(key);
-        Ok(revision)
+        publish_active_symbol_revision(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            document,
+            metadata,
+            revision_note,
+        )
     }
 
     /// The refusal message for the symbol editor's read-only banner, naming
@@ -238,14 +186,76 @@ impl AppState {
     }
 
     /// [`undo_active_symbol_document`] for the session.
+    #[cfg(test)]
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
         undo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
 
     /// [`redo_active_symbol_document`] for the session.
+    #[cfg(test)]
     pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
         redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
+}
+
+/// Publish one frame of a canvas gesture.
+///
+/// The gesture is one edit however many frames publish it: the parents'
+/// wiring is resolved at its first frame, every frame moves the held ends
+/// from that baseline, and the canvas closes it with
+/// [`finish_symbol_parent_edit`] when the pointer lets go.
+pub(crate) fn store_symbol_canvas_frame(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    document: &SymbolDocument,
+    metadata: &SymbolEditorMetadata,
+) -> Result<(), String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    let key = model.workspace.content.active_key();
+    if symbol.history.parent_edit(&key).is_none() {
+        begin_symbol_parent_edit(symbol, model);
+    }
+    publish_active_symbol_edit(
+        symbol,
+        model,
+        wb,
+        document,
+        metadata,
+        &SymbolCommitIntent::default(),
+    )
+}
+
+/// Publish a symbol revision, refusing on the first contract row that
+/// fails.
+///
+/// The refusal is the point: the dialog disables its primary control on
+/// the same rows, so a command that published without consulting them
+/// would be a second, more permissive save path for the same document.
+pub(crate) fn publish_active_symbol_revision(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    document: &SymbolDocument,
+    metadata: &mut SymbolEditorMetadata,
+    revision_note: &str,
+) -> Result<u64, String> {
+    let ports = active_symbol_ports(model);
+    if let Some(failed) = active_symbol_save_checks(model, document, &ports)
+        .into_iter()
+        .find(|check| !check.passed)
+    {
+        return Err(failed.refusal());
+    }
+    let mut candidate = metadata.clone();
+    let revision = candidate.publish_revision(document, revision_note)?;
+    store_active_symbol_editor_bundle(symbol, model, wb, document, &candidate)?;
+    *metadata = candidate;
+    let key = model.workspace.content.active_key();
+    symbol.history.mark_save_point(key);
+    Ok(revision)
 }
 
 /// The ports the interface its schematic declares gives the active symbol.

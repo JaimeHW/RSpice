@@ -25,7 +25,8 @@ use rspice_schematic_editor::view::{
     viewport::Viewport,
 };
 
-use super::{AppState, PortSpec, SymbolDocument, SymbolEditorMetadata, SymbolLibrary};
+use super::{PortSpec, SymbolDocument, SymbolEditorMetadata, SymbolLibrary};
+use crate::schematic::view::{CanvasFacts, CanvasParts};
 use crate::state::{SchematicNetHighlighting, SchematicProbe};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -51,7 +52,7 @@ pub(super) struct InPlaceFrame {
 /// place.
 pub(super) fn frame(
     ui: &Ui,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     rect: Rect,
     response: &egui::Response,
 ) -> Option<InPlaceFrame> {
@@ -115,7 +116,7 @@ fn frame_world_rect(
 /// The parent, dimmed, and the symbol over it at full strength.
 pub(super) fn draw(
     ui: &Ui,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     frame: &InPlaceFrame,
     document: &SymbolDocument,
     editor: &SymbolEditorMetadata,
@@ -143,7 +144,7 @@ pub(super) fn draw(
 fn draw_parent(
     painter: &egui::Painter,
     frame: &InPlaceFrame,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let Some(session) = state.symbol_in_place() else {
@@ -205,7 +206,7 @@ fn unannotated_probe(_: &SchematicProbe) -> ProbeVisualStatus {
 }
 
 /// Ask what becomes of unsaved symbol edits before the in-place edit ends.
-pub(super) fn show_leaving_question(ctx: &egui::Context, state: &mut AppState) {
+pub(super) fn show_leaving_question(ctx: &egui::Context, state: &mut CanvasParts<'_>) {
     let Some(session) = state
         .symbol_in_place()
         .filter(|session| session.leaving.is_some())

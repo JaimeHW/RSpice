@@ -188,7 +188,14 @@ pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 pub(crate) use actions::workspace::{
     copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
     selected_hierarchy_master, selected_instance_veriloga_source,
-    symbol_in_place::{SymbolInPlaceRefusal, selected_symbol_in_place_target},
+    symbol_document::{
+        active_symbol_save_checks, finish_symbol_parent_edit, publish_active_symbol_revision,
+        record_symbol_edit, store_symbol_canvas_frame, symbol_editor_request_source,
+    },
+    symbol_in_place::{
+        SymbolInPlace, SymbolInPlaceRefusal, in_place_placement, in_place_session,
+        in_place_session_mut, selected_symbol_in_place_target,
+    },
     sync_active_schematic, veriloga_master_of_component, veriloga_source_for_component,
 };
 pub(crate) use dialogs::find_replace::find_replace_matches;

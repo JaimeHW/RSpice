@@ -10,8 +10,12 @@ mod tests;
 
 use crate::state::{CellViewRef, ComponentType, ViewType};
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
-use super::symbol_document::SymbolUiState;
+use super::symbol_document::{
+    SymbolUiState, load_active_symbol_editor_metadata, redo_active_symbol_document,
+    refuse_unsavable_active_symbol, store_active_symbol_editor_bundle, undo_active_symbol_document,
+};
 use super::{NavigationParts, commit_pending_inspector_edit};
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 
@@ -286,16 +290,6 @@ impl AppState {
         in_place_session(&self.design.symbol.in_place, &self.model)
     }
 
-    /// [`in_place_session_mut`] for the session's model.
-    pub(crate) fn symbol_in_place_mut(&mut self) -> Option<&mut SymbolInPlace> {
-        in_place_session_mut(&mut self.design.symbol.in_place, &self.model)
-    }
-
-    /// [`in_place_placement`] for the session's model.
-    pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
-        in_place_placement(self.symbol_in_place()?, &self.model)
-    }
-
     /// [`NavigationParts::edit_selected_symbol_in_place`] for the session.
     pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
         self.navigation().edit_selected_symbol_in_place()
@@ -322,109 +316,46 @@ impl AppState {
         self.navigation().request_symbol_in_place_exit(exit);
     }
 
-    /// Save, then leave: the symbol editor's own save transaction runs, and
-    /// the session ends when it publishes.
-    pub(crate) fn save_and_leave_symbol_in_place(&mut self) {
-        let Some(exit) = self
-            .symbol_in_place_mut()
-            .and_then(|session| session.leaving.take())
-        else {
-            return;
-        };
-        if let Some(refusal) = self.refuse_unsavable_active_symbol() {
-            self.prompt(refusal);
-            return;
-        }
-        if let Some(session) = self.symbol_in_place_mut() {
-            session.exit_after_save = Some(exit);
-        }
-        self.design.symbol.editor.save_dialog_open = true;
-        self.design.symbol.editor.save_error = None;
-    }
-
-    /// Put the symbol back as the session found it, or as it was last saved
-    /// in it, then leave.
+    /// [`NavigationParts::discard_and_leave_symbol_in_place`] for the session.
+    #[cfg(test)]
     pub(crate) fn discard_and_leave_symbol_in_place(&mut self) {
-        let Some(exit) = self
-            .symbol_in_place_mut()
-            .and_then(|session| session.leaving.take())
-        else {
-            return;
-        };
-        match self.discard_symbol_in_place_edits() {
-            Ok(()) => self.navigation().finish_symbol_in_place(exit),
-            Err(error) => self.prompt(format!("The symbol edits were not discarded: {error}")),
-        }
+        self.navigation().discard_and_leave_symbol_in_place();
     }
+}
 
-    /// Stay in the session: the question is withdrawn and nothing changes.
-    pub(crate) fn stay_in_symbol_in_place(&mut self) {
-        if let Some(session) = self.symbol_in_place_mut() {
-            session.leaving = None;
+/// Walk the open symbol's history back to the in-place baseline, then store
+/// the baseline itself where a stack trimmed to its cap cannot walk that far.
+fn discard_symbol_in_place_edits(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) -> Result<(), String> {
+    let Some(session) = in_place_session(&symbol.in_place, model) else {
+        return Ok(());
+    };
+    let key = session.symbol.key();
+    let depth = session.baseline_depth;
+    let baseline = session.baseline.clone();
+    while symbol.history.undo_depth(&key) > depth {
+        if !undo_active_symbol_document(symbol, model)? {
+            break;
         }
     }
-
-    /// The save dialog published the symbol: what it published is the new
-    /// baseline, and a save asked for on the way out finishes leaving.
-    pub(crate) fn symbol_in_place_saved(&mut self) {
-        let Some(symbol) = self.symbol_in_place().map(|session| session.symbol.clone()) else {
-            return;
-        };
-        let depth = self.design.symbol.history.undo_depth(&symbol.key());
-        let baseline = self
-            .model
-            .load_symbol_document(&symbol)
-            .and_then(|document| {
-                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
-                Ok((document, metadata))
-            });
-        let Some(session) = self.symbol_in_place_mut() else {
-            return;
-        };
-        if let Ok(baseline) = baseline {
-            session.baseline = baseline;
-            session.baseline_depth = depth;
-        }
-        if let Some(exit) = session.exit_after_save.take() {
-            self.navigation().finish_symbol_in_place(exit);
+    while symbol.history.undo_depth(&key) < depth {
+        if !redo_active_symbol_document(symbol, model)? {
+            break;
         }
     }
-
-    /// The save dialog closed without publishing: the author stays.
-    pub(crate) fn symbol_in_place_save_cancelled(&mut self) {
-        if let Some(session) = self.symbol_in_place_mut() {
-            session.exit_after_save = None;
-        }
+    // The edits are gone, not waiting to be redone.
+    symbol.history.discard_redo(&key);
+    // A stack trimmed to its cap cannot walk back that far; the
+    // baseline itself is what the symbol returns to.
+    let document = model.load_active_symbol_document()?;
+    let metadata = load_active_symbol_editor_metadata(model, &document)?;
+    if (document, metadata) != baseline {
+        store_active_symbol_editor_bundle(symbol, model, wb, &baseline.0, &baseline.1)?;
     }
-
-    fn discard_symbol_in_place_edits(&mut self) -> Result<(), String> {
-        let Some(session) = self.symbol_in_place() else {
-            return Ok(());
-        };
-        let key = session.symbol.key();
-        let depth = session.baseline_depth;
-        let baseline = session.baseline.clone();
-        while self.design.symbol.history.undo_depth(&key) > depth {
-            if !self.undo_active_symbol_document()? {
-                break;
-            }
-        }
-        while self.design.symbol.history.undo_depth(&key) < depth {
-            if !self.redo_active_symbol_document()? {
-                break;
-            }
-        }
-        // The edits are gone, not waiting to be redone.
-        self.design.symbol.history.discard_redo(&key);
-        // A stack trimmed to its cap cannot walk back that far; the
-        // baseline itself is what the symbol returns to.
-        let document = self.model.load_active_symbol_document()?;
-        let metadata = self.load_active_symbol_editor_metadata(&document)?;
-        if (document, metadata) != baseline {
-            self.store_active_symbol_editor_bundle(&baseline.0, &baseline.1)?;
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Whether the session `symbol` holds over the open document has edits the
@@ -542,6 +473,84 @@ impl NavigationParts<'_> {
             }
         } else {
             self.finish_symbol_in_place(exit);
+        }
+    }
+
+    /// Save, then leave: the symbol editor's own save transaction runs, and
+    /// the session ends when it publishes.
+    pub(crate) fn save_and_leave_symbol_in_place(&mut self) {
+        let Some(exit) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model)
+            .and_then(|session| session.leaving.take())
+        else {
+            return;
+        };
+        if let Some(refusal) = refuse_unsavable_active_symbol(self.model) {
+            self.wb.prompt(refusal);
+            return;
+        }
+        if let Some(session) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model) {
+            session.exit_after_save = Some(exit);
+        }
+        self.restore.symbol.editor.save_dialog_open = true;
+        self.restore.symbol.editor.save_error = None;
+    }
+
+    /// Put the symbol back as the session found it, or as it was last saved
+    /// in it, then leave.
+    pub(crate) fn discard_and_leave_symbol_in_place(&mut self) {
+        let Some(exit) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model)
+            .and_then(|session| session.leaving.take())
+        else {
+            return;
+        };
+        match discard_symbol_in_place_edits(self.restore.symbol, self.model, self.wb) {
+            Ok(()) => self.finish_symbol_in_place(exit),
+            Err(error) => self
+                .wb
+                .prompt(format!("The symbol edits were not discarded: {error}")),
+        }
+    }
+
+    /// Stay in the session: the question is withdrawn and nothing changes.
+    pub(crate) fn stay_in_symbol_in_place(&mut self) {
+        if let Some(session) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model) {
+            session.leaving = None;
+        }
+    }
+
+    /// The save dialog published the symbol: what it published is the new
+    /// baseline, and a save asked for on the way out finishes leaving.
+    pub(crate) fn symbol_in_place_saved(&mut self) {
+        let Some(symbol) = in_place_session(&self.restore.symbol.in_place, self.model)
+            .map(|session| session.symbol.clone())
+        else {
+            return;
+        };
+        let depth = self.restore.symbol.history.undo_depth(&symbol.key());
+        let baseline = self
+            .model
+            .load_symbol_document(&symbol)
+            .and_then(|document| {
+                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
+                Ok((document, metadata))
+            });
+        let Some(session) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model)
+        else {
+            return;
+        };
+        if let Ok(baseline) = baseline {
+            session.baseline = baseline;
+            session.baseline_depth = depth;
+        }
+        if let Some(exit) = session.exit_after_save.take() {
+            self.finish_symbol_in_place(exit);
+        }
+    }
+
+    /// The save dialog closed without publishing: the author stays.
+    pub(crate) fn symbol_in_place_save_cancelled(&mut self) {
+        if let Some(session) = in_place_session_mut(&mut self.restore.symbol.in_place, self.model) {
+            session.exit_after_save = None;
         }
     }
 

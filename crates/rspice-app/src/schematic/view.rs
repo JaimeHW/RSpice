@@ -76,8 +76,7 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
-pub(crate) use self::parts::canvas_parts;
-use self::parts::{CanvasFacts, canvas_facts};
+pub(crate) use self::parts::{CanvasFacts, CanvasParts, canvas_facts, canvas_parts};
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,

@@ -80,7 +80,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
 
     let label = symbol_canvas_accessibility_label(
         &document,
-        &state,
+        &crate::schematic::view::canvas_facts(&state),
         false,
         crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,

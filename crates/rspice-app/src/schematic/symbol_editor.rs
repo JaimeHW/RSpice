@@ -10,6 +10,7 @@ use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use super::symbols::SymbolLibrary;
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts, canvas_parts};
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme;
 use crate::ui::widgets::DialogChoice;
@@ -22,7 +23,7 @@ use rspice_schematic_editor::symbol_editor::{draw_canvas, update_viewport};
 
 fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     read_only: bool,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
@@ -114,7 +115,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
             .unwrap_or_else(|_| SymbolDocument::generated_from_ports(&ports));
     }
 
-    interaction::bind_active_canvas(state);
+    interaction::bind_active_canvas(&mut canvas_parts(state));
     // The stage is full-bleed: tools live in the workspace toolbar, the pin
     // contract in the left panel, and object editing in the inspector, so
     // the canvas keeps the whole document area.
@@ -127,7 +128,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         let navigation = state.model.preferences.canvas_navigation();
         // Edited in place, the canvas frames the parent sheet and the symbol
         // stands where its instance does.
-        let in_place = in_place::frame(ui, state, rect, &response);
+        let in_place = in_place::frame(ui, &mut canvas_parts(state), rect, &response);
         let viewport = match &in_place {
             Some(frame) => frame.symbol,
             None => update_viewport(
@@ -139,10 +140,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 navigation,
             ),
         };
-        interaction::handle_canvas(state, &mut document, &mut editor, viewport, &response);
+        interaction::handle_canvas(
+            &mut canvas_parts(state),
+            &mut document,
+            &mut editor,
+            viewport,
+            &response,
+        );
         match &in_place {
             Some(frame) => {
-                in_place::draw(ui, state, frame, &document, &editor, &ports, symbol_library);
+                in_place::draw(
+                    ui,
+                    &canvas_facts(state),
+                    frame,
+                    &document,
+                    &editor,
+                    &ports,
+                    symbol_library,
+                );
             }
             None => draw_canvas(
                 ui,
@@ -173,7 +188,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 ui.is_enabled(),
                 symbol_canvas_accessibility_label(
                     &document,
-                    state,
+                    &canvas_facts(state),
                     state.active_view_read_only(),
                     shortcut_platform,
                     operating_system,
@@ -191,13 +206,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
     // No breadcrumb overlay: the document tab and the inspector's eyebrow
     // both name the view this canvas is drawing.
     surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
-    show_save_symbol_dialog(ui.ctx(), state, &document, &mut editor, &ports);
-    in_place::show_leaving_question(ui.ctx(), state);
+    show_save_symbol_dialog(
+        ui.ctx(),
+        &mut canvas_parts(state),
+        &document,
+        &mut editor,
+        &ports,
+    );
+    in_place::show_leaving_question(ui.ctx(), &mut canvas_parts(state));
 }
 
 fn show_save_symbol_dialog(
     ctx: &egui::Context,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     document: &SymbolDocument,
     editor: &mut SymbolEditorMetadata,
     ports: &[PortSpec],
@@ -223,7 +244,7 @@ fn show_save_symbol_dialog(
                     state.design.symbol.editor.save_dialog_open = false;
                     state.design.symbol.editor.save_revision_note.clear();
                     state.design.symbol.editor.save_error = None;
-                    state.record(
+                    state.model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         format!("Saved symbol revision {revision}"),

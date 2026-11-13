@@ -8,15 +8,24 @@
 //!
 //! What only asks or paints, such as which rows the canvas menu offers or
 //! the scene, reads [`CanvasFacts`]: the same parts, shared.
+//!
+//! The symbol canvas, in its own view or in place on a parent sheet, takes
+//! its gestures over the same parts.
 
-use crate::state::{BusDeclaration, BusParseError, CellViewRef, Point};
+use crate::state::{
+    BusDeclaration, BusParseError, CellViewRef, Point, PortSpec, SymbolDocument,
+    SymbolEditorMetadata,
+};
 use crate::workbench::{
     app::{
-        SymbolInPlaceRefusal, deny_read_only_edit, hierarchy_master_for_component,
-        place_floating_paste, reconcile_conductor_route, selected_hierarchy_master,
-        selected_instance_veriloga_source, selected_symbol_in_place_target, start_canvas_bus,
-        start_canvas_wire, sync_active_schematic, veriloga_master_of_component,
-        veriloga_source_for_component,
+        SymbolInPlace, SymbolInPlaceRefusal, active_symbol_save_checks, deny_read_only_edit,
+        finish_symbol_parent_edit, hierarchy_master_for_component, in_place_placement,
+        in_place_session, in_place_session_mut, place_floating_paste,
+        publish_active_symbol_revision, reconcile_conductor_route, record_symbol_edit,
+        selected_hierarchy_master, selected_instance_veriloga_source,
+        selected_symbol_in_place_target, start_canvas_bus, start_canvas_wire,
+        store_symbol_canvas_frame, symbol_editor_request_source, sync_active_schematic,
+        veriloga_master_of_component, veriloga_source_for_component,
     },
     app_state::{AppState, DragType, Model, model_design_view},
     commands::vocabulary::command_registry,
@@ -25,6 +34,9 @@ use crate::workbench::{
     state::WorkbenchSession,
 };
 use rspice_design::drc::{DrcLocation, DrcSeverity};
+use rspice_design::symbol::publication::SymbolSaveCheck;
+use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
+use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 use rspice_schematic_editor::view::design_view::DesignView;
 use rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag;
 
@@ -100,6 +112,12 @@ impl<'a> CanvasFacts<'a> {
 
     pub(crate) fn active_view_read_only(&self) -> bool {
         self.model.active_view_read_only()
+    }
+
+    /// The in-place session the open symbol belongs to.
+    pub(crate) fn symbol_in_place(&self) -> Option<&'a SymbolInPlace> {
+        let design = self.design;
+        in_place_session(&design.symbol.in_place, self.model)
     }
 
     /// Whether a selection drag is under way.
@@ -234,6 +252,107 @@ impl CanvasParts<'_> {
         self.design
             .navigation_parts(self.model, self.workbench, self.runs)
             .ascend_workspace_level();
+    }
+
+    /// [`symbol_editor_request_source`] over these parts.
+    pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
+        symbol_editor_request_source(self.model, self.workbench)
+    }
+
+    /// [`active_symbol_save_checks`] over these parts.
+    pub(crate) fn active_symbol_save_checks(
+        &self,
+        document: &SymbolDocument,
+        ports: &[PortSpec],
+    ) -> Vec<SymbolSaveCheck> {
+        active_symbol_save_checks(self.model, document, ports)
+    }
+
+    /// [`publish_active_symbol_revision`] over these parts.
+    pub(crate) fn publish_active_symbol_revision(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &mut SymbolEditorMetadata,
+        revision_note: &str,
+    ) -> Result<u64, String> {
+        publish_active_symbol_revision(
+            &mut self.design.symbol,
+            self.model,
+            self.workbench,
+            document,
+            metadata,
+            revision_note,
+        )
+    }
+
+    /// [`finish_symbol_parent_edit`] over these parts.
+    pub(crate) fn finish_symbol_parent_edit(&mut self) {
+        finish_symbol_parent_edit(&mut self.design.symbol, self.model);
+    }
+
+    /// [`record_symbol_edit`] over these parts.
+    pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
+        record_symbol_edit(&mut self.design.symbol, self.model, before);
+    }
+
+    /// [`store_symbol_canvas_frame`] over these parts.
+    pub(crate) fn store_symbol_canvas_frame(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &SymbolEditorMetadata,
+    ) -> Result<(), String> {
+        store_symbol_canvas_frame(
+            &mut self.design.symbol,
+            self.model,
+            self.workbench,
+            document,
+            metadata,
+        )
+    }
+
+    /// The in-place session the open symbol belongs to.
+    pub(crate) fn symbol_in_place(&self) -> Option<&SymbolInPlace> {
+        in_place_session(&self.design.symbol.in_place, self.model)
+    }
+
+    /// [`CanvasParts::symbol_in_place`], to write to.
+    pub(crate) fn symbol_in_place_mut(&mut self) -> Option<&mut SymbolInPlace> {
+        in_place_session_mut(&mut self.design.symbol.in_place, self.model)
+    }
+
+    /// Where the edited instance puts its symbol on the parent.
+    pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
+        in_place_placement(self.symbol_in_place()?, self.model)
+    }
+
+    pub(crate) fn save_and_leave_symbol_in_place(&mut self) {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .save_and_leave_symbol_in_place();
+    }
+
+    pub(crate) fn discard_and_leave_symbol_in_place(&mut self) {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .discard_and_leave_symbol_in_place();
+    }
+
+    pub(crate) fn stay_in_symbol_in_place(&mut self) {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .stay_in_symbol_in_place();
+    }
+
+    pub(crate) fn symbol_in_place_saved(&mut self) {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .symbol_in_place_saved();
+    }
+
+    pub(crate) fn symbol_in_place_save_cancelled(&mut self) {
+        self.design
+            .navigation_parts(self.model, self.workbench, self.runs)
+            .symbol_in_place_save_cancelled();
     }
 
     /// The parts the results workspace's commands write.

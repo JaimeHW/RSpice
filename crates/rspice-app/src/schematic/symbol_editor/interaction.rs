@@ -1,19 +1,19 @@
 //! App validation, undo and publication for symbol canvas requests.
 
+use crate::schematic::view::CanvasParts;
 use crate::state::{SymbolDocument, SymbolEditorMetadata};
-use crate::workbench::AppState;
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source, canvas_request, edit_canvas,
 };
 
-pub(super) fn bind_active_canvas(state: &mut AppState) {
+pub(super) fn bind_active_canvas(state: &mut CanvasParts<'_>) {
     let source = state.symbol_editor_request_source();
     bind_canvas_source(&mut state.design.symbol.editor, source);
 }
 
 pub(super) fn handle_canvas(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
     viewport: SymbolViewport,
@@ -34,7 +34,7 @@ pub(super) fn handle_canvas(
 }
 
 fn apply_canvas_request(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
     request: SymbolCanvasRequest,

@@ -1,5 +1,6 @@
 //! Symbol canvas transactions: pointer gestures, undo grouping and stale-source rejection.
 
+use super::super::AppState;
 use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolPin, SymbolShape, View, ViewType,
@@ -35,7 +36,7 @@ fn open_symbol() -> AppState {
             &SymbolEditorMetadata::for_document(&document),
         )
         .unwrap();
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     state
 }
 
@@ -60,7 +61,12 @@ fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
 fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
     let mut document = state.model.load_active_symbol_document().unwrap();
     let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
-    apply_canvas_request(state, &mut document, &mut metadata, request);
+    apply_canvas_request(
+        &mut crate::schematic::view::canvas_parts(state),
+        &mut document,
+        &mut metadata,
+        request,
+    );
 }
 
 #[test]
@@ -69,7 +75,7 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     let before = state.model.load_active_symbol_document().unwrap();
     state.design.symbol.editor.dragging_origin = true;
     for point in [Point::new(10, 20), Point::new(20, 30)] {
-        bind_active_canvas(&mut state);
+        bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
         let request = request(
             &state,
             SymbolCanvasInput {
@@ -144,13 +150,13 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    bind_active_canvas(&mut state);
+                    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
                     // accessibility-pointer-shim: synthetic input for the canvas handler test.
                     let response = ui.allocate_rect(viewport().rect, egui::Sense::click_and_drag());
                     let mut document = state.model.load_active_symbol_document().unwrap();
                     let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
                     handle_canvas(
-                        &mut state,
+                        &mut crate::schematic::view::canvas_parts(&mut state),
                         &mut document,
                         &mut metadata,
                         viewport(),
@@ -205,7 +211,7 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     let pending = request(
         &state,
         SymbolCanvasInput {
@@ -215,7 +221,7 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     );
     state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     apply(&mut state, pending);
     assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
@@ -229,7 +235,7 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
     state.design.symbol.editor.marquee_start = Some(Point::origin());
     state.design.symbol.editor.dragging_origin = true;
     state.model.active_schematic_epoch += 1;
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     assert!(state.design.symbol.editor.pending_polyline.is_empty());
     assert!(state.design.symbol.editor.shape_start.is_none());
     assert!(state.design.symbol.editor.marquee_start.is_none());
@@ -287,7 +293,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
         .workspace
         .content
         .set_active_occurrence(occurrence("X1"));
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     state.design.symbol.editor.dragging_origin = true;
     let pending = request(
         &state,
@@ -304,7 +310,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
         .content
         .set_active_occurrence(occurrence("X2"));
     apply(&mut state, pending);
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     assert!(!state.design.symbol.editor.dragging_origin);
     assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
@@ -398,7 +404,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> AppState {
         .model
         .workspace
         .insert_schematic_editor(TOP.to_owned(), parent);
-    bind_active_canvas(&mut state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
     state
 }
 
@@ -447,7 +453,7 @@ fn parent_nets(state: &AppState) -> std::collections::BTreeMap<String, Vec<u64>>
 fn drag_inp(state: &mut AppState, points: &[Point]) {
     state.design.symbol.editor.dragging_pin = Some("INP".to_owned());
     for point in points {
-        bind_active_canvas(state);
+        bind_active_canvas(&mut crate::schematic::view::canvas_parts(state));
         let request = request(
             state,
             SymbolCanvasInput {
@@ -458,7 +464,7 @@ fn drag_inp(state: &mut AppState, points: &[Point]) {
         );
         apply(state, request);
     }
-    bind_active_canvas(state);
+    bind_active_canvas(&mut crate::schematic::view::canvas_parts(state));
     let request = request(
         state,
         SymbolCanvasInput {
@@ -626,7 +632,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
             state.workbench.window_session.set_current(window).unwrap();
         }
         state.open_workspace_view(symbol);
-        bind_active_canvas(&mut state);
+        bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
         assert!(!state.design.symbol.editor.dragging_origin, "{change}");
         assert!(
             state.design.symbol.editor.marquee_start.is_none(),
