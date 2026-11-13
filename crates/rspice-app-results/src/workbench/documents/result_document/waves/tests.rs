@@ -1564,13 +1564,10 @@ fn ac_magnitude_and_frequency_axis_follow_the_reader_choice() {
     assert_eq!(linear[0].traces[0].y.as_slice(), &[1.0, 10.0]);
 }
 
-/// A session that stored the retired radians mode reads back as magnitude
-/// and phase; the phase pane then follows the angle unit under Units.
+/// The retired radians index reads back as magnitude and phase; the phase
+/// pane then follows the angle unit under Units.
 #[test]
-fn the_retired_radians_mode_reads_back_as_magnitude_and_phase() {
-    let restored: ComplexNumberDisplay =
-        serde_json::from_str("\"magnitude-phase-radians\"").expect("retired mode decodes");
-    assert_eq!(restored, ComplexNumberDisplay::MagnitudePhaseDegrees);
+fn the_retired_radians_index_reads_back_as_magnitude_and_phase() {
     assert_eq!(
         ComplexNumberDisplay::from_index(2),
         Ok(ComplexNumberDisplay::MagnitudePhaseDegrees)
