@@ -5,8 +5,8 @@
 
 use crate::workbench::FolderListPreference;
 use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
-use crate::workbench::workflows::netlist_workflow::tests::seed_owned_strategy;
-use crate::workbench::workflows::netlist_workflow::tests::vendor_profiles::{cases, source};
+use crate::workbench::workflows::netlist_workflow::fixtures::seed_owned_strategy;
+use crate::workbench::workflows::netlist_workflow::fixtures::vendor_profiles::{cases, source};
 use crate::workbench::workflows::netlist_workflow::{
     apply_staged_external_netlist_change, save_owned_netlist_source,
 };

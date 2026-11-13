@@ -14,12 +14,14 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 pub(crate) mod bundle;
 mod external_change;
 mod find;
+#[cfg(test)]
+pub(crate) mod fixtures;
 mod import;
 mod platform;
 mod save;
 mod staging;
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 
 pub(crate) use external_change::apply_staged_external_netlist_change;
 pub(crate) use find::apply_netlist_find_step;
