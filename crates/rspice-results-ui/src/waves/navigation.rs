@@ -492,7 +492,7 @@ pub fn show_shared_x_axis(
     painter.text(
         egui::pos2(plot_left - 8.0, label_top + font.size * 0.5),
         egui::Align2::RIGHT_CENTER,
-        shared_x_gutter_label(&model.x_unit),
+        shared_x_gutter_label(model.x_label(), &model.x_unit),
         gutter_font.clone(),
         c.text_faint,
     );
@@ -902,18 +902,21 @@ pub fn resized_shared_x_view(
 }
 
 /// The name the strip prints into the panes' left gutter beside the tick
-/// values, following the mockup's axis vocabulary.
+/// values, following the mockup's axis vocabulary: TIME and FREQ, and for
+/// any other sweep the quantity swept, as a DC sweep of VD reads "VD · V"
+/// and a temperature sweep "TEMP · °C".
 ///
 /// The tick values themselves are SI-prefixed bare numbers, so the gutter is
 /// where the axis states its unit — once, for the whole row.
-pub fn shared_x_gutter_label(unit: &str) -> String {
+pub fn shared_x_gutter_label(quantity: &str, unit: &str) -> String {
     let name = match unit {
-        "s" => "TIME",
-        "Hz" => "FREQ",
-        _ => "X",
+        "s" => "TIME".to_owned(),
+        "Hz" => "FREQ".to_owned(),
+        _ if quantity.trim().is_empty() => "X".to_owned(),
+        _ => quantity.trim().to_uppercase(),
     };
     if unit.is_empty() {
-        name.to_owned()
+        name
     } else {
         format!("{name} · {unit}")
     }

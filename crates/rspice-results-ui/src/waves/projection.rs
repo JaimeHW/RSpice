@@ -212,16 +212,21 @@ fn swept_source_axis<A: AsRef<AnalysisResult<RetainedTrace>>>(
             })?
     };
     // SPICE names a source by what it is: the leading letter is the element
-    // type, so it is also the quantity being swept. Anything else is a swept
-    // parameter, which has no unit the sheet is entitled to invent.
-    let unit = match source
-        .chars()
-        .next()
-        .map(|first| first.to_ascii_uppercase())
-    {
-        Some('V') => "V",
-        Some('I') => "A",
-        _ => "",
+    // type, so it is also the quantity being swept. TEMP is the circuit
+    // temperature, which a deck states in degrees Celsius. Anything else is
+    // a swept parameter, which has no unit the sheet is entitled to invent.
+    let unit = if source.eq_ignore_ascii_case("temp") {
+        "\u{b0}C"
+    } else {
+        match source
+            .chars()
+            .next()
+            .map(|first| first.to_ascii_uppercase())
+        {
+            Some('V') => "V",
+            Some('I') => "A",
+            _ => "",
+        }
     };
     Some((source, unit.to_owned()))
 }

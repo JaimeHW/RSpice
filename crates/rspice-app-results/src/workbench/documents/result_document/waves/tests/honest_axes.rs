@@ -511,3 +511,38 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
         assert!(panes.iter().any(|p| p.unit == unit), "missing {unit}");
     }
 }
+
+/// The ruler under a DC sweep names the quantity swept in its gutter, as the
+/// one under a transient names TIME: a sweep of the source VD reads
+/// "VD · V" and a sweep of the circuit temperature "TEMP · °C", never "X".
+#[test]
+fn a_dc_sweeps_ruler_names_the_quantity_it_sweeps() {
+    for (deck, caption) in [
+        (
+            "source sweep\nVD d 0 DC 0\nR1 d 0 1k\n.dc VD 0 3 0.1\n.end\n",
+            "VD \u{b7} V",
+        ),
+        (
+            "temperature sweep\nV1 a 0 DC 1\nR1 a 0 1k\n.dc TEMP -40 125 5\n.end\n",
+            "TEMP \u{b7} \u{b0}C",
+        ),
+    ] {
+        let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(deck);
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs.push(run);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+        let ctx = super::lanes::theme_context();
+        super::lanes::frame(&ctx, &mut state, Vec::new());
+        let painted = super::conversion::texts(&super::lanes::frame(&ctx, &mut state, Vec::new()));
+        assert!(
+            painted.iter().any(|(text, _)| text == caption),
+            "the ruler's gutter reads {caption:?}: {painted:?}"
+        );
+        assert!(
+            !painted.iter().any(|(text, _)| text.starts_with("X \u{b7}")),
+            "{painted:?}"
+        );
+    }
+}

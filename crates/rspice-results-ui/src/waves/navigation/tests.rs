@@ -117,3 +117,18 @@ fn two_ruler_boxes_that_would_touch_part_by_halves_inside_the_span() {
         vec![80.0, 80.0 - 20.0 - RULER_FLAG_PAD]
     );
 }
+
+#[test]
+fn the_gutter_names_the_quantity_swept_with_its_unit() {
+    assert_eq!(shared_x_gutter_label("t", "s"), "TIME \u{b7} s");
+    assert_eq!(shared_x_gutter_label("f", "Hz"), "FREQ \u{b7} Hz");
+    assert_eq!(shared_x_gutter_label("VD", "V"), "VD \u{b7} V");
+    assert_eq!(shared_x_gutter_label("Ibias", "A"), "IBIAS \u{b7} A");
+    assert_eq!(
+        shared_x_gutter_label("temp", "\u{b0}C"),
+        "TEMP \u{b7} \u{b0}C"
+    );
+    // A sweep whose source the run did not keep reads as the generic axis.
+    assert_eq!(shared_x_gutter_label("x", "V"), "X \u{b7} V");
+    assert_eq!(shared_x_gutter_label("", ""), "X");
+}
