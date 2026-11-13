@@ -306,7 +306,12 @@ fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
 #[test]
 fn import_symbol_definition_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    crate::workbench::app::open_symbol_import_dialog(&mut app.state);
+    crate::workbench::app::open_symbol_import_dialog(
+        &mut app.state.design.symbol_import,
+        &app.state.model,
+        &mut app.state.workbench,
+        &app.state.platform,
+    );
     assert!(draws_dialog(&mut app, "Import symbol definition"));
     assert!(app.state.design.symbol_import.open);
 }

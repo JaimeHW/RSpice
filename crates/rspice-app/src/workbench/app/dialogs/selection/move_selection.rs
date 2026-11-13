@@ -19,7 +19,9 @@ use crate::workbench::app::dialogs::selection::array::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// Authority and interaction state of the armed Move tool. The design
 /// snapshot remains immutable while the tool is armed; pointer and keyboard
@@ -122,11 +124,14 @@ pub(crate) fn armed_move_selection_authority(
     validate_draft(draft, model)
 }
 
+/// [`cancel_armed_move_selection_in`] for the session.
+#[cfg(test)]
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
 }
 
-/// [`cancel_armed_move_selection`] over the dialog and the model.
+/// End an armed Move: close its dialog, and let its tool go if the
+/// canvas still holds it.
 pub(crate) fn cancel_armed_move_selection_in(
     dialog: &mut MoveSelectionDialogState,
     model: &mut Model,

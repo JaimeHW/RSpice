@@ -25,7 +25,9 @@ use crate::workbench::app::dialogs::selection::move_selection::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// Isolated authority, typed draft, and canvas interaction state for the
@@ -427,11 +429,14 @@ pub(crate) fn armed_array_selection_plan(
         .map_err(|error| error.to_string())
 }
 
+/// [`cancel_armed_array_selection_in`] for the session.
+#[cfg(test)]
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     cancel_armed_array_selection_in(&mut state.design.array_selection, &mut state.model);
 }
 
-/// [`cancel_armed_array_selection`] over the dialog and the model.
+/// End an armed Array: close its dialog, and let its tool go if the
+/// canvas still holds it.
 pub(crate) fn cancel_armed_array_selection_in(
     dialog: &mut ArraySelectionDialogState,
     model: &mut Model,

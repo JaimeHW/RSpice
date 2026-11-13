@@ -16,11 +16,16 @@ pub(in crate::workbench) use render::render_symbol_definition_dialogs;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
-pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
-    open_symbol_import_dialog_for(state, None);
+pub(crate) fn open_symbol_import_dialog(
+    dialog: &mut SymbolImportDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
+) {
+    open_symbol_import_dialog_for(dialog, model, wb, platform, None);
 }
 
 /// Open the importer with an explicit project-owned symbol as the preferred
@@ -28,22 +33,25 @@ pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
 /// Library/Cell/View selection use this entry point so an unrelated active
 /// Design document cannot silently retarget the transaction.
 pub(crate) fn open_symbol_import_dialog_for(
-    state: &mut AppState,
+    dialog: &mut SymbolImportDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
     preferred_binding_source: Option<&CellViewRef>,
 ) {
-    let Some(target_library) = writable_library_name(state) else {
-        state.prompt("Import symbol needs an open project with a writable design library.");
+    let Some(target_library) = writable_library_name(model, platform) else {
+        wb.prompt("Import symbol needs an open project with a writable design library.");
         return;
     };
     let binding_source = preferred_binding_source
         .cloned()
-        .filter(|reference| reference_has_typed_definition(state, reference))
+        .filter(|reference| reference_has_typed_definition(model, reference))
         .or_else(|| {
-            selected_symbol_reference(&state.model)
-                .filter(|reference| reference_has_typed_definition(state, reference))
+            selected_symbol_reference(model)
+                .filter(|reference| reference_has_typed_definition(model, reference))
         })
-        .or_else(|| first_model_bound_symbol_reference(state));
-    state.design.symbol_import = SymbolImportDialogState {
+        .or_else(|| first_model_bound_symbol_reference(model));
+    *dialog = SymbolImportDialogState {
         open: true,
         target_library,
         binding_source,
@@ -136,26 +144,23 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(
     };
 }
 
-fn writable_library_name(state: &AppState) -> Option<String> {
-    if !state.platform.project_lifecycle.is_open() || state.model.safe_mode.project_read_only() {
+fn writable_library_name(model: &Model, platform: &PlatformState) -> Option<String> {
+    if !platform.project_lifecycle.is_open() || model.safe_mode.project_read_only() {
         return None;
     }
-    state
-        .model
+    model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
-            state
-                .model
+            model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
                 .map(|library| library.name.clone())
         })
         .or_else(|| {
-            state
-                .model
+            model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -204,9 +209,8 @@ fn first_symbol_reference(model: &Model) -> Option<CellViewRef> {
         .next()
 }
 
-fn first_model_bound_symbol_reference(state: &AppState) -> Option<CellViewRef> {
-    state
-        .model
+fn first_model_bound_symbol_reference(model: &Model) -> Option<CellViewRef> {
+    model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -224,9 +228,8 @@ fn first_model_bound_symbol_reference(state: &AppState) -> Option<CellViewRef> {
         .next()
 }
 
-fn reference_has_typed_definition(state: &AppState, reference: &CellViewRef) -> bool {
-    state
-        .model
+fn reference_has_typed_definition(model: &Model, reference: &CellViewRef) -> bool {
+    model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -238,13 +241,19 @@ fn reference_has_typed_definition(state: &AppState, reference: &CellViewRef) -> 
 mod tests {
     use super::*;
     use crate::state::{ModelBoundSymbolDefinition, SymbolDefinitionImport};
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
         let mut state = AppState::default();
         state.open_project_session();
 
-        open_symbol_import_dialog(&mut state);
+        open_symbol_import_dialog(
+            &mut state.design.symbol_import,
+            &state.model,
+            &mut state.workbench,
+            &state.platform,
+        );
 
         assert!(state.design.symbol_import.open);
         assert_eq!(

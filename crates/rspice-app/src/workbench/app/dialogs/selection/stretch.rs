@@ -18,7 +18,9 @@ use crate::workbench::app::dialogs::selection::array::{
 use crate::workbench::app::dialogs::selection::move_selection::{
     MoveSelectionDialogState, cancel_armed_move_selection_in,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 
@@ -154,11 +156,14 @@ pub(crate) fn armed_stretch_selection_authority(
     validate_draft(draft, model)
 }
 
+/// [`cancel_armed_stretch_selection_in`] for the session.
+#[cfg(test)]
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     cancel_armed_stretch_selection_in(&mut state.design.stretch_selection, &mut state.model);
 }
 
-/// [`cancel_armed_stretch_selection`] over the dialog and the model.
+/// End an armed Stretch: close its dialog, and let its tool go if the
+/// canvas still holds it.
 pub(crate) fn cancel_armed_stretch_selection_in(
     dialog: &mut StretchSelectionDialogState,
     model: &mut Model,

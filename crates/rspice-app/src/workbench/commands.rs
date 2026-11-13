@@ -410,14 +410,26 @@ impl Command {
                     app.state.model.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.design.descend_hierarchy.open {
                     app.state.design.descend_hierarchy.close();
-                } else if crate::workbench::app::cancel_floating_paste(&mut app.state) {
+                } else if crate::workbench::app::cancel_floating_paste_in(
+                    &mut app.state.design.floating_paste,
+                    &mut app.state.workbench,
+                ) {
                     // The floating copy is let go; the drawing never changed.
                 } else if app.state.design.move_selection.armed {
-                    crate::workbench::app::cancel_armed_move_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_move_selection_in(
+                        &mut app.state.design.move_selection,
+                        &mut app.state.model,
+                    );
                 } else if app.state.design.stretch_selection.armed {
-                    crate::workbench::app::cancel_armed_stretch_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_stretch_selection_in(
+                        &mut app.state.design.stretch_selection,
+                        &mut app.state.model,
+                    );
                 } else if app.state.design.array_selection.armed {
-                    crate::workbench::app::cancel_armed_array_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_array_selection_in(
+                        &mut app.state.design.array_selection,
+                        &mut app.state.model,
+                    );
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.design.object_properties.open {

@@ -20,7 +20,9 @@ use crate::workbench::app::dialogs::selection::move_selection::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// A Paste or Duplicate floating under the pointer until a click places it.
@@ -157,9 +159,9 @@ pub(super) fn float_schematic_objects(
     Ok(())
 }
 
+#[cfg(test)]
 impl AppState {
     /// [`place_floating_paste`] for the session.
-    #[cfg(test)]
     pub(crate) fn place_floating_paste(&mut self) -> bool {
         place_floating_paste(
             &mut self.design.floating_paste,
@@ -275,12 +277,8 @@ impl FloatingPaste {
     }
 }
 
-/// Let the floating copy go.
-pub(crate) fn cancel_floating_paste(state: &mut AppState) -> bool {
-    cancel_floating_paste_in(&mut state.design.floating_paste, &mut state.workbench)
-}
-
-/// [`cancel_floating_paste`] over the copy and the session.
+/// Let the floating copy go, saying so on `wb`'s status bar. Returns whether
+/// a copy was floating.
 pub(crate) fn cancel_floating_paste_in(
     floating: &mut Option<FloatingPaste>,
     wb: &mut WorkbenchSession,

@@ -210,15 +210,17 @@ pub(crate) use dialogs::placement::net_label::{
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement_in, place_sequenced_net_label_in,
 };
-#[cfg(test)]
-pub(crate) use dialogs::selection::array::open_array_selection_dialog;
 pub(crate) use dialogs::selection::array::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,
-    armed_array_selection_plan, cancel_armed_array_selection, cancel_armed_array_selection_in,
+    armed_array_selection_plan, cancel_armed_array_selection_in,
+};
+#[cfg(test)]
+pub(crate) use dialogs::selection::array::{
+    cancel_armed_array_selection, open_array_selection_dialog,
 };
 pub(crate) use dialogs::selection::commands::floating::{
-    FloatingCopyParts, cancel_floating_paste, cancel_floating_paste_in, floating_paste_scope,
-    on_grid, place_floating_paste, turn_floating_paste,
+    FloatingCopyParts, cancel_floating_paste_in, floating_paste_scope, on_grid,
+    place_floating_paste, turn_floating_paste,
 };
 pub(crate) use dialogs::selection::commands::{
     cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
@@ -227,15 +229,18 @@ pub(crate) use dialogs::selection::commands::{
     select_all_schematic_objects,
 };
 #[cfg(test)]
-pub(crate) use dialogs::selection::move_selection::arm_move_selection;
 pub(crate) use dialogs::selection::move_selection::{
-    armed_move_selection_authority, cancel_armed_move_selection, cancel_armed_move_selection_in,
+    arm_move_selection, cancel_armed_move_selection,
+};
+pub(crate) use dialogs::selection::move_selection::{
+    armed_move_selection_authority, cancel_armed_move_selection_in,
 };
 #[cfg(test)]
-pub(crate) use dialogs::selection::stretch::arm_stretch_selection;
 pub(crate) use dialogs::selection::stretch::{
-    armed_stretch_selection_authority, cancel_armed_stretch_selection,
-    cancel_armed_stretch_selection_in,
+    arm_stretch_selection, cancel_armed_stretch_selection,
+};
+pub(crate) use dialogs::selection::stretch::{
+    armed_stretch_selection_authority, cancel_armed_stretch_selection_in,
 };
 pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,

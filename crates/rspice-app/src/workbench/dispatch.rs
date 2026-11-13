@@ -429,11 +429,19 @@ impl RSpiceApp {
                     );
                 }
                 OpenSymbolAuthoring::Import(None) => {
-                    crate::workbench::app::open_symbol_import_dialog(&mut app.state);
+                    crate::workbench::app::open_symbol_import_dialog(
+                        &mut app.state.design.symbol_import,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        &app.state.platform,
+                    );
                 }
                 OpenSymbolAuthoring::Import(Some(binding_source)) => {
                     crate::workbench::app::open_symbol_import_dialog_for(
-                        &mut app.state,
+                        &mut app.state.design.symbol_import,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        &app.state.platform,
                         Some(&binding_source),
                     );
                 }
