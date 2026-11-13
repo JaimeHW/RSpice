@@ -1281,13 +1281,16 @@ impl Bjt {
             // (lines 255-256) along with the junctions it seeds.
             self.mna_dissipation_drops = Some([0.0; VBIC_PARASITIC_DROP_DIM]);
             startup
-        } else if apply_limiting {
+        } else if apply_limiting && self.voltage_limiting_enabled {
             let mut solution_bias = raw;
             self.impose_intrinsic_node_constraints(&mut solution_bias, vc, vb, ve, vs);
             self.mna_dissipation_drops =
                 Some(Self::vbic_parasitic_drops([vc, vb, ve, vs], solution_bias));
             self.limit_vbic_internal_state_to_previous(raw, previous)
         } else {
+            // A static probe, or a Newton load under `DEVICE VOLTLIM=0`,
+            // evaluates the iterate as it stands: Xyce's `$limit` hands back
+            // its argument when voltageLimiterFlag is clear.
             raw
         };
         self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
@@ -3335,6 +3338,60 @@ mod tests {
             (second[IDX_VBI] - second[IDX_VEI]).abs() > 1e-6,
             "the OFF load must apply once, not pin the instance off for the solve"
         );
+    }
+
+    /// Under `DEVICE VOLTLIM=0` a VBIC loads each iterate as it stands: its
+    /// first load takes no MODEINITJCT seed and later ones are not limited,
+    /// as Xyce's voltageLimiterFlag gates both (N_DEV_ADMSvbic13.C:3575,
+    /// 3588). An OFF instance still opens at zero junction bias, once.
+    #[test]
+    fn a_vbic_without_voltage_limiting_loads_each_iterate_as_it_stands() {
+        for off in [false, true] {
+            let (mut bjt, n) = self_heating_vbic();
+            bjt.set_voltage_limiting_enabled(false);
+            bjt.initial_off = off;
+            let collector = [bjt.node_collector, bjt.node_cx, bjt.node_ci, bjt.node_bp];
+            let base = [bjt.node_base, bjt.node_bx, bjt.node_bi];
+            let rth = bjt.node_rth;
+            let iterate = |vb: Value| {
+                let mut bias = vec![0.0; n];
+                for node in collector {
+                    bias[node - 1] = 5.0;
+                }
+                for node in base {
+                    bias[node - 1] = vb;
+                }
+                bias[rth - 1] = 40.0;
+                bias
+            };
+
+            let first = iterate(2.5);
+            bjt.update(&first);
+            let state = bjt.mna_internal_state();
+            if off {
+                assert!(
+                    (state[IDX_VBI] - state[IDX_VEI]).abs() < 1e-9
+                        && (state[IDX_VBI] - state[IDX_VCI]).abs() < 1e-9,
+                    "the OFF instance opened at {state:?}"
+                );
+            } else {
+                assert_eq!(
+                    &state[..INTERNAL_DIM],
+                    &bjt.mna_internal_state_at_solution(&first)[..INTERNAL_DIM],
+                    "the first load was seeded"
+                );
+            }
+
+            // A volt further forward than the last load: the limited load
+            // cuts this step, the unlimited one takes it whole.
+            let second = iterate(3.5);
+            bjt.update(&second);
+            assert_eq!(
+                &bjt.mna_internal_state()[..INTERNAL_DIM],
+                &bjt.mna_internal_state_at_solution(&second)[..INTERNAL_DIM],
+                "OFF = {off}: the second load was limited"
+            );
+        }
     }
 
     /// Promoted Gummel-Poon cards: the fourbitadder gate transistor (base

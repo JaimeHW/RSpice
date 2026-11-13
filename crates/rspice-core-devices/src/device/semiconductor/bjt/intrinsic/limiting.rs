@@ -401,7 +401,10 @@ impl Bjt {
     /// (`anchor_parasitics_at_drops`, `thermal_power_branch_about`). A
     /// self-heating instance therefore opens like any other, with Vrth at zero.
     /// VBIC 1.3 is the Xyce model, not vbicload.c, and keeps the ordinary
-    /// limited load.
+    /// limited load. Under `DEVICE VOLTLIM=0` no junction is seeded, as Xyce's
+    /// voltageLimiterFlag gates its VBIC 1.3 initJct load
+    /// (N_DEV_ADMSvbic13.C:3575, 3588); an OFF instance still opens off, as
+    /// the Gummel-Poon load does.
     pub(in crate::device::semiconductor::bjt) fn vbic_startup_load_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
@@ -411,7 +414,7 @@ impl Bjt {
         }
         let startup = if self.initial_off {
             VbicNonlinearBranchVoltages::default()
-        } else if self.vbic_13 {
+        } else if self.vbic_13 || !self.voltage_limiting_enabled {
             return None;
         } else {
             let (_vt, vcrit) = self.vbic_limiting_parameters(0.0);

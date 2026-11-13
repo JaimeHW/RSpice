@@ -143,6 +143,63 @@ fn vbic13_pnjmaxi_matches_xyce_and_model_overrides_global_option() {
     }
 }
 
+/// Xyce's `DEVICE VOLTLIM=0` evaluates VBIC 1.3 at each Newton iterate as it
+/// stands, with no `$limit` and no initJct seed (N_DEV_ADMSvbic13.C:3575,
+/// 3588). A common-emitter stage, its base fed through 470 kOhm, solves to
+/// Xyce 7.10's operating point with the option at 0 on the three-terminal
+/// card, the LEVEL=11 one whose fourth node is thermal and the four-terminal
+/// LEVEL=12 one, and within 1e-5 V of the limited solve. RSpice refused the
+/// option on the native VBIC.
+#[test]
+fn native_vbic13_solves_with_voltage_limiting_disabled() {
+    let bias = |card: &str, device_voltage_limiting: bool| {
+        let netlist = Netlist::parse(&format!(
+            "VBIC common emitter\nVCC vcc 0 5\nVBB vbb 0 5\nRC vcc c 1k\nRB vbb b 470k\n{card}\n.end\n"
+        ))
+        .expect("the common-emitter stage parses");
+        let result = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            device_voltage_limiting,
+            ..SimulationConfig::default()
+        })
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|err| panic!("{card} with VOLTLIM={device_voltage_limiting}: {err}"));
+        ["c", "b"].map(|node| voltage(&result, node))
+    };
+    // Xyce 7.10, `.options device voltlim=0`, v(c) and v(b).
+    for (card, xyce) in [
+        (
+            "Q1 c b 0 qm\n.model qm NPN LEVEL=11",
+            [4.10031844, 0.771500654],
+        ),
+        (
+            "Q1 c b 0 0 qm\n.model qm NPN LEVEL=11",
+            [4.10031859, 0.771501363],
+        ),
+        (
+            "Q1 c b 0 0 qm\n.model qm NPN LEVEL=12",
+            [4.10031843, 0.771500654],
+        ),
+    ] {
+        let unlimited = bias(card, false);
+        let limited = bias(card, true);
+        for (index, node) in ["c", "b"].into_iter().enumerate() {
+            assert_rel_close(
+                &format!("{card}: v({node}) with VOLTLIM=0"),
+                unlimited[index],
+                xyce[index],
+                1.0e-5,
+            );
+            assert!(
+                (unlimited[index] - limited[index]).abs() <= 1.0e-5,
+                "{card}: v({node}) {} unlimited, {} limited",
+                unlimited[index],
+                limited[index]
+            );
+        }
+    }
+}
+
 #[test]
 fn pnjmaxi_rejects_invalid_values_and_unsupported_model_families() {
     for value in ["0", "-1", "{1/0}", "\"invalid\""] {

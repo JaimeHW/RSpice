@@ -7949,7 +7949,7 @@ impl Engine {
                         let params_map = model_params_upper_map(&device_model.params);
                         let level = params_map.get("LEVEL").copied().unwrap_or(1.0);
                         if resolve_bjt_type_from_model(&device_model.model_type).is_none()
-                            || !legacy_gummel_poon_bjt_level(level)
+                            || !supported_bjt_level(level)
                         {
                             return Err(SimulationError::Circuit(format!(
                                 "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; its voltage limiting cannot yet be disabled",
@@ -12261,7 +12261,7 @@ mod tests {
     }
 
     #[test]
-    fn voltlim_false_builds_legacy_bjt_and_rejects_unimplemented_families() {
+    fn voltlim_false_builds_native_bjts_and_rejects_unimplemented_families() {
         let mut config = SimulationConfig {
             device_voltage_limiting: false,
             spice_dialect: SpiceDialect::Xyce,
@@ -12280,14 +12280,12 @@ mod tests {
         assert!(!device.uses_legacy_junction_limiting());
 
         let vbic = Netlist::parse(
-            "unsupported VBIC limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",
+            "VBIC raw limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",
         )
         .expect("VBIC fixture parses");
-        let error = Engine::new(config.clone())
+        Engine::new(config.clone())
             .build_circuit(&vbic)
-            .expect_err("VOLTLIM=0 must fail closed for VBIC limiting");
-        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
-        assert!(error.to_string().contains("LEVEL=11"));
+            .expect("VBIC supports VOLTLIM=0");
 
         let ekv = Netlist::parse(
             "unsupported EKV limiting\nV1 d 0 1\nM1 d d 0 0 NMOD\n.model NMOD NMOS LEVEL=260\n.end\n",
