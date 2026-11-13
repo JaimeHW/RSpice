@@ -443,6 +443,7 @@ where
                 export_io: &NullExportIo,
                 run_controller: &mut self.run_controller,
                 model_hub: &mut self.model_hub,
+                symbols: None,
             },
             Peers::new(
                 Some(&mut self.ports),

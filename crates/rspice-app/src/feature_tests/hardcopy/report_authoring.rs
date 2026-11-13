@@ -52,6 +52,7 @@ fn cx<'a>(
                 &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             run_controller,
             model_hub,
+            symbols: None,
         },
         Peers::new(
             Some(&mut *state.design),
