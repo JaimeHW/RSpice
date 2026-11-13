@@ -1418,7 +1418,9 @@ fn deck_a_hashes_are_identical_across_processes() {
 fn deck_c2_hashes_are_identical_across_processes() {
     assert_fingerprints_survive_new_processes(
         "deck_c2",
-        &["tri_family_transient::deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period"],
+        &[
+            "tri_family_transient::deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period",
+        ],
         8,
         &deck_c2_records(),
     );

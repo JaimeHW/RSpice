@@ -808,7 +808,9 @@ mod xyce_vbic_generated {
             ),
             (
                 "commonEmitterBjt_vbic13_3T",
-                include_str!("../../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"),
+                include_str!(
+                    "../../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"
+                ),
             ),
         ] {
             let netlist = Netlist::parse_with_options(

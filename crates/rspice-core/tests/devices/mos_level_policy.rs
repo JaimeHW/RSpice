@@ -1419,8 +1419,7 @@ fn level3_runs_without_fallback_warning() {
                 .model n3native NMOS (LEVEL=3 VTO=0.6 KP=100u)\n\
                 .op\n\
                 .end\n";
-    let (report, warnings) =
-        log_capture::lines_logged(log::LevelFilter::Warn, || run_report(deck));
+    let (report, warnings) = log_capture::lines_logged(log::LevelFilter::Warn, || run_report(deck));
     let report = report.expect("LEVEL=3 must run as native Berkeley MOS3");
     let entry = report
         .entries

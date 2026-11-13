@@ -309,23 +309,18 @@ const NATIVE_REFUSALS: &str =
     "tests/veriloga/capability_refusals.rs::noise_refuses_a_charge_model_it_does_not_implement";
 const PERIODIC_REFUSALS: &str =
     "tests/veriloga/capability_refusals.rs::harmonic_balance_refuses_a_device_it_cannot_stamp";
-const PZ_REFUSALS: &str = "tests/veriloga/capability_refusals.rs::pole_zero_refuses_transmission_lines";
-const PZ_RATIONAL: &str =
-    "tests/veriloga/pole_zero_veriloga_rational.rs::an_rc_with_a_laplace_filter_has_both_closed_form_poles";
-const PZ_NON_RATIONAL: &str =
-    "tests/veriloga/pole_zero_veriloga_rational.rs::a_transport_delay_refuses_by_instance_and_module";
-const PZ_MIXED: &str =
-    "tests/veriloga/pole_zero_veriloga_rational.rs::a_mixed_host_with_laplace_and_trim_matches_its_twin";
+const PZ_REFUSALS: &str =
+    "tests/veriloga/capability_refusals.rs::pole_zero_refuses_transmission_lines";
+const PZ_RATIONAL: &str = "tests/veriloga/pole_zero_veriloga_rational.rs::an_rc_with_a_laplace_filter_has_both_closed_form_poles";
+const PZ_NON_RATIONAL: &str = "tests/veriloga/pole_zero_veriloga_rational.rs::a_transport_delay_refuses_by_instance_and_module";
+const PZ_MIXED: &str = "tests/veriloga/pole_zero_veriloga_rational.rs::a_mixed_host_with_laplace_and_trim_matches_its_twin";
 const PZ_HELD_CONVERTERS: &str =
     "tests/veriloga/pole_zero_veriloga_rational.rs::held_converters_take_part_as_their_held_stamps";
-const MIXED_HELD: &str =
-    "tests/veriloga/mixed_small_signal_held.rs::the_held_trim_register_matches_its_held_source_twin";
-const MIXED_XSPICE_HELD: &str =
-    "tests/veriloga/mixed_small_signal_held.rs::the_xspice_trim_register_matches_its_held_source_twin";
+const MIXED_HELD: &str = "tests/veriloga/mixed_small_signal_held.rs::the_held_trim_register_matches_its_held_source_twin";
+const MIXED_XSPICE_HELD: &str = "tests/veriloga/mixed_small_signal_held.rs::the_xspice_trim_register_matches_its_held_source_twin";
 const MIXED_DC: &str =
     "tests/veriloga/mixed_dc_sweep_state.rs::a_sweep_carries_the_comparator_latch_in_sweep_order";
-const XSPICE_DC: &str =
-    "tests/veriloga/mixed_dc_sweep_state.rs::the_xspice_latch_twin_reads_its_time_zero_state_at_every_point";
+const XSPICE_DC: &str = "tests/veriloga/mixed_dc_sweep_state.rs::the_xspice_latch_twin_reads_its_time_zero_state_at_every_point";
 const TRANSIENT_NOISE_VERILOGA: &str =
     "tests/transient_noise_veriloga.rs::mixed_and_runtime_module_noise_reach_the_transient";
 const SHAPED_NOISE_VERILOGA: &str =
