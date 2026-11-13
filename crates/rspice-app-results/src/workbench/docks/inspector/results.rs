@@ -24,7 +24,7 @@ use super::super::super::design_system::{
 };
 use super::super::super::state::Workspace;
 use super::{result_authority, run_details};
-use rspice_app_workbench::workbench::docks::inspector::compact_readout;
+use rspice_app_workbench::workbench::docks::inspector::engineering_readout;
 
 pub(in crate::workbench) fn results(
     ui: &mut Ui,
@@ -175,14 +175,22 @@ fn selected_result_trace(
     let statistics = finite_trace_statistics(&waveform.y);
     let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();
     // The statistics are measurements of the trace, read in the trace's own
-    // unit at the precision this panel's rows hold.
+    // unit to the reader's significant digits: the measurement rows below
+    // them read to those, and one panel holds one precision.
     let unit = crate::workbench::documents::result_document::browser_signal_unit(
         &waveform.name,
         waveform.unit.as_deref(),
         crate::workbench::documents::result_document::analysis_default_unit(analysis.analysis_type),
     )
     .to_owned();
-    let measured = |value: f64| compact_readout(value, &unit);
+    let digits = usize::from(
+        state
+            .results_reads()
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    let measured = |value: f64| engineering_readout(value, &unit, digits);
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);

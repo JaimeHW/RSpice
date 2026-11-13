@@ -164,3 +164,110 @@ fn the_colour_swatch_is_the_colour_the_strip_drew_the_curve_in() {
     let column = crate::ui::tokens::Tokens::get(&ctx).color.traces[2];
     assert_ne!(column, drawn, "the fixture tells the two apart");
 }
+
+/// A selected trace's statistics read to the reader's significant digits,
+/// as the measurement rows beside them do, and follow the reader's choice.
+/// They were held at four ("490.2 mV") beside measurements at seven
+/// ("490.2291 mV").
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn trace_statistics_read_to_the_readers_significant_digits() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsTestHost};
+    use rspice_app_state::workbench::preferences::ScalarPreference;
+    use rspice_results_ui::selection::SelectedResultTrace;
+
+    let samples = vec![0.490_229_1, 0.512_345_6, 0.734_567_8];
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], samples, ""),
+        ]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(analysis, "V(out)"));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let minimum = |host: &mut ResultsTestHost| {
+        let mut value = None;
+        for _ in 0..2 {
+            let mut run_details = None;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        results(ui, &mut host.results_parts(), &mut run_details);
+                    });
+                },
+            );
+            value = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Minimum"))
+                .and_then(|(_, node)| node.value().map(str::to_owned));
+        }
+        value.expect("the Minimum row")
+    };
+    let digits = host
+        .model
+        .preferences
+        .scalar(ScalarPreference::DisplayedSignificantDigits);
+    assert_eq!(digits, 7, "the reader's default");
+    assert_eq!(minimum(&mut host), "490.2291 mV");
+    host.model
+        .preferences
+        .set_scalar(ScalarPreference::DisplayedSignificantDigits, 5)
+        .expect("five digits");
+    assert_eq!(minimum(&mut host), "490.23 mV");
+}
+
+/// The Inspector with a selected trace, for review, written under
+/// `RSPICE_PICTURES` when it is set.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_trace_statistics_picture() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsTestHost};
+    use rspice_results_ui::selection::SelectedResultTrace;
+
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.490_229_1, 0.512_345_6, 0.734_567_8],
+                "",
+            ),
+        ]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(analysis, "V(out)"));
+    let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 420.0), |ui, _| {
+        let mut run_details = None;
+        results(ui, &mut host.results_parts(), &mut run_details);
+    });
+    std::fs::write(
+        format!("{directory}/inspector-trace-statistics.png"),
+        canvas.png(canvas.height()),
+    )
+    .expect("the picture is written");
+}
