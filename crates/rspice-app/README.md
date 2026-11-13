@@ -114,20 +114,7 @@ profiles accept production ceremony keys alone.
 
 Issuance is the signing half of the same spec and lives in that file's test
 module, where `cfg(test)` keeps signing code out of every shipped binary.
-Production issuance belongs to the platform backend's cold-key flow. Both
-entry points are `#[ignore]`d fixture generators:
-
-```bash
-# Signing is deterministic: the same secret and parameters reproduce the same
-# key. Overrides: RSPICE_LICENSE_{KEY_ID,TIER,SEATS,ISSUED_DAYS,EXPIRES_DAYS,
-# FEATURES,LICENSE_ID}
-RSPICE_LICENSE_SECRET=<hex64> RSPICE_LICENSE_NAME="Name" \
-  cargo test -p rspice-app --lib mint_signed_key -- --ignored --nocapture
-
-# Rotate the development signer (key id 0x01); paste the printed Rust array
-# into DEVELOPMENT_VERIFYING_KEYS and never commit the secret.
-cargo test -p rspice-app --lib mint_development_signer -- --ignored --nocapture
-```
+Production issuance belongs to the platform backend's cold-key flow.
 
 ## Building and testing
 
