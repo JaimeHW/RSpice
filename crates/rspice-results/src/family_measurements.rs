@@ -23,7 +23,15 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "engine-evidence")]
+mod evaluation;
 mod monte_carlo;
+
+#[cfg(feature = "engine-evidence")]
+pub use evaluation::{
+    FamilyMeasurement, FamilyMember, FamilyStatistics, FamilyYield, MemberSource, MemberValue,
+    evaluate_members, family_members,
+};
 
 /// Which member of a result family produced one measurement.
 ///
