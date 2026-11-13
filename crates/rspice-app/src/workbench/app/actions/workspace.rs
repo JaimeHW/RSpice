@@ -6,7 +6,7 @@
 //! read-only schematic refuses.
 
 pub(in crate::workbench) mod design_checks;
-mod history;
+pub(in crate::workbench) mod history;
 mod navigation;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;

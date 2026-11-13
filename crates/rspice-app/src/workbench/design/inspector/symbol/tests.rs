@@ -57,7 +57,10 @@ impl Editor {
     }
 
     fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
-        let source = self.app.state.symbol_editor_request_source();
+        let source = crate::workbench::app::symbol_editor_request_source(
+            &self.app.state.model,
+            &self.app.state.workbench,
+        );
         rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source(
             &mut self.app.state.design.symbol.editor,
             source,
@@ -76,14 +79,17 @@ impl Editor {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     panel_body(ui, |ui| {
                         let document = self.app.state.model.load_active_symbol_document().unwrap();
-                        let metadata = self
-                            .app
-                            .state
-                            .load_active_symbol_editor_metadata(&document)
-                            .unwrap();
+                        let metadata = crate::workbench::app::load_active_symbol_editor_metadata(
+                            &self.app.state.model,
+                            &document,
+                        )
+                        .unwrap();
                         request = Some(inspector::show(
                             ui,
-                            self.app.state.symbol_editor_request_source(),
+                            crate::workbench::app::symbol_editor_request_source(
+                                &self.app.state.model,
+                                &self.app.state.workbench,
+                            ),
                             document,
                             metadata,
                             &[],

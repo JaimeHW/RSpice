@@ -20,8 +20,8 @@ mod symbol;
 pub(crate) use rspice_app_simulate::workbench::app::actions::tuning_staging;
 pub(crate) use symbol::{
     activate_symbol_tool, copy_selected_symbol_shape, delete_selected_symbol_item,
-    duplicate_selected_symbol_shape, paste_symbol_shape, select_all_symbol_items,
-    transform_selected_symbol_item, transform_selected_symbol_pin,
+    duplicate_selected_symbol_shape, finish_pending_symbol_polyline, paste_symbol_shape,
+    select_all_symbol_items, transform_selected_symbol_item, transform_selected_symbol_pin,
 };
 pub(crate) mod veriloga_placement;
 pub(crate) mod veriloga_symbol;

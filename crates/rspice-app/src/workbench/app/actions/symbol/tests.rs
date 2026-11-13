@@ -5,6 +5,7 @@ use crate::state::{
     Cell, CellViewRef, Library, PortDirection, SymbolDocument, SymbolEditorMetadata, SymbolPin,
     SymbolShape, View, ViewType,
 };
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
@@ -181,8 +182,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
     assert_eq!(after.name_anchor, Point::new(-10, 40));
     assert_eq!(
-        app.state
-            .load_active_symbol_editor_metadata(&after)
+        crate::workbench::app::load_active_symbol_editor_metadata(&app.state.model, &after)
             .unwrap()
             .attribute(SymbolAttributeKind::Reference)
             .unwrap()
@@ -329,7 +329,8 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
         before
     );
 
-    let source = app.state.symbol_editor_request_source();
+    let source =
+        crate::workbench::app::symbol_editor_request_source(&app.state.model, &app.state.workbench);
     bind_canvas_source(&mut app.state.design.symbol.editor, source);
     app.state.design.symbol.editor.tool = SymbolTool::Polygon;
     app.state.design.symbol.editor.pending_polyline = points.clone();

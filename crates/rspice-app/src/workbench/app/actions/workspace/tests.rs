@@ -400,7 +400,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
     );
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
-    let ports = state.active_symbol_ports();
+    let ports = crate::workbench::app::active_symbol_ports(&state.model);
 
     assert_eq!(ports.len(), 1);
     assert_eq!(ports[0].name, "OUT");
@@ -656,7 +656,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
             .contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
     );
 
-    state.record_symbol_edit(&before);
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
     state
         .store_active_symbol_document(&SymbolDocument {
             body: vec![crate::state::SymbolShape::Dot {
@@ -1060,7 +1060,7 @@ fn symbol_undo_history_is_scoped_to_active_view() {
         name_anchor: Point::new(-20, -20),
         ..SymbolDocument::default()
     };
-    state.record_symbol_edit(&before_a);
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before_a);
     state
         .store_active_symbol_document(&after_a)
         .expect("store amp_a symbol");
@@ -1121,7 +1121,7 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
     state
         .store_active_symbol_editor_bundle(&document, &baseline)
         .expect("baseline symbol bundle stores");
-    state.record_symbol_edit(&document);
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &document);
     let mut edited = baseline.clone();
     edited
         .attribute_mut(crate::state::SymbolAttributeKind::Value)
@@ -1132,8 +1132,7 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
         .expect("edited symbol bundle stores");
 
     let annotation = |state: &mut AppState| {
-        state
-            .load_active_symbol_editor_metadata(&document)
+        crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &document)
             .expect("the sidecar loads")
             .attribute(crate::state::SymbolAttributeKind::Value)
             .expect("the value attribute survives")

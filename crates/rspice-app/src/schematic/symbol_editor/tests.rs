@@ -22,7 +22,10 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
             state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
             let before = state.model.load_active_symbol_document().unwrap();
             let request = SymbolSurfaceRequest {
-                source: state.symbol_editor_request_source(),
+                source: crate::workbench::app::symbol_editor_request_source(
+                    &state.model,
+                    &state.workbench,
+                ),
                 action,
             };
             if stale_view {
@@ -52,7 +55,10 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 .content
                 .set_active_read_only_reference(false);
             let request = SymbolSurfaceRequest {
-                source: state.symbol_editor_request_source(),
+                source: crate::workbench::app::symbol_editor_request_source(
+                    &state.model,
+                    &state.workbench,
+                ),
                 action: SymbolSurfaceAction::CopyToEditableLibrary,
             };
             assert!(apply_surface_request(

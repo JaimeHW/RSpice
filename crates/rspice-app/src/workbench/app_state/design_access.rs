@@ -8,10 +8,12 @@
 
 use super::AppState;
 use crate::diagnostics::LogAnchor;
-use crate::state::{CellViewRef, SchematicState};
+use crate::state::{CellViewRef, SchematicState, SymbolDocument};
+use crate::workbench::app::actions::workspace::symbol_document::store_active_symbol_document;
 use crate::workbench::app::actions::workspace::{
-    NavigationParts, bump_active_schematic_epoch, new_schematic_document,
-    restore_active_schematic_from_workspace, sync_active_schematic,
+    NavigationParts, bump_active_schematic_epoch, commit_inline_component_edit,
+    commit_pending_inspector_edit, new_schematic_document, restore_active_schematic_from_workspace,
+    sync_active_schematic,
 };
 
 impl AppState {
@@ -98,5 +100,23 @@ impl AppState {
             ],
         );
         self.prompt(announced);
+    }
+
+    /// [`commit_inline_component_edit`] for the session.
+    pub(crate) fn commit_inline_component_edit(&mut self) -> Result<bool, String> {
+        commit_inline_component_edit(&mut self.model, &mut self.workbench)
+    }
+
+    /// [`commit_pending_inspector_edit`] for the session.
+    pub(crate) fn commit_pending_inspector_edit(&mut self) -> bool {
+        commit_pending_inspector_edit(&mut self.model, &mut self.workbench)
+    }
+
+    /// [`store_active_symbol_document`] for the session.
+    pub(crate) fn store_active_symbol_document(
+        &mut self,
+        document: &SymbolDocument,
+    ) -> Result<(), String> {
+        store_active_symbol_document(&mut self.design.symbol, &mut self.model, document)
     }
 }

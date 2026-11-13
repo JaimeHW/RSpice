@@ -16,10 +16,8 @@
 
 use crate::state::{CellViewRef, UndoSequence, ViewType};
 use crate::workbench::app::actions::stimulus;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::{HistoryEffects, StagedProjectStep};
-use crate::workbench::app_state::{AppState, Model};
-#[cfg(test)]
-use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::{ClearSelectedModel, VoidVerilogAEvidence};
 use crate::workbench::state::{
     InlineEditAuthority, StimulusEditorState, WorkbenchSession, Workspace,
@@ -35,60 +33,6 @@ use super::{
     SchematicRestoreParts, bump_active_schematic_epoch, restore_active_schematic_from_workspace,
     sync_active_schematic,
 };
-
-impl AppState {
-    /// [`undo_project_design`] for the session.
-    #[cfg(test)]
-    pub(crate) fn undo_project_design(&mut self) -> Result<Option<String>, String> {
-        undo_project_design(
-            self.design.schematic_restore_parts(),
-            &mut self.model,
-            &mut self.workbench,
-            &self.runs,
-            ModelsPort::selected_model(&*self.models),
-        )
-    }
-
-    /// [`redo_project_design`] for the session.
-    #[cfg(test)]
-    pub(crate) fn redo_project_design(&mut self) -> Result<Option<String>, String> {
-        redo_project_design(
-            self.design.schematic_restore_parts(),
-            &mut self.model,
-            &mut self.workbench,
-            &self.runs,
-            ModelsPort::selected_model(&*self.models),
-        )
-    }
-
-    /// [`activate_history_document`] for the session.
-    #[cfg(test)]
-    pub(crate) fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
-        activate_history_document(
-            &mut self.design.symbol,
-            &mut self.model,
-            &mut self.workbench,
-            reference,
-            operation,
-        );
-    }
-
-    /// [`inline_edit_authority`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
-        inline_edit_authority(&self.model)
-    }
-
-    /// [`commit_inline_component_edit`] for the session.
-    pub(crate) fn commit_inline_component_edit(&mut self) -> Result<bool, String> {
-        commit_inline_component_edit(&mut self.model, &mut self.workbench)
-    }
-
-    /// [`commit_pending_inspector_edit`] for the session.
-    pub(crate) fn commit_pending_inspector_edit(&mut self) -> bool {
-        commit_pending_inspector_edit(&mut self.model, &mut self.workbench)
-    }
-}
 
 /// What an inspector draft is bound to: the project, the document, the
 /// occurrence and the epochs `model` is at.

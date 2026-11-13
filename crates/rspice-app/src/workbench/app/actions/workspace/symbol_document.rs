@@ -23,7 +23,7 @@ use crate::state::{
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::{AppState, Model, SlotFacts};
+use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::state::WorkbenchSession;
 
 use super::symbol_in_place::in_place_session;
@@ -54,119 +54,6 @@ pub struct SymbolUiState {
     pub history: rspice_design::symbol::edit::SymbolHistory,
     /// The symbol being edited in place on a parent schematic, if any.
     pub in_place: Option<Box<super::symbol_in_place::SymbolInPlace>>,
-}
-
-impl AppState {
-    /// [`symbol_editor_request_source`] for the session.
-    pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
-        symbol_editor_request_source(&self.model, &self.workbench)
-    }
-
-    /// [`active_symbol_ports`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
-        active_symbol_ports(&self.model)
-    }
-
-    /// [`load_active_symbol_editor_metadata`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn load_active_symbol_editor_metadata(
-        &self,
-        document: &SymbolDocument,
-    ) -> Result<SymbolEditorMetadata, String> {
-        load_active_symbol_editor_metadata(&self.model, document)
-    }
-
-    /// [`store_active_symbol_document`] for the session.
-    pub(crate) fn store_active_symbol_document(
-        &mut self,
-        document: &SymbolDocument,
-    ) -> Result<(), String> {
-        store_active_symbol_document(&mut self.design.symbol, &mut self.model, document)
-    }
-
-    /// [`store_active_symbol_editor_bundle`] for the session.
-    #[cfg(test)]
-    pub(crate) fn store_active_symbol_editor_bundle(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &SymbolEditorMetadata,
-    ) -> Result<(), String> {
-        store_active_symbol_editor_bundle(
-            &mut self.design.symbol,
-            &mut self.model,
-            &mut self.workbench,
-            document,
-            metadata,
-        )
-    }
-
-    /// [`commit_active_symbol_edit`] for the session.
-    #[cfg(test)]
-    pub(crate) fn commit_active_symbol_edit(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &SymbolEditorMetadata,
-        intent: &SymbolCommitIntent,
-    ) -> Result<(), String> {
-        commit_active_symbol_edit(
-            &mut self.design.symbol,
-            &mut self.model,
-            &mut self.workbench,
-            document,
-            metadata,
-            intent,
-        )
-    }
-
-    /// [`refuse_unsavable_active_symbol`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
-        refuse_unsavable_active_symbol(&self.model)
-    }
-
-    /// [`publish_active_symbol_revision`] for the session.
-    #[cfg(test)]
-    pub(crate) fn publish_active_symbol_revision(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &mut SymbolEditorMetadata,
-        revision_note: &str,
-    ) -> Result<u64, String> {
-        publish_active_symbol_revision(
-            &mut self.design.symbol,
-            &mut self.model,
-            &mut self.workbench,
-            document,
-            metadata,
-            revision_note,
-        )
-    }
-
-    /// [`record_symbol_edit`] for the session.
-    pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
-        record_symbol_edit(&mut self.design.symbol, &self.model, before);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
-        self.design
-            .symbol
-            .history
-            .can_undo(&self.model.workspace.content.active_key())
-    }
-
-    /// [`undo_active_symbol_document`] for the session.
-    #[cfg(test)]
-    pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
-        undo_active_symbol_document(&mut self.design.symbol, &mut self.model)
-    }
-
-    /// [`redo_active_symbol_document`] for the session.
-    #[cfg(test)]
-    pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
-        redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
-    }
 }
 
 /// Publish one frame of a canvas gesture.

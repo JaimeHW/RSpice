@@ -7,7 +7,7 @@
 use crate::workbench::app_state::waivers::{StoredWaiverEdit, StoredWaivers, WaiverTarget};
 use crate::workbench::app_state::{AppState, Model, SlotFacts};
 
-use super::symbol_document::run_active_symbol_pin_checks;
+use super::symbol_document::{record_symbol_edit, run_active_symbol_pin_checks};
 
 impl AppState {
     /// [`restate_waived_findings`] for the session.
@@ -61,7 +61,7 @@ impl AppState {
             return Ok(());
         }
         self.store_active_symbol_document(&document)?;
-        self.record_symbol_edit(&before);
+        record_symbol_edit(&mut self.design.symbol, &self.model, &before);
         Ok(())
     }
 }

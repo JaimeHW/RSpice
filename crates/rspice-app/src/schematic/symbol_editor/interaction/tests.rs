@@ -50,7 +50,7 @@ fn viewport() -> SymbolViewport {
 
 fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
     SymbolCanvasRequest {
-        source: state.symbol_editor_request_source(),
+        source: crate::workbench::app::symbol_editor_request_source(&state.model, &state.workbench),
         tool: state.design.symbol.editor.tool,
         selection: state.design.symbol.editor.effective_selection(),
         viewport: viewport(),
@@ -60,7 +60,8 @@ fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
 
 fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
     let mut document = state.model.load_active_symbol_document().unwrap();
-    let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
+    let mut metadata =
+        crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &document).unwrap();
     apply_canvas_request(
         &mut crate::schematic::view::canvas_parts(state),
         &mut document,
@@ -154,7 +155,11 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
                     // accessibility-pointer-shim: synthetic input for the canvas handler test.
                     let response = ui.allocate_rect(viewport().rect, egui::Sense::click_and_drag());
                     let mut document = state.model.load_active_symbol_document().unwrap();
-                    let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
+                    let mut metadata = crate::workbench::app::load_active_symbol_editor_metadata(
+                        &state.model,
+                        &document,
+                    )
+                    .unwrap();
                     handle_canvas(
                         &mut crate::schematic::view::canvas_parts(&mut state),
                         &mut document,
@@ -202,7 +207,8 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
         },
     );
     let before = state.model.load_active_symbol_document().unwrap();
-    let mut metadata = state.load_active_symbol_editor_metadata(&before).unwrap();
+    let mut metadata =
+        crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &before).unwrap();
     metadata.revision += 1;
     state
         .store_active_symbol_editor_bundle(&before, &metadata)
@@ -594,7 +600,9 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
             },
         );
         if change == "revision" {
-            let mut metadata = state.load_active_symbol_editor_metadata(&before).unwrap();
+            let mut metadata =
+                crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &before)
+                    .unwrap();
             metadata.revision += 1;
             state
                 .store_active_symbol_editor_bundle(&before, &metadata)

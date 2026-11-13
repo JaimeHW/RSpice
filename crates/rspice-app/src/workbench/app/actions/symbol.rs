@@ -1,6 +1,7 @@
 //! App authority, history and publication for symbol editor commands.
 
 use crate::state::Point;
+use crate::workbench::AppState;
 use crate::workbench::app::actions::workspace::deny_read_only_edit;
 use crate::workbench::app::actions::workspace::symbol_document::{
     SymbolUiState, load_active_symbol_editor_metadata, record_symbol_edit,
@@ -8,7 +9,6 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::{
     self, SymbolEditAction, SymbolEditRequest, SymbolPinTransform, SymbolTransform,
 };
@@ -19,24 +19,21 @@ use rspice_schematic_editor::symbol_editor::session::{
     SymbolClipboard, SymbolSelection, SymbolTool,
 };
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn finish_pending_symbol_polyline(&mut self) {
-        // A command can arrive after navigation and before the new canvas has rendered.
-        let source = self.state.symbol_editor_request_source();
-        bind_canvas_source(&mut self.state.design.symbol.editor, source);
-        if self.state.design.symbol.editor.pending_polyline.len() < 2
-            || crate::workbench::app::deny_read_only_edit(
-                &self.state.model,
-                &mut self.state.workbench,
-            )
-        {
-            self.state.design.symbol.editor.pending_polyline.clear();
-            return;
-        }
-        let points = self.state.design.symbol.editor.pending_polyline.clone();
-        let request = edit_request(&self.state, SymbolEditAction::FinishPolyline { points });
-        apply_edit_request(&mut self.state, request);
+/// Finish the symbol canvas's open polyline, or let it go when it has fewer
+/// than two points or the symbol is read-only.
+pub(crate) fn finish_pending_symbol_polyline(state: &mut AppState) {
+    // A command can arrive after navigation and before the new canvas has rendered.
+    let source = symbol_editor_request_source(&state.model, &state.workbench);
+    bind_canvas_source(&mut state.design.symbol.editor, source);
+    if state.design.symbol.editor.pending_polyline.len() < 2
+        || deny_read_only_edit(&state.model, &mut state.workbench)
+    {
+        state.design.symbol.editor.pending_polyline.clear();
+        return;
     }
+    let points = state.design.symbol.editor.pending_polyline.clone();
+    let request = edit_request(state, SymbolEditAction::FinishPolyline { points });
+    apply_edit_request(state, request);
 }
 
 /// Arm `tool` on the symbol canvas. A pin starts from the document in front,

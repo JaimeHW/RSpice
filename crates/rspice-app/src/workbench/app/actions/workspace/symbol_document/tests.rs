@@ -7,6 +7,7 @@
 //! that are wired to it.
 
 use super::*;
+use crate::workbench::app_state::AppState;
 
 use crate::diagnostics::LogSeverity;
 use crate::state::{
@@ -130,7 +131,7 @@ fn terminal_names(state: &AppState) -> Vec<String> {
 /// The interface's own generated symbol: pin order, electrical types and
 /// terminal placement all agree with the contract by construction.
 fn contract_matching_document(state: &AppState) -> SymbolDocument {
-    SymbolDocument::generated_from_ports(&state.active_symbol_ports())
+    SymbolDocument::generated_from_ports(&crate::workbench::app::active_symbol_ports(&state.model))
 }
 
 fn pin_index(document: &SymbolDocument, name: &str) -> usize {
@@ -157,7 +158,7 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         .model
         .load_active_symbol_document()
         .expect("document loads");
-    state.record_symbol_edit(&before);
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
     state
         .store_active_symbol_editor_bundle(&document, &metadata)
         .expect("edit stores");
@@ -168,9 +169,15 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
          faithfully the project library was written"
     );
 
-    state
-        .publish_active_symbol_revision(&document, &mut metadata, "first cut")
-        .expect("a contract-matching symbol publishes");
+    crate::workbench::app::publish_active_symbol_revision(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+        &document,
+        &mut metadata,
+        "first cut",
+    )
+    .expect("a contract-matching symbol publishes");
 
     assert_eq!(metadata.revision, 1);
     assert!(
@@ -182,7 +189,7 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         .model
         .load_active_symbol_document()
         .expect("document loads");
-    state.record_symbol_edit(&published);
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &published);
     let mut edited = document.clone();
     edited.body.push(SymbolShape::Circle {
         center: Point::new(30, 30),
@@ -223,9 +230,15 @@ fn a_symbol_that_fails_its_own_checks_is_refused_by_name() {
         "the refusal names the row that blocked it: {refusal}"
     );
 
-    let error = state
-        .publish_active_symbol_revision(&document, &mut metadata, "note")
-        .expect_err("publication is refused");
+    let error = crate::workbench::app::publish_active_symbol_revision(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+        &document,
+        &mut metadata,
+        "note",
+    )
+    .expect_err("publication is refused");
     assert_eq!(error, refusal);
     assert_eq!(
         metadata.revision, 0,
@@ -327,8 +340,7 @@ fn updating_pins_from_the_contract_adds_only_what_is_missing() {
 #[test]
 fn the_contract_update_reorders_only_on_an_exact_name_match() {
     let mut state = state_with_open_symbol(0);
-    let declared: Vec<String> = state
-        .active_symbol_ports()
+    let declared: Vec<String> = crate::workbench::app::active_symbol_ports(&state.model)
         .into_iter()
         .map(|port| port.name)
         .collect();
@@ -370,16 +382,18 @@ fn a_pin_rename_reaches_every_placed_instance() {
         .model
         .load_active_symbol_document()
         .expect("document loads");
-    state.record_symbol_edit(&before);
-    state
-        .commit_active_symbol_edit(
-            &renamed,
-            &metadata,
-            &SymbolCommitIntent {
-                renames: BTreeMap::from([("OUT".to_owned(), "VOUT".to_owned())]),
-            },
-        )
-        .expect("the rename commits");
+    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
+    commit_active_symbol_edit(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+        &renamed,
+        &metadata,
+        &SymbolCommitIntent {
+            renames: BTreeMap::from([("OUT".to_owned(), "VOUT".to_owned())]),
+        },
+    )
+    .expect("the rename commits");
 
     assert_eq!(
         terminal_names(&state),
