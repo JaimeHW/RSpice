@@ -25,9 +25,11 @@ const FRAME: egui::Vec2 = egui::vec2(1200.0, 760.0);
 /// absolute, so it runs without an imported deck origin, each line passed
 /// through `edit`.
 fn corpus_deck(design: &str, deck: &str, edit: impl Fn(&str) -> String) -> String {
+    // A deck reads a backslash as an escape, so a Windows manifest path goes
+    // into the deck with forward slashes.
     let root = format!(
         "{}/../../tests/mixed-corpus/{design}",
-        env!("CARGO_MANIFEST_DIR")
+        env!("CARGO_MANIFEST_DIR").replace('\\', "/")
     );
     let read = |path: String| std::fs::read_to_string(&path).expect("the corpus deck is readable");
     read(format!("{root}/deck/{deck}"))
