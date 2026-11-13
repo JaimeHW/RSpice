@@ -230,7 +230,7 @@ pub(super) fn stage_netlist_import(
     if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
         record_import_failure(
-            state,
+            &mut state.model,
             &format!(
                 "the selected file exceeds the {} B size limit",
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
@@ -251,7 +251,10 @@ pub(super) fn stage_netlist_import(
     }
     if bytes.starts_with(b"PK\x03\x04") {
         return stage_netlist_bundle_import(
-            state,
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.platform,
+            &mut state.workbench,
             transaction,
             mode,
             bytes,
@@ -263,7 +266,7 @@ pub(super) fn stage_netlist_import(
         Ok(decoded) => decoded,
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            record_import_failure(state, &error);
+            record_import_failure(&mut state.model, &error);
             return false;
         }
     };
@@ -685,7 +688,11 @@ fn stage_dropped_netlist(
     source_path: Option<std::path::PathBuf>,
     display_name: String,
 ) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(state, mode) {
+    if let Some(reason) = netlist_import_start_block_reason(
+        &state.model,
+        state.platform.project_lifecycle.is_open(),
+        mode,
+    ) {
         state.prompt(format!(
             "The dropped SPICE file was not imported: {reason}."
         ));
@@ -703,7 +710,10 @@ fn stage_dropped_netlist(
 }
 
 pub(super) fn stage_netlist_bundle_import(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
     transaction: crate::product::TransactionId,
     mode: NetlistImportMode,
     bytes: Vec<u8>,
@@ -718,8 +728,8 @@ pub(super) fn stage_netlist_bundle_import(
     let bundle = match parse_generated_netlist_bundle(&bytes) {
         Ok(bundle) => bundle,
         Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-            state.record(
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
+            model.record(
                 LogSeverity::Error,
                 LogSource::Netlist,
                 format!("Netlist bundle import failed: {error}"),
@@ -762,7 +772,7 @@ pub(super) fn stage_netlist_bundle_import(
         "Validated the fully expanded retained deck without consulting the host filesystem or network.".to_owned(),
         "Preserved the retained root source and dependency bytes; applied no syntax rewrite, model substitution, unit coercion, or unsupported-statement deletion.".to_owned(),
     ];
-    state.code.netlist.import_review = Some(NetlistImportReviewState {
+    netlist.import_review = Some(NetlistImportReviewState {
         transaction,
         operation: match mode {
             NetlistImportMode::OpenProject => NetlistImportOperation::OpenProject,
@@ -790,9 +800,7 @@ pub(super) fn stage_netlist_bundle_import(
         compatibility_accepted: false,
         error: None,
     });
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+    workbench.activate(crate::workbench::state::Workspace::Netlist);
     true
 }
 

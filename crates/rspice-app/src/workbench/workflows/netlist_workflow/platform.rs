@@ -9,7 +9,11 @@ use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(state, mode) {
+    if let Some(reason) = netlist_import_start_block_reason(
+        &state.model,
+        state.platform.project_lifecycle.is_open(),
+        mode,
+    ) {
         state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
         return false;
     }
@@ -52,7 +56,7 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
             if error != "cancelled" {
-                record_import_failure(state, &error);
+                record_import_failure(&mut state.model, &error);
             }
             false
         }
@@ -62,13 +66,21 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
     let started = import_netlist_with_mode(state, NetlistImportMode::OpenProject);
-    route_started_netlist_import(state, started)
+    route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        started,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn import_netlist(state: &mut AppState) -> bool {
     let started = import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject);
-    route_started_netlist_import(state, started)
+    route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        started,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -89,13 +101,20 @@ pub(super) fn show_open_netlist_dialog(
 /// `poll_browser_dependency_relink` and remains guarded by both the global
 /// picker token and the root document revision captured before the picker.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: &str) -> bool {
+pub(crate) fn request_dependency_relink(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut rspice_app_runs::workbench::slots::runs::RunsState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    logical_identity: &str,
+) -> bool {
     if let Err(error) = crate::workbench::documents::netlist_document::begin_dependency_relink(
-        &state.model,
-        &mut state.code.netlist,
+        model,
+        netlist,
         logical_identity,
     ) {
-        state.prompt(error);
+        workbench.prompt(error);
         return false;
     }
     let picked = rfd::FileDialog::new()
@@ -105,9 +124,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         .set_title("Relink SPICE Dependency")
         .pick_file();
     let Some(path) = picked else {
-        crate::workbench::documents::netlist_document::cancel_dependency_relink(
-            &mut state.code.netlist,
-        );
+        crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
         return false;
     };
     let bytes = match std::fs::metadata(&path)
@@ -124,21 +141,17 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         }) {
         Ok(bytes) => bytes,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
-            record_relink_failure(state, &error);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
+            record_relink_failure(model, &error);
             return false;
         }
     };
     let source = match rspice_core::netlist::decode_source_bytes(&bytes) {
         Ok(source) => source,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
             record_relink_failure(
-                state,
+                model,
                 &format!("the selected file could not be decoded: {error}"),
             );
             return false;
@@ -149,38 +162,35 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     match crate::workbench::documents::netlist_document::commit_dependency_relink(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
+        model,
+        netlist,
+        open_documents,
+        runs,
         source,
         display_name,
         Some(path.display().to_string()),
     ) {
         Ok(()) => {
-            record_relink_success(state);
+            record_relink_success(model, workbench);
             true
         }
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
-            record_relink_failure(state, &error);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
+            record_relink_failure(model, &error);
             false
         }
     }
 }
 
-fn record_relink_success(state: &mut AppState) {
-    let message = state
-        .workbench
+fn record_relink_success(model: &mut Model, workbench: &crate::workbench::state::WorkbenchSession) {
+    let message = workbench
         .messages()
         .text(crate::workbench::MessageId::NetlistRelinkSucceeded);
-    state.record(LogSeverity::Info, LogSource::Netlist, message);
+    model.record(LogSeverity::Info, LogSource::Netlist, message);
 }
 
-fn record_relink_failure(state: &mut AppState, error: &str) {
-    state.record(
+fn record_relink_failure(model: &mut Model, error: &str) {
+    model.record(
         LogSeverity::Error,
         LogSource::Netlist,
         format!("SPICE dependency relink failed: {error}"),
@@ -189,14 +199,18 @@ fn record_relink_failure(state: &mut AppState, error: &str) {
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
-    if let Some(reason) = netlist_import_start_block_reason(state, mode) {
+    if let Some(reason) = netlist_import_start_block_reason(
+        &state.model,
+        state.platform.project_lifecycle.is_open(),
+        mode,
+    ) {
         state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
         return false;
     }
     match start_browser_netlist_import(state, mode) {
         Ok(()) => true,
         Err(error) => {
-            record_import_failure(state, &error);
+            record_import_failure(&mut state.model, &error);
             false
         }
     }
@@ -205,24 +219,35 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
     let started = import_netlist_with_mode(state, NetlistImportMode::OpenProject);
-    route_started_netlist_import(state, started)
+    route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        started,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn import_netlist(state: &mut AppState) -> bool {
     let started = import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject);
-    route_started_netlist_import(state, started)
+    route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        started,
+    )
 }
 
 /// Browser picker completions are consumed by the Netlist surface. Route a
 /// successfully started open/import transaction to that owning page before
 /// the asynchronous file read can complete. Native uses the same transition
 /// so the staged review always opens in a deterministic workspace.
-pub(super) fn route_started_netlist_import(state: &mut AppState, started: bool) -> bool {
+pub(super) fn route_started_netlist_import(
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    page: &mut crate::workbench::documents::code_workspace::CodeWorkspacePage,
+    started: bool,
+) -> bool {
     if started {
-        state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        state.code.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        *page = crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     }
     started
 }
@@ -268,13 +293,20 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: &str) -> bool {
+pub(crate) fn request_dependency_relink(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    _open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    _runs: &mut rspice_app_runs::workbench::slots::runs::RunsState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+    logical_identity: &str,
+) -> bool {
     if let Err(error) = crate::workbench::documents::netlist_document::begin_dependency_relink(
-        &state.model,
-        &mut state.code.netlist,
+        model,
+        netlist,
         logical_identity,
     ) {
-        state.prompt(error);
+        workbench.prompt(error);
         return false;
     }
     let token = match crate::workbench::browser::file_import::try_begin_text_import(
@@ -282,10 +314,8 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
     ) {
         Ok(token) => token,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
-            state.prompt(error);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
+            workbench.prompt(error);
             return false;
         }
     };
@@ -307,7 +337,13 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
+pub(crate) fn poll_browser_dependency_relink(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut rspice_app_runs::workbench::slots::runs::RunsState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+) -> bool {
     let Some(completion) = BROWSER_DEPENDENCY_RELINK_RESULT.with(|slot| slot.borrow_mut().take())
     else {
         return false;
@@ -321,10 +357,8 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 .original_bytes
                 .unwrap_or_else(|| file.contents.into_bytes());
             if bytes.starts_with(b"PK\x03\x04") {
-                crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                    &mut state.code.netlist,
-                );
-                state.prompt(
+                crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
+                workbench.prompt(
                     "A bundle cannot relink one dependency. Select the SPICE source file itself.",
                 );
                 return false;
@@ -333,48 +367,44 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 Ok(source) => source,
                 Err(error) => {
                     crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                        &mut state.code.netlist,
+                        netlist,
                     );
                     record_relink_failure(
-                        state,
+                        model,
                         &format!("the selected file could not be decoded: {error}"),
                     );
                     return false;
                 }
             };
             match crate::workbench::documents::netlist_document::commit_dependency_relink(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-                &mut state.runs,
+                model,
+                netlist,
+                open_documents,
+                runs,
                 source,
                 file.name,
                 None,
             ) {
                 Ok(()) => {
-                    record_relink_success(state);
+                    record_relink_success(model, workbench);
                     true
                 }
                 Err(error) => {
                     crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                        &mut state.code.netlist,
+                        netlist,
                     );
-                    record_relink_failure(state, &error);
+                    record_relink_failure(model, &error);
                     false
                 }
             }
         }
         BrowserDependencyRelinkResult::Failed(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
-            record_relink_failure(state, &error);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
+            record_relink_failure(model, &error);
             false
         }
         BrowserDependencyRelinkResult::Cancelled => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(
-                &mut state.code.netlist,
-            );
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(netlist);
             false
         }
     }
@@ -459,7 +489,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
                 &mut state.platform,
                 completion.transaction,
             );
-            record_import_failure(state, &error);
+            record_import_failure(&mut state.model, &error);
             false
         }
         BrowserNetlistImportResult::Cancelled => {

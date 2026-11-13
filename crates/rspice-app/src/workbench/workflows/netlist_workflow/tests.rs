@@ -85,7 +85,11 @@ fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
     state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
 
-    assert!(!route_started_netlist_import(&mut state, false));
+    assert!(!route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        false
+    ));
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Models
@@ -95,7 +99,11 @@ fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
     );
 
-    assert!(route_started_netlist_import(&mut state, true));
+    assert!(route_started_netlist_import(
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        true
+    ));
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Netlist

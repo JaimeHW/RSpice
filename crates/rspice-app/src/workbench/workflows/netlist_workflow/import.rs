@@ -83,7 +83,7 @@ pub(super) fn apply_imported_netlist_transaction(
             false
         }
         Err(ImportFailure::Failed(error)) => {
-            record_import_failure(state, &error);
+            record_import_failure(&mut state.model, &error);
             false
         }
     }
@@ -119,7 +119,6 @@ fn install_imported_netlist(
     }
 
     let (document, mut descriptor) = canonical_import_document(
-        state,
         &source,
         source_path.as_deref(),
         display_name,
@@ -177,8 +176,8 @@ fn install_imported_netlist(
     Ok(())
 }
 
-pub(super) fn record_import_failure(state: &mut AppState, error: &str) {
-    state.record(
+pub(super) fn record_import_failure(model: &mut Model, error: &str) {
+    model.record(
         LogSeverity::Error,
         LogSource::Netlist,
         format!("SPICE deck import failed: {error}"),
@@ -200,17 +199,20 @@ impl NetlistImportMode {
     }
 }
 
+/// Why an import in `mode` cannot start, over the model and whether a
+/// project is open.
 pub(super) fn netlist_import_start_block_reason(
-    state: &AppState,
+    model: &Model,
+    project_open: bool,
     mode: NetlistImportMode,
 ) -> Option<&'static str> {
-    if state.model.simulation.execution.has_active_execution() {
+    if model.simulation.execution.has_active_execution() {
         return Some("a simulation execution still owns the project");
     }
-    if mode == NetlistImportMode::ImportIntoProject && !state.platform.project_lifecycle.is_open() {
+    if mode == NetlistImportMode::ImportIntoProject && !project_open {
         return Some("no project is open");
     }
-    if mode == NetlistImportMode::ImportIntoProject && state.model.safe_mode.project_read_only() {
+    if mode == NetlistImportMode::ImportIntoProject && model.safe_mode.project_read_only() {
         return Some("the project is open read-only");
     }
     None
@@ -300,7 +302,6 @@ pub(super) fn apply_netlist_import_result(
 }
 
 pub(super) fn canonical_import_document(
-    _state: &AppState,
     source: &str,
     source_path: Option<&std::path::Path>,
     display_name: &str,

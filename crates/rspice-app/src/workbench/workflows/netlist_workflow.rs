@@ -37,7 +37,13 @@ pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
     platform::poll_browser_netlist_import(state);
-    platform::poll_browser_dependency_relink(state);
+    platform::poll_browser_dependency_relink(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        &mut state.workbench,
+    );
 }
 
 pub(crate) fn normalize_owned_netlist_whitespace(source: &str) -> String {

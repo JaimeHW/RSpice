@@ -470,7 +470,11 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::RelinkNetlistDependency(identity) => {
             crate::workbench::workflows::netlist_workflow::request_dependency_relink(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                &mut app.state.runs,
+                &mut app.state.workbench,
                 &identity,
             );
         }
