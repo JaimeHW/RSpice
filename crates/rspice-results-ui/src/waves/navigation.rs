@@ -500,29 +500,29 @@ pub fn show_shared_x_axis(
         egui::pos2(plot_left - 8.0, track.center().y),
         egui::Align2::RIGHT_CENTER,
         "FULL",
-        gutter_font.clone(),
+        gutter_font,
         c.text_faint,
     );
-    // The scale toggle sits in the gutter between the two rows' names. A
-    // domain a logarithmic axis cannot show refuses it with the reason.
-    let (scale_text, other) = match model.x_scale {
-        XScale::Log10 => ("LOG", "linear"),
-        XScale::Linear => ("LIN", "logarithmic"),
-    };
-    let refused = model.x_scale == XScale::Linear && input.log_refusal.is_some();
-    let scale_galley = painter.layout_no_wrap(scale_text.to_owned(), gutter_font, c.text_dim);
-    let scale_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            plot_left - 8.0 - scale_galley.size().x,
-            flag_top + (SHARED_X_FLAG_HEIGHT - scale_galley.size().y) * 0.5,
-        ),
-        scale_galley.size(),
-    )
-    .expand(2.0);
-    if scale_rect.left() > rect.left() {
-        let scale_response = ui
+    // The scale toggle reads as each pane's Y toggle does: "log", lit while
+    // the axis is logarithmic, in the chip's fills. It heads the gutter, in
+    // the column the panes' unit tags start in, where no cursor flag reaches:
+    // beside the plot's left edge it ran into cursor A's flag. A domain a
+    // logarithmic axis cannot show refuses it with the reason.
+    let logarithmic = model.x_scale == XScale::Log10;
+    let refused = !logarithmic && input.log_refusal.is_some();
+    let toggle_galley = painter.layout_no_wrap(
+        "log".to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text,
+    );
+    let toggle_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 5.0, flag_top - 1.0),
+        egui::vec2(toggle_galley.size().x + 12.0, SHARED_X_FLAG_HEIGHT + 2.0),
+    );
+    if toggle_rect.right() + 4.0 <= plot_left {
+        let toggle = ui
             .interact(
-                scale_rect,
+                toggle_rect,
                 egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
                 egui::Sense::click(),
             )
@@ -530,32 +530,39 @@ pub fn show_shared_x_axis(
                 Some(reason) if refused => {
                     format!("A logarithmic X axis is not available: {reason}")
                 }
-                _ => format!("X axis {}; click for {other}", scale_text.to_lowercase()),
+                _ => "Toggle logarithmic X axis".to_owned(),
             });
-        scale_response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Button,
+        toggle.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
                 !refused,
-                format!("X scale {scale_text}"),
+                logarithmic,
+                "Logarithmic X axis",
             )
         });
-        let colour = if refused {
-            c.text_faint
-        } else if scale_response.hovered() || model.x_scale == XScale::Log10 {
-            c.accent
+        let hovered = toggle.hovered() && !refused;
+        let (fill, border, ink) = if logarithmic {
+            (c.accent_dim, c.accent, c.text)
+        } else if refused {
+            (egui::Color32::TRANSPARENT, c.border, c.text_faint)
+        } else if hovered {
+            (egui::Color32::TRANSPARENT, c.border_strong, c.text)
         } else {
-            c.text_dim
+            (egui::Color32::TRANSPARENT, c.border, c.text_dim)
         };
-        if scale_response.hovered() && !refused {
-            painter.rect_stroke(
-                scale_rect,
-                2.0,
-                egui::Stroke::new(1.0, c.border),
-                egui::StrokeKind::Inside,
-            );
-        }
-        painter.galley(scale_rect.min + egui::vec2(2.0, 2.0), scale_galley, colour);
-        output.scale_toggled = scale_response.clicked() && !refused;
+        painter.rect(
+            toggle_rect,
+            t.radius,
+            fill,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(
+            toggle_rect.center() - toggle_galley.size() * 0.5,
+            toggle_galley,
+            ink,
+        );
+        output.scale_toggled = toggle.clicked() && !refused;
     }
 
     // The same fills and ink as the plot's own cursor flags, so one cursor

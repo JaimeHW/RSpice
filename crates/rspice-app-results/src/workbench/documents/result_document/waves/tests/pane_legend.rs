@@ -356,6 +356,53 @@ fn a_logic_expression_chip_offers_analog() {
     );
 }
 
+/// Both axes' log toggles read alike, "log", lit while the axis is
+/// logarithmic; and the X axis's stands clear of cursor A's flag with A on
+/// the plot's left edge, with lanes beside the panes and without.
+#[test]
+fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
+    for lanes in [true, false] {
+        let mut state = if lanes {
+            sar_strip(BusRadix::Unsigned, false).0
+        } else {
+            super::lanes::host(super::lanes::sar_run(), &super::lanes::ANALOG)
+        };
+        super::lanes::place_cursors(&mut state, Some(0.0), None);
+        let ctx = theme_context();
+        let output = settled(&ctx, &mut state);
+        let panes = texts(&output.shapes)
+            .iter()
+            .filter(|(text, _)| text.ends_with(" hidden"))
+            .count();
+        assert_eq!(
+            texts(&output.shapes)
+                .iter()
+                .filter(|(text, _)| text == "log")
+                .count(),
+            panes + 1,
+            "each pane's Y toggle and the X toggle read \"log\" (lanes: {lanes})"
+        );
+        assert!(
+            texts(&output.shapes)
+                .iter()
+                .all(|(text, _)| text != "LIN" && text != "LOG"),
+            "no toggle states its scale in capitals (lanes: {lanes})"
+        );
+        let toggle = control(&output, "Logarithmic X axis");
+        let flag = texts(&output.shapes)
+            .into_iter()
+            .filter(|(text, _)| text == "A")
+            .map(|(_, rect)| rect)
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("cursor A's flag on the time axis");
+        assert!(
+            toggle.right() + 4.0 <= flag.left() - 3.0,
+            "the X toggle clears cursor A's flag (lanes: {lanes}): toggle {toggle:?}, flag letter \
+             {flag:?}"
+        );
+    }
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the staircase named in its own pane beside the DAC, and an expression of
 /// volts named in the volts pane with cursor A's reading, then hidden there.

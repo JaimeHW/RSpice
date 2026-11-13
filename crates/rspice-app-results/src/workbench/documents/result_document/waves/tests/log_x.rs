@@ -40,8 +40,9 @@ fn key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     )
 }
 
-/// Draw the waves view and return the labels it publishes.
-fn frame(state: &mut ResultsTestHost) -> Vec<String> {
+/// The X axis's log toggle as the drawn waves view publishes it: whether it
+/// is lit and whether it can be pressed. `None` when the view draws none.
+fn x_log_toggle(state: &mut ResultsTestHost) -> Option<(bool, bool)> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -50,17 +51,16 @@ fn frame(state: &mut ResultsTestHost) -> Vec<String> {
             show(ui, &mut state.results_parts());
         });
     });
-    output
-        .platform_output
-        .accesskit_update
-        .map(|update| {
-            update
-                .nodes
-                .iter()
-                .filter_map(|(_, node)| node.label().map(str::to_owned))
-                .collect()
+    output.platform_output.accesskit_update.and_then(|update| {
+        update.nodes.iter().find_map(|(_, node)| {
+            (node.label() == Some("Logarithmic X axis")).then(|| {
+                (
+                    node.toggled() == Some(egui::accesskit::Toggled::True),
+                    !node.is_disabled(),
+                )
+            })
         })
-        .unwrap_or_default()
+    })
 }
 
 #[test]
@@ -68,9 +68,10 @@ fn a_startup_transient_reads_over_decades_of_time_from_its_first_positive_sample
     let x = vec![0.0, 1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3];
     let mut state = strip_host(AnalysisType::Transient, x);
     assert_eq!(model(&mut state)[0].x_scale, XScale::Linear);
-    assert!(
-        frame(&mut state).iter().any(|label| label == "X scale LIN"),
-        "the axis offers its scale"
+    assert_eq!(
+        x_log_toggle(&mut state),
+        Some((false, true)),
+        "the axis offers its scale, unlit while linear"
     );
     assert_eq!(log_x_refusal(&model(&mut state)[0]), None);
 
@@ -103,7 +104,11 @@ fn a_startup_transient_reads_over_decades_of_time_from_its_first_positive_sample
         );
     }
     drop(models);
-    assert!(frame(&mut state).iter().any(|label| label == "X scale LOG"));
+    assert_eq!(
+        x_log_toggle(&mut state),
+        Some((true, true)),
+        "lit while logarithmic"
+    );
     // The choice is the project's.
     let saved = state
         .results
@@ -157,7 +162,11 @@ fn a_signed_sweep_refuses_a_logarithmic_axis_and_says_why() {
         .x_scales
         .insert(analysis, XScale::Log10);
     assert_eq!(model(&mut state)[0].x_scale, XScale::Linear);
-    assert!(frame(&mut state).iter().any(|label| label == "X scale LIN"));
+    assert_eq!(
+        x_log_toggle(&mut state),
+        Some((false, false)),
+        "the toggle is unlit and refused"
+    );
 }
 
 /// A saved view keeps the X scale its strip drew when it was saved and draws
