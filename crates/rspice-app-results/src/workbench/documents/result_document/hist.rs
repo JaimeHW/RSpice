@@ -489,6 +489,33 @@ fn member_samples(
     })
 }
 
+/// The limits of the yield the reader last kept on the reading pane for
+/// `name` itself: a family measurement of exactly that variable, judged
+/// against a lower and/or upper limit. An engine yield's limits, when the
+/// run judged one, are drawn instead.
+fn kept_yield_limits(state: ResultsReads<'_>, name: &str) -> Option<(Option<f64>, Option<f64>)> {
+    let document_id = super::document_edit::active_document_id(state)?;
+    let (_, pane_id) = super::persistent_document::reading_position(state, document_id)?;
+    state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)?
+        .measurements()
+        .iter()
+        .rev()
+        .filter(|measurement| measurement.pane_id == pane_id)
+        .filter(|measurement| {
+            measurement
+                .expression
+                .as_deref()
+                .is_some_and(|expression| expression.trim().eq_ignore_ascii_case(name))
+        })
+        .filter_map(|measurement| measurement.family.as_ref())
+        .find(|family| family.lower.is_some() || family.upper.is_some())
+        .map(|family| (family.lower, family.upper))
+}
+
 /// The trial rows a pick in the histogram selects: the trials whose sample
 /// the picked bin counts, by the same edge rule that counted them.
 fn picked_rows(samples: &[f64], histogram: &Histogram, picked: view::HistogramPick) -> Vec<usize> {
@@ -535,6 +562,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .collect()
         })
         .unwrap_or_default();
+    let kept_limits = name
+        .as_deref()
+        .and_then(|name| kept_yield_limits(state.results_reads(), name));
     let model = match &plan {
         None => Err(HistogramUnavailable::NoSelection {
             has_measurements: !names.is_empty(),
@@ -556,7 +586,8 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                     &histogram.name,
                     plan.yield_is_consistent,
                 )
-                .map(|result| (result.spec.min, result.spec.max)),
+                .map(|result| (result.spec.min, result.spec.max))
+                .or(kept_limits),
                 source: &plan.display_source,
                 selected: &selected,
             }),

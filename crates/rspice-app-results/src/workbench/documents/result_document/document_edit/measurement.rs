@@ -818,6 +818,17 @@ mod tests {
         assert!(text.contains(&line), "{text}");
     }
 
+    /// The histogram of the variable a yield was kept on draws that yield's
+    /// limits, as it draws an engine yield's; the run here judged none.
+    #[test]
+    fn the_histogram_draws_the_limits_of_the_yield_kept_on_its_pane() {
+        let (mut host, document) = kept_yield();
+        let text = picture(&mut host, document, crate::ui::Mode::Dark).1;
+        for expected in ["LSL 39", "USL 41.2", "retained spec limit"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+    }
+
     /// The review pictures, written under `RSPICE_PICTURES` when it is set:
     /// the population's document with its kept yield, and the same pane with
     /// one bin's trials picked.
