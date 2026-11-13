@@ -1,12 +1,21 @@
 //! SI-prefixed number formatting for axes, readouts and cursor blocks.
 
-/// The engineering ladder, tera down to atto. Beyond either end a value is
-/// printed under the last prefix rather than in a notation the rest of the
-/// instrument does not use.
-const SI_MAX: i32 = 4;
-const SI_MIN: i32 = -6;
+/// The engineering ladder, yotta down to yocto: the scale-factor suffixes
+/// Cadence's analog expression language prints (`aelSuffixNotation`, Y to y).
+///
+/// Past either end the mantissa stays in 1‥1000 and the decade is stated as
+/// an exponent on the number, `24.03e-27 V`, as that language leaves the `e`
+/// and exponent in place once its suffixes run out. Piling the value onto the
+/// last prefix instead (`0.02402879 yV`) prints a mantissa no engineering
+/// readout ever shows and hides the decade in a run of leading zeros.
+const SI_MAX: i32 = 8;
+const SI_MIN: i32 = -8;
 
-const SI_LADDER: [(f64, i32); 11] = [
+const SI_LADDER: [(f64, i32); 17] = [
+    (1.0e24, 8),
+    (1.0e21, 7),
+    (1.0e18, 6),
+    (1.0e15, 5),
     (1.0e12, 4),
     (1.0e9, 3),
     (1.0e6, 2),
@@ -18,44 +27,81 @@ const SI_LADDER: [(f64, i32); 11] = [
     (1.0e-12, -4),
     (1.0e-15, -5),
     (1.0e-18, -6),
+    (1.0e-21, -7),
+    (1.0e-24, -8),
 ];
 
+const SI_PREFIXES: [&str; 17] = [
+    "y", "z", "a", "f", "p", "n", "µ", "m", "", "k", "M", "G", "T", "P", "E", "Z", "Y",
+];
+
+/// The prefix the unit takes at ladder index `index`; none past the ladder,
+/// where [`si_exponent`] states the decade instead.
 fn si_prefix(index: i32) -> &'static str {
-    match index {
-        4 => "T",
-        3 => "G",
-        2 => "M",
-        1 => "k",
-        0 => "",
-        -1 => "m",
-        -2 => "µ",
-        -3 => "n",
-        -4 => "p",
-        -5 => "f",
-        _ => "a",
+    if (SI_MIN..=SI_MAX).contains(&index) {
+        SI_PREFIXES[(index - SI_MIN) as usize]
+    } else {
+        ""
     }
+}
+
+/// The exponent the mantissa takes at ladder index `index`: none on the
+/// ladder, `e-27` one step below yocto, `e27` one step above yotta.
+fn si_exponent(index: i32) -> String {
+    if (SI_MIN..=SI_MAX).contains(&index) {
+        String::new()
+    } else {
+        format!("e{}", 3 * index)
+    }
+}
+
+/// The scale an axis tick ends in: the prefix, or past the ladder the
+/// exponent with the typographic minus every tick is signed with.
+fn tick_scale(index: i32) -> String {
+    si_exponent(index).replace('-', "−") + si_prefix(index)
 }
 
 /// `value` expressed under the prefix `index` names.
 ///
-/// Positive indices divide and negative ones multiply, so the factor is
-/// always an exactly representable power of ten and the mantissa carries no
-/// rounding the value did not already have.
+/// Positive indices divide and negative ones multiply, so on the ladder up to
+/// 10^21 the factor is an exactly representable power of ten and the mantissa
+/// carries no rounding the value did not already have. The factor is applied
+/// in two steps past 10^300, which a subnormal needs and no single `f64` holds.
 fn si_scaled(value: f64, index: i32) -> f64 {
-    let factor = 10f64.powi(3 * index.abs());
+    let decades = 3 * index.abs();
+    let first = 10f64.powi(decades.min(300));
+    let rest = 10f64.powi(decades - decades.min(300));
     if index >= 0 {
-        value / factor
+        value / first / rest
     } else {
-        value * factor
+        value * first * rest
     }
 }
 
-/// Engineering ladder index: mantissa in 1‥1000.
+/// Engineering ladder index: mantissa in 1‥1000. Zero and the non-finite
+/// values take no scale at all.
 fn si_index(magnitude: f64) -> i32 {
-    SI_LADDER
-        .iter()
-        .find(|(floor, _)| magnitude >= *floor)
-        .map_or(SI_MIN, |(_, index)| *index)
+    if magnitude == 0.0 || !magnitude.is_finite() {
+        return 0;
+    }
+    if (SI_LADDER[SI_LADDER.len() - 1].0..1.0e27).contains(&magnitude) {
+        return SI_LADDER
+            .iter()
+            .find(|(floor, _)| magnitude >= *floor)
+            .map_or(SI_MIN, |(_, index)| *index);
+    }
+    // Past the ladder, the decade that puts the mantissa in 1‥1000. The
+    // logarithm can land a hair either side of an exact power, so the guess
+    // is settled against the mantissa it produces.
+    let index = (magnitude.log10() / 3.0).floor() as i32;
+    let mantissa = si_scaled(magnitude, index);
+    if mantissa >= 1.0e3 {
+        index + 1
+    } else if mantissa < 1.0 {
+        index - 1
+    } else {
+        index
+    }
 }
 
 /// Tick ladder index. Human-scale values (0.1 V, 0.8 V, 240) stay plain
@@ -78,9 +124,10 @@ fn overflows_prefix(scaled: f64, decimals: usize) -> bool {
 }
 
 /// One ladder placement: the index to print under, promoted when rounding
-/// would carry the mantissa past 1000.
+/// would carry the mantissa past 1000. Past yotta the promotion moves the
+/// exponent on, so no end of the ladder prints a four-digit mantissa.
 fn placed(magnitude: f64, index: i32, decimals: usize) -> i32 {
-    if index < SI_MAX && overflows_prefix(si_scaled(magnitude, index), decimals) {
+    if overflows_prefix(si_scaled(magnitude, index), decimals) {
         index + 1
     } else {
         index
@@ -104,8 +151,9 @@ fn trimmed(mut text: String) -> String {
 /// Format `value` with an SI prefix and unit: `fmt_si(2.0e-6, "s", 3)` →
 /// `"2.000 µs"`. Zero renders without a prefix.
 pub fn fmt_si(value: f64, unit: &str, digits: usize) -> String {
-    let (scaled, prefix) = scale_si(value, digits);
-    format!("{scaled:.digits$} {prefix}{unit}")
+    let (scaled, index) = scale_si(value, digits);
+    let (exponent, prefix) = (si_exponent(index), si_prefix(index));
+    format!("{scaled:.digits$}{exponent} {prefix}{unit}")
         .trim_end()
         .to_owned()
 }
@@ -123,9 +171,13 @@ pub fn fmt_si(value: f64, unit: &str, digits: usize) -> String {
 /// trailing zeros: a measured `1.00 ms` says three digits were resolved, which
 /// is a claim an axis label never makes.
 pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
-    let (scaled, prefix) = scale_si(value, digits);
+    let (scaled, index) = scale_si(value, digits);
     let mantissa = trimmed(format!("{scaled:.digits$}"));
-    format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
+    let exponent = si_exponent(index).replace('-', "−");
+    let prefix = si_prefix(index);
+    format!("{mantissa}{exponent} {prefix}{unit}")
+        .trim_end()
+        .to_owned()
 }
 
 /// A ladder tick with the unit its axis has no caption to carry:
@@ -145,19 +197,17 @@ pub fn tick_with_unit(label: &str, unit: &str) -> String {
 /// engineering export, which serializes the original `f64` samples.
 pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> String {
     let magnitude = value.abs();
-    let mut index = if magnitude == 0.0 || !magnitude.is_finite() {
-        0
-    } else {
-        si_index(magnitude)
-    };
+    let mut index = si_index(magnitude);
     // The mantissa decides its own decimal count, so the promotion has to be
     // judged against the digits that mantissa will print.
     let decimals = significant_decimals(si_scaled(value, index), significant_digits);
-    index = placed(magnitude, index, decimals);
+    if magnitude != 0.0 && magnitude.is_finite() {
+        index = placed(magnitude, index, decimals);
+    }
     format_with_significant_digits(
         si_scaled(value, index),
         significant_digits,
-        &format!(" {}{unit}", si_prefix(index)),
+        &format!("{} {}{unit}", si_exponent(index), si_prefix(index)),
     )
     .trim_end()
     .to_owned()
@@ -175,17 +225,21 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
 pub fn fmt_si_readout(value: f64, unit: &str, significant_digits: usize) -> String {
     let text = fmt_si_significant(value, unit, significant_digits);
     let (number, suffix) = text.split_once(' ').unwrap_or((text.as_str(), ""));
-    // Scientific notation past the ladder's end carries its own exponent, and
-    // trimming its mantissa would change the number.
-    let number = if number.contains('.') && !number.contains(['e', 'E']) {
-        number.trim_end_matches('0').trim_end_matches('.')
+    // Past the ladder's end the number carries its own exponent. Only the
+    // mantissa in front of it pads out, and trimming the exponent's zeros
+    // would change the decade.
+    let (mantissa, exponent) = number
+        .find(['e', 'E'])
+        .map_or((number, ""), |at| number.split_at(at));
+    let mantissa = if mantissa.contains('.') {
+        mantissa.trim_end_matches('0').trim_end_matches('.')
     } else {
-        number
+        mantissa
     };
     if suffix.is_empty() {
-        number.to_owned()
+        format!("{mantissa}{exponent}")
     } else {
-        format!("{number} {suffix}")
+        format!("{mantissa}{exponent} {suffix}")
     }
 }
 
@@ -208,13 +262,15 @@ pub fn fmt_significant(value: f64, significant_digits: usize, suffix: &str) -> S
     format_with_significant_digits(value, significant_digits, suffix)
 }
 
-fn scale_si(value: f64, decimals: usize) -> (f64, &'static str) {
+/// `value` placed on the ladder for `decimals` places: the mantissa and the
+/// ladder index it is printed under.
+fn scale_si(value: f64, decimals: usize) -> (f64, i32) {
     let magnitude = value.abs();
     if magnitude == 0.0 || !magnitude.is_finite() {
-        return (value, "");
+        return (value, 0);
     }
     let index = placed(magnitude, si_index(magnitude), decimals);
-    (si_scaled(value, index), si_prefix(index))
+    (si_scaled(value, index), index)
 }
 
 fn significant_decimals(value: f64, significant_digits: usize) -> usize {
@@ -272,8 +328,8 @@ pub fn tick_label_with_step(value: f64, step: f64) -> String {
     if !(step.is_finite() && step > 0.0) {
         return tick_label(value);
     }
-    if value == 0.0 {
-        return "0".to_owned();
+    if value == 0.0 || !value.is_finite() {
+        return tick_label(value);
     }
     let magnitude = value.abs();
     let mut index = tick_index(magnitude);
@@ -283,7 +339,7 @@ pub fn tick_label_with_step(value: f64, step: f64) -> String {
         index = promoted;
         decimals = step_decimals(si_scaled(step, index));
     }
-    trimmed(format!("{:.*}", decimals, si_scaled(value, index))) + si_prefix(index)
+    trimmed(format!("{:.*}", decimals, si_scaled(value, index))) + &tick_scale(index)
 }
 
 /// A tick stated as a signed offset from an axis anchor.
@@ -308,7 +364,8 @@ pub fn offset_anchor_label(anchor: f64, unit: &str, step: f64) -> String {
     };
     let decimals = step_decimals(si_scaled(step, index));
     let mantissa = trimmed(format!("{:.*}", decimals, si_scaled(magnitude, index)));
-    format!("{sign}{mantissa} {}{unit}", si_prefix(index))
+    let exponent = si_exponent(index).replace('-', "−");
+    format!("{sign}{mantissa}{exponent} {}{unit}", si_prefix(index))
         .trim_end()
         .to_owned()
 }
@@ -354,7 +411,7 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
     }
     let magnitude = value.abs();
     let index = placed(magnitude, tick_index(magnitude), decimals);
-    trimmed(format!("{:.*}", decimals, si_scaled(value, index))) + si_prefix(index)
+    trimmed(format!("{:.*}", decimals, si_scaled(value, index))) + &tick_scale(index)
 }
 
 #[cfg(test)]
@@ -417,13 +474,53 @@ mod tests {
     }
 
     #[test]
-    fn the_si_ladder_reaches_tera_and_atto_in_both_directions() {
+    fn the_si_ladder_reaches_yotta_and_yocto_in_both_directions() {
         assert_eq!(tick_label(1.0e12), "1T");
         assert_eq!(tick_label(2.5e12), "2.5T");
         assert_eq!(tick_label(1.0e-15), "1f");
         assert_eq!(tick_label(4.7e-18), "4.7a");
         assert_eq!(fmt_si(3.3e12, "Hz", 1), "3.3 THz");
         assert_eq!(fmt_si(2.0e-18, "F", 2), "2.00 aF");
+        // Past tera and atto the ladder carries on through the prefixes the
+        // reference tools print, rather than parking the value on the last.
+        assert_eq!(fmt_si_readout(2.402_879e-20, "V", 7), "24.02879 zV");
+        assert_eq!(fmt_si_readout(3.1e-24, "C", 4), "3.1 yC");
+        assert_eq!(fmt_si_readout(4.2e15, "Hz", 4), "4.2 PHz");
+        assert_eq!(fmt_si_readout(1.5e18, "Hz", 4), "1.5 EHz");
+        assert_eq!(fmt_si_readout(6.0e21, "W", 4), "6 ZW");
+        assert_eq!(fmt_si_readout(7.5e24, "W", 4), "7.5 YW");
+        assert_eq!(tick_label(5.0e-21), "5z");
+        assert_eq!(tick_label(-2.0e15), "−2P");
+        assert_eq!(si_tick_label(1.0e-24, "s", 2), "1 ys");
+    }
+
+    /// Below yocto and above yotta the mantissa stays in 1‥1000 and the
+    /// decade moves into an exponent on the number, as Cadence's suffix
+    /// notation leaves the `e` and exponent once its suffixes run out. A value
+    /// is never parked on the last prefix with a run of leading zeros.
+    #[test]
+    fn past_the_ladder_a_value_states_its_decade_as_an_exponent() {
+        assert_eq!(fmt_si_readout(2.402_879e-26, "V", 7), "24.02879e-27 V");
+        assert_eq!(fmt_si_significant(2.402_879e-26, "V", 7), "24.02879e-27 V");
+        assert_eq!(fmt_si_readout(-5.0e-30, "A", 4), "-5e-30 A");
+        assert_eq!(fmt_si_readout(3.0e27, "Hz", 4), "3e27 Hz");
+        assert_eq!(fmt_si_readout(4.56e31, "Hz", 4), "45.6e30 Hz");
+        assert_eq!(fmt_si(2.5e-28, "F", 2), "250.00e-30 F");
+        assert_eq!(fmt_si(2.5e-28, "", 2), "250.00e-30");
+        // A tick signs its exponent as it signs its value.
+        assert_eq!(tick_label(-3.0e-27), "−3e−27");
+        assert_eq!(si_tick_label(3.0e-27, "V", 2), "3e−27 V");
+        assert_eq!(tick_with_unit(&tick_label(3.0e-27), "V"), "3e−27 V");
+        assert_eq!(offset_anchor_label(2.0e-27, "s", 1.0e-33), "+2e−27 s");
+        // Rounding past 1000 promotes across the ladder's ends both ways.
+        assert_eq!(fmt_si_readout(999.999_99e-27, "V", 4), "1 yV");
+        assert_eq!(fmt_si_readout(999.999_99e24, "V", 4), "1e27 V");
+        // The far ends of the double stay finite and bounded.
+        assert_eq!(fmt_si_readout(f64::MIN_POSITIVE, "V", 4), "22.25e-309 V");
+        assert_eq!(fmt_si_readout(5.0e-324, "V", 2), "4.9e-324 V");
+        assert_eq!(fmt_si_readout(f64::MAX, "V", 4), "179.8e306 V");
+        assert_eq!(fmt_si_readout(f64::INFINITY, "V", 4), "inf V");
+        assert_eq!(tick_label_with_step(f64::NAN, 1.0), "NaN");
     }
 
     #[test]

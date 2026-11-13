@@ -71,17 +71,21 @@ pub fn fmt_in_unit_readout(value: f64, unit: &str, significant_digits: usize) ->
 /// magnitude, a phase, a frequency in the reader's own display convention.
 pub(super) fn as_readout(text: &str) -> String {
     let (number, suffix) = text.split_once(' ').unwrap_or((text, ""));
-    // Scientific notation past the ladder's end carries its own exponent, and
-    // trimming its mantissa would change the number.
-    let number = if number.contains('.') && !number.contains(['e', 'E']) {
-        number.trim_end_matches('0').trim_end_matches('.')
+    // Past the ladder's end the number carries its own exponent. Only the
+    // mantissa in front of it pads out, and trimming the exponent's zeros
+    // would change the decade.
+    let (mantissa, exponent) = number
+        .find(['e', 'E'])
+        .map_or((number, ""), |at| number.split_at(at));
+    let mantissa = if mantissa.contains('.') {
+        mantissa.trim_end_matches('0').trim_end_matches('.')
     } else {
-        number
+        mantissa
     };
     if suffix.is_empty() {
-        number.to_owned()
+        format!("{mantissa}{exponent}")
     } else {
-        format!("{number} {suffix}")
+        format!("{mantissa}{exponent} {suffix}")
     }
 }
 
@@ -225,13 +229,14 @@ mod tests {
         assert_eq!(fmt_in_unit_readout(1.234_5, "V", 5), "1.2345 V");
         assert_eq!(fmt_in_unit_readout(0.0, "V", 7), "0 V");
         // Only fractional padding goes. A value past the top of the SI
-        // ladder has no fraction to trim, and the readout spelling leaves it
-        // exactly as the column spelling writes it — trimming an integer's
-        // zeros would change the number by orders of magnitude.
-        assert_eq!(
-            fmt_in_unit_readout(1.0e40, "V", 7),
-            fmt_in_unit(1.0e40, "V", 7)
-        );
+        // ladder keeps its exponent, and only the mantissa in front of it is
+        // trimmed — trimming an integer's or an exponent's zeros would change
+        // the number by orders of magnitude.
+        assert_eq!(fmt_in_unit(1.0e40, "V", 7), "10.00000e39 V");
+        assert_eq!(fmt_in_unit_readout(1.0e40, "V", 7), "10e39 V");
+        assert_eq!(fmt_in_unit_readout(1.0e29, "V", 7), "100e27 V");
+        assert_eq!(fmt_in_unit_readout(1.0e30, "V", 7), "1e30 V");
+        assert_eq!(as_readout("250.000e-30"), "250e-30");
     }
 
     #[test]

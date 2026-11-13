@@ -378,3 +378,76 @@ fn a_curve_the_reader_adds_takes_the_next_free_hue() {
         );
     }
 }
+
+/// Hold `node` at `value` through the whole run.
+fn hold(state: &mut ResultsTestHost, node: &str, value: f64) {
+    for analysis in &mut state.model.simulation.retained.runs[0].analyses {
+        for waveform in &mut analysis.waveforms {
+            if waveform.name == node {
+                waveform.y = std::sync::Arc::new(vec![value; waveform.y.len()]);
+            }
+        }
+    }
+    state.model.simulation.view.data_version =
+        state.model.simulation.view.data_version.wrapping_add(1);
+}
+
+/// A trace far below atto or far above tera states its value at cursor A as
+/// Cadence's suffix notation does: under the next SI prefix through yocto
+/// and yotta, and past them in engineering notation with the unit. Never a
+/// run of leading zeros under the last prefix, as TOP's `0.02402879 aV`
+/// once read.
+#[test]
+fn the_legend_states_values_past_the_ends_of_the_prefix_ladder() {
+    let ctx = themed_context(crate::ui::Theme::default());
+    for (top, vin, top_text, vin_text) in [
+        (2.402_879e-20, 7.5e24, "24.02879 zV", "7.5 YV"),
+        (3.1e-23, 4.2e15, "31 yV", "4.2 PV"),
+        (2.402_879e-26, 4.56e31, "24.02879e-27 V", "45.6e30 V"),
+    ] {
+        let mut state = review_strip(false);
+        hold(&mut state, "TOP", top);
+        hold(&mut state, "VIN", vin);
+        let output = settled(&ctx, &mut state);
+        let painted = texts(&output);
+        for (node, wanted) in [("TOP", top_text), ("VIN", vin_text)] {
+            assert!(
+                painted
+                    .iter()
+                    .any(|(text, _)| text.starts_with(node) && text.ends_with(wanted)),
+                "{node}'s legend chip does not read {wanted}: {:?}",
+                painted
+                    .iter()
+                    .filter(|(text, _)| text.starts_with(node))
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert!(
+            !painted
+                .iter()
+                .any(|(text, _)| text.contains(" 0.0") && text.ends_with('V')),
+            "a value is parked on the last prefix: {painted:?}"
+        );
+    }
+}
+
+/// The strip as the SAR run leaves it, with TOP a few zeptovolts off
+/// ground at cursor A, written under `RSPICE_PICTURES` when it is set.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_tiny_value_legend_picture() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let mut state = review_strip(false);
+    let canvas =
+        rspice_ui_kit::raster::render_themed(crate::ui::Theme::default(), FRAME, |ui, _| {
+            well(ui);
+            show(ui, &mut state.results_parts());
+        });
+    std::fs::write(
+        format!("{directory}/legend-tiny-value.png"),
+        canvas.png(canvas.height()),
+    )
+    .expect("the picture is written");
+}
