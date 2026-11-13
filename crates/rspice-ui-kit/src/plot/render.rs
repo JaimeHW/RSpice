@@ -11,7 +11,7 @@ use crate::tokens::Tokens;
 use super::cursor::CursorPair;
 use super::decimate::DecimationCache;
 use super::scale::XScale;
-use super::spec::{MarkerShape, PlotSpec, Trace};
+use super::spec::{Axis, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
 
 /// Interaction contract selected by the owning result surface.
@@ -699,18 +699,22 @@ pub fn show(
     };
     // Labels skip when they would collide with the previous label (dense
     // log decades at deep zoom) — every gridline still draws.
-    if spec.minor_grid {
-        let minor = Stroke::new(1.0, c.canvas_grid.gamma_multiply(0.45));
-        for value in
-            super::scale::minor_grid_values(spec.x_scale, &spec.x.ticks, spec.x.min, spec.x.max)
-        {
-            painter.vline(mx(value), plot_rect.y_range(), minor);
+    // A logarithmic axis is read against its mantissas, 2 … 9 in each decade,
+    // lighter than the decades, as ViVA and ADS rule one; a linear axis
+    // subdivides only when the reader asks for a minor grid.
+    let minor = Stroke::new(1.0, c.canvas_grid.gamma_multiply(0.45));
+    let minors = |scale: XScale, axis: &Axis| {
+        if spec.minor_grid || scale == XScale::Log10 {
+            super::scale::minor_grid_values(scale, &axis.ticks, axis.min, axis.max)
+        } else {
+            Vec::new()
         }
-        for value in
-            super::scale::minor_grid_values(spec.y_scale, &spec.y.ticks, spec.y.min, spec.y.max)
-        {
-            painter.hline(plot_rect.x_range(), my(value), minor);
-        }
+    };
+    for value in minors(spec.x_scale, &spec.x) {
+        painter.vline(mx(value), plot_rect.y_range(), minor);
+    }
+    for value in minors(spec.y_scale, &spec.y) {
+        painter.hline(plot_rect.x_range(), my(value), minor);
     }
     // The Y column's chrome is either its unit or, when the window is too
     // narrow to label absolutely, the anchor its ticks are offsets from —
@@ -1743,6 +1747,141 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The gridlines a frame painted across the whole plot, as (position,
+    /// ink): vertical ones at their x, horizontal ones at their y.
+    fn rulings(
+        shapes: &[egui::epaint::ClippedShape],
+        plot: Rect,
+        vertical: bool,
+    ) -> Vec<(f32, Color32)> {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::LineSegment { points, stroke } => {
+                    let [a, b] = *points;
+                    let spans = if vertical {
+                        a.x == b.x && (a.y - b.y).abs() >= plot.height() - 0.5
+                    } else {
+                        a.y == b.y && (a.x - b.x).abs() >= plot.width() - 0.5
+                    };
+                    spans.then_some((if vertical { a.x } else { a.y }, stroke.color))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A logarithmic axis is ruled at 2 … 9 in every decade, lighter than its
+    /// decades, whether or not the reader turned the minor grid on: it is
+    /// how a log scale is read, as ViVA and ADS draw it. Before, a Bode
+    /// plot's frequency axis carried its decade lines and nothing between.
+    #[test]
+    fn a_log_axis_is_ruled_at_every_mantissa_lighter_than_its_decades() {
+        let x = [10.0, 1.0e5];
+        let y = [1.0e-3, 1.0];
+        let mut spec = PlotSpec::new(
+            Axis::log_decades(10.0, 1.0e5, "Hz"),
+            XScale::Log10,
+            Axis::log_decades(1.0e-3, 1.0, "V"),
+        )
+        .with_log_y();
+        spec.traces.push(Trace::new(&x, &y, Color32::WHITE));
+        assert!(!spec.minor_grid, "the reader's minor grid is off");
+        let size = vec2(640.0, 400.0);
+        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
+        let decade = Tokens::get(&{
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx
+        })
+        .color
+        .canvas_grid;
+
+        for (vertical, (min, max), decades) in [(true, (10.0, 1.0e5), 4), (false, (1.0e-3, 1.0), 3)]
+        {
+            let lines = rulings(&shapes, plot, vertical);
+            let minors: Vec<f32> = lines
+                .iter()
+                .filter(|(_, ink)| ink.a() < decade.a())
+                .map(|(at, _)| *at)
+                .collect();
+            assert_eq!(
+                minors.len(),
+                8 * decades,
+                "vertical {vertical}: eight mantissa lines per decade, {minors:?}"
+            );
+            assert!(
+                lines.iter().any(|(_, ink)| *ink == decade),
+                "vertical {vertical}: the decades keep the full grid ink"
+            );
+            let (low, high) = (f64::log10(min), f64::log10(max));
+            for exponent in (low as i32)..(high as i32) {
+                for mantissa in 2..=9 {
+                    let value = f64::from(mantissa) * 10f64.powi(exponent);
+                    let fraction = ((value.log10() - low) / (high - low)) as f32;
+                    let at = if vertical {
+                        plot.left() + fraction * plot.width()
+                    } else {
+                        plot.bottom() - fraction * plot.height()
+                    };
+                    assert!(
+                        minors.iter().any(|line| (line - at).abs() <= 0.5),
+                        "vertical {vertical}: no line at {value} ({at})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A first-order low-pass on log-log axes, both canvases, for review.
+    /// Set `RSPICE_REVIEW_DIR` to choose where.
+    #[test]
+    #[ignore = "writes PNGs for review"]
+    fn write_log_grid_pngs() {
+        let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let x: Vec<f64> = (0..=400)
+            .map(|step| 10f64.powf(1.0 + f64::from(step) / 100.0))
+            .collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|f| 1.0 / (1.0 + (f / 1.0e3).powi(2)).sqrt())
+            .collect();
+        for (canvas_theme, name) in [
+            (crate::EngineeringCanvasTheme::Dark, "log-grid-dark.png"),
+            (crate::EngineeringCanvasTheme::Light, "log-grid-light.png"),
+        ] {
+            let theme = crate::Theme {
+                canvas_theme,
+                mode: if canvas_theme == crate::EngineeringCanvasTheme::Dark {
+                    crate::Mode::Dark
+                } else {
+                    crate::Mode::Light
+                },
+                ..crate::Theme::default()
+            };
+            let canvas = crate::raster::render_themed(theme, vec2(720.0, 420.0), |ui, _| {
+                let well = ui.available_rect_before_wrap();
+                ui.painter()
+                    .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
+                let mut spec = PlotSpec::new(
+                    Axis::log_decades(10.0, 1.0e5, "Hz"),
+                    XScale::Log10,
+                    Axis::log_decades(1.0e-3, 1.0, "V"),
+                )
+                .with_log_y();
+                spec.traces
+                    .push(Trace::new(&x, &y, Tokens::get(ui.ctx()).color.traces[0]));
+                let mut cache = DecimationCache::default();
+                show(ui, &spec, &mut cache, None, None);
+            });
+            let path = directory.join(name);
+            std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
+            println!("{}", path.display());
+        }
     }
 
     fn degenerate_spec<'a>(x: &'a [f64], y: &'a [f64], min: f64, max: f64) -> PlotSpec<'a> {
