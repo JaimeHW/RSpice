@@ -16,7 +16,8 @@ pub(in crate::workbench) use render::render_symbol_definition_dialogs;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::state::WorkbenchSession;
 
 pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
     open_symbol_import_dialog_for(state, None);
@@ -38,7 +39,7 @@ pub(crate) fn open_symbol_import_dialog_for(
         .cloned()
         .filter(|reference| reference_has_typed_definition(state, reference))
         .or_else(|| {
-            selected_symbol_reference(state)
+            selected_symbol_reference(&state.model)
                 .filter(|reference| reference_has_typed_definition(state, reference))
         })
         .or_else(|| first_model_bound_symbol_reference(state));
@@ -50,13 +51,18 @@ pub(crate) fn open_symbol_import_dialog_for(
     };
 }
 
-pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
-    let Some(target) = selected_symbol_reference(state).or_else(|| first_symbol_reference(state))
+pub(crate) fn open_symbol_parameter_form_dialog(
+    form: &mut SymbolParameterFormDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
+) {
+    let Some(target) = selected_symbol_reference(model).or_else(|| first_symbol_reference(model))
     else {
-        state.prompt("Open form designer needs a symbol in the project library.");
+        wb.prompt("Open form designer needs a symbol in the project library.");
         return;
     };
-    open_symbol_parameter_form_dialog_for(state, target);
+    open_symbol_parameter_form_dialog_for(form, model, wb, platform, target);
 }
 
 /// Open the form transaction for one exact symbol reference.
@@ -64,44 +70,45 @@ pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
 /// This explicit form is required by the Library/Cellview specialist route:
 /// its project-library selection is authoritative even when another symbol
 /// remains open in the Design workspace.
-pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target: CellViewRef) {
-    let writable = state
-        .model
+pub(crate) fn open_symbol_parameter_form_dialog_for(
+    form: &mut SymbolParameterFormDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
+    target: CellViewRef,
+) {
+    let writable = model
         .library_manager
         .get_library(&target.library)
         .is_some_and(|library| !library.read_only);
-    if !state.platform.project_lifecycle.is_open()
-        || state.model.safe_mode.project_read_only()
-        || !writable
-    {
-        state.prompt("The symbol's parameter form cannot be edited: its library is read-only.");
+    if !platform.project_lifecycle.is_open() || model.safe_mode.project_read_only() || !writable {
+        wb.prompt("The symbol's parameter form cannot be edited: its library is read-only.");
         return;
     }
-    let Some(view) = state
-        .model
+    let Some(view) = model
         .library_manager
         .get_library(&target.library)
         .and_then(|library| library.get_cell(&target.cell))
         .and_then(|cell| cell.get_view(&target.view))
     else {
-        state.prompt("The selected symbol view is no longer available.");
+        wb.prompt("The selected symbol view is no longer available.");
         return;
     };
     if view.view_type != ViewType::Symbol {
-        state.prompt("The selected cellview is not a symbol, so it has no parameter form.");
+        wb.prompt("The selected cellview is not a symbol, so it has no parameter form.");
         return;
     }
     let definition = match crate::state::load_model_bound_symbol(view) {
         Ok(Some(definition)) => definition,
         Ok(None) => {
-            state.prompt(
+            wb.prompt(
                 "The selected symbol has no parameter form. Create or import a model-bound \
                  symbol first.",
             );
             return;
         }
         Err(error) => {
-            state.prompt(format!(
+            wb.prompt(format!(
                 "The selected symbol definition is invalid: {error}"
             ));
             return;
@@ -118,7 +125,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         .first()
         .and_then(|section| section.fields.first())
         .map(|field| field.key.clone());
-    state.design.symbol_parameter_form = SymbolParameterFormDialogState {
+    *form = SymbolParameterFormDialogState {
         open: true,
         target: Some(target),
         original_definition: Some(definition),
@@ -157,10 +164,9 @@ fn writable_library_name(state: &AppState) -> Option<String> {
         })
 }
 
-fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
-    let active = &state.model.workspace.content.active_view;
-    if state
-        .model
+fn selected_symbol_reference(model: &Model) -> Option<CellViewRef> {
+    let active = &model.workspace.content.active_view;
+    if model
         .library_manager
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -169,11 +175,10 @@ fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
     {
         return Some(active.clone());
     }
-    let library = state.model.library_manager.selected_library.as_deref()?;
-    let cell = state.model.library_manager.selected_cell.as_deref()?;
-    let view = state.model.library_manager.selected_view.as_deref()?;
-    (state
-        .model
+    let library = model.library_manager.selected_library.as_deref()?;
+    let cell = model.library_manager.selected_cell.as_deref()?;
+    let view = model.library_manager.selected_view.as_deref()?;
+    (model
         .library_manager
         .get_library(library)?
         .get_cell(cell)?
@@ -183,9 +188,8 @@ fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
         .then(|| CellViewRef::new(library, cell, view))
 }
 
-fn first_symbol_reference(state: &AppState) -> Option<CellViewRef> {
-    state
-        .model
+fn first_symbol_reference(model: &Model) -> Option<CellViewRef> {
+    model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -278,7 +282,12 @@ mod tests {
             .library_manager
             .select_view(&library_name, cell_name, "symbol");
 
-        open_symbol_parameter_form_dialog(&mut state);
+        open_symbol_parameter_form_dialog(
+            &mut state.design.symbol_parameter_form,
+            &state.model,
+            &mut state.workbench,
+            &state.platform,
+        );
 
         assert!(state.design.symbol_parameter_form.open);
         assert_eq!(

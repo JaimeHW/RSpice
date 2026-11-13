@@ -401,11 +401,19 @@ impl RSpiceApp {
                     crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
                 }
                 OpenSymbolAuthoring::ParameterForm(None) => {
-                    crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
+                    crate::workbench::app::open_symbol_parameter_form_dialog(
+                        &mut app.state.design.symbol_parameter_form,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        &app.state.platform,
+                    );
                 }
                 OpenSymbolAuthoring::ParameterForm(Some(target)) => {
                     crate::workbench::app::open_symbol_parameter_form_dialog_for(
-                        &mut app.state,
+                        &mut app.state.design.symbol_parameter_form,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        &app.state.platform,
                         target,
                     );
                 }

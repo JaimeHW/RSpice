@@ -343,7 +343,12 @@ fn the_component_form_designer_opens_and_draws_in_the_frame() {
         .model
         .library_manager
         .select_view(&library_name, "review_form", "symbol");
-    crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
+    crate::workbench::app::open_symbol_parameter_form_dialog(
+        &mut app.state.design.symbol_parameter_form,
+        &app.state.model,
+        &mut app.state.workbench,
+        &app.state.platform,
+    );
     assert!(draws_dialog(&mut app, "Open component form designer"));
     assert!(app.state.design.symbol_parameter_form.open);
 }

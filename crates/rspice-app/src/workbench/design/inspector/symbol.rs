@@ -51,7 +51,12 @@ fn apply_request(state: &mut AppState, mut request: SymbolInspectorRequest) {
     }
     state.design.symbol.editor.set_selection(request.selection);
     if request.open_parameter_form {
-        crate::workbench::app::open_symbol_parameter_form_dialog(state);
+        crate::workbench::app::open_symbol_parameter_form_dialog(
+            &mut state.design.symbol_parameter_form,
+            &state.model,
+            &mut state.workbench,
+            &state.platform,
+        );
     }
     if request.changed {
         match state.commit_active_symbol_edit(&request.document, &request.metadata, &request.intent)
