@@ -626,11 +626,11 @@ fn legacy_fourier_specs_retain_dimensional_thd_behavior() {
     let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
         "Fourier": fields.clone()
     }))
-    .expect("legacy analysis spec deserializes");
+    .expect("analysis spec deserializes");
     let worker: WorkerAnalysisSpec = serde_json::from_value(serde_json::json!({
         "Fourier": fields
     }))
-    .expect("legacy worker spec deserializes");
+    .expect("worker spec deserializes");
 
     assert!(matches!(
         analysis,
@@ -756,12 +756,12 @@ fn a_wire_request_written_before_the_share_threshold_field_restores_without_one(
 }
 
 #[test]
-fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
+fn envelope_specs_decode_identically_across_worker_transport() {
     let fields = serde_json::json!({
         "fundamental_freq": 1.0e6,
         "stop_time": 10.0e-3,
         "num_harmonics": 9,
-        "max_step": 1.0e-6
+        "envelope_step": 1.0e-6
     });
     let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
         "Envelope": fields.clone()
