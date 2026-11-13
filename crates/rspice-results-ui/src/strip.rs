@@ -197,7 +197,7 @@ pub struct StripHeader<'a> {
     closable: bool,
     zoomed: bool,
     expr_action: bool,
-    removable_from: usize,
+    removable: std::ops::Range<usize>,
     pane_actions: bool,
     incomplete: Option<&'a str>,
 }
@@ -213,7 +213,7 @@ impl<'a> StripHeader<'a> {
             closable: false,
             zoomed: false,
             expr_action: false,
-            removable_from: usize::MAX,
+            removable: usize::MAX..usize::MAX,
             pane_actions: true,
             incomplete: None,
         }
@@ -258,7 +258,14 @@ impl<'a> StripHeader<'a> {
     /// Legend chips from this index on get a "Remove" context-menu action
     /// (user expression traces).
     pub fn removable_from(mut self, index: usize) -> Self {
-        self.removable_from = index;
+        self.removable = index..usize::MAX;
+        self
+    }
+
+    /// Legend chips in `chips` get the "Remove" action, and the chips after
+    /// them, which the sheet draws itself, do not.
+    pub fn removable(mut self, chips: std::ops::Range<usize>) -> Self {
+        self.removable = chips;
         self
     }
 
@@ -408,7 +415,7 @@ impl<'a> StripHeader<'a> {
 
         // Chips own exactly the remaining clipped width; drag/wheel scrolling
         // keeps every trace reachable without crossing into the action rect.
-        let removable_from = self.removable_from;
+        let removable = self.removable;
         let legend = self.legend;
         let expr_action = self.expr_action;
         let legend_rect = span_rect(layout.legend);
@@ -434,7 +441,7 @@ impl<'a> StripHeader<'a> {
                         if visibility.clicked() {
                             out.legend_visibility_clicked = Some(index);
                         }
-                        if index >= removable_from {
+                        if removable.contains(&index) {
                             response.context_menu(|ui| {
                                 if ui.button("Remove expression").clicked() {
                                     out.legend_removed = Some(index);

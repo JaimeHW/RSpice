@@ -577,18 +577,13 @@ pub fn show(
 
     // The legend chips are painted in the mono face, which has no ohm sign,
     // so the retained reference impedance rides the sans subtitle instead.
-    let mut legend = vec![
-        LegendChip {
-            name: &locus.label,
-            color: c.traces[0],
-            on: true,
-        },
-        LegendChip {
-            name: "A \u{b7} B frequency markers",
-            color: c.canvas_cursor_a,
-            on: true,
-        },
-    ];
+    // The curves first, the primary then its overlays, and the markers drawn
+    // on them after every curve they mark.
+    let mut legend = vec![LegendChip {
+        name: &locus.label,
+        color: c.traces[0],
+        on: true,
+    }];
     let inks = overlay_inks(&c);
     let overlays = &overlays[..overlays.len().min(inks.len())];
     for (overlay, ink) in overlays.iter().zip(inks) {
@@ -598,12 +593,17 @@ pub fn show(
             on: true,
         });
     }
+    legend.push(LegendChip {
+        name: "A \u{b7} B frequency markers",
+        color: c.canvas_cursor_a,
+        on: true,
+    });
     let mut subtitle = rule.head_note(&locus.unit, sheet.normalize);
     if let Some(reference) = locus.reference_impedance_ohm {
         subtitle.push_str(&format!(" \u{b7} Z\u{2080} {reference} \u{3a9}"));
     }
     let header = strip::StripHeader::new("POLAR", &subtitle, &legend)
-        .removable_from(2)
+        .removable(1..1 + overlays.len())
         .show(ui);
 
     let loci = Loci {
@@ -613,7 +613,7 @@ pub fn show(
     let mut response = paint_canvas(ui, &t, loci, rule, samples, sheet, policy);
     response.removed_overlay = header
         .legend_removed
-        .and_then(|chip| chip.checked_sub(2))
+        .and_then(|chip| chip.checked_sub(1))
         .filter(|overlay| *overlay < overlays.len());
     Some(response)
 }
@@ -1818,6 +1818,24 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The legend names the curves first, the primary then its overlays,
+    /// and the markers drawn on them last. The markers' entry sat between
+    /// the primary and the overlays it also marks.
+    #[test]
+    fn the_legend_names_every_curve_before_the_markers() {
+        let (ctx, output) = three_responses(rspice_ui_kit::theme::Theme::default(), 1.0);
+        let names = ["V(lp1)", "V(lp2)", "V(lp3)", "A \u{b7} B frequency markers"];
+        let mut chips: Vec<(f32, String)> =
+            rspice_ui_kit::raster::text_contrasts(&ctx, PANE, &output)
+                .into_iter()
+                .filter(|text| names.contains(&text.text.as_str()))
+                .map(|text| (text.rect.left(), text.text))
+                .collect();
+        chips.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let order: Vec<&str> = chips.iter().map(|(_, name)| name.as_str()).collect();
+        assert_eq!(order, names);
     }
 
     /// The three-response polar chart for review, at 2x as a review display
