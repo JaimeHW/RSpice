@@ -411,7 +411,7 @@ fn xyce_nodeset_holds_a_latch_whose_input_has_no_dc_path() {
     // Each latch input is reached only through a capacitor and a
     // controlled-source sense, so only its NODESET defines it at DC.
     let deck = Netlist::parse_with_options(
-        include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_1962/nodeset.cir"),
+        include_str!("../../../../tests/xyce/Netlists/Certification_Tests/BUG_1962/nodeset.cir"),
         NetlistParseOptions {
             expression_dialect: ExpressionDialect::Xyce,
             ..NetlistParseOptions::default()
