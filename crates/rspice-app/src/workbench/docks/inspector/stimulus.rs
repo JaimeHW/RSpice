@@ -476,7 +476,12 @@ fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
         }
         Verb::Readopt(index) => {
             if let Some(adopter) = adopters.get(index) {
-                stimulus_actions::readopt_adopter(state, adopter.source.component_id, &name);
+                stimulus_actions::readopt_adopter(
+                    &mut state.model,
+                    &mut state.workbench,
+                    adopter.source.component_id,
+                    &name,
+                );
             }
         }
         Verb::OpenPlanReaders => {
@@ -491,7 +496,13 @@ fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
         }
         Verb::CommitPurpose(text) => {
             state.design.stimulus_editor.clear_field();
-            stimulus_actions::edit_field(state, PURPOSE_FIELD, &text);
+            stimulus_actions::edit_field(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                PURPOSE_FIELD,
+                &text,
+            );
         }
     }
 }

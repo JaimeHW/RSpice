@@ -295,7 +295,13 @@ fn a_many_cycle_window_announces_its_band_and_a_curve_does_not() {
 fn many_cycle_train() -> RSpiceApp {
     let mut app = seeded("bridge_cal_step");
     for (field, value) in [("tr", "1n"), ("tf", "1n"), ("pw", "1u"), ("per", "2u")] {
-        crate::workbench::app::actions::stimulus::edit_field(&mut app.state, field, value);
+        crate::workbench::app::actions::stimulus::edit_field(
+            app.state.design.selected_stimulus_definition.as_deref(),
+            &mut app.state.design.stimulus_editor,
+            &app.state.model,
+            field,
+            value,
+        );
     }
     app.state.design.stimulus_editor.span = crate::workbench::state::PreviewSpan::Transient;
     app
@@ -315,7 +321,12 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
         .params
         .clone();
 
-    crate::workbench::app::actions::stimulus::edit_family(&mut app.state, StimulusFamily::Sin);
+    crate::workbench::app::actions::stimulus::edit_family(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        StimulusFamily::Sin,
+    );
     let draft = app
         .state
         .design
@@ -376,7 +387,12 @@ fn a_finding_lands_on_the_field_its_rule_named() {
 #[test]
 fn a_name_collision_is_stated_at_the_name_field() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
+    crate::workbench::app::actions::stimulus::edit_name(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "sensor_diff_1k",
+    );
     let stage = resolve(&mut app.state).expect("stage");
     assert!(
         stage
@@ -413,12 +429,22 @@ fn the_footer_states_a_specification_rather_than_a_card() {
 #[test]
 fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
+    crate::workbench::app::actions::stimulus::edit_name(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "sensor_diff_1k",
+    );
     let stage = resolve(&mut app.state).expect("stage");
     assert!(stage.errors() > 0);
     assert!(stage.apply_block().is_some());
 
-    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_step_2");
+    crate::workbench::app::actions::stimulus::edit_name(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "bridge_cal_step_2",
+    );
     let stage = resolve(&mut app.state).expect("stage");
     assert_eq!(stage.errors(), 0, "{:?}", stage.findings);
     assert!(stage.apply_block().is_none());
@@ -433,7 +459,12 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
 fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
     let id = adopter(&mut app.state, "bridge_cal_step", "V1");
-    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_pulse");
+    crate::workbench::app::actions::stimulus::edit_name(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "bridge_cal_pulse",
+    );
     crate::workbench::app::actions::stimulus::apply_draft(
         &mut app.state.design.selected_stimulus_definition,
         &mut app.state.design.stimulus_editor,
@@ -561,7 +592,13 @@ fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
     let _ = published(&mut app.state, size);
     assert_eq!(app.state.design.stimulus_editor.evaluations(), after_first);
 
-    crate::workbench::app::actions::stimulus::edit_field(&mut app.state, "va", "9m");
+    crate::workbench::app::actions::stimulus::edit_field(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "va",
+        "9m",
+    );
     let _ = published(&mut app.state, size);
     assert_eq!(
         app.state.design.stimulus_editor.evaluations(),
@@ -716,7 +753,9 @@ fn the_identity_band_never_cuts_a_fact_short() {
         // the longest thing the lifecycle chip ever has to say.
         let mut refused = seeded(name);
         crate::workbench::app::actions::stimulus::edit_name(
-            &mut refused.state,
+            refused.state.design.selected_stimulus_definition.as_deref(),
+            &mut refused.state.design.stimulus_editor,
+            &refused.state.model,
             fixtures::names()
                 .into_iter()
                 .find(|other| *other != name)
@@ -776,7 +815,12 @@ fn guide_labels_that_would_touch_are_merged() {
 #[test]
 fn a_count_of_one_is_singular() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
+    crate::workbench::app::actions::stimulus::edit_name(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        "sensor_diff_1k",
+    );
     let published = published(&mut app.state, vec2(1000.0, 470.0));
     assert!(
         published.iter().any(|text| text == "draft \u{b7} 1 error"),

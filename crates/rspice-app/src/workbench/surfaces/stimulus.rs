@@ -234,8 +234,12 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
     else {
         return;
     };
-    let consequence = crate::workbench::app::actions::stimulus::delete_needs_confirmation(state)
-        .unwrap_or_default();
+    let consequence = crate::workbench::app::actions::stimulus::delete_needs_confirmation(
+        state.design.selected_stimulus_definition.as_deref(),
+        &state.design.stimulus_editor,
+        &state.model,
+    )
+    .unwrap_or_default();
     let choice = Dialog::new(format!("Delete \u{201c}{name}\u{201d}?"), "Delete")
         .description(consequence.clone())
         .size(DialogSize::Confirmation)
@@ -562,15 +566,30 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
     match action {
         StageAction::Rename(name) => {
             state.design.stimulus_editor.clear_field();
-            stimulus::edit_name(state, &name);
+            stimulus::edit_name(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                &name,
+            );
         }
         StageAction::SetFamily(family) => {
             state.design.stimulus_editor.clear_field();
-            stimulus::edit_family(state, family);
+            stimulus::edit_family(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                family,
+            );
         }
         StageAction::SetKind(kind) => {
             state.design.stimulus_editor.clear_field();
-            stimulus::edit_kind(state, kind);
+            stimulus::edit_kind(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                kind,
+            );
         }
         StageAction::TypeField { field, value } => {
             let name = stage.saved.name().to_owned();
@@ -581,11 +600,23 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
         }
         StageAction::CommitField { field, value } => {
             state.design.stimulus_editor.clear_field();
-            stimulus::edit_field(state, &field, &value);
+            stimulus::edit_field(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                &field,
+                &value,
+            );
         }
         StageAction::SetPoints(points) => {
             state.design.stimulus_editor.clear_field();
-            stimulus::edit_field(state, "pwl_data", &points);
+            stimulus::edit_field(
+                state.design.selected_stimulus_definition.as_deref(),
+                &mut state.design.stimulus_editor,
+                &state.model,
+                "pwl_data",
+                &points,
+            );
         }
         StageAction::SelectPoint(index) => {
             let name = stage.saved.name().to_owned();
@@ -609,7 +640,13 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
             &mut state.workbench,
         ),
         StageAction::Delete => {
-            if stimulus::delete_needs_confirmation(state).is_some() {
+            if stimulus::delete_needs_confirmation(
+                state.design.selected_stimulus_definition.as_deref(),
+                &state.design.stimulus_editor,
+                &state.model,
+            )
+            .is_some()
+            {
                 let name = stage.saved.name().to_owned();
                 state.design.stimulus_editor.ask_before_deleting(&name);
             } else {
@@ -620,7 +657,11 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
                 );
             }
         }
-        StageAction::ImportDataFile => stimulus::import_data_file(state),
+        StageAction::ImportDataFile => stimulus::import_data_file(
+            state.design.selected_stimulus_definition.as_deref(),
+            &mut state.design.stimulus_editor,
+            &mut state.model,
+        ),
         StageAction::Copy(text) => state
             .workbench
             .outbox

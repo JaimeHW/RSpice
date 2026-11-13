@@ -564,7 +564,13 @@ fn the_inspector_paints_nothing_with_no_definition_selected() {
 fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    stimulus_verbs::edit_field(&mut app.state, PURPOSE_FIELD, "differential sensor drive");
+    stimulus_verbs::edit_field(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+        PURPOSE_FIELD,
+        "differential sensor drive",
+    );
 
     assert!(
         app.state.design.stimulus_editor.is_dirty("sensor_diff_1k"),

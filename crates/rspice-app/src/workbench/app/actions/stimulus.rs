@@ -21,7 +21,7 @@ use crate::state::stimulus_library::definition::{
 use crate::state::stimulus_library::draft::DefinitionDraft;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::write_field;
 use crate::workbench::state::{StimulusEditorState, WorkbenchSession};
 
@@ -131,10 +131,14 @@ pub(crate) fn delete_definition(
 /// Two things make a delete worth a question: work that has not been applied,
 /// and instances that will start reading "definition removed" because of it.
 #[must_use]
-pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
-    let name = state.design.selected_stimulus_definition.as_deref()?;
-    let adopters = design_adopters(&state.model, name).len();
-    let dirty = state.design.stimulus_editor.is_dirty(name);
+pub(crate) fn delete_needs_confirmation(
+    selection: Option<&str>,
+    editor: &StimulusEditorState,
+    model: &Model,
+) -> Option<String> {
+    let name = selection?;
+    let adopters = design_adopters(model, name).len();
+    let dirty = editor.is_dirty(name);
     match (adopters, dirty) {
         (0, false) => None,
         (0, true) => Some(format!(
@@ -266,62 +270,66 @@ pub(crate) fn redo_draft(
 }
 
 /// Rename the working record.
-pub(crate) fn edit_name(state: &mut AppState, name: &str) {
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| {
-            draft.edit(|working| {
-                let _ = working.rename(name.trim());
-            });
-        },
-    );
+pub(crate) fn edit_name(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+    name: &str,
+) {
+    with_draft(selection, editor, model, |draft| {
+        draft.edit(|working| {
+            let _ = working.rename(name.trim());
+        });
+    });
 }
 
 /// Switch the waveform shape. The shape parameters reset; undo restores them.
-pub(crate) fn edit_family(state: &mut AppState, family: StimulusFamily) {
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| {
-            draft.edit(|working| *working = working.with_family(family));
-        },
-    );
+pub(crate) fn edit_family(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+    family: StimulusFamily,
+) {
+    with_draft(selection, editor, model, |draft| {
+        draft.edit(|working| *working = working.with_family(family));
+    });
 }
 
 /// Switch the driven quantity, keeping the card.
-pub(crate) fn edit_kind(state: &mut AppState, kind: StimulusKind) {
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| {
-            draft.edit(|working| *working = working.with_kind(kind));
-        },
-    );
+pub(crate) fn edit_kind(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+    kind: StimulusKind,
+) {
+    with_draft(selection, editor, model, |draft| {
+        draft.edit(|working| *working = working.with_kind(kind));
+    });
 }
 
 /// Write one waveform field, in the instance's own spelling.
-pub(crate) fn edit_field(state: &mut AppState, field: &str, value: &str) {
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| {
-            draft.edit(|working| write_field(working, field, value));
-        },
-    );
+pub(crate) fn edit_field(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+    field: &str,
+    value: &str,
+) {
+    with_draft(selection, editor, model, |draft| {
+        draft.edit(|working| write_field(working, field, value));
+    });
 }
 
 /// Import a data file and retain its bytes in the definition.
 ///
 /// The card names the file and the project keeps a copy of it, which is what
 /// lets a project that has been zipped and mailed still describe the same run.
-pub(crate) fn import_data_file(state: &mut AppState) {
-    let data_root = state
-        .model
+pub(crate) fn import_data_file(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &mut Model,
+) {
+    let data_root = model
         .workspace
         .content
         .project
@@ -332,7 +340,7 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         Ok(Some(reference)) => reference,
         Ok(None) => return,
         Err(error) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Data file import failed: {error}"),
@@ -347,7 +355,7 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     let bytes = match std::fs::read(&absolute) {
         Ok(bytes) => bytes,
         Err(error) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!(
@@ -368,7 +376,7 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     if let Some(refusal) =
         crate::simulation::table_route::engine_refusal(&absolute.to_string_lossy())
     {
-        state.record(
+        model.record(
             LogSeverity::Error,
             LogSource::Studio,
             format!("Data file import failed: '{name}' is not a table the engine reads: {refusal}"),
@@ -382,7 +390,7 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     ) {
         Ok(retained) => retained,
         Err(refusal) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Data file import failed: {refusal}"),
@@ -391,18 +399,13 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         }
     };
     let retained_bytes = retained.contents.len();
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| {
-            draft.edit(|working| {
-                write_field(working, "file", &reference);
-                working.pwl_file = Some(retained.clone());
-            });
-        },
-    );
-    state.record(
+    with_draft(selection, editor, model, |draft| {
+        draft.edit(|working| {
+            write_field(working, "file", &reference);
+            working.pwl_file = Some(retained.clone());
+        });
+    });
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!("Retained '{name}' ({retained_bytes} B) in the stimulus definition."),
@@ -443,9 +446,14 @@ pub(crate) fn retained_table(
 /// The instrument used to own a second re-adoption with its own undo group and
 /// its own wording, so the same verb on two surfaces produced two different
 /// receipts for one edit.
-pub(crate) fn readopt_adopter(state: &mut AppState, component_id: u64, definition: &str) {
-    match state.model.readopt_stimulus(component_id, definition) {
-        Ok(line) | Err(line) => state.prompt(line),
+pub(crate) fn readopt_adopter(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    component_id: u64,
+    definition: &str,
+) {
+    match model.readopt_stimulus(component_id, definition) {
+        Ok(line) | Err(line) => wb.prompt(line),
     }
 }
 
@@ -629,13 +637,13 @@ pub(crate) struct StimulusAdopter {
 /// browser listing fourteen definitions would otherwise resolve the design
 /// fourteen times for two numbers per row.
 #[must_use]
-pub(crate) fn design_adopter_tally(state: &AppState) -> HashMap<String, AdopterTally> {
-    let library = &state.model.workspace.content.stimulus_library;
+pub(crate) fn design_adopter_tally(model: &Model) -> HashMap<String, AdopterTally> {
+    let library = &model.workspace.content.stimulus_library;
     let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
-        &state.model.library_manager,
-        &state.model.workspace,
-        &state.model.schematic,
-        state.model.sim_setup.analysis_plan.as_ref(),
+        &model.library_manager,
+        &model.workspace,
+        &model.schematic,
+        model.sim_setup.analysis_plan.as_ref(),
     );
     let mut tally: HashMap<String, AdopterTally> = HashMap::new();
     for source in &sources {

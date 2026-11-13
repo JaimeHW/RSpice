@@ -92,7 +92,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     let timing =
         crate::workbench::app::actions::property_edit::stimulus_preview_timing(&state.model);
     browser.minis(&state.model.workspace.content.stimulus_library, timing);
-    let tally = stimulus_actions::design_adopter_tally(state);
+    let tally = stimulus_actions::design_adopter_tally(&state.model);
     let counts = scope_counts(state, &tally);
     let mut scope = browser.scope;
     let mut chosen = None;
