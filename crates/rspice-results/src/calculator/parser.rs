@@ -484,6 +484,24 @@ impl<'a> Parser<'a> {
             return Ok(CalculatorExpr::wave(&signal_name));
         }
 
+        // A digital net or bus, `D(q[3:0])`: its name is read literally, as
+        // a probe argument is, so a bus range is part of it. It is no node
+        // voltage or branch current, so it is not listed with those.
+        if upper_name == "D" && matches!(self.current.token, Token::LParen) {
+            let start = self.current.position;
+            let argument_start = self.lexer.position();
+            let (_, arg) = self.lexer.read_probe_argument()?;
+            if arg.trim().is_empty() {
+                return Err(ParseError::new(
+                    argument_start,
+                    "expected a net or bus name inside D(...)".to_owned(),
+                ));
+            }
+            self.advance()?;
+            self.expect_rparen(start)?;
+            return Ok(CalculatorExpr::wave(&format!("D({arg})")));
+        }
+
         // 2. Constants — but only where the name stands alone. `freq` is the
         //    AC sweep's own axis; `freq(V(out))` is the measurement function
         //    that reports a signal's repetition rate, and the parenthesis

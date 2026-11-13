@@ -36,6 +36,9 @@ use super::measures::Argument;
 use super::value::RealValue as CalcValue;
 use std::f64::consts::PI;
 
+mod conversion;
+pub use conversion::{EventWord, analog_staircase};
+
 /// Registry of built-in functions
 pub struct FunctionRegistry;
 
@@ -65,6 +68,10 @@ impl FunctionRegistry {
             "pp" => pp(args),
             "yval" => yval(args),
             "thd" => thd(args),
+
+            // Analog-to-digital and digital-to-analog conversion
+            "digital" => conversion::digital(args),
+            "analog" => conversion::analog(args),
 
             _ => match super::time_measures::lookup(&name.to_lowercase()) {
                 // Edge, pulse and step measurements take option words, so

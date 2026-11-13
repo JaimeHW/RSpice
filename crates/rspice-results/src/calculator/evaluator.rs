@@ -24,6 +24,16 @@ pub trait EvaluationContext {
     ) -> Result<CalcValue, EvaluationError> {
         super::complex_functions::dispatch("mag", vec![self.get_waveform(signal, dataset)?])
     }
+
+    /// The exact event history of a bus or logic net, `D(name)`, for
+    /// `analog()`. A context without event histories names none.
+    fn get_event_word(
+        &self,
+        signal: &str,
+        _dataset: Option<&str>,
+    ) -> Result<super::functions::EventWord, EvaluationError> {
+        Err(EvaluationError::IdentifierNotFound(signal.to_owned()))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +112,21 @@ pub fn evaluate(
         }
 
         CalculatorExpr::FunctionCall { name, args } => {
+            // `analog(D(bus))` reads the bus's exact event history; anything
+            // else it is given is evaluated as a value.
+            if name.eq_ignore_ascii_case("analog")
+                && let [CalculatorExpr::WaveformRef { signal, dataset }] = args.as_slice()
+            {
+                match ctx.get_event_word(signal, dataset.as_deref()) {
+                    Ok(word) => {
+                        return super::functions::analog_staircase(&word)
+                            .map(CalcValue::Real)?
+                            .checked();
+                    }
+                    Err(EvaluationError::IdentifierNotFound(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
             if matches!(
                 name.to_ascii_lowercase().as_str(),
                 "mag" | "magnitude" | "abs" | "db"
