@@ -80,9 +80,10 @@ impl MismatchPlan {
     }
 }
 /// A mismatch figure as the panel reads it: engineering notation at the
-/// precision a budget is read at. The CSV export carries the retained f64.
+/// precision a budget is read at, its prefix on the number. The CSV export
+/// carries the retained f64.
 fn exact_value(value: f64) -> String {
-    rspice_ui_kit::plot::fmt_si_readout(value, "", 6)
+    super::unitless(value, 6)
 }
 
 /// The same figure in the output's own unit — a sigma is millivolts, not a

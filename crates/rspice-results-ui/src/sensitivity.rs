@@ -122,9 +122,11 @@ fn exact_basis_label(result_mode: SensitivityResultMode) -> String {
 }
 
 /// A sensitivity as the panel reads it: engineering notation at the precision
-/// a ranked list is read at. The CSV export carries the retained f64.
+/// a ranked list is read at, its prefix on the number as every unitless value
+/// in the product reads (`1.23457n`, never `1.23457 n`). The CSV export
+/// carries the retained f64.
 fn exact_value(value: f64) -> String {
-    rspice_ui_kit::plot::fmt_si_readout(value, "", 6)
+    unitless(value, 6)
 }
 
 fn unavailable_reason(reason: SensitivityUnavailability) -> &'static str {
@@ -656,12 +658,15 @@ mod tests {
         assert_eq!(chart_scale(0.012_5, 7), "±12.5m");
     }
 
-    /// A panel value reads in engineering notation, and an AC basis names
+    /// A panel value reads in engineering notation with its prefix on the
+    /// number, as the chart's values do, and an AC basis names
     /// the frequency it was read at in the reader's own units rather than to
     /// seventeen digits.
     #[test]
     fn panel_values_read_in_engineering_notation() {
-        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457 n");
+        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457n");
+        assert_eq!(exact_value(-2.5e3), "-2.5k");
+        assert_eq!(exact_value(0.75), "750m");
         assert_eq!(
             exact_basis_label(SensitivityResultMode::Ac {
                 frequency_hz: 2.5e6,

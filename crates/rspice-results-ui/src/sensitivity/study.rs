@@ -868,10 +868,7 @@ mod tests {
         let basis = basis_label(&evidence, &policy);
         assert!(basis.contains("AC sweep"), "{basis}");
         assert!(basis.contains("3 points"), "{basis}");
-        assert_eq!(
-            read_at_label(&evidence, 0, &policy),
-            format!("{} Hz", exact_value(10.0))
-        );
+        assert_eq!(read_at_label(&evidence, 0, &policy), "10 Hz");
         // The band and the point follow Frequency display.
         let radians = QuantityPresentationPolicy {
             frequency_display: rspice_vocabulary::quantity::FrequencyDisplay::RadiansPerSecond,
@@ -910,6 +907,55 @@ mod tests {
         evidence.filter = String::new();
         assert_eq!(evidence.filter_label(), "every device and model parameter");
     }
+    /// The exact readings the sheet states, in its rows' names and their
+    /// hovers, carry their prefix on the number as every unitless value in
+    /// the product does: `250m`, never `250 m`, which reads as metres.
+    #[test]
+    fn the_exact_readings_carry_their_prefix_on_the_number() {
+        let evidence = swept_evidence();
+        let plan = StudyPlan::new(&evidence, 0);
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut rows = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let view = StudyView {
+                        analysis_label: "AC",
+                        evidence: &evidence,
+                        quantity_policy: QuantityPresentationPolicy::default(),
+                    };
+                    show(ui, ActiveStudy::Ready(view), Some(&plan), 7);
+                },
+            );
+            rows = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
+                .filter_map(|(_, node)| node.label().or_else(|| node.value()).map(str::to_owned))
+                .collect();
+        }
+        let gain = rows
+            .iter()
+            .find(|row| row.contains("PARAM:GAIN"))
+            .unwrap_or_else(|| panic!("no PARAM:GAIN row among {rows:?}"));
+        assert!(
+            gain.ends_with("normalized sensitivity 250m, raw sensitivity 250m"),
+            "{gain}"
+        );
+    }
+
     /// The ranked list is the panel's statement of which variable matters
     /// most, so the order it is drawn in is what has to be right.
     #[test]
