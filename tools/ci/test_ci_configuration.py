@@ -12,9 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 _XYCE_EXCLUSION_FIXTURE = None
 
-# The `veriloga`-gated rspice-core integration targets that no pull-request lane
-# names, each with the reason no lane runs it. Anything not
-# listed here must appear in both Verilog-A steps of `ci.yml`; see
+# The `veriloga`-gated rspice-core integration test files that no pull-request
+# lane runs, each with the reason. Every other gated file must build into a
+# target both Verilog-A steps of `ci.yml` name; see
 # `CiConfigurationTests.test_veriloga_gated_core_suites_run_on_both_routes`.
 VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     "veriloga_bsim4_oracle": (
@@ -34,11 +34,11 @@ VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     ),
 }
 
-# Core targets that are not gated on `veriloga` but that a route's steps run
+# Core test files that are not gated on `veriloga` but that a route's steps run
 # as well, by route feature. The default-feature core lane runs each of them
 # already; the route runs it again because the feature changes what it
 # measures.
-VERILOGA_ROUTE_UNGATED_CORE_TEST_TARGETS = {
+VERILOGA_ROUTE_UNGATED_CORE_TEST_FILES = {
     "veriloga": {
         "expression_stack_safety": (
             "bounds the stack a deeply nested expression may take on a 1 MiB "
@@ -172,15 +172,48 @@ def targets_gated_on(directory: Path, feature: str) -> set[str]:
     }
 
 
-def veriloga_gated_core_test_targets() -> set[str]:
-    """Every rspice-core integration target `--features veriloga` switches on.
+_MOD_DECLARATION = re.compile(r"((?:[ \t]*#\[[^\n]*\n)*)[ \t]*(?:pub )?mod (\w+);")
+
+
+def core_test_files() -> dict[str, tuple[str, str]]:
+    """Every rspice-core integration test file: stem -> (target, cfg text).
+
+    A top-level `tests/<stem>.rs` is its own target. A `tests/<folder>/main.rs`
+    builds one target out of the files it declares as modules, and the
+    attributes on a file's `mod` line gate it as an inner attribute would, so
+    they are part of the text the scan reads. A `mod` with a `#[path]` is a
+    shared helper, not a test file.
+    """
+    directory = ROOT / "crates" / "rspice-core" / "tests"
+    files: dict[str, tuple[str, str]] = {}
+    for path in sorted(directory.glob("*.rs")):
+        files[path.stem] = (path.stem, path.read_text(encoding="utf-8"))
+    for main in sorted(directory.glob("*/main.rs")):
+        folder = main.parent
+        for attributes, name in _MOD_DECLARATION.findall(main.read_text(encoding="utf-8")):
+            if "#[path" in attributes:
+                continue
+            source = (folder / f"{name}.rs").read_text(encoding="utf-8")
+            if name in files:
+                raise AssertionError(f"core test file {name} is declared twice")
+            files[name] = (folder.name, attributes + source)
+    return files
+
+
+def veriloga_gated_core_test_files() -> set[str]:
+    """Every rspice-core integration test file `--features veriloga` switches on.
 
     Matched on the `cfg` predicate rather than the inner-attribute spelling: a
     file gated item by item, as `transient_checkpoint` is, links under the
     default feature set but runs a shorter suite there, which is exactly the
     silent coverage hole this scan exists to close.
     """
-    return targets_gated_on(ROOT / "crates" / "rspice-core" / "tests", "veriloga")
+    wanted = re.compile(r'feature\s*=\s*"veriloga"')
+    return {
+        name
+        for name, (_, text) in core_test_files().items()
+        if any(wanted.search(predicate) for predicate in cfg_predicates(text))
+    }
 
 
 def contract_gated_veriloga_test_targets() -> set[str]:
@@ -1060,18 +1093,22 @@ class CiConfigurationTests(unittest.TestCase):
         suites never executed on a pull request, and `connect_module_insertion`
         was already red on `main` when this gate was written.
 
-        The list of targets is scanned out of the test directory rather than
+        The list of files is scanned out of the test directory rather than
         written down here, because a hand-maintained list is the failure being
         fixed: a new gated file would join it only if someone remembered. Each
         route gets the whole set -- the bytecode interpreter and the x64 JIT
         are separate lowerings of the same modules -- minus the explicit
-        exclusions above, each of which must still be a gated target, so an
+        exclusions above, each of which must still be a gated file, so an
         exclusion for a file that no longer exists fails instead of rotting.
+        A step names targets; a target folder brings every file it declares,
+        so the files a route runs are exactly the gated set plus the ungated
+        files listed for it, and no excluded file rides along in a folder.
         """
         import shlex
 
         workflow = read_text(".github/workflows/ci.yml")
-        gated = veriloga_gated_core_test_targets()
+        files = core_test_files()
+        gated = veriloga_gated_core_test_files()
 
         # A scan that silently collapses to nothing would pass every assertion
         # below, so the floor is checked before the set is used.
@@ -1089,19 +1126,19 @@ class CiConfigurationTests(unittest.TestCase):
             self.assertIn(
                 name,
                 gated,
-                f"{name} is excluded but is no longer a Verilog-A-gated target",
+                f"{name} is excluded but is no longer a Verilog-A-gated file",
             )
             self.assertGreater(len(reason), 40, f"{name} needs a written reason")
         gated_expected = gated - set(VERILOGA_GATED_CORE_TEST_EXCLUSIONS)
-        test_directory = ROOT / "crates" / "rspice-core" / "tests"
 
         for job_name, feature, step_names in VERILOGA_GATED_CORE_TEST_STEPS:
-            extras = VERILOGA_ROUTE_UNGATED_CORE_TEST_TARGETS[feature]
+            extras = VERILOGA_ROUTE_UNGATED_CORE_TEST_FILES[feature]
             for name, reason in extras.items():
                 with self.subTest(route=feature, extra=name):
-                    self.assertTrue(
-                        (test_directory / f"{name}.rs").is_file(),
-                        f"{name} is run on {feature} but is no longer a core target",
+                    self.assertIn(
+                        name,
+                        files,
+                        f"{name} is run on {feature} but is no longer a core test file",
                     )
                     self.assertNotIn(
                         name,
@@ -1142,12 +1179,19 @@ class CiConfigurationTests(unittest.TestCase):
                     len(set(covered)),
                     f"{job_name} compiles a target twice: {sorted(covered)}",
                 )
+                targets = {target for target, _ in files.values()}
                 self.assertEqual(
-                    set(covered),
+                    set(covered) - targets,
+                    set(),
+                    f"{job_name} names targets rspice-core does not build",
+                )
+                run = {name for name, (target, _) in files.items() if target in covered}
+                self.assertEqual(
+                    run,
                     expected,
                     f"{job_name} does not run every Verilog-A-gated core "
-                    f"suite; missing={sorted(expected - set(covered))}, "
-                    f"unexpected={sorted(set(covered) - expected)}",
+                    f"suite; missing={sorted(expected - run)}, "
+                    f"unexpected={sorted(run - expected)}",
                 )
 
         # The native lane serializes its harness because the JIT maps

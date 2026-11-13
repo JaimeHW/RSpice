@@ -420,47 +420,8 @@ endmodule
     let _ = std::fs::remove_file(quiet);
 }
 
-static WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-
-struct WarningCapture;
-
-impl log::Log for WarningCapture {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            WARNINGS
-                .lock()
-                .expect("warning capture")
-                .push(record.args().to_string());
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-/// Start capturing this test binary's warnings.
-fn capture_warnings() {
-    static INSTALL: std::sync::Once = std::sync::Once::new();
-    INSTALL.call_once(|| {
-        log::set_logger(&WarningCapture).expect("the warning capture installs");
-        log::set_max_level(log::LevelFilter::Warn);
-    });
-}
-
-/// The warnings logged so far that mention `needle` (tests run in parallel,
-/// so each names something only it uses).
-fn warnings_mentioning(needle: &str) -> Vec<String> {
-    WARNINGS
-        .lock()
-        .expect("warning capture")
-        .iter()
-        .filter(|warning| warning.contains(needle))
-        .cloned()
-        .collect()
-}
+#[path = "common/log_capture.rs"]
+mod log_capture;
 
 const SIGNED_NOISE: &str = r#"
 `include "disciplines.vams"
@@ -479,20 +440,21 @@ endmodule
 /// frequencies evaluate it.
 #[test]
 fn a_negative_noise_power_contributes_nothing_and_warns_once() {
-    capture_warnings();
     let model = write_model("signed_noise.va", SIGNED_NOISE);
     let frequencies = [1.0, 1.0e3, 1.0e6];
-    let density = output_noise(
-        &format!(
-            "* negative noise power\n\
-             i1 0 out dc 0\n\
-             XSIGNED out 0 signed_noise\n\
-             .va \"{model}\" signed_noise\n\
-             .end\n"
-        ),
-        "out",
-        &frequencies,
-    );
+    let (density, warnings) = log_capture::lines_logged(log::LevelFilter::Warn, || {
+        output_noise(
+            &format!(
+                "* negative noise power\n\
+                 i1 0 out dc 0\n\
+                 XSIGNED out 0 signed_noise\n\
+                 .va \"{model}\" signed_noise\n\
+                 .end\n"
+            ),
+            "out",
+            &frequencies,
+        )
+    });
 
     // Only the 1e-21 A^2/Hz source reaches the output, through 1 kOhm.
     for (frequency, density) in frequencies.iter().zip(&density) {
@@ -501,7 +463,10 @@ fn a_negative_noise_power_contributes_nothing_and_warns_once() {
             "{frequency} Hz: {density:e} V^2/Hz"
         );
     }
-    let warnings = warnings_mentioning("'reversed_power'");
+    let warnings: Vec<String> = warnings
+        .into_iter()
+        .filter(|warning| warning.contains("'reversed_power'"))
+        .collect();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(
         warnings[0].to_ascii_lowercase().contains("'xsigned'") && warnings[0].contains("-1e-20"),

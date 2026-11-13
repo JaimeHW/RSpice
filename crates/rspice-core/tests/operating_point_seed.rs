@@ -8,47 +8,13 @@
 
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
-use std::cell::RefCell;
-use std::sync::Once;
 
-static LOG_INIT: Once = Once::new();
-
-thread_local! {
-    static CAPTURED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
-}
-
-struct CapturingLogger;
-
-impl log::Log for CapturingLogger {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            CAPTURED.with(|captured| {
-                if let Some(lines) = captured.borrow_mut().as_mut() {
-                    lines.push(record.args().to_string());
-                }
-            });
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-static LOGGER: CapturingLogger = CapturingLogger;
+#[path = "common/log_capture.rs"]
+mod log_capture;
 
 /// Run `body` with the warnings it logs on this thread collected.
 fn warnings_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
-    LOG_INIT.call_once(|| {
-        log::set_logger(&LOGGER).expect("the capture logger installs");
-        log::set_max_level(log::LevelFilter::Warn);
-    });
-    CAPTURED.with(|captured| *captured.borrow_mut() = Some(Vec::new()));
-    let value = body();
-    let lines = CAPTURED.with(|captured| captured.borrow_mut().take().unwrap_or_default());
-    (value, lines)
+    log_capture::lines_logged(log::LevelFilter::Warn, body)
 }
 
 // LTspice 26.1.1 and QSPICE 2026 batch: V(y) = 2 V exactly.

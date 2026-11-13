@@ -13,7 +13,6 @@
 //! `connectrules` `vsup` both outrank the derivation and stay silent.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, Once};
 
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
@@ -23,53 +22,18 @@ use rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES;
 // Warning capture
 //=============================================================================
 
-static LOG_INIT: Once = Once::new();
-static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Serializes the capture window; the logger is process-global.
-static CAPTURE_LOCK: Mutex<()> = Mutex::new(());
-
-struct CapturingLogger;
-
-impl log::Log for CapturingLogger {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            CAPTURED
-                .lock()
-                .expect("warning capture lock")
-                .push(record.args().to_string());
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-static LOGGER: CapturingLogger = CapturingLogger;
+#[path = "common/log_capture.rs"]
+mod log_capture;
 
 /// Run `body` with the supply warnings it emits collected, deduplicated and
 /// sorted: a build repeated for a second analysis says the same sentence
 /// again, and what is pinned here is which sentences a run produces.
 fn supply_warnings_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
-    let guard = CAPTURE_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    LOG_INIT.call_once(|| {
-        log::set_logger(&LOGGER).expect("the capture logger installs");
-        log::set_max_level(log::LevelFilter::Warn);
-    });
-    CAPTURED.lock().expect("warning capture lock").clear();
-    let value = body();
-    let mut warnings: Vec<String> = CAPTURED
-        .lock()
-        .expect("warning capture lock")
-        .iter()
+    let (value, lines) = log_capture::lines_logged(log::LevelFilter::Warn, body);
+    let mut warnings: Vec<String> = lines
+        .into_iter()
         .filter(|line| line.contains("boundary net"))
-        .cloned()
         .collect();
-    drop(guard);
     warnings.sort();
     warnings.dedup();
     (value, warnings)

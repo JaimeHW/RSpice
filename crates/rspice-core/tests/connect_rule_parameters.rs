@@ -10,9 +10,7 @@
 //!
 //! Expected values are closed forms.
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::Once;
 
 use rspice_core::circuit::{
     ConverterInsertion, ConverterKind, ConverterParameter, ConverterSource,
@@ -27,53 +25,19 @@ use rspice_veriloga::connect::library::{BUILTIN_CONNECT_MODULES, LEGACY_BUILTIN_
 // Log capture
 //=============================================================================
 
-static LOG_INIT: Once = Once::new();
-
-thread_local! {
-    /// The lines logged on this thread while it captures. The logger is
-    /// process-global and the tests run in parallel, so a capture keeps only
-    /// its own thread's lines: another test's boundaries never reach it.
-    static CAPTURED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
-}
-
-struct CapturingLogger;
-
-impl log::Log for CapturingLogger {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Info
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            CAPTURED.with(|captured| {
-                if let Some(lines) = captured.borrow_mut().as_mut() {
-                    lines.push(record.args().to_string());
-                }
-            });
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-static LOGGER: CapturingLogger = CapturingLogger;
+#[path = "common/log_capture.rs"]
+mod log_capture;
 
 /// Run `body` with the boundary lines it logs collected.
 fn boundary_lines_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
     lines_of("boundary", body)
 }
 
-/// Run `body` with the lines it logs that contain `needle` collected.
+/// Run `body` with the lines it logs on this thread that contain `needle`
+/// collected.
 fn lines_of<T>(needle: &str, body: impl FnOnce() -> T) -> (T, Vec<String>) {
-    LOG_INIT.call_once(|| {
-        log::set_logger(&LOGGER).expect("the capture logger installs");
-        log::set_max_level(log::LevelFilter::Info);
-    });
-    CAPTURED.with(|captured| *captured.borrow_mut() = Some(Vec::new()));
-    let value = body();
-    let lines = CAPTURED
-        .with(|captured| captured.borrow_mut().take())
-        .unwrap_or_default()
+    let (value, lines) = log_capture::lines_logged(log::LevelFilter::Info, body);
+    let lines = lines
         .into_iter()
         .filter(|line| line.contains(needle))
         .collect();
