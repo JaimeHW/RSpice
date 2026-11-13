@@ -11,6 +11,7 @@ mod branches;
 mod degenerate;
 mod expression_scope;
 mod extent;
+mod frame_cost;
 mod honest_axes;
 mod interaction;
 mod lanes;

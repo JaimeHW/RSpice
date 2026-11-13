@@ -35,6 +35,8 @@ pub use rspice_results::{number_format as format, plot_axis as scale};
 pub use rspice_results::sampling as sample;
 
 pub use cursor::CursorPair;
+#[cfg(any(test, feature = "test-support"))]
+pub use decimate::DecimationWork;
 pub use decimate::TraceView;
 pub use decimate::{DecimationCache, SampleInterpolation, sample_at};
 pub use format::{

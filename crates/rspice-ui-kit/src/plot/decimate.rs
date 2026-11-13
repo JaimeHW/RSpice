@@ -20,7 +20,9 @@ pub use rspice_results::sampling::{SampleInterpolation, sample_at};
 /// cleared wholesale when the data version changes.
 #[derive(Debug, Clone)]
 pub struct DecimationCache {
-    map: HashMap<CacheKey, Entry>,
+    /// Everything the cache holds, behind one allocation: the cache sits
+    /// inline in the results workspace's state, whose size is budgeted.
+    held: Box<Held>,
     /// Retained source identity when trace keys are scoped to a source owner.
     source: Option<rspice_vocabulary::source_revision::SourceRevision>,
     /// Data version the cache contents belong to.
@@ -32,6 +34,42 @@ pub struct DecimationCache {
     /// Hard resident-memory budget for reconstructable display envelopes.
     byte_capacity: usize,
     resident_bytes: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Held {
+    map: HashMap<CacheKey, Entry>,
+    #[cfg(any(test, feature = "test-support"))]
+    work: DecimationWork,
+}
+
+/// What the cache has done since it was made, for the frame-cost gates.
+///
+/// A steady or hovered frame is entitled to reuse every envelope it drew on
+/// the frame before. Counting the rebuilds is how a gate holds it to that
+/// without timing anything.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DecimationWork {
+    /// Lookups answered from a retained envelope.
+    pub hits: u64,
+    /// Envelopes rebuilt from the retained samples, one O(n) pass each.
+    pub rebuilds: u64,
+    /// Retained envelopes dropped to admit another.
+    pub evictions: u64,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl DecimationWork {
+    /// The work done since `earlier` was read.
+    #[must_use]
+    pub const fn since(self, earlier: Self) -> Self {
+        Self {
+            hits: self.hits - earlier.hits,
+            rebuilds: self.rebuilds - earlier.rebuilds,
+            evictions: self.evictions - earlier.evictions,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,7 +153,7 @@ const DEFAULT_BYTE_CAPACITY: usize = DEFAULT_DISPLAY_CACHE_MIB as usize * 1024 *
 impl Default for DecimationCache {
     fn default() -> Self {
         Self {
-            map: HashMap::new(),
+            held: Box::default(),
             source: None,
             version: 0,
             tick: 0,
@@ -126,6 +164,12 @@ impl Default for DecimationCache {
 }
 
 impl DecimationCache {
+    /// Everything the cache has done since it was made.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn work(&self) -> DecimationWork {
+        self.held.work
+    }
+
     /// Bind logical trace keys to their current source before reading them.
     /// A restored source or an edited clone can reuse numeric IDs and versions;
     /// retaining this small revision prevents either from reusing old samples.
@@ -138,7 +182,7 @@ impl DecimationCache {
 
     /// Discard derived samples while preserving the configured memory budget.
     pub fn invalidate(&mut self) {
-        self.map.clear();
+        self.held.map.clear();
         self.resident_bytes = 0;
     }
 
@@ -153,11 +197,12 @@ impl DecimationCache {
     }
 
     fn evict_to_fit(&mut self, incoming_bytes: usize) {
-        while (!self.map.is_empty())
-            && (self.map.len() >= CACHE_CAP
+        while (!self.held.map.is_empty())
+            && (self.held.map.len() >= CACHE_CAP
                 || self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity)
         {
             let Some(oldest) = self
+                .held
                 .map
                 .iter()
                 .min_by_key(|(_, entry)| entry.last_used)
@@ -165,10 +210,14 @@ impl DecimationCache {
             else {
                 break;
             };
-            if let Some(removed) = self.map.remove(&oldest) {
+            if let Some(removed) = self.held.map.remove(&oldest) {
                 self.resident_bytes = self
                     .resident_bytes
                     .saturating_sub(removed.envelope.len() * size_of::<[f64; 2]>());
+                #[cfg(any(test, feature = "test-support"))]
+                {
+                    self.held.work.evictions += 1;
+                }
             }
         }
     }
@@ -205,9 +254,17 @@ impl DecimationCache {
             x_scale: view.x_scale,
             y_scale: view.y_scale,
         };
-        if let Some(hit) = self.map.get_mut(&key) {
+        if let Some(hit) = self.held.map.get_mut(&key) {
             hit.last_used = self.tick;
+            #[cfg(any(test, feature = "test-support"))]
+            {
+                self.held.work.hits += 1;
+            }
             return Arc::clone(&hit.envelope);
+        }
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.held.work.rebuilds += 1;
         }
         let envelope: Arc<[[f64; 2]]> = match reduction {
             Reduction::PixelCells => decimate_pixel_cells(x, y, view),
@@ -232,7 +289,7 @@ impl DecimationCache {
         let bytes = envelope.len() * size_of::<[f64; 2]>();
         if bytes <= self.byte_capacity {
             self.evict_to_fit(bytes);
-            self.map.insert(
+            self.held.map.insert(
                 key,
                 Entry {
                     envelope: Arc::clone(&envelope),
