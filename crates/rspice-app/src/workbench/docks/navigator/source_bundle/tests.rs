@@ -4,7 +4,7 @@
 //! ordinary source.
 
 use super::*;
-use crate::workbench::RSpiceApp;
+use crate::workbench::code::tests::harness;
 
 /// The defect this rail exists for: `selected_file` had no UI writer, so
 /// every file in a bundle except the root was unreachable. Assert the
@@ -12,15 +12,15 @@ use crate::workbench::RSpiceApp;
 /// changes the selection.
 #[test]
 fn every_file_in_the_bundle_is_offered_and_selectable() {
-    let mut app = RSpiceApp::test_instance();
+    let mut harness = harness();
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    let rows = bundle_rows(&app.state.model, language);
+    let rows = bundle_rows(&harness.model, language);
     assert!(
         rows.len() > 1,
         "an automation bundle carries an entry, a run plan, a lock, and a manifest"
     );
 
-    let root = active_path(&app.state.model, &app.state.code.code_workspace, language)
+    let root = active_path(&harness.model, &harness.state.code_workspace, language)
         .expect("bundle root is the default document");
     let other = rows
         .iter()
@@ -29,14 +29,14 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
     let target = other.logical_path.clone();
 
     select(
-        &app.state.model,
-        &mut app.state.code.code_workspace,
+        &harness.model,
+        &mut harness.state.code_workspace,
         language,
         &target,
     );
 
     assert_eq!(
-        active_path(&app.state.model, &app.state.code.code_workspace, language).as_deref(),
+        active_path(&harness.model, &harness.state.code_workspace, language).as_deref(),
         Some(target.as_str())
     );
 }
@@ -45,9 +45,9 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
 /// from the filename.
 #[test]
 fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
-    let app = RSpiceApp::test_instance();
+    let harness = harness();
     let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-    let rows = bundle_rows(&app.state.model, ProjectSourceLanguage::RSpiceAutomation);
+    let rows = bundle_rows(&harness.model, ProjectSourceLanguage::RSpiceAutomation);
     let roles = rows
         .iter()
         .filter_map(|row| role_message(row.role))

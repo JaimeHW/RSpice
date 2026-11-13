@@ -844,12 +844,14 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app_state", "app"),
     ("app_state", "slots"),
     ("app_state", "workflows/file_workflow"),
-    // The code workspace's and the netlist document's tests that only seed
-    // and read state run over the code feature on its own, and the feature
-    // builds that harness, as the models feature builds the model editor's
-    // below.
+    // The tests of code's documents, navigator panes and netlist workflow
+    // that only seed and read state run over the code feature on its own,
+    // and the feature builds that harness, as the models feature builds the
+    // model editor's below.
     ("documents/code_workspace", "code"), // retires at the code flip
     ("documents/netlist_document", "code"), // retires at the code flip
+    ("docks", "code"),                    // retires at the code flip
+    ("workflows/netlist_workflow", "code"), // retires at the code flip
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the

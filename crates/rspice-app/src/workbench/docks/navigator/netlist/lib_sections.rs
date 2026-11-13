@@ -171,15 +171,19 @@ mod tests {
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SourceLocator,
     };
-    use crate::workbench::AppState;
+    use crate::workbench::code::tests::{CodeHarness, harness};
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, OwnedNetlistReplacement, replace_owned_sources_atomically,
         undo_netlist_edit,
     };
 
     /// Choosing `section` for the card at `line`, as the shell commits it.
-    fn use_section(state: &mut AppState, line: usize, section: &str) -> Result<String, String> {
-        let rewrite = section_edit(&state.model, &state.code.netlist, line, section)?;
+    fn use_section(
+        harness: &mut CodeHarness,
+        line: usize,
+        section: &str,
+    ) -> Result<String, String> {
+        let rewrite = section_edit(&harness.model, &harness.state.netlist, line, section)?;
         let edit = match rewrite.dependency.as_deref() {
             Some(identity) => OwnedNetlistReplacement::dependency(
                 identity,
@@ -190,9 +194,9 @@ mod tests {
             None => OwnedNetlistReplacement::root(&rewrite.original, rewrite.replacement, 1),
         };
         replace_owned_sources_atomically(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
             vec![edit],
         )?;
         Ok(rewrite.selected)
@@ -209,7 +213,7 @@ mod tests {
          .endl ff\n";
     const LOCATOR: &str = "corners.lib";
 
-    fn corner_deck_state(root: &str) -> AppState {
+    fn corner_deck_state(root: &str) -> CodeHarness {
         let locator = SourceLocator::try_new(LOCATOR, "corners.lib").unwrap();
         let dependency = DependencyMetadata::unresolved_direct_to(0, LOCATOR, locator)
             .unwrap()
@@ -236,10 +240,10 @@ mod tests {
             .create_editable_copy(NetlistDocumentId::new(), generated.content_digest())
             .unwrap();
 
-        let mut state = AppState::default();
-        state.model.workspace.content.netlist_source = Some(root.to_owned());
-        state.model.workspace.content.netlist_document = Some(owned.clone());
-        state.model.workspace.content.netlist_descriptor =
+        let mut harness = harness();
+        harness.model.workspace.content.netlist_source = Some(root.to_owned());
+        harness.model.workspace.content.netlist_document = Some(owned.clone());
+        harness.model.workspace.content.netlist_descriptor =
             Some(crate::state::OwnedNetlistDescriptor {
                 deck_id: uuid::Uuid::new_v4(),
                 artifact_name: "owned.cir".to_owned(),
@@ -254,19 +258,19 @@ mod tests {
                 revision_history: Vec::new(),
                 owned_includes: Vec::new(),
             });
-        state.model.netlist_artifacts.generated_source = root.to_owned();
-        state.model.netlist_artifacts.generated_document = Some(generated);
-        state.code.netlist.owned_document = Some(owned);
-        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.code.netlist.active_document_initialized = true;
-        state.model.simulation.source.netlist_content = root.to_owned();
-        state
+        harness.model.netlist_artifacts.generated_source = root.to_owned();
+        harness.model.netlist_artifacts.generated_document = Some(generated);
+        harness.state.netlist.owned_document = Some(owned);
+        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        harness.state.netlist.active_document_initialized = true;
+        harness.model.simulation.source.netlist_content = root.to_owned();
+        harness
             .model
             .workspace
             .content
             .validate_simulation_configuration()
             .unwrap();
-        state
+        harness
     }
 
     /// The navigator asks what every row offers on each frame. Enumerating a
@@ -274,72 +278,72 @@ mod tests {
     /// bytes it describes change.
     #[test]
     fn sections_are_enumerated_from_retained_bytes_once_per_revision() {
-        let mut state = corner_deck_state(ROOT);
+        let mut harness = corner_deck_state(ROOT);
         refresh(
-            &state.model,
-            &state.code.netlist,
-            &mut state.code.code_workspace,
+            &harness.model,
+            &harness.state.netlist,
+            &mut harness.state.code_workspace,
         );
 
         assert_eq!(
-            declared(&state.code.code_workspace, LOCATOR)
+            declared(&harness.state.code_workspace, LOCATOR)
                 .iter()
                 .map(|section| section.name.clone())
                 .collect::<Vec<_>>(),
             ["tt", "ff"],
             "the row's alternatives come from the bytes the closure retained"
         );
-        let first = state.code.code_workspace.include_lib_sections[LOCATOR]
+        let first = harness.state.code_workspace.include_lib_sections[LOCATOR]
             .1
             .clone();
         refresh(
-            &state.model,
-            &state.code.netlist,
-            &mut state.code.code_workspace,
+            &harness.model,
+            &harness.state.netlist,
+            &mut harness.state.code_workspace,
         );
         assert!(
             std::sync::Arc::ptr_eq(
                 &first,
-                &state.code.code_workspace.include_lib_sections[LOCATOR].1
+                &harness.state.code_workspace.include_lib_sections[LOCATOR].1
             ),
             "unchanged bytes must not be parsed a second time"
         );
 
         // A locator that leaves the closure leaves the cache with it.
-        state.code.netlist.owned_document = None;
-        state.model.workspace.content.netlist_document = None;
+        harness.state.netlist.owned_document = None;
+        harness.model.workspace.content.netlist_document = None;
         refresh(
-            &state.model,
-            &state.code.netlist,
-            &mut state.code.code_workspace,
+            &harness.model,
+            &harness.state.netlist,
+            &mut harness.state.code_workspace,
         );
-        assert!(state.code.code_workspace.include_lib_sections.is_empty());
+        assert!(harness.state.code_workspace.include_lib_sections.is_empty());
     }
 
     #[test]
     fn choosing_a_section_rewrites_only_the_section_token_and_can_be_undone() {
-        let mut state = corner_deck_state(ROOT);
+        let mut harness = corner_deck_state(ROOT);
 
-        use_section(&mut state, 2, "ff").expect("the owned root is editable");
+        use_section(&mut harness, 2, "ff").expect("the owned root is editable");
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some("corner deck\n.lib \"corners.lib\" ff\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n"),
             "the locator, its quotes, and every other card stay exactly as \
              written"
         );
         assert!(
-            state.model.workspace.content.netlist_source_dirty,
+            harness.model.workspace.content.netlist_source_dirty,
             "a rewritten card is an unsaved change"
         );
 
         undo_netlist_edit(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
         )
         .expect("the rewrite is one journal entry");
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some(ROOT),
             "undo must restore the card the deck was authored with"
         );
@@ -347,26 +351,26 @@ mod tests {
 
     #[test]
     fn a_section_rewrite_states_why_it_cannot_run() {
-        let mut state = corner_deck_state(ROOT);
+        let mut harness = corner_deck_state(ROOT);
         assert_eq!(
-            use_section(&mut state, 2, "tt").unwrap_err(),
+            use_section(&mut harness, 2, "tt").unwrap_err(),
             "The card already selects section tt.",
             "re-selecting the bound section is a no-op, not an edit"
         );
         assert_eq!(
-            use_section(&mut state, 3, "ff").unwrap_err(),
+            use_section(&mut harness, 3, "ff").unwrap_err(),
             "Line 3 does not write a `.lib \"file\" section` card.",
             "only a library card has a section token to move"
         );
 
-        state.code.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
         assert_eq!(
-            use_section(&mut state, 2, "ff").unwrap_err(),
+            use_section(&mut harness, 2, "ff").unwrap_err(),
             "This netlist source is read-only; its .lib section cannot be changed.",
             "a generated document is reviewed, not authored"
         );
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some(ROOT),
             "a refused rewrite changes nothing"
         );

@@ -7,8 +7,6 @@
 //! validation and the format over these parts.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};

@@ -6,16 +6,17 @@
 //! rather than by its English key.
 
 use super::*;
+use crate::workbench::code::tests::harness;
 
 #[test]
 fn a_run_snapshot_and_a_comparison_report_no_include_status() {
-    let mut state = crate::workbench::AppState::default();
+    let mut harness = harness();
     for document in [
         ActiveNetlistDocument::RunSnapshot,
         ActiveNetlistDocument::GeneratedDiff,
     ] {
-        state.code.netlist.active_document = document;
-        assert!(netlist_dependency_status(&state.model, &state.code.netlist).is_none());
+        harness.state.netlist.active_document = document;
+        assert!(netlist_dependency_status(&harness.model, &harness.state.netlist).is_none());
     }
 }
 

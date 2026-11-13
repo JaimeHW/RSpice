@@ -5,7 +5,7 @@ use super::bundle::*;
 use super::external_change::*;
 use super::platform::*;
 use super::staging::*;
-use super::*;
+use crate::workbench::code::tests::{CodeHarness, harness};
 use rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -51,36 +51,36 @@ const GENERATED_BASE: &str = "* generated\n.option reltol=1e-3\n.param gain=10\n
 
 #[test]
 fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
-    let mut state = AppState::default();
-    state.workbench.workspace = crate::workbench::state::Workspace::Models;
-    state.code.code_workspace.page =
+    let mut harness = harness();
+    harness.wb.workspace = crate::workbench::state::Workspace::Models;
+    harness.state.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
 
     assert!(!route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
+        &mut harness.wb,
+        &mut harness.state.code_workspace.page,
         false
     ));
     assert_eq!(
-        state.workbench.workspace,
+        harness.wb.workspace,
         crate::workbench::state::Workspace::Models
     );
     assert_eq!(
-        state.code.code_workspace.page,
+        harness.state.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
     );
 
     assert!(route_started_netlist_import(
-        &mut state.workbench,
-        &mut state.code.code_workspace.page,
+        &mut harness.wb,
+        &mut harness.state.code_workspace.page,
         true
     ));
     assert_eq!(
-        state.workbench.workspace,
+        harness.wb.workspace,
         crate::workbench::state::Workspace::Netlist
     );
     assert_eq!(
-        state.code.code_workspace.page,
+        harness.state.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
 }
@@ -197,11 +197,15 @@ fn three_way_merge_combines_independent_lines_and_marks_overlaps() {
     assert_eq!(merged, "a\ninserted locally\nb\nchanged externally\n");
 }
 
-pub(crate) fn state_with_owned_strategy(
+/// The owned-strategy fixture seeded into a session's model: a generated
+/// deck copied into an owned source the author rewrote, held under
+/// `strategy`.
+pub(crate) fn seed_owned_strategy(
+    model: &mut rspice_app_state::workbench::app_state::model::Model,
     generated_source: &str,
     authored_source: &str,
     strategy: crate::state::OwnedNetlistEditStrategy,
-) -> AppState {
+) {
     use crate::product::ObjectRevision;
     use crate::state::{
         GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
@@ -229,10 +233,9 @@ pub(crate) fn state_with_owned_strategy(
         .replace_editable_source(owned.content_digest(), authored_source.as_bytes().to_vec())
         .expect("authored source");
 
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some(authored_source.to_owned());
-    state.model.workspace.content.netlist_document = Some(owned);
-    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    model.workspace.content.netlist_source = Some(authored_source.to_owned());
+    model.workspace.content.netlist_document = Some(owned);
+    model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: "owned.cir".to_owned(),
         strategy,
@@ -246,21 +249,36 @@ pub(crate) fn state_with_owned_strategy(
         revision_history: Vec::new(),
         owned_includes: Vec::new(),
     });
-    state
+}
+
+/// The owned-strategy fixture over code's harness.
+fn state_with_owned_strategy(
+    generated_source: &str,
+    authored_source: &str,
+    strategy: crate::state::OwnedNetlistEditStrategy,
+) -> CodeHarness {
+    let mut harness = harness();
+    seed_owned_strategy(
+        &mut harness.model,
+        generated_source,
+        authored_source,
+        strategy,
+    );
+    harness
 }
 
 #[test]
 fn owned_source_strategy_executes_exact_authored_bytes_without_generated_composition() {
     let authored = "* independently owned\r\nV9 out 0 9\r\n.tran 1n 10n\r\n.end\r\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         authored,
         crate::state::OwnedNetlistEditStrategy::OwnedSource,
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -277,15 +295,15 @@ fn owned_source_strategy_executes_exact_authored_bytes_without_generated_composi
 #[test]
 fn parameter_option_override_retains_base_and_appends_override_before_end() {
     let authored = "* project corner\n.param gain=22\n+ trim=0.5\n.options method=gear\n.temp 85\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         authored,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -306,15 +324,15 @@ fn parameter_option_override_retains_base_and_appends_override_before_end() {
 fn include_order_override_replaces_all_base_include_cards_and_continuations() {
     let authored =
         ".lib \"models/b.lib\" SS\n.include \"models/a.lib\"\n.veriloga \"models/device.va\"\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         authored,
         crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -335,15 +353,15 @@ fn include_order_override_replaces_all_base_include_cards_and_continuations() {
 #[test]
 fn analysis_only_deck_replaces_base_analysis_measurement_and_output_cards() {
     let authored = ".tran 1n 10n\n.measure tran vmax MAX V(out)\n.probe V(out) I(V1)\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         authored,
         crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -365,14 +383,14 @@ fn analysis_only_deck_replaces_base_analysis_measurement_and_output_cards() {
 #[test]
 fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
     let device = "Roverride out 0 2k\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         device,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
     let error = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -386,14 +404,14 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
     assert!(error.contains("line 1"));
 
     let wrong_strategy = ".include \"models/other.lib\"\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         wrong_strategy,
         crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
     );
     let error = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -410,15 +428,15 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
 #[test]
 fn narrow_override_rejects_orphan_continuation() {
     let authored = "+ sweep=fast\n.param gain=22\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         GENERATED_BASE,
         authored,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
     let error = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -438,25 +456,26 @@ fn narrow_override_rejects_orphan_continuation() {
 #[test]
 fn narrow_override_requires_retained_generated_base() {
     let authored = ".tran 1n 10n\n";
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-        deck_id: uuid::Uuid::new_v4(),
-        artifact_name: "analysis.cir".to_owned(),
-        strategy: crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
-        source_encoding: crate::state::NetlistTextEncoding::Utf8,
-        source_line_ending: crate::state::NetlistLineEnding::Lf,
-        imported_dialect: None,
-        compatibility_reviewed: false,
-        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-        external_file_sha256: None,
-        save_history: Vec::new(),
-        revision_history: Vec::new(),
-        owned_includes: Vec::new(),
-    });
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_descriptor =
+        Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "analysis.cir".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: None,
+            compatibility_reviewed: false,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
+        });
 
     let error = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content
@@ -476,15 +495,15 @@ fn narrow_override_requires_retained_generated_base() {
 #[test]
 fn narrow_override_rejects_generated_base_without_end_terminator() {
     let authored = ".param gain=22\n";
-    let state = state_with_owned_strategy(
+    let harness = state_with_owned_strategy(
         "* malformed generated base\nR1 out 0 1k\n.op\n",
         authored,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
     let error = compose_owned_netlist_execution_source(
-        state.model.workspace.content.netlist_descriptor.as_ref(),
-        state
+        harness.model.workspace.content.netlist_descriptor.as_ref(),
+        harness
             .model
             .workspace
             .content

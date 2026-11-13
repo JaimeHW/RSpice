@@ -4,13 +4,13 @@
 //! external change.
 
 use crate::workbench::FolderListPreference;
-use crate::workbench::RSpiceApp;
 use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
-use crate::workbench::workflows::netlist_workflow::tests::state_with_owned_strategy;
+use crate::workbench::workflows::netlist_workflow::tests::seed_owned_strategy;
 use crate::workbench::workflows::netlist_workflow::tests::vendor_profiles::{cases, source};
 use crate::workbench::workflows::netlist_workflow::{
     apply_staged_external_netlist_change, save_owned_netlist_source,
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 #[test]
 fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
@@ -190,7 +190,9 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     let parameter_source = ".param gain=22\n";
     std::fs::write(&root, parameter_source).expect("write parameter source");
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state = state_with_owned_strategy(
+    app.state = AppState::default();
+    seed_owned_strategy(
+        &mut app.state.model,
         generated,
         parameter_source,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
@@ -231,7 +233,9 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     let include_source = ".include \"override.inc\"\n";
     std::fs::write(&root, include_source).expect("write include-order source");
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state = state_with_owned_strategy(
+    app.state = AppState::default();
+    seed_owned_strategy(
+        &mut app.state.model,
         generated,
         include_source,
         crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
