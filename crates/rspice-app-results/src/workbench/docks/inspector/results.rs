@@ -574,7 +574,7 @@ fn schematic_cross_probe_unavailability(
     // A trace is scoped by written instance names, `xamp` for a cell drawn
     // `amp`, so its scope is compared with the drawn occurrence by those names
     // and named to the reader as the occurrence the run drew.
-    let leaf = match crate::state::ProbeTarget::parse_legacy(net) {
+    let leaf = match crate::state::ProbeTarget::parse(net) {
         Ok(probe) if !probe.scope.same_engine_scope(&here) => {
             let deeper = probe.scope.engine_scope_starts_with(&here);
             let verb = if deeper { "Descend" } else { "Ascend" };

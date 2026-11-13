@@ -17,7 +17,7 @@ crate, egui or other GUI package, and simulator package.
 | Module | Contents |
 | :--- | :--- |
 | `product` | `ProductObjectKind`, whose `ALL` lists the objects the application owns, each with a static contract (stable serialized ID, parent, owning workflow, mutability); the UUID-backed identities (`ProjectId`, `RunId`, `DatasetId` and the rest), which refuse the nil UUID; `ObjectRef`, `ObjectRevision`, `DatasetBinding`; reproducible derived and manual-deck analysis identities; `ProcessCorner` |
-| `hierarchy_path` | `InstancePath`, `InstancePathPattern` and `ProbeTarget`, the one instance-path grammar. Canonical `/X1/X2` is the only stored form; engine `x1.x2` (or `x1:x2`) and the legacy `/top/...` spelling parse to the same path, and case folds for identity |
+| `hierarchy_path` | `InstancePath`, `InstancePathPattern` and `ProbeTarget`, the one instance-path grammar. Canonical `/X1/X2` is the only stored form; engine `x1.x2` (or `x1:x2`) parses to the same path, and case folds for identity |
 | `canonical` | `CanonicalWriter` and `content_digest`: the versioned, domain-separated SHA-256 encoding content identities are computed with, independent of serde formats, map iteration order and host word size |
 | `diagnostics` | `SourceDiagnostic` over `CanonicalDiagnosticMetadata`: a source finding with a stable UUID-v5 identity, revision, currentness, related locations and quick fixes, shared by the producers and every view that lists it; `LogSeverity` for engine and application logs |
 | `property` | `PropertyValue`, `PropertyDefinition` and `PropertySheet`: typed component parameters with units, ranges, visibility conditions and validation |
@@ -37,10 +37,9 @@ crate, egui or other GUI package, and simulator package.
 
 ## Entry points
 
-- `InstancePath::parse` and `InstancePath::parse_legacy`. `fold_key` is the
-  only key a map may use; `to_engine_name` and `engine_name_for` emit the
-  engine spelling. Paths are bounded by `MAX_INSTANCE_PATH_BYTES` and
-  `MAX_INSTANCE_PATH_DEPTH`.
+- `InstancePath::parse`. `fold_key` is the only key a map may use;
+  `to_engine_name` and `engine_name_for` emit the engine spelling. Paths are
+  bounded by `MAX_INSTANCE_PATH_BYTES` and `MAX_INSTANCE_PATH_DEPTH`.
 - `raw_probe::validate_raw_probe` and `raw_probe::parse_probe_target` for a
   probe expression or a single probe token.
 - `ProductObjectKind::contract` for an object kind's stable ID and ownership.

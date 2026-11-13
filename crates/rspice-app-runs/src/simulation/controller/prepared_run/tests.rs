@@ -1018,7 +1018,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Mixed-signal".to_owned(),
             root: crate::state::CellViewRef::default_top(),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["veriloga".to_owned()],
             stop_views: vec!["veriloga".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,

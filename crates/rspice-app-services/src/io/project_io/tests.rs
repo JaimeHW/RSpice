@@ -408,14 +408,14 @@ fn project_file_round_trips_configuration_execution_authority() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Browser-qualified release".to_owned(),
             root: workspace.content.active_view.clone(),
-            dut_path: "/top/XDUT".to_owned(),
+            dut_path: "/XDUT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: vec![crate::state::ConfigurationSetOverride {
-                instance_path: "/top/XDUT/*".to_owned(),
+                instance_path: "/XDUT/*".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),

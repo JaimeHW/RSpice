@@ -791,7 +791,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
             root: CellViewRef::new("work", "amp", "schematic"),
-            dut_path: "/top".to_owned(),
+            dut_path: "/".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,

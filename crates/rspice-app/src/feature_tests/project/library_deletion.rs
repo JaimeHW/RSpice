@@ -113,7 +113,7 @@ fn add_configuration_root(
         .create(crate::state::ConfigurationSetDefinition {
             name: name.to_owned(),
             root,
-            dut_path: "/top".to_owned(),
+            dut_path: "/".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,

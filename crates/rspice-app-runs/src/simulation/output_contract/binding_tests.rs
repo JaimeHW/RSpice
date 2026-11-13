@@ -72,7 +72,6 @@ fn scoped_outputs(spec: AnalysisSpec, derived: bool) {
         ("X1.mid", "X2.mid", "X1.Vprobe"),
         ("X1:mid", "X2:mid", "X1:Vprobe"),
         ("/X1/mid", "/X2/mid", "/X1/Vprobe"),
-        ("/top/X1/mid", "/top/X2/mid", "/top/X1/Vprobe"),
     ] {
         let expressions = [
             format!("V({first})"),

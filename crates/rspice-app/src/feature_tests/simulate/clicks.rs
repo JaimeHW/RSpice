@@ -427,7 +427,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     for (name, scope) in [("Core rails", "/x1"), ("Edge rails", "/x2")] {
         let mut group = CaptureGroup::new(name).expect("group name");
         group.rules.push(CaptureGroupRule::for_scope(
-            InstancePath::parse_legacy(scope).expect("scope"),
+            InstancePath::parse(scope).expect("scope"),
         ));
         ids.push(
             app.state

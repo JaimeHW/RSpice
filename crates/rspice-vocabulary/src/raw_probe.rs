@@ -63,15 +63,14 @@ pub fn device_current_probe(expression: &str) -> Option<(&str, &str)> {
 /// Resolve one probe token — a node, device, or noise-source name, optionally
 /// scoped — against the one instance-path grammar.
 ///
-/// Every spelling the product has written is accepted and resolves to the same
-/// target: canonical `/X1/net`, engine `x1.net` and `x1:net`, and the legacy
-/// `/top/X1/net` that projects saved before the design root became implicit
-/// still carry. Resolution is all this does — the persisted expression stays
-/// exactly as the project stored it, because a read is not an edit.
+/// Every spelling the grammar reads resolves to the same target: canonical
+/// `/X1/net`, and engine `x1.net` and `x1:net`. Resolution is all this does —
+/// the persisted expression stays exactly as the project stored it, because a
+/// read is not an edit.
 ///
 /// `/` on its own is the design root, which is why a doubled separator is
 /// refused here: `//net` would otherwise resolve to a root probe rather than
 /// to the empty instance name it actually spells.
 pub fn parse_probe_target(value: &str) -> Result<ProbeTarget, String> {
-    ProbeTarget::parse_legacy(value).map_err(|error| error.to_string())
+    ProbeTarget::parse(value).map_err(|error| error.to_string())
 }

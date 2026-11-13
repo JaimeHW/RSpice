@@ -244,7 +244,7 @@ fn device_reading(entry: &DeviceOpEntry) -> (&str, impl Iterator<Item = (&str, f
 fn name_parts(name: &str) -> (String, String) {
     let signal = signal_leaf(name);
     let signal = signal.strip_suffix("#branch").unwrap_or(signal);
-    match ProbeTarget::parse_legacy(signal) {
+    match ProbeTarget::parse(signal) {
         Ok(target) if !target.scope.is_root() => {
             let mut parent = target.scope.segments().join(".");
             parent.push('.');

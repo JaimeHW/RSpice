@@ -409,7 +409,7 @@ mod tests {
     fn core_group() -> CaptureGroup {
         let mut group = CaptureGroup::new("Core").expect("group name");
         group.rules.push(CaptureGroupRule::for_scope(
-            InstancePath::parse_legacy("/x1").expect("scope"),
+            InstancePath::parse("/x1").expect("scope"),
         ));
         group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
         group
@@ -613,7 +613,7 @@ mod tests {
         fn claiming(configure: impl FnOnce(&mut CaptureGroup)) -> CaptureGroup {
             let mut group = CaptureGroup::new("Core").expect("group name");
             group.rules.push(CaptureGroupRule::for_scope(
-                InstancePath::parse_legacy("/x1").expect("scope"),
+                InstancePath::parse("/x1").expect("scope"),
             ));
             configure(&mut group);
             group

@@ -254,7 +254,7 @@ fn probe_scope(expression: &str) -> Option<InstancePath> {
         let close = expression.rfind(')')?;
         expression.get(open + 1..close)?.split(',').next()?
     };
-    ProbeTarget::parse_legacy(token.trim())
+    ProbeTarget::parse(token.trim())
         .ok()
         .map(|target| target.scope)
 }
@@ -597,7 +597,7 @@ mod tests {
     fn scoped(name: &str, scope: &str) -> CaptureGroup {
         let mut group = CaptureGroup::new(name).expect("test group name");
         group.rules.push(CaptureGroupRule::for_scope(
-            InstancePath::parse_legacy(scope).expect("test scope"),
+            InstancePath::parse(scope).expect("test scope"),
         ));
         group
     }

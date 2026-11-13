@@ -771,7 +771,7 @@ fn capture_group_from_draft(
             None
         } else {
             Some(
-                crate::state::InstancePath::parse_legacy(scope)
+                crate::state::InstancePath::parse(scope)
                     .map_err(|error| error.to_string())?,
             )
         };

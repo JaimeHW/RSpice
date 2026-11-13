@@ -11,7 +11,7 @@
 //! and never occupies a segment. A stored path therefore names instances only,
 //! so renaming or re-rooting the top cell cannot invalidate one.
 //!
-//! Three surface grammars meet here and exactly one of them is canonical.
+//! Two surface grammars meet here and exactly one of them is canonical.
 //!
 //! - Canonical — `/` for the root, `/X1/X2` otherwise. The only form stored,
 //!   displayed, or serialized.
@@ -24,10 +24,6 @@
 //!   parsed back from this form therefore carries written names, and is
 //!   compared with a drawn path only through
 //!   [`InstancePath::same_engine_scope`].
-//! - Legacy — the spelling from before the root was implicit, in which the
-//!   root occupied a literal `top` segment. [`InstancePath::parse_legacy`]
-//!   accepts it and drops that one segment; deserialization uses it so
-//!   projects saved with `/top/...` load unchanged.
 //!
 //! Case is not identity. Two paths that differ only in case name the same
 //! instance, so comparison and map keys fold case, while the segments keep the
@@ -48,9 +44,6 @@ pub const MAX_INSTANCE_PATH_BYTES: usize = 1_024;
 
 /// Maximum number of instance segments in a path or pattern.
 pub const MAX_INSTANCE_PATH_DEPTH: usize = 128;
-
-/// The segment the pre-implicit-root grammar spent on the design root.
-const LEGACY_ROOT_SEGMENT: &str = "top";
 
 /// Separator the engine uses between hierarchy levels.
 const ENGINE_SEPARATOR: char = '.';
@@ -105,21 +98,6 @@ impl InstancePath {
     /// Parses a canonical path (`/X1/X2`) or an engine path (`x1.x2`).
     pub fn parse(text: &str) -> Result<Self, HierarchyPathError> {
         Self::sealed(parse_path_segments(text)?)
-    }
-
-    /// Parses everything [`InstancePath::parse`] accepts, then drops one
-    /// leading `top` segment so paths written against the old grammar name the
-    /// same instance: `/top` is the root, `/top/XAFE` is `/XAFE`, and `/XAFE`
-    /// is unchanged.
-    pub fn parse_legacy(text: &str) -> Result<Self, HierarchyPathError> {
-        let mut segments = parse_path_segments(text)?;
-        if segments
-            .first()
-            .is_some_and(|first| first.eq_ignore_ascii_case(LEGACY_ROOT_SEGMENT))
-        {
-            segments.remove(0);
-        }
-        Self::sealed(segments)
     }
 
     pub fn is_root(&self) -> bool {
@@ -318,7 +296,7 @@ impl Serialize for InstancePath {
 impl<'de> Deserialize<'de> for InstancePath {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        Self::parse_legacy(&text).map_err(serde::de::Error::custom)
+        Self::parse(&text).map_err(serde::de::Error::custom)
     }
 }
 
@@ -352,19 +330,6 @@ pub struct InstancePathPattern {
 impl InstancePathPattern {
     pub fn parse(text: &str) -> Result<Self, HierarchyPathError> {
         Self::sealed(parse_pattern_segments(text)?)
-    }
-
-    /// Parses a pattern written against the old grammar, dropping one leading
-    /// `top` segment the way [`InstancePath::parse_legacy`] does. A leading
-    /// wildcard is never dropped.
-    pub fn parse_legacy(text: &str) -> Result<Self, HierarchyPathError> {
-        let mut segments = parse_pattern_segments(text)?;
-        if segments.first().is_some_and(|first| {
-            matches!(first, PatternSegment::Name(name) if name.eq_ignore_ascii_case(LEGACY_ROOT_SEGMENT))
-        }) {
-            segments.remove(0);
-        }
-        Self::sealed(segments)
     }
 
     pub fn is_root(&self) -> bool {
@@ -460,7 +425,7 @@ impl Serialize for InstancePathPattern {
 impl<'de> Deserialize<'de> for InstancePathPattern {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        Self::parse_legacy(&text).map_err(serde::de::Error::custom)
+        Self::parse(&text).map_err(serde::de::Error::custom)
     }
 }
 
@@ -480,14 +445,39 @@ impl ProbeTarget {
     /// Parses `leaf`, `/X1/leaf`, or `x1.x2.leaf`. The scope prefix is written
     /// in one grammar or the other, never mixed.
     pub fn parse(text: &str) -> Result<Self, HierarchyPathError> {
-        Self::parse_scoped(text, InstancePath::parse)
-    }
-
-    /// Parses everything [`ProbeTarget::parse`] accepts, resolving the scope
-    /// through [`InstancePath::parse_legacy`] so a probe saved as
-    /// `/top/X1/net` names `/X1/net`.
-    pub fn parse_legacy(text: &str) -> Result<Self, HierarchyPathError> {
-        Self::parse_scoped(text, InstancePath::parse_legacy)
+        if text.is_empty() {
+            return Err(HierarchyPathError::Empty);
+        }
+        if text.contains("//") {
+            return Err(HierarchyPathError::EmptySegment(text.to_owned()));
+        }
+        if text.len() > MAX_INSTANCE_PATH_BYTES {
+            return Err(HierarchyPathError::TooLong {
+                path: text.to_owned(),
+                actual: text.len(),
+                maximum: MAX_INSTANCE_PATH_BYTES,
+            });
+        }
+        let (scope, leaf) = if let Some(index) = text.rfind('/') {
+            if !text.starts_with('/') {
+                return Err(HierarchyPathError::MalformedProbe(text.to_owned()));
+            }
+            (&text[..index], &text[index + 1..])
+        } else if let Some(index) = text.rfind(ENGINE_SEPARATORS) {
+            (&text[..index], &text[index + 1..])
+        } else {
+            ("", text)
+        };
+        validate_leaf(leaf)?;
+        let scope = if scope.is_empty() {
+            InstancePath::root()
+        } else {
+            InstancePath::parse(scope)?
+        };
+        Ok(Self {
+            scope,
+            leaf: leaf.to_owned(),
+        })
     }
 
     /// The engine's flattened name for this probe, `x1.x2.net`.
@@ -519,47 +509,8 @@ impl ProbeTarget {
     /// punctuation as well as flattened hierarchical names. Only the request
     /// is translated; unrelated retained names must never be normalized into it.
     pub fn engine_alias(text: &str) -> Option<String> {
-        let engine = Self::parse_legacy(text).ok()?.engine_name().ok()?;
+        let engine = Self::parse(text).ok()?.engine_name().ok()?;
         (!engine.eq_ignore_ascii_case(text)).then_some(engine)
-    }
-
-    fn parse_scoped(
-        text: &str,
-        parse_scope: fn(&str) -> Result<InstancePath, HierarchyPathError>,
-    ) -> Result<Self, HierarchyPathError> {
-        if text.is_empty() {
-            return Err(HierarchyPathError::Empty);
-        }
-        if text.contains("//") {
-            return Err(HierarchyPathError::EmptySegment(text.to_owned()));
-        }
-        if text.len() > MAX_INSTANCE_PATH_BYTES {
-            return Err(HierarchyPathError::TooLong {
-                path: text.to_owned(),
-                actual: text.len(),
-                maximum: MAX_INSTANCE_PATH_BYTES,
-            });
-        }
-        let (scope, leaf) = if let Some(index) = text.rfind('/') {
-            if !text.starts_with('/') {
-                return Err(HierarchyPathError::MalformedProbe(text.to_owned()));
-            }
-            (&text[..index], &text[index + 1..])
-        } else if let Some(index) = text.rfind(ENGINE_SEPARATORS) {
-            (&text[..index], &text[index + 1..])
-        } else {
-            ("", text)
-        };
-        validate_leaf(leaf)?;
-        let scope = if scope.is_empty() {
-            InstancePath::root()
-        } else {
-            parse_scope(scope)?
-        };
-        Ok(Self {
-            scope,
-            leaf: leaf.to_owned(),
-        })
     }
 }
 
@@ -926,30 +877,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_paths_lose_exactly_one_root_segment() {
-        for (input, expected) in [
-            ("/", "/"),
-            ("/top", "/"),
-            ("/TOP/xafe", "/xafe"),
-            ("/top/XAFE", "/XAFE"),
-            ("/XAFE", "/XAFE"),
-            ("top.x1.net", "/x1/net"),
-        ] {
-            let path = InstancePath::parse_legacy(input).expect("legacy path parses");
-            assert_eq!(path.to_string(), expected, "{input}");
-            assert_eq!(
-                InstancePath::parse_legacy(&path.to_string()).expect("migrated path re-parses"),
-                path,
-                "{input} must migrate idempotently"
-            );
-        }
-        assert_eq!(
-            InstancePath::parse_legacy("/top/top")
-                .expect("nested instance named top")
-                .to_string(),
-            "/top",
-            "only the root segment is dropped"
-        );
+    fn a_segment_named_top_is_an_instance_like_any_other() {
         assert_eq!(
             InstancePath::parse("/top/XAFE")
                 .expect("canonical parse keeps every segment")
@@ -1017,8 +945,8 @@ mod tests {
 
     #[test]
     fn fold_key_is_the_only_identity() {
-        let upper = InstancePath::parse_legacy("/TOP/xafe").expect("upper");
-        let lower = InstancePath::parse_legacy("/top/XAFE").expect("lower");
+        let upper = InstancePath::parse("/XAFE").expect("upper");
+        let lower = InstancePath::parse("/xafe").expect("lower");
         assert_ne!(upper, lower, "the author's spelling is preserved");
         assert_eq!(upper.fold_key(), lower.fold_key());
         assert_eq!(upper.fold_key(), "/xafe");
@@ -1142,12 +1070,6 @@ mod tests {
             "the deck's bus-bit spelling is a nameable leaf"
         );
         assert_eq!(
-            ProbeTarget::parse_legacy("/top/X1/net")
-                .expect("legacy probe")
-                .to_string(),
-            "/X1/net"
-        );
-        assert_eq!(
             ProbeTarget::parse("net").expect("bare leaf").to_string(),
             "net"
         );
@@ -1155,7 +1077,6 @@ mod tests {
         assert_eq!(ProbeTarget::parse(""), Err(HierarchyPathError::Empty));
         for text in ["//net", "/top//net", "/X1//net"] {
             assert!(ProbeTarget::parse(text).is_err(), "{text}");
-            assert!(ProbeTarget::parse_legacy(text).is_err(), "{text}");
             assert!(ProbeTarget::engine_alias(text).is_none(), "{text}");
         }
         assert_eq!(
@@ -1177,10 +1098,10 @@ mod tests {
 
     #[test]
     fn patterns_match_and_rank_exactly_as_scoped_overrides_did() {
-        let wildcard = InstancePathPattern::parse_legacy("/top/*").expect("wildcard");
-        let specific = InstancePathPattern::parse_legacy("/top/Xcritical").expect("specific");
-        let critical = InstancePath::parse_legacy("/top/xCRITICAL").expect("path");
-        let other = InstancePath::parse_legacy("/top/Xother").expect("path");
+        let wildcard = InstancePathPattern::parse("/*").expect("wildcard");
+        let specific = InstancePathPattern::parse("/Xcritical").expect("specific");
+        let critical = InstancePath::parse("/xCRITICAL").expect("path");
+        let other = InstancePath::parse("/Xother").expect("path");
         assert!(wildcard.matches(&critical));
         assert!(specific.matches(&critical));
         assert!(wildcard.matches(&other));
@@ -1189,12 +1110,12 @@ mod tests {
         assert_eq!(wildcard.specificity(), 0);
         assert_eq!(wildcard.depth(), 1);
         assert!(
-            !wildcard.matches(&InstancePath::parse_legacy("/top/X1/X2").expect("deeper path")),
+            !wildcard.matches(&InstancePath::parse("/X1/X2").expect("deeper path")),
             "a wildcard stands for one instance, not a subtree"
         );
 
-        let left = InstancePathPattern::parse_legacy("/top/*/X1").expect("left");
-        let right = InstancePathPattern::parse_legacy("/top/I0/*").expect("right");
+        let left = InstancePathPattern::parse("/*/X1").expect("left");
+        let right = InstancePathPattern::parse("/I0/*").expect("right");
         assert!(left.overlaps(&right));
         assert_eq!(left.specificity(), right.specificity());
         assert!(
@@ -1202,14 +1123,14 @@ mod tests {
             "patterns of unequal depth cannot overlap"
         );
         assert!(
-            !InstancePathPattern::parse_legacy("/top/I0/X1")
+            !InstancePathPattern::parse("/I0/X1")
                 .expect("left")
-                .overlaps(&InstancePathPattern::parse_legacy("/top/I1/X1").expect("right"))
+                .overlaps(&InstancePathPattern::parse("/I1/X1").expect("right"))
         );
         assert!(
-            InstancePathPattern::parse_legacy("/top/I0/X1")
+            InstancePathPattern::parse("/I0/X1")
                 .expect("left")
-                .overlaps(&InstancePathPattern::parse_legacy("/top/i0/x1").expect("right")),
+                .overlaps(&InstancePathPattern::parse("/i0/x1").expect("right")),
             "overlap folds case"
         );
 
@@ -1218,12 +1139,6 @@ mod tests {
         assert_eq!(root.to_string(), "/");
         assert!(root.matches(&InstancePath::root()));
         assert!(!root.matches(&InstancePath::parse("/X1").expect("path")));
-        assert_eq!(
-            InstancePathPattern::parse_legacy("/top/*/X1")
-                .expect("legacy pattern")
-                .to_string(),
-            "/*/X1"
-        );
         assert_eq!(
             InstancePathPattern::parse("/*/X1")
                 .expect("pattern")
@@ -1253,19 +1168,15 @@ mod tests {
     }
 
     #[test]
-    fn serde_renders_canonically_and_loads_legacy_projects() {
+    fn serde_renders_and_loads_canonically() {
         let path = InstancePath::parse("/X1/X2").expect("path");
         assert_eq!(
             serde_json::to_string(&path).expect("serialize"),
             "\"/X1/X2\""
         );
         assert_eq!(
-            serde_json::from_str::<InstancePath>("\"/top/X1/X2\"").expect("legacy path loads"),
+            serde_json::from_str::<InstancePath>("\"/X1/X2\"").expect("path loads"),
             path
-        );
-        assert_eq!(
-            serde_json::from_str::<InstancePath>("\"/top\"").expect("legacy root loads"),
-            InstancePath::root()
         );
         assert_eq!(
             serde_json::from_str::<InstancePath>("\"/\"").expect("root loads"),
@@ -1280,11 +1191,11 @@ mod tests {
             "\"/*/X1\""
         );
         assert_eq!(
-            serde_json::from_str::<InstancePathPattern>("\"/top/*/X1\"")
-                .expect("legacy pattern loads"),
+            serde_json::from_str::<InstancePathPattern>("\"/*/X1\"")
+                .expect("pattern loads"),
             pattern
         );
-        assert!(serde_json::from_str::<InstancePathPattern>("\"/top/**\"").is_err());
+        assert!(serde_json::from_str::<InstancePathPattern>("\"/**\"").is_err());
     }
 
     #[test]

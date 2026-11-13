@@ -718,13 +718,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     /// The instance to attribute an unmet configuration requirement to, and
     /// why it is unmet — or `None` when the expanded hierarchy satisfies it.
     ///
-    /// `text` is the authored spelling, which is where the pre-implicit-root
-    /// grammar is still admitted. A requirement naming one instance is looked
-    /// up by identity; a pattern is matched against every instance the walk
-    /// reached, because that is the only thing a pattern can be measured
+    /// `text` is the authored spelling. A requirement naming one instance is
+    /// looked up by identity; a pattern is matched against every instance the
+    /// walk reached, because that is the only thing a pattern can be measured
     /// against.
     fn unmet_requirement(&mut self, text: &str, purpose: &str) -> Option<(InstancePath, String)> {
-        match InstancePath::parse_legacy(text) {
+        match InstancePath::parse(text) {
             Ok(path) => {
                 let key = path.fold_key();
                 if self.encountered_instance_paths.contains_key(&key) {
@@ -737,7 +736,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 ))
             }
             Err(HierarchyPathError::WildcardInPath(_)) => {
-                let diagnostic = match InstancePathPattern::parse_legacy(text) {
+                let diagnostic = match InstancePathPattern::parse(text) {
                     Ok(pattern) => {
                         if self
                             .encountered_instance_paths
@@ -2012,14 +2011,10 @@ fn seal_plan(
     }
 }
 
-/// One override with its pattern re-spelled canonically.
-///
-/// This is the boundary the authored spelling stops at: a definition saved
-/// before the design root became implicit still carries it as a segment, and a
-/// pattern that names the root cannot match a path that does not.
+/// One override with its pattern re-spelled in the canonical grammar.
 fn canonical_override(scoped: &ConfigurationSetOverride) -> ConfigurationSetOverride {
     let mut scoped = scoped.clone();
-    if let Ok(pattern) = InstancePathPattern::parse_legacy(&scoped.instance_path) {
+    if let Ok(pattern) = InstancePathPattern::parse(&scoped.instance_path) {
         scoped.instance_path = pattern.to_string();
     }
     scoped

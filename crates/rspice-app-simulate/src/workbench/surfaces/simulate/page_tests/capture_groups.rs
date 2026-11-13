@@ -191,7 +191,7 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     let id = plan_id(&harness.model);
     let mut group = CaptureGroup::new("Two rules").expect("group");
     group.rules.push(CaptureGroupRule::for_scope(
-        InstancePath::parse_legacy("/x3").expect("scope"),
+        InstancePath::parse("/x3").expect("scope"),
     ));
     group.rules.push(CaptureGroupRule::for_kind(
         SavedOutputKind::NoiseContributor,

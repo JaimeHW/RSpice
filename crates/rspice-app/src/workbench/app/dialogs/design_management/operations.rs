@@ -632,7 +632,7 @@ pub(super) fn hierarchy_audit_subjects(
         .flat_map(|binding| {
             binding.instance_paths.iter().filter_map(move |path| {
                 if view_checks == HierarchyViewChecks::SelectedHierarchy
-                    && !crate::state::InstancePath::parse_legacy(path)
+                    && !crate::state::InstancePath::parse(path)
                         .is_ok_and(|occurrence| occurrence.starts_with(scope))
                 {
                     return None;

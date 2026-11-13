@@ -272,7 +272,6 @@ mod tests {
             "V(/X1/n)",
             "V(x1.n)",
             "V(x1:n)",
-            "V(top.x1.n)",
             "V(/X1/a, /X1/b)",
             "I(x1.r1)",
         ] {
@@ -291,7 +290,7 @@ mod tests {
 
     #[test]
     fn every_spelling_of_one_target_resolves_to_the_same_canonical_path() {
-        for spelling in ["/x1/n", "x1.n", "x1:n", "top.x1.n", "/top/x1/n"] {
+        for spelling in ["/x1/n", "x1.n", "x1:n"] {
             let target = parse_probe_target(spelling).expect("probe spelling resolves");
             assert_eq!(target.to_string(), "/x1/n", "{spelling}");
             assert_eq!(
@@ -344,7 +343,7 @@ mod tests {
             "id": "6f1c2a4e-3b7d-4c59-9e21-8a0f5d3b7c11",
             "kind": "raw_voltage_or_current",
             "name": "probe",
-            "source_expression": "V(top.x1.n)",
+            "source_expression": "V(x1.n)",
             "compatible_analyses": { "kind": "op_tran_ac" },
             "save_policy": "every_accepted_point",
             "stored_precision": "full_source_precision",
@@ -352,7 +351,7 @@ mod tests {
         }"#;
         let output: SavedOutput = serde_json::from_str(stored).expect("a stored output loads");
         assert_eq!(
-            output.source_expression, "V(top.x1.n)",
+            output.source_expression, "V(x1.n)",
             "a read resolves the target; it does not rewrite what the project persisted"
         );
         assert_eq!(output.validate(), Ok(()));

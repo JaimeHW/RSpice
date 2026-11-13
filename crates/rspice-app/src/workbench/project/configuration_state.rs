@@ -478,7 +478,7 @@ fn instance_rows(hierarchy: &HierarchyResolution) -> Vec<InstanceRow> {
         .enumerate()
         .flat_map(|(binding, row)| {
             row.instance_paths.iter().filter_map(move |path| {
-                let parsed = InstancePath::parse_legacy(path).ok()?;
+                let parsed = InstancePath::parse(path).ok()?;
                 let order = parsed
                     .segments()
                     .iter()
@@ -639,7 +639,7 @@ pub(crate) fn set_cell_view(
 }
 
 fn fold(path: &str) -> String {
-    InstancePath::parse_legacy(path)
+    InstancePath::parse(path)
         .map_or_else(|_| path.to_ascii_lowercase(), |parsed| parsed.fold_key())
 }
 
@@ -659,16 +659,16 @@ pub(crate) fn instance_binding<'a>(
     definition: &'a ConfigurationSetDefinition,
     path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
-    let key = InstancePath::parse_legacy(path).ok()?.fold_key();
+    let key = InstancePath::parse(path).ok()?.fold_key();
     definition.overrides.iter().find(|binding| {
-        InstancePath::parse_legacy(&binding.instance_path)
+        InstancePath::parse(&binding.instance_path)
             .is_ok_and(|exact| exact.fold_key() == key)
     })
 }
 
 /// Whether an instance binding names a pattern rather than one instance.
 pub(crate) fn is_pattern(binding: &ConfigurationSetOverride) -> bool {
-    InstancePath::parse_legacy(&binding.instance_path).is_err()
+    InstancePath::parse(&binding.instance_path).is_err()
 }
 
 /// The binding that governs `path`: the matching one that pins the most
@@ -677,12 +677,12 @@ pub(crate) fn governing_binding<'a>(
     definition: &'a ConfigurationSetDefinition,
     path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
-    let instance = InstancePath::parse_legacy(path).ok()?;
+    let instance = InstancePath::parse(path).ok()?;
     definition
         .overrides
         .iter()
         .filter_map(|binding| {
-            let pattern = InstancePathPattern::parse_legacy(&binding.instance_path).ok()?;
+            let pattern = InstancePathPattern::parse(&binding.instance_path).ok()?;
             pattern
                 .matches(&instance)
                 .then(|| (binding, pattern.specificity()))
@@ -699,12 +699,12 @@ pub(crate) fn set_instance_view(
     path: &str,
     view: Option<&str>,
 ) {
-    let Ok(parsed) = InstancePath::parse_legacy(path) else {
+    let Ok(parsed) = InstancePath::parse(path) else {
         return;
     };
     let key = parsed.fold_key();
     let existing = definition.overrides.iter().position(|binding| {
-        InstancePath::parse_legacy(&binding.instance_path)
+        InstancePath::parse(&binding.instance_path)
             .is_ok_and(|exact| exact.fold_key() == key)
     });
     match (view, existing) {
@@ -739,13 +739,13 @@ pub(crate) fn apply_binding_change(
     inherited: &[String],
     change: BindingChange,
 ) {
-    let exact_key = InstancePath::parse_legacy(path)
+    let exact_key = InstancePath::parse(path)
         .ok()
         .map(|exact| exact.fold_key());
     let position = definition.overrides.iter().position(|binding| {
         binding.instance_path.eq_ignore_ascii_case(path)
             || exact_key.as_ref().is_some_and(|key| {
-                InstancePath::parse_legacy(&binding.instance_path)
+                InstancePath::parse(&binding.instance_path)
                     .is_ok_and(|exact| &exact.fold_key() == key)
             })
     });
@@ -755,7 +755,7 @@ pub(crate) fn apply_binding_change(
         (None, _) => {
             definition.overrides.push(ConfigurationSetOverride {
                 instance_path: exact_key
-                    .and_then(|_| InstancePath::parse_legacy(path).ok())
+                    .and_then(|_| InstancePath::parse(path).ok())
                     .map_or_else(|| path.to_owned(), |exact| exact.to_string()),
                 executable_views: inherited.to_vec(),
                 stop_view: None,

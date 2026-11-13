@@ -221,7 +221,7 @@ fn borrow_signal_conductor<'a>(
     // A node voltage and a digital lane both name their net; selecting either
     // highlights the same conductor.
     let (wrapped, _) = probed_net(signal).ok_or(LocateSignalError::NotANet)?;
-    let target = ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
+    let target = ProbeTarget::parse(wrapped).map_err(|_| LocateSignalError::NotANet)?;
     let Some(net_to_points) = view.net_to_points else {
         return Err(LocateSignalError::NoCurrentMap);
     };

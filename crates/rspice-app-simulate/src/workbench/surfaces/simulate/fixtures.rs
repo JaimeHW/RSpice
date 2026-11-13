@@ -47,7 +47,7 @@ pub fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
     }
     let mut group = CaptureGroup::new("Core rails").expect("group name");
     group.rules.push(CaptureGroupRule::for_scope(
-        InstancePath::parse_legacy("/x1").expect("scope"),
+        InstancePath::parse("/x1").expect("scope"),
     ));
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     model

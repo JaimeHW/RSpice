@@ -420,7 +420,7 @@ fn a_confirmed_output_removal_commits_with_its_receipt() {
         let id = plan_of(state);
         let mut group = CaptureGroup::new("Rails").expect("group name");
         group.rules.push(CaptureGroupRule::for_scope(
-            InstancePath::parse_legacy("/").expect("scope"),
+            InstancePath::parse("/").expect("scope"),
         ));
         state
             .model
@@ -478,7 +478,7 @@ fn seed_capture_group(state: &mut AppState, name: &str, holding: bool) {
     }
     let mut group = CaptureGroup::new(name).expect("group name");
     group.rules.push(CaptureGroupRule::for_scope(
-        InstancePath::parse_legacy("/").expect("scope"),
+        InstancePath::parse("/").expect("scope"),
     ));
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     let group_id = state

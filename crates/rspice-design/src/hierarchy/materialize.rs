@@ -344,15 +344,11 @@ pub(super) fn deduplicate_view_order(order: &mut Vec<String>) {
 
 /// The override that governs one instance: the matching scope that pins the
 /// most positions by name.
-///
-/// Both operands are read with the grammar's legacy parser, so a scope stored
-/// before the design root became implicit and one stored after it resolve to
-/// the same instance rather than to two.
 pub(super) fn selected_configuration_override<'a>(
     overrides: &'a [ConfigurationSetOverride],
     instance_path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
-    let instance = InstancePath::parse_legacy(instance_path).ok()?;
+    let instance = InstancePath::parse(instance_path).ok()?;
     overrides
         .iter()
         .filter_map(|scoped| {
@@ -387,7 +383,7 @@ pub(super) fn validate_override_pattern_authority(
 }
 
 fn configured_scope(pattern: &str) -> Result<InstancePathPattern, String> {
-    InstancePathPattern::parse_legacy(pattern)
+    InstancePathPattern::parse(pattern)
         .map_err(|error| format!("configured scope '{pattern}' is not a hierarchy scope: {error}"))
 }
 
@@ -445,25 +441,25 @@ mod tests {
     fn configuration_override_patterns_use_most_specific_segment_match() {
         let overrides = vec![
             ConfigurationSetOverride {
-                instance_path: "/top/*".to_owned(),
+                instance_path: "/*".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
             },
             ConfigurationSetOverride {
-                instance_path: "/top/Xcritical".to_owned(),
+                instance_path: "/Xcritical".to_owned(),
                 executable_views: vec!["schematic".to_owned()],
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
             },
         ];
-        let selected = selected_configuration_override(&overrides, "/top/xCRITICAL")
+        let selected = selected_configuration_override(&overrides, "/xCRITICAL")
             .expect("specific override matches");
-        assert_eq!(selected.instance_path, "/top/Xcritical");
-        let wildcard = selected_configuration_override(&overrides, "/top/Xother")
+        assert_eq!(selected.instance_path, "/Xcritical");
+        let wildcard = selected_configuration_override(&overrides, "/Xother")
             .expect("wildcard override matches");
-        assert_eq!(wildcard.instance_path, "/top/*");
+        assert_eq!(wildcard.instance_path, "/*");
     }
 }
