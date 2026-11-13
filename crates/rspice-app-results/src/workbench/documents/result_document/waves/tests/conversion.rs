@@ -110,9 +110,9 @@ fn a_digital_expression_is_a_logic_lane_with_its_edges_on_the_threshold() {
 /// The code bus as a staircase is the DAC's input code: at every settled
 /// trial it equals the netlist's own code probe, `bcode`, which reads the
 /// DAC's bit nodes at half the rail (net/sar_analog.cir). The top plate
-/// during conversion is `-vin + code·vref/256` with vref = 1 V, so
-/// `V(TOP) + V(VIN)` follows the staircase over 256: exactly through the
-/// first five trials of each conversion, and within one LSB after them.
+/// during conversion is `-vin + code·vref/256` with vref = 1 V and vin the
+/// input sampled when samp fell, so `V(TOP) + vin` follows the staircase
+/// over 256 at every trial.
 #[test]
 fn the_code_bus_staircase_follows_the_dac() {
     let run = sar_run();
@@ -191,42 +191,38 @@ fn the_code_bus_staircase_follows_the_dac() {
             let f = (t - xs[i - 1]) / (xs[i] - xs[i - 1]);
             ys[i - 1] + f * (ys[i] - ys[i - 1])
         };
+        // The top plate floats when samp falls, holding the charge of the vin
+        // it sampled; the deck steps vin to the next conversion's input half
+        // way through this one (net/vin_codes.cir), so the DAC is read
+        // against the sampled vin, not the live one.
         let samp = history(run, "SAMP");
-        let sampling = |t: f64| {
-            samp.iter()
-                .rev()
-                .find(|(time, _)| *time <= t)
-                .is_none_or(|(_, code)| *code == 1)
+        let sampled_at = |t: f64| match samp.iter().rev().find(|(time, _)| *time <= t) {
+            Some((time, 0)) => Some(*time),
+            _ => None,
         };
         let (cx, cy) = column("CODE");
         let mut worst: f64 = 0.0;
-        let mut early: f64 = 0.0;
         let mut compared = 0;
         for k in 0..24 {
             let t = f64::from(k).mul_add(100.0 * NS, 90.5 * NS);
-            if sampling(t) || held(t).is_nan() {
+            let Some(fell) = sampled_at(t) else {
+                continue;
+            };
+            if held(t).is_nan() {
                 continue;
             }
-            let dac = at(&tx, &ty, t) + at(&vx, &vy, t);
+            let dac = at(&tx, &ty, t) + at(&vx, &vy, fell);
             let code = at(&cx, &cy, t);
             assert!(
                 (code - held(t)).abs() < 1e-9,
                 "at {t}: the code probe reads {code}, the staircase {}",
                 held(t)
             );
-            let error = (dac - held(t) / 256.0).abs();
-            if held(t) >= 8.0 {
-                early = early.max(error);
-            }
             worst = worst.max((dac - held(t) / 256.0).abs());
             compared += 1;
         }
         assert!(compared >= 16, "{compared} settled trials");
-        assert!(early < 1e-6, "an early trial is {early} V off code/256");
-        assert!(
-            worst < 1e-6 + 1.0 / 256.0,
-            "the DAC is {worst} V off code/256"
-        );
+        assert!(worst < 1e-6, "the DAC is {worst} V off code/256");
     }
 }
 
