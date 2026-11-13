@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_app_slices import (  # noqa: E402
     CEILINGS,
     GROUPS,
+    SHELL_TRANSACTIONS,
     SLICE_RULES,
     SLICES,
     compare,
@@ -549,20 +550,33 @@ class MeasurementTests(unittest.TestCase):
         })
 
 
-    def test_the_shell_project_transactions_are_appstate_entry_points_not_coupling(self) -> None:
-        values, _, _ = measure_tree({
+    def test_the_shell_transactions_are_appstate_entry_points_not_coupling(self) -> None:
+        self.assertEqual(SHELL_TRANSACTIONS, (
+            "workbench/session/project_transactions.rs",
+            "workbench/session/netlist_import_transactions.rs",
+        ))
+        values, contributors, _ = measure_tree({
             "workbench/app_state.rs": "pub struct AppState;\n",
             "workbench/session/project_transactions.rs": (
                 "use crate::workbench::app_state::AppState;\n"
                 "impl AppState {\n    pub fn delete_library(&mut self) {}\n}\n"
             ),
-            "workbench/session/other.rs": (
+            "workbench/session/netlist_import_transactions.rs": (
+                "use crate::workbench::app_state::AppState;\n"
+                "impl AppState {\n    pub fn import_netlist(&mut self) {}\n}\n"
+            ),
+            "workbench/session/other_transactions.rs": (
                 "use crate::workbench::app_state::AppState;\n"
                 "impl AppState {\n    pub fn elsewhere(&mut self) {}\n}\n"
             ),
         })
-        # Only the method outside the shell's project transactions counts.
+        # Only the method outside the named shell transactions counts, even in
+        # a session file whose name looks like theirs.
         self.assertEqual(values["whole-app"], {"impl AppState methods outside session": 1})
+        self.assertEqual(
+            contributors[("whole-app", "impl AppState methods outside session")],
+            {"workbench/session/other_transactions.rs": 1},
+        )
 
 
 class CeilingTests(unittest.TestCase):

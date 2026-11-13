@@ -67,8 +67,12 @@ SESSION = "session"  # the AppState/WorkbenchSession aggregate
 SHELL = "shell"
 # The shell's transactions over the whole project are AppState's own entry
 # points: the callers below the shell reach them as methods, until each
-# caller raises a request for the shell to run instead.
-PROJECT_TRANSACTIONS = "workbench/session/project_transactions.rs"
+# caller raises a request for the shell to run instead. Each file is named,
+# so every new exemption is a reviewed edit rather than a file name.
+SHELL_TRANSACTIONS = (
+    "workbench/session/project_transactions.rs",
+    "workbench/session/netlist_import_transactions.rs",
+)
 SLICES = (*LOWER, SESSION, *FEATURES, SHELL)
 GROUPS = ("feature->feature", "lower->upper", "whole-app")
 
@@ -961,7 +965,7 @@ def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
                 inherent
                 and fn["impl"] == "AppState"
                 and owner[p] != SESSION
-                and p != PROJECT_TRANSACTIONS
+                and p not in SHELL_TRANSACTIONS
             ):
                 whole["impl AppState methods outside session"][p] += 1
             if owner[p] != SHELL:
