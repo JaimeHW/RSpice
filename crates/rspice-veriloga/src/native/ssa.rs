@@ -13,13 +13,10 @@
 //! reactive-Jacobian entries come off the CFG through [`ProgramBuilder`], so
 //! `Terminator`, `Edge` and the whole builder are shipped constructors now.
 //!
-//! What remains marked `cfg_attr(not(test), allow(dead_code))` below is the
-//! *other* way to a block program: [`Program::with_branching_conditionals`] and
-//! its splitter re-express a postfix lift's select form as a diamond, and only
-//! the branch-agreement census builds one. W-C3 (digital process control flow)
-//! is what gives that a shipped constructor. The three small accessors marked
-//! the same way — a block parameter's value, a terminator's edge count, a
-//! program's block-parameter count — are read by the verifier's own tests.
+//! [`Program::with_branching_conditionals`] and its splitter are the other way
+//! to a block program: they re-express a postfix lift's select form as a
+//! diamond, which [`Program::lower_executable`] does whenever a program needs
+//! guarded conditionals.
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
@@ -154,19 +151,6 @@ pub(crate) enum Terminator {
 }
 
 impl Terminator {
-    // Read by the x64 codegen tests, which are the only callers on any target,
-    // and this file is compiled twice — as `native::ssa` and as `jit::ssa` — so
-    // the copy the caller does not reach is dead in every test build too. That
-    // is what made the AArch64 test binary fail its own `-D warnings`.
-    #[cfg_attr(any(not(test), not(target_arch = "x86_64")), allow(dead_code))]
-    pub(crate) fn edge_count(&self) -> usize {
-        match self {
-            Self::Return(_) => 0,
-            Self::Jump(_) => 1,
-            Self::Branch { .. } => 2,
-        }
-    }
-
     fn edges(&self) -> impl Iterator<Item = &Edge> {
         match self {
             Self::Return(_) => [None, None],
@@ -895,7 +879,7 @@ impl Program {
         &self.block_parameters[block.parameter_start..block.parameter_end]
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn block_parameter_count(&self) -> usize {
         self.block_parameters.len()
     }
@@ -1836,7 +1820,6 @@ impl DominatorTree {
 }
 
 /// Which conditional arm exclusively consumes an instruction's result.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArmOwner {
     conditional: usize,
@@ -1872,7 +1855,6 @@ impl Program {
     /// Values agree bit-for-bit with the select form whenever both arms are
     /// pure, and the conditional's own truthiness (nonzero, NaN included) is
     /// unchanged; the backends realize it with the same comparison.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_branching_conditionals(&self) -> JitResult<Self> {
         if !self.is_single_block() {
             return Err(JitError::Verifier {
@@ -1897,7 +1879,6 @@ impl Program {
     /// pass reaches the fixed point: an instruction belongs to an arm exactly
     /// when every one of its use sites is either that conditional's arm
     /// operand or another instruction already attributed to the same arm.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn conditional_arm_owners(&self) -> Vec<Option<ArmOwner>> {
         enum UseSite {
             /// The arm operand of a conditional: the use happens only when
@@ -1972,7 +1953,6 @@ impl Program {
 /// closed before the next block opens. A branch's terminator is written after
 /// its arms are laid out, which is the only point at which the join block's
 /// identity is known.
-#[cfg_attr(not(test), allow(dead_code))]
 struct ConditionalSplitter<'a> {
     source: &'a Program,
     /// Every `IfElse` becomes a terminator rather than an instruction, so the
@@ -1988,7 +1968,6 @@ struct ConditionalSplitter<'a> {
 }
 
 /// One pending step of [`ConditionalSplitter::emit`].
-#[cfg_attr(not(test), allow(dead_code))]
 enum SplitStep {
     /// Emit `members[next..]` into the current block.
     Region { members: Vec<usize>, next: usize },
@@ -2016,7 +1995,6 @@ enum SplitStep {
     },
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl<'a> ConditionalSplitter<'a> {
     fn new(source: &'a Program, owners: &[Option<ArmOwner>]) -> JitResult<Self> {
         let mut regions: HashMap<ArmOwner, Vec<usize>> = HashMap::new();

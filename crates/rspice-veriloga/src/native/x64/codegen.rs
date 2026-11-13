@@ -14585,7 +14585,12 @@ mod tests {
             .blocks()
             .iter()
             .flat_map(|block| {
-                (0..block.terminator().edge_count())
+                let edge_count = match block.terminator() {
+                    super::X64Terminator::Return(_) => 0,
+                    super::X64Terminator::Jump(_) => 1,
+                    super::X64Terminator::Branch { .. } => 2,
+                };
+                (0..edge_count)
                     .filter_map(|edge| allocation.edge_moves(block.id(), edge).ok())
                     .flatten()
             })
