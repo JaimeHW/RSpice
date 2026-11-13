@@ -160,6 +160,28 @@ const COLOR_SAFE_STYLES: [TraceRedundancy; TRACE_HUES] = [
 const PASS_DASHES: [Option<(f32, f32)>; 4] =
     [None, Some((6.0, 4.0)), Some((2.0, 3.0)), Some((12.0, 4.0))];
 
+/// The gap each later pass through the hues adds to its hue's first-pass
+/// dash, in points. The first pass's gaps are 2 to 4 points, so every pass
+/// draws its dashes from a set no other pass draws.
+const COLOR_SAFE_PASS_GAP: f32 = 4.0;
+
+/// The dash a solid first-pass curve is broken into on a later pass.
+const COLOR_SAFE_SOLID_AS_DASH: (f32, f32) = (12.0, 2.0);
+
+/// The dash a colour-safe curve on pass `pass` (the second is 1) through the
+/// hues draws in: its hue's own first-pass dash with a wider gap, so it is
+/// always dashed, keeps its hue's marker, and is told from every first-pass
+/// curve — the one in its own hue by the gap, the others by the marker too.
+///
+/// Borrowing another hue's dash instead, as a later pass once did, handed
+/// the eighth hue's second pass the first hue's solid stroke.
+fn color_safe_pass_dash(hue: usize, pass: usize) -> (f32, f32) {
+    let (dash, gap) = COLOR_SAFE_STYLES[hue % TRACE_HUES]
+        .dash
+        .unwrap_or(COLOR_SAFE_SOLID_AS_DASH);
+    (dash, gap + COLOR_SAFE_PASS_GAP * pass as f32)
+}
+
 fn color_safe_trace_style(index: usize, semantic_dashed: bool) -> TraceRedundancy {
     let mut style = COLOR_SAFE_STYLES[index % TRACE_HUES];
     if semantic_dashed && style.dash.is_none() {
@@ -191,7 +213,7 @@ impl Trace<'_> {
         let redundancy = color_safe.then(|| {
             let mut style = color_safe_trace_style(slot, self.dashed);
             if pass > 0 {
-                style.dash = COLOR_SAFE_STYLES[(slot + pass) % TRACE_HUES].dash;
+                style.dash = Some(color_safe_pass_dash(slot, pass));
             }
             style
         });
@@ -1410,6 +1432,143 @@ mod tests {
         }
         assert_eq!(trace(3).look(0, false).dash, None);
         assert_eq!(trace(3).look(0, false).marker, None);
+    }
+
+    /// With colour-safe traces on, every curve past the eighth is dashed and
+    /// no two curves share a dash and a marker. The first pass's dashes are
+    /// never reused, so a second-pass curve cannot pass for a first-pass one
+    /// even where a reader cannot tell the hues apart.
+    #[test]
+    fn a_colour_safe_later_pass_is_always_dashed_and_never_a_first_pass_look() {
+        let (x, y) = ([0.0, 1.0], [0.0, 1.0]);
+        let trace = |slot| Trace::new(&x, &y, Color32::RED).palette_slot(slot);
+        let first: Vec<TraceLook> = (0..TRACE_HUES)
+            .map(|slot| trace(slot).look(0, true))
+            .collect();
+        let later: Vec<TraceLook> = (TRACE_HUES..4 * TRACE_HUES)
+            .map(|slot| trace(slot).look(0, true))
+            .collect();
+        for (index, look) in later.iter().enumerate() {
+            let slot = index + TRACE_HUES;
+            assert!(look.dash.is_some(), "slot {slot} is drawn solid");
+            assert!(
+                first.iter().all(|first| first.dash != look.dash),
+                "slot {slot} reuses a first-pass dash"
+            );
+        }
+        let looks: Vec<TraceLook> = first.iter().chain(&later).copied().collect();
+        for (index, look) in looks.iter().enumerate() {
+            for (other_index, other) in looks.iter().enumerate().skip(index + 1) {
+                assert_ne!(look, other, "slots {index} and {other_index} draw alike");
+            }
+        }
+        // A semantically dashed curve stays dashed on its first pass.
+        assert!(
+            Trace::new(&x, &y, Color32::RED)
+                .palette_slot(0)
+                .dashed()
+                .look(0, true)
+                .dash
+                .is_some()
+        );
+    }
+
+    /// Sixteen curves on one colour-safe plot, read back from the frame: only
+    /// the first is stroked solid, and each curve on the second pass through
+    /// the hues is dashed with a gap its first-pass twin does not draw.
+    #[test]
+    fn a_colour_safe_frame_draws_the_second_pass_dashed() {
+        let x = [0.0, 1.0];
+        let levels: Vec<[f64; 2]> = (0..2 * TRACE_HUES)
+            .map(|slot| [slot as f64, slot as f64])
+            .collect();
+        let color = |slot: usize| Color32::from_rgb(40 + 12 * slot as u8, 90, 160);
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(-1.0, 2.0 * TRACE_HUES as f64, "V"),
+        );
+        for (slot, y) in levels.iter().enumerate() {
+            spec.traces
+                .push(Trace::new(&x, y, color(slot)).palette_slot(slot));
+        }
+        let ctx = egui::Context::default();
+        crate::Theme {
+            colorblind_traces: true,
+            ..crate::Theme::default()
+        }
+        .apply(&ctx);
+        let mut cache = DecimationCache::default();
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0))),
+                ..Default::default()
+            };
+            shapes = ctx
+                .run_ui(input, |ui| {
+                    show(ui, &spec, &mut cache, None, None);
+                })
+                .shapes;
+        }
+        fn flatten(shape: &Shape, out: &mut Vec<Shape>) {
+            match shape {
+                Shape::Vec(inner) => inner.iter().for_each(|shape| flatten(shape, out)),
+                shape => out.push(shape.clone()),
+            }
+        }
+        let mut painted = Vec::new();
+        for clipped in &shapes {
+            flatten(&clipped.shape, &mut painted);
+        }
+        // Each curve as the frame drew it: stroked solid across the plot, or
+        // as horizontal dashes whose median gap is measured.
+        let drawn = |slot: usize| -> (bool, Option<f32>) {
+            let mut solid = false;
+            let mut dashes: Vec<(f32, f32)> = Vec::new();
+            for shape in &painted {
+                match shape {
+                    Shape::Path(path)
+                        if !path.closed
+                            && path.stroke.color == egui::epaint::ColorMode::Solid(color(slot))
+                            && path.points.len() >= 2
+                            && (path.points[path.points.len() - 1].x - path.points[0].x)
+                                > 200.0 =>
+                    {
+                        solid = true;
+                    }
+                    Shape::LineSegment { points, stroke }
+                        if stroke.color == color(slot)
+                            && (points[0].y - points[1].y).abs() < 0.01
+                            && (points[1].x - points[0].x).abs() > 0.5 =>
+                    {
+                        let (a, b) = (points[0].x.min(points[1].x), points[0].x.max(points[1].x));
+                        dashes.push((a, b));
+                    }
+                    _ => {}
+                }
+            }
+            dashes.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut gaps: Vec<f32> = dashes
+                .windows(2)
+                .map(|pair| pair[1].0 - pair[0].1)
+                .collect();
+            gaps.sort_by(f32::total_cmp);
+            (solid, gaps.get(gaps.len() / 2).copied())
+        };
+        let solid: Vec<usize> = (0..2 * TRACE_HUES).filter(|slot| drawn(*slot).0).collect();
+        assert_eq!(solid, [0], "the curves stroked solid");
+        for hue in 0..TRACE_HUES {
+            let (_, second_gap) = drawn(hue + TRACE_HUES);
+            let second_gap =
+                second_gap.unwrap_or_else(|| panic!("slot {} is not dashed", hue + TRACE_HUES));
+            if let (_, Some(first_gap)) = drawn(hue) {
+                assert!(
+                    second_gap > first_gap + 2.0,
+                    "hue {hue}: second-pass gap {second_gap} beside the first pass's {first_gap}"
+                );
+            }
+        }
     }
 
     #[test]
