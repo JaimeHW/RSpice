@@ -32,12 +32,9 @@ pub enum CompilerPhase {
     HirValidation,
     MirLowering,
     MirValidation,
-    OptLowering,
-    OptValidation,
     CfgLowering,
     Scheduling,
     Artifact,
-    BackendLowering,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

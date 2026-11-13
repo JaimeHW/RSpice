@@ -1888,33 +1888,14 @@ impl VerilogACompiler {
         )))
     }
 
-    /// Read a source file's clause 7 connect specification without compiling
-    /// any module from it.
+    /// Read a preprocessed source's clause 7 connect specification without
+    /// compiling any module from it.
     ///
     /// The engine needs a design's [`connect::ConnectRuleTable`] to decide
     /// which connect module bridges a mixed node, and it needs it whether or
     /// not the file also declares a device. Compiling would answer a question
     /// nobody asked and would fail on a file that declares only connect
     /// modules, which is exactly the shape a connect library has.
-    ///
-    /// Preprocessing runs first, so a `connectmodule` reached through an
-    /// `` `include `` is read like any other. What this deliberately does not
-    /// do is cache: the caller decides whether a file is worth reading. A raw
-    /// source scan must conservatively include sources containing directives or
-    /// macro invocations, which can supply rules through an include or expansion.
-    pub fn connect_specification_from_file(
-        &self,
-        path: &std::path::Path,
-    ) -> CompileResult<ConnectSpecification> {
-        let mut preprocessor = self.configured_preprocessor();
-        let preprocessed = preprocessor
-            .preprocess_file(path)
-            .map_err(CompileError::preprocess)?;
-        self.connect_specification_from_preprocessed(&preprocessed)
-    }
-
-    /// [`Self::connect_specification_from_file`] on source that is already
-    /// preprocessed.
     ///
     /// The table is built by semantic analysis rather than beside it, because
     /// a `connect` statement is checked against the disciplines the *file*
