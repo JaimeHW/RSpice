@@ -18,6 +18,7 @@ mod xspice_pspice_stim;
 mod xspice_quoted_context;
 mod xspice_real_boundary;
 mod xspice_reassignments;
+mod xspice_registry_audit;
 mod xspice_retained_siblings;
 mod xspice_scalar_dependencies;
 mod xspice_scoped_defaults;
