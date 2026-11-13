@@ -467,6 +467,18 @@ pub fn polar_quantity_source<'a>(
     }
 }
 
+/// Whether one analysis retains a complex AC or harmonic-balance response,
+/// which the Smith sheet reads as Γ, Z or Y against the pane's own Z₀.
+///
+/// Network analyses are not responses: their coefficients carry the
+/// retained port impedances and go through
+/// [`smith_structure_is_renderable`].
+pub fn retains_smith_response(analysis: &Analysis) -> bool {
+    analysis.success
+        && polar_reference_impedances(analysis).is_none()
+        && retains_polar_quantity(analysis)
+}
+
 /// Whether the polar sheet has any quantity to draw from one analysis.
 pub fn retains_polar_quantity(analysis: &Analysis) -> bool {
     if !analysis.success {
@@ -544,7 +556,11 @@ pub fn viewer_can_render(
                     && complex.real.len() == waveform.x.len()
             })
         }),
-        ResultViewer::Smith => structural(StructuralGate::SParameterStructure),
+        // Network coefficients against their port impedances, or a complex
+        // AC or harmonic-balance response against the pane's Z₀.
+        ResultViewer::Smith => {
+            retains_smith_response(analysis) || structural(StructuralGate::SParameterStructure)
+        }
         // The polar sheet draws any retained complex response, so its shape
         // question is the same one Nyquist asks — the analysis kind decides
         // which quantities it can name, not whether it can draw at all.

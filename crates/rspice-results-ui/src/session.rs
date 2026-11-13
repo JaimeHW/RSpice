@@ -303,6 +303,9 @@ pub struct ResultViewerState {
     /// Polar sheet controls: the network term, the radius ruling, the decade
     /// marks and the normalization.
     pub polar: crate::polar::PolarSheetState,
+    /// Smith sheet controls: the grid, the response reading and Z₀, the
+    /// responses drawn, and the two-port circles.
+    pub smith: crate::smith_chart::SmithSheetState,
     /// Contribution sheet control: the frequency a swept study is read at.
     pub study: crate::sensitivity::study::SensitivitySheetState,
     /// Scatter sheet controls and the brushed trial selection.

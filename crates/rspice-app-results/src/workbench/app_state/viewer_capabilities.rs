@@ -267,11 +267,12 @@ impl ResultsReads<'_> {
                     || self.analysis.smith_chart_state.traces.is_empty()
                 {
                     ViewerCapability::unavailable(
-                        "Requires retained S-parameter traces and per-port reference impedances",
+                        "Requires retained complex traces: S-parameters with per-port reference \
+                         impedances, or an AC or HB response",
                     )
                 } else {
                     ViewerCapability::available(
-                        "Active S-parameter traces loaded from retained impedance authority",
+                        "Active complex traces loaded from the retained result",
                     )
                 }
             }

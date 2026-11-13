@@ -2247,6 +2247,9 @@ fn show_docbar_for_family(
 /// is the only place that knows what the retained result can offer.
 fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     let viewer = state.results.session.viewer;
+    if viewer == ResultViewer::Smith {
+        return smith::domain_bar(ui, state);
+    }
     let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
