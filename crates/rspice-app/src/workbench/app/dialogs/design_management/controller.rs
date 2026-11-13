@@ -154,7 +154,7 @@ pub(crate) fn render_design_management_dialog(
                 response.retain_cancel_focus(DialogInitialFocus::Ghost);
             } else if page == DesignManagementPage::Manager {
                 parts.dialog.close_and_discard();
-                crate::workbench::app::close_design_management_dialog_route(parts.wb);
+                super::close_design_management_dialog_route(parts.wb);
             } else {
                 let active_sheet = parts
                     .dialog
@@ -201,7 +201,7 @@ fn handle_design_management_body_action(
                 return;
             }
             parts.dialog.close_and_discard();
-            crate::workbench::app::close_design_management_dialog_route(parts.wb);
+            super::close_design_management_dialog_route(parts.wb);
             crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in(
                 parts.platform,
                 parts.wb,
@@ -217,7 +217,7 @@ fn handle_design_management_body_action(
                 return;
             }
             parts.dialog.close_and_discard();
-            crate::workbench::app::close_design_management_dialog_route(parts.wb);
+            super::close_design_management_dialog_route(parts.wb);
             crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in(
                 parts.platform,
                 parts.wb,

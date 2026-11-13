@@ -93,3 +93,28 @@ pub fn restore_model_library_manager(
     *config = next;
     Ok((manager, loaded))
 }
+
+/// Rebuild the application-scoped model catalog from durable PDK settings.
+///
+/// Project-owned libraries never participate in this reconstruction. The
+/// caller receives a completely staged catalog, and both the live
+/// configuration and catalog remain unchanged unless discovery, parsing, and
+/// native ownership persistence all succeed.
+pub fn restore_session_model_library_manager(
+    config: &mut crate::state::pdk_config::PdkConfig,
+) -> Result<(crate::state::model_library::ModelLibraryManager, usize), Vec<String>> {
+    let mut next = config.clone();
+    let restored = restore_model_library_manager(&mut next)?;
+
+    #[cfg(all(not(any(test, feature = "test-support")), not(target_arch = "wasm32")))]
+    if next.managed_model_sources != config.managed_model_sources {
+        crate::state::pdk_config::save(&next).map_err(|error| {
+            vec![format!(
+                "Configured PDK sources were validated but their ownership could not be persisted: {error}"
+            )]
+        })?;
+    }
+
+    *config = next;
+    Ok(restored)
+}

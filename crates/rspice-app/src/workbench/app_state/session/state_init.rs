@@ -7,8 +7,9 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::preferences_file::PreferencesStore;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
-pub(crate) use rspice_app_state::workbench::workspace::default_model_library_manager;
-use rspice_app_state::workbench::workspace::restore_model_library_manager;
+pub(crate) use rspice_app_state::workbench::workspace::{
+    default_model_library_manager, restore_session_model_library_manager,
+};
 
 impl AppState {
     /// The state a launch starts from: the stored session, with the
@@ -39,31 +40,6 @@ impl AppState {
         }
         state
     }
-}
-
-/// Rebuild the application-scoped model catalog from durable PDK settings.
-///
-/// Project-owned libraries never participate in this reconstruction. The
-/// caller receives a completely staged catalog, and both the live
-/// configuration and catalog remain unchanged unless discovery, parsing, and
-/// native ownership persistence all succeed.
-pub(crate) fn restore_session_model_library_manager(
-    config: &mut crate::state::pdk_config::PdkConfig,
-) -> Result<(crate::state::model_library::ModelLibraryManager, usize), Vec<String>> {
-    let mut next = config.clone();
-    let restored = restore_model_library_manager(&mut next)?;
-
-    #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    if next.managed_model_sources != config.managed_model_sources {
-        crate::state::pdk_config::save(&next).map_err(|error| {
-            vec![format!(
-                "Configured PDK sources were validated but their ownership could not be persisted: {error}"
-            )]
-        })?;
-    }
-
-    *config = next;
-    Ok(restored)
 }
 
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {

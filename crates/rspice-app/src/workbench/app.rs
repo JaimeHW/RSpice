@@ -979,26 +979,6 @@ impl RSpiceApp {
     }
 }
 
-/// Close the route-owned Design Management manager without stranding a
-/// `?surface=design-management` URL. Ordinary opens traverse back to their
-/// exact Design source; direct deep links fail safely to the canonical Design
-/// workspace using a replacement history entry.
-pub(crate) fn close_design_management_dialog_route(wb: &mut crate::workbench::WorkbenchSession) {
-    if wb.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement {
-        return;
-    }
-    if wb
-        .navigate_back(crate::workbench::RouteTransitionSource::User)
-        .is_some()
-    {
-        return;
-    }
-    let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design);
-    if let Err(error) = wb.replace_route(fallback, crate::workbench::RouteTransitionSource::User) {
-        wb.prompt(format!("Could not close Design Management: {error}"));
-    }
-}
-
 impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -2037,6 +2017,7 @@ mod tests {
 
     #[test]
     fn design_management_close_restores_design_with_canonical_history_effects() {
+        use crate::workbench::app::dialogs::design_management::close_design_management_dialog_route;
         use crate::workbench::{
             BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute,
         };

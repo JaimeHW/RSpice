@@ -30,7 +30,7 @@ pub(super) fn commit_design_management_subflow(
             );
         }
         parts.dialog.close_and_discard();
-        crate::workbench::app::close_design_management_dialog_route(parts.wb);
+        super::close_design_management_dialog_route(parts.wb);
         // Create hierarchy is design's: the shell opens it as this dialog returns.
         parts.wb.outbox.push(ProjectRequest::OpenCreateHierarchy);
         return Ok(());

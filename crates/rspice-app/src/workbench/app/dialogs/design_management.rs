@@ -465,6 +465,26 @@ pub(crate) fn open_design_management_on(
     }
 }
 
+/// Close the route-owned Design Management manager without stranding a
+/// `?surface=design-management` URL. Ordinary opens traverse back to their
+/// exact Design source; direct deep links fail safely to the canonical Design
+/// workspace using a replacement history entry.
+pub(crate) fn close_design_management_dialog_route(wb: &mut crate::workbench::WorkbenchSession) {
+    if wb.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement {
+        return;
+    }
+    if wb
+        .navigate_back(crate::workbench::RouteTransitionSource::User)
+        .is_some()
+    {
+        return;
+    }
+    let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design);
+    if let Err(error) = wb.replace_route(fallback, crate::workbench::RouteTransitionSource::User) {
+        wb.prompt(format!("Could not close Design Management: {error}"));
+    }
+}
+
 fn open_design_management_dialog_state(
     dialog: &mut DesignManagementDialogState,
     model: &mut Model,
