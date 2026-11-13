@@ -35,6 +35,14 @@ pub(crate) const BUS_ROW_PREFIX: &str = "payload/transient-events/bus/";
 /// before the `D(net)` or `E(net)` name its lane answers to.
 pub(crate) const EVENT_NET_ROW_PREFIX: &str = "payload/transient-events/net/";
 
+/// The strip models the result document last built, for a browser row that
+/// takes its curve's colour from what the strip drew.
+pub(crate) fn last_strip_models<'a>(
+    state: &'a ResultsParts<'_>,
+) -> Option<&'a [rspice_results_ui::waves::StripModel]> {
+    state.results.models.last_built()
+}
+
 /// Whether a row's tick is on. A waveform's tick is whether it is on the plot:
 /// there is no second record of it that the legend or the Inspector could
 /// disagree with.

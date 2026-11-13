@@ -53,6 +53,13 @@ impl ModelsCache {
     pub fn invalidate(&mut self) {
         self.cached = None;
     }
+
+    /// The strip models last built, for a reader that has to agree with what
+    /// the strip drew, such as a browser row taking its curve's colour,
+    /// without building them itself.
+    pub fn last_built(&self) -> Option<&[StripModel]> {
+        self.cached.as_ref().map(|cached| cached.models.as_slice())
+    }
 }
 
 impl std::fmt::Debug for ModelsCache {

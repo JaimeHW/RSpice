@@ -3,11 +3,13 @@
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
+use crate::workbench::documents::result_document::browser_plot::last_strip_models;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultQuantityDrag, ResultsTestHost, set_result_quantity_ticked, waves,
 };
 
 use super::super::results::results;
+use super::super::results_rows::plotted_signal_color;
 use super::browser::{Node, find, hierarchical_run};
 
 const NAMES: [&str; 6] = [
@@ -197,4 +199,46 @@ fn a_ticked_row_carries_the_whole_ticked_selection() {
         assert!(carried.keys.contains(&key(&workspace.host, name)), "{name}");
     }
     assert_eq!(plotted(&workspace.host), ["V(out)", "V(in)"]);
+}
+
+#[test]
+fn a_plotted_row_reads_in_the_colour_the_strip_drew_its_curve_in() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    // The dataset leaves its first column off the plot, so V(b) is the first
+    // curve drawn and takes the first hue, where its column would give it
+    // the second.
+    let trace = |name: &str, visible: bool| {
+        let mut trace = RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "");
+        trace.visible = visible;
+        trace
+    };
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            trace("V(a)", false),
+            trace("V(b)", true),
+            trace("V(c)", true),
+        ]),
+    );
+    let mut workspace = Workspace::new(host);
+    workspace.frame(Vec::new());
+    let palette = crate::ui::tokens::Tokens::get(&workspace.ctx).color.traces;
+    let run = workspace.host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let parts = workspace.host.results_parts();
+    let models = last_strip_models(&parts);
+    let drawn = models
+        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        .and_then(|model| model.traces.iter().find(|trace| trace.waveform_index == 1))
+        .expect("the strip drew V(b)")
+        .color;
+    assert_eq!(
+        plotted_signal_color(models, &palette, analysis, 1, ""),
+        drawn
+    );
+    assert_ne!(
+        plotted_signal_color(None, &palette, analysis, 1, ""),
+        drawn,
+        "its column's hue is not its curve's"
+    );
 }
