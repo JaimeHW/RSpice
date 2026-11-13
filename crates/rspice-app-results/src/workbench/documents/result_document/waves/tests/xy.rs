@@ -1047,3 +1047,81 @@ fn a_transient_ramp_drawn_against_its_input_is_the_dc_transfer_curve() {
     frame(&ctx, &mut transient, Vec::new());
     assert!(arrowheads(&frame(&ctx, &mut transient, Vec::new()), color).is_empty());
 }
+
+/// Every text a frame painted, with the face and the ink of its first run.
+fn styled_texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect, egui::FontId, egui::Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect, egui::FontId, egui::Color32)>) {
+        match shape {
+            egui::Shape::Text(text) => {
+                if let Some(section) = text.galley.job.sections.first() {
+                    out.push((
+                        text.galley.job.text.clone(),
+                        egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        section.format.font_id.clone(),
+                        section.format.color,
+                    ));
+                }
+            }
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The name of the quantity before the span field, "t" under a transient,
+/// "VD" under a DC sweep of VD and "TEMP" under a temperature sweep, and the
+/// dash between the ends, are the header's own words: the subtitle's face,
+/// size and ink.
+#[test]
+fn the_span_fields_quantity_reads_in_the_headers_words() {
+    let dc = |deck: &str| {
+        let mut state = solved_host(deck);
+        state.results.results.session.viewer =
+            rspice_results::result_presentation::ResultViewer::DcSweep;
+        state
+    };
+    let cases = [
+        (lissajous_host(), "V", "V(a)", "t"),
+        (
+            dc("source sweep\nVD d 0 DC 0\nR1 d 0 1k\n.dc VD 0 3 0.1\n.end\n"),
+            "A",
+            "V(D)",
+            "VD",
+        ),
+        (
+            dc("temperature sweep\nV1 a 0 DC 1\nR1 a 0 1k\n.dc TEMP -40 125 5\n.end\n"),
+            "A",
+            "V(A)",
+            "TEMP",
+        ),
+    ];
+    for (mut state, unit, abscissa, quantity) in cases {
+        open_strip(&mut state, unit, signal(abscissa));
+        let ctx = theme_context();
+        frame(&ctx, &mut state, Vec::new());
+        let painted = styled_texts(&frame(&ctx, &mut state, Vec::new()));
+        let subtitle = format!("vs {abscissa}");
+        let (_, header, font, ink) = painted
+            .iter()
+            .find(|(text, ..)| *text == subtitle)
+            .unwrap_or_else(|| panic!("a strip header reads {subtitle:?}: {painted:?}"));
+        for word in [quantity, "\u{2013}"] {
+            let (_, _, word_font, word_ink) = painted
+                .iter()
+                .find(|(text, rect, ..)| {
+                    text == word && (rect.center().y - header.center().y).abs() < 4.0
+                })
+                .unwrap_or_else(|| panic!("the header row reads {word:?}: {painted:?}"));
+            assert_eq!(
+                (word_font, word_ink),
+                (font, ink),
+                "{word:?} reads in the subtitle's face, size and ink"
+            );
+        }
+    }
+}

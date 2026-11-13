@@ -404,7 +404,7 @@ impl<'a> StripHeader<'a> {
             0.0
         };
         let kind_natural_width = kind_text_width + mark_room;
-        let subtitle_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+        let subtitle_font = header_font();
         let subtitle_natural_width = if self.subtitle.is_empty() {
             0.0
         } else {
@@ -466,12 +466,7 @@ impl<'a> StripHeader<'a> {
             truncated_label(
                 ui,
                 span_rect(layout.subtitle),
-                Label::new(
-                    egui::RichText::new(self.subtitle)
-                        .font(subtitle_font)
-                        .color(c.text_faint),
-                )
-                .truncate(),
+                Label::new(header_words(self.subtitle, &t)).truncate(),
                 self.subtitle,
             );
         }
@@ -586,6 +581,19 @@ impl<'a> StripHeader<'a> {
 
         out
     }
+}
+
+/// The face a strip header writes its words in.
+pub(crate) fn header_font() -> egui::FontId {
+    theme::sans(tokens::FS_0, FontWeight::Regular)
+}
+
+/// Words of a strip header, its subtitle and the name of the quantity beside
+/// a field, in one face, size and ink.
+pub(crate) fn header_words(text: &str, tokens: &Tokens) -> egui::RichText {
+    egui::RichText::new(text)
+        .font(header_font())
+        .color(tokens.color.text_faint)
 }
 
 fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {

@@ -499,8 +499,8 @@ fn sweep_name(model: &StripModel) -> &str {
 }
 
 /// The width a strip's header leaves for its "t <from> – <to>" field and the
-/// "follow" toggle after it: the sweep's name and the dash at the field size,
-/// both ends' boxes, and the toggle as the kit's chip sizes it.
+/// "follow" toggle after it: the sweep's name and the dash in the header's
+/// words, both ends' boxes, and the toggle as the kit's chip sizes it.
 pub(crate) fn sweep_range_field_width(ui: &Ui, model: &StripModel) -> f32 {
     let measure = |text: &str, font: egui::FontId| {
         ui.fonts_mut(|fonts| {
@@ -510,8 +510,8 @@ pub(crate) fn sweep_range_field_width(ui: &Ui, model: &StripModel) -> f32 {
                 .x
         })
     };
-    let field = rspice_ui_kit::theme::field_mono();
-    let words = measure(sweep_name(model), field.clone()) + measure("\u{2013}", field);
+    let words = measure(sweep_name(model), crate::strip::header_font())
+        + measure("\u{2013}", crate::strip::header_font());
     let label = measure(
         FOLLOW,
         rspice_ui_kit::theme::mono(
@@ -613,9 +613,6 @@ pub(crate) fn sweep_range_field(
     let (start, stop) = span;
     let sweep = sweep_name(model);
     let t = Tokens::get(ui.ctx());
-    // The ends and the words beside them read at the field size, as every
-    // input does.
-    let font = rspice_ui_kit::theme::field_mono();
     let mut changed = None;
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -624,21 +621,15 @@ pub(crate) fn sweep_range_field(
         |ui| {
             ui.set_clip_rect(rect);
             ui.spacing_mut().item_spacing.x = SWEEP_RANGE_GAP;
-            ui.label(
-                egui::RichText::new(sweep)
-                    .font(font.clone())
-                    .color(t.color.text_dim),
-            );
+            // The quantity's name and the dash are the header's words, as
+            // its subtitle is; the ends are inputs, at the field size.
+            ui.label(crate::strip::header_words(sweep, &t));
             let mut ends = [String::new(), String::new()];
             let mut typed = false;
             let mut committed = false;
             for (end, value) in [(0usize, start), (1, stop)] {
                 if end == 1 {
-                    ui.label(
-                        egui::RichText::new("\u{2013}")
-                            .font(font.clone())
-                            .color(t.color.text_dim),
-                    );
+                    ui.label(crate::strip::header_words("\u{2013}", &t));
                 }
                 let id = egui::Id::new(("xy-sweep-range", identity, end));
                 let shown = model.format_x(value, significant_digits, quantity);
