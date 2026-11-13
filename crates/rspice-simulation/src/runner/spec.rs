@@ -238,7 +238,7 @@ pub(super) fn run_spec_request_in_context(
             );
         }
         if let Some(member) = options.member {
-            return bridge.run_transient_member(
+            return bridge.run_family_member(
                 &config,
                 netlist,
                 source_path,

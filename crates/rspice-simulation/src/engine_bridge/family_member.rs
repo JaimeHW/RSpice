@@ -20,19 +20,19 @@ use rspice_simulation_contract::mc_draft::McVariationSource;
 
 use super::{EngineBridge, SimulationInput, ensure_not_aborted};
 use crate::error::SimulationError;
-use crate::execution_options::TransientMember;
+use crate::execution_options::FamilyMember;
 use crate::results::SimulationResult;
 
 impl EngineBridge {
     /// Solve `member` of the deck's own study or sweep with `config`, which
     /// must be a transient.
-    pub(crate) fn run_transient_member(
+    pub(crate) fn run_family_member(
         &self,
         config: &AnalysisConfig,
         netlist_str: &str,
         source_path: Option<&Path>,
         environment: Option<crate::runner::AnalysisExecutionEnvironment>,
-        member: TransientMember,
+        member: FamilyMember,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         if !matches!(config, AnalysisConfig::Transient(_)) {
@@ -52,11 +52,11 @@ impl EngineBridge {
             abort,
         )?;
         match member {
-            TransientMember::MonteCarloTrial {
+            FamilyMember::MonteCarloTrial {
                 index,
                 variation_source,
             } => self.run_monte_carlo_trial(config, &netlist, index, variation_source, abort),
-            TransientMember::StepPoint { index } => {
+            FamilyMember::StepPoint { index } => {
                 self.run_step_point(config, &netlist, index, abort)
             }
         }
@@ -90,7 +90,7 @@ impl EngineBridge {
                 end.saturating_sub(1)
             )));
         }
-        let study = crate::transient_family::monte_carlo_study(card, variation_source, index, 1);
+        let study = crate::deck_family::monte_carlo_study(card, variation_source, index, 1);
         let solved: Mutex<Option<Result<SimulationResult, SimulationError>>> = Mutex::new(None);
         let engine = self.engine.resolved_for_netlist(netlist);
         let outcome = engine.run_monte_carlo_measurements_with_abort(

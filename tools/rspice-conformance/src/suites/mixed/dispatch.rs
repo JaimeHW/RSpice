@@ -1073,7 +1073,7 @@ pub fn deck_states_statistics(source: &str, origin: &Path) -> Result<bool, Strin
     let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
         .expand_content(source, origin)
         .map_err(|error| error.to_string())?;
-    Ok(rspice_simulation::transient_family::deck_states_statistics(
+    Ok(rspice_simulation::deck_family::deck_states_statistics(
         &expanded,
     ))
 }
@@ -1155,7 +1155,7 @@ fn family_tasks(
     cards: &[String],
     runtimes: &PreparedVerilogARuntimeSet,
 ) -> Result<(Vec<HeadlessTaskRequest>, Family), CaseError> {
-    use rspice_simulation::transient_family;
+    use rspice_simulation::deck_family;
     let family_word = match kind {
         "mc-tran" => Some(".mc"),
         "step-tran" => Some(".step"),
@@ -1238,13 +1238,13 @@ fn family_tasks(
                 "the deck's includes could not be resolved to find its statistics: {error}"
             ))
         })?;
-        transient_family::monte_carlo_members(&netlist, statistical)
+        deck_family::monte_carlo_members(&netlist, statistical)
     } else {
-        transient_family::step_members(&netlist, &engine.config().resource_limits)
+        deck_family::step_members(&netlist, &engine.config().resource_limits)
     }
     .map_err(harness_error)?;
     let drawn =
-        transient_family::member_parameters(&engine, &netlist, &members).map_err(harness_error)?;
+        deck_family::member_parameters(&engine, &netlist, &members).map_err(harness_error)?;
     let parameters = members
         .iter()
         .zip(drawn)

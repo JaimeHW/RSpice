@@ -18,7 +18,7 @@ pub struct SpecExecutionOptions {
     pub pstb: Option<crate::periodic::PstbRunConfig>,
     /// The one member of the deck's own `.MC` study or `.STEP` sweep this
     /// transient solves. `None` solves the deck as it stands.
-    pub member: Option<TransientMember>,
+    pub member: Option<FamilyMember>,
     /// Resume this transient from the checkpoint the transient it depends on
     /// captured at this scheduled time, rather than solving from the start.
     /// That transient is the same request on the same circuit with this time
@@ -39,7 +39,7 @@ pub struct SpecExecutionOptions {
 /// result, rather than one task reduced to a scalar per trial or per point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "member")]
-pub enum TransientMember {
+pub enum FamilyMember {
     /// Trial `index` of the deck's `.MC` study, in the card's own numbering
     /// (its first trial included), varied as `variation_source` states.
     MonteCarloTrial {
@@ -50,7 +50,7 @@ pub enum TransientMember {
     StepPoint { index: usize },
 }
 
-impl TransientMember {
+impl FamilyMember {
     /// What a result of this member is called, `trial 3` or `point 0`.
     pub fn label(self) -> String {
         match self {

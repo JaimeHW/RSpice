@@ -85,8 +85,8 @@ fn a_monte_carlo_transient_keeps_one_transient_per_trial_as_drawn() {
     // Each trial's draw, read off the deck by the sampler the corpus runner
     // reads it with.
     let netlist = rspice_core::Netlist::parse_with_path(&source, &path).unwrap();
-    let members = rspice_simulation::transient_family::monte_carlo_members(&netlist, true).unwrap();
-    let draws = rspice_simulation::transient_family::member_parameters(
+    let members = rspice_simulation::deck_family::monte_carlo_members(&netlist, true).unwrap();
+    let draws = rspice_simulation::deck_family::member_parameters(
         &rspice_core::Engine::new(Default::default()),
         &netlist,
         &members,

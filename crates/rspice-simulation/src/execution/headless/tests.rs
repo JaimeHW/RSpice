@@ -666,10 +666,7 @@ fn shared_artifact_capture_rejects_foreign_consumers_and_invalid_results() {
 }
 
 /// A transient task that solves one member of the deck's own study or sweep.
-fn member_task(
-    cards: &str,
-    member: crate::execution_options::TransientMember,
-) -> HeadlessTaskRequest {
+fn member_task(cards: &str, member: crate::execution_options::FamilyMember) -> HeadlessTaskRequest {
     let mut request = task(
         AnalysisSpec::Transient {
             stop_time: 1e-5,
@@ -706,7 +703,7 @@ fn final_output(result: &SimulationResult) -> f64 {
 
 #[test]
 fn a_monte_carlo_trial_task_solves_the_transient_of_the_trial_the_whole_study_draws() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     use rspice_simulation_contract::mc_draft::McVariationSource;
     let path = origin();
     let source =
@@ -745,7 +742,7 @@ fn a_monte_carlo_trial_task_solves_the_transient_of_the_trial_the_whole_study_dr
         .map(|index| {
             member_task(
                 card,
-                TransientMember::MonteCarloTrial {
+                FamilyMember::MonteCarloTrial {
                     index,
                     variation_source: McVariationSource::DeckStatistics,
                 },
@@ -774,12 +771,12 @@ fn a_monte_carlo_trial_task_solves_the_transient_of_the_trial_the_whole_study_dr
 
 #[test]
 fn a_step_point_task_solves_the_transient_of_its_point() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     let path = origin();
     let source = "Point divider\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.end\n";
     let card = ".step param r list 1k 2k 3k";
     let points: Vec<_> = (0..3)
-        .map(|index| member_task(card, TransientMember::StepPoint { index }))
+        .map(|index| member_task(card, FamilyMember::StepPoint { index }))
         .collect();
     let snapshot =
         prepare_headless_run(HeadlessRunInput::new(source, &path, points), &NoAbort).unwrap();
@@ -795,7 +792,7 @@ fn a_step_point_task_solves_the_transient_of_its_point() {
 /// finish, with the finish named in its checks, as a plain transient does.
 #[test]
 fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     use rspice_core::{ModelFinishPoint, ModelFinishTask};
     use rspice_simulation_contract::mc_draft::McVariationSource;
     let directory = std::env::temp_dir().join(format!(
@@ -828,7 +825,7 @@ fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
         },
         ".tran 1n 20n\n.mc 2 seed 3".into(),
     );
-    trial.analysis.spec_options.member = Some(TransientMember::MonteCarloTrial {
+    trial.analysis.spec_options.member = Some(FamilyMember::MonteCarloTrial {
         index: 1,
         variation_source: McVariationSource::DeckStatistics,
     });
@@ -873,14 +870,14 @@ fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
 
 #[test]
 fn a_member_outside_its_study_or_sweep_is_refused_by_name() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     use rspice_simulation_contract::mc_draft::McVariationSource;
     let path = origin();
     let source = "Member divider\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.end\n";
     for (cards, member, message) in [
         (
             ".mc 2 seed 1",
-            TransientMember::MonteCarloTrial {
+            FamilyMember::MonteCarloTrial {
                 index: 2,
                 variation_source: McVariationSource::ParameterTolerance,
             },
@@ -888,12 +885,12 @@ fn a_member_outside_its_study_or_sweep_is_refused_by_name() {
         ),
         (
             ".step param r list 1k 2k",
-            TransientMember::StepPoint { index: 2 },
+            FamilyMember::StepPoint { index: 2 },
             "point 2 is outside the deck's .STEP sweep of 2 points",
         ),
         (
             "",
-            TransientMember::StepPoint { index: 0 },
+            FamilyMember::StepPoint { index: 0 },
             "point 0 names the deck's .STEP sweep, and the deck has no .STEP card",
         ),
     ] {

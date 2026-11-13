@@ -7,6 +7,7 @@ pub mod analysis_preparation;
 pub mod capture_ledger;
 pub mod compilation;
 pub(crate) mod data_files;
+pub mod deck_family;
 pub mod engine_log;
 pub mod error;
 pub mod execution_artifact;
@@ -38,7 +39,6 @@ pub mod study;
 pub mod study_document;
 pub mod sweeps;
 pub mod transient_checkpoint;
-pub mod transient_family;
 pub mod veriloga;
 
 mod engine_bridge;

@@ -842,7 +842,7 @@ fn manual_deck_temp_list_uses_paired_op_base_analysis() {
 
 #[test]
 fn manual_deck_parameter_step_of_a_transient_runs_one_transient_per_point() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
             reference_pvt.temperature_celsius,
@@ -855,7 +855,7 @@ fn manual_deck_parameter_step_of_a_transient_runs_one_transient_per_point() {
         assert!(matches!(task.spec, AnalysisSpec::Transient { .. }));
         assert_eq!(
             task.spec_options.member,
-            Some(TransientMember::StepPoint { index })
+            Some(FamilyMember::StepPoint { index })
         );
         assert!(task.spec_options.parametric_base.is_none());
     }
@@ -863,7 +863,7 @@ fn manual_deck_parameter_step_of_a_transient_runs_one_transient_per_point() {
 
 #[test]
 fn manual_deck_monte_carlo_of_a_transient_runs_one_transient_per_trial() {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     use rspice_simulation_contract::mc_draft::McVariationSource;
     let reference_pvt = ReferencePoint::default();
     let deck = "deck\n.param r={agauss(1k,100,1)}\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 {r}\n.op\n.mc 3 seed 9\n.tran 1n 10n\n.end\n";
@@ -884,7 +884,7 @@ fn manual_deck_monte_carlo_of_a_transient_runs_one_transient_per_trial() {
     assert_eq!(
         trials,
         (0..3)
-            .map(|index| Some(TransientMember::MonteCarloTrial {
+            .map(|index| Some(FamilyMember::MonteCarloTrial {
                 index,
                 variation_source: McVariationSource::DeckStatistics,
             }))

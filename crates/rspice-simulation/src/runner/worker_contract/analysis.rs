@@ -65,7 +65,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
     pub pnoise: Option<WorkerPnoiseRunConfig>,
     pub pstb: Option<WorkerPstbRunConfig>,
     #[serde(default)]
-    pub member: Option<crate::execution_options::TransientMember>,
+    pub member: Option<crate::execution_options::FamilyMember>,
     #[serde(default)]
     pub resume_at: Option<f64>,
 }

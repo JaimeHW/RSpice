@@ -12,7 +12,7 @@ fn trials_are_the_cards_own_numbers_varied_as_the_deck_states() {
     let indices: Vec<_> = members
         .iter()
         .map(|member| match member.member {
-            TransientMember::MonteCarloTrial {
+            FamilyMember::MonteCarloTrial {
                 index,
                 variation_source: McVariationSource::DeckStatistics,
             } => index,
@@ -50,7 +50,7 @@ fn points_carry_the_value_each_swept_axis_takes() {
     let members = step_members(&netlist, &ResourceLimits::default()).unwrap();
     assert_eq!(members.len(), 3);
     for (index, (member, value)) in members.iter().zip([1e3, 2e3, 3e3]).enumerate() {
-        assert_eq!(member.member, TransientMember::StepPoint { index });
+        assert_eq!(member.member, FamilyMember::StepPoint { index });
         assert_eq!(member.coordinate, [("r".to_owned(), value)]);
     }
     let resolved = member_parameters(&Engine::new(Default::default()), &netlist, &members).unwrap();

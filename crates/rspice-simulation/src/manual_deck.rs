@@ -153,12 +153,12 @@ fn queue_manual_deck_analyses(
         Err(err) => return Err(vec![err]),
     };
     let plans = [temperature_plan, parameter_step_plan, monte_carlo_plan];
-    let transient_family = plans
+    let deck_family = plans
         .iter()
         .flatten()
         .flat_map(|plan| &plan.items)
         .any(|item| item.spec_options.member.is_some());
-    if transient_family
+    if deck_family
         && (parsed
             .analyses
             .iter()
@@ -488,7 +488,7 @@ fn transient_family_items(
     reference_temperature_celsius: f64,
     parsed: &Netlist,
     tran: &AnalysisCommand,
-    members: Vec<crate::transient_family::TransientFamilyMember>,
+    members: Vec<crate::deck_family::DeckFamilyMember>,
 ) -> Result<Vec<QueuedAnalysis>, String> {
     let base = command_to_queue_item(reference_temperature_celsius, parsed, tran)?;
     Ok(members
@@ -547,9 +547,9 @@ fn build_monte_carlo_transient_plan(
                 .to_owned(),
         );
     }
-    let members = crate::transient_family::monte_carlo_members(
+    let members = crate::deck_family::monte_carlo_members(
         parsed,
-        crate::transient_family::deck_states_statistics(deck),
+        crate::deck_family::deck_states_statistics(deck),
     )
     .map_err(|error| format!("Monte Carlo transient: {error}"))?;
     let mut skip_indices = vec![mc_index, *tran_index];
@@ -631,7 +631,7 @@ fn build_parameter_step_plan(
     // A swept transient keeps every point's waveforms: one transient per
     // point rather than one value per point.
     let items = if let Some((_, tran @ AnalysisCommand::Tran { .. })) = supported_bases.first() {
-        let members = crate::transient_family::step_members(parsed, &Default::default())
+        let members = crate::deck_family::step_members(parsed, &Default::default())
             .map_err(|error| format!(".step transient: {error}"))?;
         transient_family_items(reference_temperature_celsius, parsed, tran, members)?
     } else {

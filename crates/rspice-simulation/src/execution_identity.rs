@@ -22,7 +22,7 @@ use analysis_spec::{
     encode_noise_integration_mode, encode_periodic_carrier_tail, frequency_sweep_tag,
 };
 
-use crate::execution_options::{SpecExecutionOptions, TransientMember};
+use crate::execution_options::{FamilyMember, SpecExecutionOptions};
 use crate::periodic::PnoiseReference;
 use crate::sweeps::CornerBaseMode;
 use rspice_design::drc::DrcLocation;
@@ -762,7 +762,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
     if let Some(member) = &options.member {
         writer.domain("transient-member/v1");
         match *member {
-            TransientMember::MonteCarloTrial {
+            FamilyMember::MonteCarloTrial {
                 index,
                 variation_source,
             } => {
@@ -775,7 +775,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                     rspice_simulation_contract::mc_draft::McVariationSource::DeckStatistics => 1,
                 });
             }
-            TransientMember::StepPoint { index } => {
+            FamilyMember::StepPoint { index } => {
                 writer.u8(1);
                 writer.usize(index);
             }

@@ -879,7 +879,7 @@ pub fn build_prepared_manual_deck<R, A>(
         inputs.technology.project.revision(),
         queued_tasks,
     )?;
-    attach_transient_family_members(&mut tasks, &expanded)?;
+    attach_family_members(&mut tasks, &expanded)?;
     reject_deferred_corner_model_sources(
         tasks.iter().map(PreparedTask::queued_analysis),
         &expanded,
@@ -959,11 +959,11 @@ pub fn build_prepared_manual_deck<R, A>(
 /// Record on each transient that solves one trial or point of the deck's
 /// `.MC` study or `.STEP` sweep which member it solves, with the value each
 /// swept axis takes at a point, and name the task after it.
-fn attach_transient_family_members(
+fn attach_family_members(
     tasks: &mut [PreparedTask],
     expanded: &str,
 ) -> Result<(), PreparationError> {
-    use crate::execution_options::TransientMember;
+    use crate::execution_options::FamilyMember;
     use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
     let member_of = |task: &PreparedTask| task.queued_analysis().spec_options.member;
     if !tasks.iter().any(|task| member_of(task).is_some()) {
@@ -977,22 +977,22 @@ fn attach_transient_family_members(
     };
     let points = if tasks
         .iter()
-        .any(|task| matches!(member_of(task), Some(TransientMember::StepPoint { .. })))
+        .any(|task| matches!(member_of(task), Some(FamilyMember::StepPoint { .. })))
     {
         let netlist =
             rspice_core::Netlist::parse(&manual_deck::compose_manual_deck_source(expanded))
                 .map_err(|error| refused(error.to_string()))?;
-        crate::transient_family::step_members(&netlist, &Default::default()).map_err(refused)?
+        crate::deck_family::step_members(&netlist, &Default::default()).map_err(refused)?
     } else {
         Vec::new()
     };
     for task in tasks {
         let record = match member_of(task) {
             None => continue,
-            Some(TransientMember::MonteCarloTrial { index, .. }) => {
+            Some(FamilyMember::MonteCarloTrial { index, .. }) => {
                 AnalysisResultFamilyMember::MonteCarloTrial { index }
             }
-            Some(TransientMember::StepPoint { index }) => {
+            Some(FamilyMember::StepPoint { index }) => {
                 let point = points
                     .get(index)
                     .ok_or_else(|| refused(format!("the sweep has no point {index}")))?;

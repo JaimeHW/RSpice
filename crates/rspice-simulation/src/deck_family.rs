@@ -2,7 +2,7 @@
 //!
 //! A deck that pairs its `.TRAN` card with a `.MC` study or a `.STEP` sweep
 //! runs as one transient task per trial or point, each naming its member
-//! ([`TransientMember`]) and each keeping its full result. This module reads
+//! ([`FamilyMember`]) and each keeping its full result. This module reads
 //! the members off the deck without solving anything, so every route that
 //! lowers such a deck — the application's manual-deck run and the corpus
 //! runner's headless cases — lowers it to the same members:
@@ -24,7 +24,7 @@ use rspice_core::netlist::{AnalysisCommand, MonteCarloCommand, MonteCarloDistrib
 use rspice_core::{Engine, Netlist, NoAbort, ResourceLimits};
 use rspice_simulation_contract::mc_draft::McVariationSource;
 
-use crate::execution_options::TransientMember;
+use crate::execution_options::FamilyMember;
 
 /// The seed a `.MC` card that states none runs with on the prepared route,
 /// the configured Monte Carlo study's own default.
@@ -35,9 +35,9 @@ const STATISTICAL_FUNCTIONS: [&str; 5] = ["agauss(", "aunif(", "gauss(", "unif("
 
 /// One member of a deck's Monte Carlo or `.STEP` transient.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TransientFamilyMember {
+pub struct DeckFamilyMember {
     /// The member a transient task names.
-    pub member: TransientMember,
+    pub member: FamilyMember,
     /// For a `.STEP` point, the value each swept axis takes there, in axis
     /// order: `("r", 2000.0)` for `.STEP PARAM r LIST 1k 2k`, every column
     /// of the row for a `.STEP DATA` table. Empty for a Monte Carlo trial.
@@ -136,7 +136,7 @@ pub(crate) fn monte_carlo_study(
 pub fn monte_carlo_members(
     netlist: &Netlist,
     states_statistics: bool,
-) -> Result<Vec<TransientFamilyMember>, String> {
+) -> Result<Vec<DeckFamilyMember>, String> {
     let card = monte_carlo_card(netlist)?;
     if card.runs == 0 {
         return Err("the .mc card asks for no trials".to_owned());
@@ -147,8 +147,8 @@ pub fn monte_carlo_members(
         .checked_add(card.runs)
         .ok_or_else(|| "the .mc card's trial numbers overflow".to_owned())?;
     Ok((card.first_trial..end)
-        .map(|index| TransientFamilyMember {
-            member: TransientMember::MonteCarloTrial {
+        .map(|index| DeckFamilyMember {
+            member: FamilyMember::MonteCarloTrial {
                 index,
                 variation_source,
             },
@@ -162,7 +162,7 @@ pub fn monte_carlo_members(
 pub fn step_members(
     netlist: &Netlist,
     limits: &ResourceLimits,
-) -> Result<Vec<TransientFamilyMember>, String> {
+) -> Result<Vec<DeckFamilyMember>, String> {
     use rspice_core::execution::{DeckPlan, RunAxisValue};
     let plan = DeckPlan::from_netlist(netlist, limits)
         .map_err(|error| format!("the .step plan: {error}"))?;
@@ -194,8 +194,8 @@ pub fn step_members(
                     }
                 }
             }
-            Ok(TransientFamilyMember {
-                member: TransientMember::StepPoint { index },
+            Ok(DeckFamilyMember {
+                member: FamilyMember::StepPoint { index },
                 coordinate: values,
             })
         })
@@ -229,7 +229,7 @@ fn axis_label(assignment: &rspice_core::execution::AxisAssignment) -> String {
 pub fn member_parameters(
     engine: &Engine,
     netlist: &Netlist,
-    members: &[TransientFamilyMember],
+    members: &[DeckFamilyMember],
 ) -> Result<Vec<BTreeMap<String, f64>>, String> {
     let resolved = |circuit: &Netlist| {
         circuit
@@ -243,11 +243,11 @@ pub fn member_parameters(
     let trials = members
         .iter()
         .filter_map(|member| match member.member {
-            TransientMember::MonteCarloTrial {
+            FamilyMember::MonteCarloTrial {
                 index,
                 variation_source,
             } => Some((index, variation_source)),
-            TransientMember::StepPoint { .. } => None,
+            FamilyMember::StepPoint { .. } => None,
         })
         .collect::<Vec<_>>();
     let mut drawn = BTreeMap::new();
@@ -275,7 +275,7 @@ pub fn member_parameters(
     }
     let materializer = if members
         .iter()
-        .any(|member| matches!(member.member, TransientMember::StepPoint { .. }))
+        .any(|member| matches!(member.member, FamilyMember::StepPoint { .. }))
     {
         let limits = engine.config().resource_limits;
         let plan = rspice_core::execution::DeckPlan::from_netlist(netlist, &limits)
@@ -291,10 +291,10 @@ pub fn member_parameters(
     members
         .iter()
         .map(|member| match member.member {
-            TransientMember::MonteCarloTrial { index, .. } => drawn
+            FamilyMember::MonteCarloTrial { index, .. } => drawn
                 .remove(&index)
                 .ok_or_else(|| format!("trial {index} drew no parameters")),
-            TransientMember::StepPoint { index } => {
+            FamilyMember::StepPoint { index } => {
                 let Some(materializer) = materializer.as_ref() else {
                     return Err(format!("point {index} has no .STEP plan"));
                 };
