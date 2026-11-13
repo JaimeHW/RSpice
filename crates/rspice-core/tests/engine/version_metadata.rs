@@ -1,7 +1,7 @@
 #[path = "../../src/engine/builder/version_metadata.rs"]
-mod version_metadata;
+mod builder;
 
-use version_metadata::parse_dotted_version_metadata;
+use builder::parse_dotted_version_metadata;
 
 fn assert_version(input: &str, expected: f64) {
     let actual = parse_dotted_version_metadata(input)
