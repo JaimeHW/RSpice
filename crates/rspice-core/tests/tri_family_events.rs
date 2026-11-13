@@ -30,8 +30,8 @@ mod determinism_fingerprint;
 mod digital_trace_invariants;
 
 use determinism_fingerprint::{
-    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, emitting, fingerprint,
-    pin_fingerprint,
+    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, assert_grid_survives_a_nudge,
+    emitting, fingerprint, pin_fingerprint,
 };
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
@@ -899,22 +899,8 @@ endmodule\n";
 /// `#2` after each rising edge falls on the tick image.
 #[test]
 fn a_converter_read_by_a_module_dates_every_edge_at_its_crossing() {
-    let follower = ModelFile::new(EDGE_FOLLOWER);
     let periods = 100;
-    let result = run(
-        &format!(
-            "* converter edges dated at their crossings\n\
-             vclk aclk 0 dc 0 pulse(0 1 0.1u 2n 2n 98n 200n)\n\
-             abridge [aclk] [dclk] adc_buff\n\
-             .model adc_buff adc_bridge(in_low=0.5 in_high=0.5)\n\
-             Xf dclk q follower\n\
-             .va \"{}\" follower\n\
-             .end\n",
-            follower.path()
-        ),
-        0.1e-6 + periods as f64 * 200e-9,
-        0.1e-6,
-    );
+    let result = run_clock_through_a_converter(1.0, periods);
     let ns = 1e-9;
     let mut previous = None;
     let mut edges = Vec::new();
@@ -968,6 +954,53 @@ fn a_converter_read_by_a_module_dates_every_edge_at_its_crossing() {
             (picoseconds as u64 - 104_000) % 200_000,
             0,
             "the register moves 2 ns after a rising clock edge: {time:.17e} s"
+        );
+    }
+}
+
+/// The sigma-delta modulator's clock path, `periods` periods of a 2 ns ramp
+/// to `amplitude` through a single-threshold `adc_bridge` a module reads.
+fn run_clock_through_a_converter(amplitude: f64, periods: usize) -> TransientResult {
+    let follower = ModelFile::new(EDGE_FOLLOWER);
+    run(
+        &format!(
+            "* converter edges dated at their crossings\n\
+             vclk aclk 0 dc 0 pulse(0 {amplitude:?} 0.1u 2n 2n 98n 200n)\n\
+             abridge [aclk] [dclk] adc_buff\n\
+             .model adc_buff adc_bridge(in_low=0.5 in_high=0.5)\n\
+             Xf dclk q follower\n\
+             .va \"{}\" follower\n\
+             .end\n",
+            follower.path()
+        ),
+        0.1e-6 + periods as f64 * 200e-9,
+        0.1e-6,
+    )
+}
+
+/// The converter's landings do not hinge on the last bits of its input. A
+/// clock one ulp taller or shorter moves every crossing by about an ulp, and
+/// each landing reads the threshold a rounding to one side or the other of
+/// where it read it before. The crossing the root located decides the landing
+/// either way, so the run lands the same edges on the same steps.
+#[test]
+fn a_converter_read_by_a_module_lands_alike_under_a_one_ulp_nudge() {
+    let periods = 100;
+    let base = run_clock_through_a_converter(1.0, periods);
+    for (what, amplitude) in [
+        ("clock amplitude up", 1.0f64.next_up()),
+        ("clock amplitude down", 1.0f64.next_down()),
+    ] {
+        let nudged = run_clock_through_a_converter(amplitude, periods);
+        assert_grid_survives_a_nudge(
+            &format!("the converter's clock path, {what}"),
+            &base.time,
+            &nudged.time,
+        );
+        assert_eq!(
+            trace_points(&nudged, "dclk").len(),
+            trace_points(&base, "dclk").len(),
+            "{what}: the converter published a different number of values"
         );
     }
 }

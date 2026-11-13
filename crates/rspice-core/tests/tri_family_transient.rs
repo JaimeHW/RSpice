@@ -42,8 +42,8 @@ mod determinism_fingerprint;
 mod digital_trace_invariants;
 
 use determinism_fingerprint::{
-    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, emitting, fingerprint,
-    pin_fingerprint, pin_grid,
+    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, assert_grid_survives_a_nudge,
+    emitting, fingerprint, pin_fingerprint, pin_grid,
 };
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
@@ -424,6 +424,10 @@ fn bounded_rc_module() -> String {
 /// divides that clock in its discrete half while conducting in its analog
 /// half.
 fn deck_a() -> (Vec<ModelFile>, Netlist) {
+    deck_a_nudged(&|deck| deck.to_string())
+}
+
+fn deck_a_nudged(nudge: &dyn Fn(&str) -> String) -> (Vec<ModelFile>, Netlist) {
     let analog = ModelFile::new(&bounded_rc_module());
     let mixed = ModelFile::new(MIX_DIV);
     let generated = if DIODE_CMC { "xd2 a 0 diode_cmc\n" } else { "" };
@@ -454,7 +458,7 @@ fn deck_a() -> (Vec<ModelFile>, Netlist) {
         analog.path(),
         mixed.path()
     );
-    let netlist = Netlist::parse(&deck).expect("deck A parses");
+    let netlist = Netlist::parse(&nudge(&deck)).expect("deck A parses");
     (vec![analog, mixed], netlist)
 }
 
@@ -585,12 +589,14 @@ fn deck_a_tri_family_transient_sequence_golden() {
 ///
 /// # Landings are not restarts
 ///
-/// The deck does take steps at its floor, and must: they are *landings*, the
+/// A deck may take steps at its floor, and must: they are *landings*, the
 /// one analog timepoint the stepper owes an event it cannot separate from the
-/// point before. `a_adc` reaches `in_low` exactly on the point that lands its
-/// 1.6 V root, and holds `0` there (ngspice `cfunc.mod`), so its move to `x` is
-/// a root at that point itself and is landed one minimum step after it
-/// (48.48 ps). That is the one such landing this deck has.
+/// point before. `a_adc` once took one at 48.48 ps: the point that lands its
+/// 1.6 V root can read `in_low` exactly, where `0` holds (ngspice `cfunc.mod`),
+/// and its move to `x` was then landed one minimum step later. The crossing
+/// the root located now decides that landing whichever side of `in_low` its
+/// sample rounds to, so this deck takes none
+/// (`deck_a_grid_survives_a_one_ulp_nudge_of_its_waveforms`).
 ///
 /// `q`'s six edges once added one each. `q` is a zero-rise D/A drive that acts
 /// from the first instant after the point that steps it, and an A/D crossing
@@ -1400,4 +1406,52 @@ fn deck_c2_hashes_are_identical_across_processes() {
         8,
         &DECK_C2_FINGERPRINT.records("deck_c2"),
     );
+}
+
+/// Deck A's accepted grid does not hinge on the last bits of its waveforms.
+///
+/// Each run moves one deck value by one ulp, which moves the waveforms it
+/// reaches by about an ulp, as another platform's libm would. The diode's
+/// saturation current runs through `exp`. The clock's amplitude is `a_adc`'s
+/// input: its 1.6 V and 1.7 V crossings move by an ulp, and each root lands on
+/// a sample that reads the threshold a rounding either side of it. Before a
+/// converter's located crossing decided its landing, the clock nudged up read
+/// exactly 1.6 V at the 48.48 ps landing, held `0` there as `in <= in_low`
+/// does, and took a solver-floor step to chase the same crossing: 1157 points
+/// where the deck has 1156.
+#[test]
+fn deck_a_grid_survives_a_one_ulp_nudge_of_its_waveforms() {
+    let base = run_deck_a().time;
+    let value = |v: f64| format!("{v:?}");
+    for (what, from, to) in [
+        (
+            "clock amplitude up",
+            "pulse(0 3.3 ",
+            format!("pulse(0 {} ", value(3.3f64.next_up())),
+        ),
+        (
+            "clock amplitude down",
+            "pulse(0 3.3 ",
+            format!("pulse(0 {} ", value(3.3f64.next_down())),
+        ),
+        (
+            "diode current up",
+            "is=1e-14",
+            format!("is={}", value(1e-14f64.next_up())),
+        ),
+        (
+            "diode current down",
+            "is=1e-14",
+            format!("is={}", value(1e-14f64.next_down())),
+        ),
+    ] {
+        let (_models, netlist) = deck_a_nudged(&|deck| {
+            assert!(deck.contains(from), "deck A carries {from:?}");
+            deck.replacen(from, &to, 1)
+        });
+        let nudged = Engine::default()
+            .run_tran(&netlist, DECK_A_TSTOP, DECK_A_STEP)
+            .expect("nudged deck A transient");
+        assert_grid_survives_a_nudge(&format!("deck A, {what}"), &base, &nudged.time);
+    }
 }

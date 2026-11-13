@@ -146,6 +146,32 @@ pub fn pin_grid(key: &str, observed: Fingerprint, points: usize, grid_hash: u64)
     );
 }
 
+/// Assert that a run whose waveforms were nudged in their last bits accepted
+/// the same grid as `base`, up to rounding: the same number of points, each
+/// within 64 ulps of its counterpart.
+///
+/// This is [`pin_grid`]'s premise checked on one platform. Another libm moves a
+/// waveform by an ulp; a nudge of one ulp in a deck value does the same here.
+/// An event dated on a moved crossing may move by an ulp too, so the grids are
+/// compared to rounding rather than hashed. A decision that hinged on those
+/// last bits — a landing taken or skipped, a solver-floor step added — shows as
+/// a different count or a point that moved by a step rather than an ulp.
+pub fn assert_grid_survives_a_nudge(key: &str, base: &[f64], nudged: &[f64]) {
+    assert_eq!(
+        nudged.len(),
+        base.len(),
+        "{key}: a one-ulp nudge changed the accepted point count"
+    );
+    if let Some((index, (a, b))) = base
+        .iter()
+        .zip(nudged)
+        .enumerate()
+        .find(|(_, (a, b))| (*a - *b).abs() > 64.0 * f64::EPSILON * a.abs().max(b.abs()))
+    {
+        panic!("{key}: a one-ulp nudge moved accepted point {index} from {a:.17e} to {b:.17e} s");
+    }
+}
+
 /// Every `TRIFAMILY` record in a child's stdout, and the test count it ran.
 fn records_of(stdout: &str) -> (BTreeMap<String, String>, Option<usize>) {
     let mut records = BTreeMap::new();
