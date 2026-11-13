@@ -978,6 +978,37 @@ impl VisualizationDocument {
                 });
                 Ok(())
             }
+            DocumentEdit::AddExpressionTrace(trace) => {
+                self.validate_expression_trace(&trace)?;
+                match self
+                    .expression_traces
+                    .iter_mut()
+                    .find(|held| held.pane_id == trace.pane_id && held.text == trace.text)
+                {
+                    Some(held) => *held = trace,
+                    None => {
+                        ensure_maximum_len(
+                            "visualization-document.expression-traces",
+                            self.expression_traces.len() + 1,
+                            MAX_VISUALIZATION_EXPRESSION_TRACES,
+                        )?;
+                        self.expression_traces.push(trace);
+                    }
+                }
+                Ok(())
+            }
+            DocumentEdit::RemoveExpressionTrace { pane_id, text } => {
+                let before = self.expression_traces.len();
+                self.expression_traces
+                    .retain(|trace| trace.pane_id != pane_id || trace.text != text);
+                if self.expression_traces.len() == before {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "expression-trace.text",
+                        message: format!("pane {} plots no expression {text:?}", pane_id.get()),
+                    });
+                }
+                Ok(())
+            }
             DocumentEdit::SetEventLaneOrder(order) => {
                 self.validate_event_lane_order(&order)?;
                 self.event_lane_orders
@@ -1411,6 +1442,14 @@ impl VisualizationDocument {
                 binding.analysis_id = to;
             }
         }
+        for expression in &mut self.expression_traces {
+            for binding in &mut expression.datasets {
+                if *binding == previous {
+                    *binding = next;
+                }
+            }
+            expression.datasets.dedup();
+        }
         for (index, predicates) in traces {
             let trace = &mut self.traces[index];
             if let Some(predicates) = predicates {
@@ -1639,6 +1678,8 @@ impl VisualizationDocument {
         self.user_buses.retain(|bus| bus.pane_id != pane_id);
         self.event_lane_orders
             .retain(|order| order.pane_id != pane_id);
+        self.expression_traces
+            .retain(|trace| trace.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -1963,6 +2004,25 @@ impl VisualizationDocument {
                 });
             }
         }
+        ensure_maximum_len(
+            "visualization-document.expression-traces",
+            self.expression_traces.len(),
+            MAX_VISUALIZATION_EXPRESSION_TRACES,
+        )?;
+        let mut expressions = HashSet::new();
+        for trace in &self.expression_traces {
+            self.validate_expression_trace(trace)?;
+            if !expressions.insert((trace.pane_id, trace.text.as_str())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "expression-trace.text",
+                    message: format!(
+                        "pane {} plots the expression {:?} twice",
+                        trace.pane_id.get(),
+                        trace.text
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -2031,6 +2091,39 @@ impl VisualizationDocument {
                     message: format!("pane {} orders one lane twice", order.pane_id.get()),
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// One expression trace on its own: non-blank text on a pane, reading
+    /// attached datasets only, with a well-formed declared unit if any.
+    fn validate_expression_trace(&self, trace: &ExpressionTrace) -> Result<(), VisualizationError> {
+        self.require_pane(trace.pane_id)?;
+        if trace.text.trim().is_empty()
+            || trace.text.len() > MAX_SOURCE_TEXT_BYTES
+            || trace.text.chars().any(char::is_control)
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "expression-trace.text",
+                message: format!(
+                    "must be non-blank, contain no control characters, and not exceed {MAX_SOURCE_TEXT_BYTES} bytes"
+                ),
+            });
+        }
+        validate_optional_unit("expression-trace.unit", trace.unit.as_deref())?;
+        ensure_maximum_len(
+            "expression-trace.datasets",
+            trace.datasets.len(),
+            MAX_EXPRESSION_TRACE_DATASETS,
+        )?;
+        if trace.datasets.is_empty() {
+            return Err(VisualizationError::InvalidValue {
+                field: "expression-trace.datasets",
+                message: "an expression reads at least one attached dataset".to_owned(),
+            });
+        }
+        for binding in &trace.datasets {
+            self.dataset_for_binding(*binding)?;
         }
         Ok(())
     }

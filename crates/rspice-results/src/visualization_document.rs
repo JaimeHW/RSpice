@@ -83,6 +83,10 @@ pub const MAX_USER_BUS_MEMBERS: usize = 256;
 pub const MAX_BUS_VALUE_NAMES: usize = 256;
 /// Maximum member references retained across all user buses in one document.
 pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
+/// Maximum calculator-expression traces in one visualization document.
+pub const MAX_VISUALIZATION_EXPRESSION_TRACES: usize = 1_024;
+/// Maximum datasets one expression trace reads.
+pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1661,6 +1665,44 @@ where
     deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
 }
 
+/// A calculator expression plotted on a pane.
+///
+/// It is kept as the text the reader typed and the datasets it reads, never
+/// as samples: the view evaluates it against those datasets each time it is
+/// drawn, so a saved view keeps the expression and a view re-pointed at
+/// another run evaluates it there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExpressionTrace {
+    pub pane_id: PaneId,
+    /// The expression as typed, unique within its pane.
+    #[serde(deserialize_with = "deserialize_source_text_string")]
+    pub text: String,
+    /// The attached datasets the expression reads.
+    #[serde(deserialize_with = "deserialize_expression_datasets")]
+    pub datasets: Vec<DatasetBinding>,
+    /// The unit the reader declared, which replaces the one unit algebra
+    /// infers from the expression.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_unit_string"
+    )]
+    pub unit: Option<String>,
+    #[serde(default = "default_expression_visible")]
+    pub visible: bool,
+}
+
+const fn default_expression_visible() -> bool {
+    true
+}
+
+fn deserialize_expression_datasets<'de, D>(deserializer: D) -> Result<Vec<DatasetBinding>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_EXPRESSION_TRACE_DATASETS>(deserializer)
+}
+
 /// One row of a pane's event-lane stack.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -2288,6 +2330,8 @@ pub struct VisualizationDocument {
     user_buses: Vec<UserBus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     event_lane_orders: Vec<EventLaneOrder>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    expression_traces: Vec<ExpressionTrace>,
 }
 
 #[derive(Deserialize)]
@@ -2343,6 +2387,8 @@ struct VisualizationDocumentWire {
             MAX_VISUALIZATION_EVENT_LANES_TOTAL,
         >,
     >,
+    #[serde(default)]
+    expression_traces: Option<BoundedVec<ExpressionTrace, MAX_VISUALIZATION_EXPRESSION_TRACES>>,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -2381,6 +2427,9 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             event_lane_orders: wire
                 .event_lane_orders
                 .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
+            expression_traces: wire
+                .expression_traces
+                .map_or_else(Vec::new, BoundedVec::into_inner),
         };
         if document.schema_version < 12
             && document
@@ -2390,6 +2439,11 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
         {
             return Err(serde::de::Error::custom(
                 "a bus with named values requires visualization schema 12",
+            ));
+        }
+        if document.schema_version < 12 && !document.expression_traces.is_empty() {
+            return Err(serde::de::Error::custom(
+                "an expression trace requires visualization schema 12",
             ));
         }
         if document.schema_version < 11
@@ -2480,11 +2534,19 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    /// Schema 12 keeps a measurement evaluated once per member of a family
-    /// with the distribution its members formed: statistic, count, mean,
-    /// sample standard deviation, minimum, maximum, and a yield against its
-    /// limits with the failing members named. A schema-11 document reads as
-    /// one whose measurements were each one evaluation, which they were.
+    /// Schema 12 keeps three things a schema-11 document could not hold:
+    ///
+    /// - a measurement evaluated once per member of a family with the
+    ///   distribution its members formed: statistic, count, mean, sample
+    ///   standard deviation, minimum, maximum, and a yield against its limits
+    ///   with the failing members named;
+    /// - the names a reader gives a user bus's words;
+    /// - calculator expressions plotted on a pane, as their text and the
+    ///   datasets they read.
+    ///
+    /// A schema-11 document reads as one whose measurements were each one
+    /// evaluation, whose buses name no values and that plots no expression,
+    /// which is what it held.
     ///
     /// Schema 11 lets a dataset reference its retained run by identity and
     /// content digest instead of holding a copy of every sample, and lets a
@@ -2565,6 +2627,7 @@ impl VisualizationDocument {
             comparisons: Vec::new(),
             user_buses: Vec::new(),
             event_lane_orders: Vec::new(),
+            expression_traces: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2689,6 +2752,11 @@ impl VisualizationDocument {
     #[must_use]
     pub fn user_buses(&self) -> &[UserBus] {
         &self.user_buses
+    }
+
+    /// The calculator expressions plotted on the document's panes.
+    pub fn expression_traces(&self) -> &[ExpressionTrace] {
+        &self.expression_traces
     }
 
     /// The order one pane draws its event lanes in; empty when it recorded
@@ -2951,6 +3019,8 @@ impl VisualizationDocument {
     }
 }
 
+#[cfg(test)]
+mod expression_tests;
 #[cfg(test)]
 mod lane_tests;
 #[cfg(test)]

@@ -243,6 +243,16 @@ pub enum DocumentEdit {
         #[serde(deserialize_with = "deserialize_label_string")]
         name: String,
     },
+    /// Plot a calculator expression on a pane, replacing the pane's
+    /// expression of the same text (which is how its unit or visibility
+    /// changes).
+    AddExpressionTrace(ExpressionTrace),
+    /// Take one expression off a pane.
+    RemoveExpressionTrace {
+        pane_id: PaneId,
+        #[serde(deserialize_with = "deserialize_source_text_string")]
+        text: String,
+    },
     /// Replace the order one pane draws its event lanes in. An empty order
     /// forgets the pane's recorded order.
     SetEventLaneOrder(EventLaneOrder),
