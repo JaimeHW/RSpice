@@ -33,9 +33,10 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Peers,
-    Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
+    NoHandles, Peers, Reads,
 };
 use crate::workbench::framework::requests::{FocusProjectLauncherSearch, ProjectFileAction};
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -82,8 +83,98 @@ impl Feature for ProjectFeature {
             // commit.
             commit_pending_edit: |_, _| {},
         });
+        registry.dialogs(DIALOGS);
     }
 }
+
+/// The dialog steps the feature draws, under the keys the shell's dialog
+/// order lists them by, in that order: New project, Check and save, Design
+/// management, Revision history, the configuration dialogs, New Cell, New
+/// View, Copy Cell, Rename Cell, the deletion review and the staged
+/// deletion. Then the library and view membership dialogs the Library
+/// surface draws, which hold a modal gate while open. Each is open while its
+/// form is. The staged deletion draws nothing, so nothing of it is ever open.
+const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("project.new_project"),
+        is_open: |project| project.new_project.open,
+        render: ProjectFeature::render_new_project_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.check_and_save"),
+        is_open: |project| project.check_and_save.open,
+        render: ProjectFeature::render_check_and_save_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.design_management"),
+        is_open: |project| project.design_management.open,
+        render: ProjectFeature::render_design_management_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.project_revision_history"),
+        is_open: |project| project.project_revision_history.open,
+        render: ProjectFeature::render_project_revision_history_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.configuration"),
+        is_open: |project| {
+            project.configuration_dialog.is_open()
+                || project.configuration_dialog.leaving.is_some()
+                || project.configuration.pending_selection.is_some()
+        },
+        render: ProjectFeature::render_configuration_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.new_cell"),
+        is_open: |project| project.new_cell_dialog,
+        render: ProjectFeature::process_new_cell_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.new_view"),
+        is_open: |project| project.new_view_dialog,
+        render: ProjectFeature::process_new_view_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.copy_cell"),
+        is_open: |project| project.copy_cell_dialog,
+        render: ProjectFeature::process_copy_cell_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.rename_cell"),
+        is_open: |project| project.rename_cell_dialog,
+        render: ProjectFeature::process_rename_cell_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.library_deletion_review"),
+        is_open: |project| project.library_deletion_review.target.is_some(),
+        render: ProjectFeature::process_library_deletion_review_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.pending_library_deletions"),
+        is_open: |_| false,
+        render: |cx, _| ProjectFeature::process_pending_library_deletions(cx),
+    },
+    FeatureDialog {
+        key: DialogKey("project.new_library"),
+        is_open: |project| project.new_library_dialog,
+        render: ProjectFeature::process_new_library_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.rename_library"),
+        is_open: |project| project.rename_library_dialog,
+        render: ProjectFeature::process_rename_library_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.delete_library"),
+        is_open: |project| project.delete_library_dialog,
+        render: ProjectFeature::process_delete_library_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.rename_view"),
+        is_open: |project| project.rename_view_dialog,
+        render: ProjectFeature::process_rename_view_dialog,
+    },
+];
 
 impl ProjectFeature {
     /// Keep browser-restored manager routes and the transient egui dialog

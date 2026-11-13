@@ -71,11 +71,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.new_project"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.new_project.open),
-        render: |app, ctx| {
-            ProjectFeature::render_new_project_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.new_project"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.new_project")),
     },
     DialogSpec {
         key: DialogKey("cloud.publish_web"),
@@ -221,11 +218,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.check_and_save"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.check_and_save.open),
-        render: |app, ctx| {
-            ProjectFeature::render_check_and_save_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.check_and_save"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.check_and_save")),
     },
     DialogSpec {
         key: DialogKey("design.connectivity_manager"),
@@ -246,10 +240,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.design_management"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.design_management.open),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.design_management"))),
         render: |app, ctx| {
-            ProjectFeature::render_design_management_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
+            features::render_dialog(app, ctx, DialogKey("project.design_management"))
         },
     },
     DialogSpec {
@@ -265,9 +258,11 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.project_revision_history"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.project_revision_history.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("project.project_revision_history"))
+        }),
         render: |app, ctx| {
-            ProjectFeature::render_project_revision_history_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("project.project_revision_history"))
         },
     },
     DialogSpec {
@@ -307,15 +302,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.configuration"),
         modality: Modality::Dialog,
-        is_open: Some(|state| {
-            state.project.configuration_dialog.is_open()
-                || state.project.configuration_dialog.leaving.is_some()
-                || state.project.configuration.pending_selection.is_some()
-        }),
-        render: |app, ctx| {
-            ProjectFeature::render_configuration_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.configuration"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.configuration")),
     },
     DialogSpec {
         key: DialogKey("design.rule_setup"),
@@ -438,20 +426,14 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.new_cell"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.new_cell_dialog),
-        render: |app, ctx| {
-            ProjectFeature::process_new_cell_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.new_cell"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.new_cell")),
     },
     DialogSpec {
         key: DialogKey("project.new_view"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.new_view_dialog),
-        render: |app, ctx| {
-            ProjectFeature::process_new_view_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.new_view"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.new_view")),
     },
     DialogSpec {
         key: DialogKey("code.new_veriloga_device"),
@@ -484,24 +466,23 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("project.copy_cell"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.copy_cell_dialog),
-        render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.copy_cell"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.copy_cell")),
     },
     DialogSpec {
         key: DialogKey("project.rename_cell"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.rename_cell_dialog),
-        render: |app, ctx| {
-            ProjectFeature::process_rename_cell_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.rename_cell"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.rename_cell")),
     },
     DialogSpec {
         key: DialogKey("project.library_deletion_review"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.project.library_deletion_review.target.is_some()),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("project.library_deletion_review"))
+        }),
         render: |app, ctx| {
-            ProjectFeature::process_library_deletion_review_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("project.library_deletion_review"))
         },
     },
     DialogSpec {
@@ -539,9 +520,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.pending_library_deletions"),
         modality: Modality::None,
         is_open: None,
-        render: |app, _| {
-            ProjectFeature::process_pending_library_deletions(&mut features::cx(app));
-            app.after_contribution();
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("project.pending_library_deletions"))
         },
     },
     DialogSpec {
@@ -608,22 +588,22 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("project.new_library"),
         modality: Modality::Dialog,
-        is_open: |state| state.project.new_library_dialog,
+        is_open: |state| features::dialog_open(state, DialogKey("project.new_library")),
     },
     ModalSpec {
         key: DialogKey("project.rename_library"),
         modality: Modality::Dialog,
-        is_open: |state| state.project.rename_library_dialog,
+        is_open: |state| features::dialog_open(state, DialogKey("project.rename_library")),
     },
     ModalSpec {
         key: DialogKey("project.delete_library"),
         modality: Modality::Dialog,
-        is_open: |state| state.project.delete_library_dialog,
+        is_open: |state| features::dialog_open(state, DialogKey("project.delete_library")),
     },
     ModalSpec {
         key: DialogKey("project.rename_view"),
         modality: Modality::Dialog,
-        is_open: |state| state.project.rename_view_dialog,
+        is_open: |state| features::dialog_open(state, DialogKey("project.rename_view")),
     },
     ModalSpec {
         key: DialogKey("project.technology_attachment"),

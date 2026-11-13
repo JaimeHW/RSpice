@@ -1,8 +1,11 @@
 //! The project feature's own steps, run in its context.
 
+use crate::state::{Cell, Library, View, ViewType};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::feature::{CommandSet, Cx, LowerHandles, Peers};
+use crate::workbench::framework::dialogs::DialogKey;
+use crate::workbench::framework::feature::{CommandSet, Cx, FeatureRegistry, LowerHandles, Peers};
+use crate::workbench::framework::requests::Drain;
 
 use super::ProjectFeature;
 use super::commands::{ProjectCommand, ProjectRequest};
@@ -179,4 +182,90 @@ fn a_commit_handed_to_the_shell_ends_where_the_commit_in_place_did() {
         assert_eq!(handed.state.project.check_and_save.open, !saves, "{note:?}");
     }
     let _ = std::fs::remove_file(&file);
+}
+
+/// An open project with a writable library `work` holding the cell `amp`.
+fn with_a_writable_cell() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut library = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(amp);
+    app.state.model.library_manager.add_library(library);
+    app
+}
+
+/// The project's dialog step `key`, drawn for two frames through what the
+/// feature registers for it while it is open, raises nothing: the outbox is
+/// as it was, so the answer the registry runs after the step finds nothing
+/// to carry out.
+fn assert_the_step_raises_nothing(app: &mut RSpiceApp, key: &'static str) {
+    let registry = FeatureRegistry::<ProjectFeature>::build();
+    let dialog = registry
+        .dialog(DialogKey(key))
+        .unwrap_or_else(|| panic!("the project feature registers `{key}`"));
+    assert!((dialog.is_open)(&app.state.project), "`{key}` is open");
+    assert!(
+        !app.state
+            .workbench
+            .outbox
+            .waits_at(Drain::AfterContribution),
+        "nothing waits for the answer before `{key}` draws"
+    );
+    let before = format!("{:?}", app.state.workbench.outbox);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    for _ in 0..2 {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            with_cx(app, |cx| (dialog.render)(cx, ctx));
+        });
+    }
+    assert!((dialog.is_open)(&app.state.project), "`{key}` stays open");
+    assert!(
+        !app.state
+            .workbench
+            .outbox
+            .waits_at(Drain::AfterContribution),
+        "`{key}` leaves nothing for the answer after it"
+    );
+    assert_eq!(
+        format!("{:?}", app.state.workbench.outbox),
+        before,
+        "`{key}` raises nothing"
+    );
+}
+
+#[test]
+fn revision_history_raises_nothing_for_the_answer_after_it() {
+    let mut app = with_a_writable_cell();
+    with_cx(&mut app, |cx| ProjectCommand::RevisionHistory.execute(cx));
+    assert_the_step_raises_nothing(&mut app, "project.project_revision_history");
+}
+
+#[test]
+fn copy_cell_raises_nothing_for_the_answer_after_it() {
+    let mut app = with_a_writable_cell();
+    app.state
+        .project
+        .open_copy_cell_dialog(&app.state.model, "work", "amp")
+        .expect("a writable cell opens Copy Cell");
+    assert_the_step_raises_nothing(&mut app, "project.copy_cell");
+}
+
+#[test]
+fn the_deletion_review_raises_nothing_for_the_answer_after_it() {
+    let mut app = with_a_writable_cell();
+    app.state
+        .project
+        .open_library_cell_deletion_review(&app.state.model, "work", "amp")
+        .expect("a writable cell opens the deletion review");
+    assert_the_step_raises_nothing(&mut app, "project.library_deletion_review");
+}
+
+#[test]
+fn new_library_raises_nothing_for_the_answer_after_it() {
+    let mut app = with_a_writable_cell();
+    app.state.project.open_new_library_dialog(&app.state.model);
+    assert_the_step_raises_nothing(&mut app, "project.new_library");
 }

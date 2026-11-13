@@ -8,7 +8,8 @@ use super::*;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::elide_text;
-use crate::workbench::features;
+use crate::workbench::features::{self, render_dialog};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
 
@@ -86,16 +87,13 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     show_library_audit_history(&ctx, &app.state);
     super::library_publication::show(&ctx, app);
     // The library and view membership modals are reachable only from this
-    // surface's own routes, so this surface owns their frame. Each draws in
-    // the project feature's context, and what one raised is answered as it
-    // returns.
-    ProjectFeature::process_new_library_dialog(&mut features::cx(app), &ctx);
-    ProjectFeature::process_rename_library_dialog(&mut features::cx(app), &ctx);
-    app.after_contribution();
-    ProjectFeature::process_delete_library_dialog(&mut features::cx(app), &ctx);
-    app.after_contribution();
-    ProjectFeature::process_rename_view_dialog(&mut features::cx(app), &ctx);
-    app.after_contribution();
+    // surface's own routes, so this surface owns their frame. Each draws
+    // through the feature registry, in the project feature's context, and
+    // what one raised is answered as it returns.
+    render_dialog(app, &ctx, DialogKey("project.new_library"));
+    render_dialog(app, &ctx, DialogKey("project.rename_library"));
+    render_dialog(app, &ctx, DialogKey("project.delete_library"));
+    render_dialog(app, &ctx, DialogKey("project.rename_view"));
 }
 
 /// The browser: the selection repaired to a real library, cell and view, the

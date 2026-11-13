@@ -307,7 +307,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "settings"),
     ("features::render_dialog", "cloud"),
     ("features::render_dialog", "cloud"),
-    ("ProjectFeature::render_new_project_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "cloud"),
     ("features::render_dialog", "cloud"),
     ("features::render_dialog", "cloud"),
@@ -328,21 +328,18 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "design"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "design"),
-    ("ProjectFeature::render_check_and_save_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "sheets"),
-    ("ProjectFeature::render_design_management_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "design"),
-    (
-        "ProjectFeature::render_project_revision_history_dialog",
-        "project",
-    ),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "design"),
-    ("ProjectFeature::render_configuration_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "sheets"),
     ("features::render_dialog", "sheets"),
@@ -363,28 +360,22 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "results"),
     ("render_shortcuts_help_dialog", "shell"),
     ("features::render_dialog", "models"),
-    ("ProjectFeature::process_new_cell_dialog", "project"),
-    ("ProjectFeature::process_new_view_dialog", "project"),
+    ("features::render_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
-    ("ProjectFeature::process_copy_cell_dialog", "project"),
-    ("ProjectFeature::process_rename_cell_dialog", "project"),
-    (
-        "ProjectFeature::process_library_deletion_review_dialog",
-        "project",
-    ),
+    ("features::render_dialog", "project"),
+    ("features::render_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("SimulateFeature::render_plan_removal_review", "simulate"),
     ("SimulateFeature::render_plan_removal_refusal", "simulate"),
     (
         "app_state::services_access::process_autosave_restore_dialog",
         "services",
     ),
-    (
-        "ProjectFeature::process_pending_library_deletions",
-        "project",
-    ),
+    ("features::render_dialog", "project"),
     ("process_exit_request", "shell"),
     ("show_route_overlays", "shell"),
 ];
@@ -395,10 +386,15 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
 const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
     "synchronize_route_owned_dialogs",
     "ProjectFeature::synchronize_design_management_route",
-    "ProjectFeature::process_pending_library_deletions",
     "process_exit_request",
     "show_route_overlays",
 ];
+
+/// The steps a registered feature runs that draw no dialog of their own,
+/// named by the key their spec draws them by, since each is drawn through
+/// the registry like any feature dialog: the project feature's staged
+/// deletion, which finishes what the deletion review decided.
+const SYNTHETIC_FEATURE_STEPS: &[&str] = &["project.pending_library_deletions"];
 
 /// What `show_route_overlays`, the last dialog step, drew, and the slice that
 /// owns each: above every dialog, so a workflow opened from one of them is
@@ -1470,7 +1466,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         }
         assert_eq!(
             modality == "None",
-            SYNTHETIC_DIALOG_STEPS.contains(&first),
+            SYNTHETIC_DIALOG_STEPS.contains(&first)
+                || SYNTHETIC_FEATURE_STEPS.contains(&key.as_str()),
             "`{key}` is a step that draws no dialog exactly when `{first}` is one"
         );
         drawn += renders.len();
@@ -1482,8 +1479,14 @@ fn the_frame_dialogs_draw_in_todays_order() {
             "`{synthetic}` is a step of the frame's dialogs"
         );
     }
+    for synthetic in SYNTHETIC_FEATURE_STEPS {
+        assert!(
+            specs.iter().any(|spec| spec.key == *synthetic),
+            "`{synthetic}` is a step of the frame's dialogs"
+        );
+    }
     assert_eq!(
-        DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len(),
+        DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
         68,
         "the frame draws 68 dialog steps beside its synthetic ones"
     );
@@ -1723,44 +1726,56 @@ const CELL_VIEWS_CREATED: &[Step] = &[(
     ],
 )];
 
-/// The project's cell dialogs draw in the feature's context. New Cell and
-/// Rename Cell have what they raised answered straight after they draw, in
-/// the step that drew them; Copy Cell raises nothing.
+/// The project feature registers `render` as its dialog step `key`, so the
+/// registry draws `key` with it in the feature's context.
+fn assert_project_registers(key: &str, render: &str) {
+    let project = without_whitespace(PROJECT);
+    let dialog = project
+        .split("FeatureDialog{")
+        .find(|dialog| dialog.starts_with(&format!("key:DialogKey(\"{key}\")")))
+        .unwrap_or_else(|| panic!("the project feature registers `{key}`"));
+    assert!(
+        dialog.contains(&format!("render:{},", without_whitespace(render))),
+        "the project feature draws `{key}` with `{render}`"
+    );
+}
+
+/// The shell's dialog order draws the project step `key` through the
+/// feature registry, which answers what the step raised straight after it
+/// draws, in the step that drew it; and the feature registers `render` as
+/// that step.
+fn assert_project_step(key: &str, render: &str) {
+    let order = without_whitespace(DIALOG_ORDER);
+    let spec = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains(&format!("key:DialogKey(\"{key}\")")))
+        .unwrap_or_else(|| panic!("the shell's dialog order draws `{key}`"));
+    assert!(
+        spec.contains(&format!(
+            "features::render_dialog(app,ctx,DialogKey(\"{key}\"))"
+        )),
+        "`{key}` draws through the feature registry, which answers what it raised straight after"
+    );
+    assert_project_registers(key, render);
+}
+
+/// The project's cell dialogs draw through the feature registry, in the
+/// feature's context, and have what they raised answered straight after
+/// they draw, in the step that drew them. Copy Cell raises nothing, so its
+/// answer finds nothing to carry out.
 #[test]
 fn the_cell_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_as_they_return() {
-    let order = without_whitespace(DIALOG_ORDER);
-    let spec = |key: &str| {
-        order
-            .split("DialogSpec{")
-            .find(|spec| spec.contains(&format!("DialogKey(\"{key}\")")))
-            .unwrap_or_else(|| panic!("the shell's dialog order draws `{key}`"))
-            .to_owned()
-    };
-    assert!(
-        spec("project.rename_cell").contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::process_rename_cell_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "Rename Cell draws in the project feature's context, and what it raised is answered \
-         straight after"
+    assert_project_step(
+        "project.rename_cell",
+        "ProjectFeature::process_rename_cell_dialog",
     );
-    assert!(
-        spec("project.copy_cell").contains(&without_whitespace(
-            "render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),"
-        )),
-        "Copy Cell draws in the project feature's context and answers nothing"
+    assert_project_step(
+        "project.copy_cell",
+        "ProjectFeature::process_copy_cell_dialog",
     );
-    assert!(
-        spec("project.new_cell").contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::process_new_cell_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "New Cell draws in the project feature's context, and what it raised is answered \
-         straight after"
+    assert_project_step(
+        "project.new_cell",
+        "ProjectFeature::process_new_cell_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -1788,25 +1803,16 @@ const VIEW_OPENED: &[Step] = &[(
     ],
 )];
 
-/// New View draws in the project feature's context and has what it raised
-/// answered straight after it draws, in the step that drew it. A created
-/// view's Verilog-A library is saved inside that answer, after everything
-/// else it carries out, so nothing is saved ahead of the creation it saves.
+/// New View draws through the feature registry, in the project feature's
+/// context, and has what it raised answered straight after it draws, in the
+/// step that drew it. A created view's Verilog-A library is saved inside
+/// that answer, after everything else it carries out, so nothing is saved
+/// ahead of the creation it saves.
 #[test]
 fn the_new_view_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns() {
-    let order = without_whitespace(DIALOG_ORDER);
-    let new_view = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"project.new_view\")"))
-        .expect("the shell's dialog order draws New View");
-    assert!(
-        new_view.contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::process_new_view_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "New View draws in the project feature's context, and what it raised is answered          straight after"
+    assert_project_step(
+        "project.new_view",
+        "ProjectFeature::process_new_view_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -1844,35 +1850,21 @@ const CELL_OR_VIEW_DELETED: &[Step] = &[(
     ],
 )];
 
-/// The deletion review draws in the project feature's context and raises
-/// nothing. The staged deletion's step runs in that context too, and has
-/// what it raised answered straight after it, before the next step draws.
+/// The deletion review draws through the feature registry, in the project
+/// feature's context, and raises nothing, so the answer after it finds
+/// nothing to carry out. The staged deletion's step, a step that draws no
+/// dialog, runs the same way, and has what it raised answered straight
+/// after it, before the next step draws.
 #[test]
 fn the_library_deletion_steps_run_in_the_project_context_and_a_deletion_is_answered_as_it_returns()
 {
-    let order = without_whitespace(DIALOG_ORDER);
-    let spec = |key: &str| {
-        order
-            .split("DialogSpec{")
-            .find(|spec| spec.contains(&format!("DialogKey(\"{key}\")")))
-            .unwrap_or_else(|| panic!("the shell's dialog order draws `{key}`"))
-            .to_owned()
-    };
-    let review = spec("project.library_deletion_review");
-    assert!(
-        review.contains(&without_whitespace(
-            "ProjectFeature::process_library_deletion_review_dialog(&mut features::cx(app), ctx)"
-        )) && !review.contains("after_contribution"),
-        "the deletion review draws in the project feature's context and answers nothing"
+    assert_project_step(
+        "project.library_deletion_review",
+        "ProjectFeature::process_library_deletion_review_dialog",
     );
-    assert!(
-        spec("project.pending_library_deletions").contains(&without_whitespace(
-            "render: |app, _| {
-                ProjectFeature::process_pending_library_deletions(&mut features::cx(app));
-                app.after_contribution();
-            },"
-        )),
-        "the staged deletion runs in the project feature's context, and what it raised is          answered straight after"
+    assert_project_step(
+        "project.pending_library_deletions",
+        "|cx, _| ProjectFeature::process_pending_library_deletions(cx)",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -1897,26 +1889,16 @@ const PROJECT_CREATED: &[Step] = &[(
     ],
 )];
 
-/// New project draws in the project feature's context, and the creation it
-/// hands over is answered straight after it draws, in the step that drew it,
-/// so the dialogs drawn after it in the frame see the new project.
+/// New project draws through the feature registry, in the project feature's
+/// context, and the creation it hands over is answered straight after it
+/// draws, in the step that drew it, so the dialogs drawn after it in the
+/// frame see the new project.
 #[test]
 fn the_new_project_dialog_draws_in_the_project_context_and_its_creation_is_answered_as_it_returns()
 {
-    let order = without_whitespace(DIALOG_ORDER);
-    let new_project = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"project.new_project\")"))
-        .expect("the shell's dialog order draws New project");
-    assert!(
-        new_project.contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::render_new_project_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "New project draws in the project feature's context, and its creation is answered \
-         straight after"
+    assert_project_step(
+        "project.new_project",
+        "ProjectFeature::render_new_project_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -1941,26 +1923,16 @@ const CREATE_HIERARCHY_OPENED: &[Step] = &[(
     ],
 )];
 
-/// Design management draws in the project feature's context, and the
-/// Create hierarchy it hands over is answered straight after it draws, in
-/// the step that drew it, so it opens in the frame it was asked for.
+/// Design management draws through the feature registry, in the project
+/// feature's context, and the Create hierarchy it hands over is answered
+/// straight after it draws, in the step that drew it, so it opens in the
+/// frame it was asked for.
 #[test]
 fn the_design_management_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns()
  {
-    let order = without_whitespace(DIALOG_ORDER);
-    let design_management = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"project.design_management\")"))
-        .expect("the shell's dialog order draws Design management");
-    assert!(
-        design_management.contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::render_design_management_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "Design management draws in the project feature's context, and what it raises is \
-         answered straight after"
+    assert_project_step(
+        "project.design_management",
+        "ProjectFeature::render_design_management_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -1979,9 +1951,9 @@ const CHECK_AND_SAVE_COMMITTED: &[Step] = &[(
 )];
 
 /// Check and save opens in the project feature's context, inside the call
-/// of the command that asks for it, raising nothing; it draws there, and the
-/// save it hands over is answered straight after it draws, in the step that
-/// drew it.
+/// of the command that asks for it, raising nothing; it draws there, through
+/// the feature registry, and the save it hands over is answered straight
+/// after it draws, in the step that drew it.
 #[test]
 fn the_check_and_save_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns()
  {
@@ -1994,20 +1966,9 @@ fn the_check_and_save_dialog_draws_in_the_project_context_and_what_it_raises_is_
         "Check and save opens in the project feature's context, in the command's own call"
     );
 
-    let order = without_whitespace(DIALOG_ORDER);
-    let check_and_save = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"project.check_and_save\")"))
-        .expect("the shell's dialog order draws Check and save");
-    assert!(
-        check_and_save.contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::render_check_and_save_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "Check and save draws in the project feature's context, and what it raises is answered \
-         straight after"
+    assert_project_step(
+        "project.check_and_save",
+        "ProjectFeature::render_check_and_save_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -2087,26 +2048,15 @@ const LEAVING_GONE_ON: &[Step] = &[(
     ],
 )];
 
-/// The configuration dialogs draw in the project feature's context, and
-/// going on leaving, which they hand over, is answered straight after they
-/// draw, in the step that drew them.
+/// The configuration dialogs draw through the feature registry, in the
+/// project feature's context, and going on leaving, which they hand over, is
+/// answered straight after they draw, in the step that drew them.
 #[test]
 fn the_configuration_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_as_they_return()
  {
-    let order = without_whitespace(DIALOG_ORDER);
-    let configuration = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"project.configuration\")"))
-        .expect("the shell's dialog order draws the configuration dialogs");
-    assert!(
-        configuration.contains(&without_whitespace(
-            "render: |app, ctx| {
-                ProjectFeature::render_configuration_dialog(&mut features::cx(app), ctx);
-                app.after_contribution();
-            },"
-        )),
-        "the configuration dialogs draw in the project feature's context, and what they raise \
-         is answered straight after"
+    assert_project_step(
+        "project.configuration",
+        "ProjectFeature::render_configuration_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
@@ -2163,33 +2113,25 @@ const LIBRARY_PAGE: &[Step] = &[
 ];
 
 /// The library and view membership dialogs the Library surface draws, in
-/// today's order, each in the project feature's context. New Library raises
-/// nothing; each of the others has what it raised answered as it returns.
+/// today's order, each through the feature registry, in the project
+/// feature's context, which answers what each raised as it returns. New
+/// Library raises nothing, so the answer after it finds nothing to carry out.
 const LIBRARY_DIALOGS: &[Step] = &[
     (
         "New Library",
-        &["ProjectFeature::process_new_library_dialog(&mut features::cx(app), &ctx);"],
+        &["render_dialog(app, &ctx, DialogKey(\"project.new_library\"));"],
     ),
     (
         "Rename Library",
-        &[
-            "ProjectFeature::process_rename_library_dialog(&mut features::cx(app), &ctx);\
-             app.after_contribution();",
-        ],
+        &["render_dialog(app, &ctx, DialogKey(\"project.rename_library\"));"],
     ),
     (
         "Delete Library",
-        &[
-            "ProjectFeature::process_delete_library_dialog(&mut features::cx(app), &ctx);\
-             app.after_contribution();",
-        ],
+        &["render_dialog(app, &ctx, DialogKey(\"project.delete_library\"));"],
     ),
     (
         "Rename View",
-        &[
-            "ProjectFeature::process_rename_view_dialog(&mut features::cx(app), &ctx);\
-             app.after_contribution();",
-        ],
+        &["render_dialog(app, &ctx, DialogKey(\"project.rename_view\"));"],
     ),
 ];
 
@@ -2217,8 +2159,26 @@ fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_i
         &[LIBRARY_PAGE, LIBRARY_DIALOGS].concat(),
     );
     assert!(
-        without_whitespace(&library).ends_with("app.after_contribution();"),
+        without_whitespace(&library).ends_with(&without_whitespace(
+            "render_dialog(app, &ctx, DialogKey(\"project.rename_view\"));"
+        )),
         "the Library surface draws nothing after its last dialog has what it raised answered"
+    );
+    assert_project_registers(
+        "project.new_library",
+        "ProjectFeature::process_new_library_dialog",
+    );
+    assert_project_registers(
+        "project.rename_library",
+        "ProjectFeature::process_rename_library_dialog",
+    );
+    assert_project_registers(
+        "project.delete_library",
+        "ProjectFeature::process_delete_library_dialog",
+    );
+    assert_project_registers(
+        "project.rename_view",
+        "ProjectFeature::process_rename_view_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
