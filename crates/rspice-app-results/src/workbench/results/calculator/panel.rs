@@ -12,8 +12,11 @@
 //! across frames. This module is a second inherent impl on that type:
 //! rendering stays with the renderer, session data stays with the session.
 
+use std::borrow::Cow;
+
 use egui::Ui;
 
+use crate::analysis::calculator::catalogue::{MEASUREMENTS, MeasureSpec};
 use crate::state::SimulationState;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
@@ -48,11 +51,11 @@ pub(super) fn body_width(ctx: &egui::Context) -> f32 {
                 .x
         })
     };
-    let longest_row = [MATH_FUNCTIONS, SIGNAL_FUNCTIONS, MEASURE_FUNCTIONS]
+    let longest_row = FunctionCategory::ALL
         .into_iter()
-        .flatten()
+        .flat_map(FunctionCategory::entries)
         .map(|entry| {
-            measure(entry.label, theme::mono(tokens::FS_1, FontWeight::Regular))
+            measure(&entry.label, theme::mono(tokens::FS_1, FontWeight::Regular))
                 + ROW_GAP
                 + measure(entry.hint, theme::sans(tokens::FS_0, FontWeight::Regular))
         })
@@ -66,229 +69,144 @@ pub(super) fn body_width(ctx: &egui::Context) -> f32 {
 
 /// One function-reference row: label, one-line hint, what to insert, and
 /// how many characters the caret steps back into the inserted text.
+#[derive(Clone)]
 struct FunctionEntry {
-    label: &'static str,
+    label: Cow<'static, str>,
     hint: &'static str,
-    insert: &'static str,
+    insert: Cow<'static, str>,
     caret_back: usize,
+}
+
+impl FunctionEntry {
+    /// A catalogued measurement's row: its signature with the optional
+    /// arguments folded, inserted as an empty call.
+    fn measurement(spec: &'static MeasureSpec) -> Self {
+        Self {
+            label: Cow::Owned(spec.short_signature()),
+            hint: spec.summary,
+            insert: Cow::Owned(format!("{}()", spec.name)),
+            caret_back: 1,
+        }
+    }
 }
 
 const MATH_FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry {
-        label: "complex(re, im)",
+        label: Cow::Borrowed("complex(re, im)"),
         hint: "rectangular complex value",
-        insert: "complex(, )",
+        insert: Cow::Borrowed("complex(, )"),
         caret_back: 3,
     },
     FunctionEntry {
-        label: "abs(x)",
+        label: Cow::Borrowed("abs(x)"),
         hint: "absolute value",
-        insert: "abs()",
+        insert: Cow::Borrowed("abs()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "sqrt(x)",
+        label: Cow::Borrowed("sqrt(x)"),
         hint: "square root",
-        insert: "sqrt()",
+        insert: Cow::Borrowed("sqrt()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "log(x)",
+        label: Cow::Borrowed("log(x)"),
         hint: "natural log",
-        insert: "log()",
+        insert: Cow::Borrowed("log()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "log10(x)",
+        label: Cow::Borrowed("log10(x)"),
         hint: "log base 10",
-        insert: "log10()",
+        insert: Cow::Borrowed("log10()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "exp(x)",
+        label: Cow::Borrowed("exp(x)"),
         // Plex has no modifier small x: "eˣ" drew a missing-glyph box.
         hint: "exponential",
-        insert: "exp()",
+        insert: Cow::Borrowed("exp()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "x ^ n",
+        label: Cow::Borrowed("x ^ n"),
         hint: "power",
-        insert: " ^ ",
+        insert: Cow::Borrowed(" ^ "),
         caret_back: 0,
     },
 ];
 
 const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry {
-        label: "mag(x)",
+        label: Cow::Borrowed("mag(x)"),
         hint: "complex magnitude",
-        insert: "mag()",
+        insert: Cow::Borrowed("mag()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "real(x)",
+        label: Cow::Borrowed("real(x)"),
         hint: "real component",
-        insert: "real()",
+        insert: Cow::Borrowed("real()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "imag(x)",
+        label: Cow::Borrowed("imag(x)"),
         hint: "imaginary component",
-        insert: "imag()",
+        insert: Cow::Borrowed("imag()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "phase(x)",
+        label: Cow::Borrowed("phase(x)"),
         hint: "phase in degrees; undefined at zero",
-        insert: "phase()",
+        insert: Cow::Borrowed("phase()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "phase_rad(x)",
+        label: Cow::Borrowed("phase_rad(x)"),
         hint: "phase in radians",
-        insert: "phase_rad()",
+        insert: Cow::Borrowed("phase_rad()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "conj(x)",
+        label: Cow::Borrowed("conj(x)"),
         hint: "complex conjugate",
-        insert: "conj()",
+        insert: Cow::Borrowed("conj()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "dB(x)",
+        label: Cow::Borrowed("dB(x)"),
         hint: "20·log₁₀|x|",
-        insert: "dB()",
+        insert: Cow::Borrowed("dB()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "deriv(x)",
+        label: Cow::Borrowed("deriv(x)"),
         hint: "d/dt",
-        insert: "deriv()",
+        insert: Cow::Borrowed("deriv()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "integ(x)",
+        label: Cow::Borrowed("integ(x)"),
         hint: "∫ dt",
-        insert: "integ()",
+        insert: Cow::Borrowed("integ()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "clip(x, lo, hi)",
+        label: Cow::Borrowed("clip(x, lo, hi)"),
         hint: "limit range",
-        insert: "clip(, , )",
+        insert: Cow::Borrowed("clip(, , )"),
         caret_back: 5,
     },
     FunctionEntry {
-        label: "unwrap(x)",
+        label: Cow::Borrowed("unwrap(x)"),
         hint: "continuous phase in degrees",
-        insert: "unwrap()",
+        insert: Cow::Borrowed("unwrap()"),
         caret_back: 1,
     },
     FunctionEntry {
-        label: "xval(x)",
+        label: Cow::Borrowed("xval(x)"),
         hint: "domain as a trace",
-        insert: "xval()",
-        caret_back: 1,
-    },
-];
-
-const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry {
-        label: "avg(x)",
-        hint: "mean over the window",
-        insert: "avg()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "rms(x)",
-        hint: "root mean square",
-        insert: "rms()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "min(x)",
-        hint: "lowest sample",
-        insert: "min()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "max(x)",
-        hint: "highest sample",
-        insert: "max()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "pp(x)",
-        hint: "peak to peak",
-        insert: "pp()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "yval(x, at)",
-        hint: "value at an x",
-        insert: "yval(, )",
-        caret_back: 3,
-    },
-    FunctionEntry {
-        label: "cross(x, lvl, n)",
-        hint: "x of the nth crossing",
-        insert: "cross(, , )",
-        caret_back: 5,
-    },
-    FunctionEntry {
-        label: "freq(x)",
-        hint: "repetition rate",
-        insert: "freq()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "period(x)",
-        hint: "1 / freq",
-        insert: "period()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "duty(x)",
-        hint: "% above mid level",
-        insert: "duty()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "rise(x)",
-        hint: "10–90 % rising edge",
-        insert: "rise()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "fall(x)",
-        hint: "90–10 % falling edge",
-        insert: "fall()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "overshoot(x)",
-        hint: "% past the final value",
-        insert: "overshoot()",
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: "settling(x, %)",
-        hint: "time into the band",
-        insert: "settling(, )",
-        caret_back: 3,
-    },
-    FunctionEntry {
-        label: "delay(a, b)",
-        hint: "between mid crossings",
-        insert: "delay(, )",
-        caret_back: 3,
-    },
-    FunctionEntry {
-        label: "thd(x, n, f0)",
-        hint: "% distortion; n and explicit f0 optional",
-        insert: "thd()",
+        insert: Cow::Borrowed("xval()"),
         caret_back: 1,
     },
 ];
@@ -296,11 +214,17 @@ const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
 const FUNCTION_CONVENTIONS: &str = "phase() and unwrap() use degrees; phase_rad() uses radians";
 
 impl FunctionCategory {
-    fn entries(self) -> &'static [FunctionEntry] {
+    /// The rows under this category. The measurements are the shared
+    /// catalogue's, so this reference and Add measurement list the same
+    /// functions with the same arguments.
+    fn entries(self) -> Vec<FunctionEntry> {
         match self {
-            FunctionCategory::Math => MATH_FUNCTIONS,
-            FunctionCategory::Signal => SIGNAL_FUNCTIONS,
-            FunctionCategory::Measure => MEASURE_FUNCTIONS,
+            FunctionCategory::Math => MATH_FUNCTIONS.to_vec(),
+            FunctionCategory::Signal => SIGNAL_FUNCTIONS.to_vec(),
+            FunctionCategory::Measure => MEASUREMENTS
+                .iter()
+                .map(FunctionEntry::measurement)
+                .collect(),
         }
     }
 
@@ -553,8 +477,8 @@ impl CalculatorPanel {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for entry in self.category.entries() {
-                    if function_row(ui, entry).clicked() {
-                        *insert = Some((entry.insert.to_owned(), entry.caret_back));
+                    if function_row(ui, &entry).clicked() {
+                        *insert = Some((entry.insert.to_string(), entry.caret_back));
                     }
                 }
             });
@@ -729,7 +653,7 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
     painter.text(
         egui::pos2(rect.left() + ROW_INSET, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        entry.label,
+        &entry.label,
         theme::mono(tokens::FS_1, FontWeight::Regular),
         mix(c.text_dim, c.text, hover),
     );

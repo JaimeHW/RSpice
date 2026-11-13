@@ -4,6 +4,7 @@
 //! Callers supply their numeric literal policy and bind live waveforms.
 
 pub mod ast;
+pub mod catalogue;
 mod complex_functions;
 mod complex_ops;
 pub mod evaluator;
