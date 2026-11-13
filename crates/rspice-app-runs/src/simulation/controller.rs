@@ -855,8 +855,11 @@ impl SimulationController {
                 candidate.snapshot_digest(),
                 candidate.dependencies().to_vec(),
             )
-            .map(|provenance| provenance.with_pvt_point(candidate.pvt_point().cloned()))
-            {
+            .and_then(|provenance| {
+                provenance
+                    .with_pvt_point(candidate.pvt_point().cloned())
+                    .with_family_member(candidate.family_member().cloned())
+            }) {
                 Ok(provenance) => provenance,
                 Err(error) => {
                     self.run_line(
@@ -910,8 +913,11 @@ impl SimulationController {
             next_analysis.snapshot_digest(),
             next_analysis.dependencies().to_vec(),
         )
-        .map(|provenance| provenance.with_pvt_point(next_analysis.pvt_point().cloned()))
-        {
+        .and_then(|provenance| {
+            provenance
+                .with_pvt_point(next_analysis.pvt_point().cloned())
+                .with_family_member(next_analysis.family_member().cloned())
+        }) {
             Ok(provenance) => provenance,
             Err(error) => {
                 self.run_line(

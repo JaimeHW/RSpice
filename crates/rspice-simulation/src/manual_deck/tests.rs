@@ -841,7 +841,8 @@ fn manual_deck_temp_list_uses_paired_op_base_analysis() {
 }
 
 #[test]
-fn manual_deck_parameter_step_retains_transient_base_analysis() {
+fn manual_deck_parameter_step_of_a_transient_runs_one_transient_per_point() {
+    use crate::execution_options::TransientMember;
     let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
             reference_pvt.temperature_celsius,
@@ -849,12 +850,90 @@ fn manual_deck_parameter_step_retains_transient_base_analysis() {
         )
         .expect("parameter step with transient should be planned");
 
-    assert_eq!(queue.len(), 1);
-    assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+    assert_eq!(queue.len(), 2, "{queue:?}");
+    for (index, task) in queue.iter().enumerate() {
+        assert!(matches!(task.spec, AnalysisSpec::Transient { .. }));
+        assert_eq!(
+            task.spec_options.member,
+            Some(TransientMember::StepPoint { index })
+        );
+        assert!(task.spec_options.parametric_base.is_none());
+    }
+}
+
+#[test]
+fn manual_deck_monte_carlo_of_a_transient_runs_one_transient_per_trial() {
+    use crate::execution_options::TransientMember;
+    use rspice_simulation_contract::mc_draft::McVariationSource;
+    let reference_pvt = ReferencePoint::default();
+    let deck = "deck\n.param r={agauss(1k,100,1)}\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 {r}\n.op\n.mc 3 seed 9\n.tran 1n 10n\n.end\n";
+    let queue = build_manual_deck_queue(reference_pvt.temperature_celsius, deck)
+        .expect("Monte Carlo transient is planned");
+    // The operating point runs as it stands; the study varies the transient.
     assert!(matches!(
-        queue[0].spec_options.parametric_base,
-        Some(CornerBaseMode::Transient { .. })
+        queue[0].spec,
+        AnalysisSpec::DcOp { .. } | AnalysisSpec::LegacyDcOp
     ));
+    let trials: Vec<_> = queue[1..]
+        .iter()
+        .map(|task| {
+            assert!(matches!(task.spec, AnalysisSpec::Transient { .. }));
+            task.spec_options.member
+        })
+        .collect();
+    assert_eq!(
+        trials,
+        (0..3)
+            .map(|index| Some(TransientMember::MonteCarloTrial {
+                index,
+                variation_source: McVariationSource::DeckStatistics,
+            }))
+            .collect::<Vec<_>>()
+    );
+
+    // Without a .tran the card keeps its operating-point study.
+    let study = build_manual_deck_queue(
+        reference_pvt.temperature_celsius,
+        "deck\n.param r={agauss(1k,100,1)}\nV1 out 0 1\nR1 out 0 {r}\n.mc 3 seed 9\n.end\n",
+    )
+    .expect("operating-point study");
+    assert!(matches!(
+        study[..],
+        [QueuedAnalysis {
+            spec: AnalysisSpec::MonteCarlo { .. },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn manual_deck_transient_family_refusals_name_the_conflict() {
+    let reference_pvt = ReferencePoint::default();
+    let refused = |deck: &str| {
+        build_manual_deck_queue(reference_pvt.temperature_celsius, deck)
+            .expect_err("refused")
+            .join("\n")
+    };
+    let both = refused(
+        "deck\n.param r={agauss(1k,100,1)}\nV1 out 0 1\nR1 out 0 {r}\n.mc 3\n.step param r list 1k 2k\n.tran 1n 10n\n.end\n",
+    );
+    assert!(
+        both.contains("both a Monte Carlo study (.mc) and a .step sweep"),
+        "{both}"
+    );
+    let fourier = refused(
+        "deck\n.param r={agauss(1k,100,1)}\nV1 out 0 SIN(0 1 1meg)\nR1 out 0 {r}\n.mc 3\n.tran 1n 10u\n.four 1meg V(out)\n.end\n",
+    );
+    assert!(
+        fourier.contains("would read only the first of them"),
+        "{fourier}"
+    );
+    let nominal =
+        refused("deck\n.param r=1k\nV1 out 0 1\nR1 out 0 {r}\n.mc 3\n.tran 1n 10n\n.end\n");
+    assert!(
+        nominal.contains("refusing to perturb every .param"),
+        "{nominal}"
+    );
 }
 
 #[test]

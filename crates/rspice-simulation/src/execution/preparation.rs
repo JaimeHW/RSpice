@@ -874,11 +874,12 @@ pub fn build_prepared_manual_deck<R, A>(
         )
     })?;
     let source_digest = manual_executable_source_digest(&expanded);
-    let tasks = prepare_manual_tasks(
+    let mut tasks = prepare_manual_tasks(
         source_digest,
         inputs.technology.project.revision(),
         queued_tasks,
     )?;
+    attach_transient_family_members(&mut tasks, &expanded)?;
     reject_deferred_corner_model_sources(
         tasks.iter().map(PreparedTask::queued_analysis),
         &expanded,
@@ -953,6 +954,64 @@ pub fn build_prepared_manual_deck<R, A>(
         touchstone_export,
         sealed_source_dependencies,
     })
+}
+
+/// Record on each transient that solves one trial or point of the deck's
+/// `.MC` study or `.STEP` sweep which member it solves, with the value each
+/// swept axis takes at a point, and name the task after it.
+fn attach_transient_family_members(
+    tasks: &mut [PreparedTask],
+    expanded: &str,
+) -> Result<(), PreparationError> {
+    use crate::execution_options::TransientMember;
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    let member_of = |task: &PreparedTask| task.queued_analysis().spec_options.member;
+    if !tasks.iter().any(|task| member_of(task).is_some()) {
+        return Ok(());
+    }
+    let refused = |error: String| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(".step transient: {error}"),
+        )
+    };
+    let points = if tasks
+        .iter()
+        .any(|task| matches!(member_of(task), Some(TransientMember::StepPoint { .. })))
+    {
+        let netlist =
+            rspice_core::Netlist::parse(&manual_deck::compose_manual_deck_source(expanded))
+                .map_err(|error| refused(error.to_string()))?;
+        crate::transient_family::step_members(&netlist, &Default::default()).map_err(refused)?
+    } else {
+        Vec::new()
+    };
+    for task in tasks {
+        let record = match member_of(task) {
+            None => continue,
+            Some(TransientMember::MonteCarloTrial { index, .. }) => {
+                AnalysisResultFamilyMember::MonteCarloTrial { index }
+            }
+            Some(TransientMember::StepPoint { index }) => {
+                let point = points
+                    .get(index)
+                    .ok_or_else(|| refused(format!("the sweep has no point {index}")))?;
+                AnalysisResultFamilyMember::StepPoint {
+                    index,
+                    coordinate: point
+                        .coordinate
+                        .iter()
+                        .map(|(name, value)| AnalysisResultStepCoordinate {
+                            name: name.clone(),
+                            value: *value,
+                        })
+                        .collect(),
+                }
+            }
+        };
+        task.set_family_member(record);
+    }
+    Ok(())
 }
 
 pub fn touchstone_export_policy<'a>(

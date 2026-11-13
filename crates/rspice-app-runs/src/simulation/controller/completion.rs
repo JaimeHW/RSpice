@@ -176,6 +176,12 @@ impl SimulationController {
                 }
                 let retention_error = analysis_result.error_message.clone();
                 if let Some(provenance) = self.current_provenance.take() {
+                    // One member of a Monte Carlo or .STEP transient is named
+                    // after the trial or point it solved, as its task is.
+                    if let Some(member) = provenance.family_member() {
+                        analysis_result.label =
+                            format!("{} \u{00b7} {}", analysis_result.label, member.label());
+                    }
                     let completed_instance = provenance.source_instance_id();
                     match self.retain_completed_analysis(
                         state.model_mut(),

@@ -320,6 +320,9 @@ pub struct PreparedTask {
     /// it; a task that runs once for the whole declared space has no point,
     /// and naming one would attribute its results to a corner it never solved.
     pvt_point: Option<rspice_results::provenance::AnalysisResultPvtPoint>,
+    /// The Monte Carlo trial or `.STEP` point this transient solves, with the
+    /// coordinate the point takes. Set with the member the task names.
+    family_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
     /// The PVT declaration this task solves one point of. The declaration is
     /// never dispatched, so this is the only record of which base analysis it
     /// ran and where this point sits in the space it declared.
@@ -380,6 +383,7 @@ impl PreparedTask {
             veriloga_runtimes: None,
             source_basis_digest: None,
             pvt_point: None,
+            family_member: None,
             declared_point: None,
             execution_environment: None,
             run_at: rspice_simulation_contract::analysis_run_at::AnalysisRunAt::default(),
@@ -488,6 +492,16 @@ impl PreparedTask {
     #[cfg(test)]
     pub const fn pvt_point(&self) -> Option<&rspice_results::provenance::AnalysisResultPvtPoint> {
         self.pvt_point.as_ref()
+    }
+
+    /// Record which trial or point of the deck's family this transient
+    /// solves, and name the task after it.
+    pub(crate) fn set_family_member(
+        &mut self,
+        member: rspice_results::provenance::AnalysisResultFamilyMember,
+    ) {
+        self.label = format!("{} \u{00b7} {}", self.label, member.label());
+        self.family_member = Some(member);
     }
 
     fn payload_digest(&self) -> ContentDigest {
@@ -618,6 +632,7 @@ pub struct AuthorizedTaskDispatch {
     data_files: crate::data_files::PreparedDataFiles,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<rspice_results::provenance::AnalysisResultPvtPoint>,
+    family_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
     declared_point: Option<crate::point_family::DeclaredRunPoint>,
     execution_environment: Option<crate::runner::AnalysisExecutionEnvironment>,
     execution_limits: rspice_core::ResourceLimits,
@@ -708,6 +723,14 @@ impl AuthorizedTaskDispatch {
     /// point-specific.
     pub const fn pvt_point(&self) -> Option<&rspice_results::provenance::AnalysisResultPvtPoint> {
         self.pvt_point.as_ref()
+    }
+
+    /// The Monte Carlo trial or `.STEP` point this transient solves, or
+    /// `None` when it solves the deck as it stands.
+    pub const fn family_member(
+        &self,
+    ) -> Option<&rspice_results::provenance::AnalysisResultFamilyMember> {
+        self.family_member.as_ref()
     }
 
     /// The PVT declaration this task solves one point of, when it is one.
@@ -1780,6 +1803,7 @@ impl PreparedRunSnapshot {
                     data_files: data_files.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
+                    family_member: prepared.family_member,
                     declared_point: prepared.declared_point,
                     execution_environment: prepared.execution_environment,
                     transient_state: prepared.transient_state,

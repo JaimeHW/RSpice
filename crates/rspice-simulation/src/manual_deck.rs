@@ -83,13 +83,22 @@ pub fn build_manual_deck_queue_with_runtimes(
     let parsed =
         Netlist::parse(&source).map_err(|err| vec![format!("Netlist parse error: {err}")])?;
     let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source, runtimes)?;
-    queue_manual_deck_analyses(reference_temperature_celsius, parsed, periodic_tasks)
-        .map_err(ManualDeckError::Cards)
+    queue_manual_deck_analyses(
+        reference_temperature_celsius,
+        &source,
+        parsed,
+        periodic_tasks,
+    )
+    .map_err(ManualDeckError::Cards)
 }
 
 /// Queue the deck's own analyses around its lowered periodic tasks.
+///
+/// `deck` is the source `parsed` was read from, with its includes expanded
+/// wherever the caller has them.
 fn queue_manual_deck_analyses(
     reference_temperature_celsius: f64,
+    deck: &str,
     parsed: Netlist,
     periodic_tasks: Vec<QueuedAnalysis>,
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
@@ -129,30 +138,51 @@ fn queue_manual_deck_analyses(
         Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
-    let parameter_step_plan = match build_parameter_step_plan(&parsed.analyses) {
+    let parameter_step_plan =
+        match build_parameter_step_plan(reference_temperature_celsius, &parsed) {
+            Ok(plan) => plan,
+            Err(err) => return Err(vec![err]),
+        };
+    let monte_carlo_plan = match build_monte_carlo_transient_plan(
+        reference_temperature_celsius,
+        &parsed,
+        deck,
+        [&temperature_plan, &parameter_step_plan],
+    ) {
         Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
+    let plans = [temperature_plan, parameter_step_plan, monte_carlo_plan];
+    let transient_family = plans
+        .iter()
+        .flatten()
+        .flat_map(|plan| &plan.items)
+        .any(|item| item.spec_options.member.is_some());
+    if transient_family
+        && (parsed
+            .analyses
+            .iter()
+            .any(|command| matches!(command, AnalysisCommand::Four { .. }))
+            || !parsed.fft_analyses.is_empty())
+    {
+        return Err(vec![
+            "A Monte Carlo or .step transient runs one transient per trial or point, and a .four or .fft card would read only the first of them. Remove the card, or run the transient without its .mc or .step."
+                .to_owned(),
+        ]);
+    }
 
     let mut queue = Vec::with_capacity(parsed.analyses.len());
     let mut errors = Vec::new();
     for (idx, command) in parsed.analyses.iter().enumerate() {
-        if let Some(plan) = &temperature_plan
-            && idx == plan.insert_index
-        {
-            queue.push(plan.item.clone());
+        for plan in plans.iter().flatten() {
+            if idx == plan.insert_index {
+                queue.extend(plan.items.iter().cloned());
+            }
         }
-        if let Some(plan) = &parameter_step_plan
-            && idx == plan.insert_index
-        {
-            queue.push(plan.item.clone());
-        }
-        if temperature_plan
-            .as_ref()
-            .is_some_and(|plan| plan.skip_indices.contains(&idx))
-            || parameter_step_plan
-                .as_ref()
-                .is_some_and(|plan| plan.skip_indices.contains(&idx))
+        if plans
+            .iter()
+            .flatten()
+            .any(|plan| plan.skip_indices.contains(&idx))
         {
             continue;
         }
@@ -334,7 +364,7 @@ fn finalize_manual_fourier_contracts(queue: &mut [QueuedAnalysis]) -> Result<(),
 struct PlannedQueueItem {
     insert_index: usize,
     skip_indices: Vec<usize>,
-    item: QueuedAnalysis,
+    items: Vec<QueuedAnalysis>,
 }
 
 fn build_temperature_plan(
@@ -434,7 +464,7 @@ fn build_temperature_plan(
     Ok(Some(PlannedQueueItem {
         insert_index,
         skip_indices,
-        item: QueuedAnalysis {
+        items: vec![QueuedAnalysis {
             numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
@@ -446,13 +476,101 @@ fn build_temperature_plan(
                 ..SpecExecutionOptions::default()
             },
             analysis_line,
-        },
+        }],
+    }))
+}
+
+/// One transient per member of the deck's `.MC` study or `.STEP` sweep:
+/// the deck's `.TRAN` lowered as it is on its own, each copy naming its
+/// member. The deck keeps the family card, which is what each member is
+/// materialized from.
+fn transient_family_items(
+    reference_temperature_celsius: f64,
+    parsed: &Netlist,
+    tran: &AnalysisCommand,
+    members: Vec<crate::transient_family::TransientFamilyMember>,
+) -> Result<Vec<QueuedAnalysis>, String> {
+    let base = command_to_queue_item(reference_temperature_celsius, parsed, tran)?;
+    Ok(members
+        .into_iter()
+        .map(|member| {
+            let mut item = base.clone();
+            item.spec_options.member = Some(member.member);
+            item
+        })
+        .collect())
+}
+
+/// A `.MC` study paired with the deck's `.TRAN`: one transient per trial,
+/// each keeping its own waveforms, events and `.MEAS` results.
+///
+/// The study varies the transient the deck states. A deck with no `.TRAN`
+/// keeps its operating-point study; a `.TRAN` that a temperature or
+/// parameter `.STEP` already sweeps is refused, because a trial and a point
+/// cannot both be the member one transient solves.
+fn build_monte_carlo_transient_plan(
+    reference_temperature_celsius: f64,
+    parsed: &Netlist,
+    deck: &str,
+    claimed: [&Option<PlannedQueueItem>; 2],
+) -> Result<Option<PlannedQueueItem>, String> {
+    let analyses = &parsed.analyses;
+    let Some(mc_index) = analyses
+        .iter()
+        .position(|command| matches!(command, AnalysisCommand::MonteCarlo(_)))
+    else {
+        return Ok(None);
+    };
+    let transients = analyses
+        .iter()
+        .enumerate()
+        .filter(|(_, command)| matches!(command, AnalysisCommand::Tran { .. }))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [tran_index] = transients.as_slice() else {
+        if transients.is_empty() {
+            return Ok(None);
+        }
+        return Err(format!(
+            "A manual Monte Carlo transient varies one .tran; found {}. Split the transients into separate runs.",
+            transients.len()
+        ));
+    };
+    if claimed
+        .iter()
+        .copied()
+        .flatten()
+        .any(|plan| plan.skip_indices.contains(tran_index))
+    {
+        return Err(
+            "The deck's .tran is both a Monte Carlo study (.mc) and a .step sweep; a manual deck runs one of them per run. Split them into separate runs."
+                .to_owned(),
+        );
+    }
+    let members = crate::transient_family::monte_carlo_members(
+        parsed,
+        crate::transient_family::deck_states_statistics(deck),
+    )
+    .map_err(|error| format!("Monte Carlo transient: {error}"))?;
+    let mut skip_indices = vec![mc_index, *tran_index];
+    skip_indices.sort_unstable();
+    Ok(Some(PlannedQueueItem {
+        insert_index: skip_indices[0],
+        skip_indices,
+        items: transient_family_items(
+            reference_temperature_celsius,
+            parsed,
+            &analyses[*tran_index],
+            members,
+        )?,
     }))
 }
 
 fn build_parameter_step_plan(
-    analyses: &[AnalysisCommand],
+    reference_temperature_celsius: f64,
+    parsed: &Netlist,
 ) -> Result<Option<PlannedQueueItem>, String> {
+    let analyses = &parsed.analyses;
     let Some((step_index, step)) = analyses.iter().enumerate().find_map(|(idx, command)| {
         if let AnalysisCommand::Step(step) = command {
             (step.target != StepTarget::Temp).then_some((idx, step))
@@ -510,10 +628,14 @@ fn build_parameter_step_plan(
     skip_indices.sort_unstable();
     skip_indices.dedup();
 
-    Ok(Some(PlannedQueueItem {
-        insert_index: skip_indices[0],
-        skip_indices,
-        item: QueuedAnalysis {
+    // A swept transient keeps every point's waveforms: one transient per
+    // point rather than one value per point.
+    let items = if let Some((_, tran @ AnalysisCommand::Tran { .. })) = supported_bases.first() {
+        let members = crate::transient_family::step_members(parsed, &Default::default())
+            .map_err(|error| format!(".step transient: {error}"))?;
+        transient_family_items(reference_temperature_celsius, parsed, tran, members)?
+    } else {
+        vec![QueuedAnalysis {
             numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
@@ -522,7 +644,12 @@ fn build_parameter_step_plan(
                 ..SpecExecutionOptions::default()
             },
             analysis_line: format!(".step {}", step_target_name(step)),
-        },
+        }]
+    };
+    Ok(Some(PlannedQueueItem {
+        insert_index: skip_indices[0],
+        skip_indices,
+        items,
     }))
 }
 
