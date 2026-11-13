@@ -102,6 +102,11 @@ impl<'a> CanvasFacts<'a> {
         self.model.active_view_read_only()
     }
 
+    /// Whether a selection drag is under way.
+    pub(crate) fn schematic_drag_in_progress(&self) -> bool {
+        self.design.interaction.drag.in_progress(self.model)
+    }
+
     /// The design the canvas shows: the model's, with the review markers
     /// the design slot asks for.
     pub(crate) fn design_view(&self) -> DesignView<'a> {

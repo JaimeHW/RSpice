@@ -3,15 +3,15 @@
 //! paste. Every reference editor does this; without it a part cannot be
 //! carried past what is on screen.
 
-use super::AppState;
+use super::parts::{CanvasFacts, CanvasParts};
 use egui::{Popup, Rect, Response, Ui};
 use rspice_schematic_editor::view::navigation::apply_edge_pan;
 
 /// Pan toward the edge the pointer rests near, if a gesture is carrying
 /// something, and keep frames coming while it does.
-pub(super) fn edge_pan(ui: &Ui, response: &Response, canvas: Rect, state: &mut AppState) {
+pub(super) fn edge_pan(ui: &Ui, response: &Response, canvas: Rect, state: &mut CanvasParts<'_>) {
     if !state.model.preferences.canvas_navigation().edge_pan
-        || !carrying(state)
+        || !carrying(&state.facts())
         || state.application_modal_open()
         || Popup::is_any_open(ui.ctx())
     {
@@ -34,7 +34,7 @@ pub(super) fn edge_pan(ui: &Ui, response: &Response, canvas: Rect, state: &mut A
 }
 
 /// Whether a gesture is carrying something across the canvas.
-fn carrying(state: &AppState) -> bool {
+fn carrying(state: &CanvasFacts<'_>) -> bool {
     let editor = &state.model.schematic.session.editor;
     let move_draft = &state.design.move_selection;
     let stretch_draft = &state.design.stretch_selection;

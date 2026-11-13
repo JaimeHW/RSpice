@@ -6,19 +6,18 @@ use rspice_schematic_editor::view::keyboard_navigation::{
     self, KeyboardCapabilities, KeyboardNavigationOutcome, KeyboardNavigationView,
 };
 
-use super::SchematicSymbolContext;
+use super::{SchematicSymbolContext, parts::CanvasParts};
 use crate::workbench::TogglePreference;
-use crate::workbench::app_state::AppState;
 
 pub(super) fn handle_keyboard_object_navigation(
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
 ) -> bool {
     let outcome = keyboard_navigation::handle_keyboard_object_navigation(
         response,
         &KeyboardNavigationView {
-            design: super::schematic_design_view(state),
+            design: state.design_view(),
             editor: &state.model.schematic.session.editor,
             keyboard_focus: state.design.interaction.schematic_keyboard_focus,
             filter: state.design.schematic_selection_filter,
@@ -38,7 +37,7 @@ pub(super) fn handle_keyboard_object_navigation(
         KeyboardNavigationOutcome::Ignored => false,
         KeyboardNavigationOutcome::Consumed => true,
         KeyboardNavigationOutcome::Request(request) => {
-            apply_editor_request(&mut super::canvas_parts(state), *request);
+            apply_editor_request(state, *request);
             true
         }
     }
@@ -46,6 +45,7 @@ pub(super) fn handle_keyboard_object_navigation(
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::workbench::app_state::SchematicKeyboardFocus;
@@ -204,7 +204,11 @@ mod tests {
                     ui.memory_mut(|memory| memory.request_focus(Id::new("other-control")));
                 }
                 let symbol_context = schematic_symbol_context(state);
-                let handled = handle_keyboard_object_navigation(&response, state, &symbol_context);
+                let handled = handle_keyboard_object_navigation(
+                    &response,
+                    &mut crate::schematic::view::canvas_parts(state),
+                    &symbol_context,
+                );
                 let key_still_available = ui
                     .ctx()
                     .input_mut(|input| input.consume_key(modifiers, key));

@@ -17,8 +17,10 @@ use egui::{Context, Id};
 use crate::state::{
     ActiveSheetTopology, SchematicSelectionFilter, SchematicState, Selection, SheetCatalog,
 };
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 
+#[cfg(test)]
+use super::AppState;
 use super::{SchematicSymbolContext, SelectionWindow, parts::CanvasParts};
 
 /// How much of a cell view a dock lists.
@@ -48,7 +50,11 @@ impl SheetScope {
 }
 
 /// Whether one object is listed under `scope`.
-pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id: u64) -> bool {
+pub(crate) fn object_is_in_scope(
+    state: &impl AsRef<Model>,
+    scope: SheetScope,
+    object_id: u64,
+) -> bool {
     scope == SheetScope::AllSheets || object_is_on_active_sheet(state, object_id)
 }
 
@@ -59,8 +65,8 @@ pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id:
 /// sheet, names one, or counts them asks this first and says nothing at all
 /// when it answers `None`, so none of them can offer a control with one
 /// position or a page number with one page.
-pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    state.model.multi_sheet_catalog()
+pub(crate) fn multi_sheet_catalog(state: &impl AsRef<Model>) -> Option<&SheetCatalog> {
+    state.as_ref().multi_sheet_catalog()
 }
 
 /// The active cell view's sheet catalog, however many sheets it holds.
@@ -117,15 +123,15 @@ fn object_is_on_active_sheet_in_workspace(
 /// This is also the sheet-switch boundary: stale IDs from a previously active
 /// sheet can never flow into keyboard commands or context-menu actions.
 #[cfg(test)]
-pub(super) fn selection_on_active_sheet(state: &AppState) -> Selection {
-    selection_filtered_to_active_sheet(state, &state.model.schematic.session.editor.selection)
+pub(super) fn selection_on_active_sheet(state: &impl AsRef<Model>) -> Selection {
+    selection_filtered_to_active_sheet(state, &state.as_ref().schematic.session.editor.selection)
 }
 
 pub(crate) fn selection_filtered_to_active_sheet(
-    state: &AppState,
+    state: &impl AsRef<Model>,
     source: &Selection,
 ) -> Selection {
-    selection_filtered_to_active_sheet_in(&state.model, source)
+    selection_filtered_to_active_sheet_in(state.as_ref(), source)
 }
 
 /// [`selection_filtered_to_active_sheet`] over the model alone.
@@ -213,13 +219,9 @@ pub(crate) fn selection_filtered_to_active_sheet_in(
     selection
 }
 
-#[cfg(test)]
-pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
-    let selection = selection_on_active_sheet(state);
-    state.model.schematic.session.editor.selection = selection;
-}
-
-/// [`retain_selection_on_active_sheet`] over the model alone.
+/// Keep in the session's selection only the objects on the active sheet.
+/// This is the sheet-switch boundary applied: stale IDs from a previously
+/// active sheet never reach keyboard commands or context-menu actions.
 pub(crate) fn retain_selection_on_active_sheet_in(model: &mut Model) {
     let selection =
         selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
@@ -747,7 +749,7 @@ mod tests {
             .selection
             .select_component(20);
 
-        retain_selection_on_active_sheet(&mut state);
+        retain_selection_on_active_sheet_in(&mut state.model);
         assert!(state.model.schematic.session.editor.selection.is_empty());
 
         state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(

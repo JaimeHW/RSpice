@@ -4,7 +4,9 @@
 //! a chooser that lists them in pick order.
 
 use super::{
-    AppState, DesignState, Model, SchematicSymbolContext, model_design_view, viewport::Viewport,
+    DesignState, Model, SchematicSymbolContext, model_design_view,
+    parts::{CanvasFacts, CanvasParts},
+    viewport::Viewport,
 };
 use crate::state::Point;
 use egui::{Context, Id, Pos2, Response};
@@ -216,21 +218,21 @@ pub(super) fn chooser_takes_click(ctx: &Context) -> bool {
 /// two or more do.
 pub(super) fn open_chooser_at(
     ctx: &Context,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     position: Pos2,
     symbol_context: &SchematicSymbolContext,
     viewport: &Viewport,
 ) {
     let query = ToolPointerView {
-        design: super::schematic_design_view(state),
+        design: state.design_view(),
         snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
     let candidates = candidates_at(
         ctx,
-        &state.model,
-        &state.design,
+        state.model,
+        state.design,
         query,
         symbol_context,
         viewport,
@@ -238,7 +240,7 @@ pub(super) fn open_chooser_at(
     if candidates.len() < 2 {
         return;
     }
-    let rows = chooser_rows(&state.model, &candidates);
+    let rows = chooser_rows(state.model, &candidates);
     if let Some(chooser) = PickChooser::open(position, rows, pointer_target::canvas_touch_mode(ctx))
     {
         ctx.data_mut(|data| {
@@ -251,7 +253,7 @@ pub(super) fn open_chooser_at(
 /// Show the open chooser for this frame and apply what the person chose.
 /// Runs before the canvas tools, so its keys (arrows, Enter, Esc) never
 /// reach them.
-pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
+pub(super) fn show_chooser(ctx: &Context, state: &mut CanvasParts<'_>) {
     let Some(mut chooser) = open_chooser(ctx) else {
         return;
     };
@@ -280,7 +282,7 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
                 alt_held: false,
             },
         };
-        super::requests::apply_editor_request(&mut super::canvas_parts(state), request);
+        super::requests::apply_editor_request(state, request);
     }
 }
 

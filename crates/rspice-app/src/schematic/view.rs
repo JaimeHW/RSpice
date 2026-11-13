@@ -383,7 +383,7 @@ pub fn render_schematic_view(
         min_zoom,
         canvas_navigation,
     );
-    edge_pan::edge_pan(ui, &response, available, state);
+    edge_pan::edge_pan(ui, &response, available, &mut canvas_parts(state));
     let editor = &mut state.model.schematic.session.editor;
     editor
         .view_history
@@ -399,10 +399,10 @@ pub fn render_schematic_view(
         .as_ref()
         .and_then(|_| ui.ctx().pointer_hover_pos());
     let shelf_drag_over_canvas = shelf_drag.is_some() && shelf_drag_position.is_some();
-    handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
+    handle_placement_transform_keys(&response, &mut canvas_parts(state), shelf_drag_over_canvas);
     let shelf_drop = shelf_drag
         .as_deref()
-        .map(|payload| can_accept_shelf_drop(state, payload));
+        .map(|payload| can_accept_shelf_drop(&canvas_facts(state), payload));
     let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
     // Keep the pre-interaction route state available to the context-menu
     // layer for diagnostics. Secondary click is exclusively a context-menu
@@ -421,7 +421,7 @@ pub fn render_schematic_view(
         let drop_position =
             snap_resolution::resolve_grid_pointer(&state.model, &viewport, position)
                 .snapped_position;
-        match commit_shelf_drop(state, payload, drop_position) {
+        match commit_shelf_drop(&mut canvas_parts(state), payload, drop_position) {
             // The canvas shows the part where it was dropped.
             ShelfDropOutcome::Placed => {}
             ShelfDropOutcome::ReadOnly => {
@@ -438,9 +438,15 @@ pub fn render_schematic_view(
         if state.model.schematic.session.editor.tool == crate::state::Tool::Select
             && let Some(position) = pick_chooser::observe_long_click(&response)
         {
-            pick_chooser::open_chooser_at(ui.ctx(), state, position, &symbol_context, &viewport);
+            pick_chooser::open_chooser_at(
+                ui.ctx(),
+                &canvas_facts(state),
+                position,
+                &symbol_context,
+                &viewport,
+            );
         }
-        pick_chooser::show_chooser(ui.ctx(), state);
+        pick_chooser::show_chooser(ui.ctx(), &mut canvas_parts(state));
         handle_tool_interactions(
             ui,
             &response,
@@ -460,7 +466,7 @@ pub fn render_schematic_view(
     if let Some(follow_up) = menu_follow_up {
         apply_menu_follow_up(state, follow_up);
     }
-    handle_keyboard_object_navigation(&response, state, &symbol_context);
+    handle_keyboard_object_navigation(&response, &mut canvas_parts(state), &symbol_context);
     set_canvas_cursor(ui, &response, state, shelf_drop);
     let crosshair = full_crosshair_at(ui, &response, state, &viewport);
     refresh_symbol_context_after_interactions(state, &mut symbol_context);
@@ -501,7 +507,7 @@ pub fn render_schematic_view(
     );
     if dropped_payload.is_none()
         && let (Some(payload), Some(position)) = (shelf_drag.as_deref(), shelf_drag_position)
-        && can_accept_shelf_drop(state, payload)
+        && can_accept_shelf_drop(&canvas_facts(state), payload)
     {
         draw_shelf_drag_preview(
             &painter,

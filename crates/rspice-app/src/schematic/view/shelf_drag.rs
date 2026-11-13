@@ -87,7 +87,10 @@ pub(super) enum ShelfDropOutcome {
     RequiresConfiguration,
 }
 
-pub(super) fn can_accept_shelf_drop(state: &AppState, payload: &SchematicShelfDragPayload) -> bool {
+pub(super) fn can_accept_shelf_drop(
+    state: &CanvasFacts<'_>,
+    payload: &SchematicShelfDragPayload,
+) -> bool {
     !state.model.schematic.session.read_only
         && !state.active_view_read_only()
         && !matches!(
@@ -102,7 +105,7 @@ pub(super) fn can_accept_shelf_drop(state: &AppState, payload: &SchematicShelfDr
 /// non-placement tool. If a click-to-arm placement tool was already active,
 /// the one-shot shelf drop retires it exactly as the mockup does.
 pub(super) fn commit_shelf_drop(
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     payload: &SchematicShelfDragPayload,
     grid_pos: Point,
 ) -> ShelfDropOutcome {
@@ -300,7 +303,7 @@ fn turn_the_move(state: &mut CanvasParts<'_>, transform: PlacementTransform) {
 /// canvas, even though the drag source necessarily owns pointer focus.
 pub(super) fn handle_placement_transform_keys(
     response: &Response,
-    state: &mut AppState,
+    state: &mut CanvasParts<'_>,
     shelf_drag_over_canvas: bool,
 ) -> bool {
     let click_placement_active = state.model.schematic.session.editor.tool.is_place_tool()
@@ -354,8 +357,11 @@ mod tests {
                 let response =
                     ui.interact(ui.max_rect(), Id::new("placement-canvas"), Sense::click());
                 response.request_focus();
-                let handled =
-                    handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
+                let handled = handle_placement_transform_keys(
+                    &response,
+                    &mut crate::schematic::view::canvas_parts(state),
+                    shelf_drag_over_canvas,
+                );
                 let m_still_available = ui
                     .ctx()
                     .input_mut(|input| input.consume_key(Modifiers::NONE, Key::M));
@@ -399,7 +405,11 @@ mod tests {
             SchematicShelfDragPayload::primitive(ComponentType::Resistor).expect("placeable");
 
         assert_eq!(
-            commit_shelf_drop(&mut state, &payload, Point::new(30, 40)),
+            commit_shelf_drop(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &payload,
+                Point::new(30, 40)
+            ),
             ShelfDropOutcome::Placed
         );
 
@@ -432,7 +442,11 @@ mod tests {
         let payload = SchematicShelfDragPayload::library_cell(binding.clone());
 
         assert_eq!(
-            commit_shelf_drop(&mut state, &payload, Point::new(10, 20)),
+            commit_shelf_drop(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &payload,
+                Point::new(10, 20)
+            ),
             ShelfDropOutcome::Placed
         );
 
@@ -454,7 +468,11 @@ mod tests {
             SchematicShelfDragPayload::primitive(ComponentType::Capacitor).expect("placeable");
 
         assert_eq!(
-            commit_shelf_drop(&mut state, &payload, Point::origin()),
+            commit_shelf_drop(
+                &mut crate::schematic::view::canvas_parts(&mut state),
+                &payload,
+                Point::origin()
+            ),
             ShelfDropOutcome::ReadOnly
         );
         assert!(state.model.schematic.document().components.is_empty());
