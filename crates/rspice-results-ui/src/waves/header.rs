@@ -393,7 +393,7 @@ pub fn show_header(
         );
     }
 
-    let traces: Vec<&StripTrace> = model
+    let mut traces: Vec<&StripTrace> = model
         .traces
         .iter()
         .take(model.signal_trace_count)
@@ -404,6 +404,7 @@ pub fn show_header(
                 .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
         })
         .collect();
+    sweep_members_in_value_order(&mut traces, |trace| &trace.source_waveform_name);
     let (plotted_traces, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
         traces.into_iter().partition(|trace| trace.visible);
     let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
@@ -597,6 +598,56 @@ impl Entry<'_> {
     }
 }
 
+/// A nested sweep's member, as its columns name it: `I(VD) [VG=1.5; point
+/// 2]` is the member of `I(VD)` at VG = 1.5. `None` for any other name.
+fn sweep_member(name: &str) -> Option<(&str, &str, f64)> {
+    let (base, rest) = name.split_once(" [")?;
+    let (assignment, point) = rest.strip_suffix(']')?.split_once("; point ")?;
+    point.parse::<usize>().ok()?;
+    let (source, value) = assignment.split_once('=')?;
+    Some((base, source, value.parse::<f64>().ok()?))
+}
+
+/// Put the members of each nested sweep in `items` in the order of their
+/// parameter value, numerically, in the places the members already hold:
+/// VG = 1, 1.5, 2 rather than the 1.5, 1, 2 their names sort to. Every
+/// other item keeps its place.
+pub(crate) fn sweep_members_in_value_order<T: Copy>(items: &mut [T], name: impl Fn(&T) -> &str) {
+    // Each item's family (its base name and swept source) and value, owned:
+    // the items move while these are read.
+    let members: Vec<Option<(String, f64)>> = items
+        .iter()
+        .map(|item| {
+            sweep_member(name(item))
+                .map(|(base, source, value)| (format!("{base}\0{source}"), value))
+        })
+        .collect();
+    let mut placed = vec![false; items.len()];
+    for first in 0..items.len() {
+        let Some((family, _)) = &members[first] else {
+            continue;
+        };
+        if placed[first] {
+            continue;
+        }
+        let places: Vec<usize> = (first..items.len())
+            .filter(|index| {
+                members[*index]
+                    .as_ref()
+                    .is_some_and(|(other, _)| other == family)
+            })
+            .collect();
+        let value = |index: usize| members[index].as_ref().map_or(0.0, |member| member.1);
+        let mut order = places.clone();
+        order.sort_by(|a, b| value(*a).total_cmp(&value(*b)).then(a.cmp(b)));
+        let sorted: Vec<T> = order.iter().map(|index| items[*index]).collect();
+        for (place, item) in places.iter().zip(sorted) {
+            items[*place] = item;
+            placed[*place] = true;
+        }
+    }
+}
+
 /// An expression's entry, measured as a signal's is: its name, its value at
 /// cursor A, and how many curves it stands for when it draws a family.
 fn expression_entry(ui: &Ui, expression: &PaneExpression, name_budget: f32) -> LegendEntry {
@@ -779,6 +830,35 @@ fn legend_chip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A nested sweep's members read in the order of their parameter value,
+    /// not of their names, in the places they held; the other quantity's
+    /// members and a plain signal keep theirs.
+    #[test]
+    fn a_sweeps_members_read_in_the_order_of_their_value() {
+        let mut names = [
+            "I(VD) [VG=1.5; point 2]",
+            "I(VD) [VG=10; point 4]",
+            "V(D)",
+            "I(VD) [VG=1; point 1]",
+            "I(VD) [VG=2; point 3]",
+            "V(G) [VG=1.5; point 2]",
+            "V(G) [VG=1; point 1]",
+        ];
+        sweep_members_in_value_order(&mut names, |name| name);
+        assert_eq!(
+            names,
+            [
+                "I(VD) [VG=1; point 1]",
+                "I(VD) [VG=1.5; point 2]",
+                "V(D)",
+                "I(VD) [VG=2; point 3]",
+                "I(VD) [VG=10; point 4]",
+                "V(G) [VG=1; point 1]",
+                "V(G) [VG=1.5; point 2]",
+            ]
+        );
+    }
 
     /// Both rows of a strip's chrome stop on one rule.
     ///
