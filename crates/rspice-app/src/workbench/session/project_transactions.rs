@@ -378,6 +378,125 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     }
 }
 
+/// Saving the standalone schematic, to its own file or where the reader
+/// picks, through the file I/O the caller passes.
+impl AppState {
+    /// Write the standalone schematic to `path` through `io`. A path the
+    /// reader can reopen clears its unsaved mark, and becomes its file when
+    /// `update_current_file` says so; a browser download leaves it unsaved.
+    /// Returns whether it was written.
+    pub(crate) fn save_schematic_to_path_with_io(
+        &mut self,
+        path: &std::path::Path,
+        update_current_file: bool,
+        io: &(impl FileWorkflowIo + ?Sized),
+    ) -> bool {
+        let keep_backup = self
+            .model
+            .preferences
+            .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
+        match io.save_schematic(&self.model.schematic, path, keep_backup) {
+            Ok(()) => {
+                let saved_path_is_reopenable = io.saved_paths_are_reopenable();
+                if saved_path_is_reopenable && update_current_file {
+                    self.model.schematic.session.current_file = Some(path.to_path_buf());
+                }
+                if saved_path_is_reopenable {
+                    self.platform.browser_schematic_save_name = None;
+                    self.model.schematic.session.is_dirty = false;
+                    // Retire only the checkpoint whose writer lease and committed
+                    // identity prove this process owns these exact bytes. Foreign,
+                    // legacy, or replaced recovery evidence is retained.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Err(error) =
+                            crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(
+                                path,
+                            )
+                        {
+                            self.record(
+                                LogSeverity::Warning,
+                                LogSource::Studio,
+                                format!(
+                                    "Saved {}, but its recovery checkpoint could not be removed: \
+                                     {error}",
+                                    path.display()
+                                ),
+                            );
+                        }
+                    }
+                }
+                self.sync_active_schematic_to_workspace();
+                if saved_path_is_reopenable {
+                    self.remember_recent_file(
+                        crate::services::recent_files::RecentKind::Schematic,
+                        path,
+                    );
+                    self.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Saved schematic {}.", path.display()),
+                    );
+                } else {
+                    self.platform.browser_schematic_save_name =
+                        file_workflow::file_name_string(path);
+                    self.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Downloaded a copy of the schematic: {}.", path.display()),
+                    );
+                }
+                true
+            }
+            Err(e) => {
+                self.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Schematic save failed: {e}"),
+                );
+                false
+            }
+        }
+    }
+
+    /// Save the standalone schematic to its file, or ask where when it has
+    /// none. Returns whether it was written.
+    pub(crate) fn save_schematic_with_io(&mut self, io: &(impl FileWorkflowIo + ?Sized)) -> bool {
+        if let Some(path) = self.model.schematic.session.current_file.clone() {
+            self.save_schematic_to_path_with_io(&path, false, io)
+        } else {
+            self.save_schematic_as_with_io(io)
+        }
+    }
+
+    /// Ask where to save the standalone schematic, then write it there.
+    /// Returns whether it was written.
+    pub(crate) fn save_schematic_as_with_io(
+        &mut self,
+        io: &(impl FileWorkflowIo + ?Sized),
+    ) -> bool {
+        let default_name =
+            file_workflow::schematic_save_dialog_default_name(&self.model, &self.platform);
+
+        match io.show_save_dialog(default_name.as_deref()) {
+            Ok(path) => self.save_schematic_to_path_with_io(&path, true, io),
+            #[cfg(not(target_arch = "wasm32"))]
+            Err(SchematicIoError::Cancelled) => {
+                // User cancelled - no message needed
+                false
+            }
+            Err(e) => {
+                self.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Schematic Save As failed: {e}"),
+                );
+                false
+            }
+        }
+    }
+}
+
 /// Closing the open project without saving it, and opening the project the
 /// restored session holds at startup: the project's phases over its own
 /// parts, with the shell's steps between them, in the order each has always

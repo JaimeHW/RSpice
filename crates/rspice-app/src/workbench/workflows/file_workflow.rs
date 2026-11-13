@@ -1,16 +1,19 @@
 //! Schematic file workflows.
 //!
-//! New, open, save, and save-as for a standalone schematic, behind the same
-//! I/O trait split as the export workflows.
+//! The parts phases of opening and saving a standalone schematic: the cell
+//! name an import takes, the browser's file picker, and the open's settling.
+//! The whole-app sequences, behind the same I/O trait split as the export
+//! workflows, are the shell's, in `session::project_transactions`.
 
 use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::io::FileWorkflowIo;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::SchematicIoError;
+#[cfg(test)]
+use crate::io::{FileWorkflowIo, SchematicIoError};
 use crate::state::SchematicState;
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{Model, PlatformState};
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 
 #[derive(Debug, Clone, Copy)]
@@ -149,15 +152,19 @@ pub(in crate::workbench) fn file_name_string(path: &Path) -> Option<String> {
         .filter(|name| !name.trim().is_empty())
 }
 
-fn schematic_save_dialog_default_name(state: &AppState) -> Option<String> {
-    state
-        .model
+/// The name the schematic's Save As dialog suggests: its file's, or the
+/// name the browser last read or downloaded it under.
+pub(crate) fn schematic_save_dialog_default_name(
+    model: &Model,
+    platform: &PlatformState,
+) -> Option<String> {
+    model
         .schematic
         .session
         .current_file
         .as_deref()
         .and_then(file_name_string)
-        .or_else(|| state.platform.browser_schematic_save_name.clone())
+        .or_else(|| platform.browser_schematic_save_name.clone())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -252,112 +259,6 @@ pub(crate) fn poll_browser_schematic_import(model: &mut Model) -> Option<Browser
             None
         }
         BrowserSchematicImportResult::Cancelled => None,
-    }
-}
-
-pub(crate) fn save_schematic_to_path_with_io(
-    state: &mut AppState,
-    path: &Path,
-    update_current_file: bool,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    let keep_backup = state
-        .model
-        .preferences
-        .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
-    match io.save_schematic(&state.model.schematic, path, keep_backup) {
-        Ok(()) => {
-            let saved_path_is_reopenable = io.saved_paths_are_reopenable();
-            if saved_path_is_reopenable && update_current_file {
-                state.model.schematic.session.current_file = Some(path.to_path_buf());
-            }
-            if saved_path_is_reopenable {
-                state.platform.browser_schematic_save_name = None;
-                state.model.schematic.session.is_dirty = false;
-                // Retire only the checkpoint whose writer lease and committed
-                // identity prove this process owns these exact bytes. Foreign,
-                // legacy, or replaced recovery evidence is retained.
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if let Err(error) =
-                        crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path)
-                    {
-                        state.record(
-                            LogSeverity::Warning,
-                            LogSource::Studio,
-                            format!(
-                                "Saved {}, but its recovery checkpoint could not be removed: \
-                                 {error}",
-                                path.display()
-                            ),
-                        );
-                    }
-                }
-            }
-            state.sync_active_schematic_to_workspace();
-            if saved_path_is_reopenable {
-                state.remember_recent_file(
-                    crate::services::recent_files::RecentKind::Schematic,
-                    path,
-                );
-                state.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    format!("Saved schematic {}.", path.display()),
-                );
-            } else {
-                state.platform.browser_schematic_save_name = file_name_string(path);
-                state.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    format!("Downloaded a copy of the schematic: {}.", path.display()),
-                );
-            }
-            true
-        }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Schematic save failed: {e}"),
-            );
-            false
-        }
-    }
-}
-
-pub(crate) fn save_schematic_with_io(
-    state: &mut AppState,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    if let Some(path) = state.model.schematic.session.current_file.clone() {
-        save_schematic_to_path_with_io(state, &path, false, io)
-    } else {
-        save_schematic_as_with_io(state, io)
-    }
-}
-
-pub(crate) fn save_schematic_as_with_io(
-    state: &mut AppState,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    let default_name = schematic_save_dialog_default_name(state);
-
-    match io.show_save_dialog(default_name.as_deref()) {
-        Ok(path) => save_schematic_to_path_with_io(state, &path, true, io),
-        #[cfg(not(target_arch = "wasm32"))]
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-            false
-        }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Schematic Save As failed: {e}"),
-            );
-            false
-        }
     }
 }
 
@@ -480,7 +381,7 @@ mod tests {
         );
         assert!(imported);
 
-        let saved = save_schematic_as_with_io(&mut state, &io);
+        let saved = state.save_schematic_as_with_io(&io);
 
         assert!(saved);
         assert_eq!(
@@ -716,8 +617,7 @@ mod tests {
             saved_paths_are_reopenable: false,
             save_dialog_default_names: Rc::new(RefCell::new(Vec::new())),
         };
-        let saved =
-            save_schematic_to_path_with_io(&mut state, Path::new("browser-save.rsch"), true, &io);
+        let saved = state.save_schematic_to_path_with_io(Path::new("browser-save.rsch"), true, &io);
 
         assert!(saved);
         assert!(state.model.schematic.session.current_file.is_none());
@@ -752,12 +652,7 @@ mod tests {
                 .preferences
                 .set_toggle(crate::workbench::TogglePreference::KeepSaveBackup, keep);
             for _ in 0..2 {
-                assert!(save_schematic_to_path_with_io(
-                    &mut state,
-                    &path,
-                    true,
-                    &NativeFileWorkflowIo
-                ));
+                assert!(state.save_schematic_to_path_with_io(&path, true, &NativeFileWorkflowIo));
             }
             assert_eq!(path.with_extension("rsch.bak").exists(), keep);
         }

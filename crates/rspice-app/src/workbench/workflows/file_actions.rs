@@ -15,5 +15,5 @@ pub(in crate::workbench) fn action_file_save_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
-    crate::workbench::workflows::file_workflow::save_schematic_with_io(state, io)
+    state.save_schematic_with_io(io)
 }
