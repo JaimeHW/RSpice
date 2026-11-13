@@ -3,9 +3,7 @@
 //! Contains result types for PAC analysis including per-node voltage spectra,
 //! conversion matrices, and helper methods for extracting RF metrics.
 
-use super::conversion_matrix::{
-    ConversionMatrix, SidebandTransfer, complex_log10_magnitude, complex_magnitude,
-};
+use super::conversion_matrix::{ConversionMatrix, SidebandTransfer};
 use super::solver::PacError;
 use crate::{Complex64, Value};
 
@@ -95,45 +93,6 @@ impl PacSidebandData {
             node_voltages: try_zeroed_complex_values(num_nodes, "PAC node voltages")?,
             branch_currents: try_zeroed_complex_values(num_branches, "PAC branch currents")?,
         })
-    }
-
-    /// Get voltage magnitude at a node
-    pub fn voltage_magnitude(&self, node: usize) -> Result<Value, PacError> {
-        let voltage = self.node_voltages.get(node).copied().ok_or_else(|| {
-            PacError::InvalidResult(format!(
-                "node index {node} is outside this {}-node sideband record",
-                self.node_voltages.len()
-            ))
-        })?;
-        complex_magnitude(voltage, "PAC sideband voltage")
-    }
-
-    /// Get voltage phase at a node (radians)
-    pub fn voltage_phase(&self, node: usize) -> Result<Value, PacError> {
-        let voltage = self.node_voltages.get(node).copied().ok_or_else(|| {
-            PacError::InvalidResult(format!(
-                "node index {node} is outside this {}-node sideband record",
-                self.node_voltages.len()
-            ))
-        })?;
-        if !voltage.re.is_finite() || !voltage.im.is_finite() {
-            return Err(PacError::InvalidResult(format!(
-                "PAC sideband voltage has a non-finite complex value ({:+.6e}{:+.6e}j)",
-                voltage.re, voltage.im
-            )));
-        }
-        Ok(voltage.arg())
-    }
-
-    /// Get voltage in dB relative to 1V
-    pub fn voltage_db(&self, node: usize) -> Result<Value, PacError> {
-        let voltage = *self.node_voltages.get(node).ok_or_else(|| {
-            PacError::InvalidResult(format!(
-                "node index {node} is outside this {}-node sideband record",
-                self.node_voltages.len()
-            ))
-        })?;
-        Ok(20.0 * complex_log10_magnitude(voltage, "PAC sideband voltage")?)
     }
 
     /// Set voltage for a node
@@ -511,12 +470,9 @@ mod tests {
     }
 
     #[test]
-    fn node_access_and_publication_fail_closed() {
+    fn node_publication_fails_closed() {
         let mut data =
             PacSidebandData::new(0, 1.0e3, 1.0e6, 1, 1).expect("small sideband record is valid");
-        assert!(data.voltage_magnitude(1).is_err());
-        assert!(data.voltage_phase(1).is_err());
-        assert!(data.voltage_db(1).is_err());
         assert!(data.set_voltage(1, Complex64::new(1.0, 0.0)).is_err());
         assert!(
             data.set_voltage(0, Complex64::new(Value::NAN, 0.0))
@@ -527,13 +483,6 @@ mod tests {
             data.set_current(0, Complex64::new(0.0, Value::INFINITY))
                 .is_err()
         );
-        data.node_voltages[0] = Complex64::new(Value::NAN, 0.0);
-        assert!(data.voltage_magnitude(0).is_err());
-        assert!(data.voltage_phase(0).is_err());
-        assert!(data.voltage_db(0).is_err());
-        data.node_voltages[0] = Complex64::new(Value::MAX, Value::MAX);
-        assert!(data.voltage_magnitude(0).is_err());
-        assert!(data.voltage_db(0).is_ok());
     }
 
     #[test]

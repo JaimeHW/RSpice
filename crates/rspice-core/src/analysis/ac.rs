@@ -406,19 +406,6 @@ impl AcResult {
         }
         self.voltages.get(node - 1).map(|v| v.norm()).unwrap_or(0.0)
     }
-
-    /// Get voltage phase at a node (in radians, 1-indexed)
-    pub fn voltage_phase(&self, node: usize) -> Value {
-        if node == 0 {
-            return 0.0; // Ground phase is 0
-        }
-        self.voltages.get(node - 1).map(|v| v.arg()).unwrap_or(0.0)
-    }
-
-    /// Get voltage in dB at a node
-    pub fn voltage_db(&self, node: usize) -> Value {
-        20.0 * self.voltage_magnitude(node).log10()
-    }
 }
 
 #[cfg(test)]
