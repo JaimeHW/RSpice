@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
+use rspice_core::netlist::AnalysisCommand;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::mc_draft::McVariationSource;
 
@@ -22,10 +22,6 @@ use super::{EngineBridge, SimulationInput, ensure_not_aborted};
 use crate::error::SimulationError;
 use crate::execution_options::TransientMember;
 use crate::results::SimulationResult;
-
-/// The seed a `.MC` card that states none runs with on the prepared route,
-/// the configured Monte Carlo study's own default.
-const DEFAULT_SEED: u64 = 0x5EED_5EED;
 
 impl EngineBridge {
     /// Solve `member` of the deck's own study or sweep with `config`, which
@@ -74,8 +70,6 @@ impl EngineBridge {
         variation_source: McVariationSource,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
-        use rspice_core::analysis::Distribution;
-        use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
         let card = netlist
             .analyses
             .iter()
@@ -96,28 +90,7 @@ impl EngineBridge {
                 end.saturating_sub(1)
             )));
         }
-        let mut study = MonteCarloStudyConfig::new(
-            1,
-            card.seed.unwrap_or(DEFAULT_SEED),
-            vec!["trial".to_owned()],
-        );
-        study.first_trial = index;
-        study.distribution = match card.distribution {
-            MonteCarloDistribution::Gaussian => Distribution::Gaussian {
-                sigma: card.relative_spread,
-            },
-            MonteCarloDistribution::Uniform => Distribution::Uniform {
-                tolerance: card.relative_spread,
-            },
-            MonteCarloDistribution::WorstCase => Distribution::WorstCase {
-                tolerance: card.relative_spread,
-            },
-        };
-        study.variation_source = match variation_source {
-            McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
-            McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
-        };
-        study.parameter_filter = card.params.clone();
+        let study = crate::transient_family::monte_carlo_study(card, variation_source, index, 1);
         let solved: Mutex<Option<Result<SimulationResult, SimulationError>>> = Mutex::new(None);
         let engine = self.engine.resolved_for_netlist(netlist);
         let outcome = engine.run_monte_carlo_measurements_with_abort(

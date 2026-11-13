@@ -34,7 +34,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
@@ -1066,20 +1065,6 @@ fn record_measures(measurements: &[rspice_core::MeasureResult], observation: &mu
     }
 }
 
-/// Record every top-level `.param` value the trial netlist resolved.
-fn record_parameters(netlist: &rspice_core::Netlist, observation: &mut Observation) {
-    for (name, value) in netlist.params.all_params() {
-        if value.is_finite() {
-            observation
-                .scalars
-                .insert(format!("param:{}", name.to_ascii_lowercase()), value);
-        }
-    }
-}
-
-/// Statistical functions a deck may state its Monte Carlo variation with.
-const STATISTICAL_FUNCTIONS: [&str; 5] = ["agauss(", "aunif(", "gauss(", "unif(", "limit("];
-
 /// Whether the deck, with every file it includes, states a statistical
 /// function outside comments. An include that cannot be resolved is an
 /// error, not "no statistics".
@@ -1088,19 +1073,10 @@ pub fn deck_states_statistics(source: &str, origin: &Path) -> Result<bool, Strin
     let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
         .expand_content(source, origin)
         .map_err(|error| error.to_string())?;
-    Ok(expanded.lines().any(|line| {
-        let code = line.split(['$', ';']).next().unwrap_or_default().trim();
-        !code.starts_with('*') && {
-            let lower = code.to_ascii_lowercase();
-            STATISTICAL_FUNCTIONS
-                .iter()
-                .any(|function| lower.contains(function))
-        }
-    }))
+    Ok(rspice_simulation::transient_family::deck_states_statistics(
+        &expanded,
+    ))
 }
-
-/// The seed a `.MC` card that states none runs with on the prepared route.
-const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 /// How a family's member observations gather into the case's one family
 /// observation: the trials of a Monte Carlo transient, the points of a
@@ -1179,7 +1155,7 @@ fn family_tasks(
     cards: &[String],
     runtimes: &PreparedVerilogARuntimeSet,
 ) -> Result<(Vec<HeadlessTaskRequest>, Family), CaseError> {
-    use rspice_simulation::execution_options::TransientMember;
+    use rspice_simulation::transient_family;
     let family_word = match kind {
         "mc-tran" => Some(".mc"),
         "step-tran" => Some(".step"),
@@ -1254,31 +1230,33 @@ fn family_tasks(
         config.spice_dialect = dialect;
     }
     let engine = rspice_core::Engine::new(config);
-    let abort = rspice_core::NoAbort;
-    let mut parameters = HashMap::new();
-    let members: Vec<TransientMember> = if kind == "mc-tran" {
-        monte_carlo_members(&engine, &netlist, source, origin, &mut parameters)?
+    let members = if kind == "mc-tran" {
+        // The corpus decks state their variation as agauss/aunif expressions,
+        // in the deck or in a file it includes.
+        let statistical = deck_states_statistics(source, origin).map_err(|error| {
+            harness_error(format!(
+                "the deck's includes could not be resolved to find its statistics: {error}"
+            ))
+        })?;
+        transient_family::monte_carlo_members(&netlist, statistical)
     } else {
-        let limits = engine.config().resource_limits;
-        let plan = rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits)
-            .map_err(|error| harness_error(format!("the .step plan: {error}")))?;
-        let materializer = engine
-            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &abort)
-            .map_err(|error| harness_error(format!("the .step plan: {error}")))?;
-        let mut members = Vec::with_capacity(materializer.len());
-        for index in 0..materializer.len() {
-            let run = materializer
-                .materialize_run_with_abort(index, &abort)
-                .map_err(|error| harness_error(format!("materialize point {index}: {error}")))?;
-            let (_, point, _, _) = run.into_parts();
-            let member = TransientMember::StepPoint { index };
-            let mut scratch = Observation::default();
-            record_parameters(&point, &mut scratch);
-            parameters.insert(member.label(), scratch.scalars);
-            members.push(member);
-        }
-        members
-    };
+        transient_family::step_members(&netlist, &engine.config().resource_limits)
+    }
+    .map_err(harness_error)?;
+    let drawn =
+        transient_family::member_parameters(&engine, &netlist, &members).map_err(harness_error)?;
+    let parameters = members
+        .iter()
+        .zip(drawn)
+        .map(|(member, values)| {
+            let scalars = values
+                .into_iter()
+                .map(|(name, value)| (format!("param:{name}"), value))
+                .collect();
+            (member.member.label(), scalars)
+        })
+        .collect();
+    let members: Vec<_> = members.into_iter().map(|member| member.member).collect();
     let mut family = Family {
         kind: if kind == "mc-tran" { "mc" } else { "step" },
         members: Vec::with_capacity(members.len()),
@@ -1295,104 +1273,6 @@ fn family_tasks(
         })
         .collect();
     Ok((tasks, family))
-}
-
-/// The trials of the deck's `.MC` study, varied as the engine's Monte Carlo
-/// transient varies them, with each trial's drawn `.param` values.
-fn monte_carlo_members(
-    engine: &rspice_core::Engine,
-    netlist: &rspice_core::Netlist,
-    source: &str,
-    origin: &Path,
-    parameters: &mut HashMap<String, BTreeMap<String, f64>>,
-) -> Result<Vec<rspice_simulation::execution_options::TransientMember>, CaseError> {
-    use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
-    use rspice_simulation::execution_options::TransientMember;
-    use rspice_simulation_contract::mc_draft::McVariationSource;
-    let Some(card) = netlist.analyses.iter().find_map(|analysis| match analysis {
-        rspice_core::netlist::AnalysisCommand::MonteCarlo(card) => Some(card.clone()),
-        _ => None,
-    }) else {
-        return Err(harness_error("deck has no .mc card").into());
-    };
-    // The corpus decks state their variation as agauss/aunif expressions,
-    // in the deck or in a file it includes. A deck that states none and whose
-    // card names no parameter would have every `.param` perturbed by the
-    // card's default spread (a supply `vcc` included); that is refused, never
-    // run as if it were the design's variation.
-    let statistical = deck_states_statistics(source, origin).map_err(|error| {
-        harness_error(format!(
-            "the deck's includes could not be resolved to find its statistics: {error}"
-        ))
-    })?;
-    let variation_source = if statistical {
-        McVariationSource::DeckStatistics
-    } else if card.params.is_empty() {
-        return Err(harness_error(
-            "the .mc card names no parameter and neither the deck nor any file it includes states a statistical function (agauss, aunif, gauss, unif, limit); refusing to perturb every .param",
-        )
-        .into());
-    } else {
-        McVariationSource::ParameterTolerance
-    };
-    let mut study = MonteCarloStudyConfig::new(
-        card.runs,
-        card.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
-        vec!["trial".into()],
-    );
-    study.first_trial = card.first_trial;
-    study.distribution = match card.distribution {
-        rspice_core::netlist::MonteCarloDistribution::Gaussian => {
-            rspice_core::analysis::Distribution::Gaussian {
-                sigma: card.relative_spread,
-            }
-        }
-        rspice_core::netlist::MonteCarloDistribution::Uniform => {
-            rspice_core::analysis::Distribution::Uniform {
-                tolerance: card.relative_spread,
-            }
-        }
-        rspice_core::netlist::MonteCarloDistribution::WorstCase => {
-            rspice_core::analysis::Distribution::WorstCase {
-                tolerance: card.relative_spread,
-            }
-        }
-    };
-    study.variation_source = match variation_source {
-        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
-        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
-    };
-    study.parameter_filter = card.params.clone();
-    let drawn: Mutex<BTreeMap<usize, BTreeMap<String, f64>>> = Mutex::new(BTreeMap::new());
-    engine
-        .run_monte_carlo_measurements_with_abort(
-            netlist,
-            &study,
-            &rspice_core::NoAbort,
-            |_, trial, index, _| {
-                let mut scratch = Observation::default();
-                record_parameters(trial, &mut scratch);
-                drawn
-                    .lock()
-                    .expect("trial parameters")
-                    .insert(index, scratch.scalars);
-                Ok(vec![0.0])
-            },
-        )
-        .map_err(|error| harness_error(format!("the .mc study's draws: {error}")))?;
-    let drawn = drawn.into_inner().expect("trial parameters");
-    let mut members = Vec::with_capacity(card.runs);
-    for index in card.first_trial..card.first_trial + card.runs {
-        let member = TransientMember::MonteCarloTrial {
-            index,
-            variation_source,
-        };
-        if let Some(values) = drawn.get(&index) {
-            parameters.insert(member.label(), values.clone());
-        }
-        members.push(member);
-    }
-    Ok(members)
 }
 
 #[cfg(test)]

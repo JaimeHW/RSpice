@@ -38,6 +38,7 @@ pub mod study;
 pub mod study_document;
 pub mod sweeps;
 pub mod transient_checkpoint;
+pub mod transient_family;
 pub mod veriloga;
 
 mod engine_bridge;
