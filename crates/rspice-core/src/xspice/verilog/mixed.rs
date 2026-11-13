@@ -717,7 +717,7 @@ impl HeldCrossing {
 /// structured form would be three public types — this, an enum for which
 /// ceiling tripped, and a struct holding the list — and the only consumer any
 /// of them would have is [`MixedSignalError`]'s own `Display`, which is not
-/// worth three entries of this crate's public-surface budget. If a caller ever
+/// worth three more public types. If a caller ever
 /// needs to *branch* on a participant rather than read about one, that is the
 /// point to publish them.
 #[derive(Debug, Clone, PartialEq, Eq)]
