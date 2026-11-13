@@ -39,7 +39,6 @@
 //! let instance = XspiceInstance::new("A1", model, &ports, &params);
 //! ```
 
-pub mod conformance;
 mod context;
 mod copy_on_write;
 mod data_file;
@@ -57,7 +56,6 @@ pub mod event_trace;
 // rank that can name `EventValue` and be named by everything that schedules.
 pub mod event_scheduler;
 mod external;
-pub mod ifspec;
 mod instance;
 // The XSPICE twelve-state values against IEEE 1364 strengths, for the nets and
 // boundaries the native Verilog host shares with XSPICE.

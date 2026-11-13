@@ -284,12 +284,6 @@ test = false
 required-features = ["circuit-suites"]
 
 [[bin]]
-name = "rspice-xspice-ifspec-audit"
-path = "src/bin/xspice_ifspec_audit.rs"
-test = false
-required-features = ["circuit-suites"]
-
-[[bin]]
 name = "rspice-veriloga-golden"
 path = "src/bin/rspice_veriloga_golden.rs"
 required-features = ["veriloga-builtins-models"]

@@ -121,7 +121,6 @@ crash.
 | `rspice-ngspice-case-runner` | Per-deck child process for the ngspice suite |
 | `rspice-ngspice-oracle-capture` | Capture ngspice reference output for a case |
 | `rspice-xyce-case-runner` | Per-deck child process for the Xyce suite |
-| `rspice-xspice-ifspec-audit` | Diff RSpice's XSPICE code-model metadata against `ifspec.ifs` in an ngspice source checkout, optionally running its example decks against a real ngspice binary |
 | `rspice-veriloga-golden` | Golden capture, replay, and derivative audit for generated models |
 | `rspice-mixed-corpus` | The mixed-signal corpus: `run` (classify and ratchet `outcomes.tsv`, `--record` to rewrite), `case` (the per-cell child, through `rspice-simulation`'s headless execution), `capture` (oracle references), `probe a\|b\|c` |
 
