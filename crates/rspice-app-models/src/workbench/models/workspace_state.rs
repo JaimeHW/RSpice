@@ -28,10 +28,7 @@ pub enum ProjectModelFacet {
     Bound,
     Pinned,
     Review,
-    /// Models compiled into the engine. Named `Protected` until 2026-08, which
-    /// read as a sealed-IP guarantee the product does not make; the alias is
-    /// what lets a session saved under the old spelling still open.
-    #[serde(alias = "protected")]
+    /// Models compiled into the engine.
     BuiltIn,
 }
 
@@ -692,8 +689,7 @@ pub enum ModelHubFacet {
     #[default]
     All,
     /// An update on offer and a release this build cannot run are both
-    /// attention rungs, so both old spellings restore here.
-    #[serde(alias = "updatable", alias = "incompatible")]
+    /// attention rungs.
     NeedsAttention,
     Installed,
     Pinned,

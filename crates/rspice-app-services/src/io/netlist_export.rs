@@ -13,10 +13,7 @@ pub enum NetlistFormat {
     /// Cadence Spectre format
     #[default]
     Spectre,
-    /// Standard SPICE format. An earlier build also wrote the same text
-    /// under HSPICE and Xyce extensions; a choice of either saved then reads
-    /// back as SPICE.
-    #[serde(alias = "Hspice", alias = "Xyce")]
+    /// Standard SPICE format.
     Spice,
 }
 

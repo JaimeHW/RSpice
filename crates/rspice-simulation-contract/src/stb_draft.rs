@@ -181,10 +181,8 @@ struct PersistedStbDialogState {
     start_freq: String,
     #[serde(default)]
     stop_freq: String,
-    /// Point count. `points_per_decade` was the name before the sweep shape
-    /// became configurable and the count stopped being per-decade by
-    /// definition.
-    #[serde(default, alias = "points_per_decade")]
+    /// Point count.
+    #[serde(default)]
     num_points: String,
     #[serde(default)]
     sweep_type_idx: usize,

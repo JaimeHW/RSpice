@@ -8,20 +8,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum VerificationPage {
     #[default]
-    // A session saved while the placeholder DRC page existed restores to the
-    // first page.
-    #[serde(
-        alias = "Cockpit",
-        alias = "Specifications",
-        alias = "Checks",
-        alias = "Drc"
-    )]
     Yield,
     Corners,
     Tuning,
     Optimization,
     DeviceSafety,
-    #[serde(alias = "History")]
     Regression,
 }
 

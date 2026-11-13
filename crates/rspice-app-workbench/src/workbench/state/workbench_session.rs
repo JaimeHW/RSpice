@@ -251,11 +251,7 @@ pub enum Drawer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ConsolePage {
-    /// The alias restores a session last left on the retired Interactive page
-    /// onto the engine log, rather than failing the whole workbench restore
-    /// on a page name this build no longer has.
     #[default]
-    #[serde(alias = "Interactive")]
     Console,
     Problems,
     Measurements,

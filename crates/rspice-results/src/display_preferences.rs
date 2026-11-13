@@ -92,7 +92,6 @@ impl CursorInterpolation {
 #[serde(rename_all = "kebab-case")]
 pub enum ComplexNumberDisplay {
     #[default]
-    #[serde(alias = "magnitude-phase-radians")]
     MagnitudePhaseDegrees,
     RealImaginary,
 }

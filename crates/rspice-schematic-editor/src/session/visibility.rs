@@ -20,10 +20,7 @@ pub use crate::view::grid::GridStyle;
 pub struct DrawingSheetLayerVisibility {
     pub zones: bool,
     pub title_block: bool,
-    /// ISO 5457 centring marks and ASME Y14.1 microfilm arrows. A session
-    /// saved when the layer also held corner registration and fold marks
-    /// keeps its choice.
-    #[serde(alias = "registration_marks")]
+    /// ISO 5457 centring marks and ASME Y14.1 microfilm arrows.
     pub centring_marks: bool,
     pub dimensions_at_detail_zoom: bool,
 }
@@ -82,9 +79,6 @@ pub enum SchematicNetHighlighting {
     /// own highlight; nothing carries it through an instance terminal into a
     /// child or back up to the parent.
     #[default]
-    // The policy's earlier name promised a highlight across hierarchy levels;
-    // a preference saved under it still reads.
-    #[serde(alias = "selected-across-hierarchy")]
     SelectedNet,
     /// The selected net, carried through the instance terminal it reaches:
     /// descending into an instance lights the child's port net it drives,

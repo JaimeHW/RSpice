@@ -320,7 +320,7 @@ struct EncodedParameterContract {
     aliases: Vec<String>,
     #[serde(default)]
     required: bool,
-    #[serde(default, alias = "default_value")]
+    #[serde(default)]
     default: Option<String>,
 }
 

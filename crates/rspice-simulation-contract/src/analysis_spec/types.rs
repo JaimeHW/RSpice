@@ -214,7 +214,6 @@ pub enum AnalysisSpec {
         #[serde(default = "default_pss_shooting_points")]
         points_per_period: usize,
         /// Relative periodicity tolerance.
-        #[serde(alias = "period_tolerance")]
         tolerance: f64,
         /// Whether the fundamental is an oscillator-period initial guess.
         #[serde(default)]
@@ -428,7 +427,7 @@ pub enum AnalysisSpec {
         additional_carrier_tones: Vec<f64>,
         stop_time: f64,
         num_harmonics: usize,
-        #[serde(default, alias = "max_step")]
+        #[serde(default)]
         envelope_step: Option<f64>,
         #[serde(default)]
         modulation_sources: Vec<String>,

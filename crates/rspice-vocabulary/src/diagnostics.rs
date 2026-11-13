@@ -138,7 +138,6 @@ impl LogSeverity {
 pub enum LogSource {
     /// Every studio event, whether the user asked for it or a background
     /// service did it: opened, saved, exported, imported, restored, failed.
-    #[serde(alias = "User", alias = "System", alias = "Drc")]
     Studio,
     /// Simulation-plan lifecycle outcomes: the receipt a committed plan
     /// command left, or the refusal that kept one from committing.
@@ -151,7 +150,6 @@ pub enum LogSource {
     Plan,
     /// A run's lifecycle: started, each analysis finished, completed or
     /// failed.
-    #[serde(alias = "Simulation")]
     Run,
     /// The circuit engine's own account of a solve.
     Engine,

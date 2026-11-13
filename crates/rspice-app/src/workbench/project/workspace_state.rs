@@ -81,12 +81,10 @@ impl ProjectLauncherPage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ProjectPage {
-    #[serde(alias = "Dashboard", alias = "Activity")]
     #[default]
     Overview,
     Library,
     Configuration,
-    #[serde(alias = "Technology")]
     Dependencies,
     Recovery,
 }

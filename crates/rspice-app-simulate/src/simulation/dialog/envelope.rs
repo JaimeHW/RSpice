@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 use rspice_simulation_contract::analysis_spec::{
-    EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+    EnvelopeAdaptiveMode, EnvelopeInitialPeriodicSolve,
 };
 #[cfg(test)]
 pub use rspice_simulation_contract::envelope_draft::EnvelopeConfig;
@@ -49,28 +49,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_dialog_payload_migrates_without_restoring_modulation_type() {
-        let mut state: EnvelopeDialogState = serde_json::from_str(
-            r#"{"fundamental":"2.4G","stop_time":"10u","harmonics":"7","modulation_idx":3}"#,
-        )
-        .expect("legacy envelope draft should deserialize");
-        state.initialized = true;
-        let config = state.to_config().expect("migrated draft should validate");
-        assert_eq!(config.carrier_tones, vec![2.4e9]);
-        assert_eq!(config.harmonic_order, 7);
-        assert_eq!(
-            config.initial_periodic_solve,
-            EnvelopeInitialPeriodicSolve::TransientSpectralEstimate
-        );
-        assert_eq!(
-            config.adaptive_mode,
-            EnvelopeAdaptiveMode::FixedEnvelopeStep
-        );
-        assert_eq!(config.extraction_path, EnvelopeExtractionPath::Projection);
-        assert!(config.modulation_sources.is_empty());
-    }
-
-    #[test]
     fn rejects_duplicate_carriers_and_noncanonical_modulation_sources() {
         let mut config = EnvelopeConfig::default();
         config.carrier_tones.push(1.0e6);
@@ -91,30 +69,5 @@ mod tests {
         let mut state = EnvelopeDialogState::from_config(&EnvelopeConfig::default());
         state.harmonic_order = "1.5".to_owned();
         assert_eq!(state.to_config().unwrap_err(), expected);
-    }
-
-    /// A draft saved while the extraction-path row existed still opens.
-    ///
-    /// The row painted one value and wrote it back, so the key carries no
-    /// choice. It is accepted and dropped, and the projection stays the only
-    /// path `EnvelopeConfig` can name.
-    #[test]
-    fn a_saved_draft_that_carries_an_extraction_path_still_opens() {
-        let mut state: EnvelopeDialogState = serde_json::from_str(
-            r#"{"fundamental":"2.4G","stop_time":"10u","harmonics":"7","extraction_path_idx":0}"#,
-        )
-        .expect("a draft carrying the retired key still opens");
-        state.initialized = true;
-        let config = state.to_config().expect("the restored draft configures");
-        assert_eq!(config.extraction_path, EnvelopeExtractionPath::Projection);
-
-        let written = serde_json::to_value(&state).expect("the draft serializes");
-        assert!(
-            !written
-                .as_object()
-                .expect("the draft is an object")
-                .contains_key("extraction_path_idx"),
-            "the retired key is never written again: {written}"
-        );
     }
 }

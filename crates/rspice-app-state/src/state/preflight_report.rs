@@ -9,14 +9,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModelsPage {
     #[default]
-    #[serde(alias = "Catalog")]
     Models,
-    #[serde(alias = "Libraries")]
     Symbols,
-    #[serde(alias = "Pdk")]
     Corners,
     Bins,
-    #[serde(alias = "Behavioral")]
     Include,
     Qualification,
 }

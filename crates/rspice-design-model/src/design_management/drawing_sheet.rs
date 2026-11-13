@@ -554,7 +554,7 @@ pub struct DrawingSheetMarks {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DrawingSheetMarksWire {
-    #[serde(default, alias = "registration")]
+    #[serde(default)]
     centring: bool,
     #[serde(default, rename = "folding")]
     _folding: bool,
@@ -564,19 +564,7 @@ struct DrawingSheetMarksWire {
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetTitleBlockTemplate {
     /// ISO 7200's 180 mm block, drawn as the standard's form.
-    ///
-    /// A sheet, default, preset or package saved naming the retired `wide`
-    /// block loads as this one. That block was 230 mm wide, past ISO 7200's
-    /// 180 mm maximum, and existed only to give an equal-width grid wider
-    /// cells, which cells sized by what they hold no longer need.
-    ///
-    /// So does one saved naming the retired `compact` block on its own; a
-    /// sheet saved on it loads on its format's standard block (see
-    /// [`DrawingSheetTitleBlock`]). That 130 mm block predated both
-    /// standards' forms and held a title of a dozen characters, against ISO
-    /// 7200's 25.
     #[default]
-    #[serde(alias = "wide", alias = "compact")]
     Standard,
     OrganizationManaged,
     None,

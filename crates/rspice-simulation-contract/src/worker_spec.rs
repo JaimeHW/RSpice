@@ -251,7 +251,6 @@ pub enum WorkerAnalysisSpec {
         tstab_periods: usize,
         #[serde(default = "worker_default_pss_shooting_points")]
         points_per_period: usize,
-        #[serde(alias = "period_tolerance")]
         tolerance: f64,
         #[serde(default)]
         oscillator_mode: bool,
@@ -306,7 +305,7 @@ pub enum WorkerAnalysisSpec {
         additional_carrier_tones: Vec<f64>,
         stop_time: f64,
         num_harmonics: usize,
-        #[serde(default, alias = "max_step")]
+        #[serde(default)]
         envelope_step: Option<f64>,
         #[serde(default)]
         modulation_sources: Vec<String>,
@@ -338,7 +337,6 @@ pub enum WorkerAnalysisSpec {
     /// Canonical complex analysis carried verbatim when a dedicated wire
     /// mirror would merely duplicate the domain shape. The dispatcher remains
     /// responsible for capability validation after lossless reconstruction.
-    #[serde(alias = "ManifestPreview")]
     CanonicalSpec(AnalysisSpec),
 }
 

@@ -41,7 +41,6 @@ enum DrawingSheetTitleBlockTemplateWire {
     /// Retired: a 130 mm block that predated ISO 7200's and ASME Y14.1's
     /// forms.
     Compact,
-    #[serde(alias = "wide")]
     Standard,
     OrganizationManaged,
     None,

@@ -150,13 +150,13 @@ pub struct EnvelopeDialogState {
     pub multirate: EnvelopeMultirateState,
     #[serde(default)]
     pub initialization: EnvelopeInitializationState,
-    #[serde(default = "default_carrier_tones_text", alias = "fundamental")]
+    #[serde(default = "default_carrier_tones_text")]
     pub carrier_tones: String,
     #[serde(default = "default_stop_time_text")]
     pub stop_time: String,
     #[serde(default = "default_envelope_step_text")]
     pub envelope_step: String,
-    #[serde(default = "default_harmonic_order_text", alias = "harmonics")]
+    #[serde(default = "default_harmonic_order_text")]
     pub harmonic_order: String,
     #[serde(default)]
     pub modulation_sources: String,
@@ -164,16 +164,6 @@ pub struct EnvelopeDialogState {
     pub initial_periodic_solve_idx: usize,
     #[serde(default = "legacy_adaptive_mode_idx")]
     pub adaptive_mode_idx: usize,
-    /// Retired: the projection is the only extraction path the runner has,
-    /// so the row that pinned this to its one value was reading a control
-    /// back from itself. Accepted so a project saved while the row existed
-    /// still opens, then dropped.
-    #[serde(default, rename = "extraction_path_idx", skip_serializing)]
-    _extraction_path_idx: Option<serde::de::IgnoredAny>,
-    /// Accepted solely to migrate drafts written by the removed AM/FM/PM/IQ
-    /// placeholder. It is never serialized or interpreted as a new control.
-    #[serde(default, rename = "modulation_idx", skip_serializing)]
-    _legacy_modulation_idx: usize,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -208,8 +198,6 @@ impl EnvelopeDialogState {
                 EnvelopeAdaptiveMode::FixedEnvelopeStep => 1,
                 EnvelopeAdaptiveMode::EventAlignedOnly => 2,
             },
-            _extraction_path_idx: None,
-            _legacy_modulation_idx: 0,
             initialized: true,
         }
     }
