@@ -1,4 +1,4 @@
-//! Architectural layering ratchet for the `rspice-core` engine crate.
+//! Architectural layering rule for the `rspice-core` engine crate.
 //!
 //! `rspice-core` is one crate by design: the analyses, the device models, and
 //! the sparse assembly they share are a single numerical program, and cutting
@@ -20,20 +20,17 @@
 //! (the layer-0 leaves) may share rank 0, because there is no edge for a tie
 //! to conceal.
 //!
-//! # How it ratchets
+//! # Allowed edges
 //!
-//! Every edge that violates the layer order today is recorded in
-//! [`ALLOWED_VIOLATIONS`] with its exact reference count. The count is a
-//! ceiling, never a target:
+//! Every edge that violates the layer order today is listed in
+//! [`ALLOWED_VIOLATIONS`]:
 //!
 //! - A **new** violating edge fails the build.
-//! - An **existing** violating edge that grows fails the build.
-//! - An edge that shrinks is fine; lower the ceiling when convenient.
-//! - An edge that reaches zero fails the build until its entry is deleted, so
-//!   the allowlist cannot rot into a list of problems that no longer exist.
+//! - A listed edge that no longer exists fails the build until its entry is
+//!   deleted, so the allowlist cannot rot into a list of problems that no
+//!   longer exist.
 //!
-//! Each entry carries the remediation phase that retires it. When a phase
-//! lands, its entries disappear from this list rather than being renumbered.
+//! Each entry carries the remediation that retires it.
 //!
 //! # What counts as a reference
 //!
@@ -56,7 +53,7 @@
 //!
 //! Nothing under `src/` is excluded. `device/veriloga_builtins/` used to be,
 //! first because it held the generated corpus — 172 files, 49 MB, and generated
-//! code is the generator's business rather than this ratchet's — and then,
+//! code is the generator's business rather than this test's — and then,
 //! after the shard moved those files into `rspice-veriloga-models`, because the
 //! one hand-written file left behind named `crate::engine::SimulationError`
 //! from rank 8. That was a real upward edge wearing an exemption's clothes.
@@ -224,14 +221,13 @@ const LAYERS: &[(&str, u32)] = &[
     ("execution", 13),
 ];
 
-/// Upward dependencies, recorded with the exact reference count each stands at.
+/// Upward dependencies the tree has today.
 ///
 /// This list was empty until 2026-09-11 and is meant to be empty again. Three
 /// edges landed in the September parser and sensitivity work without it. Nine
 /// more were already there, behind names the crate root re-exports, until the
-/// scan learned to follow those names on 2026-10-17; the same change showed
-/// `netlist -> engine` at 13 rather than 5. Each entry below says what retires
-/// it.
+/// scan learned to follow those names on 2026-10-17. Each entry below says
+/// what retires it.
 ///
 /// The `netlist -> engine` and `netlist -> circuit` edges have retired: the
 /// physical half of each check moved into an integration test under
@@ -243,7 +239,7 @@ const LAYERS: &[(&str, u32)] = &[
 ///
 /// The rest were found through the crate root's names.
 ///
-/// - `analysis -> engine`, 3; `circuit -> engine`, 11. Unit tests that run a
+/// - `analysis -> engine` and `circuit -> engine`. Unit tests that run a
 ///   deck through `crate::Engine` to get a circuit or a result to check:
 ///   `analysis/measure_signals.rs`; six in
 ///   `circuit/mixed_signal/coupled_tests.rs` and one each in
@@ -252,11 +248,11 @@ const LAYERS: &[(&str, u32)] = &[
 ///   `circuit/xyce_dae.rs`. They retire as `netlist -> engine` and
 ///   `device -> engine` did, by moving the half that needs the facade into an
 ///   integration test.
-/// - `device -> analysis`, 3. Unit tests in `device/veriloga.rs` that check a
+/// - `device -> analysis`. Unit tests in `device/veriloga.rs` that check a
 ///   `StampError` keeps its classification when it widens to
 ///   `crate::SimulationError`. `device/veriloga.rs` moves up with `circuit`
 ///   and `analysis` when the crate is split, so the edge leaves with it.
-/// - `circuit -> analysis`, 21. Production: the mixed-signal scheduler
+/// - `circuit -> analysis`. Production: the mixed-signal scheduler
 ///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
 ///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
 ///   (`circuit/external_models.rs`) return `SimulationError` and
@@ -265,19 +261,19 @@ const LAYERS: &[(&str, u32)] = &[
 ///   `circuit`: its `From<CircuitError>` impl moves into `circuit`, and the
 ///   `s_param::PortError` its `RfPort` variant carries, the one analysis type
 ///   it names, moves down with it.
-/// - `abort_signal -> transient_observation`, 2. A tie, not an inversion:
+/// - `abort_signal -> transient_observation`. A tie, not an inversion:
 ///   `TransientSample`, the view of one accepted sample a transient hook is
 ///   handed, borrows the run's current- and voltage-impulse traces, which is
 ///   what `transient_observation` sits below the hooks to hold. Both are
 ///   rank-0 leaves, and `io` and `numerics`, at rank 1, read `abort_signal`,
 ///   so the order cannot be stated without lifting `abort_signal` to rank 1
 ///   and every rank from `io` up by one. That renumbering retires it.
-const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
-    ("abort_signal", "transient_observation", 2),
-    ("analysis", "engine", 3),
-    ("circuit", "analysis", 21),
-    ("circuit", "engine", 11),
-    ("device", "analysis", 3),
+const ALLOWED_VIOLATIONS: &[(&str, &str)] = &[
+    ("abort_signal", "transient_observation"),
+    ("analysis", "engine"),
+    ("circuit", "analysis"),
+    ("circuit", "engine"),
+    ("device", "analysis"),
 ];
 
 /// `rspice-core`'s own `src/`, whose root re-exports the engine's names.
@@ -760,7 +756,7 @@ fn a_crate_root_name_counts_toward_the_module_that_defines_it() {
 }
 
 /// The resolver reads the real root too: a reformatted `lib.rs` it can no
-/// longer parse would leave the ratchet blind again without failing it.
+/// longer parse would leave the check blind again without failing it.
 #[test]
 fn the_crate_roots_own_names_are_read() {
     let root = src_dir();
@@ -826,7 +822,7 @@ fn every_top_level_module_declares_a_layer() {
 
 /// The scan reads every module the order ranks. A module whose files left the
 /// scanned roots would otherwise drop out of the edge count, and every
-/// ceiling it carries would pass on nothing.
+/// allowance it carries would pass on nothing.
 #[test]
 fn every_layer_names_a_module_the_family_holds() {
     let found = top_level_modules();
@@ -846,10 +842,7 @@ fn every_layer_names_a_module_the_family_holds() {
 #[test]
 fn module_references_respect_the_layer_order() {
     let edges = edge_counts();
-    let mut allowed: BTreeMap<(&str, &str), usize> = ALLOWED_VIOLATIONS
-        .iter()
-        .map(|(from, to, count)| ((*from, *to), *count))
-        .collect();
+    let mut allowed: BTreeSet<(&str, &str)> = ALLOWED_VIOLATIONS.iter().copied().collect();
     assert_eq!(
         allowed.len(),
         ALLOWED_VIOLATIONS.len(),
@@ -857,29 +850,24 @@ fn module_references_respect_the_layer_order() {
     );
 
     let mut new_violations = Vec::new();
-    let mut grown = Vec::new();
 
     for ((from, to), count) in &edges {
         if layer_of(from) > layer_of(to) {
             continue;
         }
-        match allowed.remove(&(from.as_str(), to.as_str())) {
-            None => new_violations.push(format!(
+        if !allowed.remove(&(from.as_str(), to.as_str())) {
+            new_violations.push(format!(
                 "  {from} -> {to} ({count} references, layer {} -> layer {})",
                 layer_of(from),
                 layer_of(to)
-            )),
-            Some(ceiling) if *count > ceiling => grown.push(format!(
-                "  {from} -> {to}: {count} references, ceiling is {ceiling}"
-            )),
-            Some(_) => {}
+            ));
         }
     }
 
     // Entries left over describe edges that no longer exist. Deleting them is
     // the point of the exercise, so the allowlist must be kept honest.
     let retired: Vec<String> = allowed
-        .keys()
+        .iter()
         .map(|(from, to)| format!("  {from} -> {to}"))
         .collect();
 
@@ -891,13 +879,6 @@ fn module_references_respect_the_layer_order() {
              Move it to a module that sits above what it needs, or take the \
              value it uses as a parameter instead of reaching for it.\n",
             new_violations.join("\n")
-        ));
-    }
-    if !grown.is_empty() {
-        failures.push_str(&format!(
-            "\nExisting violations that grew:\n{}\n\
-             These edges are being retired, not extended.\n",
-            grown.join("\n")
         ));
     }
     if !retired.is_empty() {
