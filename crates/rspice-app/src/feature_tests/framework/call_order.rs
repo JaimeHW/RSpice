@@ -808,7 +808,10 @@ const DESIGN_STAGE: &[Step] = &[
         "document",
         &["features::show_surface::<DesignFeature>(app, ui);"],
     ),
-    ("Verilog-A source", &["veriloga::show_in_design(ui, app);"]),
+    (
+        "Verilog-A source",
+        &["code_adapters::show_in_design(ui, app);"],
+    ),
     (
         "touch strip",
         &[

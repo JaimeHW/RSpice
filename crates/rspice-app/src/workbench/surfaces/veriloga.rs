@@ -1,8 +1,8 @@
 //! The Verilog-A source editor.
 //!
 //! A Verilog-A module is a view of a cell, so its editor is a Design-workspace
-//! document: [`show_in_design`] draws it, editor only, while the inspector
-//! dock states the module's facts. It edits the bundle
+//! document: the shell's `show_in_design` draws it, editor only, while the
+//! inspector dock states the module's facts. It edits the bundle
 //! `ProjectWorkspace::active_source_owner` names, which is the bundle every
 //! command, dock and dialog resolves too.
 
@@ -16,7 +16,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::text_editor_commands::ActiveSourceEditor;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{MessageId, RSpiceApp, WorkbenchSession};
+use crate::workbench::{MessageId, WorkbenchSession};
 
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
@@ -29,46 +29,11 @@ use crate::workbench::documents::code_workspace::{
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
 const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
 
-/// A Verilog-A cell view, as the Design workspace's document.
-///
-/// The design page draws the view through this, which lends the page the
-/// code feature's context: the page prepares, putting its editor in front,
-/// and then draws in a context holding the source menu's answers while
-/// [`source_menu_open`] says the menu is open or opening, and whether an
-/// application-modal dialog is open. What the reader pressed on the
-/// interface strip changes the design's own state, past the code feature,
-/// so it is carried out here once the page has drawn. This adapter goes
-/// when design stops calling it and the shell draws the page by name.
-pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
-    let application_modal = app.state.application_modal_open();
-    prepare(&mut crate::workbench::features::cx(app));
-    let ctx = ui.ctx().clone();
-    let pressed = show(
-        ui,
-        &mut crate::workbench::features::cx_with_menu_answers(app, |app| {
-            source_menu_open(&ctx, &app.state.workbench)
-        })
-        .with_application_modal(application_modal),
-    );
-    match pressed {
-        None => {}
-        Some(InterfaceAction::UpdateSymbol) => app.state.update_active_veriloga_symbol(),
-        Some(InterfaceAction::Place) => match app.state.place_offered_veriloga_device() {
-            // The canvas takes the keyboard, as the shelf leaves it, so R, M
-            // and Esc work before the pointer reaches the sheet. No status
-            // line: the armed cursor is the answer, and a sentence about it
-            // outlives the arm.
-            Ok(()) => rspice_schematic_editor::view::canvas::request_focus(ui.ctx()),
-            Err(error) => app.state.prompt(error),
-        },
-    }
-}
-
 /// Before the page draws, in the code feature's context: put the page's
 /// editor in front, before the shell takes the dispatcher's answers the
 /// page's context holds, so they are the answers the editor gets. The page
 /// publishes it again as it draws it.
-fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+pub(crate) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::code_workspace::{
         active_veriloga_file_path, selected_veriloga_source_in, viewed_veriloga_header,
     };
@@ -99,7 +64,7 @@ fn prepare(cx: &mut Cx<'_, CodeFeature>) {
 /// what this frame carries, read from the editor the page put in front.
 /// The page's context holds the menu's answers only then, so this is read
 /// before the context is lent.
-fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
+pub(crate) fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
     wb.active_source_editor.is_some_and(|editor| {
         crate::workbench::documents::virtual_text_editor::context_menu_may_show(ctx, editor.id)
     })
@@ -154,7 +119,7 @@ fn page_editor(
 
 /// Draw a Verilog-A cell view in the code feature's context, and say what
 /// the reader pressed on the interface strip.
-fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
     // Import and compile results are consumed by the frame loop, so a result
     // that lands while the editor is off screen is still published. Only what
     // needs this surface's pointer and context stays here.
@@ -718,7 +683,7 @@ fn interface_strip(
 }
 
 /// What the reader pressed on the interface strip.
-enum InterfaceAction {
+pub(crate) enum InterfaceAction {
     /// Update symbol, beside a hand-edited symbol's drift.
     UpdateSymbol,
     /// Place the new device in the schematic the strip named.

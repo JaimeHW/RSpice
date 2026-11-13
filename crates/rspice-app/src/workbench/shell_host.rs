@@ -83,8 +83,8 @@ impl Host for RSpiceApp {
                 use crate::workbench::design::surface as design;
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::surfaces::{
-                    automation, library_cellview_manager, netlist, project, simulate, stimulus,
-                    verify, veriloga,
+                    automation, code_adapters, library_cellview_manager, netlist, project,
+                    simulate, stimulus, verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -163,7 +163,7 @@ impl Host for RSpiceApp {
                             == ViewType::VerilogA;
                         features::show_surface::<DesignFeature>(app, ui);
                         if verilog_a {
-                            veriloga::show_in_design(ui, app);
+                            code_adapters::show_in_design(ui, app);
                         }
                         if let Some(canvas) = app.state.design.touch_strip_canvas.take()
                             && app.state.workbench.current_route().surface_id()

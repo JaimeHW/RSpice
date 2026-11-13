@@ -81,6 +81,7 @@ thread_local! {
 pub(crate) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
+pub(crate) mod code_adapters;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
 #[cfg(test)]
