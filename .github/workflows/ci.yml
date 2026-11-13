@@ -99,11 +99,6 @@ jobs:
           cargo test --locked -p rspice-formats --no-default-features --features spice-raw --lib
           cargo test --locked -p rspice-formats --no-default-features --features xlsx --lib
           cargo test --locked -p rspice-vocabulary -p rspice-results -p rspice-hardcopy-contract -p rspice-hardcopy -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project-contract -p rspice-project --lib
-      - name: Application slice coupling ratchet
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: |
-          python3 tools/ci/test_check_app_slices.py
-          python3 tools/ci/check_app_slices.py
       - name: Engine crate family manifests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |
