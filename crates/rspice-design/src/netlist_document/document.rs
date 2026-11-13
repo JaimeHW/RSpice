@@ -519,6 +519,7 @@ impl DependencyMetadata {
         })
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn unresolved_transitive(
         parent: SourceLocator,

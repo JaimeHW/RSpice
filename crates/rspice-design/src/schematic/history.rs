@@ -430,6 +430,7 @@ impl SchematicHistory {
     }
 
     /// Get the number of available redo steps
+    #[cfg(test)]
     pub fn redo_count(&self) -> usize {
         self.redo_stack.len()
     }

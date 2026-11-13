@@ -494,11 +494,6 @@ impl Selection {
         self.net_labels.insert(id);
     }
 
-    /// Remove a net label from the current selection.
-    pub fn deselect_net_label(&mut self, id: u64) {
-        self.net_labels.remove(&id);
-    }
-
     /// Toggle a net label in the current selection.
     pub fn toggle_net_label(&mut self, id: u64) {
         if !self.net_labels.remove(&id) {
@@ -615,11 +610,6 @@ impl Selection {
         !self.wires.is_empty() || !self.wire_segments.is_empty() || !self.wire_vertices.is_empty()
     }
 
-    /// Check if any bus or bus-tap object is selected.
-    pub fn has_any_bus_selection(&self) -> bool {
-        !self.buses.is_empty() || !self.bus_taps.is_empty()
-    }
-
     /// Get all selected wire IDs (including from segments and vertices)
     pub fn all_selected_wire_ids(&self) -> Vec<u64> {
         let mut ids = self.wires.clone();
@@ -651,7 +641,6 @@ mod tests {
         assert_eq!(selection.single_bus(), Some(9));
         selection.select_bus_tap(10);
         assert_eq!(selection.single_bus(), None);
-        assert!(selection.has_any_bus_selection());
         assert_eq!(selection.count(), 2);
         selection.clear();
         assert!(selection.is_empty());
@@ -669,7 +658,7 @@ mod tests {
         assert_eq!(selection.count(), 2);
         assert_eq!(selection.single_net_label(), None);
         selection.toggle_net_label(42);
-        selection.deselect_net_label(41);
+        selection.toggle_net_label(41);
         assert!(selection.is_empty());
     }
 

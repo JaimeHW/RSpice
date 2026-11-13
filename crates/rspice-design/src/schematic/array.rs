@@ -609,11 +609,6 @@ impl SchematicArrayNaming {
         self.range_for_source(source)?.value_at(member_index)
     }
 
-    pub fn validate_for_members(&self, members: usize) -> Result<(), SchematicArrayError> {
-        let mut normalized = self.clone();
-        normalized.normalize_for_members(members)
-    }
-
     pub fn normalized_for_members(mut self, members: usize) -> Result<Self, SchematicArrayError> {
         self.normalize_for_members(members)?;
         Ok(self)
@@ -1337,7 +1332,7 @@ mod tests {
     #[test]
     fn naming_normalizes_integral_interleaved_stride_for_group_arrays() {
         let naming = SchematicArrayNaming::parse("R1…R15 · R2…R16").unwrap();
-        naming.validate_for_members(8).unwrap();
+        naming.clone().normalize_for_members(8).unwrap();
         let plan = SchematicArrayPlan::new(
             SchematicArrayKind::Linear,
             SchematicArrayCount::new(8, 1).unwrap(),

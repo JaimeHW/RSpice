@@ -266,19 +266,6 @@ impl DesignRuleDeck {
         Ok(self.severities.remove(&rule).is_some() || replaced)
     }
 
-    /// Put every rule this build has back on its own default.
-    ///
-    /// Rows naming a rule this build does not have are kept: it cannot say
-    /// what that rule's default is, and a newer build reading the project
-    /// still can.
-    pub fn clear_all(&mut self) -> Result<(), DeckEditRefusal> {
-        self.editable()?;
-        self.severities.clear();
-        self.retained
-            .retain(|code, _| DrcViolationType::from_rule_code(code).is_none());
-        Ok(())
-    }
-
     /// Each rule this deck decides, in declaration order, at the severity it
     /// is applied at.
     pub fn entries(&self) -> impl Iterator<Item = (DrcViolationType, DrcSeverity)> + '_ {
@@ -565,10 +552,12 @@ mod tests {
         );
         assert!(!deck.severity_overrides().is_empty());
 
-        // An edit, and a reset, leave the unknown row where it was.
+        // An edit, and resetting every known rule, leave the unknown row
+        // where it was.
         deck.set_severity(DrcViolationType::FloatingNode, DrcSeverity::Error)
             .unwrap();
-        deck.clear_all().unwrap();
+        deck.clear(DrcViolationType::FloatingNode).unwrap();
+        deck.clear(DrcViolationType::DanglingWire).unwrap();
         assert!(!deck.is_empty(), "the kept row is still stored");
         assert_eq!(
             written(&deck),
@@ -623,7 +612,7 @@ mod tests {
                 version: 2
             }))
         ));
-        assert!(deck.clear_all().is_err());
+        assert!(deck.clear(DrcViolationType::DanglingWire).is_err());
         assert_eq!(written(&deck), stored);
     }
 

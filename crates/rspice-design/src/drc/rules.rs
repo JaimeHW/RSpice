@@ -77,12 +77,6 @@ impl DrcFloor {
             unwritten_instance: severity,
         }
     }
-
-    /// Whether some finding of the rule refuses the run whatever the deck
-    /// sets.
-    pub fn refuses_the_run(self) -> bool {
-        self.unwritten_instance >= DrcSeverity::Error
-    }
 }
 
 const ENGINE_REFUSES: DrcFloor = DrcFloor::every(DrcSeverity::Error);
@@ -708,7 +702,7 @@ mod tests {
     fn a_rule_that_refuses_the_run_can_neither_be_demoted_nor_waived() {
         for rule in DrcViolationType::ALL {
             let entry = rule.rule();
-            if entry.floor.refuses_the_run() {
+            if entry.floor.unwritten_instance >= DrcSeverity::Error {
                 assert!(!entry.waivable, "{rule:?}");
             }
             if entry.waivable {

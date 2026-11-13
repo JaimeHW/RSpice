@@ -645,6 +645,7 @@ pub fn generate_artwork_block(ports: &[PortSpec]) -> GeneratedSymbol {
 ///
 /// Empty interfaces produce an empty pin list with the minimum body —
 /// callers treat that as "nothing to place yet".
+#[cfg(test)]
 pub fn generate_symbol(ports: &[PortSpec]) -> GeneratedSymbol {
     generate_symbol_with_roles(ports, &[])
 }
