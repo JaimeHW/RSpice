@@ -8,10 +8,11 @@
 
 use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows, x_separation};
 use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
-use crate::session::{MarkerSelector, MarkerView, ResultViewerState};
+use crate::session::{HorizontalCursors, MarkerSelector, MarkerView, ResultViewerState};
 use egui::Ui;
+use rspice_results::feature_search;
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, MarkerKind, WaveformPresentationKey,
+    AnalysisPresentationKey, MarkerKind, WavePanePresentationKey, WaveformPresentationKey,
 };
 use rspice_ui_kit::plot::{CursorPair, fmt_si_significant, sample::sample_at_with_shape};
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -93,9 +94,33 @@ pub const MARKER_ROW_H: f32 = 22.0;
 pub fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
     match kind {
         MarkerKind::Note => t.color.text,
-        MarkerKind::Peak => t.color.accent,
+        MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) => t.color.accent,
         MarkerKind::Spec => t.color.warn,
     }
+}
+
+/// Where a marker sits on its trace as the trace is now.
+///
+/// A peak, valley or crossing marker is found again from where it was put
+/// every time it is read, so a result that changes under it moves it with
+/// its feature; `Err` carries where it was put when its trace no longer has
+/// that feature there. Any other marker stays where it was put.
+pub fn marker_position(
+    model: &StripModel,
+    anchor: &WaveformPresentationKey,
+    x: f64,
+    kind: MarkerKind,
+) -> Result<f64, f64> {
+    let Some(search) = kind.search() else {
+        return Ok(x);
+    };
+    model
+        .traces
+        .iter()
+        .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
+        .and_then(|trace| feature_search::nearest(&trace.x, &trace.y, x, search))
+        .map(|found| found.x)
+        .ok_or(x)
 }
 
 /// Tag text: the id always, the note only when the user wrote one.
@@ -151,7 +176,8 @@ fn cursor_body_height(state: &mut ResultViewerState, source: ReadoutInput<'_>) -
 }
 
 pub fn marker_body_height(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> f32 {
-    let markers = visible_markers(state, source).len();
+    let markers =
+        visible_markers(state, source).len() + horizontal_cursor_rows(state, source).len();
     if markers > 0 {
         markers as f32 * MARKER_ROW_H
     } else if cursor_target_available(state, source) {
@@ -178,7 +204,8 @@ fn readout_columns_side_by_side(width: f32, cursor: bool, markers: bool) -> bool
 /// Row counts and painting use the same host-provided strip projections.
 pub fn readout_strip_height(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> f32 {
     let cursor = state.cursor_readout_active();
-    let markers = !visible_markers(state, source).is_empty();
+    let markers = !visible_markers(state, source).is_empty()
+        || !horizontal_cursor_rows(state, source).is_empty();
     if !cursor && !markers {
         return 0.0;
     }
@@ -294,7 +321,9 @@ fn readout_body(
 ) {
     let cursor = cursor_target_available(state, source);
     // Cursor mode keeps an explicit markers panel even when it is empty.
-    let markers = !visible_markers(state, source).is_empty() || cursor;
+    let markers = !visible_markers(state, source).is_empty()
+        || !horizontal_cursor_rows(state, source).is_empty()
+        || cursor;
     let width = ui.available_width();
     if readout_columns_side_by_side(width, cursor, markers) {
         let marker_width = (width * 0.42).clamp(240.0, 720.0).min(width);
@@ -413,14 +442,17 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut ResultViewerState, source: Read
     };
     let cursors = state.cursors;
     let lane_rows = strip_lane_rows(state, model, cursors, presentation);
-    super::readout::cursor_readout_table(
+    if let Some(stepping) = super::readout::cursor_readout_table(
         ui,
         model,
         cursors,
+        state.stepping_cursor,
         presentation,
         quantity_policy,
         lane_rows,
-    );
+    ) {
+        state.stepping_cursor = stepping;
+    }
 }
 
 /// The marker half of the strip: one editable row per marker.
@@ -443,6 +475,59 @@ pub fn marker_section(
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let models = source.models;
 
+    // The horizontal cursors lead: one row per pane that has any, its H1, H2
+    // and the ΔY between them in the pane's own unit.
+    let horizontal = horizontal_cursor_rows(state, source);
+    let mut clear_horizontal = None;
+    for (index, (pane, cursors)) in horizontal.iter().enumerate() {
+        let top = rect.top() + index as f32 * MARKER_ROW_H;
+        let row = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + READOUT_PAD_X, top),
+            egui::pos2(rect.right() - READOUT_PAD_X, top + MARKER_ROW_H),
+        );
+        let mut row_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row_ui.set_clip_rect(row);
+        row_ui.spacing_mut().item_spacing.x = 8.0;
+        let mono = |text: String, color| {
+            egui::RichText::new(text)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(color)
+        };
+        let format =
+            |value: f64| super::units::fmt_in_unit_readout(value, &pane.unit, significant_digits);
+        row_ui.label(mono(horizontal_pane_name(models, pane), c.text_dim));
+        for (slot, color) in [(0, c.canvas_cursor_a), (1, c.canvas_cursor_b)] {
+            if let Some(value) = cursors[slot] {
+                row_ui.label(mono(format!("H{}", slot + 1), color));
+                row_ui.label(mono(format(value), c.text));
+            }
+        }
+        if let [Some(h1), Some(h2)] = cursors {
+            row_ui.label(mono(format!("\u{0394}Y {}", format(h2 - h1)), c.text));
+        }
+        if row_ui
+            .add(egui::Button::new(mono("×".to_owned(), c.text_dim)).frame(false))
+            .on_hover_text("Remove this pane's horizontal cursors")
+            .clicked()
+        {
+            clear_horizontal = Some(pane.clone());
+        }
+    }
+    if let Some(pane) = clear_horizontal {
+        state.horizontal_cursors.remove(&pane);
+    }
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(
+            rect.left(),
+            rect.top() + horizontal.len() as f32 * MARKER_ROW_H,
+        ),
+        rect.max,
+    );
+
     // Rows are derived once, up front, so a row can never describe a marker
     // the plot placed somewhere else — and so the borrow of the marker stores
     // ends before the row widgets need `state` mutably.
@@ -450,35 +535,73 @@ pub fn marker_section(
         selector: MarkerSelector,
         display_id: String,
         kind: MarkerKind,
-        anchor: WaveformPresentationKey,
-        x: f64,
         analysis: AnalysisPresentationKey,
         trace_name: String,
         note: String,
         retained: bool,
+        /// Where the marker is now, or where it was put when its search
+        /// finds nothing there.
+        position: Result<f64, f64>,
+        /// The anchored trace's value there, with the strip and trace it
+        /// was read from.
+        value: Option<(usize, usize, f64)>,
     }
-    let shown: Vec<MarkerRow> = visible_markers(state, source)
-        .into_iter()
-        .map(|marker| MarkerRow {
+    let read = |marker: MarkerView<'_>| -> MarkerRow {
+        let model_index = models
+            .iter()
+            .position(|model| model.analysis_key == marker.analysis());
+        let position = model_index.map_or(Ok(marker.x()), |index| {
+            marker_position(&models[index], marker.anchor(), marker.x(), marker.kind())
+        });
+        let value = model_index
+            .filter(|_| marker.kind().rides_a_trace())
+            .and_then(|model_index| {
+                let model = &models[model_index];
+                let trace_index = model.traces.iter().position(|trace| {
+                    !trace.overlay && anchor_key(model, trace) == *marker.anchor()
+                })?;
+                let trace = &model.traces[trace_index];
+                // Read through the sweep's shape: a loop has no single
+                // value here, and bisecting across its turnaround puts a
+                // number in the row the curve never takes. This is the
+                // canvas' own fallback — the first branch that covers the
+                // marker's X — so the row and the tagged point agree.
+                let at = position.unwrap_or_else(|seed| seed);
+                let sampled =
+                    sample_at_with_shape(&trace.x, &trace.y, &trace.shape, at, interpolation);
+                Some((model_index, trace_index, sampled))
+            });
+        MarkerRow {
             selector: marker.selector(),
             display_id: marker.display_id(),
             kind: marker.kind(),
-            anchor: marker.anchor().clone(),
-            x: marker.x(),
             analysis: marker.analysis(),
             trace_name: marker.trace_name().to_owned(),
             note: marker.note().to_owned(),
             retained: matches!(marker, MarkerView::Document(_)),
-        })
+            position,
+            value,
+        }
+    };
+    let shown: Vec<MarkerRow> = visible_markers(state, source)
+        .into_iter()
+        .map(read)
         .collect();
     // An empty marker list reserves no height to say it is empty; the +M
     // control's own hover says how one is placed.
     if shown.is_empty() {
         return;
     }
+    // The reference, when it is one of these markers: every other marker on
+    // its strip reads its Δx, and its Δy where the two share a unit.
+    let reference = state
+        .reference_marker
+        .and_then(|selector| shown.iter().find(|row| row.selector == selector))
+        .map(|row| (row.selector, row.analysis, row.position, row.value));
 
     let mut remove: Option<MarkerSelector> = None;
     let mut edit: Option<MarkerSelector> = None;
+    let mut reference_toggle: Option<MarkerSelector> = None;
     for (index, entry) in shown.iter().enumerate() {
         let top = rect.top() + index as f32 * MARKER_ROW_H;
         let row = egui::Rect::from_min_max(
@@ -487,13 +610,10 @@ pub fn marker_section(
         );
         let selector = entry.selector;
         let kind = entry.kind;
-        let anchor = entry.anchor.clone();
-        let marker_x = entry.x;
-        let analysis_key = entry.analysis;
-        let trace_name = entry.trace_name.clone();
         let model = models
             .iter()
-            .find(|model| model.analysis_key == analysis_key);
+            .find(|model| model.analysis_key == entry.analysis);
+        let marker_x = entry.position.unwrap_or_else(|seed| seed);
         let position = model.map_or_else(
             || super::units::as_readout(&fmt_si_significant(marker_x, "", significant_digits)),
             |model| {
@@ -505,35 +625,53 @@ pub fn marker_section(
             },
         );
         // A spec marker constrains the X position alone; reporting a curve
-        // value against it would assert a reading it does not make.
-        let value = kind.rides_a_trace().then(|| {
-            model
-                .and_then(|model| {
-                    let trace = model
-                        .traces
-                        .iter()
-                        .find(|trace| !trace.overlay && anchor_key(model, trace) == anchor)?;
-                    // Read through the sweep's shape: a loop has no single
-                    // value here, and bisecting across its turnaround puts a
-                    // number in the row the curve never takes. This is the
-                    // canvas' own fallback — the first branch that covers the
-                    // marker's X — so the row and the tagged point agree.
-                    let sampled = sample_at_with_shape(
-                        &trace.x,
-                        &trace.y,
-                        &trace.shape,
-                        marker_x,
-                        interpolation,
-                    );
-                    Some(model.format_trace_value(
-                        trace,
+        // value against it would assert a reading it does not make. A
+        // search that finds nothing says so rather than reading the curve
+        // where the feature used to be.
+        let value = kind
+            .rides_a_trace()
+            .then(|| match (entry.position, entry.value) {
+                (Err(_), _) => format!("no {} here", kind.label()),
+                (Ok(_), Some((model_index, trace_index, sampled))) => {
+                    let model = &models[model_index];
+                    model.format_trace_value(
+                        &model.traces[trace_index],
                         sampled,
                         significant_digits,
                         quantity_policy,
-                    ))
-                })
-                .unwrap_or_else(|| "trace unavailable".to_owned())
-        });
+                    )
+                }
+                (Ok(_), None) => "trace unavailable".to_owned(),
+            });
+        let is_reference = reference.is_some_and(|(chosen, ..)| chosen == selector);
+        let delta = reference
+            .filter(|(chosen, analysis, ..)| *chosen != selector && *analysis == entry.analysis)
+            .and_then(|(_, _, reference_position, reference_value)| {
+                let model = model?;
+                let reference_x = reference_position.ok()?;
+                let x = entry.position.ok()?;
+                let mut text = format!(
+                    "\u{0394}x {}",
+                    x_separation(model, reference_x, x, significant_digits, quantity_policy)
+                );
+                if let (Some((_, trace_index, y)), Some((_, reference_trace, reference_y))) =
+                    (entry.value, reference_value)
+                {
+                    let trace = &model.traces[trace_index];
+                    if model.trace_unit(trace) == model.trace_unit(&model.traces[reference_trace]) {
+                        text.push_str(&format!(
+                            "  \u{0394}y {}",
+                            model.format_trace_value(
+                                trace,
+                                y - reference_y,
+                                significant_digits,
+                                quantity_policy
+                            )
+                        ));
+                    }
+                }
+                Some(text)
+            });
 
         let mut row_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -562,6 +700,27 @@ pub fn marker_section(
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(c.text_dim),
         );
+        // The reference is chosen on its own row, as ViVA's reference
+        // marker is: the word lights when this marker is the one the
+        // others are read against.
+        if row_ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("ref")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(if is_reference { c.accent } else { c.text_faint }),
+                )
+                .frame(false),
+            )
+            .on_hover_text(if is_reference {
+                "The other markers read \u{0394}x and \u{0394}y against this one; click to stop"
+            } else {
+                "Make this the reference marker: the others read \u{0394}x and \u{0394}y against it"
+            })
+            .clicked()
+        {
+            reference_toggle = Some(selector);
+        }
         // Which store owns the marker is on the id's own hover above; the
         // word "retained" on the row said it a second time.
         if row_ui
@@ -597,7 +756,7 @@ pub fn marker_section(
             remove = Some(selector);
         }
         row_ui.label(
-            egui::RichText::new(trace_name)
+            egui::RichText::new(&entry.trace_name)
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(if kind.rides_a_trace() {
                     c.text_dim
@@ -617,6 +776,13 @@ pub fn marker_section(
                     .color(c.text),
             );
         }
+        if let Some(delta) = delta {
+            row_ui.label(
+                egui::RichText::new(delta)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text),
+            );
+        }
         // The note takes what is left of the row. It reads as text here and
         // is edited in the marker dialog, so a stray keystroke over the strip
         // cannot rewrite what a marker says.
@@ -632,8 +798,54 @@ pub fn marker_section(
                 .on_hover_text(note);
         }
     }
+    if let Some(selector) = reference_toggle {
+        state.toggle_reference_marker(selector);
+    }
     actions.remove = remove;
     actions.edit = edit;
+}
+
+/// The panes of the on-screen strips that have a horizontal cursor, with
+/// their cursors, in strip and unit order.
+pub fn horizontal_cursor_rows(
+    state: &ResultViewerState,
+    source: ReadoutInput<'_>,
+) -> Vec<(WavePanePresentationKey, HorizontalCursors)> {
+    let mut rows: Vec<_> = state
+        .horizontal_cursors
+        .iter()
+        .filter(|(pane, cursors)| {
+            cursors.iter().any(Option::is_some) && source.on_screen_strips.contains(&pane.analysis)
+        })
+        .map(|(pane, cursors)| (pane.clone(), *cursors))
+        .collect();
+    rows.sort_by(|(a, _), (b, _)| {
+        let strip = |pane: &WavePanePresentationKey| {
+            source
+                .on_screen_strips
+                .iter()
+                .position(|analysis| *analysis == pane.analysis)
+        };
+        strip(a).cmp(&strip(b)).then_with(|| a.unit.cmp(&b.unit))
+    });
+    rows
+}
+
+/// How a horizontal cursor row names its pane: the unit, and the strip when
+/// more than one strip is on the sheet.
+fn horizontal_pane_name(models: &[StripModel], pane: &WavePanePresentationKey) -> String {
+    let unit = if pane.unit.is_empty() {
+        "number"
+    } else {
+        pane.unit.as_str()
+    };
+    match models
+        .iter()
+        .find(|model| model.analysis_key == pane.analysis)
+    {
+        Some(model) if models.len() > 1 => format!("{} {unit}", model.kind_tag),
+        _ => format!("{unit} pane"),
+    }
 }
 
 // ---------------------------------------------------------------------------

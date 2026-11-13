@@ -449,9 +449,9 @@ pub struct PlotSpec<'a> {
     pub limit_lines: Vec<LimitLine>,
     /// Draw unlabeled subdivisions between major ticks.
     pub minor_grid: bool,
-    /// Horizontal measurement cursor on the left Y axis.
-    pub horizontal_cursor: Option<f64>,
-    /// Whether primary click/drag updates `horizontal_cursor`.
+    /// Horizontal measurement cursors H1 and H2 on the left Y axis.
+    pub horizontal_cursors: [Option<f64>; 2],
+    /// Whether primary click/drag places or moves a horizontal cursor.
     pub horizontal_cursor_interactive: bool,
     /// Shaded vertical bands, drawn under everything.
     pub bands: Vec<Band>,
@@ -486,7 +486,7 @@ impl<'a> PlotSpec<'a> {
             ref_lines: Vec::new(),
             limit_lines: Vec::new(),
             minor_grid: false,
-            horizontal_cursor: None,
+            horizontal_cursors: [None; 2],
             horizontal_cursor_interactive: false,
             bands: Vec::new(),
             underlay: None,

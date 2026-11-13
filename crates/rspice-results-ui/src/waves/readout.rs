@@ -14,12 +14,12 @@ use rspice_ui_kit::plot::sample::{
     sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    CursorPair, SampleInterpolation, TraceLook, XScale, fmt_si_significant, fmt_significant,
-    paint_trace_swatch,
+    CursorId, CursorPair, SampleInterpolation, TraceLook, XScale, fmt_si_significant,
+    fmt_significant, paint_trace_swatch,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_vocabulary::quantity::QuantityPresentationPolicy;
+use rspice_vocabulary::quantity::{FrequencyDisplay, QuantityPresentationPolicy};
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
@@ -52,21 +52,24 @@ pub fn branch_tag(shape: &SweepShape, run: usize) -> String {
 }
 
 /// Paint the selected strip's cursor table, including its accessible reading.
+///
+/// The A and B column heads say which cursor the arrow keys and the jumps
+/// move, in that cursor's colour; a click on the other head hands them to
+/// it, and is returned for the host to apply.
 pub fn cursor_readout_table(
     ui: &mut Ui,
     model: &StripModel,
     cursors: CursorPair,
+    stepping: CursorId,
     presentation: ReadoutPolicy,
     quantity_policy: QuantityPresentationPolicy,
     lane_rows: Vec<ReadoutRow>,
-) {
+) -> Option<CursorId> {
     let rect = ui.available_rect_before_wrap();
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
-    let Some(a) = cursors.a else {
-        return;
-    };
+    let a = cursors.a?;
     // Fixed columns keep focus/hover/value-length changes from shifting
     // neighboring fields. At compact widths the table scrolls horizontally.
     let name_column = (rect.width() * 0.24).clamp(150.0, 220.0);
@@ -122,10 +125,17 @@ pub fn cursor_readout_table(
         }
     };
 
+    let head = |id: CursorId, color| if stepping == id { color } else { c.text_faint };
     draw_row(
         0,
         ["TRACE", "A", "B", "\u{0394}", "SLOPE"],
-        [c.text_faint; 5],
+        [
+            c.text_faint,
+            head(CursorId::A, c.canvas_cursor_a),
+            head(CursorId::B, c.canvas_cursor_b),
+            c.text_faint,
+            c.text_faint,
+        ],
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
         None,
     );
@@ -136,15 +146,24 @@ pub fn cursor_readout_table(
         .unwrap_or_else(|| "Place cursor B".to_owned());
     let delta_x = cursors
         .b
-        .map(|b| x_separation(model, a, b, significant_digits, quantity_policy))
+        .map(|b| x_delta(model, a, b, significant_digits, quantity_policy))
         .unwrap_or_default();
-    // The X row's last cell is where the sweep's own shape is stated: a
+    // The X row's last cell carries 1/Δx — the frequency of a period
+    // measured between the cursors — and states the sweep's own shape: a
     // reader looking at two rows per signal is owed the reason there are two.
-    let branch_note = readout_branch_note(model).unwrap_or_default();
+    let reciprocal = cursors
+        .b
+        .and_then(|b| x_reciprocal(model, a, b, significant_digits, quantity_policy))
+        .map(|reciprocal| format!("1/\u{0394} {reciprocal}"));
+    let x_note = [reciprocal.clone(), readout_branch_note(model)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" \u{00b7} ");
     draw_row(
         1,
-        [model.x_label(), &a_x, &b_x, &delta_x, &branch_note],
-        [c.text_dim, c.accent, c.text, c.text, c.text_faint],
+        [model.x_label(), &a_x, &b_x, &delta_x, &x_note],
+        [c.text_dim, c.accent, c.text, c.text, c.text_dim],
         theme::mono(tokens::FS_0, FontWeight::Regular),
         None,
     );
@@ -168,13 +187,55 @@ pub fn cursor_readout_table(
     // already publishes its rows; this half stated the same numbers to a
     // sighted reader and nothing at all to anyone else.
     let response = ui.interact(rect, ui.id().with("cursor-readout"), egui::Sense::hover());
-    let summary = readout_accessibility_text(model, cursors, &a_x, &b_x, &delta_x, &rows);
+    let summary = readout_accessibility_text(
+        model,
+        cursors,
+        &a_x,
+        &b_x,
+        &delta_x,
+        reciprocal.as_deref(),
+        &rows,
+    );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, summary.clone()));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Table);
         node.set_label(summary.clone());
     });
+
+    // The A and B heads hand the arrow keys and the jumps to their cursor.
+    let mut chosen = None;
+    for (id, left, right) in [
+        (CursorId::A, columns[1], columns[2]),
+        (CursorId::B, columns[2], columns[3]),
+    ] {
+        let head = egui::Rect::from_x_y_ranges(
+            left..=right - 4.0,
+            rect.top()..=rect.top() + READOUT_ROW_H,
+        );
+        let response = ui
+            .interact(
+                head,
+                ui.id().with(("cursor-readout-head", id.letter())),
+                egui::Sense::click(),
+            )
+            .on_hover_text(if stepping == id {
+                format!(
+                    "The arrow keys and the cursor jumps move cursor {}: arrows by sample, \
+                     Shift by peak, Alt by crossing",
+                    id.letter()
+                )
+            } else {
+                format!(
+                    "Click to move cursor {} with the arrow keys and the cursor jumps",
+                    id.letter()
+                )
+            });
+        if response.clicked() {
+            chosen = Some(id);
+        }
+    }
+    chosen
 }
 
 /// The A/B/Δ/slope table, spoken.
@@ -188,11 +249,15 @@ fn readout_accessibility_text(
     a_x: &str,
     b_x: &str,
     delta_x: &str,
+    reciprocal: Option<&str>,
     rows: &[ReadoutRow],
 ) -> String {
     let mut text = format!("Cursor readout. {} A {a_x}", model.x_label());
     if cursors.b.is_some() {
         text.push_str(&format!(", B {b_x}, \u{0394} {delta_x}"));
+        if let Some(reciprocal) = reciprocal {
+            text.push_str(&format!(", 1/\u{0394} {reciprocal}"));
+        }
     } else {
         text.push_str(", cursor B not placed");
     }
@@ -414,18 +479,12 @@ fn trace_readout_rows(
                         // strip's: a current sharing a sheet with voltages must
                         // not report mA/ms of rise as volts. `trace_unit` is the
                         // one owner of that mapping.
-                        let y_unit = model.trace_unit(trace);
                         let x_unit = match model.x_scale {
                             XScale::Log10 => "dec",
                             XScale::Linear if model.x_unit.is_empty() => "x",
                             XScale::Linear => model.x_unit.as_str(),
                         };
-                        let suffix = if y_unit.is_empty() {
-                            format!(" /{x_unit}")
-                        } else {
-                            format!(" {y_unit}/{x_unit}")
-                        };
-                        fmt_significant(slope, significant_digits, &suffix)
+                        slope_text(slope, model.trace_unit(trace), x_unit, significant_digits)
                     },
                 ),
             }
@@ -469,14 +528,91 @@ pub fn x_separation(
             } else {
                 format!(
                     "{span}  ({})",
-                    as_readout(
-                        &quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits)
-                    )
+                    as_readout(&frequency_text(
+                        1.0 / dx.abs(),
+                        significant_digits,
+                        quantity_policy
+                    ))
                 )
             }
         }
-        XScale::Log10 => as_readout(&quantity_policy.format_frequency(dx, significant_digits)),
+        XScale::Log10 => as_readout(&frequency_text(dx, significant_digits, quantity_policy)),
         _ => as_readout(&fmt_si_significant(dx, &model.x_unit, significant_digits)),
+    }
+}
+
+/// The separation between the cursors alone, as the table's Δ column reads
+/// it; 1/Δx has its own cell beside it.
+pub fn x_delta(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    significant_digits: usize,
+    quantity_policy: QuantityPresentationPolicy,
+) -> String {
+    let dx = b - a;
+    match model.x_scale {
+        XScale::Log10 => as_readout(&frequency_text(dx, significant_digits, quantity_policy)),
+        XScale::Linear => as_readout(&fmt_si_significant(dx, &model.x_unit, significant_digits)),
+    }
+}
+
+/// 1/Δx, the number a period or a spacing is measured for: a frequency for a
+/// time span (in the reader's frequency unit), a time for a frequency span,
+/// otherwise the reciprocal of the X unit. `None` for cursors on one point.
+pub fn x_reciprocal(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    significant_digits: usize,
+    quantity_policy: QuantityPresentationPolicy,
+) -> Option<String> {
+    let span = (b - a).abs();
+    if !(span > 0.0 && span.is_finite()) {
+        return None;
+    }
+    let inverse = 1.0 / span;
+    Some(as_readout(&match model.x_unit.as_str() {
+        "s" => frequency_text(inverse, significant_digits, quantity_policy),
+        "Hz" => fmt_si_significant(inverse, "s", significant_digits),
+        "" => fmt_significant(inverse, significant_digits, ""),
+        unit => fmt_significant(inverse, significant_digits, &format!(" /{unit}")),
+    }))
+}
+
+/// A frequency at the reader's significant digits, in the reader's frequency
+/// unit. `format_frequency` counts decimals after the prefix, so a 1/Δt off a
+/// span that is not round read `999.8615044 Hz` beside `1.000139 ms`.
+fn frequency_text(
+    hertz: f64,
+    significant_digits: usize,
+    quantity_policy: QuantityPresentationPolicy,
+) -> String {
+    match quantity_policy.frequency_display {
+        FrequencyDisplay::HertzEngineering => fmt_si_significant(hertz, "Hz", significant_digits),
+        FrequencyDisplay::RadiansPerSecond => {
+            fmt_si_significant(hertz * std::f64::consts::TAU, "rad/s", significant_digits)
+        }
+    }
+}
+
+/// A slope in the reader's number format: an SI prefix on a unit that takes
+/// one (`2 MV/s`, `15 mA/V`), plain digits on one that carries its own scale
+/// (`-20 dB/dec`, `45 °/kHz`).
+pub fn slope_text(slope: f64, y_unit: &str, x_unit: &str, significant_digits: usize) -> String {
+    let compound = format!("{y_unit}/{x_unit}");
+    let prefixed = !y_unit.is_empty()
+        && !y_unit.starts_with("dB")
+        && !matches!(y_unit, "°" | "deg" | "rad")
+        && !super::units::unit_carries_its_decade(y_unit);
+    if prefixed {
+        as_readout(&fmt_si_significant(slope, &compound, significant_digits))
+    } else {
+        as_readout(&fmt_significant(
+            slope,
+            significant_digits,
+            &format!(" {compound}"),
+        ))
     }
 }
 

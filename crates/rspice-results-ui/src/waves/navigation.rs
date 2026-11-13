@@ -8,6 +8,9 @@ use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
+mod jump;
+pub use jump::{CursorJump, crossing_level, jump_cursor, jump_trace};
+
 pub const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
 
 /// The shared-X strip's three bands, offset from the strip's top edge.

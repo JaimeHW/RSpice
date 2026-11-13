@@ -34,7 +34,7 @@ pub use rspice_results::{number_format as format, plot_axis as scale};
 /// functions among the plot's own types.
 pub use rspice_results::sampling as sample;
 
-pub use cursor::CursorPair;
+pub use cursor::{CursorId, CursorPair};
 #[cfg(any(test, feature = "test-support"))]
 pub use decimate::DecimationWork;
 pub use decimate::TraceView;

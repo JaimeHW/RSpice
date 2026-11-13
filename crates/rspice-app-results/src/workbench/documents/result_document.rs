@@ -160,7 +160,19 @@ pub fn visualization_source_dataset(
 }
 
 pub mod waves;
-pub(crate) use waves::copy_cursor_text;
+pub(crate) use waves::{copy_cursor_text, cursor_jump_availability, jump_cursor};
+
+/// Place a point marker on the trace at cursor A, opening its dialog, as the
+/// instrument bar's marker control does; says why on the status bar when
+/// there is no trace under the cursor.
+pub(crate) fn place_marker_at_cursor(state: &mut ResultsParts<'_>) {
+    let t = Tokens::default();
+    if waves::marker_at_cursor_a_available(state, &t) {
+        waves::drop_marker_at_cursor_a(state, &t);
+    } else {
+        state.prompt("There is no visible trace under cursor A to mark.");
+    }
+}
 pub use waves::{
     ActivePaneFacts, SharedXStatus, active_pane_facts, active_shared_x_status,
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
@@ -708,15 +720,18 @@ pub const fn marker_kind_of_retained(
     }
 }
 
-/// How a Results marker kind is retained in a visualization document.
+/// How a Results marker kind is retained in a visualization document, or
+/// `None` for a kind a result document does not keep: a valley or a crossing
+/// is a search of the project's quick markers.
 pub(crate) const fn retained_kind_of_marker(
     kind: MarkerKind,
-) -> crate::results::visualization_document::PlotMarkerKind {
+) -> Option<crate::results::visualization_document::PlotMarkerKind> {
     use crate::results::visualization_document::PlotMarkerKind;
     match kind {
-        MarkerKind::Note => PlotMarkerKind::PointNote,
-        MarkerKind::Peak => PlotMarkerKind::Peak,
-        MarkerKind::Spec => PlotMarkerKind::SpecificationLine,
+        MarkerKind::Note => Some(PlotMarkerKind::PointNote),
+        MarkerKind::Peak => Some(PlotMarkerKind::Peak),
+        MarkerKind::Spec => Some(PlotMarkerKind::SpecificationLine),
+        MarkerKind::Valley | MarkerKind::Crossing(_) => None,
     }
 }
 
@@ -845,7 +860,7 @@ pub fn place_marker(
                         retained_x,
                     ),
                     label: trace_name.clone(),
-                    kind: retained_kind_of_marker(MarkerKind::default()),
+                    kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
                     scope: crate::results::visualization_document::PlotMarkerScope::Pane,
                     source_specification: None,
                 },
@@ -967,6 +982,13 @@ pub fn commit_marker_edit(
             marker_id,
             ..
         } => {
+            let Some(retained_kind) = retained_kind_of_marker(kind) else {
+                return Err(format!(
+                    "A result document keeps note, peak and spec markers; a {} marker is kept \
+                     with the project's own markers.",
+                    kind.label()
+                ));
+            };
             let trace_name = state
                 .results
                 .session
@@ -1008,7 +1030,7 @@ pub fn commit_marker_edit(
                             marker_id,
                             coordinate,
                             label: label.clone(),
-                            kind: retained_kind_of_marker(kind),
+                            kind: retained_kind,
                             scope,
                             source_specification,
                         },
@@ -1604,6 +1626,14 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
     let plain = ctx
         .input(|input| !input.modifiers.command && !input.modifiers.alt && !input.modifiers.ctrl);
     if !plain {
+        // Alt+arrow is the one modified key here: it steps a cursor from
+        // crossing to crossing.
+        let alt_only = ctx.input(|input| {
+            input.modifiers.alt && !input.modifiers.command && !input.modifiers.ctrl
+        });
+        if alt_only && state.results.session.cursor_readout_active() {
+            step_cursor_by_key(ctx, state);
+        }
         return;
     }
 
@@ -1640,24 +1670,41 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
         hide_selected_trace(state);
     }
-    // Arrow nudging is a cursor gesture, so it only exists while cursors do.
+    // Arrow stepping is a cursor gesture, so it only exists while cursors
+    // do: the arrows step the stepping cursor sample by sample along the
+    // trace it reads, Shift+arrow from peak to peak and Alt+arrow from
+    // crossing to crossing, as Left and Right step a logic lane from edge to
+    // edge.
     if state.results.session.cursor_readout_active() {
-        let shift = ctx.input(|input| input.modifiers.shift);
-        let modifiers = if shift {
-            egui::Modifiers::SHIFT
-        } else {
-            egui::Modifiers::NONE
-        };
-        let steps = if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::ArrowRight)) {
-            1.0
-        } else if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::ArrowLeft)) {
-            -1.0
-        } else {
-            0.0
-        };
-        if steps != 0.0 {
-            let t = Tokens::get(ctx);
-            waves::nudge_cursor(state, &t, shift, steps);
+        step_cursor_by_key(ctx, state);
+    }
+}
+
+/// The arrow-key cursor step, with its modifier.
+fn step_cursor_by_key(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
+    use rspice_results::feature_search::Direction;
+    use rspice_results_ui::waves::navigation::CursorJump;
+    // A bare pattern also matches a key pressed with Shift or Alt, so the
+    // modified steps are offered the key first.
+    for (modifiers, step) in [
+        (
+            egui::Modifiers::ALT,
+            CursorJump::Crossing as fn(Direction) -> CursorJump,
+        ),
+        (egui::Modifiers::SHIFT, CursorJump::Peak),
+        (egui::Modifiers::NONE, CursorJump::Sample),
+    ] {
+        for (key, direction) in [
+            (egui::Key::ArrowRight, Direction::Next),
+            (egui::Key::ArrowLeft, Direction::Previous),
+        ] {
+            if ctx.input_mut(|input| input.consume_key(modifiers, key)) {
+                let t = Tokens::get(ctx);
+                if let Err(refusal) = waves::jump_cursor(state, &t, step(direction)) {
+                    state.prompt(format!("{refusal}."));
+                }
+                return;
+            }
         }
     }
 }
@@ -1984,7 +2031,7 @@ pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.session.clear_cursors();
-        results.session.horizontal_cursor = None;
+        results.session.horizontal_cursors.clear();
         results.session.active_wave_pane = None;
         results.session.selected_trace = None;
         results.session.selected_result_artifact = None;

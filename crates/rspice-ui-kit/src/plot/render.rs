@@ -68,8 +68,9 @@ pub struct PlotResponse {
     pub response: Response,
     /// Data-space X of a primary click inside the plot area, this frame.
     pub clicked_x: Option<f64>,
-    /// Updated left-axis horizontal cursor value from a click or drag.
-    pub horizontal_cursor_y: Option<f64>,
+    /// A horizontal cursor a click or drag placed or moved: its slot (0 is
+    /// H1, 1 is H2) and its new left-axis value.
+    pub horizontal_cursor: Option<(usize, f64)>,
     /// The inner plot rectangle (inside margins), for overlays.
     pub plot_rect: Rect,
     /// Zoom/pan/fit gesture result: wheel zooms X about the cursor
@@ -852,9 +853,18 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
         (Some(a), None) => format!(" Cursor A {}.", spec.x.format_display_value(a)),
         _ => String::new(),
     });
-    let horizontal_cursor = spec.horizontal_cursor.map_or_else(String::new, |value| {
-        format!(" Horizontal cursor {}.", spec.y.format_display_value(value))
-    });
+    let horizontal_cursor = match spec.horizontal_cursors {
+        [Some(h1), Some(h2)] => format!(
+            " Horizontal cursor H1 {}, H2 {}, delta {}.",
+            spec.y.format_display_value(h1),
+            spec.y.format_display_value(h2),
+            spec.y.format_display_delta(h2 - h1)
+        ),
+        [Some(value), None] | [None, Some(value)] => {
+            format!(" Horizontal cursor {}.", spec.y.format_display_value(value))
+        }
+        [None, None] => String::new(),
+    };
     let custom_detail = spec
         .accessible_detail
         .map_or_else(String::new, |detail| format!(" {detail}."));
@@ -918,7 +928,7 @@ pub fn show(
     let mut out = PlotResponse {
         response,
         clicked_x: None,
-        horizontal_cursor_y: None,
+        horizontal_cursor: None,
         plot_rect,
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
@@ -1366,18 +1376,43 @@ pub fn show(
         }
     }
 
-    if let Some(y) = spec
-        .horizontal_cursor
-        .filter(|y| y.is_finite() && *y >= spec.y.min && *y <= spec.y.max)
-    {
+    // ---- horizontal cursors: H1 in A's colour, H2 in B's, and the ΔY
+    // between them dimensioned at the right edge when both are placed.
+    let horizontal_colors = [c.canvas_cursor_a, c.canvas_cursor_b];
+    let in_view = |y: f64| y.is_finite() && y >= spec.y.min && y <= spec.y.max;
+    for (slot, y) in spec.horizontal_cursors.iter().enumerate() {
+        let Some(y) = y.filter(|y| in_view(*y)) else {
+            continue;
+        };
         let py = my(y);
-        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, c.canvas_cursor_a));
+        let color = horizontal_colors[slot];
+        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, color));
         painter.text(
             pos2(plot_rect.left() + 4.0, py - 3.0),
             Align2::LEFT_BOTTOM,
-            format!("H {}", spec.y.format_display_value(y)),
+            format!("H{} {}", slot + 1, spec.y.format_display_value(y)),
             theme::mono(9.0, FontWeight::Medium),
-            c.canvas_cursor_a,
+            color,
+        );
+    }
+    if let [Some(h1), Some(h2)] = spec.horizontal_cursors
+        && h1.is_finite()
+        && h2.is_finite()
+    {
+        let clamp = |y: f64| my(y).clamp(plot_rect.top(), plot_rect.bottom());
+        let (top, bottom) = (clamp(h1).min(clamp(h2)), clamp(h1).max(clamp(h2)));
+        let px = plot_rect.right() - 10.0;
+        let stroke = Stroke::new(1.0, c.canvas_text);
+        painter.vline(px, top..=bottom, stroke);
+        for y in [top, bottom] {
+            painter.hline(px - 3.0..=px + 3.0, y, stroke);
+        }
+        painter.text(
+            pos2(px - 5.0, (top + bottom) * 0.5),
+            Align2::RIGHT_CENTER,
+            format!("\u{0394}Y {}", spec.y.format_display_delta(h2 - h1)),
+            theme::mono(9.0, FontWeight::Medium),
+            c.canvas_text,
         );
     }
 
@@ -1403,15 +1438,30 @@ pub fn show(
         if out.response.clicked() {
             out.clicked_x = Some(data_x);
         }
-        if spec.horizontal_cursor_interactive
-            && (out.response.clicked() || out.response.dragged_by(egui::PointerButton::Primary))
-        {
-            let fraction = ((plot_rect.bottom() - pointer.y) / plot_rect.height()).clamp(0.0, 1.0);
-            out.horizontal_cursor_y = Some(spec.y_scale.denormalize(
-                f64::from(fraction),
-                spec.y.min,
-                spec.y.max,
-            ));
+        if spec.horizontal_cursor_interactive {
+            // The slot is chosen where the gesture starts and kept for the
+            // whole drag, so dragging H2 across H1 keeps moving H2.
+            let grab = out.response.id.with("horizontal-cursor-slot");
+            let starting = out.response.clicked()
+                || out.response.drag_started_by(egui::PointerButton::Primary);
+            if starting {
+                let slot = horizontal_cursor_slot(spec.horizontal_cursors, pointer.y, &my);
+                ui.data_mut(|data| data.insert_temp(grab, slot));
+            }
+            if out.response.clicked() || out.response.dragged_by(egui::PointerButton::Primary) {
+                let fraction =
+                    ((plot_rect.bottom() - pointer.y) / plot_rect.height()).clamp(0.0, 1.0);
+                let slot = ui
+                    .data(|data| data.get_temp::<usize>(grab))
+                    .unwrap_or_else(|| {
+                        horizontal_cursor_slot(spec.horizontal_cursors, pointer.y, &my)
+                    });
+                out.horizontal_cursor = Some((
+                    slot.min(1),
+                    spec.y_scale
+                        .denormalize(f64::from(fraction), spec.y.min, spec.y.max),
+                ));
+            }
         }
     }
 
@@ -1421,6 +1471,32 @@ pub fn show(
     theme::paint_focus_ring(ui, &out.response, rect);
 
     out
+}
+
+/// Which horizontal cursor a press at screen height `pointer_y` takes: one
+/// already placed within grabbing distance of it, else the first unplaced
+/// slot, else the nearer of the two.
+fn horizontal_cursor_slot(
+    cursors: [Option<f64>; 2],
+    pointer_y: f32,
+    to_screen: &impl Fn(f64) -> f32,
+) -> usize {
+    const GRAB: f32 = 6.0;
+    let nearest = cursors
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, y)| {
+            y.filter(|y| y.is_finite())
+                .map(|y| (slot, (to_screen(y) - pointer_y).abs()))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    match nearest {
+        Some((slot, distance)) if distance <= GRAB => slot,
+        _ => cursors
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or_else(|| nearest.map_or(0, |(slot, _)| slot)),
+    }
 }
 
 /// A range wide enough to still be a view, or nothing.

@@ -9,8 +9,6 @@
 #[cfg(test)]
 use super::{MarkerKind, TracePresentationKey};
 #[cfg(test)]
-use crate::ui::plot::fmt_significant;
-#[cfg(test)]
 use crate::ui::plot::{CursorPair, SampleInterpolation};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;

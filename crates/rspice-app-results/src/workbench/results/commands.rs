@@ -50,6 +50,22 @@ pub enum ResultsCommand {
     EditSpecifications,
     AddVisualizationPane,
     VisualizationDocumentProperties,
+    /// Move the stepping cursor to the largest sample of the trace it reads.
+    CursorToMaximum,
+    /// Move the stepping cursor to the smallest sample of the trace it reads.
+    CursorToMinimum,
+    /// Move the stepping cursor to the next peak of the trace it reads.
+    CursorToNextPeak,
+    /// Move the stepping cursor to the previous peak of the trace it reads.
+    CursorToPreviousPeak,
+    /// Move the stepping cursor to the next crossing of the crossing level.
+    CursorToNextCrossing,
+    /// Move the stepping cursor to the previous crossing of the level.
+    CursorToPreviousCrossing,
+    /// Hand the arrow keys and the jumps to the other cursor of the pair.
+    SwitchSteppingCursor,
+    /// Place a point marker on the trace at cursor A.
+    MarkerAtCursor,
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -82,7 +98,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 52] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -127,6 +143,14 @@ impl ResultsCommand {
         Self::EditSpecifications,
         Self::AddVisualizationPane,
         Self::VisualizationDocumentProperties,
+        Self::CursorToMaximum,
+        Self::CursorToMinimum,
+        Self::CursorToNextPeak,
+        Self::CursorToPreviousPeak,
+        Self::CursorToNextCrossing,
+        Self::CursorToPreviousCrossing,
+        Self::SwitchSteppingCursor,
+        Self::MarkerAtCursor,
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -157,6 +181,14 @@ impl ResultsCommand {
             Self::EditSpecifications => ids::EDIT_SPECIFICATIONS,
             Self::AddVisualizationPane => CommandKey::new("visualization-add-pane"),
             Self::VisualizationDocumentProperties => CommandKey::new("plot-properties"),
+            Self::CursorToMaximum => CommandKey::new("cursor-to-maximum"),
+            Self::CursorToMinimum => CommandKey::new("cursor-to-minimum"),
+            Self::CursorToNextPeak => CommandKey::new("cursor-to-next-peak"),
+            Self::CursorToPreviousPeak => CommandKey::new("cursor-to-previous-peak"),
+            Self::CursorToNextCrossing => CommandKey::new("cursor-to-next-crossing"),
+            Self::CursorToPreviousCrossing => CommandKey::new("cursor-to-previous-crossing"),
+            Self::SwitchSteppingCursor => CommandKey::new("switch-stepping-cursor"),
+            Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
         }
     }
 
@@ -304,6 +336,17 @@ impl ResultsCommand {
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
+            // The arrows step the same cursor sample by sample, Shift+arrow
+            // by peak and Alt+arrow by crossing; those keys are the waveform
+            // sheet's own, as Left and Right are a logic lane's.
+            Self::CursorToMaximum => cursor_command("Cursor to maximum"),
+            Self::CursorToMinimum => cursor_command("Cursor to minimum"),
+            Self::CursorToNextPeak => cursor_command("Cursor to next peak"),
+            Self::CursorToPreviousPeak => cursor_command("Cursor to previous peak"),
+            Self::CursorToNextCrossing => cursor_command("Cursor to next crossing"),
+            Self::CursorToPreviousCrossing => cursor_command("Cursor to previous crossing"),
+            Self::SwitchSteppingCursor => cursor_command("Step the other cursor"),
+            Self::MarkerAtCursor => cursor_command("Place marker at cursor A"),
         };
         CommandSpec {
             key: self.key(),
@@ -315,6 +358,26 @@ impl ResultsCommand {
             owner: CommandOwner::Results,
         }
     }
+}
+
+/// What a cursor command declares: a Results palette entry with no chord of
+/// its own.
+const fn cursor_command(
+    label: &'static str,
+) -> (
+    &'static str,
+    &'static str,
+    CommandFlags,
+    ShortcutContext,
+    &'static [ShortcutBinding],
+) {
+    (
+        label,
+        "Results",
+        ANYWHERE,
+        ShortcutContext::ResultsWorkspace,
+        NONE,
+    )
 }
 
 /// The key of the command that opens `viewer`.

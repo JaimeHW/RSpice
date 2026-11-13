@@ -20,7 +20,7 @@ use rspice_results::{
     },
     visualization_document::{MarkerId, PaneId},
 };
-use rspice_ui_kit::plot::{CursorPair, DecimationCache};
+use rspice_ui_kit::plot::{CursorId, CursorPair, DecimationCache};
 use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
 use std::collections::{HashMap, HashSet};
 
@@ -213,12 +213,9 @@ impl<'a> MarkerView<'a> {
     }
 }
 
-/// One horizontal measurement cursor bound to an exact waveform pane.
-#[derive(Debug, Clone, PartialEq)]
-pub struct HorizontalWaveCursor {
-    pub pane: WavePanePresentationKey,
-    pub y: f64,
-}
+/// A waveform pane's horizontal measurement cursors, H1 and H2, as values
+/// on the Y axis that pane draws.
+pub type HorizontalCursors = [Option<f64>; 2];
 
 /// One optimizer candidate picked out of the iteration history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,8 +465,15 @@ pub struct ResultViewerState {
     pub cursor_a_anchor: Option<WaveformPresentationKey>,
     /// Unit-scoped waveform pane receiving instrument actions.
     pub active_wave_pane: Option<WavePanePresentationKey>,
-    /// Horizontal cursor, bound to the pane whose Y axis owns its value.
-    pub horizontal_cursor: Option<HorizontalWaveCursor>,
+    /// The cursor the arrow keys and the jump commands move. A click that
+    /// places a cursor makes it the stepping one, as does dragging it.
+    pub stepping_cursor: CursorId,
+    /// Horizontal cursors, kept per pane because each is a value on the Y
+    /// axis of the pane it was placed on: placing them on one pane leaves
+    /// another pane's where they were.
+    pub horizontal_cursors: HashMap<WavePanePresentationKey, HorizontalCursors>,
+    /// The marker the other markers read their Δx and Δy against.
+    pub reference_marker: Option<MarkerSelector>,
     /// Unit-scoped panes the user put on a logarithmic Y axis.
     ///
     /// This lived in egui's persisted memory under a hand-built id, which put
@@ -646,6 +650,42 @@ impl ResultViewerState {
         self.cursors.clear();
         self.cursor_strip = None;
         self.cursor_a_anchor = None;
+        self.stepping_cursor = CursorId::A;
+    }
+
+    /// Arm the A│B tool, as a request to move a cursor implies.
+    pub fn arm_cursor_tool(&mut self) {
+        self.cursor_tool = CursorTool(true);
+    }
+
+    /// Hand the arrow keys and the jump commands to the other cursor.
+    pub fn switch_stepping_cursor(&mut self) {
+        self.stepping_cursor = self.stepping_cursor.other();
+    }
+
+    /// The horizontal cursors placed on `pane`.
+    pub fn pane_horizontal_cursors(&self, pane: &WavePanePresentationKey) -> HorizontalCursors {
+        self.horizontal_cursors
+            .get(pane)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Put horizontal cursor `slot` (0 is H1, 1 is H2) of `pane` at `y`.
+    pub fn set_horizontal_cursor(&mut self, pane: WavePanePresentationKey, slot: usize, y: f64) {
+        if let Some(cursor) = self
+            .horizontal_cursors
+            .entry(pane)
+            .or_default()
+            .get_mut(slot)
+        {
+            *cursor = y.is_finite().then_some(y);
+        }
+    }
+
+    /// Make `selector` the reference marker, or stop it being one.
+    pub fn toggle_reference_marker(&mut self, selector: MarkerSelector) {
+        self.reference_marker = (self.reference_marker != Some(selector)).then_some(selector);
     }
 
     /// Arm or disarm the A│B tool. Disarming clears the pair, because a
@@ -722,6 +762,9 @@ impl ResultViewerState {
     pub fn remove_marker(&mut self, id: u32) {
         self.remember_marker_ids();
         self.markers.retain(|marker| marker.id != id);
+        if self.reference_marker == Some(MarkerSelector::Quick(id)) {
+            self.reference_marker = None;
+        }
         if self
             .marker_edit
             .as_ref()

@@ -4,6 +4,32 @@
 //! a third restarts at A. Values and deltas are read by the right panel;
 //! the plot only draws the verticals and letter flags.
 
+/// One cursor of the A/B pair.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CursorId {
+    #[default]
+    A,
+    B,
+}
+
+impl CursorId {
+    /// The letter the cursor's flag and column carry.
+    pub const fn letter(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
+    }
+
+    /// The other cursor of the pair.
+    pub const fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
 /// The A/B cursor pair, in data-space X of the strip they were placed on.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CursorPair {
@@ -23,6 +49,31 @@ impl CursorPair {
                 self.a = Some(x);
                 self.b = None;
             }
+        }
+    }
+
+    /// Which cursor the next click places.
+    pub fn next_placed(&self) -> CursorId {
+        if self.a.is_some() && self.b.is_none() {
+            CursorId::B
+        } else {
+            CursorId::A
+        }
+    }
+
+    /// Where cursor `id` is, if it is placed.
+    pub fn get(&self, id: CursorId) -> Option<f64> {
+        match id {
+            CursorId::A => self.a,
+            CursorId::B => self.b,
+        }
+    }
+
+    /// Put cursor `id` at `x`.
+    pub fn set(&mut self, id: CursorId, x: f64) {
+        match id {
+            CursorId::A => self.a = Some(x),
+            CursorId::B => self.b = Some(x),
         }
     }
 
@@ -52,5 +103,21 @@ mod tests {
         assert_eq!((c.a, c.b), (Some(3.0), None));
         c.clear();
         assert!(!c.any());
+    }
+
+    #[test]
+    fn the_next_click_places_the_cursor_the_cycle_is_on() {
+        let mut c = CursorPair::default();
+        assert_eq!(c.next_placed(), CursorId::A);
+        c.place(1.0);
+        assert_eq!(c.next_placed(), CursorId::B);
+        c.place(2.0);
+        assert_eq!(c.next_placed(), CursorId::A);
+        c.set(CursorId::B, 5.0);
+        assert_eq!(
+            (c.get(CursorId::A), c.get(CursorId::B)),
+            (Some(1.0), Some(5.0))
+        );
+        assert_eq!(CursorId::A.other().letter(), "B");
     }
 }

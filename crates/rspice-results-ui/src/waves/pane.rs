@@ -409,7 +409,7 @@ pub struct PanePlot<'a> {
     /// Stroke of the active run's traces, in points. Overlays and
     /// expressions are drawn proportionally thinner.
     pub trace_width: f32,
-    pub horizontal_cursor: Option<f64>,
+    pub horizontal_cursors: [Option<f64>; 2],
     pub horizontal_cursor_interactive: bool,
     pub cursors: Option<CursorPair>,
     pub specification_limits: Vec<plot::LimitLine>,
@@ -525,7 +525,7 @@ pub fn show_plot<'a>(
     }
     spec.limit_lines = input.specification_limits;
     spec.minor_grid = input.minor_grid;
-    spec.horizontal_cursor = input.horizontal_cursor;
+    spec.horizontal_cursors = input.horizontal_cursors;
     spec.horizontal_cursor_interactive = input.horizontal_cursor_interactive;
     spec.markers = input.markers;
 

@@ -20,9 +20,10 @@ use crate::workbench::commands::result_navigation::{
 };
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
-    family_available, fit_gesture_available, linked_cursors, open_create_document,
-    open_dataset_browser, open_specification_editor, request_view_gesture, viewer_is_available,
-    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
+    cursor_jump_availability, family_available, fit_gesture_available, jump_cursor, linked_cursors,
+    open_create_document, open_dataset_browser, open_specification_editor, place_marker_at_cursor,
+    request_view_gesture, viewer_is_available, viewer_unavailability_reason,
+    zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -37,7 +38,9 @@ use crate::workbench::slots::ResultsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::workflows::result_import_workflow::import_result_dataset;
 use crate::workbench::{ResultViewer, SurfaceId};
+use rspice_results::feature_search::Direction;
 use rspice_results_ui::session::ViewGesture;
+use rspice_results_ui::waves::navigation::CursorJump;
 
 use commands::ResultsCommand;
 
@@ -346,6 +349,14 @@ fn copy_cursor_readout(cx: &mut Cx<'_, ResultsFeature>) {
     }
 }
 
+/// Move the stepping cursor, saying on the status bar why when it cannot.
+fn jump(cx: &mut Cx<'_, ResultsFeature>, to: CursorJump) {
+    let mut parts = results_parts(cx);
+    if let Err(refusal) = jump_cursor(&mut parts, &rspice_ui_kit::tokens::Tokens::default(), to) {
+        parts.prompt(format!("{refusal}."));
+    }
+}
+
 /// What the results workspace's predicates read of a command's reads.
 fn results_reads<'a>(reads: &Reads<'a, ResultsFeature>) -> ResultsReads<'a> {
     reads.state.reads(reads.model, reads.wb)
@@ -506,6 +517,30 @@ impl CommandSet for ResultsCommand {
             // dataset exists. Every other viewer is only actionable when the
             // active retained dataset satisfies the same compatibility
             // contract used by the in-workspace viewer tabs.
+            Self::CursorToMaximum
+            | Self::CursorToMinimum
+            | Self::CursorToNextPeak
+            | Self::CursorToPreviousPeak
+            | Self::CursorToNextCrossing
+            | Self::CursorToPreviousCrossing => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    cursor_jump_availability(state)
+                        .map_or_else(CommandAvailability::Disabled, |()| {
+                            CommandAvailability::Available
+                        })
+                }
+            }
+            Self::SwitchSteppingCursor => available_or(
+                workbench.workspace == Workspace::Results && state.results.session.cursors.any(),
+                "place a cursor in Results",
+            ),
+            Self::MarkerAtCursor => available_or(
+                workbench.workspace == Workspace::Results
+                    && state.results.session.cursors.a.is_some(),
+                "place cursor A on a waveform in Results",
+            ),
             Self::ResultViewer(ResultViewer::Waves) => CommandAvailability::Available,
             Self::ResultViewer(viewer) => {
                 if viewer_is_available(state, viewer) {
@@ -586,6 +621,16 @@ impl CommandSet for ResultsCommand {
             // here selects it first, so this command carries the workspace
             // half of the destination and nothing else.
             Self::OpenRunInResults => cx.wb.activate(Workspace::Results),
+            Self::CursorToMaximum => jump(cx, CursorJump::Maximum),
+            Self::CursorToMinimum => jump(cx, CursorJump::Minimum),
+            Self::CursorToNextPeak => jump(cx, CursorJump::Peak(Direction::Next)),
+            Self::CursorToPreviousPeak => jump(cx, CursorJump::Peak(Direction::Previous)),
+            Self::CursorToNextCrossing => jump(cx, CursorJump::Crossing(Direction::Next)),
+            Self::CursorToPreviousCrossing => {
+                jump(cx, CursorJump::Crossing(Direction::Previous));
+            }
+            Self::SwitchSteppingCursor => cx.state.results.session.switch_stepping_cursor(),
+            Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::OpenProducingPlan => {
                 match producing_plan_hop(cx.state.reads(cx.model, cx.wb)) {
                     Ok(hop) => {

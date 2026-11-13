@@ -9,6 +9,7 @@ use rspice_results::visualization_document::AccessibleColorPalette;
 
 mod branches;
 mod conversion;
+mod cursors;
 mod degenerate;
 mod expression_scope;
 mod expression_units;
@@ -338,15 +339,16 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
             .collect();
 
     // The SLOPE column had its own copy of the unit mapping, keyed on the
-    // strip, so the current on a mixed sheet reported volts per second.
+    // strip, so the current on a mixed sheet reported volts per second. A
+    // slope carries its SI prefix in front of the unit.
     assert_eq!(slopes.len(), 2);
     assert!(
-        slopes[0].ends_with(" V/s"),
+        slopes[0].ends_with("V/s"),
         "a node voltage's slope reads in volts per second: {}",
         slopes[0]
     );
     assert!(
-        slopes[1].ends_with(" A/s"),
+        slopes[1].ends_with("A/s"),
         "a supply current's slope reads in amps per second: {}",
         slopes[1]
     );

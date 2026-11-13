@@ -2,7 +2,7 @@
 use super::{
     CursorDomain, ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key,
     cursor_interpolation,
-    dock::{marker_color, marker_label},
+    dock::{marker_color, marker_label, marker_position},
     extent::{self, FamilyEnvelopePlan},
     header::{self as pane_header, WAVE_PANE_HEADER_HEIGHT, elide},
     navigation::{self, WAVE_SHARED_X_HEIGHT},
@@ -12,7 +12,7 @@ use super::{
 use crate::{
     derived::DerivedSeries,
     presentation::well_hint,
-    session::{ExprEditor, HorizontalWaveCursor, ResultViewerState},
+    session::{ExprEditor, ResultViewerState},
     strip::{LegendChip, StripHeader},
 };
 use egui::Ui;
@@ -20,7 +20,7 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
 use rspice_ui_kit::{
-    plot::{self, CursorPair, XScale},
+    plot::{self, CursorId, CursorPair, XScale},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -701,12 +701,17 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
             host.session_mut().clear_cursors();
             host.session_mut().cursor_strip = Some(model.analysis_index);
         }
+        let session = host.session_mut();
         match cursor {
             navigation::CursorMove::A(x) => {
-                host.session_mut().cursors.a = Some(x);
-                host.session_mut().cursor_a_anchor = None;
+                session.cursors.a = Some(x);
+                session.cursor_a_anchor = None;
+                session.stepping_cursor = CursorId::A;
             }
-            navigation::CursorMove::B(x) => host.session_mut().cursors.b = Some(x),
+            navigation::CursorMove::B(x) => {
+                session.cursors.b = Some(x);
+                session.stepping_cursor = CursorId::B;
+            }
         }
     }
 }
@@ -1036,7 +1041,8 @@ fn show_unit_pane(
             .strip_markers(model.analysis_key)
             .map(|marker| pane_view::MarkerPresentation {
                 anchor: marker.anchor(),
-                x: marker.x(),
+                x: marker_position(model, marker.anchor(), marker.x(), marker.kind())
+                    .unwrap_or_else(|seed| seed),
                 kind: marker.kind(),
                 color: marker_color(marker.kind(), &t),
                 label: marker_label(marker),
@@ -1052,12 +1058,7 @@ fn show_unit_pane(
         quantity: quantity_policy,
         minor_grid: host.session().show_minor_grid,
         trace_width: options.trace_width,
-        horizontal_cursor: host
-            .session()
-            .horizontal_cursor
-            .as_ref()
-            .filter(|cursor| cursor.pane == pane_key)
-            .map(|cursor| cursor.y),
+        horizontal_cursors: host.session().pane_horizontal_cursors(&pane_key),
         horizontal_cursor_interactive: host.session().horizontal_cursor_placement_enabled(),
         cursors,
         specification_limits,
@@ -1073,12 +1074,12 @@ fn show_unit_pane(
     if response.response.hovered()
         || response.response.dragged()
         || response.clicked_x.is_some()
-        || response.horizontal_cursor_y.is_some()
+        || response.horizontal_cursor.is_some()
     {
         host.session_mut().active_wave_pane = Some(pane_key.clone());
     }
-    if let Some(y) = response.horizontal_cursor_y {
-        host.session_mut().horizontal_cursor = Some(HorizontalWaveCursor { pane: pane_key, y });
+    if let Some((slot, y)) = response.horizontal_cursor {
+        host.session_mut().set_horizontal_cursor(pane_key, slot, y);
     }
 
     // A form waiting for a trace takes the click first: the reader asked to
@@ -1118,6 +1119,7 @@ fn show_unit_pane(
         if placing_cursor_a {
             results.cursor_a_anchor = nearest_anchor.flatten();
         }
+        results.stepping_cursor = results.cursors.next_placed();
         results.cursors.place(clicked_x);
     }
 

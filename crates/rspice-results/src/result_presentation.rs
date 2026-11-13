@@ -459,27 +459,60 @@ impl ResultArtifactPresentationKey {
 }
 
 /// What a result marker asserts, and therefore how it draws.
+///
+/// A peak, valley or crossing marker is a search, not a label: it rides the
+/// feature of its trace nearest where it was placed and finds that feature
+/// again whenever the curve under it changes, as ViVA's peak and crossing
+/// markers do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum MarkerKind {
     /// A freeform annotation on a sample.
     #[default]
     Note,
-    /// A called-out extremum or feature of the curve.
+    /// The local maximum the trace climbs to from where the marker was put.
     Peak,
+    /// The local minimum the trace descends to from where the marker was put.
+    Valley,
+    /// The crossing of a level nearest where the marker was put.
+    Crossing(CrossingLevel),
     /// A limit the design is measured against. Drawn as a limit line,
     /// because a spec constrains the axis position, not one curve.
     Spec,
 }
 
+/// The level a crossing marker finds, compared bit for bit so a marker kind
+/// stays comparable.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CrossingLevel(pub f64);
+
+impl PartialEq for CrossingLevel {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for CrossingLevel {}
+
 impl MarkerKind {
-    /// Every kind a marker may be given.
-    pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
+    /// Every kind a marker may be given. A crossing's level is the trace's
+    /// value where the marker is when the kind is chosen; the level here only
+    /// names the choice.
+    pub const ALL: [MarkerKind; 5] = [
+        MarkerKind::Note,
+        MarkerKind::Peak,
+        MarkerKind::Valley,
+        MarkerKind::Crossing(CrossingLevel(0.0)),
+        MarkerKind::Spec,
+    ];
 
     /// Short label used on the chip and in the marker list.
     pub const fn label(self) -> &'static str {
         match self {
             MarkerKind::Note => "note",
             MarkerKind::Peak => "peak",
+            MarkerKind::Valley => "valley",
+            MarkerKind::Crossing(_) => "crossing",
             MarkerKind::Spec => "spec",
         }
     }
@@ -488,8 +521,40 @@ impl MarkerKind {
     pub const fn dialog_label(self) -> &'static str {
         match self {
             MarkerKind::Note => "Note — a remark about this point on the curve",
-            MarkerKind::Peak => "Peak — a called-out extremum or feature",
+            MarkerKind::Peak => {
+                "Peak — the local maximum it sits on, found again as the curve changes"
+            }
+            MarkerKind::Valley => {
+                "Valley — the local minimum it sits on, found again as the curve changes"
+            }
+            MarkerKind::Crossing(_) => {
+                "Crossing — where the curve crosses its level, found again as the curve changes"
+            }
             MarkerKind::Spec => "Spec — a limit line the design is measured against",
+        }
+    }
+
+    /// Whether `other` is the same choice, whatever level a crossing holds.
+    pub const fn same_choice(self, other: MarkerKind) -> bool {
+        matches!(
+            (self, other),
+            (MarkerKind::Note, MarkerKind::Note)
+                | (MarkerKind::Peak, MarkerKind::Peak)
+                | (MarkerKind::Valley, MarkerKind::Valley)
+                | (MarkerKind::Crossing(_), MarkerKind::Crossing(_))
+                | (MarkerKind::Spec, MarkerKind::Spec)
+        )
+    }
+
+    /// The feature a search marker finds, or `None` for a marker that stays
+    /// where it was put.
+    pub const fn search(self) -> Option<crate::feature_search::Anchor> {
+        use crate::feature_search::Anchor;
+        match self {
+            MarkerKind::Peak => Some(Anchor::Peak),
+            MarkerKind::Valley => Some(Anchor::Valley),
+            MarkerKind::Crossing(level) => Some(Anchor::Crossing { level: level.0 }),
+            MarkerKind::Note | MarkerKind::Spec => None,
         }
     }
 

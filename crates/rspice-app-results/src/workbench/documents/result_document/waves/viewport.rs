@@ -157,17 +157,17 @@ pub(crate) fn fit_active_strip(state: &mut ResultsParts<'_>) {
     }
 }
 
-/// Move a placed cursor by a fraction of the visible X interval.
+/// Move the stepping cursor to `jump` on the trace it reads: the selected
+/// trace, else the one cursor A was anchored to, else the active pane's.
 ///
-/// The nudge is expressed in the window the reader is looking at, not the
-/// full retained sweep, so one keypress moves the same visible distance
-/// however far the sheet is zoomed in.
-pub(crate) fn nudge_cursor(
+/// The arrow keys step it sample by sample, Shift+arrow from peak to peak
+/// and Alt+arrow from crossing to crossing; the Results commands move it to
+/// the maximum, the minimum, a peak or a crossing.
+pub(crate) fn jump_cursor(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
-    cursor_b: bool,
-    steps: f64,
-) {
+    jump: rspice_results_ui::waves::navigation::CursorJump,
+) -> Result<f64, String> {
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -175,32 +175,18 @@ pub(crate) fn nudge_cursor(
         presentation.complex_number_display(),
         tokens,
     );
-    let Some(strip) = state.results.session.cursor_strip else {
-        return;
-    };
-    let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
-        return;
-    };
-    let Some(full) = model.x_range else {
-        return;
-    };
-    let panes = model.unit_panes().len();
-    let (x0, x1) = shared_x_view(&state.results.session, model.analysis_key, panes).unwrap_or(full);
-    let cursor = if cursor_b {
-        &mut state.results.session.cursors.b
-    } else {
-        &mut state.results.session.cursors.a
-    };
-    let Some(position) = cursor else {
-        return;
-    };
-    let moved = if model.x_scale == XScale::Log10 && *position > 0.0 && x0 > 0.0 && x1 > x0 {
-        let decades = (x1.log10() - x0.log10()) * 0.01 * steps;
-        10.0_f64.powf(position.log10() + decades)
-    } else {
-        *position + (x1 - x0) * 0.01 * steps
-    };
-    if moved.is_finite() {
-        *position = moved.clamp(full.0.min(full.1), full.0.max(full.1));
+    rspice_results_ui::waves::navigation::jump_cursor(&mut state.results.session, &models, jump)
+}
+
+/// Whether a cursor jump has a waveform sheet to work on, or why not.
+pub(crate) fn cursor_jump_availability(
+    state: super::super::ResultsReads<'_>,
+) -> Result<(), &'static str> {
+    if !state.model.simulation.retained.has_results() {
+        return Err("no result dataset is available");
     }
+    if !rspice_results::result_presentation::viewer_uses_wave_stack(state.results.session.viewer) {
+        return Err("open a waveform sheet in Results");
+    }
+    Ok(())
 }

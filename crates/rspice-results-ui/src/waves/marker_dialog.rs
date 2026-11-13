@@ -9,12 +9,15 @@
 use egui::RichText;
 
 use crate::session::{MarkerEditDraft, MarkerSelector, ResultViewerState};
-use rspice_results::result_presentation::{AnalysisPresentationKey, MarkerKind};
+use rspice_results::result_presentation::{
+    AnalysisPresentationKey, CrossingLevel, MarkerKind, WaveformPresentationKey,
+};
+use rspice_ui_kit::plot::sample::sample_at_with_shape;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
-use super::{ReadoutPolicy, StripModel};
+use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
 
 /// Open the dialog for one marker, seeding the draft from its current state.
 pub fn open(state: &mut ResultViewerState, selector: MarkerSelector) {
@@ -42,7 +45,11 @@ pub fn open(state: &mut ResultViewerState, selector: MarkerSelector) {
 struct MarkerFacts {
     display_id: String,
     analysis: AnalysisPresentationKey,
+    anchor: WaveformPresentationKey,
     trace_name: String,
+    /// A result document keeps notes, peaks and specs; a valley or crossing
+    /// is a search only the project's quick markers carry.
+    document: bool,
     x: f64,
     persistence: &'static str,
 }
@@ -54,7 +61,9 @@ fn marker_facts(state: &ResultViewerState, selector: MarkerSelector) -> Option<M
             Some(MarkerFacts {
                 display_id: format!("M{id}"),
                 analysis: marker.analysis,
+                anchor: marker.anchor.clone(),
                 trace_name: marker.trace_name.clone(),
+                document: false,
                 x: marker.x,
                 persistence: "Saved with the project · survives zoom, pan and reload",
             })
@@ -64,7 +73,9 @@ fn marker_facts(state: &ResultViewerState, selector: MarkerSelector) -> Option<M
             Some(MarkerFacts {
                 display_id: format!("D{}", marker_id.get()),
                 analysis: marker.analysis,
+                anchor: marker.anchor.clone(),
                 trace_name: marker.trace_name.clone(),
+                document: true,
                 x: marker.x,
                 persistence: "Retained by this result document · travels with the document",
             })
@@ -162,8 +173,22 @@ pub fn show(
 
             ui.label(RichText::new("Kind").strong());
             for kind in MarkerKind::ALL {
-                if ui.radio(draft.kind == kind, kind.dialog_label()).clicked() {
-                    draft.kind = kind;
+                if marker.document && kind.search().is_some() && kind != MarkerKind::Peak {
+                    continue;
+                }
+                if ui
+                    .radio(draft.kind.same_choice(kind), kind.dialog_label())
+                    .clicked()
+                    && !draft.kind.same_choice(kind)
+                {
+                    draft.kind = match kind {
+                        // A crossing marker finds the level the curve has
+                        // where it was put.
+                        MarkerKind::Crossing(_) => MarkerKind::Crossing(CrossingLevel(
+                            level_at(strip, &marker, presentation).unwrap_or(0.0),
+                        )),
+                        kind => kind,
+                    };
                 }
             }
             ui.add_space(10.0);
@@ -172,11 +197,29 @@ pub fn show(
                 .num_columns(2)
                 .spacing(egui::vec2(14.0, 4.0))
                 .show(ui, |ui| {
-                    for (label, value) in [
-                        ("Anchor", anchor_text.as_str()),
-                        ("Sheet", sheet_text.as_str()),
-                        ("Persistence", marker.persistence),
-                    ] {
+                    let level = match draft.kind {
+                        MarkerKind::Crossing(level) => strip
+                            .and_then(|model| {
+                                let trace = model.traces.iter().find(|trace| {
+                                    !trace.overlay && anchor_key(model, trace) == marker.anchor
+                                })?;
+                                Some(model.format_trace_value(
+                                    trace,
+                                    level.0,
+                                    significant_digits,
+                                    quantity_policy,
+                                ))
+                            })
+                            .or_else(|| Some(level.0.to_string())),
+                        _ => None,
+                    };
+                    let rows = [
+                        Some(("Anchor", anchor_text.as_str())),
+                        level.as_deref().map(|level| ("Level", level)),
+                        Some(("Sheet", sheet_text.as_str())),
+                        Some(("Persistence", marker.persistence)),
+                    ];
+                    for (label, value) in rows.into_iter().flatten() {
                         ui.label(RichText::new(label).color(t.color.text_faint));
                         ui.label(
                             RichText::new(value)
@@ -205,4 +248,26 @@ pub fn show(
     } else {
         MarkerDialogResponse::Editing(draft)
     }
+}
+
+/// The value the marker's trace takes where the marker is, read the way the
+/// cursor readout reads it.
+fn level_at(
+    strip: Option<&StripModel>,
+    marker: &MarkerFacts,
+    presentation: ReadoutPolicy,
+) -> Option<f64> {
+    let model = strip?;
+    let trace = model
+        .traces
+        .iter()
+        .find(|trace| !trace.overlay && anchor_key(model, trace) == marker.anchor)?;
+    let value = sample_at_with_shape(
+        &trace.x,
+        &trace.y,
+        &trace.shape,
+        marker.x,
+        cursor_interpolation(presentation.cursor_interpolation()),
+    );
+    value.is_finite().then_some(value)
 }

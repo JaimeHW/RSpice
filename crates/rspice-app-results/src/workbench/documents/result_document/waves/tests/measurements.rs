@@ -185,14 +185,8 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
             presentation.readout(),
             state.model.preferences.quantity_presentation_policy(),
         );
-        assert_eq!(
-            rows[0].slope,
-            fmt_significant(
-                2e11,
-                usize::from(presentation.displayed_significant_digits().get()),
-                " V/s"
-            )
-        );
+        // 0.1 V over 0.5 ps, with its SI prefix and no padding zeros.
+        assert_eq!(rows[0].slope, "200 GV/s");
     }
     let coincident = readout_rows(
         &models[0],
