@@ -9,12 +9,10 @@ mod authority;
 pub use authority::PdkAdministrativeAuthority;
 pub mod contracts;
 pub mod diff;
-pub mod display_profile;
 mod library_config;
 pub use library_config::{DiscoveredFile, LibraryPathEntry};
 pub mod manifest;
 pub mod package;
-pub mod technology_draft;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PdkTechnologyError {

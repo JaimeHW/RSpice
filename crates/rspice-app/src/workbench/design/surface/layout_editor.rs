@@ -10,7 +10,6 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::schematic::view::CanvasFrame;
-use crate::state::pdk_config::{PdkDisplayFillStyle, PdkDisplayLayerStyle};
 use crate::state::{
     CellViewRef, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId, LayoutPoint,
     LayoutShape, PhysicalLayoutDocument,
@@ -24,6 +23,7 @@ const MIN_ZOOM_PX_PER_DBU: f32 = 1.0e-7;
 const MAX_ZOOM_PX_PER_DBU: f32 = 1.0e3;
 const FIT_MARGIN_PX: f32 = 48.0;
 const MAX_RENDERED_GRID_LINES: usize = 512;
+const SELECTION: Color32 = Color32::from_rgb(242, 184, 36);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum LayoutTool {
@@ -74,11 +74,11 @@ impl Default for LayoutEditorSession {
     }
 }
 
+/// The project PDK's layer-purposes in manifest order, and each one's colour
+/// keyed by its case-folded identity.
 #[derive(Debug, Clone)]
 struct ResolvedDisplayContract {
-    profile_label: String,
-    selection: Color32,
-    styles: BTreeMap<(String, String), PdkDisplayLayerStyle>,
+    colors: BTreeMap<(String, String), Color32>,
     ordered_layers: Vec<LayoutLayerPurpose>,
 }
 
@@ -232,50 +232,32 @@ fn resolve_display_contract(
             document.owner().display_path()
         ));
     }
-    let active = model
-        .pdk_config
-        .display_profile_registry
-        .active_for_package(package.metadata());
-    let (profile_label, selection_rgba, entries) = active.map_or_else(
-        || {
-            let defaults = crate::state::pdk_config::PdkDisplayProfileDraft::package_defaults(
-                package.metadata(),
-                "package-default",
-                "PDK package defaults",
-            );
-            (defaults.label, defaults.selection_rgba, defaults.entries)
-        },
-        |profile| {
-            (
-                profile.label.clone(),
-                profile.selection_rgba,
-                profile.entries.clone(),
-            )
-        },
-    );
-    let ordered_layers = entries
-        .iter()
-        .map(|style| LayoutLayerPurpose {
-            layer: style.layer.clone(),
-            purpose: style.purpose.clone(),
+    let layer_purposes = || {
+        package
+            .manifest()
+            .layers
+            .iter()
+            .flat_map(|layer| layer.purposes.iter().map(move |purpose| (layer, purpose)))
+    };
+    let ordered_layers = layer_purposes()
+        .map(|(layer, purpose)| LayoutLayerPurpose {
+            layer: layer.name.clone(),
+            purpose: purpose.clone(),
         })
-        .collect::<Vec<_>>();
-    let styles = entries
-        .into_iter()
-        .map(|style| {
+        .collect();
+    let colors = layer_purposes()
+        .map(|(layer, purpose)| {
             (
                 (
-                    style.layer.to_ascii_lowercase(),
-                    style.purpose.to_ascii_lowercase(),
+                    layer.name.to_ascii_lowercase(),
+                    purpose.to_ascii_lowercase(),
                 ),
-                style,
+                rgba(layer.display_rgba),
             )
         })
         .collect();
     Ok(ResolvedDisplayContract {
-        profile_label,
-        selection: rgba(selection_rgba),
-        styles,
+        colors,
         ordered_layers,
     })
 }
@@ -341,11 +323,10 @@ fn show_toolbar(
                 }
                 ui.separator();
                 ui.label(format!(
-                    "rev {} · {} shapes · {} instances · {}",
+                    "rev {} · {} shapes · {} instances",
                     document.revision().get(),
                     document.shapes().len(),
                     document.instances().len(),
-                    display.profile_label
                 ));
             });
             if let Some(refusal) = &session.status {
@@ -413,27 +394,23 @@ fn show_canvas(
 
     paint_grid(&painter, canvas, session, t.color.border);
     for (id, shape) in document.shapes() {
-        let Some(style) = style_for(display, &shape.layer_purpose) else {
+        let Some(color) = color_for(display, &shape.layer_purpose) else {
             continue;
         };
-        if !style.visible {
-            continue;
-        }
         paint_shape(
             &painter,
             canvas,
             session,
             shape,
-            style,
+            color,
             session.selected == Some(*id),
-            display.selection,
         );
     }
     for (id, instance) in document.instances() {
         let origin = world_to_screen(instance.transform.origin, canvas, session);
         let selected = session.selected == Some(*id);
         let color = if selected {
-            display.selection
+            SELECTION
         } else {
             t.color.text_dim
         };
@@ -457,16 +434,13 @@ fn show_canvas(
         );
     }
     for (id, text) in document.texts() {
-        let Some(style) = style_for(display, &text.layer_purpose) else {
+        let Some(color) = color_for(display, &text.layer_purpose) else {
             continue;
         };
-        if !style.visible {
-            continue;
-        }
         let color = if session.selected == Some(*id) {
-            display.selection
+            SELECTION
         } else {
-            rgba(style.screen_rgba)
+            color
         };
         painter.text(
             world_to_screen(text.origin, canvas, session),
@@ -492,7 +466,7 @@ fn show_canvas(
             painter.rect_stroke(
                 preview,
                 0.0,
-                Stroke::new(1.5, display.selection),
+                Stroke::new(1.5, SELECTION),
                 egui::StrokeKind::Inside,
             );
         }
@@ -525,14 +499,14 @@ fn show_canvas(
     None
 }
 
-fn style_for<'a>(
-    display: &'a ResolvedDisplayContract,
-    layer: &LayoutLayerPurpose,
-) -> Option<&'a PdkDisplayLayerStyle> {
-    display.styles.get(&(
-        layer.layer.to_ascii_lowercase(),
-        layer.purpose.to_ascii_lowercase(),
-    ))
+fn color_for(display: &ResolvedDisplayContract, layer: &LayoutLayerPurpose) -> Option<Color32> {
+    display
+        .colors
+        .get(&(
+            layer.layer.to_ascii_lowercase(),
+            layer.purpose.to_ascii_lowercase(),
+        ))
+        .copied()
 }
 
 fn paint_shape(
@@ -540,24 +514,11 @@ fn paint_shape(
     canvas: Rect,
     session: &LayoutEditorSession,
     shape: &LayoutShape,
-    style: &PdkDisplayLayerStyle,
+    fill: Color32,
     selected: bool,
-    selection: Color32,
 ) {
-    let base = rgba(style.screen_rgba);
-    let outline = if selected { selection } else { base };
-    let fill = match style.screen_fill {
-        PdkDisplayFillStyle::Hollow => Color32::TRANSPARENT,
-        PdkDisplayFillStyle::Solid => base,
-        PdkDisplayFillStyle::Diagonal
-        | PdkDisplayFillStyle::Crosshatch
-        | PdkDisplayFillStyle::Dots => base.gamma_multiply(0.42),
-    };
-    let width = if selected {
-        2.5
-    } else {
-        (f32::from(style.outline_width_milli_px) / 1_000.0).clamp(0.5, 8.0)
-    };
+    let outline = if selected { SELECTION } else { fill };
+    let width = if selected { 2.5 } else { 1.0 };
     match &shape.geometry {
         LayoutGeometry::Rectangle {
             lower_left,
@@ -713,11 +674,7 @@ fn hit_test(
 ) -> Option<LayoutObjectId> {
     let tolerance_dbu = (6.0 / zoom.max(MIN_ZOOM_PX_PER_DBU)).ceil() as i64;
     for (id, text) in document.texts().iter().rev() {
-        let Some(style) = style_for(display, &text.layer_purpose) else {
-            continue;
-        };
-        if style.visible
-            && style.selectable
+        if color_for(display, &text.layer_purpose).is_some()
             && (text.origin.x - point.x).abs() <= tolerance_dbu
             && (text.origin.y - point.y).abs() <= tolerance_dbu
         {
@@ -725,11 +682,7 @@ fn hit_test(
         }
     }
     for (id, shape) in document.shapes().iter().rev() {
-        let Some(style) = style_for(display, &shape.layer_purpose) else {
-            continue;
-        };
-        if style.visible
-            && style.selectable
+        if color_for(display, &shape.layer_purpose).is_some()
             && geometry_contains(&shape.geometry, point, tolerance_dbu)
         {
             return Some(*id);

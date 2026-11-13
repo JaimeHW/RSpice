@@ -1,8 +1,6 @@
 //! Canonical PDK installation configuration and pure settings mutations.
 
 use super::PdkTechnologyRegistry;
-use rspice_model_library::pdk::display_profile::PdkDisplayProfileRegistry;
-use rspice_model_library::pdk::technology_draft::PdkTechnologyDraft;
 use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,18 +36,6 @@ pub struct PdkConfig {
     #[serde(default)]
     pub technology_registry: PdkTechnologyRegistry,
 
-    /// Personal-device display overlays. Every immutable revision is bound to
-    /// an exact PDK technology manifest and has its own hash-chained audit.
-    /// Project and organization scopes remain fail-closed until their
-    /// repository and policy authorities exist.
-    #[serde(default)]
-    pub display_profile_registry: PdkDisplayProfileRegistry,
-
-    /// One unsigned authoring candidate derived from an exact trusted package.
-    /// The draft has no runtime authority and may be invalid between edits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub technology_draft: Option<PdkTechnologyDraft>,
-
     /// Discovered files from last scan (not persisted by default)
     #[serde(skip)]
     pub discovered_files: Vec<DiscoveredFile>,
@@ -80,8 +66,6 @@ impl Default for PdkConfig {
             max_recent_files: default_max_recent(),
             layout_database_unit: None,
             technology_registry: PdkTechnologyRegistry::default(),
-            display_profile_registry: PdkDisplayProfileRegistry::default(),
-            technology_draft: None,
             discovered_files: Vec::new(),
             scan_errors: Vec::new(),
             managed_model_sources: Vec::new(),

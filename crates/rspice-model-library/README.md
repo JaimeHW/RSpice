@@ -26,7 +26,7 @@ winit, wgpu and rfd in its closure.
 | `resolution`, `execution` | `ModelResolutionRecord` provider decisions and `SimulationPlanModelBinding`, a plan's ordered library bindings; `ModelExecutionPlan`, the immutable, content-addressed model namespace of one nominal run, which refuses a contested name instead of falling back to the first definition |
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
 | `technology_binding` | `ProjectTechnologyBinding` and `ProjectPdkPackagePin`: a project's model-source attachment and its exact PDK package pin |
-| `pdk` | PDK archive and manifest contracts; `verify_archive_contents`; technology-revision diffs, display profiles, library search paths and authoring drafts |
+| `pdk` | PDK archive and manifest contracts; `verify_archive_contents`; technology-revision diffs and library search paths |
 | `qualification`, `correlation`, `validation` | Model qualification and release evidence (golden vectors, desktop and WebAssembly parity, fail-closed promotion); versioned measurement-correlation datasets, alignment, metrics and reviewer evidence; `ModelValidationReceipt` and its integrity digest |
 | `symbol` | Model-bound symbol definitions, parameter forms and retained graphics, stored under the `rspice.symbol.*` metadata keys |
 | `facts` | `ClosureFacts`: facts about a model closure that more than one surface reports, derived in one place |

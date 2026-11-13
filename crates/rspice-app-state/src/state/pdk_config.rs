@@ -1,14 +1,10 @@
 //! PDK host discovery/persistence adapters and canonical installation types.
 
 mod discovery;
-#[cfg(test)]
-mod display_profile_tests;
 mod errors;
 mod paths;
 mod persistence;
 mod technology_diff;
-#[cfg(test)]
-mod technology_draft_tests;
 
 pub use discovery::discover_model_files;
 #[cfg(test)]
@@ -35,13 +31,7 @@ pub use rspice_model_library::pdk::contracts::{
     PdkRecognitionTerminal, PdkStreamMapEntry, PdkTechnologyArtifactKind, PdkTechnologyBinding,
     PdkTechnologyLayer, PdkViaDefinition,
 };
-pub use rspice_model_library::pdk::display_profile::{
-    PdkDisplayFillStyle, PdkDisplayLayerStyle, PdkDisplayProfileAuditAction,
-    PdkDisplayProfileAuditReceipt, PdkDisplayProfileBinding, PdkDisplayProfileDraft,
-    PdkDisplayProfileRevision, PdkDisplayProfileScope,
-};
 pub use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
-pub use rspice_model_library::pdk::technology_draft::PdkTechnologyDraft;
 pub use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation::pdk::PdkTechnologyRegistry;

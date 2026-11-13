@@ -526,10 +526,6 @@ mod tests {
                 "install browser persistence fixture",
             )
             .expect("install package");
-        let package = config.technology_registry.validated_packages()[0].clone();
-        let mut draft = PdkTechnologyDraft::from_package(package.metadata());
-        draft.set_revision("2.4.0".to_owned());
-        config.technology_draft = Some(draft.clone());
 
         let prepared =
             prepare_browser_pdk_snapshot(&path, &config, 7).expect("prepare browser snapshot");
@@ -539,7 +535,6 @@ mod tests {
             metadata.technology_registry.archives().is_empty(),
             "large immutable archives must not remain embedded in metadata"
         );
-        assert_eq!(metadata.technology_draft, Some(draft));
         assert_eq!(prepared.archives.len(), 1);
         assert_eq!(
             prepared.archives[0].reference.digest,
@@ -727,57 +722,6 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
-        std::fs::remove_dir_all(root).expect("remove fixture");
-    }
-
-    #[test]
-    fn display_profile_revisions_round_trip_and_rebind_only_after_package_revalidation() {
-        let root = unique_temp_dir("display-profile");
-        let path = root.join(CONFIG_FILE_NAME);
-        let (bytes, authority) = super::pdk_technology_test_fixture();
-        let mut config = PdkConfig::default();
-        config
-            .technology_registry
-            .install_archive_bytes(&bytes, &authority, "install persistence fixture")
-            .expect("install package");
-        let package = config.technology_registry.validated_packages()[0].clone();
-        config
-            .display_profile_registry
-            .publish_and_activate(
-                package.metadata(),
-                PdkDisplayProfileDraft::package_defaults(
-                    package.metadata(),
-                    "layout-dark",
-                    "Layout dark",
-                ),
-                &authority,
-                "publish persistent profile",
-            )
-            .expect("publish display profile");
-
-        save_to(&config, &path).expect("save config");
-        let mut loaded = load_from(&path).expect("load config");
-
-        assert_eq!(
-            loaded.display_profile_registry,
-            config.display_profile_registry
-        );
-        loaded
-            .display_profile_registry
-            .validate_audit_chain()
-            .expect("display audit");
-        assert!(loaded.technology_registry.validated_packages().is_empty());
-        loaded
-            .technology_registry
-            .revalidate_installed()
-            .expect("revalidate package");
-        let rebound = &loaded.technology_registry.validated_packages()[0];
-        assert!(
-            loaded
-                .display_profile_registry
-                .active_for_package(rebound.metadata())
-                .is_some()
-        );
         std::fs::remove_dir_all(root).expect("remove fixture");
     }
 
