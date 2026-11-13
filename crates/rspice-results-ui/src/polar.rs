@@ -1063,13 +1063,17 @@ fn paint_decade_marks(
         }
         let Some(point) = place(index) else { continue };
         painter.circle_filled(point, 2.5, t.color.text_dim);
-        painter.text(
-            egui::pos2(point.x + 5.0, point.y + 2.0),
-            egui::Align2::LEFT_TOP,
+        // On a patch of the well, so a locus passing under the label does
+        // not strike it through.
+        let galley = painter.layout_no_wrap(
             policy.format_frequency(frequency, 0),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_dim,
         );
+        let label =
+            egui::Rect::from_min_size(egui::pos2(point.x + 5.0, point.y + 2.0), galley.size());
+        painter.rect_filled(label.expand(1.5), 2.0, t.color.canvas_bg);
+        painter.galley(label.min, galley, t.color.text_dim);
     }
 }
 

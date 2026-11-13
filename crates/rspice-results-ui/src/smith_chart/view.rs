@@ -305,6 +305,7 @@ struct ChartInks {
     stability: egui::Color32,
     gain: egui::Color32,
     noise: egui::Color32,
+    well: egui::Color32,
 }
 
 impl ChartInks {
@@ -331,6 +332,7 @@ impl ChartInks {
             stability: c.err,
             gain: c.traces[4],
             noise: c.text_dim,
+            well: c.canvas_bg,
         }
     }
 }
@@ -553,14 +555,18 @@ fn paint_circle(
             painter.line_segment([from, tip], egui::Stroke::new(1.0, color));
         }
     }
+    // The tag sits on a patch of the well so grid lines and other circles
+    // crossing it do not break the text up.
     let middle = points[points.len() / 2];
-    painter.text(
-        screen(middle) + egui::vec2(3.0, -3.0),
-        egui::Align2::LEFT_BOTTOM,
+    let galley = painter.layout_no_wrap(
         circle.tag(),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         color,
     );
+    let tag = egui::Align2::LEFT_BOTTOM
+        .anchor_size(screen(middle) + egui::vec2(3.0, -3.0), galley.size());
+    painter.rect_filled(tag.expand(1.5), 2.0, inks.well);
+    painter.galley(tag.min, galley, color);
 }
 
 /// Admittance (conductance, susceptance) in siemens from a reflection
@@ -721,7 +727,15 @@ pub fn show(
         Axis::linear(y0, y1, "Im Γ"),
     )
     .accessible_name("Smith chart")
-    .accessible_detail(&accessible_detail);
+    .accessible_detail(&accessible_detail)
+    .without_x_axis_chrome();
+    // The chart is read on its own grid, as a printed Smith chart is: no
+    // Cartesian ticks, units or tick gutter around the disc.
+    spec.x.ticks.clear();
+    spec.y.ticks.clear();
+    spec.x.unit.clear();
+    spec.y.unit.clear();
+    spec.left_margin = 12.0;
     for (slot, prepared) in traces.iter().enumerate() {
         if !prepared.visible {
             continue;
@@ -843,7 +857,9 @@ pub fn show(
             color,
         );
     }
-    if let Some((slot, i)) = hovered.or(pinned) {
+    // The pinned marker reads out in the side panel; the card is for the
+    // point under the pointer, so it never covers the circles for good.
+    if let Some((slot, i)) = hovered {
         let prepared = &traces[slot];
         let pos = crate::presentation::xy_screen_pos(
             response.plot_rect,
@@ -948,8 +964,11 @@ pub fn right_panel(
         let rows = sample_rows(trace, index, grid, quantity_policy, digits)
             .into_iter()
             .collect::<Vec<_>>();
+        // The trace's Z₀ heads the panel already; the hover card keeps it
+        // because it stands alone.
         let table = rows
             .iter()
+            .filter(|(key, _)| key != "Z₀")
             .map(|(key, value)| (key.as_str(), value.clone(), false))
             .collect::<Vec<_>>();
         crate::presentation::stat_table(ui, &table);
@@ -1023,19 +1042,27 @@ fn two_port_rows(
         let CircleKind::Stability { stable_inside } = circle.kind else {
             continue;
         };
-        let label = match circle.plane {
-            CirclePlane::Source => "Source stab",
-            CirclePlane::Load => "Load stab",
+        let [centre, radius, side] = match circle.plane {
+            CirclePlane::Source => ["Source centre", "Source radius", "Source stable"],
+            CirclePlane::Load => ["Load centre", "Load radius", "Load stable"],
         };
         circle_rows.push((
-            label,
+            centre,
             format!(
-                "C {} ∠ {} · r {} · stable {}",
+                "{} ∠ {}",
                 plain_readout(circle.circle.center.norm(), "", digits),
                 angle_readout(quantity_policy, circle.circle.center.arg(), digits),
-                plain_readout(circle.circle.radius, "", digits),
-                if stable_inside { "inside" } else { "outside" }
             ),
+            false,
+        ));
+        circle_rows.push((
+            radius,
+            plain_readout(circle.circle.radius, "", digits),
+            false,
+        ));
+        circle_rows.push((
+            side,
+            if stable_inside { "inside" } else { "outside" }.to_owned(),
             false,
         ));
     }

@@ -371,3 +371,199 @@ fn write_smith_grid_pngs() {
         println!("{}", path.display());
     }
 }
+
+/// S-parameters at 50 Ω of a common-emitter hybrid-π bipolar transistor
+/// (gm 0.1 S, rπ 1 kΩ, Cπ 3.2 pF, Cμ 0.3 pF, rb 20 Ω, ro 5 kΩ): the base
+/// resistance in series with the intrinsic Y-parameters, converted through Z.
+fn hybrid_pi(frequency: f64) -> TwoPortScattering {
+    let omega = std::f64::consts::TAU * frequency;
+    let j = Complex64::i();
+    let (gm, r_pi, c_pi, c_mu, r_b, r_o) = (0.1, 1.0e3, 3.2e-12, 0.3e-12, 20.0, 5.0e3);
+    let y11 = 1.0 / r_pi + j * omega * (c_pi + c_mu);
+    let y12 = -j * omega * c_mu;
+    let y21 = gm - j * omega * c_mu;
+    let y22 = 1.0 / r_o + j * omega * c_mu;
+    let det = y11 * y22 - y12 * y21;
+    let (z11, z12, z21, z22) = (y22 / det + r_b, -y12 / det, -y21 / det, y11 / det);
+    let z0 = 50.0;
+    let delta = (z11 + z0) * (z22 + z0) - z12 * z21;
+    TwoPortScattering {
+        s11: ((z11 - z0) * (z22 + z0) - z12 * z21) / delta,
+        s12: 2.0 * z0 * z12 / delta,
+        s21: 2.0 * z0 * z21 / delta,
+        s22: ((z11 + z0) * (z22 - z0) - z12 * z21) / delta,
+    }
+}
+
+/// An amplifier on the Z+Y grid: the S11 sweep of [`hybrid_pi`] from
+/// 100 MHz to 6 GHz with marker m1 pinned near 500 MHz, where the device is
+/// potentially unstable, and both stability circles and two available-gain
+/// circles at the marker frequency.
+struct AmplifierScene {
+    traces: [OwnedTrace; 1],
+    figures: TwoPortFigures,
+    sheet: SmithSheetState,
+    circles: Vec<crate::smith_chart::circles::ChartCircle>,
+    marker: usize,
+}
+
+fn amplifier_scene() -> AmplifierScene {
+    use rspice_results::network_matrix::two_port::TwoPortSweep;
+
+    let frequencies = (0..=80)
+        .map(|step| 1.0e8 * 60f64.powf(f64::from(step) / 80.0))
+        .collect::<Vec<_>>();
+    let sweep = TwoPortSweep {
+        scattering: frequencies.iter().map(|f| hybrid_pi(*f)).collect(),
+        frequencies: frequencies.clone(),
+        reference_impedances_ohm: [50.0, 50.0],
+        noise: None,
+    };
+    let marker = sweep.nearest_index(5.0e8).expect("marker sample");
+    let figures = TwoPortFigures::at(&sweep, marker).expect("figures");
+    let points = frequencies
+        .iter()
+        .zip(&sweep.scattering)
+        .map(|(f, s)| (*f, s.s11.re, s.s11.im))
+        .collect::<Vec<_>>();
+    let sheet = SmithSheetState {
+        grid: SmithGrid::ImpedanceAdmittance,
+        responses: vec!["S11".to_owned()],
+        circles: SmithCircleSet {
+            stability: true,
+            available_gain: true,
+            ..SmithCircleSet::default()
+        },
+        gain_db: vec![14.0, 17.0],
+        ..SmithSheetState::default()
+    };
+    let circles = figures.circles(sheet.circles, &sheet.gain_db, &sheet.noise_db);
+    AmplifierScene {
+        traces: [owned_trace("S11", &points, Some(50.0))],
+        figures,
+        sheet,
+        circles,
+        marker,
+    }
+}
+
+const PAGE: egui::Vec2 = egui::vec2(980.0, 790.0);
+
+/// The sheet bar on its panel band, the chart in the well and the readout
+/// panel at the right, as the results page lays them out, settled and
+/// returned with the context that drew it.
+fn amplifier_page(
+    scene: &AmplifierScene,
+    theme: rspice_ui_kit::theme::Theme,
+    pixels_per_point: f32,
+) -> (egui::Context, egui::FullOutput) {
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    theme.apply(&ctx);
+    let mut cache = plot::DecimationCache::default();
+    let mut view = PlotView::default();
+    let mut pin = Some((0, scene.marker));
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(
+            ctx.run_ui(raster::display_input(PAGE, pixels_per_point), |ui| {
+                let c = Tokens::get(ui.ctx()).color;
+                let views = scene
+                    .traces
+                    .iter()
+                    .enumerate()
+                    .map(|(index, trace)| trace.view(index))
+                    .collect::<Vec<_>>();
+                let chart = SmithChart {
+                    traces: &views,
+                    sheet: &scene.sheet,
+                    figures: Some(&scene.figures),
+                    circles: &scene.circles,
+                };
+                let bar = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(PAGE.x, 40.0));
+                let panel = egui::Rect::from_min_max(
+                    egui::pos2(PAGE.x - 300.0, bar.bottom()),
+                    egui::pos2(PAGE.x, PAGE.y),
+                );
+                let well = egui::Rect::from_min_max(
+                    egui::pos2(0.0, bar.bottom()),
+                    egui::pos2(panel.left(), PAGE.y),
+                );
+                ui.painter().rect_filled(bar, 0.0, c.bg_panel);
+                ui.painter().rect_filled(well, 0.0, c.canvas_bg);
+                ui.painter().rect_filled(panel, 0.0, c.bg_panel);
+                ui.painter().vline(
+                    panel.left(),
+                    panel.y_range(),
+                    egui::Stroke::new(1.0, c.border),
+                );
+                let inset = |rect: egui::Rect| egui::UiBuilder::new().max_rect(rect.shrink(8.0));
+                ui.scope_builder(inset(bar), |ui| {
+                    ui.horizontal_centered(|ui| {
+                        let mut bar_sheet = scene.sheet.clone();
+                        let _ = domain_bar(
+                            ui,
+                            &mut bar_sheet,
+                            SmithBarOffer {
+                                responses: None,
+                                two_port: true,
+                                noise: false,
+                            },
+                        );
+                    });
+                });
+                ui.scope_builder(egui::UiBuilder::new().max_rect(well), |ui| {
+                    let _ = show(
+                        ui,
+                        &chart,
+                        &mut view,
+                        &mut pin,
+                        &mut cache,
+                        &QuantityPresentationPolicy::default(),
+                        4,
+                    );
+                });
+                ui.scope_builder(inset(panel), |ui| {
+                    right_panel(ui, &chart, pin, &QuantityPresentationPolicy::default(), 4);
+                });
+            }),
+        );
+    }
+    (ctx, output.expect("a pass ran"))
+}
+
+/// The judged Smith picture: the page above at 2x in both themes. Set
+/// `RSPICE_REVIEW_DIR` to choose where.
+#[test]
+#[ignore = "writes PNGs for review"]
+fn write_smith_amplifier_png() {
+    use rspice_ui_kit::theme::{EngineeringCanvasTheme, Theme};
+    use rspice_ui_kit::tokens::Mode;
+
+    let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let scene = amplifier_scene();
+    for (name, mode, canvas_theme) in [
+        (
+            "smith-amplifier-dark.png",
+            Mode::Dark,
+            EngineeringCanvasTheme::Dark,
+        ),
+        (
+            "smith-amplifier-light.png",
+            Mode::Light,
+            EngineeringCanvasTheme::Light,
+        ),
+    ] {
+        let theme = Theme {
+            mode,
+            canvas_theme,
+            ..Theme::default()
+        };
+        let (ctx, output) = amplifier_page(&scene, theme, 2.0);
+        let canvas = raster::rasterize(&ctx, PAGE, &output);
+        let path = directory.join(name);
+        std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
+        println!("{}", path.display());
+    }
+}
