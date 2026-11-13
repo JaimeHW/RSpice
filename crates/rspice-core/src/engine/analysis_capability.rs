@@ -281,12 +281,10 @@ pub enum CellSupport {
         evidence: &'static [&'static str],
     },
     /// No instance of the family takes part. `reason` is what a person reads;
-    /// `plan` is the roadmap item that closes the cell, internal metadata that
-    /// never reaches refusal text — the `token` is how a refusal is tracked.
+    /// the `token` is how a refusal is tracked.
     Refused {
         token: &'static str,
         reason: &'static str,
-        plan: &'static str,
     },
 }
 
@@ -480,23 +478,19 @@ pub const fn capability_cell(
             F::XspiceEvent | F::RealNumber => CellSupport::Refused {
                 token: DISCRETE_STATE,
                 reason: DISCRETE_STATE_REASON,
-                plan: "P7.2",
             },
             F::VerilogARuntime if matches!(analysis, A::Hb) => hb_admissible_veriloga(),
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
-                plan: "P7.1",
             },
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, true),
-                plan: "P7.1",
             },
             F::VerilogAmsMixed => CellSupport::Refused {
                 token: DISCRETE_STATE,
                 reason: DISCRETE_STATE_REASON,
-                plan: "P7.2/P7.3",
             },
         },
         A::Envelope | A::QuasiPeriodic => match family {
@@ -507,17 +501,14 @@ pub const fn capability_cell(
             F::XspiceEvent | F::VerilogAmsMixed | F::RealNumber => CellSupport::Refused {
                 token: DISCRETE_STATE,
                 reason: DISCRETE_STATE_REASON,
-                plan: "P7.3",
             },
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
-                plan: "P7.1",
             },
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, true),
-                plan: "P7.1",
             },
         },
     }
@@ -957,12 +948,7 @@ impl Engine {
                         }
                     }
                 },
-                // The roadmap item stays out of the text: the token tracks it.
-                CellSupport::Refused {
-                    token,
-                    reason,
-                    plan: _,
-                } => {
+                CellSupport::Refused { token, reason } => {
                     let Some((instance, module)) = first_instance(circuit, family) else {
                         continue;
                     };
@@ -1012,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn every_cell_is_decided_and_refusals_name_a_plan() {
+    fn every_cell_is_decided_and_refusals_give_a_reason() {
         let cells = capability_matrix().collect::<Vec<_>>();
         assert_eq!(
             cells.len(),
@@ -1038,13 +1024,9 @@ mod tests {
                         "{family:?} × {analysis:?}: a person reads the condition: {condition}"
                     );
                 }
-                CellSupport::Refused {
-                    token,
-                    reason,
-                    plan,
-                } => {
+                CellSupport::Refused { token, reason } => {
                     assert!(token.starts_with("analysis."), "{family:?} × {analysis:?}");
-                    assert!(!reason.is_empty() && !plan.is_empty());
+                    assert!(!reason.is_empty());
                     assert!(
                         !names_a_plan_item(reason),
                         "{family:?} × {analysis:?}: a person reads the reason: {reason}"

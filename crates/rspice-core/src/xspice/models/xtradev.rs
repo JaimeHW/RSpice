@@ -75,9 +75,6 @@ struct AswitchEval {
 
 #[derive(Debug, Clone, Copy)]
 struct PswitchEval {
-    /// Asserted by unit tests; the stamping path uses `output_conductance`.
-    #[allow(dead_code)]
-    resistance: Value,
     output_conductance: Value,
     control_partial: Value,
     control_conductance: Value,
@@ -1127,7 +1124,6 @@ fn pswitch_eval(ctx: &CmContext) -> CmResult<PswitchEval> {
         ));
     }
     Ok(PswitchEval {
-        resistance,
         output_conductance,
         control_partial,
         control_conductance,
@@ -3704,7 +3700,6 @@ mod tests {
 
         let eval = pswitch_eval(&ctx).expect("linear pswitch eval");
 
-        assert!((eval.resistance - 5000.0).abs() < 1.0e-9);
         assert!((eval.output_conductance - 2.0e-4).abs() < 1.0e-15);
         assert!((eval.control_partial - 1.6e-4).abs() < 1.0e-15);
     }
@@ -3723,7 +3718,7 @@ mod tests {
 
         let eval = pswitch_eval(&ctx).expect("log pswitch eval");
 
-        assert!((eval.resistance - 3000.0).abs() < 1.0e-9);
+        assert!((1.0 / eval.output_conductance - 3000.0).abs() < 1.0e-9);
     }
 
     #[test]

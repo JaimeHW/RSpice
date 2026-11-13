@@ -117,23 +117,11 @@ struct DigParams {
     s0_rlo: Value,
     s0_rhi: Value,
     s0_tsw: Value,
-    /// Parsed and finite-checked for Xyce parameter-set parity.  Xyce's
-    /// `N_DEV_Digital.C` declares `S0VLO`/`S1VHI` on the DIG card and never
-    /// reads them; the input threshold logic reads the `s0_vhi`/`s1_vlo`
-    /// pair only.
-    #[allow(dead_code)]
-    s0_vlo: Value,
     s0_vhi: Value,
     s1_rlo: Value,
     s1_rhi: Value,
     s1_tsw: Value,
     s1_vlo: Value,
-    /// Parsed and finite-checked for Xyce parameter-set parity.  Xyce's
-    /// `N_DEV_Digital.C` declares `S0VLO`/`S1VHI` on the DIG card and never
-    /// reads them; the input threshold logic reads the `s0_vhi`/`s1_vlo`
-    /// pair only.
-    #[allow(dead_code)]
-    s1_vhi: Value,
     delay: Value,
 }
 
@@ -197,15 +185,18 @@ fn dig_params(ctx: &CmContext) -> CmResult<DigParams> {
         s0_rlo: resistance_param(ctx, "s0rlo")?,
         s0_rhi: resistance_param(ctx, "s0rhi")?,
         s0_tsw: nonnegative_param(ctx, "s0tsw")?,
-        s0_vlo: finite_param(ctx, "s0vlo")?,
         s0_vhi: finite_param(ctx, "s0vhi")?,
         s1_rlo: resistance_param(ctx, "s1rlo")?,
         s1_rhi: resistance_param(ctx, "s1rhi")?,
         s1_tsw: nonnegative_param(ctx, "s1tsw")?,
         s1_vlo: finite_param(ctx, "s1vlo")?,
-        s1_vhi: finite_param(ctx, "s1vhi")?,
         delay: nonnegative_param(ctx, "delay")?,
     };
+    // Xyce's `N_DEV_Digital.C` declares `S0VLO`/`S1VHI` on the DIG card and
+    // never reads them; they are finite-checked for parameter-set parity and
+    // not kept.
+    finite_param(ctx, "s0vlo")?;
+    finite_param(ctx, "s1vhi")?;
     Ok(params)
 }
 
