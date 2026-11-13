@@ -515,6 +515,56 @@ fn a_pane_whose_traces_hold_no_value_is_its_header_alone() {
     );
 }
 
+/// At an event's instant a staircase reads the value after the event, as
+/// its lane does and as its curve is drawn from there on: with cursor A on
+/// the second sampling edge, where the code steps from 0 to 128, the
+/// `analog(D(code))` entry reads 128, beside the lane's 128.
+#[test]
+fn an_event_instant_reads_the_value_after_the_event() {
+    const STAIRCASE: &str = "analog(D(code))";
+    let samp = super::lanes::history(super::lanes::sar_run(), "SAMP");
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, STAIRCASE);
+    super::lanes::place_cursors(&mut state, Some(samp[1].0), None);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let painted = texts(&output.shapes);
+    let volts = text(&output, "45 hidden").expect("the volts pane's header row");
+    // The texts of the last row that names `name` (below the volts pane's
+    // header for a pane entry), from its name rightwards.
+    let row = |name: &str, in_pane: bool| {
+        let label = painted
+            .iter()
+            .rev()
+            .find(|(text, rect)| {
+                text.starts_with(name) && (!in_pane || rect.top() > volts.bottom())
+            })
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{name} is named: {painted:?}"));
+        painted
+            .iter()
+            .filter(|(_, rect)| {
+                (rect.center().y - label.center().y).abs() < 4.0 && rect.left() >= label.left()
+            })
+            .map(|(text, _)| text.clone())
+            .collect::<Vec<_>>()
+    };
+    let reads = |row: &[String], value: &str| {
+        row.iter()
+            .any(|text| text == value || text.ends_with(&format!(" {value}")))
+    };
+    let entry = row(STAIRCASE, true);
+    assert!(
+        reads(&entry, "128") && !reads(&entry, "0"),
+        "the entry reads after the event: {entry:?}"
+    );
+    let lane = row("code", false);
+    assert!(
+        reads(&lane, "128"),
+        "the lane reads after the event: {lane:?}"
+    );
+}
+
 /// The pictures for review, written under `RSPICE_PICTURES` when it is set:
 /// the staircase named in its own pane beside the DAC, and an expression of
 /// volts named in the volts pane with cursor A's reading, then hidden there.

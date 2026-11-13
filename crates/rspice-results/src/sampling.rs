@@ -231,9 +231,11 @@ pub fn sample_branches_into(
 /// One value for `xq`, whatever the shape.
 ///
 /// A monotone sweep answers exactly as [`sample_at_with`] does, endpoint
-/// clamping included. A multi-branch series answers with its first covering
-/// branch, which is presentation-lossy by construction — a surface that owes
-/// the reader every branch uses [`sample_branches_into`].
+/// clamping included, except at an instant where it jumps: there it reads
+/// the value after the jump ([`value_after_jump`]). A multi-branch series
+/// answers with its first covering branch, which is presentation-lossy by
+/// construction — a surface that owes the reader every branch uses
+/// [`sample_branches_into`].
 #[must_use]
 pub fn sample_at_with_shape(
     x: &[f64],
@@ -244,7 +246,7 @@ pub fn sample_at_with_shape(
 ) -> f64 {
     match shape.class {
         SweepClass::Empty | SweepClass::Ascending | SweepClass::Descending => {
-            sample_at_with(x, y, xq, interpolation)
+            value_after_jump(x, y, xq).unwrap_or_else(|| sample_at_with(x, y, xq, interpolation))
         }
         SweepClass::NonSweep => nearest_sample(x, y, xq),
         SweepClass::MultiBranch => {
@@ -261,17 +263,38 @@ pub fn sample_at_with_shape(
                     (last, first)
                 };
                 if xq >= lo && xq <= hi {
-                    return sample_at_with(
-                        &x[run.start..end],
-                        &y[run.start..end],
-                        xq,
-                        interpolation,
-                    );
+                    let (x, y) = (&x[run.start..end], &y[run.start..end]);
+                    return value_after_jump(x, y, xq)
+                        .unwrap_or_else(|| sample_at_with(x, y, xq, interpolation));
                 }
             }
             nearest_sample(x, y, xq)
         }
     }
+}
+
+/// The value a monotone series reads at `xq` when it jumps there: the last
+/// of the samples it stores at exactly `xq`, when it stores more than one.
+///
+/// An event-driven series — `analog()` of a bus, a real net's steps — stores
+/// the value before an event and the value after it, both at the event's
+/// instant. At that instant the reader is owed the value after: the curve is
+/// drawn at it from there on, and a digital viewer's cursor reads a
+/// transition the same way. Interpolating took the sample before, so a legend
+/// read 0 beside a lane reading 128.
+fn value_after_jump(x: &[f64], y: &[f64], xq: f64) -> Option<f64> {
+    let n = x.len().min(y.len());
+    if n < 2 {
+        return None;
+    }
+    let x = &x[..n];
+    // How many samples lie at or before `xq` in storage order.
+    let reached = if x[n - 1] < x[0] {
+        x.partition_point(|&value| value >= xq)
+    } else {
+        x.partition_point(|&value| value <= xq)
+    };
+    (reached >= 2 && x[reached - 1] == xq && x[reached - 2] == xq).then(|| y[reached - 1])
 }
 
 /// The sample nearest `xq` in source order, with no assumption about ordering
@@ -420,6 +443,43 @@ mod tests {
                         "reverse={reverse} mode={mode:?} xq={xq}"
                     );
                 }
+            }
+        }
+    }
+
+    /// A staircase stores the value before and after each event at the
+    /// event's instant: there it reads the value after, in every mode and
+    /// either storage direction, and between events it reads as before.
+    #[test]
+    fn a_jump_reads_the_value_after_it_at_its_instant() {
+        let x = [0.0, 1.0, 1.0, 2.0, 2.0, 3.0];
+        let y = [0.0, 0.0, 128.0, 128.0, 192.0, 192.0];
+        for reverse in [false, true] {
+            let (mut x, mut y) = (x.to_vec(), y.to_vec());
+            if reverse {
+                // Swept from 3 down to 0, it steps 192 → 128 at 2 and
+                // 128 → 0 at 1.
+                x.reverse();
+                y.reverse();
+            }
+            let shape = SweepShape::of(&x);
+            assert!(shape.is_monotone());
+            for mode in [
+                SampleInterpolation::Nearest,
+                SampleInterpolation::Linear,
+                SampleInterpolation::MonotoneCubic,
+            ] {
+                let at = |xq| sample_at_with_shape(&x, &y, &shape, xq, mode);
+                if reverse {
+                    assert_eq!((at(2.0), at(1.0)), (128.0, 0.0), "mode={mode:?}");
+                } else {
+                    assert_eq!((at(1.0), at(2.0)), (128.0, 192.0), "mode={mode:?}");
+                }
+                assert_eq!(
+                    at(1.5),
+                    sample_at_with(&x, &y, 1.5, mode),
+                    "reverse={reverse} mode={mode:?}"
+                );
             }
         }
     }
