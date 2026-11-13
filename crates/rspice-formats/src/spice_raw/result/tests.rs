@@ -1,6 +1,6 @@
 use super::*;
 use crate::WaveformDomain;
-use crate::spice_raw::decode_spice_raw;
+use crate::spice_raw::{RawReadError, decode_spice_raw, decode_spice_raw_plots};
 use crate::waveform_io::result::EXPORT_TEST_LIMITS;
 use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
@@ -227,4 +227,61 @@ fn only_the_named_event_nodes_are_written() {
     assert_eq!((without.event_plots, without.bus_plots), (0, 0));
     let decoded = decode_spice_raw(&without.bytes, Default::default()).unwrap();
     assert_eq!(decoded.signals[0].real, [0.0, 1.8]);
+}
+
+/// The multi-plot reader takes a file with event lanes back as the one
+/// transient it is, carrying the histories its event plots hold, where the
+/// one-dataset reader refuses the file rather than drop them.
+#[test]
+fn a_rawfile_with_event_lanes_reads_back_as_one_transient_with_its_events() {
+    let analysis = mixed_transient();
+    for format in [RawFormat::Binary, RawFormat::Ascii] {
+        let export = encode(&analysis, format, EVERY_EVENT);
+        let plots = decode_spice_raw_plots(&export.bytes, Default::default()).unwrap();
+        assert_eq!(plots.len(), 1, "event plots are not analyses");
+        let [plot] = plots.as_slice() else {
+            unreachable!()
+        };
+        assert_eq!(plot.plot_name, "Transient Analysis");
+        assert!(!plot.scalar);
+        assert_eq!(plot.dataset.domain, WaveformDomain::Transient);
+        assert_eq!(plot.dataset.signals[0].real, [0.0, 1.8]);
+        let events = plot
+            .events
+            .as_ref()
+            .expect("the transient carries the events");
+        let names = events
+            .digital_traces
+            .iter()
+            .map(|trace| (trace.node_name.as_str(), trace.points.len()))
+            .collect::<Vec<_>>();
+        assert_eq!(names, [("q1", 2), ("q0", 2)]);
+        assert_eq!(events.digital_traces[1].points[1].time, 7e-10);
+        assert_eq!(events.real_traces[0].points[0].value, 0.75);
+        assert_eq!(events.digital_buses[0].members, ["q1", "q0"]);
+        assert!(matches!(
+            decode_spice_raw(&export.bytes, Default::default()),
+            Err(RawReadError::MultiplePlots(5))
+        ));
+    }
+}
+
+/// Event plots belong to exactly one transient: beside two, or beside none,
+/// the file is refused rather than guessed at.
+#[test]
+fn event_plots_with_no_single_transient_are_refused() {
+    let export = encode(&mixed_transient(), RawFormat::Ascii, EVERY_EVENT);
+    let text = std::str::from_utf8(&export.bytes).unwrap();
+    let events_start = text.match_indices("Title:").nth(1).unwrap().0;
+    let (analysis_plot, event_plots) = text.split_at(events_start);
+    for (source, transients) in [
+        (format!("{analysis_plot}{text}"), 2),
+        (event_plots.to_owned(), 0),
+    ] {
+        let error = decode_spice_raw_plots(source.as_bytes(), Default::default()).unwrap_err();
+        assert!(
+            matches!(error, RawReadError::UnattributedEvents { transient_plots } if transient_plots == transients),
+            "{error}"
+        );
+    }
 }
