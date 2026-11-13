@@ -474,8 +474,7 @@ pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
     active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, answer_void_veriloga_evidence, file_action, foreign_import_refusal,
-    run_project_file_action,
+    answer_project_request, answer_void_veriloga_evidence, file_action, run_project_file_action,
 };
 mod design_requests;
 #[cfg(test)]

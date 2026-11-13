@@ -118,3 +118,27 @@ pub fn trim_recent_files(model: &Model, platform: &mut PlatformState) {
         *kept <= listed
     });
 }
+
+/// Why the LTspice or QSPICE schematic import cannot run now, if it cannot:
+/// natively, what the model and the platform state refuse; in the browser,
+/// always, since the source program's symbol library is read from this
+/// computer's disk.
+pub fn foreign_import_refusal_in(model: &Model, platform: &PlatformState) -> Option<&'static str> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if !platform.project_lifecycle.is_open() {
+            Some("open a project first")
+        } else if model.safe_mode.project_read_only() {
+            Some("the project is open read-only")
+        } else if model.simulation.execution.has_active_execution() {
+            Some("an active simulation execution still owns the project")
+        } else {
+            None
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (model, platform);
+        Some("the source program's symbol library is read from this computer's disk")
+    }
+}

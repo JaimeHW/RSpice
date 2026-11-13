@@ -36,8 +36,9 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_library::SimulationPlanModelBinding;
 use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::file_workflow::SchematicLoadOrigin;
+use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 
 use plan::{ForeignPlan, plan_from_cards};
 use sheet::{OwnSheet, place_on_sheet};
@@ -74,22 +75,6 @@ pub(crate) fn import_foreign_schematic_with_dialog(app: &mut RSpiceApp, tool: Fo
 /// The reason the import cannot run now, if any.
 pub(crate) fn foreign_import_refusal(state: &AppState) -> Option<&'static str> {
     foreign_import_refusal_in(&state.model, &state.platform)
-}
-
-/// [`foreign_import_refusal`], read from the model and the platform state.
-pub(crate) fn foreign_import_refusal_in(
-    model: &Model,
-    platform: &PlatformState,
-) -> Option<&'static str> {
-    if !platform.project_lifecycle.is_open() {
-        Some("open a project first")
-    } else if model.safe_mode.project_read_only() {
-        Some("the project is open read-only")
-    } else if model.simulation.execution.has_active_execution() {
-        Some("an active simulation execution still owns the project")
-    } else {
-        None
-    }
 }
 
 /// A drawing and everything under it, imported.

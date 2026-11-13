@@ -27,7 +27,6 @@ use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
-use crate::workbench::commands::foreign_import_refusal;
 use crate::workbench::documents::code_workspace::{
     self, AutomationRunPort, CodeWorkspacePage, CodeWorkspaceParts, ProblemStep,
     cancel_veriloga_compile, consume_veriloga_compile_request, design_hosts_veriloga,
@@ -48,6 +47,7 @@ use crate::workbench::slots::{CodeState, netlist_shown_in, veriloga_compilation_
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::{CodeCommand, CodeRequest};
 use rspice_app_runs::simulation::{RunHost, SimulationController};
+use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 
 /// The code feature.
 pub(crate) struct CodeFeature;
@@ -212,7 +212,7 @@ impl CommandSet for CodeCommand {
                 },
             ),
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
-                match foreign_import_refusal(model, reads.platform) {
+                match foreign_import_refusal_in(model, reads.platform) {
                     Some(refusal) => (false, refusal),
                     None => (true, UNAVAILABLE),
                 }
