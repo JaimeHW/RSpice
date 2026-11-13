@@ -991,6 +991,7 @@ impl WorkbenchSession {
         self.capture_workspace_layout(self.workspace);
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn workspace_layout(&self, workspace: Workspace) -> WorkspaceLayoutState {
         if workspace == self.workspace {
