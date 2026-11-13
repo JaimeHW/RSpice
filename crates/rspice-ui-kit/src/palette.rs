@@ -352,10 +352,11 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     // own token (0x96, 0x9d, 0xa2) is not: at (150, 157, 162) the tertiary
     // tone carried *more* contrast than the secondary one, so a unit caption
     // outshone the value it annotated and a placeholder read as a declared
-    // value. Same hue, 21% less contrast than `text_dim` on every ground the
-    // palette paints on. `text_tones_descend_against_every_ground` holds the
-    // ladder.
-    text_faint: Color32::from_rgb(126, 133, 138),
+    // value. Same hue, 12% less contrast than `text_dim` on every ground the
+    // palette paints on, and still 4.5:1 on each of them, so a gutter caption
+    // or an axis title stays legible. `text_tones_descend_against_every_ground`
+    // holds the ladder.
+    text_faint: Color32::from_rgb(136, 143, 148),
     accent: Color32::from_rgb(242, 184, 36),
     accent_ink: Color32::from_rgb(23, 24, 26),
     accent_dim: Color32::from_rgba_premultiplied(27, 20, 4, 28),
@@ -377,7 +378,7 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     net_class_clock: Color32::from_rgb(217, 132, 176),
     canvas_text: Color32::from_rgb(215, 219, 222),
     canvas_text_dim: Color32::from_rgb(147, 153, 158),
-    canvas_text_faint: Color32::from_rgb(126, 133, 138),
+    canvas_text_faint: Color32::from_rgb(136, 143, 148),
     canvas_cursor_a: Color32::from_rgb(242, 184, 36),
     canvas_cursor_b: Color32::from_rgb(205, 212, 217),
     // Blue, coral, green, violet, cyan, rose, lime, peach: at least 0.1
