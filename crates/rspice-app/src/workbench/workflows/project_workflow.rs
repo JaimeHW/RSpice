@@ -1185,7 +1185,6 @@ pub(crate) fn prepare_loaded_project(
         model, platform, ..
     } = lifecycle;
     let accepted_execution_context = project.file.execution_context.clone();
-    let project_id = project.file.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) = match project
         .file
         .execution_context
