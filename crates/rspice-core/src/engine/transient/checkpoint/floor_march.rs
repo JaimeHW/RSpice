@@ -57,13 +57,14 @@ pub(super) fn validate_target(
     if grid.is_some() || !circuit.has_coupled_event_nets() {
         return Ok(());
     }
-    Err(format!(
+    Err(
         "transient checkpoint does not record its floor march, which keys every \
          code-model event coupled to an HDL module on the HDL tick it is a rounding from; \
          this circuit couples code models to an HDL module, so the event times its image \
          queued would not resume where the uninterrupted run lands them; re-run the \
          transient from t=0"
-    ))
+            .to_owned(),
+    )
 }
 
 /// Values a parsed image retains, for the checkpoint memory budget.
