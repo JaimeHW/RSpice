@@ -205,3 +205,40 @@ fn a_coordinate_reads_to_the_resolution_of_its_axis() {
         "866.2 mV"
     );
 }
+
+/// The span field reads what a deck would write, holds the span inside the
+/// record, takes an empty end for the record's end and the whole record for
+/// no span, and refuses an end that does not read or a span that runs
+/// backwards.
+#[test]
+fn a_typed_span_reads_as_a_deck_value_inside_the_record() {
+    let record = (0.0, 1.0e-3);
+    assert_eq!(
+        typed_sweep_range(("250u", "750 \u{b5}s"), record),
+        Ok(Some((250.0e-6, 750.0e-6)))
+    );
+    assert_eq!(
+        typed_sweep_range(("", "0.5ms"), record),
+        Ok(Some((0.0, 0.5e-3)))
+    );
+    // Past the record's ends is the record's end; the whole record is none.
+    assert_eq!(typed_sweep_range(("-1", "2"), record), Ok(None));
+    assert_eq!(typed_sweep_range(("0 s", "1 ms"), record), Ok(None));
+    assert!(typed_sweep_range(("600u", "400u"), record).is_err());
+    assert!(typed_sweep_range(("later", ""), record).is_err());
+}
+
+/// Each hairline of a crowded family is fainter the more members it has,
+/// so the ink where a given share of them cross stays the same: the
+/// opacity of a tenth of the members over one another differs by under 2 %
+/// between a family of two hundred and one of two thousand.
+#[test]
+fn a_crowded_familys_density_reads_the_same_at_any_size() {
+    let ink = |members: usize, share: f64| {
+        let alpha = f64::from(crowded_member_alpha(members));
+        1.0 - (1.0 - alpha).powf(share * members as f64)
+    };
+    assert!(crowded_member_alpha(65) <= 0.5);
+    assert!(crowded_member_alpha(1_000) < crowded_member_alpha(100));
+    assert!((ink(200, 0.1) - ink(2_000, 0.1)).abs() < 0.02);
+}

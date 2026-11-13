@@ -44,7 +44,7 @@ impl ResultFingerprintCache {
             fields.marker_history,
             fields.signal_sets,
             fields.x_scales,
-            fields.unit_abscissas,
+            fields.xy_plots,
         ))?;
         let mut cache = self.0.borrow_mut();
         if let Some(held) = cache.as_ref()
@@ -92,7 +92,7 @@ fn full_digest(
         marker_history,
         signal_sets,
         x_scales,
-        unit_abscissas,
+        xy_plots,
     } = fields;
     let results = results.without_run_logs();
     let result_fields = (
@@ -120,11 +120,11 @@ fn full_digest(
     } else {
         super::digest(&("result-x-scales-v1", digest, x_scales))?
     };
-    // And the unit axes drawn against a signal, only when there are any.
-    if unit_abscissas.is_empty() {
+    // And the strips drawn against a signal, only when there are any.
+    if xy_plots.is_empty() {
         Ok(digest)
     } else {
-        super::digest(&("result-unit-abscissas-v1", digest, unit_abscissas))
+        super::digest(&("result-xy-plots-v1", digest, xy_plots))
     }
 }
 
@@ -175,32 +175,46 @@ mod tests {
         assert_eq!(fingerprint(&history(quiet)), fingerprint(&history(logged)));
     }
 
-    /// A unit axis drawn against a signal is part of the project's result
-    /// content, so choosing one dirties the project; a project with none
-    /// keeps the digest it had before the choice existed.
+    /// A strip drawn against a signal is part of the project's result
+    /// content, so making one or narrowing its sweep span dirties the
+    /// project; a project with none keeps the digest it had before such
+    /// strips existed.
     #[test]
-    fn a_unit_axis_drawn_against_a_signal_changes_the_fingerprint() {
-        use rspice_results::result_presentation::{AnalysisPresentationKey, StripUnitAbscissa};
+    fn a_strip_drawn_against_a_signal_changes_the_fingerprint() {
+        use rspice_results::result_presentation::{AnalysisPresentationKey, StripXyPlot};
         use rspice_results::visualization_document::Abscissa;
         use rspice_vocabulary::product::DatasetId;
         let results = ProjectSimulationResults::from(ProjectSimulationResultsData::default());
         let plain = ResultPresentation::default();
         let before = full_digest(&results, &[], &[], plain.fingerprint_fields().unwrap()).unwrap();
         assert_eq!(digest(&results, &[], &[], &plain).unwrap(), before);
-        let against = ResultPresentation {
-            unit_abscissas: vec![StripUnitAbscissa {
-                analysis: serde_json::from_value::<AnalysisPresentationKey>(serde_json::json!({
-                    "dataset_id": DatasetId::new(),
-                    "source": {"Legacy": 1},
-                }))
-                .unwrap(),
-                unit: "V".to_owned(),
-                abscissa: Abscissa::Signal {
-                    name: "V(in)".to_owned(),
-                },
-            }],
+        let plot = StripXyPlot {
+            analysis: serde_json::from_value::<AnalysisPresentationKey>(serde_json::json!({
+                "dataset_id": DatasetId::new(),
+                "source": {"Legacy": 1},
+            }))
+            .unwrap(),
+            unit: "V".to_owned(),
+            abscissa: Abscissa::Signal {
+                name: "V(in)".to_owned(),
+            },
+            sweep_range: None,
+        };
+        let presentation = |plot: &StripXyPlot| ResultPresentation {
+            xy_plots: vec![plot.clone()],
             ..ResultPresentation::default()
         };
-        assert_ne!(digest(&results, &[], &[], &against).unwrap(), before);
+        let whole = digest(&results, &[], &[], &presentation(&plot)).unwrap();
+        assert_ne!(whole, before);
+        let narrowed = StripXyPlot {
+            sweep_range: Some(
+                rspice_results::visualization_document::AxisRange::new(0.5e-3, 1.0e-3).unwrap(),
+            ),
+            ..plot
+        };
+        assert_ne!(
+            digest(&results, &[], &[], &presentation(&narrowed)).unwrap(),
+            whole
+        );
     }
 }

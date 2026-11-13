@@ -1021,27 +1021,36 @@ impl VisualizationDocument {
                 }
                 Ok(())
             }
-            DocumentEdit::SetUnitAbscissa {
-                pane_id,
-                unit,
-                abscissa,
-            } => {
-                self.unit_abscissas
-                    .retain(|held| held.pane_id != pane_id || held.unit != unit);
-                if let Some(abscissa) = abscissa {
-                    let choice = UnitAbscissa {
-                        pane_id,
-                        unit,
-                        abscissa,
-                    };
-                    self.validate_unit_abscissa(&choice)?;
-                    ensure_maximum_len(
-                        "visualization-document.unit-abscissas",
-                        self.unit_abscissas.len() + 1,
-                        MAX_VISUALIZATION_UNIT_ABSCISSAS,
-                    )?;
-                    self.unit_abscissas.push(choice);
+            DocumentEdit::SetXyPlots { pane_id, plots } => {
+                self.require_pane(pane_id)?;
+                for (index, plot) in plots.iter().enumerate() {
+                    if plot.pane_id != pane_id {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "xy-plot.pane-id",
+                            message: format!(
+                                "a plot of pane {} is listed among pane {}'s",
+                                plot.pane_id.get(),
+                                pane_id.get()
+                            ),
+                        });
+                    }
+                    self.validate_xy_plot(plot)?;
+                    if plots[..index].iter().any(|held| held.same_plot(plot)) {
+                        return Err(duplicate_xy_plot(plot));
+                    }
                 }
+                let kept = self
+                    .xy_plots
+                    .iter()
+                    .filter(|held| held.pane_id != pane_id)
+                    .count();
+                ensure_maximum_len(
+                    "visualization-document.xy-plots",
+                    kept + plots.len(),
+                    MAX_VISUALIZATION_XY_PLOTS,
+                )?;
+                self.xy_plots.retain(|held| held.pane_id != pane_id);
+                self.xy_plots.extend(plots);
                 Ok(())
             }
             DocumentEdit::SetEventLaneOrder(order) => {
@@ -1715,8 +1724,7 @@ impl VisualizationDocument {
             .retain(|order| order.pane_id != pane_id);
         self.expression_traces
             .retain(|trace| trace.pane_id != pane_id);
-        self.unit_abscissas
-            .retain(|choice| choice.pane_id != pane_id);
+        self.xy_plots.retain(|plot| plot.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -2059,22 +2067,17 @@ impl VisualizationDocument {
             }
         }
         ensure_maximum_len(
-            "visualization-document.unit-abscissas",
-            self.unit_abscissas.len(),
-            MAX_VISUALIZATION_UNIT_ABSCISSAS,
+            "visualization-document.xy-plots",
+            self.xy_plots.len(),
+            MAX_VISUALIZATION_XY_PLOTS,
         )?;
-        let mut unit_axes = HashSet::new();
-        for choice in &self.unit_abscissas {
-            self.validate_unit_abscissa(choice)?;
-            if !unit_axes.insert((choice.pane_id, choice.unit.as_str())) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "unit-abscissa.unit",
-                    message: format!(
-                        "pane {} chooses two abscissas for its {:?} axis",
-                        choice.pane_id.get(),
-                        choice.unit
-                    ),
-                });
+        for (index, plot) in self.xy_plots.iter().enumerate() {
+            self.validate_xy_plot(plot)?;
+            if self.xy_plots[..index]
+                .iter()
+                .any(|held| held.same_plot(plot))
+            {
+                return Err(duplicate_xy_plot(plot));
             }
         }
         let mut bus_names = HashSet::new();
@@ -2182,28 +2185,37 @@ impl VisualizationDocument {
         Ok(())
     }
 
-    /// One unit axis's abscissa on its own: a pane of the document, a unit
-    /// axis named within the bound, and a signal name or expression text a
-    /// label or a calculator source can hold.
-    fn validate_unit_abscissa(&self, choice: &UnitAbscissa) -> Result<(), VisualizationError> {
+    /// One plot on its own: a pane of the document, a unit axis named within
+    /// the bound, a signal name or expression text a label or a calculator
+    /// source can hold, and a sweep span that is an interval.
+    fn validate_xy_plot(&self, choice: &XyPlot) -> Result<(), VisualizationError> {
         self.require_pane(choice.pane_id)?;
         if choice.unit.len() > MAX_UNIT_AXIS_BYTES || choice.unit.chars().any(char::is_control) {
             return Err(VisualizationError::InvalidValue {
-                field: "unit-abscissa.unit",
+                field: "xy-plot.unit",
                 message: format!(
                     "must contain no control characters and not exceed {MAX_UNIT_AXIS_BYTES} bytes"
                 ),
             });
         }
+        if let Some(range) = choice.sweep_range {
+            AxisRange::new(range.minimum, range.maximum).map_err(|_| {
+                VisualizationError::InvalidValue {
+                    field: "xy-plot.sweep-range",
+                    message: "the sweep span's ends must be finite and its start before its end"
+                        .to_owned(),
+                }
+            })?;
+        }
         match &choice.abscissa {
-            Abscissa::Signal { name } => validate_label("unit-abscissa.signal", name),
+            Abscissa::Signal { name } => validate_label("xy-plot.signal", name),
             Abscissa::Expression { text } => {
                 if text.trim().is_empty()
                     || text.len() > MAX_SOURCE_TEXT_BYTES
                     || text.chars().any(char::is_control)
                 {
                     return Err(VisualizationError::InvalidValue {
-                        field: "unit-abscissa.expression",
+                        field: "xy-plot.expression",
                         message: format!(
                             "must be non-blank, contain no control characters, and not exceed {MAX_SOURCE_TEXT_BYTES} bytes"
                         ),
@@ -2391,4 +2403,16 @@ fn display_predicates_by_name(
         }
     }
     Ok((by_name, true))
+}
+
+fn duplicate_xy_plot(plot: &XyPlot) -> VisualizationError {
+    VisualizationError::InvalidValue {
+        field: "xy-plot.abscissa",
+        message: format!(
+            "pane {} plots its {:?} axis against {:?} twice",
+            plot.pane_id.get(),
+            plot.unit,
+            plot.abscissa.text()
+        ),
+    }
 }

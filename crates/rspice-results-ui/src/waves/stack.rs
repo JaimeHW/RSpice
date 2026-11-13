@@ -13,7 +13,7 @@ use super::{
 use crate::{
     derived::DerivedSeries,
     presentation::well_hint,
-    session::{ExprEditor, ResultViewerState, UnitAbscissaChoice},
+    session::{ExprEditor, ResultViewerState, XyStrip},
     strip::{LegendChip, StripHeader},
 };
 use egui::Ui;
@@ -445,8 +445,26 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
     ui.ctx()
         .data_mut(|data| data.insert_temp(strip_area_id(), avail));
     let n = visible.len();
-    let separators = (n.saturating_sub(1)) as f32;
-    let strip_height = ((avail.height() - separators) / n as f32).max(140.0);
+    // Each analysis' strip is followed by the strips that plot its panes
+    // against a signal, in the order the reader made them, and every strip
+    // takes an equal share of the height.
+    let rows: Vec<(&StripModel, Option<usize>)> = visible
+        .iter()
+        .flat_map(|model| {
+            std::iter::once((*model, None)).chain(
+                host.session()
+                    .xy_strips
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, strip)| strip.analysis == model.analysis_key)
+                    .map(|(index, _)| (*model, Some(index)))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    let separators = (rows.len().saturating_sub(1)) as f32;
+    let strip_height = ((avail.height() - separators) / rows.len() as f32).max(140.0);
+    let mut close_xy: Option<usize> = None;
     let maximized = host.session().maximized_strip.is_some();
     let linked_cursor_domain = host
         .session()
@@ -459,7 +477,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            for (position, model) in visible.iter().enumerate() {
+            for (position, &(model, xy)) in rows.iter().enumerate() {
                 if position > 0 {
                     // 1 px border seam between strips.
                     let (seam, _) = ui.allocate_exact_size(
@@ -467,6 +485,34 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                         egui::Sense::hover(),
                     );
                     ui.painter().rect_filled(seam, 0.0, t.color.border);
+                }
+                if let Some(index) = xy {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), strip_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_min_height(strip_height);
+                            let mut edits = ExpressionEdits::default();
+                            if show_xy_strip(
+                                ui,
+                                host,
+                                model,
+                                index,
+                                linked_cursor_domain.as_ref(),
+                                options,
+                                &mut edits,
+                            ) {
+                                close_xy = Some(index);
+                            }
+                            if let Some(slot) = edits.toggle {
+                                toggle_expr = Some((model.analysis_key, slot));
+                            }
+                            if let Some(slot) = edits.remove {
+                                remove_expr = Some((model.analysis_key, slot));
+                            }
+                        },
+                    );
+                    continue;
                 }
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), strip_height),
@@ -574,6 +620,11 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
 
     // Apply deferred mutations.
     let results = host.session_mut();
+    if let Some(index) = close_xy
+        && index < results.xy_strips.len()
+    {
+        results.xy_strips.remove(index);
+    }
     if let Some(idx) = toggle_maximize {
         results.maximized_strip = (results.maximized_strip != Some(idx)).then_some(idx);
     }
@@ -818,22 +869,9 @@ fn show_strip_plot(
         return;
     }
 
-    // Each expression is drawn in the pane its unit routed it to, and joins
-    // that pane's automatic fit; one whose unit cannot be stated has a pane of
-    // its own. A host that routes no expression keeps them in the first pane.
     // A real event lane is placed in a pane, and joins that pane's traces on
     // its unit axis.
-    let routed = !model.expression_panes.is_empty();
-    let mut pane_exprs: Vec<Vec<ResolvedExpr>> = panes.iter().map(|_| Vec::new()).collect();
-    for expr in host.resolve_expressions(model, &t) {
-        let ordinal = panes
-            .iter()
-            .position(|pane| pane.expressions.contains(&expr.slot))
-            .or((!routed).then_some(0));
-        if let Some(exprs) = ordinal.and_then(|ordinal| pane_exprs.get_mut(ordinal)) {
-            exprs.push(expr);
-        }
-    }
+    let mut pane_exprs = route_expressions(host, model, &panes, &t);
     for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
         exprs.extend(host.real_step_traces(model, pane, &t));
     }
@@ -999,6 +1037,216 @@ pub(crate) fn expression_hue_slot(model: &StripModel, slot: usize) -> usize {
     expr_palette_slot(model, slot) % rspice_ui_kit::palette::TRACE_HUES
 }
 
+/// The strip's expressions, each in the pane its unit routed it to, where it
+/// joins that pane's automatic fit; one whose unit cannot be stated has a
+/// pane of its own. A host that routes no expression keeps them in the first
+/// pane.
+fn route_expressions(
+    host: &mut impl StackHost,
+    model: &StripModel,
+    panes: &[UnitPane],
+    t: &Tokens,
+) -> Vec<Vec<ResolvedExpr>> {
+    let routed = !model.expression_panes.is_empty();
+    let mut pane_exprs: Vec<Vec<ResolvedExpr>> = panes.iter().map(|_| Vec::new()).collect();
+    for expr in host.resolve_expressions(model, t) {
+        let ordinal = panes
+            .iter()
+            .position(|pane| pane.expressions.contains(&expr.slot))
+            .or((!routed).then_some(0));
+        if let Some(exprs) = ordinal.and_then(|ordinal| pane_exprs.get_mut(ordinal)) {
+            exprs.push(expr);
+        }
+    }
+    pane_exprs
+}
+
+/// One strip plotting a unit pane's curves against a signal or an
+/// expression: a header naming the abscissa, with the span of the sweep it
+/// draws and a close button; the pane's own header, whose legend and scale
+/// it shares; and the plot, whose one horizontal axis is the abscissa. No
+/// sweep ruler and no overview stand under it. True when the reader closed
+/// it.
+fn show_xy_strip(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    index: usize,
+    linked_cursor_domain: Option<&CursorDomain>,
+    options: StackOptions,
+    edits: &mut ExpressionEdits,
+) -> bool {
+    let Some(strip) = host.session().xy_strips.get(index).cloned() else {
+        return false;
+    };
+    let t = Tokens::get(ui.ctx());
+    let identity = super::stable_hash(&(strip.analysis, &strip.unit, &strip.abscissa));
+    let subtitle = format!("vs {}", super::xy::abscissa_label(&strip.abscissa));
+    let header = StripHeader::new(&model.kind_tag, &subtitle, &[])
+        .id_salt(("xy-strip", identity))
+        .incomplete(model.incomplete)
+        .maximizable(false)
+        .closable(options.pane_chrome)
+        .zoomed(strip.x_view.is_some() || strip.y_view.is_some())
+        .field(super::xy::SWEEP_RANGE_FIELD_WIDTH)
+        .pane_actions(options.pane_chrome)
+        .show(ui);
+    if ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<u64>(xy_reveal_id()))
+        == Some(identity)
+    {
+        ui.ctx().data_mut(|data| data.remove::<u64>(xy_reveal_id()));
+        ui.scroll_to_rect(ui.max_rect(), None);
+    }
+    if header.close_clicked {
+        return true;
+    }
+    if let Some(rect) = header.field_rect
+        && let Some(range) = super::xy::sweep_range_field(
+            ui,
+            rect,
+            model,
+            &strip,
+            (
+                identity,
+                usize::from(options.readout.displayed_significant_digits().get()),
+                options.quantity,
+            ),
+        )
+        && let Some(held) = host.session_mut().xy_strips.get_mut(index)
+    {
+        held.sweep_range = range;
+        // A range read on one span is no view of another.
+        held.x_view = None;
+        held.y_view = None;
+    }
+    if header.fit_clicked
+        && let Some(held) = host.session_mut().xy_strips.get_mut(index)
+    {
+        held.x_view = None;
+        held.y_view = None;
+    }
+    let Some(x_domain) = model.x_range else {
+        well_hint(ui, "No data");
+        return false;
+    };
+    let panes = model.unit_panes();
+    let Some(ordinal) = panes.iter().position(|pane| pane.unit == strip.unit) else {
+        well_hint(
+            ui,
+            &format!("This analysis has no {} curves to plot", strip.unit),
+        );
+        return false;
+    };
+    let mut pane_exprs = route_expressions(host, model, &panes, &t);
+    let exprs = std::mem::take(&mut pane_exprs[ordinal]);
+    let pane = &panes[ordinal];
+    let gutter = strip_gutter(ui, host, model);
+    let frame = StripFrame {
+        model,
+        x_domain,
+        pane_count: panes.len(),
+        linked_cursor_domain,
+        options,
+        gutter,
+    };
+
+    // The pane's header: its legend, its unit and its scale, which the strip
+    // shares with the pane it plots.
+    let pane_range = pane_y_range(&mut host.session_mut().derived, model, &pane.traces, |_| {});
+    let auto_y = pane_auto_y(pane_range, &exprs, &[]);
+    let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
+    let mut log_y = pane_log_y(host.session(), model, pane) && log_y_available;
+    let cursor_a = (host.session().cursor_readout_active()
+        && host.session().cursor_strip == Some(model.analysis_index))
+    .then(|| {
+        host.session()
+            .cursors
+            .a
+            .map(|x| (x, options.readout, options.quantity))
+    })
+    .flatten();
+    let input = pane_header::PaneHeader {
+        height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
+        active: false,
+        log_y,
+        log_y_available,
+        cursor_a,
+        name_width: (gutter.name > 0.0).then_some(gutter.name),
+        expressions: pane_expressions(host, model, pane, &exprs, cursor_a, &t),
+        plotted: auto_y.is_some(),
+        abscissa: options
+            .pane_chrome
+            .then(|| abscissa_menu(host.session(), model, pane, Some(strip.abscissa.clone()))),
+    };
+    let header = ui
+        .push_id(("xy-strip-pane", identity), |ui| {
+            host.pane_header(ui, model, pane, ordinal, input)
+        })
+        .inner;
+    edits.toggle = edits.toggle.or(header.toggle_expression);
+    edits.remove = edits.remove.or(header.remove_expression);
+    if let Some(width) = header.resize_name {
+        host.session_mut().lane_name_width = Some(clamp_name_width(width));
+    }
+    if let Some(abscissa) = header.abscissa {
+        repoint_xy_strip(host.session_mut(), index, abscissa);
+        return false;
+    }
+    if (header.autoscale_y || header.toggle_log_y)
+        && let Some(held) = host.session_mut().xy_strips.get_mut(index)
+    {
+        held.y_view = None;
+    }
+    if header.toggle_log_y {
+        log_y = !log_y;
+        set_pane_log_y(host.session_mut(), model, pane, log_y);
+    }
+    if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT && (auto_y.is_some() || !exprs.is_empty()) {
+        ui.push_id(("xy-strip-plot", identity), |ui| {
+            super::xy::show(
+                ui,
+                host,
+                super::xy::XyInput {
+                    pane,
+                    exprs: &exprs,
+                    frame,
+                    strip: index,
+                    log_y,
+                },
+            );
+        });
+    } else if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT {
+        well_hint(ui, "No visible traces — enable one in the legend");
+    }
+    false
+}
+
+/// Plot the strip at `index` against `abscissa` instead. A strip that would
+/// repeat another plot of the same curves gives way to it.
+pub(crate) fn repoint_xy_strip(
+    session: &mut ResultViewerState,
+    index: usize,
+    abscissa: rspice_results::visualization_document::Abscissa,
+) {
+    let Some(strip) = session.xy_strips.get(index) else {
+        return;
+    };
+    let (analysis, unit) = (strip.analysis, strip.unit.clone());
+    if session
+        .xy_strips
+        .iter()
+        .any(|held| held.is(analysis, &unit, &abscissa))
+    {
+        session.xy_strips.remove(index);
+        return;
+    }
+    let strip = &mut session.xy_strips[index];
+    strip.abscissa = abscissa;
+    strip.x_view = None;
+}
+
 /// At most this share of a strip goes to event lanes when it also has panes;
 /// more lanes than fit scroll within it.
 const EVENT_LANE_SHARE: f32 = 0.5;
@@ -1153,11 +1401,6 @@ fn show_unit_pane(
             .map(|x| (x, options.readout, options.quantity))
     })
     .flatten();
-    let abscissa = host
-        .session()
-        .unit_abscissas
-        .get(&pane_key)
-        .map(|choice| choice.abscissa.clone());
     let input = pane_header::PaneHeader {
         height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
         active: host.session().active_wave_pane.as_ref() == Some(&pane_key),
@@ -1169,7 +1412,7 @@ fn show_unit_pane(
         plotted,
         abscissa: options
             .pane_chrome
-            .then(|| abscissa_menu(host.session(), model, pane, abscissa.clone())),
+            .then(|| abscissa_menu(host.session(), model, pane, None)),
     };
     let header = host.pane_header(ui, model, pane, ordinal, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);
@@ -1177,8 +1420,8 @@ fn show_unit_pane(
     if let Some(width) = header.resize_name {
         host.session_mut().lane_name_width = Some(clamp_name_width(width));
     }
-    if let Some(choice) = header.abscissa {
-        choose_abscissa(host.session_mut(), &pane_key, ordinal, choice);
+    if let Some(abscissa) = header.abscissa {
+        open_xy_strip(ui.ctx(), host.session_mut(), model, pane.unit, abscissa);
     }
     if header.autoscale_y || header.toggle_log_y {
         let view = host.session_mut().analysis_plot_view_pane_mut(
@@ -1193,30 +1436,6 @@ fn show_unit_pane(
         set_pane_log_y(host.session_mut(), model, pane, log_y);
     }
 
-    if let Some(abscissa) = host
-        .session()
-        .unit_abscissas
-        .get(&pane_key)
-        .map(|choice| choice.abscissa.clone())
-    {
-        if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT && (auto_y.is_some() || !exprs.is_empty())
-        {
-            super::xy::show(
-                ui,
-                host,
-                super::xy::XyInput {
-                    pane,
-                    ordinal,
-                    exprs,
-                    frame,
-                    abscissa: &abscissa,
-                    log_y,
-                },
-            );
-        }
-        paint_active_rail(ui, host, model, pane, pane_top, &t);
-        return;
-    }
     let Some((auto_y0, auto_y1)) = auto_y else {
         // A pane with nothing plotted is its header alone; the hint is for a
         // pane whose plotted traces hold no finite value to fit.
@@ -1366,31 +1585,42 @@ fn show_unit_pane(
     paint_active_rail(ui, host, model, pane, pane_top, &t);
 }
 
-/// Draw the pane `pane_key` against `choice`, or against its strip's sweep
-/// for `None`.
-pub(crate) fn choose_abscissa(
+/// Plot the `unit` pane's curves of `model` against `abscissa` in a strip of
+/// their own after `model`'s, as ViVA's YvsY makes a new graph; the strip
+/// drawn against the sweep stays as it was. A plot the stack already shows
+/// is brought into view rather than made twice.
+pub(crate) fn open_xy_strip(
+    ctx: &egui::Context,
     session: &mut ResultViewerState,
-    pane_key: &WavePanePresentationKey,
-    ordinal: usize,
-    choice: Option<rspice_results::visualization_document::Abscissa>,
+    model: &StripModel,
+    unit: &str,
+    abscissa: rspice_results::visualization_document::Abscissa,
 ) {
-    match choice {
-        Some(abscissa) => {
-            session
-                .unit_abscissas
-                .insert(pane_key.clone(), UnitAbscissaChoice::new(abscissa));
-        }
-        None => {
-            session.unit_abscissas.remove(pane_key);
-        }
+    let analysis = model.analysis_key;
+    if !session
+        .xy_strips
+        .iter()
+        .any(|strip| strip.is(analysis, unit, &abscissa))
+    {
+        session
+            .xy_strips
+            .push(XyStrip::new(analysis, unit, abscissa.clone()));
     }
-    // A Y range read against one X is no view against another.
-    session
-        .analysis_plot_view_pane_mut(ResultViewer::Waves, pane_key.analysis, ordinal)
-        .y = None;
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            xy_reveal_id(),
+            super::stable_hash(&(analysis, unit, &abscissa)),
+        );
+    });
+    ctx.request_repaint();
 }
 
-/// What a pane may be drawn against: the strip's sweep, any of its signals
+/// Where the stack notes the strip it was asked to bring into view.
+fn xy_reveal_id() -> egui::Id {
+    egui::Id::new("rspice.results.xy-strip.reveal")
+}
+
+/// What a pane's curves may be plotted against: any of the strip's signals
 /// (the pane's own first) or its expressions.
 pub(crate) fn abscissa_menu(
     session: &ResultViewerState,
@@ -1418,7 +1648,6 @@ pub(crate) fn abscissa_menu(
     own.extend(others);
     pane_header::AbscissaMenu {
         current,
-        sweep: model.x_label().to_owned(),
         signals: own,
         expressions: session
             .analysis_exprs

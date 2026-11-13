@@ -87,8 +87,8 @@ pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
 pub const MAX_VISUALIZATION_EXPRESSION_TRACES: usize = 1_024;
 /// Maximum datasets one expression trace reads.
 pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
-/// Maximum unit axes drawn against a chosen abscissa in one document.
-pub const MAX_VISUALIZATION_UNIT_ABSCISSAS: usize = 1_024;
+/// Maximum plots of a unit axis against a chosen abscissa in one document.
+pub const MAX_VISUALIZATION_XY_PLOTS: usize = 1_024;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1731,19 +1731,36 @@ impl Abscissa {
 /// expression whose unit cannot be stated, its text and a short suffix.
 pub const MAX_UNIT_AXIS_BYTES: usize = MAX_SOURCE_TEXT_BYTES + 64;
 
-/// One unit axis of a pane drawn against an [`Abscissa`].
+/// The curves of one unit axis of a pane drawn against an [`Abscissa`], in
+/// a plot of their own.
 ///
-/// A waveform pane stacks one axis per unit, and the reader chooses the X
-/// of each: the volts axis may read V(out) against V(in) while the amperes
-/// axis below it keeps time. The axis is named by the unit it reads in,
-/// which is how the pane tells its axes apart.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UnitAbscissa {
+/// A transfer curve, a hysteresis loop or a Lissajous figure is one signal
+/// drawn against another. The pane keeps drawing its axes against the
+/// analysis' sweep; each of these is a further plot whose only horizontal
+/// axis is the abscissa, as ViVA's YvsY and ADS's `vs()` make a new graph.
+/// The unit names which of the pane's axes supplies the curves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XyPlot {
     pub pane_id: PaneId,
-    /// The unit axis, by its unit; empty for a plain number.
+    /// The unit axis whose curves are drawn, by its unit; empty for a plain
+    /// number.
     #[serde(deserialize_with = "deserialize_unit_axis_string")]
     pub unit: String,
     pub abscissa: Abscissa,
+    /// The span of the analysis' sweep the curves are drawn over: one
+    /// hysteresis cycle, or the settled part of a run. The whole record when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_range: Option<AxisRange>,
+}
+
+impl XyPlot {
+    /// Whether `self` and `other` are the same plot: one pane's axis drawn
+    /// against one abscissa. A pane holds each plot once.
+    #[must_use]
+    pub fn same_plot(&self, other: &Self) -> bool {
+        self.pane_id == other.pane_id && self.unit == other.unit && self.abscissa == other.abscissa
+    }
 }
 
 fn deserialize_unit_axis_string<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -2099,6 +2116,13 @@ impl FamilyMeasurementSummary {
     }
 }
 
+fn deserialize_xy_plots<'de, D>(deserializer: D) -> Result<Vec<XyPlot>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_XY_PLOTS>(deserializer)
+}
+
 fn deserialize_trace_row_predicates<'de, D>(
     deserializer: D,
 ) -> Result<Vec<QueryCoordinate>, D::Error>
@@ -2390,7 +2414,7 @@ pub struct VisualizationDocument {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     expression_traces: Vec<ExpressionTrace>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    unit_abscissas: Vec<UnitAbscissa>,
+    xy_plots: Vec<XyPlot>,
 }
 
 #[derive(Deserialize)]
@@ -2449,7 +2473,7 @@ struct VisualizationDocumentWire {
     #[serde(default)]
     expression_traces: Option<BoundedVec<ExpressionTrace, MAX_VISUALIZATION_EXPRESSION_TRACES>>,
     #[serde(default)]
-    unit_abscissas: Option<BoundedVec<UnitAbscissa, MAX_VISUALIZATION_UNIT_ABSCISSAS>>,
+    xy_plots: Option<BoundedVec<XyPlot, MAX_VISUALIZATION_XY_PLOTS>>,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -2491,13 +2515,11 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             expression_traces: wire
                 .expression_traces
                 .map_or_else(Vec::new, BoundedVec::into_inner),
-            unit_abscissas: wire
-                .unit_abscissas
-                .map_or_else(Vec::new, BoundedVec::into_inner),
+            xy_plots: wire.xy_plots.map_or_else(Vec::new, BoundedVec::into_inner),
         };
-        if document.schema_version < 13 && !document.unit_abscissas.is_empty() {
+        if document.schema_version < 13 && !document.xy_plots.is_empty() {
             return Err(serde::de::Error::custom(
-                "a unit axis drawn against a signal requires visualization schema 13",
+                "a plot against a signal or an expression requires visualization schema 13",
             ));
         }
         if document.schema_version < 12
@@ -2697,7 +2719,7 @@ impl VisualizationDocument {
             user_buses: Vec::new(),
             event_lane_orders: Vec::new(),
             expression_traces: Vec::new(),
-            unit_abscissas: Vec::new(),
+            xy_plots: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2829,10 +2851,10 @@ impl VisualizationDocument {
         &self.expression_traces
     }
 
-    /// The unit axes of the document's panes that are drawn against a
-    /// chosen signal or expression rather than their analysis' sweep.
-    pub fn unit_abscissas(&self) -> &[UnitAbscissa] {
-        &self.unit_abscissas
+    /// The plots of the document's pane axes against a chosen signal or
+    /// expression, each pane's in the order the reader made them.
+    pub fn xy_plots(&self) -> &[XyPlot] {
+        &self.xy_plots
     }
 
     /// The order one pane draws its event lanes in; empty when it recorded

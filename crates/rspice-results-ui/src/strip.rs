@@ -143,11 +143,11 @@ fn strip_content_layout(
 
 fn trailing_actions_width(
     icon_side: f32,
-    closable: bool,
+    (maximizable, closable): (bool, bool),
     zoomed: bool,
     fit_chip_width: f32,
 ) -> f32 {
-    let icon_count = 1 + usize::from(closable);
+    let icon_count = usize::from(maximizable) + usize::from(closable);
     let icons_width = icon_count as f32 * icon_side
         + icon_count.saturating_sub(1) as f32 * HEADER_ACTION_ITEM_GAP;
     icons_width
@@ -186,6 +186,9 @@ pub struct StripHeaderResponse {
     pub fit_clicked: bool,
     /// The "+ expr" action was clicked.
     pub add_expr_clicked: bool,
+    /// Where the header left room for the caller's own field, when it asked
+    /// for one.
+    pub field_rect: Option<Rect>,
 }
 
 /// What a legend chip's context menu adds, given the chip's index.
@@ -205,6 +208,8 @@ pub struct StripHeader<'a> {
     pane_actions: bool,
     incomplete: Option<&'a str>,
     id_salt: egui::Id,
+    maximizable: bool,
+    field_width: f32,
 }
 
 impl<'a> StripHeader<'a> {
@@ -223,6 +228,8 @@ impl<'a> StripHeader<'a> {
             pane_actions: true,
             incomplete: None,
             id_salt: egui::Id::new(kind),
+            maximizable: true,
+            field_width: 0.0,
         }
     }
 
@@ -251,6 +258,20 @@ impl<'a> StripHeader<'a> {
     /// Show the maximize action in its active (restore) state.
     pub fn maximized(mut self, on: bool) -> Self {
         self.maximized = on;
+        self
+    }
+
+    /// Show or leave out the maximize action. A strip that belongs to
+    /// another strip's analysis is shown and hidden with it, and has none.
+    pub fn maximizable(mut self, on: bool) -> Self {
+        self.maximizable = on;
+        self
+    }
+
+    /// Leave `width` points before the actions for a field the caller
+    /// draws itself, in [`StripHeaderResponse::field_rect`].
+    pub fn field(mut self, width: f32) -> Self {
+        self.field_width = width.max(0.0);
         self
     }
 
@@ -328,8 +349,13 @@ impl<'a> StripHeader<'a> {
             0.0
         };
         let actions_width = if self.pane_actions {
-            trailing_actions_width(HEADER_ICON_SIDE, self.closable, self.zoomed, fit_chip_width)
-                .min(inner.width())
+            trailing_actions_width(
+                HEADER_ICON_SIDE,
+                (self.maximizable, self.closable),
+                self.zoomed,
+                fit_chip_width,
+            )
+            .min(inner.width())
         } else {
             0.0
         };
@@ -341,6 +367,18 @@ impl<'a> StripHeader<'a> {
             (actions_rect.left() - HEADER_ACTION_GAP).max(inner.left())
         } else {
             inner.right()
+        };
+        // The caller's field takes its width off the content, right before
+        // the actions, and the legend keeps what remains.
+        let content_right = if self.field_width > 0.0 {
+            let left = (content_right - self.field_width).max(inner.left());
+            out.field_rect = Some(Rect::from_min_max(
+                egui::pos2(left, inner.top()),
+                egui::pos2(content_right, inner.bottom()),
+            ));
+            (left - HEADER_ACTION_GAP).max(inner.left())
+        } else {
+            content_right
         };
         let content_rect =
             Rect::from_min_max(inner.left_top(), egui::pos2(content_right, inner.bottom()));
@@ -520,12 +558,13 @@ impl<'a> StripHeader<'a> {
                     } else {
                         "Maximize strip"
                     };
-                    if IconButton::new(Icon::ZoomFit)
-                        .side(HEADER_ICON_SIDE)
-                        .on(self.maximized)
-                        .tooltip(tip)
-                        .show(ui)
-                        .clicked()
+                    if self.maximizable
+                        && IconButton::new(Icon::ZoomFit)
+                            .side(HEADER_ICON_SIDE)
+                            .on(self.maximized)
+                            .tooltip(tip)
+                            .show(ui)
+                            .clicked()
                     {
                         out.maximize_clicked = true;
                     }
@@ -762,9 +801,9 @@ mod tests {
 
     #[test]
     fn trailing_actions_reserve_exact_rendered_controls_first() {
-        let base = trailing_actions_width(22.0, false, false, 0.0);
-        let close = trailing_actions_width(22.0, true, false, 0.0);
-        let zoomed = trailing_actions_width(22.0, true, true, 31.0);
+        let base = trailing_actions_width(22.0, (true, false), false, 0.0);
+        let close = trailing_actions_width(22.0, (true, true), false, 0.0);
+        let zoomed = trailing_actions_width(22.0, (true, true), true, 31.0);
 
         assert_eq!(base, 22.0);
         assert_eq!(close, 45.0);

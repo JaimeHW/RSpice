@@ -1,13 +1,15 @@
-//! A unit pane drawn against another signal: the pane's menu chooses it,
-//! arrows mark the sweep's direction, and a cursor on the sweep reads the
-//! instant and both coordinates where the curve is then.
+//! A unit pane's curves plotted against another signal, in a strip of their
+//! own after the strip drawn against time: the pane's menu makes it, its one
+//! horizontal axis is the signal, its header narrows the span of time it
+//! draws, its cursor points are the time cursors, and the project and saved
+//! views keep it.
 
 use super::conversion::{click, find, texts};
 use super::lanes::{frame, theme_context};
 use super::*;
 use egui::epaint::ClippedShape;
 use rspice_results::visualization_document::Abscissa;
-use rspice_results_ui::session::UnitAbscissaChoice;
+use rspice_results_ui::session::XyStrip;
 use std::f64::consts::PI;
 
 const OMEGA: f64 = 2.0 * PI * 1.0e3;
@@ -36,22 +38,26 @@ fn lissajous_host() -> ResultsTestHost {
     state
 }
 
-fn volts_pane(state: &mut ResultsTestHost) -> WavePanePresentationKey {
-    let models = super::lanes::strip(state);
-    WavePanePresentationKey {
-        analysis: models[0].analysis_key,
-        unit: "V".to_owned(),
+fn signal(name: &str) -> Abscissa {
+    Abscissa::Signal {
+        name: name.to_owned(),
     }
 }
 
-fn draw_against(state: &mut ResultsTestHost, signal: &str) {
-    let pane = volts_pane(state);
-    state.results.results.session.unit_abscissas.insert(
-        pane,
-        UnitAbscissaChoice::new(Abscissa::Signal {
-            name: signal.to_owned(),
-        }),
-    );
+/// Plot the first strip's `unit` curves against `abscissa`, as the pane's
+/// menu does.
+fn open_strip(state: &mut ResultsTestHost, unit: &str, abscissa: Abscissa) {
+    let analysis = super::lanes::strip(state)[0].analysis_key;
+    state
+        .results
+        .results
+        .session
+        .xy_strips
+        .push(XyStrip::new(analysis, unit, abscissa));
+}
+
+fn strips(state: &ResultsTestHost) -> &[XyStrip] {
+    &state.results.results.session.xy_strips
 }
 
 /// The filled triangles a frame painted in `color`: the arrowheads.
@@ -62,6 +68,46 @@ fn arrowheads(shapes: &[ClippedShape], color: egui::Color32) -> Vec<Vec<egui::Po
                 if path.closed && path.points.len() == 3 && path.fill == color =>
             {
                 out.push(path.points.clone());
+            }
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, color, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, color, &mut out);
+    }
+    out
+}
+
+/// The open lines a frame painted 1 px wide in a translucent shade: the
+/// hairlines of a crowded family.
+fn hairlines(shapes: &[ClippedShape]) -> usize {
+    fn walk(shape: &egui::Shape) -> usize {
+        match shape {
+            egui::Shape::Path(path)
+                if !path.closed
+                    && path.stroke.width == 1.0
+                    && matches!(
+                        path.stroke.color,
+                        egui::epaint::ColorMode::Solid(color) if color.a() > 0 && color.a() < 255
+                    ) =>
+            {
+                1
+            }
+            egui::Shape::Vec(inner) => inner.iter().map(walk).sum(),
+            _ => 0,
+        }
+    }
+    shapes.iter().map(|clipped| walk(&clipped.shape)).sum()
+}
+
+/// The filled circles a frame painted in `color`, by centre.
+fn dots(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Pos2> {
+    fn walk(shape: &egui::Shape, color: egui::Color32, out: &mut Vec<egui::Pos2>) {
+        match shape {
+            egui::Shape::Circle(circle) if circle.fill == color || circle.stroke.color == color => {
+                out.push(circle.center);
             }
             egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, color, out)),
             _ => {}
@@ -89,18 +135,50 @@ fn painted_texts(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<(Strin
     texts(&frame(ctx, state, Vec::new()))
 }
 
-/// A pane drawn against its sweep shows nothing new in its header. Its
-/// context menu draws it against V(a); the header then tags it "vs V(a)"
-/// and its X axis says how the two were paired. That axis label chooses
-/// again, and the close button beside the tag draws the pane against time.
+/// Drag the pointer from `from` to `to` across the frames egui needs.
+fn drag(ctx: &egui::Context, state: &mut ResultsTestHost, from: egui::Pos2, to: egui::Pos2) {
+    let button = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    frame(ctx, state, vec![egui::Event::PointerMoved(from)]);
+    frame(ctx, state, vec![button(from, true)]);
+    for step in 1..=8 {
+        let at = from + (to - from) * (step as f32 / 8.0);
+        frame(ctx, state, vec![egui::Event::PointerMoved(at)]);
+    }
+    frame(ctx, state, vec![button(to, false)]);
+}
+
+/// `text` read as an axis tick: a bare number, its minus the typographic
+/// one.
+fn tick(text: &str) -> Option<f64> {
+    text.replace('\u{2212}', "-").parse().ok()
+}
+
+/// The top of the strip whose header reads `subtitle`.
+fn strip_top(painted: &[(String, egui::Rect)], subtitle: &str) -> f32 {
+    painted
+        .iter()
+        .find(|(text, _)| text == subtitle)
+        .map(|(_, rect)| rect.top())
+        .unwrap_or_else(|| panic!("a strip header reads {subtitle:?}: {painted:?}"))
+}
+
+/// The time strip's pane header offers the strip's signals; choosing V(a)
+/// adds a strip after it, headed "vs V(a)", whose X axis says how the two
+/// were paired. That axis label chooses again, choosing what is already
+/// shown makes nothing twice, and the strip's close button takes it away.
 #[test]
-fn the_panes_context_menu_and_x_axis_choose_what_it_is_drawn_against() {
+fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() {
     let mut state = lissajous_host();
     let ctx = theme_context();
     let painted = painted_texts(&ctx, &mut state);
     assert!(
         !painted.iter().any(|(text, _)| text.starts_with("vs ")),
-        "a pane drawn against time has no tag: {painted:?}"
+        "a result drawn against time alone has no strip against a signal: {painted:?}"
     );
 
     let unit = volts_unit_tag(&ctx, &mut state);
@@ -108,63 +186,258 @@ fn the_panes_context_menu_and_x_axis_choose_what_it_is_drawn_against() {
     assert!(
         texts(&frame(&ctx, &mut state, Vec::new()))
             .iter()
-            .any(|(text, _)| text == "Draw the V pane against"),
-        "the header's context menu offers what the pane is drawn against"
+            .any(|(text, _)| text == "Plot the V curves against"),
+        "the header's context menu offers what the curves are plotted against"
     );
     let item = find(&ctx, &mut state, "V(a)");
     click(&ctx, &mut state, item, egui::PointerButton::Primary);
-    let pane = volts_pane(&mut state);
-    let drawn_against = |state: &ResultsTestHost| {
-        state
-            .results
-            .results
-            .session
-            .unit_abscissas
-            .get(&pane)
-            .map(|choice| choice.abscissa.clone())
-    };
+    let analysis = super::lanes::strip(&mut state)[0].analysis_key;
     assert_eq!(
-        drawn_against(&state),
-        Some(Abscissa::Signal {
-            name: "V(a)".to_owned()
-        })
+        strips(&state),
+        [XyStrip::new(analysis, "V", signal("V(a)"))]
     );
     let painted = painted_texts(&ctx, &mut state);
-    assert!(
-        painted.iter().any(|(text, _)| text == "vs V(a)"),
-        "{painted:?}"
-    );
+    let top = strip_top(&painted, "vs V(a)");
     let x_label = painted
         .iter()
-        .find(|(text, _)| text.starts_with("V(a) \u{b7} at each t sample"))
+        .find(|(text, rect)| text.starts_with("V(a) \u{b7} at each t sample") && rect.top() > top)
         .map(|(_, rect)| rect.center())
         .unwrap_or_else(|| panic!("the X axis names the abscissa and the pairing: {painted:?}"));
 
-    // The X axis label offers the same choices.
+    // The pane's menu again, on V(a): the strip already shows it.
+    let unit = volts_unit_tag(&ctx, &mut state);
+    click(&ctx, &mut state, unit, egui::PointerButton::Secondary);
+    let item = find(&ctx, &mut state, "V(a)");
+    click(&ctx, &mut state, item, egui::PointerButton::Primary);
+    assert_eq!(
+        strips(&state).len(),
+        1,
+        "a plot shown once is not made twice"
+    );
+
+    // The X axis label chooses what this strip is plotted against.
     click(&ctx, &mut state, x_label, egui::PointerButton::Primary);
     let item = find(&ctx, &mut state, "V(b)");
     click(&ctx, &mut state, item, egui::PointerButton::Primary);
     assert_eq!(
-        drawn_against(&state),
-        Some(Abscissa::Signal {
-            name: "V(b)".to_owned()
-        })
+        strips(&state),
+        [XyStrip::new(analysis, "V", signal("V(b)"))]
     );
 
-    // One click beside the tag draws the pane against time again. The
-    // button sits just past the tag chip's right edge (its text plus 9 px
-    // of padding), one item gap and half a button on.
-    let tag = painted_texts(&ctx, &mut state)
-        .into_iter()
-        .find(|(text, _)| text == "vs V(b)")
-        .map(|(_, rect)| rect)
-        .expect("the header tags what the pane is drawn against");
-    let back = egui::pos2(tag.right() + 9.0 + 13.0, tag.center().y);
-    click(&ctx, &mut state, back, egui::PointerButton::Primary);
-    assert_eq!(drawn_against(&state), None);
+    // The strip header's close button, its one action, takes it away. Both
+    // header rows end on one rule, where the pane header's log chip ends 9
+    // px past its text; the button is 22 px wide.
     let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(b)");
+    let log = painted
+        .iter()
+        .find(|(text, rect)| text == "log" && rect.top() > top)
+        .map(|(_, rect)| *rect)
+        .expect("the strip's pane header has its log chip");
+    let close = egui::pos2(log.right() + 9.0 - 11.0, top + 7.0);
+    click(&ctx, &mut state, close, egui::PointerButton::Primary);
+    assert!(strips(&state).is_empty());
+}
+
+/// A strip against a signal has exactly one horizontal axis, the signal's:
+/// one row of ticks under its plot and one axis label, and no time ruler and
+/// no overview under it.
+#[test]
+fn a_strip_against_a_signal_draws_one_horizontal_axis_and_no_ruler() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(a)");
+    let below: Vec<&(String, egui::Rect)> = painted
+        .iter()
+        .filter(|(_, rect)| rect.top() > top)
+        .collect();
+    // The ruler's own words stand under the time strip alone.
+    for word in ["FULL", "LIN"] {
+        assert_eq!(
+            painted.iter().filter(|(text, _)| text == word).count(),
+            1,
+            "{word}: {painted:?}"
+        );
+        assert!(
+            !below.iter().any(|(text, _)| text == word),
+            "no ruler under the strip: {below:?}"
+        );
+    }
+    assert!(!below.iter().any(|(text, _)| text.starts_with("TIME")));
+    // Ticks in one row are a horizontal axis's; the Y axis' stand one above
+    // another.
+    let mut rows: std::collections::BTreeMap<i32, usize> = std::collections::BTreeMap::new();
+    for (_, rect) in below.iter().filter(|(text, _)| tick(text).is_some()) {
+        *rows.entry(rect.center().y.round() as i32).or_default() += 1;
+    }
+    let axes: Vec<_> = rows.iter().filter(|(_, count)| **count >= 3).collect();
+    assert_eq!(axes.len(), 1, "one row of horizontal ticks: {below:?}");
+    assert_eq!(
+        below
+            .iter()
+            .filter(|(text, _)| text.starts_with("V(a) \u{b7}"))
+            .count(),
+        1,
+        "one horizontal axis label: {below:?}"
+    );
+}
+
+/// Making a strip against a signal leaves the strip drawn against time
+/// with every curve, its legend and its time axis, and closing it leaves
+/// the frame exactly as it was before.
+#[test]
+fn making_or_closing_a_strip_against_a_signal_leaves_the_time_strip_as_it_was() {
+    let mut state = lissajous_host();
+    let ctx = theme_context();
+    let before = painted_texts(&ctx, &mut state);
+    let before_shapes = frame(&ctx, &mut state, Vec::new());
+    // What reads the time strip, but for the ticks of its value axes, which
+    // follow its height: its header, legend, ruler and time ticks.
+    let time_strip = |painted: &[(String, egui::Rect)], bottom: f32| {
+        let mut read: Vec<String> = painted
+            .iter()
+            .filter(|(text, rect)| rect.bottom() <= bottom && tick(text).is_none())
+            .map(|(text, _)| text.clone())
+            .collect();
+        read.sort();
+        read
+    };
+    let whole = time_strip(&before, f32::INFINITY);
+
+    open_strip(&mut state, "V", signal("V(a)"));
+    let during = painted_texts(&ctx, &mut state);
+    let top = strip_top(&during, "vs V(a)");
+    assert_eq!(time_strip(&during, top), whole);
     assert!(
-        !painted.iter().any(|(text, _)| text.starts_with("vs ")),
+        during
+            .iter()
+            .filter(|(_, rect)| rect.bottom() <= top)
+            .all(|(text, _)| !text.starts_with("vs ")),
+        "the time strip says nothing of the strip after it"
+    );
+
+    state.results.results.session.xy_strips.clear();
+    frame(&ctx, &mut state, Vec::new());
+    let after = frame(&ctx, &mut state, Vec::new());
+    assert_eq!(
+        format!("{after:?}"),
+        format!("{before_shapes:?}"),
+        "closing the strip leaves the frame as it was"
+    );
+}
+
+/// The header's span field narrows the curve to the time it names: typed
+/// "250u" for its end, the strip draws the first quarter period alone, where
+/// V(a) never goes negative.
+#[test]
+fn the_span_field_clips_the_curve_to_the_time_it_names() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    let negative_ticks = |painted: &[(String, egui::Rect)], top: f32| {
+        painted
+            .iter()
+            .filter(|(text, rect)| rect.top() > top && tick(text).is_some_and(|value| value < 0.0))
+            .count()
+    };
+    let painted = painted_texts(&ctx, &mut state);
+    let top = strip_top(&painted, "vs V(a)");
+    assert!(
+        negative_ticks(&painted, top) > 0,
+        "a whole period spans ±1 V"
+    );
+
+    // The field's end is the rightmost text of the strip's header row.
+    let header_row = |painted: &[(String, egui::Rect)]| {
+        let mut row: Vec<(String, egui::Rect)> = painted
+            .iter()
+            .filter(|(_, rect)| (rect.center().y - (top + 7.0)).abs() < 10.0)
+            .cloned()
+            .collect();
+        row.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+        row
+    };
+    let row = header_row(&painted);
+    let end = row
+        .last()
+        .map(|(_, rect)| rect.center())
+        .unwrap_or_else(|| panic!("the header shows the record's end: {row:?}"));
+    click(&ctx, &mut state, end, egui::PointerButton::Primary);
+    let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    frame(
+        &ctx,
+        &mut state,
+        vec![key(egui::Key::A, egui::Modifiers::COMMAND)],
+    );
+    frame(&ctx, &mut state, vec![egui::Event::Text("250u".to_owned())]);
+    frame(
+        &ctx,
+        &mut state,
+        vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+    );
+    assert_eq!(strips(&state)[0].sweep_range, Some((0.0, 250.0e-6)));
+    let painted = painted_texts(&ctx, &mut state);
+    assert_eq!(negative_ticks(&painted, top), 0, "{painted:?}");
+    let row = header_row(&painted);
+    assert!(
+        row.last().is_some_and(|(text, _)| text.starts_with("250")),
+        "the field reads the span it draws: {row:?}"
+    );
+}
+
+/// Cursor A's point is taken hold of and dragged along the curve to where
+/// B stands, half a period on: A moves to that instant. Moving A in time, as
+/// the time strip does, moves the point along the curve to the closed form.
+#[test]
+fn dragging_a_cursor_point_moves_a_in_time_and_moving_a_moves_the_point() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    super::lanes::place_cursors(&mut state, Some(0.25e-3), Some(0.5e-3));
+    let ctx = theme_context();
+    let tokens = crate::ui::tokens::Tokens::get(&ctx);
+    let top = strip_top(&painted_texts(&ctx, &mut state), "vs V(a)");
+    let shapes = frame(&ctx, &mut state, Vec::new());
+    let on_figure = |color| {
+        dots(&shapes, color)
+            .into_iter()
+            .filter(|point| point.y > top)
+            .collect::<Vec<_>>()
+    };
+    let a = on_figure(tokens.color.canvas_cursor_a);
+    let b = on_figure(tokens.color.canvas_cursor_b);
+    assert_eq!(
+        (a.len(), b.len()),
+        (1, 1),
+        "one point per cursor on the figure"
+    );
+    drag(&ctx, &mut state, a[0], b[0]);
+    // The sample nearest B's point is the one at half a period.
+    assert_eq!(
+        state.results.results.session.cursors.a,
+        Some(f64::from(200) * 2.5e-6)
+    );
+    assert_eq!(state.results.results.session.cursors.b, Some(0.5e-3));
+
+    // A moved in time to an eighth of a period stands at sin(π/4) against
+    // sin(π/4 + π/3).
+    state.results.results.session.cursors.a = Some(0.125e-3);
+    let painted: Vec<String> = painted_texts(&ctx, &mut state)
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.starts_with("A \u{b7} t 125 ")
+                && text.ends_with("s \u{b7} V(a) 707 mV \u{b7} 966 mV")),
         "{painted:?}"
     );
 }
@@ -174,7 +447,7 @@ fn the_panes_context_menu_and_x_axis_choose_what_it_is_drawn_against() {
 #[test]
 fn a_lissajous_figure_carries_arrows_the_way_time_runs() {
     let mut state = lissajous_host();
-    draw_against(&mut state, "V(a)");
+    open_strip(&mut state, "V", signal("V(a)"));
     let ctx = theme_context();
     frame(&ctx, &mut state, Vec::new());
     let shapes = frame(&ctx, &mut state, Vec::new());
@@ -208,19 +481,20 @@ fn a_lissajous_figure_carries_arrows_the_way_time_runs() {
     }
 }
 
-/// A family drawn against a signal follows the family-only band rule: past
-/// 64 members its loops fold into the one band they occupy, and no member
-/// is stroked with its arrows while the reader points at none; at 50 every
-/// member is stroked and carries its own.
+/// A family on a strip against a signal is never folded into a band: past
+/// 64 members every loop is a faint 1 px hairline and none carries arrows
+/// until the reader points at one, which is drawn over the others at full
+/// weight with its arrows. At 50 every member is stroked and carries its
+/// own.
 #[test]
-fn a_large_family_drawn_against_a_signal_is_drawn_as_its_band() {
-    let draw = |members: usize| {
+fn a_large_family_against_a_signal_is_drawn_as_faint_hairlines() {
+    let draw = |members: usize, pointer: Option<egui::Pos2>| {
         let mut state = super::frame_cost::family_of_signals(members, 200, &["V(in)", "V(out)"]);
         // The workspace picks the viewer a corner family is read in.
         crate::workbench::documents::result_document::prepare_viewer_state(
             &mut state.results_parts(),
         );
-        draw_against(&mut state, "V(in)");
+        open_strip(&mut state, "V", signal("V(in)"));
         let color = super::lanes::strip(&mut state)[0]
             .traces
             .iter()
@@ -229,8 +503,8 @@ fn a_large_family_drawn_against_a_signal_is_drawn_as_its_band() {
             .color;
         let ctx = theme_context();
         let before = state.results.results.session.cache.work();
-        frame(&ctx, &mut state, Vec::new());
-        let rebuilds = state
+        let strokes = hairlines(&frame(&ctx, &mut state, Vec::new()));
+        let stroked = state
             .results
             .results
             .session
@@ -238,17 +512,58 @@ fn a_large_family_drawn_against_a_signal_is_drawn_as_its_band() {
             .work()
             .since(before)
             .rebuilds;
-        let arrows = arrowheads(&frame(&ctx, &mut state, Vec::new()), color).len();
-        (rebuilds, arrows)
+        let events = pointer.map_or_else(Vec::new, |at| vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, &mut state, events);
+        let shapes = frame(&ctx, &mut state, Vec::new());
+        let painted = texts(&shapes);
+        (
+            arrowheads(&shapes, color).len(),
+            (strokes, stroked),
+            painted,
+        )
     };
-    let (rebuilds, arrows) = draw(100);
+    let (arrows, (hairlines, _), painted) = draw(100, None);
     assert!(
-        rebuilds <= 2,
-        "a hundred loops fold into one band, not {rebuilds} strokes"
+        hairlines >= 100,
+        "each of a hundred loops is a faint hairline: {hairlines}"
     );
-    assert_eq!(arrows, 0, "no member of the band is stroked");
-    let (rebuilds, arrows) = draw(50);
-    assert!(rebuilds >= 50, "fifty loops are each stroked: {rebuilds}");
+    assert_eq!(
+        arrows, 0,
+        "no member carries arrows while none is pointed at"
+    );
+    // Point where the loops crowd: each member is a circle of radius about
+    // 1 V about the origin, so at V(in) = 1 V, V(out) = 0, read off the
+    // strip's own ticks.
+    let top = strip_top(&painted, "vs V(in)");
+    let ticks: Vec<(f64, egui::Pos2)> = painted
+        .iter()
+        .filter(|(_, rect)| rect.top() > top)
+        .filter_map(|(text, rect)| Some((tick(text)?, rect.center())))
+        .collect();
+    let bottom = ticks
+        .iter()
+        .map(|(_, at)| at.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let on_x = |value: f64| {
+        ticks
+            .iter()
+            .find(|(held, at)| *held == value && (at.y - bottom).abs() < 1.0)
+            .map(|(_, at)| at.x)
+            .unwrap_or_else(|| panic!("the X axis ticks {value}: {ticks:?}"))
+    };
+    let zero_y = ticks
+        .iter()
+        .find(|(held, at)| *held == 0.0 && (at.y - bottom).abs() >= 1.0)
+        .map(|(_, at)| at.y)
+        .expect("the Y axis ticks 0");
+    let centre = egui::pos2(on_x(0.0) + 2.0 * (on_x(0.5) - on_x(0.0)), zero_y);
+    let (arrows, ..) = draw(100, Some(centre));
+    assert!(arrows > 0, "the member pointed at carries its arrows");
+    let (arrows, (hairlines, stroked), _) = draw(50, None);
+    // The strip drawn against time may paint a faint line of its own; fifty
+    // loops are no crowd, and none of them is one.
+    assert!(hairlines < 50, "fifty loops are no crowd: {hairlines}");
+    assert!(stroked >= 50, "fifty loops are each stroked: {stroked}");
     assert!(arrows >= 50, "each of fifty loops carries arrows: {arrows}");
 }
 
@@ -257,11 +572,10 @@ fn a_large_family_drawn_against_a_signal_is_drawn_as_its_band() {
 #[test]
 fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     let mut state = lissajous_host();
-    draw_against(&mut state, "V(a)");
+    open_strip(&mut state, "V", signal("V(a)"));
     super::lanes::place_cursors(&mut state, Some(0.25e-3), Some(0.5e-3));
     let ctx = theme_context();
-    frame(&ctx, &mut state, Vec::new());
-    let painted: Vec<String> = texts(&frame(&ctx, &mut state, Vec::new()))
+    let painted: Vec<String> = painted_texts(&ctx, &mut state)
         .into_iter()
         .map(|(text, _)| text)
         .collect();
@@ -284,58 +598,52 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     );
 }
 
-/// The quick view's choice is the project's: it is saved with the result
-/// presentation and drawn again when the project is reopened.
+/// The quick view's strips are the project's: saved with the result
+/// presentation, span and all, and drawn again when the project is
+/// reopened.
 #[test]
-fn the_project_keeps_what_a_pane_is_drawn_against() {
+fn the_project_keeps_a_strip_against_a_signal_and_its_span() {
     let mut state = lissajous_host();
-    draw_against(&mut state, "V(a)");
-    let pane = volts_pane(&mut state);
+    open_strip(&mut state, "V", signal("V(a)"));
+    state.results.results.session.xy_strips[0].sweep_range = Some((0.25e-3, 0.75e-3));
+    let analysis = super::lanes::strip(&mut state)[0].analysis_key;
     let saved = state
         .results
         .results
         .project_presentation(&state.model.simulation);
     assert_eq!(
-        saved.unit_abscissas,
-        [rspice_results::result_presentation::StripUnitAbscissa {
-            analysis: pane.analysis,
+        saved.xy_plots,
+        [rspice_results::result_presentation::StripXyPlot {
+            analysis,
             unit: "V".to_owned(),
-            abscissa: Abscissa::Signal {
-                name: "V(a)".to_owned()
-            },
+            abscissa: signal("V(a)"),
+            sweep_range: Some(
+                rspice_results::visualization_document::AxisRange::new(0.25e-3, 0.75e-3).unwrap()
+            ),
         }]
     );
-    state.results.results.session.unit_abscissas.clear();
+    state.results.results.session.xy_strips.clear();
     crate::workbench::documents::result_document::restore_presentation(
         &mut state.results_parts(),
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap(),
     );
-    assert_eq!(
-        state
-            .results
-            .results
-            .session
-            .unit_abscissas
-            .get(&pane)
-            .map(|choice| &choice.abscissa),
-        Some(&Abscissa::Signal {
-            name: "V(a)".to_owned()
-        })
-    );
+    let mut expected = XyStrip::new(analysis, "V", signal("V(a)"));
+    expected.sweep_range = Some((0.25e-3, 0.75e-3));
+    assert_eq!(strips(&state), [expected]);
 }
 
-/// A saved view keeps what its volts axis is drawn against, draws it so
-/// when shown, keeps a change made inside it, and hands the quick view its
-/// own choice back when it is left.
+/// A saved view keeps its strip against a signal and the strip's span,
+/// draws them when shown, keeps a change made inside it, and hands the
+/// quick view its own strip back when it is left.
 #[test]
-fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
+fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
     use super::super::super::persistent_document::{
         capture_pane_presentation, project_pane_presentation, projection,
     };
     use super::expression_units::{document_frame, save_single_pane_view};
     let mut state = lissajous_host();
-    draw_against(&mut state, "V(a)");
-    let pane_key = volts_pane(&mut state);
+    open_strip(&mut state, "V", signal("V(a)"));
+    state.results.results.session.xy_strips[0].sweep_range = Some((0.0, 0.5e-3));
     let document_id = save_single_pane_view(&mut state);
     let kept = |state: &ResultsTestHost| {
         state
@@ -344,16 +652,25 @@ fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
             .content
             .visualization_document(document_id)
             .expect("the project keeps the document")
-            .unit_abscissas()
+            .xy_plots()
             .iter()
-            .map(|choice| (choice.unit.clone(), choice.abscissa.text().to_owned()))
+            .map(|plot| {
+                (
+                    plot.unit.clone(),
+                    plot.abscissa.text().to_owned(),
+                    plot.sweep_range.map(|range| (range.minimum, range.maximum)),
+                )
+            })
             .collect::<Vec<_>>()
     };
-    assert_eq!(kept(&state), [("V".to_owned(), "V(a)".to_owned())]);
+    assert_eq!(
+        kept(&state),
+        [("V".to_owned(), "V(a)".to_owned(), Some((0.0, 0.5e-3)))]
+    );
     document_frame(&mut state, document_id);
 
-    // The reader draws the view's pane against V(b) instead, inside the
-    // pane's frame, between its projection and its capture.
+    // Inside the view's frame, between its projection and its capture, the
+    // reader plots against V(b) instead, over the second half period.
     let pane = projection(state.results_reads(), document_id)
         .expect("the document projects")
         .pages[0]
@@ -363,17 +680,16 @@ fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
         .expect("the pane names a Results viewer");
     project_pane_presentation(&mut state.results_parts(), &pane, viewer)
         .expect("the pane projects onto its strip");
-    let against_b = Abscissa::Signal {
-        name: "V(b)".to_owned(),
-    };
-    state
-        .results
-        .results
-        .session
-        .unit_abscissas
-        .insert(pane_key.clone(), UnitAbscissaChoice::new(against_b.clone()));
+    {
+        let strip = &mut state.results.results.session.xy_strips[0];
+        strip.abscissa = signal("V(b)");
+        strip.sweep_range = Some((0.5e-3, 1.0e-3));
+    }
     capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
-    assert_eq!(kept(&state), [("V".to_owned(), "V(b)".to_owned())]);
+    assert_eq!(
+        kept(&state),
+        [("V".to_owned(), "V(b)".to_owned(), Some((0.5e-3, 1.0e-3)))]
+    );
     let reloaded: rspice_results::visualization_document::VisualizationDocument =
         serde_json::from_str(
             &serde_json::to_string(
@@ -387,41 +703,27 @@ fn a_saved_view_keeps_what_its_pane_is_drawn_against() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(reloaded.unit_abscissas()[0].abscissa, against_b);
+    assert_eq!(reloaded.xy_plots()[0].abscissa, signal("V(b)"));
 
     state.results.results.session.leave_persistent_document();
+    let held = |state: &ResultsTestHost| {
+        strips(state)
+            .iter()
+            .map(|strip| (strip.abscissa.text().to_owned(), strip.sweep_range))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        state
-            .results
-            .results
-            .session
-            .unit_abscissas
-            .get(&pane_key)
-            .map(|choice| choice.abscissa.text()),
-        Some("V(a)"),
-        "the quick view has its choice back"
+        held(&state),
+        [("V(a)".to_owned(), Some((0.0, 0.5e-3)))],
+        "the quick view has its strip back"
     );
-    // Shown again, the view draws against V(b).
+    // Shown again, the view draws its own.
     document_frame(&mut state, document_id);
-    assert_eq!(
-        state
-            .results
-            .results
-            .session
-            .unit_abscissas
-            .get(&pane_key)
-            .map(|choice| &choice.abscissa),
-        Some(&against_b)
-    );
-    // Back on the sweep inside the view, the view forgets the choice.
+    assert_eq!(held(&state), [("V(b)".to_owned(), Some((0.5e-3, 1.0e-3)))]);
+    // The strip closed inside the view, the view forgets it.
     project_pane_presentation(&mut state.results_parts(), &pane, viewer)
         .expect("the pane projects onto its strip");
-    state
-        .results
-        .results
-        .session
-        .unit_abscissas
-        .remove(&pane_key);
+    state.results.results.session.xy_strips.clear();
     capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
     assert!(kept(&state).is_empty());
 }
@@ -495,23 +797,14 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
         );
     }
 
-    // The amperes pane drawn against the first member's drain voltage
-    // draws one curve per member, each with its own arrows.
-    let pane = WavePanePresentationKey {
-        analysis: model.analysis_key,
-        unit: "A".to_owned(),
-    };
+    // The amperes curves plotted against the first member's drain voltage
+    // draw one curve per member, each with its own arrows.
     let colors: Vec<egui::Color32> = members
         .iter()
         .map(|(vgs, point)| trace(model, &format!("I(VD) [VG={vgs}; point {point}]")).color)
         .collect();
     drop(models);
-    state.results.results.session.unit_abscissas.insert(
-        pane,
-        UnitAbscissaChoice::new(Abscissa::Signal {
-            name: "V(D) [VG=1.5; point 1]".to_owned(),
-        }),
-    );
+    open_strip(&mut state, "A", signal("V(D) [VG=1.5; point 1]"));
     let ctx = theme_context();
     frame(&ctx, &mut state, Vec::new());
     let shapes = frame(&ctx, &mut state, Vec::new());
@@ -577,13 +870,7 @@ fn a_transient_ramp_drawn_against_its_input_is_the_dc_transfer_curve() {
     // Drawn, the pane carries the curve's arrows.
     let color = vout.color;
     drop(models);
-    let pane = volts_pane(&mut transient);
-    transient.results.results.session.unit_abscissas.insert(
-        pane,
-        UnitAbscissaChoice::new(Abscissa::Signal {
-            name: "IN".to_owned(),
-        }),
-    );
+    open_strip(&mut transient, "V", signal("IN"));
     let ctx = theme_context();
     frame(&ctx, &mut transient, Vec::new());
     assert!(!arrowheads(&frame(&ctx, &mut transient, Vec::new()), color).is_empty());

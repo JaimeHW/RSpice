@@ -1,7 +1,7 @@
-//! A unit axis of a pane drawn against a signal or an expression: the choice
-//! survives a save and reload, is cleared by choosing the sweep again, leaves
-//! with its pane, and needs schema 13. A trace may name another signal
-//! column as its coordinate.
+//! A pane axis' curves plotted against a signal or an expression: the plots
+//! and their sweep spans survive a save and reload, are replaced per pane in
+//! order, leave with their pane, and need schema 13. A trace may name another
+//! signal column as its coordinate.
 
 use super::*;
 
@@ -43,11 +43,19 @@ fn document() -> (VisualizationDocument, PaneId, DatasetBinding) {
     (document, pane, source)
 }
 
-fn against(pane: PaneId, unit: &str, abscissa: Option<Abscissa>) -> DocumentEdit {
-    DocumentEdit::SetUnitAbscissa {
+fn plot(pane: PaneId, unit: &str, abscissa: Abscissa) -> XyPlot {
+    XyPlot {
         pane_id: pane,
         unit: unit.to_owned(),
         abscissa,
+        sweep_range: None,
+    }
+}
+
+fn plots(pane: PaneId, plots: Vec<XyPlot>) -> DocumentEdit {
+    DocumentEdit::SetXyPlots {
+        pane_id: pane,
+        plots,
     }
 }
 
@@ -58,63 +66,74 @@ fn signal(name: &str) -> Abscissa {
 }
 
 #[test]
-fn a_unit_axis_drawn_against_a_signal_survives_a_save_and_reload() {
+fn a_plot_against_a_signal_and_its_sweep_span_survive_a_save_and_reload() {
     let (mut document, pane, _) = document();
     let expression = Abscissa::Expression {
         text: "V(in)-V(out)".to_owned(),
     };
+    let settled = XyPlot {
+        sweep_range: Some(AxisRange::new(1.0e-6, 2.0e-6).unwrap()),
+        ..plot(pane, "A", expression.clone())
+    };
     document
         .transact(
             document.revision(),
-            vec![
-                against(pane, "V", Some(signal("V(in)"))),
-                against(pane, "A", Some(expression.clone())),
-            ],
+            vec![plots(
+                pane,
+                vec![plot(pane, "V", signal("V(in)")), settled.clone()],
+            )],
         )
         .unwrap();
     let saved = serde_json::to_value(&document).unwrap();
     assert_eq!(saved["schema_version"], serde_json::json!(13));
     assert_eq!(
-        saved["unit_abscissas"][0]["abscissa"],
+        saved["xy_plots"][0]["abscissa"],
         serde_json::json!({"kind": "signal", "name": "V(in)"})
+    );
+    // The whole record writes no span; a narrowed one writes its ends.
+    assert!(saved["xy_plots"][0].get("sweep_range").is_none());
+    assert_eq!(
+        saved["xy_plots"][1]["sweep_range"],
+        serde_json::json!({"minimum": 1.0e-6, "maximum": 2.0e-6})
     );
     let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
     assert_eq!(reloaded, document);
-    let held: Vec<(&str, &Abscissa)> = reloaded
-        .unit_abscissas()
-        .iter()
-        .map(|choice| (choice.unit.as_str(), &choice.abscissa))
-        .collect();
-    assert_eq!(held, [("V", &signal("V(in)")), ("A", &expression)]);
+    assert_eq!(
+        reloaded.xy_plots(),
+        [plot(pane, "V", signal("V(in)")), settled]
+    );
 }
 
-/// Choosing again replaces the axis' abscissa, and choosing none draws it
-/// against its analysis' sweep again.
+/// A pane's plots are replaced as one list, in the reader's order: two
+/// plots of one axis against different signals stand side by side, and an
+/// empty list takes them all away.
 #[test]
-fn choosing_again_replaces_the_abscissa_and_choosing_none_clears_it() {
+fn a_panes_plots_are_replaced_in_order_and_an_empty_list_clears_them() {
     let (mut document, pane, _) = document();
+    let first = vec![
+        plot(pane, "V", signal("V(out)")),
+        plot(pane, "V", signal("V(in)")),
+    ];
     document
-        .transact(
-            document.revision(),
-            vec![
-                against(pane, "V", Some(signal("V(in)"))),
-                against(pane, "V", Some(signal("V(out)"))),
-            ],
-        )
+        .transact(document.revision(), vec![plots(pane, first.clone())])
         .unwrap();
-    assert_eq!(document.unit_abscissas().len(), 1);
-    assert_eq!(document.unit_abscissas()[0].abscissa, signal("V(out)"));
+    assert_eq!(document.xy_plots(), first);
+    let reordered = vec![first[1].clone(), first[0].clone()];
     document
-        .transact(document.revision(), vec![against(pane, "V", None)])
+        .transact(document.revision(), vec![plots(pane, reordered.clone())])
         .unwrap();
-    assert!(document.unit_abscissas().is_empty());
-    // With nothing chosen the document writes what it always wrote.
+    assert_eq!(document.xy_plots(), reordered);
+    document
+        .transact(document.revision(), vec![plots(pane, Vec::new())])
+        .unwrap();
+    assert!(document.xy_plots().is_empty());
+    // With nothing plotted the document writes what it always wrote.
     let saved = serde_json::to_value(&document).unwrap();
-    assert!(saved.get("unit_abscissas").is_none());
+    assert!(saved.get("xy_plots").is_none());
 }
 
 #[test]
-fn a_unit_abscissa_leaves_with_its_pane() {
+fn a_plot_leaves_with_its_pane() {
     let (mut document, pane, _) = document();
     let page = document.pages()[0].id;
     let receipt = document
@@ -139,8 +158,8 @@ fn a_unit_abscissa_leaves_with_its_pane() {
         .transact(
             document.revision(),
             vec![
-                against(pane, "V", Some(signal("V(in)"))),
-                against(second, "V", Some(signal("V(in)"))),
+                plots(pane, vec![plot(pane, "V", signal("V(in)"))]),
+                plots(second, vec![plot(second, "V", signal("V(in)"))]),
             ],
         )
         .unwrap();
@@ -150,36 +169,41 @@ fn a_unit_abscissa_leaves_with_its_pane() {
             vec![DocumentEdit::Remove(EntityRef::Pane(second))],
         )
         .unwrap();
-    assert_eq!(document.unit_abscissas().len(), 1);
-    assert_eq!(document.unit_abscissas()[0].pane_id, pane);
+    assert_eq!(document.xy_plots(), [plot(pane, "V", signal("V(in)"))]);
 }
 
+/// A blank expression, an unknown pane, a plot listed under another pane, a
+/// plot listed twice and a span that is no interval are each refused, and
+/// leave the document as it was.
 #[test]
-fn a_blank_expression_or_an_unknown_pane_is_refused() {
+fn a_malformed_plot_is_refused() {
     let (mut document, pane, _) = document();
+    let refused = |document: &mut VisualizationDocument, edit: DocumentEdit| {
+        let error = document
+            .transact(document.revision(), vec![edit])
+            .unwrap_err();
+        assert!(document.xy_plots().is_empty());
+        error
+    };
     let blank = Abscissa::Expression {
         text: "  ".to_owned(),
     };
-    let error = document
-        .transact(document.revision(), vec![against(pane, "V", Some(blank))])
-        .unwrap_err();
-    assert!(
-        matches!(
-            error,
-            VisualizationError::InvalidValue {
-                field: "unit-abscissa.expression",
-                ..
-            }
-        ),
-        "{error:?}"
+    let field = |error: VisualizationError| match error {
+        VisualizationError::InvalidValue { field, .. } => field,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        field(refused(
+            &mut document,
+            plots(pane, vec![plot(pane, "V", blank)])
+        )),
+        "xy-plot.expression"
     );
     let gone = PaneId::allocate(9_999).unwrap();
-    let error = document
-        .transact(
-            document.revision(),
-            vec![against(gone, "V", Some(signal("V(in)")))],
-        )
-        .unwrap_err();
+    let error = refused(
+        &mut document,
+        plots(gone, vec![plot(gone, "V", signal("V(in)"))]),
+    );
     assert!(
         matches!(
             error,
@@ -187,11 +211,45 @@ fn a_blank_expression_or_an_unknown_pane_is_refused() {
         ),
         "{error:?}"
     );
-    assert!(document.unit_abscissas().is_empty());
+    assert_eq!(
+        field(refused(
+            &mut document,
+            plots(pane, vec![plot(gone, "V", signal("V(in)"))])
+        )),
+        "xy-plot.pane-id"
+    );
+    assert_eq!(
+        field(refused(
+            &mut document,
+            plots(
+                pane,
+                vec![
+                    plot(pane, "V", signal("V(in)")),
+                    plot(pane, "V", signal("V(in)")),
+                ],
+            )
+        )),
+        "xy-plot.abscissa"
+    );
+    let backwards = XyPlot {
+        sweep_range: Some(AxisRange {
+            minimum: 2.0e-6,
+            maximum: 1.0e-6,
+        }),
+        ..plot(pane, "V", signal("V(in)"))
+    };
+    assert_eq!(
+        field(refused(&mut document, plots(pane, vec![backwards.clone()]))),
+        "xy-plot.sweep-range"
+    );
+    // A file that holds such a span is refused when read, too.
+    let mut wire = serde_json::to_value(&document).unwrap();
+    wire["xy_plots"] = serde_json::to_value([backwards]).unwrap();
+    assert!(serde_json::from_value::<VisualizationDocument>(wire).is_err());
 }
 
 #[test]
-fn a_schema_twelve_document_reads_unchanged_and_cannot_carry_an_abscissa() {
+fn a_schema_twelve_document_reads_unchanged_and_cannot_carry_a_plot() {
     let (mut document, pane, _) = document();
     let mut legacy = serde_json::to_value(&document).unwrap();
     legacy["schema_version"] = serde_json::json!(12);
@@ -201,7 +259,7 @@ fn a_schema_twelve_document_reads_unchanged_and_cannot_carry_an_abscissa() {
     document
         .transact(
             document.revision(),
-            vec![against(pane, "V", Some(signal("V(in)")))],
+            vec![plots(pane, vec![plot(pane, "V", signal("V(in)"))])],
         )
         .unwrap();
     let mut legacy = serde_json::to_value(&document).unwrap();

@@ -69,64 +69,41 @@ pub struct PaneHeader {
     /// header alone, which offers no autoscale and no log toggle for an axis
     /// it does not draw.
     pub plotted: bool,
-    /// What the pane may be drawn against, when the host offers a choice.
+    /// What the pane's curves may be plotted against, when the host offers
+    /// a choice.
     pub abscissa: Option<AbscissaMenu>,
 }
 
-/// What a unit pane may be drawn against: its strip's sweep, one of the
-/// strip's signals, one of its expressions, or an expression typed here.
+/// What a unit pane's curves may be plotted against: one of the strip's
+/// signals, one of its expressions, or an expression typed here.
 #[derive(Debug, Clone, Default)]
 pub struct AbscissaMenu {
-    /// The signal or expression the pane is drawn against, if any.
+    /// What the curves are plotted against already, in a strip drawn against
+    /// a signal or an expression.
     pub current: Option<Abscissa>,
-    /// The strip's sweep, as its axis names it.
-    pub sweep: String,
     /// The strip's signals, by source name: the pane's own first.
     pub signals: Vec<String>,
     /// The strip's expressions.
     pub expressions: Vec<String>,
 }
 
-/// The header's tag while the pane is drawn against `current` rather than
-/// its sweep, as ADS's `vs()` reads.
-fn abscissa_tag(current: &Abscissa, display_name: &dyn Fn(&str) -> String) -> String {
-    let against = match current {
-        Abscissa::Signal { name } => display_name(name),
-        Abscissa::Expression { text } => text.clone(),
-    };
-    format!("vs {}", elide(&against, 12))
-}
-
-/// The sweep, as the menu and the way back name it.
-fn sweep_name(menu: &AbscissaMenu) -> &str {
-    if menu.sweep.is_empty() {
-        "the sweep"
-    } else {
-        &menu.sweep
-    }
-}
-
-/// The choices of an [`AbscissaMenu`] under a heading naming the pane, with
-/// a field to type an expression. The pane header's context menu, the tag it
-/// shows while drawn against a signal, and an X axis drawn against one all
-/// open this.
+/// The choices of an [`AbscissaMenu`] under a heading naming the pane's
+/// curves, with a field to type an expression. The pane header's context
+/// menu and the X axis of a strip drawn against a signal both open this.
 pub(crate) fn abscissa_choices(
     ui: &mut Ui,
     unit: &str,
     menu: &AbscissaMenu,
     display_name: &dyn Fn(&str) -> String,
     draft_id: egui::Id,
-) -> Option<Option<Abscissa>> {
+) -> Option<Abscissa> {
     let mut chosen = None;
-    ui.label(egui::RichText::new(format!("Draw the {unit} pane against")).weak());
-    let sweep = if menu.sweep.is_empty() {
-        "the sweep".to_owned()
+    let heading = if unit.is_empty() {
+        "Plot the curves against".to_owned()
     } else {
-        format!("{} (the sweep)", menu.sweep)
+        format!("Plot the {unit} curves against")
     };
-    if ui.selectable_label(menu.current.is_none(), sweep).clicked() {
-        chosen = Some(None);
-    }
+    ui.label(egui::RichText::new(heading).weak());
     let signals = menu
         .signals
         .iter()
@@ -136,9 +113,6 @@ pub(crate) fn abscissa_choices(
         .iter()
         .map(|text| Abscissa::Expression { text: text.clone() });
     let options: Vec<Abscissa> = signals.chain(expressions).collect();
-    if !options.is_empty() {
-        ui.separator();
-    }
     egui::ScrollArea::vertical()
         .max_height(240.0)
         .show(ui, |ui| {
@@ -151,7 +125,7 @@ pub(crate) fn abscissa_choices(
                     .selectable_label(menu.current.as_ref() == Some(&option), label)
                     .clicked()
                 {
-                    chosen = Some(Some(option));
+                    chosen = Some(option);
                 }
             }
         });
@@ -164,9 +138,9 @@ pub(crate) fn abscissa_choices(
     );
     let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
     if entered && !draft.trim().is_empty() {
-        chosen = Some(Some(Abscissa::Expression {
+        chosen = Some(Abscissa::Expression {
             text: draft.trim().to_owned(),
-        }));
+        });
         draft.clear();
     }
     ui.data_mut(|data| data.insert_temp(draft_id, draft));
@@ -209,9 +183,8 @@ pub struct UnitPaneHeaderResponse {
     pub toggle_expression: Option<usize>,
     /// The expression whose entry's Remove was chosen.
     pub remove_expression: Option<usize>,
-    /// What the reader chose to draw the pane against: `Some(None)` for the
-    /// strip's sweep.
-    pub abscissa: Option<Option<Abscissa>>,
+    /// What the reader chose to plot the pane's curves against.
+    pub abscissa: Option<Abscissa>,
 }
 
 /// The three regions of a pane header, across its row.
@@ -305,13 +278,9 @@ pub fn show_header(
         return UnitPaneHeaderResponse::default();
     }
 
-    // A pane drawn against its sweep shows nothing new; one drawn against a
-    // signal or an expression says so, with the way back beside it.
+    // In a strip drawn against a signal, that signal is the X axis, not a
+    // curve of the legend.
     let display = |name: &str| display_name(name).into_owned();
-    let abscissa_tag = abscissa
-        .as_ref()
-        .and_then(|menu| menu.current.as_ref())
-        .map(|current| abscissa_tag(current, &display));
     let drawn_against = match abscissa.as_ref().and_then(|menu| menu.current.as_ref()) {
         Some(Abscissa::Signal { name }) => Some(name.as_str()),
         _ => None,
@@ -386,32 +355,6 @@ pub fn show_header(
                     .clicked()
                 {
                     output.autoscale_y = true;
-                }
-                if let (Some(menu), Some(tag)) = (abscissa.as_ref(), abscissa_tag.as_deref()) {
-                    let sweep = sweep_name(menu);
-                    let back = format!("Draw the {} pane against {sweep} again", pane.unit);
-                    if IconButton::new(Icon::Close)
-                        .side(ABSCISSA_RESET_SIDE)
-                        .tooltip(&back)
-                        .show(ui)
-                        .clicked()
-                    {
-                        output.abscissa = Some(None);
-                    }
-                    let draft_id =
-                        ui.id()
-                            .with(("abscissa-tag-draft", model.analysis_key, pane.unit));
-                    let response = chip(ui, tag, true).on_hover_text(format!(
-                        "The {} pane is drawn against {}; click to choose what it is drawn against",
-                        pane.unit,
-                        menu.current.as_ref().map_or(sweep, Abscissa::text)
-                    ));
-                    if let Some(chosen) = egui::Popup::menu(&response)
-                        .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
-                        .and_then(|inner| inner.inner)
-                    {
-                        output.abscissa = Some(chosen);
-                    }
                 }
             },
         );
@@ -729,9 +672,6 @@ fn expression_chip(
         }
     });
 }
-
-/// The side of the button that draws a pane against its sweep again.
-const ABSCISSA_RESET_SIDE: f32 = 19.0;
 
 /// The width a button-like control labelled `label` takes.
 fn control_width(ui: &Ui, label: &str) -> f32 {

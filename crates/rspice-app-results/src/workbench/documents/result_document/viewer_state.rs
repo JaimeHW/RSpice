@@ -372,27 +372,25 @@ impl ResultsState {
                 scales.sort_by_key(|scale| scale.analysis.order_key());
                 scales
             },
-            unit_abscissas: {
-                // Likewise the quick view's abscissas, not a document's.
-                let mut choices: Vec<_> = self
-                    .session
+            xy_plots: {
+                // Likewise the quick view's strips, not a document's, in the
+                // order the reader made them.
+                self.session
                     .quick_view_presentation
                     .as_ref()
-                    .map_or(&self.session.unit_abscissas, |quick| &quick.unit_abscissas)
+                    .map_or(&self.session.xy_strips, |quick| &quick.xy_strips)
                     .iter()
-                    .filter(|(pane, _)| Self::dataset_is_retained(simulation, pane.analysis))
-                    .map(
-                        |(pane, choice)| rspice_results::result_presentation::StripUnitAbscissa {
-                            analysis: pane.analysis,
-                            unit: pane.unit.clone(),
-                            abscissa: choice.abscissa.clone(),
-                        },
-                    )
-                    .collect();
-                choices.sort_by(|a, b| {
-                    (a.analysis.order_key(), &a.unit).cmp(&(b.analysis.order_key(), &b.unit))
-                });
-                choices
+                    .filter(|strip| Self::dataset_is_retained(simulation, strip.analysis))
+                    .map(|strip| rspice_results::result_presentation::StripXyPlot {
+                        analysis: strip.analysis,
+                        unit: strip.unit.clone(),
+                        abscissa: strip.abscissa.clone(),
+                        sweep_range: strip.sweep_range.and_then(|(minimum, maximum)| {
+                            rspice_results::visualization_document::AxisRange::new(minimum, maximum)
+                                .ok()
+                        }),
+                    })
+                    .collect()
             },
         }
     }

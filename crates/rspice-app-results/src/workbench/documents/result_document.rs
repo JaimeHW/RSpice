@@ -1085,7 +1085,7 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
         expression_groups,
         signal_sets,
         x_scales,
-        unit_abscissas,
+        xy_plots,
     } = presentation;
     restore_markers(state, markers, marker_id_high_water);
     restore_log_y_panes(state, log_y_panes);
@@ -1102,16 +1102,22 @@ pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPr
             (scale.analysis, x_scale)
         })
         .collect();
-    *state.results.session.unit_abscissas = unit_abscissas
+    // A strip drawn against a signal keeps its span only while it is an
+    // interval; a span a file cannot hold draws the whole record.
+    *state.results.session.xy_strips = xy_plots
         .into_iter()
-        .map(|choice| {
-            (
-                WavePanePresentationKey {
-                    analysis: choice.analysis,
-                    unit: choice.unit,
-                },
-                rspice_results_ui::session::UnitAbscissaChoice::new(choice.abscissa),
-            )
+        .map(|plot| {
+            let mut strip =
+                rspice_results_ui::session::XyStrip::new(plot.analysis, plot.unit, plot.abscissa);
+            strip.sweep_range = plot
+                .sweep_range
+                .filter(|range| {
+                    range.minimum.is_finite()
+                        && range.maximum.is_finite()
+                        && range.minimum < range.maximum
+                })
+                .map(|range| (range.minimum, range.maximum));
+            strip
         })
         .collect();
 }

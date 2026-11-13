@@ -259,13 +259,13 @@ pub enum DocumentEdit {
         #[serde(deserialize_with = "deserialize_source_text_string")]
         text: String,
     },
-    /// Draw one unit axis of a pane against a signal or an expression, or
-    /// with `None`, against its analysis' sweep again.
-    SetUnitAbscissa {
+    /// Replace the plots of one pane's axes against a signal or an
+    /// expression, in the order they are drawn. Every plot names the pane;
+    /// an empty list takes them all away.
+    SetXyPlots {
         pane_id: PaneId,
-        #[serde(deserialize_with = "deserialize_unit_axis_string")]
-        unit: String,
-        abscissa: Option<Abscissa>,
+        #[serde(deserialize_with = "deserialize_xy_plots")]
+        plots: Vec<XyPlot>,
     },
     /// Replace the order one pane draws its event lanes in. An empty order
     /// forgets the pane's recorded order.

@@ -672,14 +672,19 @@ pub struct StripXScale {
     pub logarithmic: bool,
 }
 
-/// The X the reader chose for one unit axis of a strip, in place of its
-/// analysis' sweep: another signal of the analysis, or an expression.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StripUnitAbscissa {
+/// One strip of the quick view that draws a unit axis' curves against
+/// another signal of its analysis, or an expression, over a span of the
+/// analysis' sweep.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StripXyPlot {
     pub analysis: AnalysisPresentationKey,
-    /// The unit axis, by its unit; empty for a plain number.
+    /// The unit axis whose curves are drawn, by its unit; empty for a plain
+    /// number.
     pub unit: String,
     pub abscissa: crate::visualization_document::Abscissa,
+    /// The span of the sweep drawn; the whole record when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_range: Option<crate::visualization_document::AxisRange>,
 }
 
 /// The unit the reader declared for one expression, which replaces the unit
@@ -739,14 +744,14 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub x_scales: Vec<StripXScale>,
-    /// The signals or expressions the reader drew unit axes against, by
-    /// strip and unit.
+    /// The strips that draw a unit axis against a signal or an expression,
+    /// in the order the reader made them.
     #[serde(
         default,
-        rename = "result_unit_abscissas",
+        rename = "result_xy_plots",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub unit_abscissas: Vec<StripUnitAbscissa>,
+    pub xy_plots: Vec<StripXyPlot>,
 }
 
 fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
@@ -769,7 +774,7 @@ pub struct ResultFingerprintFields<'a> {
     /// Digested as an extension only when there are any, as signal sets are.
     pub x_scales: &'a [StripXScale],
     /// Digested as an extension only when there are any, as X scales are.
-    pub unit_abscissas: &'a [StripUnitAbscissa],
+    pub xy_plots: &'a [StripXyPlot],
 }
 
 /// Pane choices are a set, but project files and content fingerprints encode
@@ -881,7 +886,7 @@ impl ResultPresentation {
             expression_groups,
             signal_sets,
             x_scales,
-            unit_abscissas,
+            xy_plots,
         } = self;
         Ok(ResultFingerprintFields {
             markers,
@@ -890,7 +895,7 @@ impl ResultPresentation {
             marker_history: self.marker_allocation_history()?,
             signal_sets,
             x_scales,
-            unit_abscissas,
+            xy_plots,
         })
     }
 }

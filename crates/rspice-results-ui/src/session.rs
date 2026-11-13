@@ -270,26 +270,62 @@ impl TracePick {
     }
 }
 
-/// The signal or expression a unit pane of a strip is drawn against, and
-/// the range of it the reader zoomed to.
+/// A strip that draws one unit pane's curves against a signal or an
+/// expression of its analysis, over a span of the analysis' sweep. It stands
+/// after its analysis' strip, which goes on drawing against the sweep.
 #[derive(Debug, Clone, PartialEq)]
-pub struct UnitAbscissaChoice {
+pub struct XyStrip {
+    pub analysis: AnalysisPresentationKey,
+    /// The unit pane whose curves it draws, by its unit.
+    pub unit: String,
     pub abscissa: rspice_results::visualization_document::Abscissa,
+    /// The span of the sweep drawn; the whole record when `None`.
+    pub sweep_range: Option<(f64, f64)>,
     /// The abscissa range shown, when the reader zoomed or panned it.
     pub x_view: Option<(f64, f64)>,
+    /// The ordinate range shown, when the reader zoomed or panned it.
+    pub y_view: Option<(f64, f64)>,
 }
 
-impl UnitAbscissaChoice {
-    pub const fn new(abscissa: rspice_results::visualization_document::Abscissa) -> Self {
+impl XyStrip {
+    pub fn new(
+        analysis: AnalysisPresentationKey,
+        unit: impl Into<String>,
+        abscissa: rspice_results::visualization_document::Abscissa,
+    ) -> Self {
         Self {
+            analysis,
+            unit: unit.into(),
             abscissa,
+            sweep_range: None,
             x_view: None,
+            y_view: None,
         }
+    }
+
+    /// Whether this strip draws `unit`'s curves of `analysis` against
+    /// `abscissa`: a strip's identity.
+    pub fn is(
+        &self,
+        analysis: AnalysisPresentationKey,
+        unit: &str,
+        abscissa: &rspice_results::visualization_document::Abscissa,
+    ) -> bool {
+        self.analysis == analysis && self.unit == unit && &self.abscissa == abscissa
     }
 }
 
-/// The unit panes drawn against a chosen abscissa, by strip and unit.
-pub type UnitAbscissas = HashMap<WavePanePresentationKey, UnitAbscissaChoice>;
+/// The strips drawn against a signal or an expression, in the order the
+/// reader made them.
+pub type XyStrips = Vec<XyStrip>;
+
+/// A strip a document pane keeps drawn against a signal or an expression:
+/// its unit, its abscissa and its sweep span.
+pub type DocumentXyPlot = (
+    String,
+    rspice_results::visualization_document::Abscissa,
+    Option<(f64, f64)>,
+);
 
 /// The quick view's own expressions and X scales, set aside while a result
 /// document's pane shows the ones it keeps in their place.
@@ -301,7 +337,7 @@ pub struct QuickViewPresentation {
     pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
     pub x_scales:
         Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
-    pub unit_abscissas: Box<UnitAbscissas>,
+    pub xy_strips: Box<XyStrips>,
 }
 
 /// State of the inline expression editor under a strip header.
@@ -586,9 +622,9 @@ pub struct ResultViewerState {
     /// keep the results state inside its stack budget.
     pub x_scales:
         Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
-    /// The signal or expression the reader drew a unit pane against, in
-    /// place of its strip's sweep. Boxed, as the X scales are.
-    pub unit_abscissas: Box<UnitAbscissas>,
+    /// The strips that draw a unit pane against a signal or an expression,
+    /// each after its analysis' strip. Boxed, as the X scales are.
+    pub xy_strips: Box<XyStrips>,
     /// The quick view's expressions and X scales while a document pane
     /// shows its own, boxed: the results state is built by value before it
     /// is boxed, and a stash held only while a document is open need not
@@ -909,7 +945,7 @@ impl ResultViewerState {
                 expr_projection_keys: self.expr_projection_keys.clone(),
                 expression_units: self.expression_units.clone(),
                 x_scales: self.x_scales.clone(),
-                unit_abscissas: self.unit_abscissas.clone(),
+                xy_strips: self.xy_strips.clone(),
             }));
         }
     }
@@ -960,31 +996,47 @@ impl ResultViewerState {
         }
     }
 
-    /// Draw a document pane's unit axes against the abscissas the pane
-    /// keeps. The quick view's own choices are set aside the first time and
-    /// come back when the document is left, as its expressions do.
-    pub fn project_document_abscissas(
+    /// Show the strips a document pane keeps drawn against a signal or an
+    /// expression, as (unit, abscissa, sweep span). The quick view's own
+    /// strips are set aside the first time and come back when the document
+    /// is left, as its expressions do. A strip the pane keeps keeps the
+    /// zoom the reader gave it.
+    pub fn project_document_xy_strips(
         &mut self,
         analysis: AnalysisPresentationKey,
-        choices: Vec<(String, rspice_results::visualization_document::Abscissa)>,
+        plots: Vec<DocumentXyPlot>,
     ) {
         self.set_quick_view_aside();
         let held: Vec<_> = self
-            .unit_abscissas
+            .xy_strips
             .iter()
-            .filter(|(pane, _)| pane.analysis == analysis)
-            .map(|(pane, choice)| (pane.unit.clone(), choice.abscissa.clone()))
+            .filter(|strip| strip.analysis == analysis)
+            .map(|strip| {
+                (
+                    strip.unit.clone(),
+                    strip.abscissa.clone(),
+                    strip.sweep_range,
+                )
+            })
             .collect();
-        if held.len() == choices.len() && choices.iter().all(|choice| held.contains(choice)) {
+        if held == plots {
             return;
         }
-        self.unit_abscissas
-            .retain(|pane, _| pane.analysis != analysis);
-        for (unit, abscissa) in choices {
-            self.unit_abscissas.insert(
-                WavePanePresentationKey { analysis, unit },
-                UnitAbscissaChoice::new(abscissa),
-            );
+        let previous: Vec<XyStrip> = self
+            .xy_strips
+            .iter()
+            .filter(|strip| strip.analysis == analysis)
+            .cloned()
+            .collect();
+        self.xy_strips.retain(|strip| strip.analysis != analysis);
+        for (unit, abscissa, sweep_range) in plots {
+            let mut strip = previous
+                .iter()
+                .find(|strip| strip.is(analysis, &unit, &abscissa))
+                .cloned()
+                .unwrap_or_else(|| XyStrip::new(analysis, unit, abscissa));
+            strip.sweep_range = sweep_range;
+            self.xy_strips.push(strip);
         }
     }
 
@@ -1080,7 +1132,7 @@ impl ResultViewerState {
             self.expr_projection_keys = quick.expr_projection_keys;
             self.expression_units = quick.expression_units;
             self.x_scales = quick.x_scales;
-            self.unit_abscissas = quick.unit_abscissas;
+            self.xy_strips = quick.xy_strips;
         }
         self.persistent_pane_context = None;
         self.document_markers.clear();
@@ -1440,7 +1492,7 @@ impl ResultViewerState {
         self.expression_units
             .retain(|(analysis, _), _| live(*analysis));
         self.x_scales.retain(|analysis, _| live(*analysis));
-        self.unit_abscissas.retain(|pane, _| live(pane.analysis));
+        self.xy_strips.retain(|strip| live(strip.analysis));
         self.expr_projection_keys
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));

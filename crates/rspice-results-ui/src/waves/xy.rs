@@ -8,11 +8,10 @@
 //! sweep, are drawn where the curves are at that instant.
 
 use super::pane::ResolvedExpr;
-use super::stack::{StackHost, StripFrame, shared_x_view};
+use super::stack::{StackHost, StripFrame};
 use super::{StripModel, StripTrace, TraceKind, UnitPane, stable_hash, trace_key};
 use crate::presentation::well_hint;
 use egui::Ui;
-use rspice_results::result_presentation::{ResultViewer, WavePanePresentationKey};
 use rspice_results::visualization_document::Abscissa;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::sample_at_with;
@@ -282,6 +281,16 @@ fn member_abscissa_name(curve: &str, abscissa: &str) -> Option<String> {
     Some(format!("{}{suffix}", member_base(abscissa)))
 }
 
+/// The abscissa as the strip names it. A nested sweep's member column names
+/// its quantity alone, `V(D)` for `V(D) [VG=1; point 1]`: every member is
+/// read against the column of its own point, not the one chosen.
+pub(crate) fn abscissa_label(abscissa: &Abscissa) -> &str {
+    match abscissa {
+        Abscissa::Signal { name } => member_base(name),
+        Abscissa::Expression { text } => text,
+    }
+}
+
 /// Whether the curve `curve` would be read against itself when its pane is
 /// drawn against the signal `abscissa`: that is the diagonal, not a curve,
 /// so the pane neither draws nor lists it.
@@ -410,26 +419,178 @@ fn at_resolution(value: f64, (low, high): (f64, f64), log: bool, unit: &str) -> 
     super::fmt_in_unit_readout(snapped, unit, digits.max(1.0) as usize)
 }
 
-/// What a pane drawn against an abscissa needs from the stack.
+/// The stroke of each member of a crowded family: the thinnest that draws.
+const HAIRLINE_WIDTH: f32 = 1.0;
+
+/// The alpha of each hairline of a crowded family of `members`. It falls
+/// inversely with the count, so where a share `s` of the members cross the
+/// ink is `1 - (1 - a)^(s n)`, about `1 - e^(-32 s)` whatever the family's
+/// size: density reads the same for a hundred trials as for a thousand, as
+/// a band would. Half opaque just past the band threshold, and never below
+/// the faintest step an 8-bit display draws a few times over.
+fn crowded_member_alpha(members: usize) -> f32 {
+    let threshold = super::pane::FAMILY_BAND_MEMBERS as f32;
+    (0.5 * threshold / members.max(1) as f32).clamp(1.0 / 64.0, 0.5)
+}
+
+/// The side of the square a cursor point can be taken hold of in.
+const CURSOR_GRIP_SIDE: f32 = 14.0;
+
+/// The width a strip's header leaves for its "t <from> – <to>" field.
+pub(crate) const SWEEP_RANGE_FIELD_WIDTH: f32 = 176.0;
+
+/// Width of each end's text box in the sweep span field.
+const SWEEP_RANGE_END_WIDTH: f32 = 70.0;
+
+/// `text` read as a sweep value: a number with an optional SPICE scale and
+/// unit, as a deck writes it (`250u`, `1.5ms`), spaces and a micro sign
+/// allowed. Empty text is no value.
+fn parse_sweep_value(text: &str) -> Option<Result<f64, String>> {
+    let compact: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| {
+            if matches!(c, '\u{b5}' | '\u{3bc}') {
+                'u'
+            } else {
+                c
+            }
+        })
+        .collect();
+    (!compact.is_empty()).then(|| rspice_results::spice_value::parse_spice_value_checked(&compact))
+}
+
+/// The span `(from, to)` typed into the field, held within the record
+/// `domain`: an empty end is the record's end, and a span that is the whole
+/// record is none. Refused, with the reason, when an end does not read as a
+/// number or the span is empty or backwards.
+pub(crate) fn typed_sweep_range(
+    (from, to): (&str, &str),
+    domain: (f64, f64),
+) -> Result<Option<(f64, f64)>, String> {
+    let read = |text: &str, end: f64| {
+        parse_sweep_value(text).map_or(Ok(end), |value| {
+            value.map(|value| value.clamp(domain.0, domain.1))
+        })
+    };
+    let (start, stop) = (read(from, domain.0)?, read(to, domain.1)?);
+    if start >= stop {
+        return Err("the span must start before it ends".to_owned());
+    }
+    Ok((start > domain.0 || stop < domain.1).then_some((start, stop)))
+}
+
+/// The strip header's "t <from> – <to>" field: the span of the sweep the
+/// strip draws, the whole record by default. An end applies when the reader
+/// presses Enter or leaves it; one that does not read reverts. Returns the
+/// new span (`Some(None)` for the whole record) when the reader changed it.
+pub(crate) fn sweep_range_field(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    model: &StripModel,
+    strip: &crate::session::XyStrip,
+    (identity, significant_digits, quantity): (
+        u64,
+        usize,
+        rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    ),
+) -> Option<Option<(f64, f64)>> {
+    let domain = model.x_range?;
+    let (start, stop) = strip.sweep_range.unwrap_or(domain);
+    let sweep = if model.x_label().is_empty() {
+        "sweep"
+    } else {
+        model.x_label()
+    };
+    let t = Tokens::get(ui.ctx());
+    // The ends and the words beside them read at the field size, as every
+    // input does.
+    let font = rspice_ui_kit::theme::field_mono();
+    let mut changed = None;
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.set_clip_rect(rect);
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(
+                egui::RichText::new(sweep)
+                    .font(font.clone())
+                    .color(t.color.text_dim),
+            );
+            let mut ends = [String::new(), String::new()];
+            let mut committed = false;
+            for (end, value) in [(0usize, start), (1, stop)] {
+                if end == 1 {
+                    ui.label(
+                        egui::RichText::new("\u{2013}")
+                            .font(font.clone())
+                            .color(t.color.text_dim),
+                    );
+                }
+                let id = egui::Id::new(("xy-sweep-range", identity, end));
+                let shown = model.format_x(value, significant_digits, quantity);
+                let mut text = ui
+                    .data_mut(|data| data.get_temp::<String>(id))
+                    .unwrap_or_else(|| shown.clone());
+                let response = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(id.with("edit"))
+                            .font(rspice_ui_kit::theme::field_mono())
+                            .desired_width(SWEEP_RANGE_END_WIDTH),
+                    )
+                    .on_hover_text(format!(
+                        "The span of {sweep} the curves are drawn over. Enter applies; an \
+                         empty end is the record's end."
+                    ));
+                if response.lost_focus() {
+                    committed = true;
+                    ui.data_mut(|data| data.remove::<String>(id));
+                } else if response.has_focus() {
+                    ui.data_mut(|data| data.insert_temp(id, text.clone()));
+                } else {
+                    ui.data_mut(|data| data.remove::<String>(id));
+                    text = shown;
+                }
+                ends[end] = text;
+            }
+            if committed
+                && let Ok(range) = typed_sweep_range((&ends[0], &ends[1]), domain)
+                && range != strip.sweep_range
+            {
+                changed = Some(range);
+            }
+        },
+    );
+    changed
+}
+
+/// What a strip drawn against an abscissa needs from the stack.
 pub(crate) struct XyInput<'a> {
+    /// The unit pane whose curves the strip plots.
     pub pane: &'a UnitPane<'a>,
-    pub ordinal: usize,
     pub exprs: &'a [ResolvedExpr],
     pub frame: StripFrame<'a>,
-    pub abscissa: &'a Abscissa,
+    /// The strip, by its place among the session's strips.
+    pub strip: usize,
     pub log_y: bool,
 }
 
-/// Draw one unit pane against its abscissa.
+/// Draw one strip's curves against its abscissa.
 pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let XyInput {
         pane,
-        ordinal,
         exprs,
         frame,
-        abscissa,
+        strip: strip_index,
         log_y,
     } = input;
+    let Some(strip) = host.session().xy_strips.get(strip_index).cloned() else {
+        return;
+    };
+    let abscissa = &strip.abscissa;
     let model = frame.model;
     let t = Tokens::get(ui.ctx());
     let interpolation = super::cursor_interpolation(frame.options.readout.cursor_interpolation());
@@ -470,8 +631,9 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
                 })
             })
     };
-    let window_range = shared_x_view(host.session(), model.analysis_key, frame.pane_count)
-        .unwrap_or(frame.x_domain);
+    // The strip draws the span of the sweep its header names, the whole
+    // record unless the reader narrowed it.
+    let window_range = strip.sweep_range.unwrap_or(frame.x_domain);
     let mut refusals: Vec<String> = Vec::new();
     let mut curves: Vec<Curve> = Vec::new();
     let trace_width = frame.options.trace_width;
@@ -586,19 +748,9 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         return;
     }
 
-    let pane_key = WavePanePresentationKey {
-        analysis: model.analysis_key,
-        unit: pane.unit.to_owned(),
-    };
-    let x_view = host
-        .session()
-        .unit_abscissas
-        .get(&pane_key)
-        .and_then(|choice| choice.x_view);
-    let y_view = host
-        .session()
-        .analysis_plot_view_pane(ResultViewer::Waves, model.analysis_key, ordinal)
-        .y
+    let x_view = strip.x_view;
+    let y_view = strip
+        .y_view
         .filter(|(low, high)| !log_y || (*low > 0.0 && *high > 0.0));
     let auto_x = finite_bounds(curves.iter().flat_map(|curve| curve.x()), false);
     let auto_y = finite_bounds(curves.iter().flat_map(|curve| curve.y()), log_y);
@@ -609,7 +761,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let interpolated = curves.iter().any(|curve| curve.data.interpolated);
     let x_label = format!(
         "{} \u{b7} {}",
-        abscissa.text(),
+        abscissa_label(abscissa),
         pairing_note(model.x_label(), interpolated, interpolation)
     );
     let x_axis = Axis::linear(x0, x1, &resolved.unit).with_label(&x_label);
@@ -626,7 +778,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             .map(|curve| curve.name.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        abscissa.text(),
+        abscissa_label(abscissa),
         if model.x_label().is_empty() {
             "the sweep"
         } else {
@@ -671,92 +823,121 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         best.filter(|(.., distance)| *distance <= 24.0)
             .map(|(curve, sample, _)| (curve, sample))
     });
-    // A family too large to stroke member by member is drawn as the band it
-    // occupies, with the member the reader points at stroked over it, as the
-    // panes drawn against the sweep draw it.
+    // A family too large to read member by member is not folded into a band
+    // here: a band filled per column of X fills a loop's interior, and X is
+    // no function axis on this plot. Each member is a hairline instead, its
+    // alpha falling as the family grows so that where members crowd the ink
+    // builds up as a band would; the member nearest the pointer is drawn
+    // over them at full weight, with its arrows and cursor points.
     let family_members: Vec<(usize, &StripTrace)> = curves
         .iter()
         .enumerate()
         .filter_map(|(index, curve)| Some((index, model.traces.get(curve.trace?)?)))
         .collect();
-    let families = super::pane::family_bands(&family_members);
-    let mut banded = std::collections::HashSet::new();
-    if !families.is_empty() {
-        let view = plot::TraceView {
-            x0,
-            x1,
-            y0,
-            y1,
-            x_scale: XScale::Linear,
-            y_scale,
-            columns: (plot_rect.width().ceil().max(0.0) as usize).next_multiple_of(64),
-            rows: 0,
-        };
-        let mut bands = Vec::with_capacity(families.len());
-        for family in &families {
-            let identity = stable_hash(
-                &family
-                    .members
-                    .iter()
-                    .map(|(index, _)| {
-                        let curve = &curves[*index];
-                        (curve.cache_key, curve.range.start, curve.range.end)
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let members: Vec<plot::BandMember<'_>> = family
-                .members
-                .iter()
-                .map(|(index, _)| plot::BandMember {
-                    x: curves[*index].x(),
-                    y: curves[*index].y(),
-                    parametric: true,
-                    shape: None,
-                })
-                .collect();
-            let color = family.members[0].1.signal_color;
-            bands.push((
-                host.session_mut().cache.band(identity, &members, view),
-                if family.overlay {
-                    color.gamma_multiply(0.40)
-                } else {
-                    color
-                },
-            ));
-            banded.extend(family.members.iter().map(|(index, _)| *index));
-        }
-        let band_range = (y0, y1);
-        spec.underlay = Some(Box::new(move |painter, mapper| {
-            super::pane::paint_family_bands(painter, mapper.rect, &bands, y_scale, band_range);
-        }));
+    let mut crowded: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for family in super::pane::family_bands(&family_members) {
+        let size = family.members.len();
+        crowded.extend(family.members.iter().map(|(index, _)| (*index, size)));
     }
     let highlighted = nearest
         .map(|(index, _)| index)
         .filter(|index| !curves[*index].overlay);
-    let stroked = |index: usize| !banded.contains(&index) || highlighted == Some(index);
+    let faint = |index: usize| crowded.contains_key(&index) && highlighted != Some(index);
+    let stroked = |index: usize| !faint(index);
     let order: Vec<usize> = (0..curves.len())
-        .filter(|index| curves[*index].overlay)
-        .chain((0..curves.len()).filter(|index| !curves[*index].overlay))
-        .filter(|index| stroked(*index))
+        .filter(|index| faint(*index))
+        .chain((0..curves.len()).filter(|index| !faint(*index) && curves[*index].overlay))
+        .chain((0..curves.len()).filter(|index| !faint(*index) && !curves[*index].overlay))
         .collect();
-    for curve in order.iter().map(|index| &curves[*index]) {
-        let color = if curve.overlay {
+    let shade = |index: usize| {
+        let curve = &curves[index];
+        if curve.overlay {
             curve.color.gamma_multiply(0.40)
         } else {
             curve.color
-        };
+        }
+    };
+    // The crowded members are painted under the curves as plain hairlines:
+    // no dash, no symbol and no style weight of their own, which would only
+    // add ink. Points closer than half a pixel to the last one drawn add
+    // nothing either, so a long member costs what the screen can show.
+    let hairlines: Vec<(&[f64], &[f64], egui::Color32)> = order
+        .iter()
+        .copied()
+        .filter(|index| faint(*index))
+        .filter_map(|index| {
+            let members = *crowded.get(&index)?;
+            let curve = &curves[index];
+            Some((
+                curve.x(),
+                curve.y(),
+                shade(index).gamma_multiply(crowded_member_alpha(members)),
+            ))
+        })
+        .collect();
+    // The member the reader points at in a crowd is drawn over a margin of
+    // the canvas, so its line stands out of a crowd of its own hue.
+    let halo = highlighted
+        .filter(|index| crowded.contains_key(index))
+        .map(|index| (curves[index].x(), curves[index].y()));
+    let halo_stroke = egui::Stroke::new(trace_width + 3.0, t.color.canvas_bg);
+    if !hairlines.is_empty() {
+        spec.underlay = Some(Box::new(move |painter, mapper| {
+            let rect = mapper.rect;
+            let at = |x: f64, y: f64| {
+                egui::pos2(
+                    rect.left() + (XScale::Linear.normalize(x, x0, x1) as f32) * rect.width(),
+                    rect.bottom() - (y_scale.normalize(y, y0, y1) as f32) * rect.height(),
+                )
+            };
+            for &(xs, ys, color) in &hairlines {
+                let stroke = egui::Stroke::new(HAIRLINE_WIDTH, color);
+                let mut run: Vec<egui::Pos2> = Vec::new();
+                for (&x, &y) in xs.iter().zip(ys) {
+                    let point = at(x, y);
+                    if !point.is_finite() {
+                        if run.len() >= 2 {
+                            painter.add(egui::Shape::line(std::mem::take(&mut run), stroke));
+                        }
+                        run.clear();
+                        continue;
+                    }
+                    if run
+                        .last()
+                        .is_none_or(|last| last.distance_sq(point) >= 0.25)
+                    {
+                        run.push(point);
+                    }
+                }
+                if run.len() >= 2 {
+                    painter.add(egui::Shape::line(run, stroke));
+                }
+            }
+            if let Some((xs, ys)) = halo {
+                let points: Vec<egui::Pos2> = xs
+                    .iter()
+                    .zip(ys)
+                    .map(|(&x, &y)| at(x, y))
+                    .filter(|point| point.is_finite())
+                    .collect();
+                painter.add(egui::Shape::line(points, halo_stroke));
+            }
+        }));
+    }
+    for index in order.iter().copied().filter(|index| !faint(*index)) {
+        let curve = &curves[index];
         let window_key = stable_hash(&(curve.cache_key, curve.range.start, curve.range.end));
-        let mut drawn = super::pane::apply_family_trace_style(
-            Trace::new(curve.x(), curve.y(), color)
+        let styled = super::pane::apply_family_trace_style(
+            Trace::new(curve.x(), curve.y(), shade(index))
                 .width(trace_width * curve.width_ratio)
                 .cache_key(window_key)
                 .parametric(),
             curve.family_style,
         );
-        if let Some(slot) = curve.palette_slot {
-            drawn = drawn.palette_slot(slot);
-        }
-        spec.traces.push(drawn);
+        spec.traces.push(match curve.palette_slot {
+            Some(slot) => styled.palette_slot(slot),
+            None => styled,
+        });
     }
 
     // The strip's cursors stand on the sweep; here each is the point every
@@ -776,6 +957,9 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     } else {
         model.x_label()
     };
+    // Where each cursor point stands on screen, by cursor and curve, so the
+    // reader can take hold of it.
+    let mut grips: Vec<(bool, usize, egui::Pos2)> = Vec::new();
     for (label, position, color) in [
         (
             "A",
@@ -790,15 +974,15 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     ] {
         let Some(at) = position else { continue };
         let mut tagged = false;
-        for curve in curves
+        for (index, curve) in curves
             .iter()
             .enumerate()
             .filter(|(index, _)| stroked(*index))
-            .map(|(_, curve)| curve)
         {
             let Some((x, y)) = point_at(curve, at, interpolation) else {
                 continue;
             };
+            grips.push((label == "A", index, to_screen(x, y)));
             let tag = if tagged {
                 label.to_owned()
             } else {
@@ -806,7 +990,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
                 format!(
                     "{label} \u{b7} {sweep_name} {} \u{b7} {} {} \u{b7} {}",
                     model.format_x(at, significant_digits, quantity),
-                    abscissa.text(),
+                    abscissa_label(abscissa),
                     format_x(x),
                     format_y(y)
                 )
@@ -823,7 +1007,10 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
                     sweep_name.to_owned(),
                     model.format_x(curve.sweep()[sample], significant_digits, quantity),
                 ),
-                (abscissa.text().to_owned(), format_x(curve.x()[sample])),
+                (
+                    abscissa_label(abscissa).to_owned(),
+                    format_x(curve.x()[sample]),
+                ),
                 (curve.name.clone(), format_y(curve.y()[sample])),
             ]
         })
@@ -837,7 +1024,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         Some(&readout),
     );
 
-    // The X axis names what the pane is drawn against, and clicking that
+    // The X axis names what the strip is drawn against, and clicking that
     // name chooses again, as ViVA's and EZwave's axis menus do.
     let mut chosen = None;
     if let Some(label_rect) = response.x_label_rect {
@@ -849,7 +1036,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!(
-                "Choose what the {} pane is drawn against",
+                "Choose what the {} curves are plotted against",
                 pane.unit
             ));
         if label.hovered()
@@ -870,10 +1057,44 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             .and_then(|inner| inner.inner);
     }
 
+    // A cursor point is taken hold of and dragged along its curve: the
+    // cursor moves to the instant of the sample nearest the pointer, so the
+    // strips drawn against the sweep follow it, as moving the cursor there
+    // moves the point here.
+    let mut dragged: Option<(bool, f64)> = None;
+    for &(is_a, index, at) in &grips {
+        if !response.plot_rect.contains(at) {
+            continue;
+        }
+        let grip = ui
+            .interact(
+                egui::Rect::from_center_size(at, egui::Vec2::splat(CURSOR_GRIP_SIDE)),
+                ui.id().with(("xy-cursor-point", is_a, index)),
+                egui::Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        if grip.dragged()
+            && let Some(pointer) = grip.interact_pointer_pos()
+        {
+            let curve = &curves[index];
+            let nearest = (0..curve.range.len())
+                .map(|sample| (sample, to_screen(curve.x()[sample], curve.y()[sample])))
+                .filter(|(_, point)| point.is_finite())
+                .min_by(|(_, a), (_, b)| a.distance(pointer).total_cmp(&b.distance(pointer)));
+            if let Some((sample, _)) = nearest {
+                dragged = Some((is_a, curve.sweep()[sample]));
+            }
+        }
+    }
+
     // Sparse arrowheads along each curve, and its start filled and its end
     // hollow, as the polar locus marks its sweep.
     let painter = ui.painter().with_clip_rect(response.plot_rect);
-    for curve in order.iter().map(|index| &curves[*index]) {
+    for curve in order
+        .iter()
+        .filter(|index| stroked(**index))
+        .map(|index| &curves[*index])
+    {
         let color = if curve.overlay {
             curve.color.gamma_multiply(0.40)
         } else {
@@ -896,15 +1117,9 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         }
     }
 
-    let pane_view_key = WavePanePresentationKey {
-        analysis: model.analysis_key,
-        unit: pane.unit.to_owned(),
-    };
-    if response.response.hovered() || response.response.dragged() {
-        host.session_mut().active_wave_pane = Some(pane_view_key.clone());
-    }
     // A click places the next cursor at the instant of the nearest point.
-    if response.clicked_x.is_some()
+    if dragged.is_none()
+        && response.clicked_x.is_some()
         && host.session().cursor_placement_enabled()
         && !host.session().marker_tool.is_armed()
         && !host.session().trace_pick.is_armed()
@@ -919,27 +1134,30 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         results.cursors.place(at);
     }
     let session = host.session_mut();
+    match dragged {
+        Some((true, at)) => {
+            session.cursors.a = Some(at);
+            session.cursor_a_anchor = None;
+        }
+        Some((false, at)) => session.cursors.b = Some(at),
+        None => {}
+    }
     if let Some(choice) = chosen {
-        super::stack::choose_abscissa(session, &pane_view_key, ordinal, choice);
+        super::stack::repoint_xy_strip(session, strip_index, choice);
         return;
     }
+    let Some(held) = session.xy_strips.get_mut(strip_index) else {
+        return;
+    };
     if response.view.reset {
-        if let Some(choice) = session.unit_abscissas.get_mut(&pane_view_key) {
-            choice.x_view = None;
-        }
-        session
-            .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, ordinal)
-            .y = None;
+        held.x_view = None;
+        held.y_view = None;
     } else if response.view.any() {
-        if let Some(x) = response.view.x
-            && let Some(choice) = session.unit_abscissas.get_mut(&pane_view_key)
-        {
-            choice.x_view = Some(x);
+        if let Some(x) = response.view.x {
+            held.x_view = Some(x);
         }
         if let Some(y) = response.view.y {
-            session
-                .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, ordinal)
-                .y = Some(y);
+            held.y_view = Some(y);
         }
     }
 }

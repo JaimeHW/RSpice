@@ -757,14 +757,13 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
             AxisScale::Linear
         }
     });
-    // And what its unit axes are drawn against.
-    let mut abscissas: Vec<(String, rspice_results::visualization_document::Abscissa)> = session
-        .unit_abscissas
+    // And the strips that plot its panes against a signal, in their order.
+    let xy_strips: Vec<rspice_results_ui::session::XyStrip> = session
+        .xy_strips
         .iter()
-        .filter(|(axis, _)| axis.analysis == analysis_key)
-        .map(|(axis, choice)| (axis.unit.clone(), choice.abscissa.clone()))
+        .filter(|strip| strip.analysis == analysis_key)
+        .cloned()
         .collect();
-    abscissas.sort_by(|a, b| a.0.cmp(&b.0));
     let mut document = build_document(resolved, tracking)?;
     let bound: Vec<_> = document
         .panes()
@@ -806,15 +805,15 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
             })
         })
         .chain(scale_edits)
-        .chain(bound.iter().flat_map(|pane_id| {
-            abscissas
+        .chain(
+            bound
                 .iter()
-                .map(move |(unit, abscissa)| DocumentEdit::SetUnitAbscissa {
+                .filter(|_| !xy_strips.is_empty())
+                .map(|pane_id| DocumentEdit::SetXyPlots {
                     pane_id: *pane_id,
-                    unit: unit.clone(),
-                    abscissa: Some(abscissa.clone()),
-                })
-        }))
+                    plots: super::persistent_document::xy_plots_of(*pane_id, &xy_strips),
+                }),
+        )
         .collect();
     if !edits.is_empty() {
         document.transact(document.revision(), edits)?;
