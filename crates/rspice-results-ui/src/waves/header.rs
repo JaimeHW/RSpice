@@ -188,7 +188,6 @@ pub fn show_header(
         return UnitPaneHeaderResponse::default();
     }
 
-    let action_width = if plotted { 58.0 } else { 0.0 };
     // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
     // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
     // An expression whose unit cannot be stated has a pane of its own and
@@ -228,10 +227,47 @@ pub fn show_header(
     // holds, so the legend starts on the edge the lane names end on.
     let unit_width = name_width
         .unwrap_or_else(|| unit_label_width.map_or(0.0, |width| (width + 28.0).max(46.0)));
+    let mut output = UnitPaneHeaderResponse::default();
+    // The right-hand controls are laid out first and take the width they
+    // need, so the legend is measured against what is left of the row and no
+    // chip of it runs under them.
+    let action_width = if plotted {
+        let space = header_regions(rect, unit_width, f32::INFINITY).actions;
+        let drawn = ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(space)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            |ui| {
+                ui.set_clip_rect(space);
+                let log = ui
+                    .add_enabled_ui(log_y_available, |ui| chip(ui, "log", log_y))
+                    .inner
+                    .on_hover_text(if log_y_available {
+                        "Toggle logarithmic Y axis"
+                    } else {
+                        "Logarithmic Y requires strictly positive visible values"
+                    });
+                if log.clicked() {
+                    output.toggle_log_y = true;
+                }
+                if IconButton::new(Icon::ZoomFit)
+                    .side(19.0)
+                    .tooltip("Autoscale Y to visible traces")
+                    .show(ui)
+                    .clicked()
+                {
+                    output.autoscale_y = true;
+                }
+            },
+        );
+        space.right() - drawn.response.rect.left()
+    } else {
+        0.0
+    };
     let PaneHeaderRegions {
         unit: unit_rect,
         legend: legend_rect,
-        actions: actions_rect,
+        ..
     } = header_regions(rect, unit_width, action_width);
 
     if let Some(unit_chip) = unit_chip {
@@ -249,79 +285,54 @@ pub fn show_header(
         );
     }
 
-    let mut output = UnitPaneHeaderResponse::default();
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(legend_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(legend_rect);
-            ui.spacing_mut().item_spacing.x = 3.0;
-            let traces: Vec<&StripTrace> = model
-                .traces
-                .iter()
-                .take(model.signal_trace_count)
-                .filter(|trace| trace_belongs_to_pane(model, pane, ordinal, trace))
-                .collect();
-            let (plotted, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
-                traces.into_iter().partition(|trace| trace.visible);
-            let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
-                .iter()
-                .partition(|expression| expression.visible);
-            // The pane names every curve it draws: its signals, then the
-            // strip's expressions routed to it.
-            let entries: Vec<Entry<'_>> = plotted
-                .iter()
-                .map(|trace| Entry::Signal(trace))
-                .chain(drawn_expressions.iter().map(|e| Entry::Expression(e)))
-                .collect();
-            // A name gives way only past a share of the row: hierarchical
-            // names keep their leaf, cut from the middle as ViVA cuts them.
-            let name_budget = (legend_rect.width() * 0.4).max(72.0);
-            let chips: Vec<LegendEntry> = entries
-                .iter()
-                .map(|entry| match entry {
-                    Entry::Signal(trace) => legend_entry(
-                        ui,
-                        model,
-                        trace,
-                        &cursor_a_value,
-                        name_budget,
-                        &display_name,
-                    ),
-                    Entry::Expression(expression) => expression_entry(ui, expression, name_budget),
-                })
-                .collect();
-            let hidden_count = hidden.len() + hidden_expressions.len();
-            let hidden_label = format!("{hidden_count} hidden");
-            let reserve = |label: &str| control_width(ui, label) + 3.0;
-            let hidden_width = if hidden_count == 0 {
-                0.0
-            } else {
-                reserve(&hidden_label)
-            };
-            let fitted = fitted_chips(&chips, legend_rect.width() - hidden_width, |overflow| {
-                reserve(&format!("+{overflow}"))
-            });
-            for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
-                entry.show(ui, chip, &display_name, host, &mut output);
-            }
-            if fitted < chips.len() {
-                let overflow = &entries[fitted..];
-                ui.menu_button(format!("+{}", overflow.len()), |ui| {
-                    for (entry, chip) in overflow.iter().zip(&chips[fitted..]) {
-                        ui.horizontal(|ui| entry.show(ui, chip, &display_name, host, &mut output));
-                    }
-                })
-                .response
-                .on_hover_text(format!(
-                    "{} more plotted in the {} pane",
-                    overflow.len(),
-                    pane.unit
-                ));
-            }
-            if hidden_count > 0 {
-                ui.menu_button(&hidden_label, |ui| {
+    let traces: Vec<&StripTrace> = model
+        .traces
+        .iter()
+        .take(model.signal_trace_count)
+        .filter(|trace| trace_belongs_to_pane(model, pane, ordinal, trace))
+        .collect();
+    let (plotted_traces, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
+        traces.into_iter().partition(|trace| trace.visible);
+    let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
+        .iter()
+        .partition(|expression| expression.visible);
+    // The pane names every curve it draws: its signals, then the strip's
+    // expressions routed to it.
+    let entries: Vec<Entry<'_>> = plotted_traces
+        .iter()
+        .map(|trace| Entry::Signal(trace))
+        .chain(drawn_expressions.iter().map(|e| Entry::Expression(e)))
+        .collect();
+    // A name gives way only past a share of the row: hierarchical names keep
+    // their leaf, cut from the middle as ViVA cuts them.
+    let name_budget = (legend_rect.width() * 0.4).max(72.0);
+    let chips: Vec<LegendEntry> = entries
+        .iter()
+        .map(|entry| match entry {
+            Entry::Signal(trace) => legend_entry(
+                ui,
+                model,
+                trace,
+                &cursor_a_value,
+                name_budget,
+                &display_name,
+            ),
+            Entry::Expression(expression) => expression_entry(ui, expression, name_budget),
+        })
+        .collect();
+
+    // The hidden control is laid out next, whole, at the legend's right end:
+    // the plotted entries share what is left, and the ones that do not fit
+    // go behind the overflow control instead of under it.
+    let hidden_count = hidden.len() + hidden_expressions.len();
+    let mut entries_right = legend_rect.right();
+    if hidden_count > 0 {
+        let drawn = ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(legend_rect)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            |ui| {
+                ui.menu_button(format!("{hidden_count} hidden"), |ui| {
                     for trace in &hidden {
                         let mut shown = false;
                         if ui
@@ -344,6 +355,40 @@ pub fn show_header(
                 })
                 .response
                 .on_hover_text(format!("Hidden traces of the {} pane", pane.unit));
+            },
+        );
+        entries_right = drawn.response.rect.left() - 3.0;
+    }
+    let entries_rect = egui::Rect::from_min_max(
+        legend_rect.min,
+        egui::pos2(entries_right.max(legend_rect.left()), legend_rect.bottom()),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(entries_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.set_clip_rect(entries_rect);
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let fitted = fitted_chips(&chips, entries_rect.width(), |overflow| {
+                control_width(ui, &format!("+{overflow}")) + 3.0
+            });
+            for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
+                entry.show(ui, chip, &display_name, host, &mut output);
+            }
+            if fitted < chips.len() {
+                let overflow = &entries[fitted..];
+                ui.menu_button(format!("+{}", overflow.len()), |ui| {
+                    for (entry, chip) in overflow.iter().zip(&chips[fitted..]) {
+                        ui.horizontal(|ui| entry.show(ui, chip, &display_name, host, &mut output));
+                    }
+                })
+                .response
+                .on_hover_text(format!(
+                    "{} more plotted in the {} pane",
+                    overflow.len(),
+                    pane.unit
+                ));
             }
         },
     );
@@ -357,36 +402,6 @@ pub fn show_header(
                 .with(("pane-name-grip", model.analysis_key, pane.unit)),
         )
     });
-    if !plotted {
-        return output;
-    }
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(actions_rect)
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(actions_rect);
-            let log = ui
-                .add_enabled_ui(log_y_available, |ui| chip(ui, "log", log_y))
-                .inner
-                .on_hover_text(if log_y_available {
-                    "Toggle logarithmic Y axis"
-                } else {
-                    "Logarithmic Y requires strictly positive visible values"
-                });
-            if log.clicked() {
-                output.toggle_log_y = true;
-            }
-            if IconButton::new(Icon::ZoomFit)
-                .side(19.0)
-                .tooltip("Autoscale Y to visible traces")
-                .show(ui)
-                .clicked()
-            {
-                output.autoscale_y = true;
-            }
-        },
-    );
     output
 }
 
@@ -534,12 +549,34 @@ fn expression_chip(
 
 /// The width a button-like control labelled `label` takes.
 fn control_width(ui: &Ui, label: &str) -> f32 {
-    let font = egui::TextStyle::Button.resolve(ui.style());
+    // Measured as egui lays a button out: its label in the widget text font
+    // (the body face unless the style overrides it, not the `Button` text
+    // style) inside its frame's margins, at the widest of its states. The
+    // `Button` style measured every chip a twelfth narrow, so a crowded row
+    // ran past its end and cut the hidden control to "10 hidd".
+    use egui::widget_style::{Classes, WidgetState};
+    let style = ui.style();
+    let classes = Classes::default();
+    let margin = [
+        WidgetState::Inactive,
+        WidgetState::Hovered,
+        WidgetState::Active,
+    ]
+    .into_iter()
+    .map(|state| {
+        let margin = style.button_style(&classes, state).frame.inner_margin;
+        f32::from(margin.left) + f32::from(margin.right)
+    })
+    .fold(0.0, f32::max);
+    let font = style
+        .button_style(&classes, WidgetState::Inactive)
+        .text_style
+        .font_id;
     ui.painter()
         .layout_no_wrap(label.to_owned(), font, egui::Color32::WHITE)
         .size()
         .x
-        + 2.0 * ui.spacing().button_padding.x
+        + margin
 }
 
 /// How many of `chips` the row shows in `width`: all of them when they fit,

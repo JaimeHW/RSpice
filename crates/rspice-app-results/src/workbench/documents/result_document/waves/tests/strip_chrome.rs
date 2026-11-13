@@ -284,6 +284,170 @@ fn the_strips_marks_take_the_canvas_inks_in_every_theme() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// One pane of volts at a narrow width: a dozen plotted signals with long
+/// hierarchical names, and ten the dataset does not plot.
+fn crowded_pane() -> ResultsTestHost {
+    let time: Vec<f64> = (0..64).map(|index| f64::from(index) * 1.0e-6).collect();
+    let waveforms = (0..22)
+        .map(|index| {
+            let values: Vec<f64> = time
+                .iter()
+                .map(|t| (t * 2.0e5 + f64::from(index)).sin())
+                .collect();
+            let mut waveform = RetainedTrace::new(
+                format!("V(xtop.xcore.node_{index:02})"),
+                time.clone(),
+                values,
+                "#fff",
+            );
+            waveform.visible = index < 12;
+            waveform
+        })
+        .collect();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(waveforms),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state
+}
+
+/// The crowded pane's strip, settled, in a well `width` wide.
+fn crowded_frame(ctx: &egui::Context, state: &mut ResultsTestHost, width: f32) -> egui::FullOutput {
+    ctx.enable_accesskit();
+    let mut output = None;
+    for events in [vec![egui::Event::PointerGone], Vec::new(), Vec::new()] {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, 420.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        output = Some(ctx.run_ui(input, |ui| {
+            well(ui);
+            show(ui, &mut state.results_parts());
+        }));
+    }
+    output.expect("a frame ran")
+}
+
+/// A pane's hidden control is painted whole however crowded its row: at a
+/// narrow width, with a dozen signals plotted and ten hidden, the plotted
+/// ones that do not fit go behind the overflow control, and "10 hidden" is
+/// neither clipped nor under the log and autoscale buttons at the row's
+/// end. The buttons took their width after the legend had been laid out,
+/// and the hidden control was the entry they cut, to "10 hidd".
+#[test]
+fn the_hidden_control_shows_whole_on_a_crowded_row() {
+    fn painted(
+        shape: &egui::Shape,
+        clip: egui::Rect,
+        out: &mut Vec<(String, egui::Rect, egui::Rect)>,
+    ) {
+        match shape {
+            egui::Shape::Text(text) => out.push((
+                text.galley.text().to_owned(),
+                text.visual_bounding_rect(),
+                clip,
+            )),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| painted(shape, clip, out)),
+            _ => {}
+        }
+    }
+    let mut failures = Vec::new();
+    for (width, cursor) in (16..=46)
+        .flat_map(|step| [None, Some(13.0e-6)].map(|cursor| (f32::from(step as u8) * 20.0, cursor)))
+    {
+        let ctx = themed_context(crate::ui::Theme::default());
+        let mut state = crowded_pane();
+        super::lanes::place_cursors(&mut state, cursor, None);
+        let output = crowded_frame(&ctx, &mut state, width);
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            painted(&clipped.shape, clipped.clip_rect, &mut texts);
+        }
+        let Some((_, chip, clip)) = texts.iter().find(|(text, ..)| text == "10 hidden") else {
+            failures.push(format!("{width} {cursor:?}: no whole hidden control"));
+            continue;
+        };
+        if !clip.contains_rect(*chip) {
+            failures.push(format!(
+                "{width} {cursor:?}: the hidden control is clipped: {chip:?} in {clip:?}"
+            ));
+        }
+        // The plotted signals that do not fit wait behind the overflow
+        // control, which is whole too.
+        let overflow = texts.iter().find(|(text, ..)| {
+            text.strip_prefix('+')
+                .is_some_and(|count| count.parse::<usize>().is_ok())
+        });
+        match overflow {
+            Some((text, rect, clip)) if !clip.contains_rect(*rect) => failures.push(format!(
+                "{width} {cursor:?}: the overflow control {text:?} is clipped"
+            )),
+            None => failures.push(format!("{width} {cursor:?}: no overflow control")),
+            Some(_) => {}
+        }
+        let buttons: Vec<egui::Rect> = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .map(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| {
+                        matches!(node.label(), Some("log" | "Autoscale Y to visible traces"))
+                    })
+                    .filter_map(|(_, node)| node.bounds())
+                    .map(|bounds| {
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if buttons.len() != 2 {
+            failures.push(format!("{width} {cursor:?}: {} row buttons", buttons.len()));
+        }
+        for button in buttons {
+            if button.intersects(*chip) {
+                failures.push(format!(
+                    "{width} {cursor:?}: the hidden control {chip:?} runs under a button {button:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The crowded row for review, written under `RSPICE_PICTURES` when it is
+/// set: 760 px wide with cursor A placed, where the hidden control was cut.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_crowded_row_picture() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let mut state = crowded_pane();
+    super::lanes::place_cursors(&mut state, Some(13.0e-6), None);
+    let canvas = rspice_ui_kit::raster::render(egui::vec2(760.0, 420.0), |ui, _| {
+        well(ui);
+        show(ui, &mut state.results_parts());
+    });
+    std::fs::write(
+        format!("{directory}/pane-crowded-row.png"),
+        canvas.png(canvas.height()),
+    )
+    .expect("the picture is written");
+}
+
 /// Ten nodes on one pane draw in all eight hues, each 0.09 apart, and the
 /// ninth and tenth repeat a hue in a dash of their own. Cursor B is drawn,
 /// across the lanes and the pane, in a colour none of those curves has.
