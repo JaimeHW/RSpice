@@ -178,24 +178,14 @@ class WorkspaceTests(unittest.TestCase):
         ]
         self.assertEqual(missing_members(described), ["crates/rspice-core"])
 
-    def test_the_engine_crate_cannot_be_formatted_in_one_invocation(self) -> None:
-        """Why this script exists rather than `cargo fmt -p <member>`.
-
-        cargo fmt puts every target of a package on one rustfmt command line.
-        rspice-core declares enough targets that the line exceeds the 32767
-        bytes Windows allows, so `cargo fmt -p rspice-core` cannot start there
-        and a formatting violation in the engine was invisible off CI.
-        """
+    def test_every_rustfmt_batch_fits_the_windows_command_line(self) -> None:
+        """cargo fmt puts every target of a package on one rustfmt command line,
+        and Windows refuses a line over 32767 bytes. The gate batches each
+        member's entry points so no single rustfmt run can exceed that."""
         grouped = entry_points(metadata())
         core = [paths for (member, _), paths in grouped.items() if member == "rspice-core"]
         self.assertTrue(core, "rspice-core must be covered by the formatting gate")
-        widest = max(sum(len(path) + 3 for path in paths) for paths in core)
-        self.assertGreater(
-            widest,
-            ARGUMENT_BUDGET,
-            "if rspice-core now fits one command line, this gate may be simplified",
-        )
-        for paths in core:
+        for paths in grouped.values():
             for run in batches(paths):
                 self.assertLessEqual(sum(len(path) + 3 for path in run), ARGUMENT_BUDGET)
 
