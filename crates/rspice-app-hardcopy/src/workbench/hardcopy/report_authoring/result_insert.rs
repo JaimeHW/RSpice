@@ -133,8 +133,20 @@ pub fn commit_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
         }
     };
     let reference = if cx.state.report_authoring.insert_result_frozen {
-        let raster = match render_visualization_report_figure(
+        let figure = match crate::workbench::hardcopy_adapters::sources::visualization_figure_copy(
+            &cx.model.simulation.retained.runs,
             &source,
+        ) {
+            Ok(figure) => figure,
+            Err(error) => {
+                cx.state.report_authoring.transaction_error = Some(format!(
+                    "The selected result figure cannot be frozen for publication: {error}"
+                ));
+                return;
+            }
+        };
+        let raster = match render_visualization_report_figure(
+            &figure,
             &snapshot,
             option.page_id,
             option.pane_id,

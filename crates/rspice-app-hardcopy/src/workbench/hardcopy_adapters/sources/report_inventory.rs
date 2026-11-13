@@ -270,8 +270,10 @@ fn resolve_linked_figure_artifact(
                 locator.pane_id, locator.page_id
             ))
         })?;
+    let figure =
+        super::visualization_figure_copy(&reads.model.simulation.retained.runs, source_document)?;
     let raster = render_visualization_report_figure(
-        source_document,
+        &figure,
         captured,
         page.id,
         pane.id,

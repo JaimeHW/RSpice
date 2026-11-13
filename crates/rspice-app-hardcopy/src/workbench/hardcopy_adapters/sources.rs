@@ -544,7 +544,10 @@ pub fn prepare_retained_hardcopy_resolution(
             RetainedHardcopySourceInput::VisualizationDocument {
                 source_key: source_key.to_owned(),
                 project_id,
-                document: document.clone(),
+                document: visualization_figure_copy(
+                    &reads.model.simulation.retained.runs,
+                    document,
+                )?,
                 page_id: page.id,
                 pane_id: pane.id,
                 all_panes,
@@ -1045,6 +1048,26 @@ pub fn quick_result_analysis_index(
                     .position(|analysis| analysis_supports_viewer(viewer, analysis, |_| {}))
             }),
     }
+}
+
+/// A copy of a saved result document that carries the samples its figures
+/// draw, read from the retained runs it references, so a prepared or frozen
+/// figure needs no run store. The copy keeps the document's identity,
+/// revision and content digest.
+pub(crate) fn visualization_figure_copy(
+    runs: &[SimulationRun],
+    document: &VisualizationDocument,
+) -> Result<VisualizationDocument, HardcopySourceError> {
+    use crate::results::visualization_document::RetainedRunSamples;
+    use crate::state::RetainedTrace;
+
+    document
+        .with_figure_samples(&RetainedRunSamples::<
+            SimulationRun,
+            AnalysisResult,
+            RetainedTrace,
+        >::new(runs))
+        .map_err(|error| HardcopySourceError::UnretainedResult(error.to_string()))
 }
 
 pub fn active_visualization_document_pane<'m>(

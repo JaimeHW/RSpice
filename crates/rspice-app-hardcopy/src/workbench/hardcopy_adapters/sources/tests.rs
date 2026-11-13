@@ -712,3 +712,90 @@ fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
         }
     }
 }
+
+#[test]
+fn a_figure_of_a_run_reference_prints_from_the_samples_its_copy_carries() {
+    use crate::results::visualization_document::{
+        NewPagePane, PaneDataBinding, PaneKind, RunSignal, RunSourceAnalysis,
+    };
+    use crate::state::result_presentation::AnalysisPresentationKey;
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0e-9, 2.0e-9],
+                vec![0.0, 1.0, 0.5],
+                "#55aaff",
+            ),
+        ]),
+    );
+    let analysis_id =
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]).retained_instance_id();
+    let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let source = SourceDataset::run_reference(
+        binding,
+        "Run 1",
+        vec![RunSourceAnalysis::new(
+            analysis_id,
+            AnalysisType::Transient,
+            vec![RunSignal::new(0, "V(out)", false)],
+        )],
+    )
+    .unwrap();
+    let document = VisualizationDocument::new_with_initial_pane(
+        "Transient",
+        vec![source],
+        NewPagePane {
+            title: "Transient".to_owned(),
+            kind: PaneKind::Cartesian,
+            viewer_id: "viewer-waveform".to_owned(),
+            binding: Some(PaneDataBinding {
+                analysis_id,
+                dataset: binding,
+            }),
+        },
+    )
+    .unwrap();
+    let reference = ReportReferenceSnapshot::new(
+        ReportSourceId::VisualizationDocument {
+            document_id: document.id(),
+        },
+        Some(document.revision()),
+        document.content_digest().unwrap(),
+        vec![binding],
+    )
+    .unwrap();
+    let resolve = |document: &VisualizationDocument| {
+        resolve_visualization_pane_source(VisualizationPaneHardcopySource {
+            source_key: "plot".to_owned(),
+            display_name: "Transient".to_owned(),
+            document,
+            reference: &reference,
+            page_id: document.pages()[0].id,
+            pane_id: document.panes()[0].id,
+            scope: HardcopyScope::ActivePlotDocument,
+        })
+    };
+
+    // The saved document holds no samples, so a figure is never drawn from it.
+    assert!(resolve(&document).is_err());
+    let copy = visualization_figure_copy(std::slice::from_ref(&run), &document).unwrap();
+    assert_eq!(
+        copy.content_digest().unwrap(),
+        document.content_digest().unwrap()
+    );
+    let carried = serde_json::to_value(&copy).unwrap();
+    assert_eq!(
+        carried["datasets"][0]["run"]["figure_samples"][0]["y"],
+        serde_json::json!([0.0, 1.0, 0.5])
+    );
+    assert!(resolve(&copy).is_ok(), "the copy prints");
+    // Without the run there is nothing to copy, and the figure says so.
+    assert!(matches!(
+        visualization_figure_copy(&[], &document),
+        Err(HardcopySourceError::UnretainedResult(_))
+    ));
+}
