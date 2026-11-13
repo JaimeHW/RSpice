@@ -215,7 +215,7 @@ pub(crate) mod state;
 pub(crate) mod surfaces {
     pub use rspice_app_workbench::workbench::surfaces::*;
     pub(crate) mod automation;
-    pub(super) mod library_cellview_manager;
+    pub(crate) mod library_cellview_manager;
     pub(crate) mod netlist;
     pub(crate) mod project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;

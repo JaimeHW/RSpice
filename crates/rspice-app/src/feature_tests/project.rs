@@ -1,15 +1,18 @@
 //! The project feature's behaviour, observed through a whole application.
 
 mod builtin_models;
+mod cellview_manager;
 mod configuration_inspector;
 mod configuration_page;
 mod landing;
 mod library_changes;
 mod library_deletion;
+mod library_page;
 mod new_cell;
 mod new_project;
 mod new_view;
 mod overview;
+mod publication;
 mod steps;
 mod surface;
 
@@ -17,6 +20,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
 use crate::workbench::project::ProjectFeature;
+use crate::workbench::surfaces::project::library_publication;
 
 /// Runs `call` in the project feature's context over `app`, lending it the
 /// application's parts as the frame does.
