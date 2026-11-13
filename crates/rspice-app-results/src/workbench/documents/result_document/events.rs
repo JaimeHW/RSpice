@@ -154,6 +154,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(cache) = event_order(state) else {
         return;
     };
+    let numbers = event_numbers(state);
     let analysis = state
         .model
         .simulation
@@ -169,6 +170,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             radix: state.results.session.event_bus_radix,
             expanded: &state.results.session.expanded_event_buses,
             selected: state.results.session.selected_digital_event.as_ref(),
+            numbers,
         },
     );
     let viewer::EventResponse {
@@ -251,6 +253,21 @@ fn event_selection_block(
     }
     None
 }
+/// The reader's significant digits and copied-value format, for every number
+/// the event sheet and its inspector state.
+fn event_numbers(state: &ResultsParts<'_>) -> viewer::EventNumbers {
+    viewer::EventNumbers {
+        significant_digits: usize::from(
+            state
+                .results_reads()
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        ),
+        quantity_policy: state.model.preferences.quantity_presentation_policy(),
+    }
+}
+
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(selection) = state.results.session.selected_digital_event.clone() else {
         viewer::selection_absent(ui, SelectionAbsence::Unselected);
@@ -264,6 +281,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         return;
     }
     let radix = state.results.session.event_bus_radix;
+    let numbers = event_numbers(state);
     let Some(order) = event_order(state) else {
         return;
     };
@@ -289,6 +307,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         buses,
         radix,
         active_event_origin(state.results_reads()),
+        numbers,
     );
     if !plot {
         return;

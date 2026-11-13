@@ -19,11 +19,58 @@ use rspice_results::{
 };
 use rspice_ui_kit::{
     panels::section_header,
+    plot::fmt_si_readout,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{SegmentedWidth, chip, segmented},
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::collections::BTreeSet;
+
+/// The reader's significant digits and copied-value format, for every time,
+/// charge and real value the event sheet and its inspector state.
+///
+/// The sheet states a number at the digits the reader chose, as every other
+/// result sheet does. The exact value stays one hover or one copy away, in the
+/// notation Copied values chose, as the cursor readout's copy is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventNumbers {
+    pub significant_digits: usize,
+    pub quantity_policy: QuantityPresentationPolicy,
+}
+
+impl EventNumbers {
+    /// `value` in `unit` at the reader's significant digits.
+    fn shown(self, value: f64, unit: &str) -> String {
+        fmt_si_readout(value, unit, self.significant_digits)
+    }
+
+    /// `value` in `unit` as Copied values writes it: every digit the double
+    /// holds.
+    fn exact(self, value: f64, unit: &str) -> String {
+        self.quantity_policy
+            .copy_si_value(value, unit)
+            .trim_end()
+            .to_owned()
+    }
+
+    /// An event's value as the table states it: a real value at the reader's
+    /// digits, a logic level or bus word as it stands.
+    fn value(self, value: &EventValue) -> String {
+        match value {
+            EventValue::Real(real) => self.shown(*real, ""),
+            _ => value.display(),
+        }
+    }
+
+    /// An event's value as a copy writes it.
+    fn exact_value(self, value: &EventValue) -> String {
+        match value {
+            EventValue::Real(real) => self.exact(*real, ""),
+            _ => value.display(),
+        }
+    }
+}
 #[derive(Clone, Copy)]
 pub enum EventOrigin<'a> {
     Native,
@@ -203,6 +250,7 @@ pub struct EventView<'a, W: AsRef<RetainedWaveform>> {
     pub radix: BusRadix,
     pub expanded: &'a BTreeSet<String>,
     pub selected: Option<&'a DigitalEventSelection>,
+    pub numbers: EventNumbers,
 }
 #[derive(Default)]
 pub struct EventResponse {
@@ -213,6 +261,7 @@ fn show_current_impulses(
     ui: &mut Ui,
     history: &rspice_results::current_impulses::CurrentImpulseHistoryEvidence,
     order: &EventOrder,
+    numbers: EventNumbers,
 ) {
     section_header(ui, "Current impulses", None);
     panel_note(
@@ -222,10 +271,16 @@ fn show_current_impulses(
     mono(
         ui,
         &format!(
-            "Retained interval: {:.17e} to {:.17e} s",
-            history.start_time_s, history.stop_time_s
+            "Retained interval: {} to {}",
+            numbers.shown(history.start_time_s, "s"),
+            numbers.shown(history.stop_time_s, "s")
         ),
-    );
+    )
+    .on_hover_text(format!(
+        "{} to {}",
+        numbers.exact(history.start_time_s, "s"),
+        numbers.exact(history.stop_time_s, "s")
+    ));
     if !history.delivery_complete {
         panel_note(
             ui,
@@ -238,13 +293,14 @@ fn show_current_impulses(
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.set_min_width(min_width);
-            show_current_impulse_tables(ui, history, order);
+            show_current_impulse_tables(ui, history, order, numbers);
         });
 }
 fn show_current_impulse_tables(
     ui: &mut Ui,
     history: &rspice_results::current_impulses::CurrentImpulseHistoryEvidence,
     order: &EventOrder,
+    numbers: EventNumbers,
 ) {
     let row_height = table_row_height(ui);
     ui.collapsing("Current coverage", |ui| {
@@ -295,12 +351,13 @@ fn show_current_impulse_tables(
     TableBuilder::new(ui)
         .id_salt("rspice.results.current-impulses")
         .striped(true)
+        .sense(egui::Sense::click())
         .max_scroll_height(height)
         .column(Column::initial(180.0).clip(true))
         .column(Column::remainder().at_least(100.0).clip(true))
         .column(Column::initial(210.0).clip(true))
         .header(row_height, |mut header| {
-            for label in ["Time (s)", "Current", "Signed charge (C)"] {
+            for label in ["Time", "Current", "Signed charge"] {
                 header.col(|ui| table_header(ui, label));
             }
         })
@@ -308,24 +365,39 @@ fn show_current_impulse_tables(
             body.rows(row_height, order.current_rows().len(), |mut row| {
                 let (trace_index, point_index) = order.current_rows()[row.index()];
                 let point = &history.traces[trace_index].points[point_index];
+                let name = &order.current_names()[trace_index];
+                let time = numbers.exact(point.time, "s");
+                let charge = numbers.exact(point.charge_coulombs, "C");
                 row.col(|ui| {
-                    mono(ui, &format!("{:.17e}", point.time));
+                    mono(ui, &numbers.shown(point.time, "s")).on_hover_text(&time);
                 });
                 row.col(|ui| {
-                    mono(ui, &order.current_names()[trace_index]);
+                    mono(ui, name);
                 });
                 row.col(|ui| {
-                    mono(ui, &format!("{:.17e}", point.charge_coulombs));
+                    mono(ui, &numbers.shown(point.charge_coulombs, "C")).on_hover_text(&charge);
+                });
+                row.response().context_menu(|ui| {
+                    if ui.button("Copy exact row").clicked() {
+                        ui.ctx().copy_text(format!("{time}\t{name}\t{charge}"));
+                        ui.close();
+                    }
                 });
             })
         });
 }
+/// A number or name in the sheet's mono face. It is not selectable text: a
+/// drag would copy the digits the cell shows, and the exact value is what
+/// the row's Copy exact row and the cell's hover give instead.
 fn mono(ui: &mut Ui, text: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(text)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text),
+    ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+        )
+        .selectable(false),
     )
 }
 pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) -> EventResponse {
@@ -335,6 +407,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
     let radix = source.radix;
     let expanded = source.expanded;
     let selected = source.selected;
+    let numbers = source.numbers;
     let exact = cache.exact();
     StripHeader::new(
         "EVENTS",
@@ -362,7 +435,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
         ..
     }) = analysis.result_payload.as_ref()
     {
-        show_current_impulses(ui, history, cache);
+        show_current_impulses(ui, history, cache, numbers);
         if cache.rows().is_empty() {
             return EventResponse::default();
         }
@@ -390,14 +463,16 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
             TableBuilder::new(ui)
                 .id_salt("rspice.results.events")
                 .striped(true)
+                .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 // Every column clips. `egui_extras` grows a cell that does not
                 // fit and pushes the rest of its row along with it, so one
                 // long value used to shift four columns on that row alone and
                 // the table stopped being a table wherever the numbers were
                 // widest. The time column is sized so its own widest content
-                // — a `{:.17e}` second with a three-digit exponent — never
-                // reaches the clip.
+                // — a time at seventeen significant digits past the prefix
+                // ladder, with a three-digit exponent — never reaches the
+                // clip.
                 .column(Column::initial(84.0).clip(true))
                 .column(Column::initial(176.0).clip(true))
                 .column(Column::remainder().at_least(190.0).clip(true))
@@ -448,8 +523,9 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
                                 requested = row_data.selection(analysis_key, cache.buses());
                             }
                         });
+                        let time = numbers.exact(row_data.time_s(), "s");
                         row.col(|ui| {
-                            mono(ui, &format!("{:.17e} s", row_data.time_s()));
+                            mono(ui, &numbers.shown(row_data.time_s(), "s")).on_hover_text(&time);
                         });
                         row.col(|ui| {
                             mono(ui, row_data.signal_name());
@@ -485,26 +561,40 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
                                 }
                             }
                         });
+                        let value = numbers.exact_value(row_data.value());
                         row.col(|ui| {
-                            let text = row_data.value().display();
-                            let response = mono(ui, &text);
+                            let response = mono(ui, &numbers.value(row_data.value()));
                             // A word is as wide as the bus is: the column
                             // clips rather than shoving the table along, so
                             // the whole word has to be reachable without
-                            // selecting the row.
-                            if row_data.source() == EventSelectionSource::Bus {
-                                response.on_hover_text(text);
+                            // selecting the row. A real value is stated at
+                            // the reader's digits and keeps the rest here.
+                            if matches!(row_data.value(), EventValue::Bus(_) | EventValue::Real(_))
+                            {
+                                response.on_hover_text(&value);
                             }
                         });
+                        let kind = if row_data.initial() {
+                            "initial"
+                        } else {
+                            "change"
+                        };
                         row.col(|ui| {
-                            ui.label(row_data.value().domain());
+                            ui.add(egui::Label::new(row_data.value().domain()).selectable(false));
                         });
                         row.col(|ui| {
-                            ui.label(if row_data.initial() {
-                                "initial"
-                            } else {
-                                "change"
-                            });
+                            ui.add(egui::Label::new(kind).selectable(false));
+                        });
+                        let ordinal = row_data.event_ordinal();
+                        let signal = row_data.signal_name();
+                        let domain = row_data.value().domain();
+                        row.response().context_menu(|ui| {
+                            if ui.button("Copy exact row").clicked() {
+                                ui.ctx().copy_text(format!(
+                                    "#{ordinal:04}\t{time}\t{signal}\t{value}\t{domain}\t{kind}"
+                                ));
+                                ui.close();
+                            }
                         });
                     });
                 });
@@ -588,6 +678,7 @@ pub fn right_panel(
     buses: &[BusTimeline],
     radix: BusRadix,
     origin: EventOrigin<'_>,
+    numbers: EventNumbers,
 ) -> bool {
     // An exact timestamp is the normal case; a reconstructed one qualifies
     // the time printed under it, so only that one says so.
@@ -600,12 +691,8 @@ pub fn right_panel(
     // shown above it are bookkeeping; a native source is the normal case.
     let mut stats = vec![
         ("Signal", event.signal_name().to_owned(), true),
-        (
-            "Physical time",
-            rspice_ui_kit::plot::fmt_si_readout(event.time_s(), "s", 6),
-            true,
-        ),
-        ("Value", event.value().display(), true),
+        ("Physical time", numbers.shown(event.time_s(), "s"), true),
+        ("Value", numbers.value(event.value()), true),
     ];
     if let EventOrigin::Imported(source) = origin {
         stats.push(("Source", origin.label().to_owned(), false));

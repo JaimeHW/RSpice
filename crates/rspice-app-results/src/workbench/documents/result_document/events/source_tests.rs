@@ -860,3 +860,219 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
     }
     assert_eq!(work.since().total(), 0);
 }
+
+/// A transient run's events as a mixed-signal block leaves them: a clock
+/// edge every few nanoseconds, a real-valued control level, and charge
+/// impulses on a supply and a transistor lead.
+fn mixed_event_state() -> ResultsTestHost {
+    let mut history = crate::state::current_impulse_history_fixture();
+    history.stop_time_s = 100.0e-9;
+    history.traces[0].points[0].time = 12.345_678_901_234_567e-9;
+    history.traces[0].points[0].charge_coulombs = -2.5e-15;
+    let mut lead = history.traces[0].clone();
+    lead.owner = rspice_core::CurrentImpulseOwner::DeviceLead {
+        device_name: "Q1".into(),
+        parameter: "ic".into(),
+    };
+    lead.points[0].time = 40.0e-9;
+    lead.points[0].charge_coulombs = 3.3e-12;
+    history.traces.push(lead);
+    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+        voltage_impulses: None,
+        current_impulses: Some(history),
+        digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+            node_name: "clk".to_owned(),
+            points: [
+                (0.0, 0),
+                (1.234_567_890_123_456_7e-9, 1),
+                (5.0e-9, 0),
+                (7.5e-9, 1),
+            ]
+            .iter()
+            .map(
+                |(time_s, value_code)| crate::state::DigitalEventPointEvidence {
+                    time_s: *time_s,
+                    value_code: *value_code,
+                },
+            )
+            .collect(),
+        }],
+        digital_buses: vec![],
+        real_traces: vec![crate::state::RealEventTraceEvidence {
+            node_name: "vctl".to_owned(),
+            points: vec![
+                crate::state::RealEventPointEvidence {
+                    time_s: 0.0,
+                    value: 0.0,
+                },
+                crate::state::RealEventPointEvidence {
+                    time_s: 2.0e-9,
+                    value: 0.123_456_789_012_345_67,
+                },
+            ],
+        }],
+    });
+    state_with(analysis)
+}
+
+/// One frame of the event sheet at 1200 by 760.
+fn event_frame(
+    ctx: &egui::Context,
+    state: &mut ResultsTestHost,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 760.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+        },
+    )
+}
+
+/// Every run of text a frame painted, with where it was laid out.
+fn painted(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(text) => out.push((
+                text.galley.job.text.clone(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The event and current-impulse tables state times, charges and real
+/// values at the reader's significant digits, with their units, as every
+/// other result sheet does — not as seventeen-digit exponents. The exact
+/// value is a right-click away: Copy exact row writes it in the notation
+/// Copied values chose, as the cursor readout's copy does.
+#[test]
+fn the_event_tables_state_their_numbers_at_the_readers_digits() {
+    let mut state = mixed_event_state();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    for _ in 0..2 {
+        event_frame(&ctx, &mut state, Vec::new());
+    }
+    let output = event_frame(&ctx, &mut state, Vec::new());
+    let texts = painted(&output);
+    let has = |wanted: &str| texts.iter().any(|(text, _)| text == wanted);
+    for wanted in [
+        "Retained interval: 0 s to 100 ns",
+        "12.34568 ns",
+        "-2.5 fC",
+        "40 ns",
+        "3.3 pC",
+        "1.234568 ns",
+        "7.5 ns",
+        "123.4568 m",
+        "Time",
+        "Signed charge",
+    ] {
+        assert!(
+            has(wanted),
+            "the sheet does not state {wanted:?}: {:?}",
+            texts.iter().map(|(text, _)| text).collect::<Vec<_>>()
+        );
+    }
+    let raw_exponent = |text: &str| {
+        text.as_bytes().windows(3).any(|window| {
+            window[0].is_ascii_digit() && window[1] == b'e' && matches!(window[2], b'-' | b'+')
+        })
+    };
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| raw_exponent(text) || text.contains("000000")),
+        "a raw exponent is still printed: {texts:?}"
+    );
+
+    // Right-click the clock edge's row and copy it exactly.
+    let row = texts
+        .iter()
+        .find(|(text, _)| text == "1.234568 ns")
+        .map(|(_, rect)| rect.center())
+        .expect("the clock edge's time is drawn");
+    let press = |at, button, pressed| egui::Event::PointerButton {
+        pos: at,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    event_frame(&ctx, &mut state, vec![egui::Event::PointerMoved(row)]);
+    event_frame(
+        &ctx,
+        &mut state,
+        vec![press(row, egui::PointerButton::Secondary, true)],
+    );
+    event_frame(
+        &ctx,
+        &mut state,
+        vec![press(row, egui::PointerButton::Secondary, false)],
+    );
+    let menu = event_frame(&ctx, &mut state, Vec::new());
+    let item = painted(&menu)
+        .into_iter()
+        .find(|(text, _)| text == "Copy exact row")
+        .map(|(_, rect)| rect.center())
+        .expect("the row offers Copy exact row");
+    event_frame(&ctx, &mut state, vec![egui::Event::PointerMoved(item)]);
+    event_frame(
+        &ctx,
+        &mut state,
+        vec![press(item, egui::PointerButton::Primary, true)],
+    );
+    let copied = event_frame(
+        &ctx,
+        &mut state,
+        vec![press(item, egui::PointerButton::Primary, false)],
+    )
+    .platform_output
+    .commands
+    .into_iter()
+    .find_map(|command| match command {
+        egui::OutputCommand::CopyText(text) => Some(text),
+        _ => None,
+    })
+    .expect("Copy exact row copies the row");
+    assert!(
+        copied.contains("1.234567890123456") && copied.contains("clk"),
+        "the copy is not exact: {copied:?}"
+    );
+}
+
+/// The event sheet for review, written under `RSPICE_PICTURES` when it is
+/// set.
+#[test]
+#[ignore = "writes the review pictures"]
+fn write_the_event_sheet_picture() {
+    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+        return;
+    };
+    let mut state = mixed_event_state();
+    let canvas = rspice_ui_kit::raster::render_themed(
+        crate::ui::Theme::default(),
+        egui::vec2(1200.0, 760.0),
+        |ui, _| show(ui, &mut state.results_parts()),
+    );
+    std::fs::write(
+        format!("{directory}/event-sheet.png"),
+        canvas.png(canvas.height()),
+    )
+    .expect("the picture is written");
+}
