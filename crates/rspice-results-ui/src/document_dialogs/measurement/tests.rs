@@ -5,6 +5,7 @@ fn preview(value: Result<Option<String>, String>) -> MeasurementPreview {
         pane: "Run 1 (8:31:04 PM)".to_owned(),
         signals: vec!["V(in)".to_owned(), "V(out)".to_owned()],
         signal_units: vec!["V".to_owned(), "V".to_owned()],
+        x_unit: "s".to_owned(),
         value,
         refusal: None,
     }
@@ -133,6 +134,93 @@ fn a_level_takes_the_unit_of_its_signal() {
     assert_eq!(unit_of("", &preview), "");
 }
 
+/// The words painted inside the field spoken as `label`, on the form for
+/// `expression` over a pane whose x-axis reads in `x_unit`.
+fn words_in_field(expression: &str, x_unit: &str, label: &str) -> Vec<String> {
+    let ctx = Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut draft = MeasurementDraft {
+        expression: expression.to_owned(),
+        ..MeasurementDraft::default()
+    };
+    reread(&mut draft);
+    let preview = MeasurementPreview {
+        x_unit: x_unit.to_owned(),
+        ..preview(Ok(None))
+    };
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                show(ui.ctx(), &mut draft, &preview);
+            },
+        ));
+    }
+    let output = output.expect("a pass ran");
+    let field = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("AccessKit tree update")
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label() == Some(label) && node.role() == egui::accesskit::Role::TextInput
+        })
+        .and_then(|(_, node)| node.bounds())
+        .map(|bounds| {
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        })
+        .unwrap_or_else(|| panic!("the form has a field {label}"));
+    output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => {
+                let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                field
+                    .expand(1.0)
+                    .contains_rect(rect)
+                    .then(|| text.galley.job.text.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A point on the x-axis is typed in the axis's unit, which its field states
+/// as a level's states its signal's: a time on a transient pane, a frequency
+/// on an AC one. A fundamental is a frequency along the axis, so it reads in
+/// hertz over time.
+#[test]
+fn an_x_axis_argument_states_the_axis_unit_in_its_field() {
+    let words = words_in_field("yval(V(out), 25u)", "s", "At x");
+    assert!(words.iter().any(|word| word == "s"), "{words:?}");
+    let words = words_in_field("yval(V(out), 1k)", "Hz", "At x");
+    assert!(words.iter().any(|word| word == "Hz"), "{words:?}");
+    let words = words_in_field("settlingTime(V(out), 2, 1.2, 10u)", "s", "Start");
+    assert!(words.iter().any(|word| word == "s"), "{words:?}");
+    let words = words_in_field("thd(V(out), 10, 1k)", "s", "Fundamental");
+    assert!(words.iter().any(|word| word == "Hz"), "{words:?}");
+    // A count beside them keeps no unit.
+    let words = words_in_field("thd(V(out), 10, 1k)", "s", "Harmonics");
+    assert_eq!(words, ["10"]);
+    assert_eq!(axis_frequency_unit("s"), "Hz");
+    assert_eq!(axis_frequency_unit("V"), "1/V");
+    assert_eq!(axis_frequency_unit(""), "");
+}
+
 /// A catalogued call typed into the expression fills the fields; anything
 /// else leaves the fields, except while the same call is still being typed.
 #[test]
@@ -245,6 +333,22 @@ fn write_measurement_form_pngs() {
                 &filled,
                 click,
             );
+            let path = directory.join(format!("add-measurement-{name}-{suffix}.png"));
+            std::fs::write(&path, canvas.png(canvas.height())).expect("write form render");
+            println!("render: {}", path.display());
+        }
+        // The arguments that are points on the x-axis, or a frequency of it.
+        for (expression, name) in [
+            ("settlingTime(V(out), 2, 1.2, 10u)", "settling"),
+            ("yval(V(out), 25u)", "yval"),
+            ("thd(V(out), 10, 1k)", "thd"),
+        ] {
+            let mut draft = MeasurementDraft {
+                expression: expression.to_owned(),
+                ..MeasurementDraft::default()
+            };
+            reread(&mut draft);
+            let canvas = render_form(theme, egui::vec2(900.0, 640.0), &mut draft, &filled, None);
             let path = directory.join(format!("add-measurement-{name}-{suffix}.png"));
             std::fs::write(&path, canvas.png(canvas.height())).expect("write form render");
             println!("render: {}", path.display());

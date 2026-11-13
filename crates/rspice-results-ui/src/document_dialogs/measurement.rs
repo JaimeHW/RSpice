@@ -34,6 +34,8 @@ pub struct MeasurementPreview {
     /// The unit each of `signals` reads in, in the same order, which a level
     /// of it is typed in.
     pub signal_units: Vec<String>,
+    /// The unit of the pane's x-axis, which a point on it is typed in.
+    pub x_unit: String,
     /// `Ok(None)` while nothing is typed, the formatted value once the
     /// expression reduces to a number, or why it does not.
     pub value: Result<Option<String>, String>,
@@ -233,6 +235,16 @@ fn unit_of(signal: &str, preview: &MeasurementPreview) -> String {
         .unwrap_or_else(|| crate::waves::browser_signal_unit(signal, None, "").to_owned())
 }
 
+/// The unit a frequency along an x-axis read in `x_unit` is typed in: hertz
+/// along time, else the reciprocal of the axis's unit.
+fn axis_frequency_unit(x_unit: &str) -> String {
+    match x_unit {
+        "" => String::new(),
+        "s" => "Hz".to_owned(),
+        unit => format!("1/{unit}"),
+    }
+}
+
 /// One argument's row. Returns whether the reader changed it.
 fn argument_row(
     rows: &mut FormRows<'_>,
@@ -244,11 +256,15 @@ fn argument_row(
 ) -> bool {
     let salt = format!("rspice.add-measurement.argument.{index}");
     let signals = &preview.signals;
+    // A number states the unit it is typed in inside its field: a level its
+    // signal's, a point on the x-axis the axis's.
     let unit = match argument.kind {
         ArgumentKind::Level(signal) => draft
             .arguments
             .get(signal)
             .map_or_else(String::new, |signal| unit_of(signal, preview)),
+        ArgumentKind::AxisPoint => preview.x_unit.clone(),
+        ArgumentKind::AxisFrequency => axis_frequency_unit(&preview.x_unit),
         _ => String::new(),
     };
     let value = &mut draft.arguments[index];
@@ -307,7 +323,10 @@ fn argument_row(
             };
             true
         }
-        ArgumentKind::Number | ArgumentKind::Level(_) => {
+        ArgumentKind::Number
+        | ArgumentKind::Level(_)
+        | ArgumentKind::AxisPoint
+        | ArgumentKind::AxisFrequency => {
             let (hint, note) = default_words(spec, argument);
             // The note says what an empty field stands for; a typed value
             // says it for itself.

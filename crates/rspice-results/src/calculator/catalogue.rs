@@ -46,8 +46,14 @@ pub enum ArgumentKind {
     /// A signal: a trace of the pane, or any expression over them.
     Signal,
     /// A number, in the unit the label states: a count, a percentage,
-    /// decibels, a point on the x-axis.
+    /// decibels.
     Number,
+    /// A point on the x-axis, in the x-axis unit: a time on a transient
+    /// pane, a frequency on an AC one.
+    AxisPoint,
+    /// A frequency of a signal along the x-axis, in the reciprocal of the
+    /// x-axis unit: hertz on a transient pane.
+    AxisFrequency,
     /// A level of the signal argument at this index, in that signal's unit.
     Level(usize),
     /// One of these option words, written quoted in the expression.
@@ -107,7 +113,7 @@ const fn arg(
 }
 
 use ArgumentDefault::{Derived, Literal, Required, SameAs};
-use ArgumentKind::{Choice, Level, Number, Signal};
+use ArgumentKind::{AxisFrequency, AxisPoint, Choice, Level, Number, Signal};
 
 const EDGES: &[&str] = &["rising", "falling", "either"];
 const SIGNAL: ArgumentSpec = arg("Signal", "x", Signal, Required);
@@ -175,7 +181,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Levels,
         summary: "value at an x",
         description: "The signal's value at one point of the x-axis, interpolated between samples.",
-        arguments: &[SIGNAL, arg("At x", "at", Number, Required)],
+        arguments: &[SIGNAL, arg("At x", "at", AxisPoint, Required)],
     },
     MeasureSpec {
         name: "cross",
@@ -347,7 +353,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
             SIGNAL,
             arg("Band (% of step)", "band", Number, Required),
             arg("Final value", "final", Level(0), Derived("last sample")),
-            arg("Start", "start", Number, Derived("window start")),
+            arg("Start", "start", AxisPoint, Derived("window start")),
         ],
     },
     MeasureSpec {
@@ -401,7 +407,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
             arg(
                 "Fundamental",
                 "f0",
-                Number,
+                AxisFrequency,
                 Derived("found from the signal"),
             ),
         ],

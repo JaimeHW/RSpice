@@ -30,6 +30,7 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
                 pane: String::new(),
                 signals: Vec::new(),
                 signal_units: Vec::new(),
+                x_unit: String::new(),
                 value: Ok(None),
                 refusal: Some(refusal),
             };
@@ -103,9 +104,25 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         pane,
         signals,
         signal_units,
+        x_unit: x_unit(state, run, analysis),
         value,
         refusal,
     }
+}
+
+/// The unit the strip reads the analysis's x-axis in, which a point on it is
+/// typed in; before the strip has drawn it, the analysis's own.
+fn x_unit(state: ResultsReads<'_>, run: &SimulationRun, analysis: &AnalysisResult) -> String {
+    let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    state
+        .results
+        .models
+        .last_built()
+        .and_then(|models| models.iter().find(|model| model.analysis_key == key))
+        .map_or_else(
+            || analysis.analysis_type.axis_info().1.to_owned(),
+            |model| model.x_unit.clone(),
+        )
 }
 
 /// Keep the draft's measurement on the selected pane. The form closes once
