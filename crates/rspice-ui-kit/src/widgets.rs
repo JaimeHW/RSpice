@@ -35,6 +35,7 @@ mod ordered_chips;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub mod painted_runs;
 mod pane;
+mod searchable_select;
 mod segmented;
 mod select;
 mod status_mark;
@@ -68,6 +69,7 @@ pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
     pane_footer_inset, pane_header, pane_header_height, pane_header_inset, two_pane,
 };
+pub use searchable_select::{SelectGroup, searchable_select};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
 pub use select::{select_mono_with_response, select_with_disabled, select_with_response};

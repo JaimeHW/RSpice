@@ -29,6 +29,7 @@ use crate::tokens::{self, Tokens};
 
 use super::dialog::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use super::form;
+use super::searchable_select::{SelectGroup, searchable_select};
 use super::segmented::{SegmentedWidth, segmented};
 use super::select::{SelectOutput, select, select_with_disabled_response, select_with_response};
 
@@ -436,6 +437,21 @@ impl<'u> FormRows<'u> {
     ) -> SelectOutput {
         self.row(label, |ui, width| {
             select_with_disabled_response(ui, id_salt, label, selected, options, disabled, width)
+        })
+    }
+
+    /// One dropdown over a long, grouped list, with a search field at the top
+    /// of the list. Returns `(group, option)` when the reader picked one.
+    pub fn searchable_select(
+        &mut self,
+        label: &str,
+        id_salt: &str,
+        selected: &str,
+        groups: &[SelectGroup<'_>],
+        query: &mut String,
+    ) -> Option<(usize, usize)> {
+        self.row(label, |ui, width| {
+            searchable_select(ui, id_salt, label, selected, groups, query, width)
         })
     }
 
