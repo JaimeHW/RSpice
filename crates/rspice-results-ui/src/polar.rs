@@ -1,6 +1,8 @@
-//! POLAR — one retained complex response on the polar plane: concentric
-//! radius rings, 30° spokes, the swept locus with its direction of travel,
-//! and the two shared frequency cursors read as A │ B │ Δ.
+//! POLAR — retained complex responses on the polar plane: concentric
+//! radius rings, 30° spokes, the swept loci with their direction of travel,
+//! and the two shared frequency cursors read as A │ B │ Δ on the primary
+//! response. Up to four more responses overlay it, each in its own palette
+//! ink, with the cursors marked on them at the same frequencies.
 //!
 //! Nothing here is derived that the result does not carry. Mixed-mode terms
 //! are offered only when the engine retained mixed-mode traces — a plain SP
@@ -70,9 +72,21 @@ const DECIBEL_SPAN: f64 = 50.0;
 #[derive(Debug, Clone, Default)]
 pub struct PolarSheetState {
     pub quantity: Option<String>,
+    /// Responses drawn over the primary one, by retained waveform name.
+    pub overlays: Vec<String>,
     pub radius: PolarRadius,
     pub decade_marks: bool,
     pub normalize: bool,
+}
+
+/// The most responses that overlay the primary one; each has its own ink.
+pub const MAX_OVERLAYS: usize = 4;
+
+/// The palette inks the overlays draw in, in order: the canvas's trace hues
+/// after the primary's. Each canvas theme's hues stand apart from one another
+/// and from both cursor inks, so none needs skipping.
+fn overlay_inks(palette: &rspice_ui_kit::palette::Palette) -> &[egui::Color32] {
+    &palette.traces[1..=MAX_OVERLAYS]
 }
 
 /// One quantity the sheet can draw, resolved from the retained result.
@@ -222,6 +236,8 @@ fn selected_index(quantities: &[PolarQuantity], sheet: &PolarSheetState) -> usiz
 /// One frame's worth of drawing evidence, holding the retained sample arrays
 /// by handle so the analysis borrow ends before any control is edited.
 pub struct PolarLocus {
+    /// Retained waveform name — the selection key.
+    name: String,
     label: String,
     unit: String,
     reference_impedance_ohm: Option<f64>,
@@ -231,6 +247,11 @@ pub struct PolarLocus {
 }
 
 impl PolarLocus {
+    /// The retained waveform the locus draws.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Retained swept-axis samples shared with the host cursor pair.
     pub fn frequencies(&self) -> &[f64] {
         &self.x
@@ -273,6 +294,9 @@ impl PolarLocus {
 #[derive(Debug, Clone, Copy)]
 struct RadiusRule {
     mode: PolarRadius,
+    /// The radius is ruled against the locus maximum rather than in
+    /// retained units.
+    normalized: bool,
     /// Magnitude at the outer ring (linear mode).
     ceiling: f64,
     /// Decibels at the outer ring (dB mode).
@@ -303,6 +327,7 @@ impl RadiusRule {
                 };
                 Self {
                     mode,
+                    normalized: normalize,
                     ceiling,
                     ceiling_db: 0.0,
                 }
@@ -319,6 +344,7 @@ impl RadiusRule {
                 };
                 Self {
                     mode,
+                    normalized: normalize,
                     ceiling: peak,
                     ceiling_db,
                 }
@@ -340,6 +366,12 @@ impl RadiusRule {
                 if magnitude <= 0.0 {
                     return Some(0.0);
                 }
+                // Normalized, the locus maximum is 0 dB at the outer ring.
+                let magnitude = if self.normalized {
+                    magnitude / self.ceiling
+                } else {
+                    magnitude
+                };
                 let decibels = 20.0 * magnitude.log10();
                 Some(((decibels - (self.ceiling_db - DECIBEL_SPAN)) / DECIBEL_SPAN).clamp(0.0, 1.0))
             }
@@ -349,6 +381,13 @@ impl RadiusRule {
     /// What the ring at `fraction` of the radius stands for.
     fn ring_label(self, fraction: f64) -> String {
         match self.mode {
+            // A plain decimal reads better than an SI prefix on a pure
+            // ratio: 0.4, not 400.00 m.
+            PolarRadius::Magnitude if (0.01..1.0e4).contains(&self.ceiling) => {
+                let value = self.ceiling * fraction;
+                let text = format!("{value:.3}");
+                text.trim_end_matches('0').trim_end_matches('.').to_owned()
+            }
             PolarRadius::Magnitude => fmt_si(self.ceiling * fraction, "", 2),
             PolarRadius::Decibels => {
                 format!("{:.0}", self.ceiling_db - DECIBEL_SPAN * (1.0 - fraction))
@@ -417,6 +456,33 @@ pub fn domain_bar(
         216.0,
     ) {
         sheet.quantity = quantities.get(picked).map(|q| q.name.clone());
+        let primary = &quantities[picked].name;
+        sheet.overlays.retain(|name| name != primary);
+    }
+    if sheet.overlays.len() < MAX_OVERLAYS {
+        let addable = quantities
+            .iter()
+            .enumerate()
+            .filter(|(index, quantity)| {
+                *index != selected && !sheet.overlays.contains(&quantity.name)
+            })
+            .map(|(_, quantity)| quantity)
+            .collect::<Vec<_>>();
+        if !addable.is_empty() {
+            let mut overlay_options = vec!["+ overlay".to_owned()];
+            overlay_options.extend(addable.iter().map(|quantity| quantity.label.clone()));
+            if let Some(picked) = select(
+                ui,
+                "rspice.results.polar.overlay",
+                "Overlay another response",
+                &overlay_options[0],
+                &overlay_options,
+                112.0,
+            ) && picked > 0
+            {
+                sheet.overlays.push(addable[picked - 1].name.clone());
+            }
+        }
     }
 
     let mut radius = sheet.radius.index();
@@ -480,10 +546,12 @@ pub struct CursorSamples {
     pub b: Option<usize>,
 }
 
-/// Render the polar sheet.
+/// Render the polar sheet: the primary locus, which carries the cursors,
+/// and its overlays.
 pub fn show(
     ui: &mut Ui,
     locus: Option<&PolarLocus>,
+    overlays: &[PolarLocus],
     sheet: &PolarSheetState,
     samples: CursorSamples,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
@@ -495,11 +563,21 @@ pub fn show(
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let rule = RadiusRule::resolve(sheet.radius, locus.peak_magnitude(), sheet.normalize);
+    // Ruled so every locus fits; normalized, each is scaled to its own
+    // maximum and the primary's sets the ring.
+    let peak = if sheet.normalize {
+        locus.peak_magnitude()
+    } else {
+        overlays
+            .iter()
+            .map(PolarLocus::peak_magnitude)
+            .fold(locus.peak_magnitude(), f64::max)
+    };
+    let rule = RadiusRule::resolve(sheet.radius, peak, sheet.normalize);
 
     // The legend chips are painted in the mono face, which has no ohm sign,
     // so the retained reference impedance rides the sans subtitle instead.
-    let legend = [
+    let mut legend = vec![
         LegendChip {
             name: &locus.label,
             color: c.traces[0],
@@ -511,13 +589,52 @@ pub fn show(
             on: true,
         },
     ];
+    let inks = overlay_inks(&c);
+    let overlays = &overlays[..overlays.len().min(inks.len())];
+    for (overlay, ink) in overlays.iter().zip(inks) {
+        legend.push(LegendChip {
+            name: &overlay.label,
+            color: *ink,
+            on: true,
+        });
+    }
     let mut subtitle = rule.head_note(&locus.unit, sheet.normalize);
     if let Some(reference) = locus.reference_impedance_ohm {
         subtitle.push_str(&format!(" \u{b7} Z\u{2080} {reference} \u{3a9}"));
     }
-    strip::StripHeader::new("POLAR", &subtitle, &legend).show(ui);
+    let header = strip::StripHeader::new("POLAR", &subtitle, &legend)
+        .removable_from(2)
+        .show(ui);
 
-    Some(paint_canvas(ui, &t, locus, rule, samples, sheet, policy))
+    let loci = Loci {
+        primary: locus,
+        overlays,
+    };
+    let mut response = paint_canvas(ui, &t, loci, rule, samples, sheet, policy);
+    response.removed_overlay = header
+        .legend_removed
+        .and_then(|chip| chip.checked_sub(2))
+        .filter(|overlay| *overlay < overlays.len());
+    Some(response)
+}
+
+/// Resolve the overlay loci the sheet lists, skipping any the analysis no
+/// longer retains and the primary itself.
+pub fn resolve_overlays(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Vec<PolarLocus> {
+    let quantities = quantities(analysis);
+    let primary = quantities
+        .get(selected_index(&quantities, sheet))
+        .map(|quantity| quantity.name.clone());
+    sheet
+        .overlays
+        .iter()
+        .filter(|name| Some(*name) != primary.as_ref())
+        .filter_map(|name| {
+            let quantity = quantities.iter().find(|quantity| quantity.name == *name)?;
+            locus_of(analysis, quantity)
+        })
+        .take(MAX_OVERLAYS)
+        .collect()
 }
 
 /// What the reader is told when the run carries no complex response at all.
@@ -532,9 +649,14 @@ pub fn resolve_locus(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Opti
     let quantity = quantities
         .get(selected_index(&quantities, sheet))
         .or_else(|| quantities.first())?;
+    locus_of(analysis, quantity)
+}
+
+fn locus_of(analysis: &AnalysisResult, quantity: &PolarQuantity) -> Option<PolarLocus> {
     let waveform = analysis.waveforms.get(quantity.waveform_index)?;
     let complex = waveform.complex.as_ref()?;
     Some(PolarLocus {
+        name: quantity.name.clone(),
         label: quantity.label.clone(),
         unit: quantity.unit.clone(),
         reference_impedance_ohm: quantity.reference_impedance_ohm,
@@ -547,19 +669,33 @@ pub fn resolve_locus(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Opti
 /// What one frame of the canvas reported back.
 pub struct CanvasResponse {
     pub response: egui::Response,
-    /// Sample nearest the pointer, when it is over the canvas.
+    /// Primary-locus sample nearest the pointer, when it is the nearest
+    /// sample of any locus over the canvas.
     pub hovered: Option<usize>,
+    /// An overlay whose legend chip's "Remove" was chosen.
+    pub removed_overlay: Option<usize>,
+}
+
+/// The primary locus and the responses overlaid on it.
+#[derive(Clone, Copy)]
+struct Loci<'a> {
+    primary: &'a PolarLocus,
+    overlays: &'a [PolarLocus],
 }
 
 fn paint_canvas(
     ui: &mut Ui,
     t: &Tokens,
-    locus: &PolarLocus,
+    loci: Loci<'_>,
     rule: RadiusRule,
     samples: CursorSamples,
     sheet: &PolarSheetState,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> CanvasResponse {
+    let Loci {
+        primary: locus,
+        overlays,
+    } = loci;
     let c = &t.color;
     let area = ui.available_rect_before_wrap();
     let (rect, response) = ui.allocate_exact_size(area.size(), Sense::click_and_drag());
@@ -577,6 +713,7 @@ fn paint_canvas(
         return CanvasResponse {
             response,
             hovered: None,
+            removed_overlay: None,
         };
     }
 
@@ -587,6 +724,7 @@ fn paint_canvas(
         return CanvasResponse {
             response,
             hovered: None,
+            removed_overlay: None,
         };
     }
     let centre = rect.center();
@@ -659,63 +797,46 @@ fn paint_canvas(
         );
     }
 
-    // The locus.
-    let place = |index: usize| -> Option<egui::Pos2> {
-        if !locus.is_finite(index) {
-            return None;
-        }
-        let magnitude = locus.magnitude(index);
-        let fraction = rule.fraction(magnitude)?;
-        let (real, imag) = (locus.real[index], locus.imag[index]);
-        let (unit_real, unit_imag) = if magnitude > 0.0 {
-            (real / magnitude, imag / magnitude)
-        } else {
-            (0.0, 0.0)
-        };
-        Some(egui::pos2(
-            centre.x + radius * (fraction * unit_real) as f32,
-            centre.y - radius * (fraction * unit_imag) as f32,
-        ))
-    };
-
-    let mut points = Vec::with_capacity(locus.len());
-    for index in 0..locus.len() {
-        match place(index) {
-            Some(point) => points.push(point),
-            None => {
-                if points.len() >= 2 {
-                    painter.add(egui::Shape::line(
-                        std::mem::take(&mut points),
-                        egui::Stroke::new(1.4, c.traces[0]),
-                    ));
-                } else {
-                    points.clear();
-                }
-            }
-        }
+    // The overlays under the primary locus, each in its own ink. Normalized,
+    // each is scaled so its own maximum lands where the primary's does.
+    let primary_peak = locus.peak_magnitude();
+    let overlay_places = overlays
+        .iter()
+        .map(|overlay| {
+            let scale = if sheet.normalize && overlay.peak_magnitude() > 0.0 {
+                primary_peak / overlay.peak_magnitude()
+            } else {
+                1.0
+            };
+            placer(overlay, rule, centre, radius, scale)
+        })
+        .collect::<Vec<_>>();
+    let inks = overlay_inks(c);
+    for ((overlay, place), ink) in overlays.iter().zip(&overlay_places).zip(inks) {
+        paint_locus(&painter, overlay, place, *ink);
     }
-    if points.len() >= 2 {
-        painter.add(egui::Shape::line(
-            points,
-            egui::Stroke::new(1.4, c.traces[0]),
-        ));
-    }
-
-    let first = (0..locus.len()).find_map(place);
-    let last = (0..locus.len()).rev().find_map(place);
-    if let Some(start) = first {
-        painter.circle_filled(start, 3.5, c.traces[0]);
-    }
-    if let Some(stop) = last {
-        painter.circle_stroke(stop, 4.0, egui::Stroke::new(1.5, c.traces[0]));
-    }
-    paint_direction_arrow(&painter, locus, &place, c.traces[0]);
+    let place = placer(locus, rule, centre, radius, 1.0);
+    paint_locus(&painter, locus, &place, c.traces[0]);
 
     if sheet.decade_marks {
         paint_decade_marks(&painter, t, locus, &place, policy);
     }
 
     // Cursor flags, in the colours the shared cursor pair has on every plot.
+    // An overlay marks the same frequencies with a ring and no flag.
+    for (sample, color) in [
+        (samples.a, c.canvas_cursor_a),
+        (samples.b, c.canvas_cursor_b),
+    ] {
+        let Some(frequency) = sample.and_then(|index| locus.x.get(index).copied()) else {
+            continue;
+        };
+        for (overlay, place) in overlays.iter().zip(&overlay_places) {
+            if let Some(point) = overlay.nearest_to_frequency(frequency).and_then(place) {
+                painter.circle_stroke(point, 4.0, egui::Stroke::new(1.2, color));
+            }
+        }
+    }
     for (label, sample, color) in [
         ("A", samples.a, c.canvas_cursor_a),
         ("B", samples.b, c.canvas_cursor_b),
@@ -741,36 +862,127 @@ fn paint_canvas(
         );
     }
 
-    // Nearest sample under the pointer, and its card.
-    let mut hovered = None;
+    // Nearest sample of any locus under the pointer, and its card. Only a
+    // primary sample is a cursor target.
+    let mut nearest: Option<(Option<usize>, usize, egui::Pos2)> = None;
     if let Some(pointer) = response.hover_pos()
         && rect.contains(pointer)
     {
         let mut best = 16.0_f32 * 16.0;
-        for index in 0..locus.len() {
-            let Some(point) = place(index) else { continue };
-            let distance = point.distance_sq(pointer);
-            if distance < best {
-                best = distance;
-                hovered = Some(index);
+        let candidates =
+            std::iter::once((None, locus, &place as &dyn Fn(usize) -> Option<egui::Pos2>)).chain(
+                overlays.iter().zip(&overlay_places).enumerate().map(
+                    |(overlay, (locus, place))| {
+                        (
+                            Some(overlay),
+                            locus,
+                            place as &dyn Fn(usize) -> Option<egui::Pos2>,
+                        )
+                    },
+                ),
+            );
+        for (which, candidate, place) in candidates {
+            for index in 0..candidate.len() {
+                let Some(point) = place(index) else { continue };
+                let distance = point.distance_sq(pointer);
+                if distance < best {
+                    best = distance;
+                    nearest = Some((which, index, point));
+                }
             }
         }
     }
-    if let Some(index) = hovered
-        && let Some(point) = place(index)
-    {
+    let mut hovered = None;
+    if let Some((which, index, point)) = nearest {
+        let (hit, color) = match which {
+            None => {
+                hovered = Some(index);
+                (locus, c.traces[0])
+            }
+            Some(overlay) => (&overlays[overlay], inks[overlay]),
+        };
         painter.circle_stroke(point, 5.0, egui::Stroke::new(1.5, c.accent));
         crate::presentation::point_card(
             ui,
             rect,
             point,
-            &locus.label,
-            c.traces[0],
-            &sample_card_rows(locus, index, policy),
+            &hit.label,
+            color,
+            &sample_card_rows(hit, index, policy),
         );
     }
 
-    CanvasResponse { response, hovered }
+    CanvasResponse {
+        response,
+        hovered,
+        removed_overlay: None,
+    }
+}
+
+/// Where each sample of `locus` lands on the canvas, its magnitude scaled by
+/// `scale` before the radius ruling reads it.
+fn placer<'a>(
+    locus: &'a PolarLocus,
+    rule: RadiusRule,
+    centre: egui::Pos2,
+    radius: f32,
+    scale: f64,
+) -> impl Fn(usize) -> Option<egui::Pos2> + 'a {
+    move |index: usize| {
+        if !locus.is_finite(index) {
+            return None;
+        }
+        let magnitude = locus.magnitude(index);
+        let fraction = rule.fraction(magnitude * scale)?;
+        let (real, imag) = (locus.real[index], locus.imag[index]);
+        let (unit_real, unit_imag) = if magnitude > 0.0 {
+            (real / magnitude, imag / magnitude)
+        } else {
+            (0.0, 0.0)
+        };
+        Some(egui::pos2(
+            centre.x + radius * (fraction * unit_real) as f32,
+            centre.y - radius * (fraction * unit_imag) as f32,
+        ))
+    }
+}
+
+/// One locus: its line, broken across samples the ruling cannot place, a
+/// filled start, a hollow stop and the arrow of travel.
+fn paint_locus(
+    painter: &egui::Painter,
+    locus: &PolarLocus,
+    place: &impl Fn(usize) -> Option<egui::Pos2>,
+    color: egui::Color32,
+) {
+    let mut points = Vec::with_capacity(locus.len());
+    for index in 0..locus.len() {
+        match place(index) {
+            Some(point) => points.push(point),
+            None => {
+                if points.len() >= 2 {
+                    painter.add(egui::Shape::line(
+                        std::mem::take(&mut points),
+                        egui::Stroke::new(1.4, color),
+                    ));
+                } else {
+                    points.clear();
+                }
+            }
+        }
+    }
+    if points.len() >= 2 {
+        painter.add(egui::Shape::line(points, egui::Stroke::new(1.4, color)));
+    }
+    let first = (0..locus.len()).find_map(place);
+    let last = (0..locus.len()).rev().find_map(place);
+    if let Some(start) = first {
+        painter.circle_filled(start, 3.5, color);
+    }
+    if let Some(stop) = last {
+        painter.circle_stroke(stop, 4.0, egui::Stroke::new(1.5, color));
+    }
+    paint_direction_arrow(painter, locus, place, color);
 }
 
 fn sample_card_rows(
@@ -1291,6 +1503,7 @@ mod tests {
             })
             .unzip();
         PolarLocus {
+            name: "S21".to_owned(),
             label: "S21 \u{b7} Port 2 \u{2190} Port 1".to_owned(),
             unit: String::new(),
             reference_impedance_ohm: None,
@@ -1381,5 +1594,149 @@ mod tests {
         );
         let expected = format!("{:+.2} dec", (locus.x[2] / locus.x[0]).log10());
         assert_eq!(rows[0].3, expected);
+    }
+
+    /// A second-order low-pass H = 1/(1 − u² + ju/Q), u = f/f₀, swept over
+    /// two decades about f₀ = 1 MHz.
+    fn low_pass(name: &str, q: f64) -> PolarLocus {
+        let x = (0..=200)
+            .map(|step| 1.0e5 * 10f64.powf(f64::from(step) / 100.0))
+            .collect::<Vec<_>>();
+        let (real, imag): (Vec<f64>, Vec<f64>) = x
+            .iter()
+            .map(|frequency| {
+                let u = frequency / 1.0e6;
+                let denominator = num_complex::Complex64::new(1.0 - u * u, u / q);
+                let response = 1.0 / denominator;
+                (response.re, response.im)
+            })
+            .unzip();
+        PolarLocus {
+            name: name.to_owned(),
+            label: name.to_owned(),
+            unit: String::new(),
+            reference_impedance_ohm: None,
+            x: Arc::new(x),
+            real: Arc::new(real),
+            imag: Arc::new(imag),
+        }
+    }
+
+    fn render_loci(
+        primary: &PolarLocus,
+        overlays: &[PolarLocus],
+        sheet: &PolarSheetState,
+    ) -> (rspice_ui_kit::raster::Canvas, std::sync::Arc<Tokens>) {
+        let mut tokens = None;
+        let canvas = rspice_ui_kit::raster::render(egui::vec2(760.0, 560.0), |ui, _| {
+            tokens = Some(Tokens::get(ui.ctx()));
+            let samples = CursorSamples {
+                a: primary.nearest_to_frequency(5.0e5),
+                b: primary.nearest_to_frequency(2.0e6),
+            };
+            let _ = show(
+                ui,
+                Some(primary),
+                overlays,
+                sheet,
+                samples,
+                &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+            );
+        });
+        (canvas, tokens.expect("the pass ran"))
+    }
+
+    /// Several responses share one polar pane, each in its own palette ink,
+    /// all on one radius ruling.
+    #[test]
+    fn overlaid_responses_are_drawn_in_their_own_inks_on_one_ruling() {
+        let primary = low_pass("Q 0.707", std::f64::consts::FRAC_1_SQRT_2);
+        let overlays = [low_pass("Q 0.5", 0.5), low_pass("Q 1.8", 1.8)];
+        let (canvas, tokens) = render_loci(&primary, &overlays, &PolarSheetState::default());
+        let ink_of = |color: egui::Color32| {
+            canvas
+                .pixels_in(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(760.0, 560.0),
+                ))
+                .filter(|pixel| {
+                    (i32::from(pixel.r()) - i32::from(color.r())).abs()
+                        + (i32::from(pixel.g()) - i32::from(color.g())).abs()
+                        + (i32::from(pixel.b()) - i32::from(color.b())).abs()
+                        < 80
+                })
+                .count()
+        };
+        // Every locus has ink of its own colour, a line's worth at least.
+        let inks = overlay_inks(&tokens.color);
+        for ink in [tokens.color.traces[0], inks[0], inks[1]] {
+            let count = ink_of(ink);
+            assert!(count > 100, "{ink:?} drew {count} pixels");
+        }
+        // The Q = 1.8 peak (|H| = 1.87) sets the ruling, so the primary is
+        // not ruled to its own 1.0 maximum and nothing is clamped to the rim.
+        let peak = overlays
+            .iter()
+            .map(PolarLocus::peak_magnitude)
+            .fold(primary.peak_magnitude(), f64::max);
+        assert!(peak > 1.8 && peak < 2.0, "{peak}");
+        let rule = RadiusRule::resolve(PolarRadius::Magnitude, peak, false);
+        assert!((rule.ceiling - 2.0).abs() < 1e-12, "{rule:?}");
+    }
+
+    /// An overlay is held by name: the primary is never its own overlay, a
+    /// response the run no longer retains is skipped, and four at most draw.
+    #[test]
+    fn overlays_resolve_by_name_and_skip_what_the_run_lacks() {
+        let analysis = four_port_analysis();
+        let names = quantities(&analysis)
+            .into_iter()
+            .map(|quantity| quantity.name)
+            .collect::<Vec<_>>();
+        let mut sheet = PolarSheetState {
+            quantity: Some(names[0].clone()),
+            ..PolarSheetState::default()
+        };
+        sheet.overlays = vec![
+            names[0].clone(),
+            "S99".to_owned(),
+            names[1].clone(),
+            names[2].clone(),
+        ];
+        let resolved = resolve_overlays(&analysis, &sheet)
+            .iter()
+            .map(|locus| locus.name().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(resolved, vec![names[1].clone(), names[2].clone()]);
+        sheet.overlays = names[1..].to_vec();
+        assert_eq!(resolve_overlays(&analysis, &sheet).len(), MAX_OVERLAYS);
+    }
+
+    /// Normalized in dB, each locus' maximum sits at 0 dB on the outer ring.
+    #[test]
+    fn a_normalized_decibel_ruling_puts_the_maximum_on_the_rim() {
+        let rule = RadiusRule::resolve(PolarRadius::Decibels, 2.0, true);
+        assert_eq!(rule.fraction(2.0), Some(1.0));
+        let half = rule.fraction(2.0 * 10f64.powf(-25.0 / 20.0)).unwrap();
+        assert!((half - 0.5).abs() < 1e-12, "{half}");
+    }
+
+    /// The three-response polar chart for review. Set `RSPICE_REVIEW_DIR`
+    /// to choose where.
+    #[test]
+    #[ignore = "writes a PNG for review"]
+    fn write_polar_overlay_png() {
+        let primary = low_pass("V(lp1)", std::f64::consts::FRAC_1_SQRT_2);
+        let overlays = [low_pass("V(lp2)", 0.5), low_pass("V(lp3)", 1.8)];
+        let sheet = PolarSheetState {
+            decade_marks: true,
+            ..PolarSheetState::default()
+        };
+        let (canvas, _) = render_loci(&primary, &overlays, &sheet);
+        let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let path = directory.join("polar-three-responses.png");
+        std::fs::write(&path, canvas.png(canvas.height())).expect("write render");
+        println!("{}", path.display());
     }
 }

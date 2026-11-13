@@ -28,6 +28,11 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if let Some(locus) = &locus {
         seed_cursors(context, locus);
     }
+    let overlays = context
+        .simulation
+        .active_analysis()
+        .map(|analysis| view::resolve_overlays(analysis, &context.results.session.polar))
+        .unwrap_or_default();
     let samples = locus
         .as_ref()
         .map(|locus| cursor_samples(context, locus))
@@ -35,10 +40,23 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if let Some(response) = view::show(
         ui,
         locus.as_ref(),
+        &overlays,
         &context.results.session.polar,
         samples,
         &context.policy,
     ) {
+        if let Some(removed) = response
+            .removed_overlay
+            .and_then(|index| overlays.get(index))
+        {
+            let name = removed.name().to_owned();
+            context
+                .results
+                .session
+                .polar
+                .overlays
+                .retain(|overlay| *overlay != name);
+        }
         apply_canvas_input(
             ui,
             context,
