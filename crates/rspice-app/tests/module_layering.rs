@@ -992,7 +992,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // out of `RSpiceApp` into the presentation and workflow layers it renders.
     // They retire as the frame loop stops calling and starts setting state
     // that the called module reads — the pattern `frame` already follows.
-    ("app", "workflows/project_workflow", 45),
+    ("app", "workflows/project_workflow", 17),
     ("app", "commands", 7),
     ("app", "chrome", 12),
     ("app", "workflows/file_workflow", 1),
