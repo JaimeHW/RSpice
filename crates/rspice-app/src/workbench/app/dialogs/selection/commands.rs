@@ -30,8 +30,6 @@ use crate::workbench::app::actions::workspace::{
 use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingCopyParts, FloatingPasteOrigin, float_schematic_objects,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 

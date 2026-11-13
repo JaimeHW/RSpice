@@ -355,7 +355,12 @@ fn rotate_and_mirror_have_their_keys_on_the_canvas() {
 #[test]
 fn plain_r_turns_the_selection_while_move_carries_it() {
     let (mut app, _) = app_with_selected_resistor_pair();
-    crate::workbench::app::arm_move_selection(&mut app.state);
+    crate::workbench::app::arm_move_selection_in(
+        &mut app.state.design.move_selection,
+        &mut app.state.design.stretch_selection,
+        &mut app.state.design.array_selection,
+        &mut app.state.model,
+    );
     assert!(app.state.design.move_selection.armed);
     let before = app.state.model.schematic.document().components[1].pos
         - app.state.model.schematic.document().components[0].pos;
@@ -675,7 +680,11 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialog_modal_open());
-    assert!(app.state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
+    ));
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
     Command::Cut.execute(&mut app);
@@ -1340,7 +1349,11 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
 
     Command::Paste.execute(&mut app);
-    assert!(app.state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
+    ));
 
     let document = app.state.model.schematic.document();
     let tee = Point::new(100, 100);
@@ -1401,7 +1414,11 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     app.state.design.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
-    assert!(app.state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
+    ));
 
     let document = app.state.model.schematic.document();
     assert_eq!(document.components.len(), 2, "the part was pasted");
@@ -1488,7 +1505,11 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     );
 
     Command::Paste.execute(&mut app);
-    assert!(app.state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
+    ));
 
     let document = app.state.model.schematic.document();
     assert_eq!(document.components.len(), 6);

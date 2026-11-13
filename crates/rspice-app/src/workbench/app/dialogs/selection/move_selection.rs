@@ -19,8 +19,6 @@ use crate::workbench::app::dialogs::selection::array::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 
 /// Authority and interaction state of the armed Move tool. The design
@@ -60,19 +58,6 @@ impl MoveSelectionDialogState {
 }
 
 const COMMAND: &str = "Move";
-
-/// [`arm_move_selection_in`] over the whole state, the shape the canvas
-/// tests arm through.
-#[cfg(test)]
-pub(crate) fn arm_move_selection(state: &mut AppState) {
-    let design = &mut state.design;
-    arm_move_selection_in(
-        &mut design.move_selection,
-        &mut design.stretch_selection,
-        &mut design.array_selection,
-        &mut state.model,
-    );
-}
 
 /// Arm Move against an immutable document and selection baseline, over the
 /// three canvas tools' drafts and the model. The design feature's command
@@ -124,12 +109,6 @@ pub(crate) fn armed_move_selection_authority(
     validate_draft(draft, model)
 }
 
-/// [`cancel_armed_move_selection_in`] for the session.
-#[cfg(test)]
-pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
-    cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
-}
-
 /// End an armed Move: close its dialog, and let its tool go if the
 /// canvas still holds it.
 pub(crate) fn cancel_armed_move_selection_in(
@@ -146,6 +125,7 @@ pub(crate) fn cancel_armed_move_selection_in(
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, SchematicSnapshot};
+    use crate::workbench::app_state::AppState;
 
     fn selected_resistor() -> AppState {
         let mut state = AppState::default();
@@ -170,7 +150,12 @@ mod tests {
         let mut state = selected_resistor();
         let baseline = SchematicSnapshot::capture(state.model.schematic.document());
 
-        arm_move_selection(&mut state);
+        arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
 
         assert!(state.design.move_selection.armed);
         assert_eq!(
@@ -187,7 +172,12 @@ mod tests {
     #[test]
     fn arming_freezes_the_selection_and_the_whole_design_snapshot() {
         let mut state = selected_resistor();
-        arm_move_selection(&mut state);
+        arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
         let authority = state
             .design
             .move_selection
@@ -206,7 +196,12 @@ mod tests {
     #[test]
     fn validation_fails_closed_when_non_electrical_geometry_changes() {
         let mut state = selected_resistor();
-        arm_move_selection(&mut state);
+        arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
         state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(validate_draft(&state.design.move_selection, &state.model).is_err());
     }
@@ -215,7 +210,12 @@ mod tests {
     #[test]
     fn an_empty_selection_refuses_instead_of_arming() {
         let mut state = AppState::default();
-        arm_move_selection(&mut state);
+        arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
         assert!(!state.design.move_selection.armed);
         assert_ne!(
             state.model.schematic.session.editor.tool,

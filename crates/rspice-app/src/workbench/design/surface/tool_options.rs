@@ -13,8 +13,6 @@ use crate::state::{MoveSelectionMode, StretchOrthogonalPolicy, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, segmented};
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::slots::DesignState;
 
@@ -111,6 +109,7 @@ fn strip(ui: &mut Ui, command: &str, options: impl FnOnce(&mut Ui)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::AppState;
     use crate::state::{ComponentType, Point, Wire};
 
     fn armed_move() -> AppState {
@@ -126,7 +125,12 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        crate::workbench::app::arm_move_selection(&mut state);
+        crate::workbench::app::arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
         state
     }
 
@@ -145,7 +149,14 @@ mod tests {
             .editor
             .selection
             .select_wire(7);
-        crate::workbench::app::arm_stretch_selection(&mut state);
+        crate::workbench::app::arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state
     }
 
@@ -168,7 +179,10 @@ mod tests {
         assert!(painted(&mut armed_stretch()));
 
         let mut cancelled = armed_move();
-        crate::workbench::app::cancel_armed_move_selection(&mut cancelled);
+        crate::workbench::app::cancel_armed_move_selection_in(
+            &mut cancelled.design.move_selection,
+            &mut cancelled.model,
+        );
         assert!(!painted(&mut cancelled));
     }
 
@@ -196,15 +210,28 @@ mod tests {
             measured
         };
         let mut state = armed_stretch();
-        crate::workbench::app::cancel_armed_stretch_selection(&mut state);
+        crate::workbench::app::cancel_armed_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.model,
+        );
         let (resting_top, resting) = frame(&mut state);
 
-        crate::workbench::app::arm_stretch_selection(&mut state);
+        crate::workbench::app::arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
         let (armed_top, armed) = frame(&mut state);
         assert!(armed_top > resting_top, "the strip took its height");
         assert_eq!(armed, resting, "arming moved the drawing");
 
-        crate::workbench::app::cancel_armed_stretch_selection(&mut state);
+        crate::workbench::app::cancel_armed_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.model,
+        );
         let (done_top, done) = frame(&mut state);
         assert_eq!(done_top, resting_top);
         assert_eq!(done, resting, "ending the command moved the drawing");

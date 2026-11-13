@@ -163,7 +163,12 @@ mod tests {
     use crate::state::{Component, ComponentType, Wire};
     fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
         state.design.move_selection.mode = mode;
-        crate::workbench::app::arm_move_selection(state);
+        crate::workbench::app::arm_move_selection_in(
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.design.array_selection,
+            &mut state.model,
+        );
         assert!(state.design.move_selection.armed);
     }
     #[test]

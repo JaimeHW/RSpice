@@ -173,7 +173,13 @@ mod tests {
             .select_only_component(1);
         state.model.schematic.recalculate_runtime_state();
         state.model.schematic.clear_undo_history();
-        crate::workbench::app::open_array_selection_dialog(&mut state);
+        crate::workbench::app::open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.arm();
         state.design.array_selection.canvas.preview_delta = Point::new(100, 0);
         state.model.schematic.arm_tool(Tool::ArraySelection);
@@ -262,7 +268,13 @@ mod tests {
         }
         state.model.schematic.recalculate_runtime_state();
         state.model.schematic.clear_undo_history();
-        crate::workbench::app::open_array_selection_dialog(state);
+        crate::workbench::app::open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.arm();
         state.design.array_selection.canvas.preview_delta = pitch;
         state.model.schematic.arm_tool(Tool::ArraySelection);
@@ -356,7 +368,13 @@ mod tests {
             .select_only_component(1);
         state.model.schematic.recalculate_runtime_state();
         state.model.schematic.clear_undo_history();
-        crate::workbench::app::open_array_selection_dialog(&mut state);
+        crate::workbench::app::open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.arm();
         state.design.array_selection.canvas.preview_delta = Point::new(1, 0);
         state.model.schematic.arm_tool(Tool::ArraySelection);
@@ -457,7 +475,13 @@ mod tests {
                 .selection
                 .select_only_component(id);
             state.model.schematic.clear_undo_history();
-            crate::workbench::app::open_array_selection_dialog(&mut state);
+            crate::workbench::app::open_array_selection_dialog_in(
+                &mut state.design.array_selection,
+                &mut state.design.move_selection,
+                &mut state.design.stretch_selection,
+                &mut state.model,
+                &mut state.workbench,
+            );
             state.design.array_selection.arm();
             state.model.schematic.arm_tool(Tool::ArraySelection);
             let expected = state.design.array_selection.canvas.clone();
@@ -485,8 +509,17 @@ mod tests {
                 "read-only" => state.model.schematic.session.read_only = true,
                 "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
-                    crate::workbench::app::cancel_armed_array_selection(&mut state);
-                    crate::workbench::app::open_array_selection_dialog(&mut state);
+                    crate::workbench::app::cancel_armed_array_selection_in(
+                        &mut state.design.array_selection,
+                        &mut state.model,
+                    );
+                    crate::workbench::app::open_array_selection_dialog_in(
+                        &mut state.design.array_selection,
+                        &mut state.design.move_selection,
+                        &mut state.design.stretch_selection,
+                        &mut state.model,
+                        &mut state.workbench,
+                    );
                     state.design.array_selection.arm();
                     state.model.schematic.arm_tool(Tool::ArraySelection);
                     assert_eq!(

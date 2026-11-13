@@ -209,7 +209,14 @@ mod tests {
     }
 
     fn arm_test_stretch(state: &mut AppState) {
-        crate::workbench::app::arm_stretch_selection(state);
+        crate::workbench::app::arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
         assert!(state.design.stretch_selection.armed);
     }
 

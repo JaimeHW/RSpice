@@ -69,16 +69,15 @@ use crate::workbench::app::dialogs::replace_instance::{
 use crate::workbench::app::dialogs::selection::commands::{
     schematic_selection_has_live_object, select_schematic_objects_of_kind,
 };
-use crate::workbench::app::dialogs::selection::{
-    array, bulk_edit, move_selection, rename, shared_properties, stretch,
-};
+use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition, visibility_options,
 };
 use crate::workbench::app::{
-    arm_schematic_tool, join_collinear_wires_on_active_sheet, schematic_editor_request_source,
-    turn_floating_paste,
+    arm_move_selection_in, arm_schematic_tool, arm_stretch_selection_in,
+    join_collinear_wires_on_active_sheet, open_array_selection_dialog_in,
+    schematic_editor_request_source, turn_floating_paste,
 };
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -883,13 +882,13 @@ impl CommandSet for DesignCommand {
                     cx.wb,
                 );
             }
-            Self::MoveSelection => move_selection::arm_move_selection_in(
+            Self::MoveSelection => arm_move_selection_in(
                 &mut cx.state.move_selection,
                 &mut cx.state.stretch_selection,
                 &mut cx.state.array_selection,
                 cx.model,
             ),
-            Self::StretchSelection => stretch::arm_stretch_selection_in(
+            Self::StretchSelection => arm_stretch_selection_in(
                 &mut cx.state.stretch_selection,
                 &mut cx.state.move_selection,
                 &mut cx.state.array_selection,
@@ -897,7 +896,7 @@ impl CommandSet for DesignCommand {
                 cx.model,
                 cx.wb,
             ),
-            Self::ArraySelection => array::open_array_selection_dialog_in(
+            Self::ArraySelection => open_array_selection_dialog_in(
                 &mut cx.state.array_selection,
                 &mut cx.state.move_selection,
                 &mut cx.state.stretch_selection,

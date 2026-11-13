@@ -638,7 +638,11 @@ fn the_strip_turns_a_floating_duplicate() {
         finger.app.state.design.floating_paste.is_some(),
         "the copy still floats"
     );
-    assert!(finger.app.state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut finger.app.state.design.floating_paste,
+        &mut finger.app.state.model,
+        &mut finger.app.state.workbench
+    ));
     let components = &finger.app.state.model.schematic.document().components;
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     let turned: Vec<_> = components

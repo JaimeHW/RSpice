@@ -211,11 +211,7 @@ pub(crate) use dialogs::placement::net_label::{
 };
 pub(crate) use dialogs::selection::array::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,
-    armed_array_selection_plan, cancel_armed_array_selection_in,
-};
-#[cfg(test)]
-pub(crate) use dialogs::selection::array::{
-    cancel_armed_array_selection, open_array_selection_dialog,
+    armed_array_selection_plan, cancel_armed_array_selection_in, open_array_selection_dialog_in,
 };
 pub(crate) use dialogs::selection::commands::floating::{
     FloatingCopyParts, cancel_floating_paste_in, floating_paste_scope, on_grid,
@@ -227,19 +223,11 @@ pub(crate) use dialogs::selection::commands::{
     paste_schematic_clipboard, paste_schematic_clipboard_at, schematic_grid_step,
     select_all_schematic_objects,
 };
-#[cfg(test)]
 pub(crate) use dialogs::selection::move_selection::{
-    arm_move_selection, cancel_armed_move_selection,
-};
-pub(crate) use dialogs::selection::move_selection::{
-    armed_move_selection_authority, cancel_armed_move_selection_in,
-};
-#[cfg(test)]
-pub(crate) use dialogs::selection::stretch::{
-    arm_stretch_selection, cancel_armed_stretch_selection,
+    arm_move_selection_in, armed_move_selection_authority, cancel_armed_move_selection_in,
 };
 pub(crate) use dialogs::selection::stretch::{
-    armed_stretch_selection_authority, cancel_armed_stretch_selection_in,
+    arm_stretch_selection_in, armed_stretch_selection_authority, cancel_armed_stretch_selection_in,
 };
 pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,

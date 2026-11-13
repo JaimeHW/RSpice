@@ -10,6 +10,7 @@ use super::*;
 use super::floating::schematic_paste_anchor;
 use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, SchematicProbe, Wire};
 use crate::workbench::app::copy_active_schematic_selection;
+use crate::workbench::app_state::AppState;
 
 fn last_prompt(state: &AppState) -> String {
     state
@@ -327,7 +328,11 @@ fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
         &mut state.model,
         &mut state.workbench
     ));
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     let copies: Vec<Point> = state
         .model
@@ -389,7 +394,11 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         &mut state.workbench,
         Point::new(140, 30)
     ));
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert_eq!(state.model.schematic.document().components.len(), 3);
     assert_eq!(
@@ -417,7 +426,11 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
         &mut state.workbench,
         Point::new(140, 30)
     ));
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     let created = state
         .model
@@ -483,7 +496,11 @@ fn duplicate_honours_the_persisted_external_net_preference() {
             ),
             "{preference:?} still duplicates"
         );
-        assert!(state.place_floating_paste());
+        assert!(crate::workbench::app::place_floating_paste(
+            &mut state.design.floating_paste,
+            &mut state.model,
+            &mut state.workbench
+        ));
         assert_eq!(
             state.model.schematic.document().components.len(),
             3,

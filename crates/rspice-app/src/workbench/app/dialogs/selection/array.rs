@@ -25,8 +25,6 @@ use crate::workbench::app::dialogs::selection::move_selection::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
@@ -226,20 +224,6 @@ impl DraftValidation {
     }
 }
 
-/// [`open_array_selection_dialog_in`] over the whole state, the shape the
-/// canvas tests open it through.
-#[cfg(test)]
-pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
-    let design = &mut state.design;
-    open_array_selection_dialog_in(
-        &mut design.array_selection,
-        &mut design.move_selection,
-        &mut design.stretch_selection,
-        &mut state.model,
-        &mut state.workbench,
-    );
-}
-
 /// Open Create array over the three canvas tools' drafts, the model and the
 /// session: opening it stops an armed Move or Stretch.
 pub(crate) fn open_array_selection_dialog_in(
@@ -429,12 +413,6 @@ pub(crate) fn armed_array_selection_plan(
         .map_err(|error| error.to_string())
 }
 
-/// [`cancel_armed_array_selection_in`] for the session.
-#[cfg(test)]
-pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
-    cancel_armed_array_selection_in(&mut state.design.array_selection, &mut state.model);
-}
-
 /// End an armed Array: close its dialog, and let its tool go if the
 /// canvas still holds it.
 pub(crate) fn cancel_armed_array_selection_in(
@@ -543,6 +521,7 @@ fn radial_documentation_center(model: &Model) -> Option<Point> {
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, DesignNote, DesignNoteKind};
+    use crate::workbench::app_state::AppState;
 
     /// The draft's validation, over what the form reads.
     fn validate_draft(state: &AppState) -> DraftValidation {
@@ -598,7 +577,13 @@ mod tests {
             .editor
             .selection
             .select_only_component(4);
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         let eight = state.design.array_selection.naming.clone();
         state.design.array_selection.count = "4 \u{00d7} 1".to_owned();
         derive_naming_from_count(&mut state);
@@ -636,7 +621,13 @@ mod tests {
             .selection
             .select_only_component(4);
 
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
 
         assert!(state.design.array_selection.open);
         assert_eq!(state.design.array_selection.count, DEFAULT_COUNT);
@@ -689,7 +680,13 @@ mod tests {
             .selection
             .select_design_note(11);
 
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.kind = SchematicArrayKind::RadialDocumentation;
 
         assert!(validate_draft(&state).can_commit());
@@ -718,7 +715,13 @@ mod tests {
             .editor
             .selection
             .select_only_component(4);
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.kind = SchematicArrayKind::Rectangular;
 
         let validation = validate_draft(&state);
@@ -747,7 +750,13 @@ mod tests {
             .editor
             .selection
             .select_only_component(4);
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.naming = "R1 to R8".to_owned();
 
         let validation = validate_draft(&state);
@@ -780,7 +789,13 @@ mod tests {
             .editor
             .selection
             .select_only_component(4);
-        open_array_selection_dialog(&mut state);
+        open_array_selection_dialog_in(
+            &mut state.design.array_selection,
+            &mut state.design.move_selection,
+            &mut state.design.stretch_selection,
+            &mut state.model,
+            &mut state.workbench,
+        );
         state.design.array_selection.authority = None;
 
         // No field is at fault, so the refusal stands at the foot of the form

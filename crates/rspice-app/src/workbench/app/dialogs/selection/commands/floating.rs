@@ -20,8 +20,6 @@ use crate::workbench::app::dialogs::selection::move_selection::{
 use crate::workbench::app::dialogs::selection::stretch::{
     StretchSelectionDialogState, cancel_armed_stretch_selection_in,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
@@ -157,18 +155,6 @@ pub(super) fn float_schematic_objects(
         object_count(count)
     ));
     Ok(())
-}
-
-#[cfg(test)]
-impl AppState {
-    /// [`place_floating_paste`] for the session.
-    pub(crate) fn place_floating_paste(&mut self) -> bool {
-        place_floating_paste(
-            &mut self.design.floating_paste,
-            &mut self.model,
-            &mut self.workbench,
-        )
-    }
 }
 
 /// Land the floating copy where it sits now. Returns whether anything was

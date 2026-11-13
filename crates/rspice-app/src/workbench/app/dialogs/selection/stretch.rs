@@ -18,8 +18,6 @@ use crate::workbench::app::dialogs::selection::array::{
 use crate::workbench::app::dialogs::selection::move_selection::{
     MoveSelectionDialogState, cancel_armed_move_selection_in,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
@@ -76,21 +74,6 @@ fn policy_for_sheet(wire_routing: SchematicWireRoutingStyle) -> StretchOrthogona
             StretchOrthogonalPolicy::AllowDiagonal
         }
     }
-}
-
-/// [`arm_stretch_selection_in`] over the whole state, the shape the canvas
-/// tests arm through.
-#[cfg(test)]
-pub(crate) fn arm_stretch_selection(state: &mut AppState) {
-    let design = &mut state.design;
-    arm_stretch_selection_in(
-        &mut design.stretch_selection,
-        &mut design.move_selection,
-        &mut design.array_selection,
-        design.schematic_visibility.wire_routing,
-        &mut state.model,
-        &mut state.workbench,
-    );
 }
 
 /// Arm Stretch over the three canvas tools' drafts, the sheet's wire
@@ -156,12 +139,6 @@ pub(crate) fn armed_stretch_selection_authority(
     validate_draft(draft, model)
 }
 
-/// [`cancel_armed_stretch_selection_in`] for the session.
-#[cfg(test)]
-pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
-    cancel_armed_stretch_selection_in(&mut state.design.stretch_selection, &mut state.model);
-}
-
 /// End an armed Stretch: close its dialog, and let its tool go if the
 /// canvas still holds it.
 pub(crate) fn cancel_armed_stretch_selection_in(
@@ -178,6 +155,7 @@ pub(crate) fn cancel_armed_stretch_selection_in(
 mod tests {
     use super::*;
     use crate::state::{Point, StretchTarget, Wire};
+    use crate::workbench::app_state::AppState;
 
     fn selected_wire_segment() -> AppState {
         let mut state = AppState::default();
@@ -202,7 +180,14 @@ mod tests {
     fn arming_opens_no_dialog_and_resolves_the_target_at_once() {
         let mut state = selected_wire_segment();
 
-        arm_stretch_selection(&mut state);
+        arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
 
         let draft = &state.design.stretch_selection;
         assert!(draft.armed);
@@ -229,7 +214,14 @@ mod tests {
         let mut state = selected_wire_segment();
         state.design.schematic_visibility.wire_routing = SchematicWireRoutingStyle::FortyFiveDegree;
 
-        arm_stretch_selection(&mut state);
+        arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
 
         assert_eq!(
             state.design.stretch_selection.policy,
@@ -240,7 +232,14 @@ mod tests {
     #[test]
     fn nothing_stretchable_refuses_instead_of_arming() {
         let mut state = AppState::default();
-        arm_stretch_selection(&mut state);
+        arm_stretch_selection_in(
+            &mut state.design.stretch_selection,
+            &mut state.design.move_selection,
+            &mut state.design.array_selection,
+            state.design.schematic_visibility.wire_routing,
+            &mut state.model,
+            &mut state.workbench,
+        );
         assert!(!state.design.stretch_selection.armed);
         assert_ne!(
             state.model.schematic.session.editor.tool,

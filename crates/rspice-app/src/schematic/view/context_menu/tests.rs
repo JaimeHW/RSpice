@@ -1112,7 +1112,11 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         &mut state.workbench,
         Point::new(22, 32),
     );
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
     assert_eq!(state.model.schematic.document().components.len(), 2);
     assert!(state.model.schematic.can_undo());
     assert!(state.model.schematic.undo());
@@ -1152,7 +1156,11 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         &mut state.workbench,
         Point::new(42, 42),
     );
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
     assert_eq!(state.model.schematic.document().net_labels.len(), 2);
     assert!(state.model.schematic.can_undo());
     assert!(state.model.schematic.undo());
@@ -1635,7 +1643,11 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
         vec![here.clone(), there.clone()],
         "a floating paste changes nothing until it is placed"
     );
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     let document = state.model.schematic.document();
     assert_eq!(
@@ -1714,7 +1726,11 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
         Point::new(60, 30),
         &symbol_context,
     );
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     let turned: Vec<_> = state
         .model
@@ -1803,7 +1819,11 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     let click = Point::new(200, 100);
     let offset = click - state.design.schematic_clipboard.origin;
     execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
-    assert!(state.place_floating_paste());
+    assert!(crate::workbench::app::place_floating_paste(
+        &mut state.design.floating_paste,
+        &mut state.model,
+        &mut state.workbench
+    ));
     let pasted = state.model.schematic.document().components.clone();
     assert_eq!(pasted.len(), 1);
     assert_eq!(pasted[0].pos, Point::new(20, 30) + offset);
