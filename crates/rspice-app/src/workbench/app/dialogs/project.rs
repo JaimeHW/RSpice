@@ -6,8 +6,8 @@
 //! technology and recovering from a checkpoint; their drafts live here, below
 //! the dialog aggregate that holds them.
 
-pub(in crate::workbench) mod configuration;
-pub(in crate::workbench) mod configuration_dialogs;
+pub(crate) mod configuration;
+pub(crate) mod configuration_dialogs;
 pub(crate) mod new_project;
 
 /// Retained draft for the mockup-owned project technology transaction.

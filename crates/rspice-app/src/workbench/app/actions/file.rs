@@ -263,7 +263,7 @@ impl RSpiceApp {
     }
 
     /// Execute a pending action after confirmation dialog
-    pub(in crate::workbench) fn execute_pending_action(
+    pub(crate) fn execute_pending_action(
         &mut self,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,

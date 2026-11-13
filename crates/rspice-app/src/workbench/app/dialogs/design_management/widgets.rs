@@ -89,7 +89,7 @@ pub(super) fn toolbar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
 pub(super) const PANE_INSET: f32 = crate::workbench::design_system::PANEL_INSET;
 
 /// `count` of `noun`, which takes an "s" for any count but one.
-pub(super) fn counted(count: usize, noun: &str) -> String {
+pub(crate) fn counted(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 

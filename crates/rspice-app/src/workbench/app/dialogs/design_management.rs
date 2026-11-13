@@ -36,7 +36,7 @@ use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
-const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
+pub(crate) const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
 const MANAGER_DESCRIPTION: &str =
     "Manage sheets, assembly variants, reference designators, and how the hierarchy resolves.";
 const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
@@ -182,8 +182,8 @@ enum ProtectedBoundaryChecks {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SubflowInputs {
-    sheet_name: String,
+pub(crate) struct SubflowInputs {
+    pub(crate) sheet_name: String,
     sheet_insert_after: Option<SheetId>,
     sheet_template: SheetTemplate,
     sheet_port_policy: SheetPortPolicy,
@@ -249,12 +249,12 @@ impl Default for SubflowInputs {
 #[derive(Debug, Clone)]
 pub(crate) struct DesignManagementDialogState {
     pub(crate) open: bool,
-    page: DesignManagementPage,
-    active_tab: DesignManagementTab,
+    pub(crate) page: DesignManagementPage,
+    pub(crate) active_tab: DesignManagementTab,
     owner_key: String,
-    original: Option<DesignManagementCatalog>,
-    draft: Option<DesignManagementCatalog>,
-    inputs: SubflowInputs,
+    pub(crate) original: Option<DesignManagementCatalog>,
+    pub(crate) draft: Option<DesignManagementCatalog>,
+    pub(crate) inputs: SubflowInputs,
     input_baseline: Option<SubflowInputs>,
     selection_object_ids: Vec<u64>,
     all_object_ids: Vec<u64>,
@@ -264,7 +264,7 @@ pub(crate) struct DesignManagementDialogState {
     /// What the last operation did that the manager's own tabs do not show —
     /// a count it produced, not a report that it finished.
     outcome: Option<String>,
-    discard_confirmation: bool,
+    pub(crate) discard_confirmation: bool,
     body_scroll_offset: f32,
 }
 
@@ -336,20 +336,20 @@ impl DesignManagementDialogState {
         *self = Self::default();
     }
 
-    fn dirty(&self) -> bool {
+    pub(crate) fn dirty(&self) -> bool {
         self.original
             .as_ref()
             .zip(self.draft.as_ref())
             .is_some_and(|(original, draft)| original != draft)
     }
 
-    fn subflow_dirty(&self) -> bool {
+    pub(crate) fn subflow_dirty(&self) -> bool {
         self.input_baseline
             .as_ref()
             .is_some_and(|baseline| baseline != &self.inputs)
     }
 
-    fn reset_inputs_for_page(
+    pub(crate) fn reset_inputs_for_page(
         &mut self,
         page: DesignManagementPage,
         configurations: Option<&crate::state::ConfigurationSetCatalog>,
@@ -426,15 +426,15 @@ impl DesignManagementDialogState {
 /// feature's context for the one call: the dialog's own state, the Project
 /// page and Configuration tab it can bring forward, the model, the session,
 /// and the run tier a published change voids.
-pub(in crate::workbench) struct DesignManagementParts<'a> {
-    pub(in crate::workbench) dialog: &'a mut DesignManagementDialogState,
-    pub(in crate::workbench) project_page: &'a mut ProjectPage,
-    pub(in crate::workbench) configuration_tab: &'a mut ConfigurationTab,
-    pub(in crate::workbench) model: &'a mut Model,
-    pub(in crate::workbench) platform: &'a PlatformState,
-    pub(in crate::workbench) wb: &'a mut WorkbenchSession,
-    pub(in crate::workbench) runs: &'a mut RunsState,
-    pub(in crate::workbench) run_controller: &'a mut SimulationController,
+pub(crate) struct DesignManagementParts<'a> {
+    pub(crate) dialog: &'a mut DesignManagementDialogState,
+    pub(crate) project_page: &'a mut ProjectPage,
+    pub(crate) configuration_tab: &'a mut ConfigurationTab,
+    pub(crate) model: &'a mut Model,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) wb: &'a mut WorkbenchSession,
+    pub(crate) runs: &'a mut RunsState,
+    pub(crate) run_controller: &'a mut SimulationController,
 }
 
 /// Open Design management on its Sheets tab.
@@ -646,12 +646,12 @@ enum DesignManagementBodyAction {
 
 mod controller;
 mod manager;
-mod operations;
+pub(crate) mod operations;
 mod subflows;
-pub(in crate::workbench) use controller::render_design_management_dialog;
+pub(crate) use controller::render_design_management_dialog;
 #[cfg(test)]
 mod tests;
 /// Reachable from the workbench so a surface that composes its own dialog body
 /// can use the concept banner these dialogs already own, rather than grow a
 /// fourth painter for the same box.
-pub(in crate::workbench) mod widgets;
+pub(crate) mod widgets;

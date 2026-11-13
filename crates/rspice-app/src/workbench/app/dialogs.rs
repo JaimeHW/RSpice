@@ -14,7 +14,7 @@ pub(in crate::workbench) mod connectivity_manager;
 pub(in crate::workbench) mod create_model_bound_symbol;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
-pub(in crate::workbench) mod design_management;
+pub(crate) mod design_management;
 pub(in crate::workbench) mod design_request;
 pub(in crate::workbench) mod design_review_comments;
 #[cfg(test)]

@@ -157,7 +157,7 @@ impl ConfigurationDialogState {
 /// Hold `action`, which takes the open project away, while the Configuration
 /// page has edits that are not applied: the page asks to apply or discard
 /// them first, then goes on with it. Returns whether it held the action.
-pub(in crate::workbench) fn hold_for_configuration_edits(
+pub(crate) fn hold_for_configuration_edits(
     state: &mut AppState,
     action: ConfirmationAction,
     recent: Option<(std::path::PathBuf, RecentKind)>,
@@ -175,7 +175,7 @@ pub(in crate::workbench) fn hold_for_configuration_edits(
 
 /// Which dialog to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workbench) enum ConfigurationDialogRequest {
+pub(crate) enum ConfigurationDialogRequest {
     New,
     Clone(ConfigurationSetId),
     Rename(ConfigurationSetId),
@@ -183,7 +183,7 @@ pub(in crate::workbench) enum ConfigurationDialogRequest {
 }
 
 /// Open the dialog `request` names, filled in from the project.
-pub(in crate::workbench) fn open_configuration_dialog(
+pub(crate) fn open_configuration_dialog(
     dialogs: &mut ConfigurationDialogState,
     model: &Model,
     request: ConfigurationDialogRequest,
@@ -283,24 +283,21 @@ pub(in crate::workbench) fn configuration_actions_menu(
 /// project feature's context for the one call: their own state, the
 /// Configuration page and the Project page they bring forward, the model,
 /// the session, and the run tier a committed change voids.
-pub(in crate::workbench) struct ConfigurationDialogParts<'a> {
-    pub(in crate::workbench) dialogs: &'a mut ConfigurationDialogState,
-    pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
-    pub(in crate::workbench) project_page: &'a mut ProjectPage,
-    pub(in crate::workbench) model: &'a mut Model,
-    pub(in crate::workbench) platform: &'a PlatformState,
-    pub(in crate::workbench) wb: &'a mut WorkbenchSession,
-    pub(in crate::workbench) runs: &'a mut RunsState,
-    pub(in crate::workbench) run_controller: &'a mut SimulationController,
+pub(crate) struct ConfigurationDialogParts<'a> {
+    pub(crate) dialogs: &'a mut ConfigurationDialogState,
+    pub(crate) configuration: &'a mut ConfigurationPageState,
+    pub(crate) project_page: &'a mut ProjectPage,
+    pub(crate) model: &'a mut Model,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) wb: &'a mut WorkbenchSession,
+    pub(crate) runs: &'a mut RunsState,
+    pub(crate) run_controller: &'a mut SimulationController,
 }
 
 /// Draw the question about edits not applied, asked before leaving the
 /// project or picking another configuration, or the configuration dialog
 /// that is open, and commit what the reader chose.
-pub(in crate::workbench) fn render_configuration_dialog(
-    parts: &mut ConfigurationDialogParts<'_>,
-    ctx: &Context,
-) {
+pub(crate) fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx: &Context) {
     if parts.dialogs.leaving.is_some() {
         let choice =
             edits_prompt(ctx, parts.configuration, parts.model).unwrap_or(DialogChoice::Secondary);
@@ -401,7 +398,7 @@ fn commit(
 /// What the answer to the question asked before leaving the project leaves
 /// to do.
 #[derive(Debug, PartialEq, Eq)]
-enum LeavingAnswer {
+pub(crate) enum LeavingAnswer {
     /// Stay in the project: cancelled, or not answered yet.
     Stay,
     /// Apply the edits, then go on leaving.
@@ -413,7 +410,7 @@ enum LeavingAnswer {
 /// Take the reader's answer about the configuration edits held before
 /// leaving the project. Discard drops them here; Apply is the caller's,
 /// because it commits through the application.
-fn answer_leaving(
+pub(crate) fn answer_leaving(
     dialogs: &mut ConfigurationDialogState,
     configuration: &mut ConfigurationPageState,
     choice: DialogChoice,
@@ -439,7 +436,7 @@ fn answer_leaving(
 /// the action to carry out now. An applied edit is unsaved work too: the
 /// project changed.
 // The shell runs this until the project feature's dialogs read the models port.
-pub(in crate::workbench) fn go_on_leaving(
+pub(crate) fn go_on_leaving(
     state: &mut AppState,
     Leaving { action, recent }: Leaving,
 ) -> Option<(
