@@ -108,6 +108,10 @@ pub(crate) struct ExportTable {
     pub(crate) scale_name: String,
     /// Rawfile variable type of the scale
     pub(crate) scale_type: String,
+    /// The analysis swept the scale by decade or octave, which a rawfile
+    /// states as `Flags: log`. `false` when the table does not know how
+    /// the scale was swept; it is never inferred from the samples.
+    pub(crate) logarithmic: bool,
     pub(crate) scale: Vec<f64>,
     pub(crate) columns: Vec<ExportColumn>,
 }
@@ -177,6 +181,7 @@ pub(crate) fn scalar_table(
         plot_name: plot_name.into(),
         scale_name: scale_name.into(),
         scale_type: scale_type.into(),
+        logarithmic: false,
         scale,
         columns: signals
             .iter()
@@ -202,6 +207,7 @@ pub(crate) fn scalar_table_taking_samples(
         plot_name: plot_name.into(),
         scale_name: scale_name.into(),
         scale_type: scale_type.into(),
+        logarithmic: false,
         scale,
         columns: signals
             .iter_mut()
@@ -235,6 +241,7 @@ pub(crate) fn complex_table(
         plot_name: plot_name.into(),
         scale_name: "frequency".to_string(),
         scale_type: "frequency".to_string(),
+        logarithmic: false,
         scale,
         columns: signals
             .iter()
@@ -249,6 +256,14 @@ pub(crate) fn complex_table(
 }
 
 impl ExportTable {
+    /// This table, its scale declared as swept by decade or octave when
+    /// `logarithmic` is true. Only a caller that knows how the analysis
+    /// spaced its scale says so.
+    pub(crate) fn swept_logarithmically(mut self, logarithmic: bool) -> Self {
+        self.logarithmic = logarithmic;
+        self
+    }
+
     /// Dense formats carry nullable columns as an explicitly typed value/validity pair.
     /// Zero padding is meaningful only with the accompanying 0/1 validity column.
     pub(crate) fn dense_encoding(&self) -> std::borrow::Cow<'_, Self> {
@@ -660,6 +675,7 @@ impl ExportTable {
             plot_name: &plot_name,
             options: &options,
             complex,
+            logarithmic: self.logarithmic,
             variables: &declared,
             points: self.scale.len(),
         };
@@ -943,6 +959,7 @@ mod tests {
             plot_name: "Transient Analysis".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
+            logarithmic: false,
             scale: vec![0.0],
             columns: vec![ExportColumn {
                 unit: None,
@@ -1046,6 +1063,7 @@ mod tests {
             plot_name: "test".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
+            logarithmic: false,
             scale: vec![f64::NAN],
             columns: Vec::new(),
         };

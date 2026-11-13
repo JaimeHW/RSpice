@@ -345,6 +345,7 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
             plot_name: "Transient Analysis".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
+            logarithmic: false,
             scale: vec![0.0],
             columns: Vec::new(),
         }),

@@ -198,11 +198,14 @@ pub(super) fn run(
                                     input_source,
                                     result,
                                     true,
+                                    frequency::sweeps_logarithmically(&dataset.command),
                                 )?;
                             }
-                            ControlAnalysisResult::Ac(result) => {
-                                frequency::finish_ac_results(&ctx, result)?
-                            }
+                            ControlAnalysisResult::Ac(result) => frequency::finish_ac_results(
+                                &ctx,
+                                result,
+                                frequency::sweeps_logarithmically(&dataset.command),
+                            )?,
                             ControlAnalysisResult::Stability(result) => {
                                 frequency::finish_stb_result(&ctx, result)?;
                             }
@@ -210,7 +213,11 @@ pub(super) fn run(
                                 advanced::publish_sparam_run(&ctx, run, "sp")?;
                             }
                             ControlAnalysisResult::Distortion(result) => {
-                                frequency::finish_disto_result(&ctx, result)?;
+                                frequency::finish_disto_result(
+                                    &ctx,
+                                    result,
+                                    frequency::sweeps_logarithmically(&dataset.command),
+                                )?;
                             }
                             ControlAnalysisResult::TransferFunction(result) => {
                                 frequency::finish_tf_result(&ctx, result)?;

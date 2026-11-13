@@ -516,6 +516,13 @@ pub(super) fn raw_result(
             },
         })
         .collect();
+    // A source that declared its sweep logarithmic keeps saying so.
+    let logarithmic = !ordinal_axis
+        && data
+            .header
+            .flags
+            .iter()
+            .any(|flag| flag.eq_ignore_ascii_case("log"));
 
     Ok(ExportTable {
         scale_unit: if ordinal_axis { None } else { units[0].clone() },
@@ -527,6 +534,7 @@ pub(super) fn raw_result(
         },
         scale_name,
         scale_type,
+        logarithmic,
         scale,
         columns,
     }
@@ -692,6 +700,7 @@ fn load_operating_point_report(
         plot_name: "DC Operating Point".to_string(),
         scale_name: "point".to_string(),
         scale_type: "index".to_string(),
+        logarithmic: false,
         scale: vec![0.0],
         columns,
     }))
@@ -889,6 +898,7 @@ fn parse_delimited(
             .and_then(|metadata| metadata.columns[0].quantity.clone())
             .unwrap_or_else(|| scale_var_type(&scale_name)),
         scale_name,
+        logarithmic: false,
         scale,
         columns,
     }
@@ -1070,6 +1080,7 @@ pub(super) fn parse_untyped_json(
                 .map(str::to_owned)
                 .unwrap_or_else(|| scale_var_type(&scale_name)),
             scale_name,
+            logarithmic: false,
             scale,
             columns,
         }
@@ -1169,6 +1180,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             _ => scale_var_type(&section.independent_name),
         },
         scale_name: section.independent_name,
+        logarithmic: false,
         scale: section.independent_values,
         columns: decode_hdf5_columns(section.signals),
     };
@@ -1180,6 +1192,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             plot_name: data.title,
             scale_name: table.waveform.independent_name,
             scale_type: table.coordinate_type,
+            logarithmic: false,
             scale: table.waveform.independent_values,
             columns: decode_hdf5_columns(table.waveform.signals),
         });
@@ -1264,6 +1277,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             },
             scale_name: "frequency(f1)".to_string(),
             scale_type: "frequency".to_string(),
+            logarithmic: false,
             scale: distortion.f1_frequency,
             columns,
         });
@@ -1279,6 +1293,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             },
             scale_name: ac.independent_name,
             scale_type: "frequency".to_string(),
+            logarithmic: false,
             scale: ac.frequency,
             columns: ac
                 .signals

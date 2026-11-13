@@ -149,6 +149,7 @@ pub(super) fn parse(
         plot_name: format!("Touchstone {}", names[index]),
         scale_name: "frequency".to_owned(),
         scale_type: "frequency".to_owned(),
+        logarithmic: false,
         scale,
         columns,
     })

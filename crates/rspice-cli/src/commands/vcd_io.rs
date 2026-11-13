@@ -889,6 +889,7 @@ pub(crate) fn vcd_table(
         plot_name: "Converted Data".to_string(),
         scale_name: "time".to_string(),
         scale_type: "time".to_string(),
+        logarithmic: false,
         scale,
         columns,
     })
@@ -1238,6 +1239,7 @@ mod tests {
             plot_name: "Transient Analysis".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
+            logarithmic: false,
             scale: times.to_vec(),
             columns: vec![ExportColumn {
                 unit: None,

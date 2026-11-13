@@ -499,6 +499,7 @@ fn pac_export_table(
         plot_name: "Periodic AC".to_string(),
         scale_name: "offset_frequency".to_string(),
         scale_type: "frequency".to_string(),
+        logarithmic: false,
         scale: frequencies.to_vec(),
         columns,
     }
@@ -539,6 +540,7 @@ fn export_pxf(
         plot_name: "Periodic Transfer Function".to_string(),
         scale_name: "offset_frequency".to_string(),
         scale_type: "frequency".to_string(),
+        logarithmic: false,
         scale: offsets.clone(),
         columns: vec![
             ExportColumn {
@@ -681,6 +683,7 @@ fn export_pstb(
         plot_name: "Periodic Stability".to_string(),
         scale_name: "mode".to_string(),
         scale_type: "index".to_string(),
+        logarithmic: false,
         scale: (1..=modes.len()).map(|index| index as f64).collect(),
         columns: vec![
             column(
@@ -750,6 +753,7 @@ fn export_pnoise(
         plot_name: "Periodic Noise".to_string(),
         scale_name: "offset_frequency".to_string(),
         scale_type: "frequency".to_string(),
+        logarithmic: false,
         scale: offsets.clone(),
         columns: pnoise_columns(result),
     };

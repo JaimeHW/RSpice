@@ -259,6 +259,7 @@ pub(super) fn table(
         plot_name: "Monte Carlo Samples".into(),
         scale_name: scale_name.into(),
         scale_type: "index".into(),
+        logarithmic: false,
         scale,
         columns,
     })

@@ -479,6 +479,7 @@ pub(in crate::commands) fn result_document_table(
             })
             .to_string(),
         scale_name,
+        logarithmic: false,
         scale,
         columns,
     })

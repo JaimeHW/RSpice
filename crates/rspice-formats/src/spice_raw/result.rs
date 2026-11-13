@@ -251,6 +251,9 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
         plot_name,
         options: &options,
         complex,
+        // A retained result does not record how its sweep was spaced, and
+        // `log` is never inferred from the samples.
+        logarithmic: false,
         variables: &variables,
         points: coordinate.len(),
     };

@@ -235,7 +235,9 @@ fn publish(
     result: &SmallSignalCardResult,
 ) -> Result<(), CliError> {
     match result {
-        SmallSignalCardResult::Ac(points) => super::finish_ac_results(ctx, points),
+        SmallSignalCardResult::Ac(points) => {
+            super::finish_ac_results(ctx, points, super::sweeps_logarithmically(card))
+        }
         SmallSignalCardResult::Noise(points) => {
             let AnalysisCommand::Noise {
                 output_node,
@@ -255,6 +257,7 @@ fn publish(
                 input_source,
                 points,
                 true,
+                super::sweeps_logarithmically(card),
             )
         }
         SmallSignalCardResult::TransferFunction(result) => super::finish_tf_result(ctx, result),
@@ -264,7 +267,9 @@ fn publish(
         SmallSignalCardResult::Stability(result) => super::finish_stb_result(ctx, result),
         SmallSignalCardResult::PoleZero(result) => super::report_pz(ctx, result),
         SmallSignalCardResult::Sensitivity(result) => super::finish_sensitivity_result(ctx, result),
-        SmallSignalCardResult::Distortion(result) => super::finish_disto_result(ctx, result),
+        SmallSignalCardResult::Distortion(result) => {
+            super::finish_disto_result(ctx, result, super::sweeps_logarithmically(card))
+        }
     }
 }
 

@@ -119,6 +119,7 @@ pub(super) fn finish_tf_result(
             plot_name: "DC Transfer Function".to_string(),
             scale_name: "point".to_string(),
             scale_type: "index".to_string(),
+            logarithmic: false,
             scale: vec![0.0],
             columns: vec![
                 scalar(
@@ -198,12 +199,15 @@ pub(super) fn run_disto(
         )
         .map_err(|source| map_frequency_error(ctx, "DISTO", source))?;
 
-    finish_disto_result(ctx, &result)
+    finish_disto_result(ctx, &result, is_logarithmic(variation))
 }
 
+/// `logarithmic` is a `DEC` or `OCT` sweep of F1, and `false` when the
+/// caller does not know how the frequencies were spaced.
 pub(super) fn finish_disto_result(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::DistortionAnalysisResult,
+    logarithmic: bool,
 ) -> Result<(), CliError> {
     let projection = distortion_projection(ctx, result)?;
     if !ctx.quiet {
@@ -227,7 +231,7 @@ pub(super) fn finish_disto_result(
 
     if let Some(output) = ctx.resolve_output("disto") {
         let analysis_id = output.analysis("disto")?;
-        let table = distortion_export_table(projection.clone())?;
+        let table = distortion_export_table(projection.clone())?.swept_logarithmically(logarithmic);
         let schema = table_schema(&table)?;
         super::document::publish_analysis_result(
             ctx,
@@ -244,7 +248,7 @@ pub(super) fn finish_disto_result(
                     write_hdf5(path, &data).map_err(|error| map_hdf5_output_error(path, error))
                 } else if let Some(raw_format) = raw_format(format) {
                     crate::commands::publish::artifact(path, |writer| {
-                        write_distortion_plots(writer, raw_format, &projection)
+                        write_distortion_plots(writer, raw_format, &projection, logarithmic)
                             .map_err(|error| CliError::output_error(path, error))
                     })
                     .map_err(|error| crate::cli::map_atomic_output_error(path, error))
@@ -299,6 +303,7 @@ fn write_sensitivity_plot(
         plot_name: "Sensitivity Analysis",
         options: &[],
         complex: frequencies.is_some(),
+        logarithmic: false,
         variables: &variables,
         points: frequencies.map_or(1, <[f64]>::len),
     };
@@ -322,6 +327,7 @@ fn write_distortion_plots(
     writer: &mut dyn std::io::Write,
     format: rspice_core::io::raw_export::RawFormat,
     projection: &DistortionProjection,
+    logarithmic: bool,
 ) -> std::io::Result<()> {
     use rspice_core::analysis::DistortionProduct;
     use rspice_core::io::raw_export;
@@ -368,6 +374,7 @@ fn write_distortion_plots(
             plot_name,
             options: &[],
             complex: true,
+            logarithmic,
             variables: &variables,
             points: projection.f1_frequencies.len(),
         };
@@ -628,6 +635,7 @@ fn distortion_export_table(
         plot_name: "Volterra Distortion Analysis".to_string(),
         scale_name: "frequency(f1)".to_string(),
         scale_type: "frequency".to_string(),
+        logarithmic: false,
         scale: projection.f1_frequencies,
         columns,
     })
@@ -755,7 +763,7 @@ pub(super) fn finish_ac_table(
     ctx: &RunContext<'_>,
     table: &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>,
 ) -> Result<(), CliError> {
-    finish_ac(ctx, &table.points, Some(table), &[])
+    finish_ac(ctx, &table.points, Some(table), &[], false)
 }
 
 pub(super) fn run_ac(
@@ -773,10 +781,35 @@ pub(super) fn run_ac(
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
-    run_ac_frequencies(ctx, frequencies)
+    run_ac_frequencies(ctx, frequencies, is_logarithmic(variation))
 }
 
-fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(), CliError> {
+/// Whether a `DEC`/`OCT`/`LIN` sweep spaces its points logarithmically.
+fn is_logarithmic(variation: rspice_core::netlist::FreqVariation) -> bool {
+    use rspice_core::netlist::FreqVariation;
+    match variation {
+        FreqVariation::Dec | FreqVariation::Oct => true,
+        FreqVariation::Lin => false,
+    }
+}
+
+/// Whether an `.AC`, `.NOISE` or `.DISTO` card sweeps its frequencies by
+/// decade or octave; `false` for any other card.
+pub(super) fn sweeps_logarithmically(command: &rspice_core::netlist::AnalysisCommand) -> bool {
+    use rspice_core::netlist::AnalysisCommand;
+    match command {
+        AnalysisCommand::Ac { variation, .. }
+        | AnalysisCommand::Noise { variation, .. }
+        | AnalysisCommand::Disto { variation, .. } => is_logarithmic(*variation),
+        _ => false,
+    }
+}
+
+fn run_ac_frequencies(
+    ctx: &RunContext<'_>,
+    frequencies: Vec<f64>,
+    logarithmic: bool,
+) -> Result<(), CliError> {
     let (results, operating_point) = ctx
         .engine
         .run_ac_reporting_operating_point_with_abort(
@@ -785,24 +818,27 @@ fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(),
             &crate::abort::ProcessAbort,
         )
         .map_err(|source| map_frequency_error(ctx, "AC", source))?;
-    finish_ac(ctx, &results, None, &operating_point)
+    finish_ac(ctx, &results, None, &operating_point, logarithmic)
 }
 
 pub(super) fn finish_ac_results(
     ctx: &RunContext<'_>,
     results: &[rspice_core::analysis::AcResult],
+    logarithmic: bool,
 ) -> Result<(), CliError> {
-    finish_ac(ctx, results, None, &[])
+    finish_ac(ctx, results, None, &[], logarithmic)
 }
 
 /// Finish an AC sweep; `operating_point` holds the `device:param` values of
 /// its bias point that a `.PRINT AC` card can print, empty when the run
-/// reported none.
+/// reported none. `logarithmic` is a `DEC` or `OCT` sweep, and `false` when
+/// the caller does not know how the frequencies were spaced.
 fn finish_ac(
     ctx: &RunContext<'_>,
     results: &[rspice_core::analysis::AcResult],
     coordinates: Option<&rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>>,
     operating_point: &[(String, f64)],
+    logarithmic: bool,
 ) -> Result<(), CliError> {
     if !ctx.args.allow_nonfinite {
         for result in results {
@@ -916,12 +952,10 @@ fn finish_ac(
         rspice_core::netlist::OutputAnalysisKind::Ac,
         super::xyce_files::Scale::Frequency,
         || {
-            Ok(super::export::complex_table(
-                "ac",
-                "AC Analysis",
-                frequencies.clone(),
-                &signals,
-            ))
+            Ok(
+                super::export::complex_table("ac", "AC Analysis", frequencies.clone(), &signals)
+                    .swept_logarithmically(logarithmic),
+            )
         },
     )?;
 
@@ -979,6 +1013,7 @@ fn finish_ac(
                     write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
                 } else {
                     super::export::complex_table("ac", "AC Analysis", frequencies.clone(), &signals)
+                        .swept_logarithmically(logarithmic)
                         .write(path, format)
                 }
             },
@@ -1107,6 +1142,7 @@ pub(super) fn finish_stb_result(
             plot_name: "STB Loop Gain".to_string(),
             scale_name: "frequency".to_string(),
             scale_type: "frequency".to_string(),
+            logarithmic: false,
             scale: stb.frequencies.clone(),
             columns: vec![
                 ExportColumn {
@@ -1261,6 +1297,7 @@ pub(super) fn run_noise(
         input_source,
         execution,
         true,
+        is_logarithmic(variation),
     )
 }
 
@@ -1316,6 +1353,7 @@ pub(super) fn finish_noise_table(
         integrate,
         Some(table),
         &[],
+        false,
     )
 }
 
@@ -1326,6 +1364,7 @@ fn finish_noise(
     input_source: &str,
     execution: Result<NoiseWithBias, rspice_core::SimulationError>,
     integrate: bool,
+    logarithmic: bool,
 ) -> Result<(), CliError> {
     let (results, operating_point) =
         execution.map_err(|source| map_frequency_error(ctx, "Noise", source))?;
@@ -1338,6 +1377,7 @@ fn finish_noise(
         integrate,
         None,
         &operating_point,
+        logarithmic,
     )
 }
 
@@ -1348,6 +1388,7 @@ pub(super) fn finish_noise_results(
     input_source: &str,
     results: &[rspice_core::analysis::NoiseResult],
     integrate: bool,
+    logarithmic: bool,
 ) -> Result<(), CliError> {
     finish_noise_projected(
         ctx,
@@ -1358,12 +1399,14 @@ pub(super) fn finish_noise_results(
         integrate,
         None,
         &[],
+        logarithmic,
     )
 }
 
 /// Finish a noise sweep; `operating_point` holds the `device:param` values
 /// of its bias point that a `.PRINT NOISE` card can print, empty when the
-/// run reported none.
+/// run reported none. `logarithmic` is a `DEC` or `OCT` sweep, and `false`
+/// when the caller does not know how the frequencies were spaced.
 fn finish_noise_projected(
     ctx: &RunContext<'_>,
     output_node: &str,
@@ -1375,6 +1418,7 @@ fn finish_noise_projected(
         &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::NoiseResult>,
     >,
     operating_point: &[(String, f64)],
+    logarithmic: bool,
 ) -> Result<(), CliError> {
     use rspice_core::analysis::noise::NoiseInputQuantity;
     if !ctx.args.allow_nonfinite {
@@ -1544,13 +1588,15 @@ fn finish_noise_projected(
                 "Noise Spectral Density Curves",
                 noise_frequencies.clone(),
                 signals,
-            ),
+            )
+            .swept_logarithmically(logarithmic),
             None => ExportTable {
                 scale_unit: None,
                 analysis: "noise".to_string(),
                 plot_name: "Noise Spectral Density Curves".to_string(),
                 scale_name: "frequency".to_string(),
                 scale_type: "frequency".to_string(),
+                logarithmic,
                 scale: noise_frequencies.clone(),
                 columns: vec![
                     ExportColumn {
@@ -1669,6 +1715,7 @@ fn write_integrated_noise_plot(
         plot_name: INTEGRATED_NOISE_PLOT,
         options: &[],
         complex: false,
+        logarithmic: false,
         variables: &variables,
         points: 1,
     };

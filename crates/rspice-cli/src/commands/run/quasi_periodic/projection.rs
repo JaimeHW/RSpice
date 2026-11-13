@@ -176,6 +176,7 @@ pub(super) fn project(
             "index"
         }
         .into(),
+        logarithmic: false,
         scale,
         columns,
     });

@@ -45,6 +45,7 @@ pub(super) fn publish_with_rawfile(
             scale_unit: None,
             scale_name: "point".into(),
             scale_type: "index".into(),
+            logarithmic: false,
             scale: vec![0.0],
             columns: Vec::new(),
         }

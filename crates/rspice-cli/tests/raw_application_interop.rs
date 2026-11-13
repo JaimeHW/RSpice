@@ -298,3 +298,99 @@ r2 out 0 1k
         assert_eq!(names, ["onoise_spectrum", "inoise_spectrum"]);
     }
 }
+
+/// The `Flags:` line of a rawfile's first plot.
+fn first_plot_flags(bytes: &[u8]) -> String {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .take_while(|line| *line != b"Binary:" && *line != b"Values:")
+        .find_map(|line| line.strip_prefix(b"Flags: "))
+        .map(|flags| String::from_utf8(flags.to_vec()).unwrap())
+        .expect("the first plot has a Flags: line")
+}
+
+/// LTspice and the readers built for its files decode a real plot's binary
+/// values as single precision unless `Flags:` says `double`, and take
+/// `forward` and `log` from it as LTspice writes them. Every rawfile the run
+/// writes says what it holds, in both encodings, and still reads back.
+#[test]
+fn run_rawfiles_carry_the_flags_ltspice_readers_decode_by() {
+    let dir = test_dir("raw_application_flags");
+    let rc = "v1 in 0 dc 1 ac 1 pulse(0 1 0 1n 1n 5n 10n)\nr1 in out 1k\nc1 out 0 1p\n";
+    for (name, analysis, flags, coordinate) in [
+        ("tran", ".tran 5n 10n", "real forward double", None),
+        (
+            "ac_dec",
+            ".ac dec 1 1 100",
+            "complex forward log",
+            Some(vec![1.0, 10.0, 100.0]),
+        ),
+        (
+            "ac_lin",
+            ".ac lin 3 100 300",
+            "complex forward",
+            Some(vec![100.0, 200.0, 300.0]),
+        ),
+        (
+            "dc_down",
+            ".dc v1 1 0 -0.5",
+            "real double",
+            Some(vec![1.0, 0.5, 0.0]),
+        ),
+        (
+            "noise_dec",
+            ".noise v(out) v1 dec 1 100 1k",
+            "real forward log double",
+            Some(vec![100.0, 1000.0]),
+        ),
+    ] {
+        let deck = dir.join(format!("{name}.cir"));
+        std::fs::write(&deck, format!("* {name}\n{rc}{analysis}\n.end\n")).unwrap();
+        for format in ["raw", "ascii"] {
+            let output = dir.join(format!("{name}.{format}"));
+            let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "run"])
+                .arg(&deck)
+                .arg("-o")
+                .arg(&output)
+                .args(["-f", format])
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{name} {format}: {result:?}");
+            let bytes = std::fs::read(&output).unwrap();
+            assert_eq!(first_plot_flags(&bytes), flags, "{name} {format}");
+            let decoded = decode_spice_raw(&bytes, Default::default()).unwrap();
+            if let Some(coordinate) = &coordinate {
+                // A decade sweep's points come from a power, whose last bit
+                // is the platform's.
+                assert_eq!(
+                    decoded.coordinate.len(),
+                    coordinate.len(),
+                    "{name} {format}"
+                );
+                for (read, swept) in decoded.coordinate.iter().zip(coordinate) {
+                    assert!(
+                        (read - swept).abs() <= 1e-12 * swept.abs(),
+                        "{name} {format}: {:?}",
+                        decoded.coordinate
+                    );
+                }
+            }
+            assert!(!decoded.signals.is_empty(), "{name} {format}");
+        }
+    }
+
+    // A converted rawfile keeps the `log` its source declared.
+    let source = dir.join("ltspice_ac.raw");
+    std::fs::write(
+        &source,
+        b"Title: ac\nPlotname: AC Analysis\nFlags: complex forward log\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 frequency frequency\n1 V(out) voltage\nValues:\n0 1,0 1,-0\n1 10,0 0.5,-0.5\n",
+    )
+    .unwrap();
+    let converted = dir.join("converted.raw");
+    convert(&source, &converted, "raw");
+    assert_eq!(
+        first_plot_flags(&std::fs::read(converted).unwrap()),
+        "complex forward log"
+    );
+}

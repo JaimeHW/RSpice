@@ -890,6 +890,7 @@ fn hb_waveform(
         plot_name: "Harmonic Balance Waveform".to_string(),
         scale_name: "time".to_string(),
         scale_type: "time".to_string(),
+        logarithmic: false,
         scale: times,
         columns,
     })
@@ -1241,6 +1242,7 @@ fn sparameter_export_table(
             plot_name: "S-Parameters".to_string(),
             scale_name: "frequency".to_string(),
             scale_type: "frequency".to_string(),
+            logarithmic: false,
             scale: frequencies,
             columns,
         },

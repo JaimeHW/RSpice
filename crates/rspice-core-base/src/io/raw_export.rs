@@ -9,7 +9,7 @@
 //! Title: <simulation name>
 //! Date: <date>
 //! Plotname: Transient Analysis
-//! Flags: real
+//! Flags: real forward double
 //! No. Variables: <N>
 //! No. Points: <M>
 //! Variables:
@@ -399,7 +399,8 @@ impl RawExporter {
     /// and typed variable schema.
     pub fn write_xyce_ascii<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
         self.validate_data_shape()?;
-        self.with_layout(|layout| write_raw_header(writer, layout))?;
+        let forward = never_decreases(self.data.iter().filter_map(|point| point.first().copied()));
+        self.with_layout(|layout| write_raw_header(writer, layout, forward))?;
         writeln!(writer, "Values:")?;
         for (index, point) in self.data.iter().enumerate() {
             let Some((axis, signals)) = point.split_first() else {
@@ -437,6 +438,7 @@ impl RawExporter {
             plot_name: &self.plot_name,
             options: &options,
             complex: false,
+            logarithmic: false,
             variables: &variables,
             points: self.data.len(),
         })
@@ -467,6 +469,11 @@ pub struct RawPlotLayout<'a> {
     pub options: &'a [u8],
     /// `Flags: complex`: every value is a real/imaginary pair.
     pub complex: bool,
+    /// `Flags: log`: the analysis swept its scale logarithmically, by decade
+    /// or by octave. Set only by a caller that knows how the scale was
+    /// swept; `false` when it does not, since the flag is never inferred
+    /// from the values.
+    pub logarithmic: bool,
     /// The `(name, type)` of every variable, scale first.
     pub variables: &'a [(&'a str, &'a str)],
     pub points: usize,
@@ -483,6 +490,9 @@ pub fn write_raw_exponent(writer: &mut dyn Write, value: Value) -> io::Result<()
 /// A real plot writes only the real half. A complex one writes both, as two
 /// little-endian doubles or as `re,im` in ASCII, each number spelled by
 /// `number`.
+///
+/// `value` is read once more for every scale sample, before the header, to
+/// decide `forward`, so it must be a lookup that answers the same each time.
 pub fn write_raw_plot<W: Write + ?Sized>(
     writer: &mut W,
     layout: &RawPlotLayout<'_>,
@@ -491,7 +501,9 @@ pub fn write_raw_plot<W: Write + ?Sized>(
     mut value: impl FnMut(usize, usize) -> (Value, Value),
 ) -> io::Result<()> {
     let mut writer = writer;
-    write_raw_header(&mut writer, layout)?;
+    let forward = layout.variables.is_empty()
+        || never_decreases((0..layout.points).map(|point| value(point, 0).0));
+    write_raw_header(&mut writer, layout, forward)?;
     let variables = layout.variables.len();
     match format {
         RawFormat::Binary => {
@@ -526,16 +538,59 @@ pub fn write_raw_plot<W: Write + ?Sized>(
     Ok(())
 }
 
+/// The `Flags:` a plot is written under, one rule for both encodings.
+///
+/// `real` or `complex` says how many numbers each value is. LTspice's binary
+/// format stores a real plot's scale as a double and every other column as
+/// single precision unless `double` is present, and the readers built for
+/// LTspice's files (PyLTSpice, spicelib) switch to all doubles only on that
+/// flag. Every value written here is a double, so every real plot says
+/// `double`. A complex plot does not: every reader takes complex values as
+/// pairs of doubles, as LTspice writes them under `complex forward log`.
+///
+/// `forward` says the scale never decreases, as LTspice writes on a transient
+/// or a sweep, and is written only when the scale as written never does.
+/// `log` says the sweep was logarithmic and is written only when the caller
+/// knows it was ([`RawPlotLayout::logarithmic`]).
+///
+/// ngspice warns about each flag it does not know (`forward`, `log`,
+/// `double`) and loads the plot as it would without it, as it does LTspice's
+/// own files.
+fn raw_flags(layout: &RawPlotLayout<'_>, forward: bool) -> String {
+    let mut flags = String::from(if layout.complex { "complex" } else { "real" });
+    if forward {
+        flags.push_str(" forward");
+    }
+    if layout.logarithmic {
+        flags.push_str(" log");
+    }
+    if !layout.complex {
+        flags.push_str(" double");
+    }
+    flags
+}
+
+/// Whether a scale never decreases: every sample at least the one before.
+/// A NaN breaks the order, since it compares with nothing.
+fn never_decreases(scale: impl IntoIterator<Item = Value>) -> bool {
+    let mut previous = Value::NEG_INFINITY;
+    scale.into_iter().all(|sample| {
+        let ordered = sample >= previous;
+        previous = sample;
+        ordered
+    })
+}
+
 fn write_raw_header<W: Write + ?Sized>(
     writer: &mut W,
     layout: &RawPlotLayout<'_>,
+    forward: bool,
 ) -> io::Result<()> {
     writeln!(writer, "Title: {}", layout.title)?;
     writeln!(writer, "Date: {}", layout.date)?;
     writeln!(writer, "Plotname: {}", layout.plot_name)?;
     writer.write_all(layout.options)?;
-    let flags = if layout.complex { "complex" } else { "real" };
-    writeln!(writer, "Flags: {flags}")?;
+    writeln!(writer, "Flags: {}", raw_flags(layout, forward))?;
     writeln!(writer, "No. Variables: {}", layout.variables.len())?;
     writeln!(writer, "No. Points: {}", layout.points)?;
     writeln!(writer, "Variables:")?;
@@ -733,7 +788,7 @@ mod export_tests {
             lines[2],
             "Plotname: Digital Events (rspice-digital-events/1)"
         );
-        assert_eq!(lines[3], "Flags: real");
+        assert_eq!(lines[3], "Flags: real forward double");
         assert_eq!(lines[4], "No. Variables: 2");
         assert_eq!(lines[5], "No. Points: 3");
         assert_eq!(lines[6], "Variables:");
@@ -853,6 +908,103 @@ mod export_tests {
                 .expect_err("an unreadable event plot must not be written");
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
             assert!(bytes.is_empty(), "refusal must not leave a partial plot");
+        }
+    }
+
+    /// The `Flags:` line of one plot written by [`write_raw_plot`] over
+    /// `scale`, with one signal of `signal`, and the plot read back when the
+    /// reader admits it (it refuses a NaN).
+    fn written_plot(
+        format: RawFormat,
+        complex: bool,
+        logarithmic: bool,
+        scale: &[Value],
+        signal: &[(Value, Value)],
+    ) -> (String, Option<crate::io::ltspice_raw::RawWaveformData>) {
+        let variables = [("frequency", "frequency"), ("V(out)", "voltage")];
+        let layout = RawPlotLayout {
+            title: "flags",
+            date: "now",
+            plot_name: "AC Analysis",
+            options: &[],
+            complex,
+            logarithmic,
+            variables: &variables,
+            points: scale.len(),
+        };
+        let mut bytes = Vec::new();
+        write_raw_plot(
+            &mut bytes,
+            &layout,
+            format,
+            write_raw_exponent,
+            |point, variable| match variable {
+                0 => (scale[point], 0.0),
+                _ => signal[point],
+            },
+        )
+        .expect("write the plot");
+        let flags = bytes
+            .split(|byte| *byte == b'\n')
+            .find_map(|line| line.strip_prefix(b"Flags: "))
+            .map(|flags| String::from_utf8(flags.to_vec()).expect("flags are UTF-8"))
+            .expect("the plot has a Flags: line");
+        (flags, parse_raw_reader(&mut Cursor::new(bytes)).ok())
+    }
+
+    #[test]
+    fn flags_carry_what_ltspice_readers_need_to_decode_the_values() {
+        let adjacent = f64::from_bits(1.0_f64.to_bits() + 1);
+        for format in [RawFormat::Binary, RawFormat::Ascii] {
+            // Real values are doubles, which LTspice's readers decode as
+            // doubles only on `double`; a scale that never decreases, repeated
+            // samples included, is `forward`.
+            let (flags, parsed) = written_plot(
+                format,
+                false,
+                false,
+                &[0.0, 1.0e-9, 1.0e-9, 2.0e-9],
+                &[(adjacent, 0.0), (-0.0, 0.0), (1.0e-300, 0.0), (-7.5, 0.0)],
+            );
+            assert_eq!(flags, "real forward double", "{format:?}");
+            let parsed = parsed.expect("read the plot back");
+            assert!(parsed.header.is_double);
+            let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            assert_eq!(
+                bits(&parsed.waveforms[1].y),
+                bits(&[adjacent, -0.0, 1.0e-300, -7.5])
+            );
+
+            // A DC sweep stepped downward, or a scale with a NaN, is not.
+            for scale in [[5.0, 2.5, 0.0], [0.0, f64::NAN, 2.0]] {
+                let (flags, _) = written_plot(format, false, false, &scale, &[(1.0, 0.0); 3]);
+                assert_eq!(flags, "real double", "{format:?} {scale:?}");
+            }
+
+            // A log sweep says `log` when the caller knows it; complex values
+            // are pairs of doubles to every reader and carry no `double`.
+            let signal = [(1.0, -0.0), (adjacent, -2.5e-12)];
+            for (logarithmic, expected) in
+                [(true, "complex forward log"), (false, "complex forward")]
+            {
+                let (flags, parsed) =
+                    written_plot(format, true, logarithmic, &[1.0, 1.0e3], &signal);
+                assert_eq!(flags, expected, "{format:?}");
+                let parsed = parsed.expect("read the plot back");
+                assert!(parsed.header.is_complex);
+                assert_eq!(bits(&parsed.waveforms[1].y), bits(&[1.0, adjacent]));
+                assert_eq!(
+                    bits(
+                        parsed.waveforms[1]
+                            .y_imag
+                            .as_deref()
+                            .expect("imaginary part")
+                    ),
+                    bits(&[-0.0, -2.5e-12])
+                );
+            }
+            let (flags, _) = written_plot(format, true, true, &[1.0e3, 1.0], &signal);
+            assert_eq!(flags, "complex log", "{format:?}");
         }
     }
 

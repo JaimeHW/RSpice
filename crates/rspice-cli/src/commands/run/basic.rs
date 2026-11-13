@@ -372,7 +372,10 @@ pub(super) fn write_dc_op_output(
                     path: path.to_path_buf(),
                     source: e,
                 })?;
-                writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
+                // The rule the shared rawfile writer follows: every value is a
+                // double, which LTspice's readers decode as doubles only on
+                // `double`, and one point never decreases, so it is `forward`.
+                writeln!(file, "Flags: real forward double").map_err(|e| CliError::OutputError {
                     path: path.to_path_buf(),
                     source: e,
                 })?;
