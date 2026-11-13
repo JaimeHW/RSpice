@@ -158,8 +158,14 @@ pub struct Theme {
     /// Control density.
     pub density: Density,
     /// Tell traces apart by dash and marker as well as by hue (≈8 % of male
-    /// engineers cannot separate red from green).
-    #[serde(default = "default_color_safe_traces")]
+    /// engineers cannot separate red from green). Off by default: a curve is
+    /// a solid line in its palette hue, as in every waveform viewer, and
+    /// symbols and dashes are a style the reader opts into.
+    ///
+    /// Stored as `color_safe_traces`. The key `colorblind_traces` was written
+    /// while this was on by default, so a stored `true` there records the old
+    /// default rather than a choice, and it is not read.
+    #[serde(rename = "color_safe_traces", default = "default_color_safe_traces")]
     pub colorblind_traces: bool,
     /// Symbol/grid separation on engineering canvases. `62` is the reviewed
     /// palette baseline used by the mockup.
@@ -178,7 +184,7 @@ const fn default_canvas_contrast() -> u8 {
 }
 
 const fn default_color_safe_traces() -> bool {
-    true
+    false
 }
 
 fn deserialize_canvas_contrast<'de, D>(deserializer: D) -> Result<u8, D::Error>
@@ -213,7 +219,7 @@ impl<'de> Deserialize<'de> for Theme {
             mode: Mode,
             #[serde(default)]
             density: Density,
-            #[serde(default = "default_color_safe_traces")]
+            #[serde(rename = "color_safe_traces", default = "default_color_safe_traces")]
             colorblind_traces: bool,
             #[serde(
                 default = "default_canvas_contrast",
@@ -680,7 +686,7 @@ mod tests {
 
         assert_eq!(resolved.color.canvas_grid, baseline.color.canvas_grid);
         assert_eq!(resolved.color.symbol, baseline.color.symbol);
-        assert!(resolved.color_safe_traces);
+        assert!(!resolved.color_safe_traces);
     }
 
     #[test]
@@ -748,11 +754,11 @@ mod tests {
 
     #[test]
     fn legacy_and_out_of_range_canvas_contrast_are_normalized() {
-        let legacy = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","colorblind_traces":false}"#;
+        let legacy = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","color_safe_traces":false}"#;
         let restored: Theme = serde_json::from_str(legacy).expect("legacy theme deserializes");
         assert_eq!(restored.canvas_contrast, 62);
 
-        let out_of_range = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","colorblind_traces":false,"canvas_contrast":255}"#;
+        let out_of_range = r#"{"direction":"Instrument","mode":"Dark","density":"Compact","color_safe_traces":false,"canvas_contrast":255}"#;
         let restored: Theme =
             serde_json::from_str(out_of_range).expect("theme contrast is recoverable");
         assert_eq!(restored.canvas_contrast, 100);
@@ -780,12 +786,29 @@ mod tests {
         assert_eq!(restored.canvas_theme, EngineeringCanvasTheme::Dark);
     }
 
+    /// Traces are told apart by hue alone unless the reader asks for more. A
+    /// theme stored while color-safe traces were the default carries
+    /// `"colorblind_traces":true` without anyone having chosen it, so it comes
+    /// back off; a choice stored under the current key comes back as made.
     #[test]
-    fn legacy_theme_defaults_to_the_mockup_color_safe_trace_policy() {
-        let legacy = r#"{"direction":"Instrument","mode":"Dark","density":"Compact"}"#;
-        let restored: Theme = serde_json::from_str(legacy).expect("legacy theme deserializes");
+    fn color_safe_traces_are_off_unless_chosen_under_the_current_key() {
+        for stored in [
+            r#"{"direction":"Instrument","mode":"Dark","density":"Compact"}"#,
+            r#"{"direction":"Instrument","mode":"Dark","density":"Compact","colorblind_traces":true}"#,
+        ] {
+            let restored: Theme = serde_json::from_str(stored).expect("stored theme deserializes");
+            assert!(!restored.colorblind_traces, "{stored}");
+            assert!(!restored.tokens().color_safe_traces, "{stored}");
+        }
+        assert!(!Theme::default().colorblind_traces);
 
-        assert!(restored.colorblind_traces);
+        let chosen = Theme {
+            colorblind_traces: true,
+            ..Theme::default()
+        };
+        let encoded = serde_json::to_string(&chosen).expect("theme serializes");
+        assert!(encoded.contains(r#""color_safe_traces":true"#), "{encoded}");
+        let restored: Theme = serde_json::from_str(&encoded).expect("theme round-trips");
         assert!(restored.tokens().color_safe_traces);
     }
 
