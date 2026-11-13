@@ -321,65 +321,6 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
     state
 }
 
-/// A persisted session whose active tab points into the legacy seeded
-/// "primitives" library must come back with the drawn content moved to
-/// the user library and the placeholder library gone — otherwise
-/// `ensure_library_model` resurrects the placeholder cell every launch.
-#[test]
-fn legacy_primitives_content_migrates_to_user_library() {
-    let mut state = AppState::default();
-
-    // Simulate the legacy session: seeded library + an open tab with
-    // a drawn schematic inside it.
-    let mut legacy = Library::new("primitives");
-    let mut cell = Cell::new("ISource AC");
-    cell.add_view(View::new("schematic", ViewType::Schematic));
-    legacy.add_cell(cell);
-    state.model.library_manager.add_library(legacy);
-
-    let mut drawn = crate::state::SchematicState::default();
-    drawn.add_component(ComponentType::Njfet, Point::new(0, 0));
-    state
-        .model
-        .workspace
-        .insert_schematic_editor("primitives/ISource AC/schematic".to_owned(), drawn);
-    state.model.workspace.content.active_view =
-        crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
-
-    state.migrate_legacy_primitives();
-
-    assert!(
-        state
-            .model
-            .library_manager
-            .get_library("primitives")
-            .is_none(),
-        "legacy library must be gone"
-    );
-    assert_eq!(state.model.workspace.content.active_view.library, "user");
-    let migrated = state
-        .model
-        .workspace
-        .content
-        .schematic_buffers
-        .get("user/ISource AC/schematic")
-        .expect("buffer migrated to the user library");
-    assert_eq!(
-        migrated.document().components.len(),
-        1,
-        "drawn content preserved"
-    );
-    assert!(
-        state
-            .model
-            .library_manager
-            .get_library("user")
-            .and_then(|lib| lib.get_cell("ISource AC"))
-            .is_some(),
-        "migrated cell exists in the user library"
-    );
-}
-
 #[test]
 fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     let mut state = AppState::default();

@@ -179,9 +179,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             project_workspace: Option<Box<crate::state::ProjectWorkspace>>,
             #[serde(default = "default_boxed_library_manager")]
             library_manager: Box<crate::state::LibraryManager>,
-            // `shell` is a read-only alias for sessions written before the
-            // clean-room workbench migration.
-            #[serde(default, rename = "ui_session", alias = "shell")]
+            #[serde(default, rename = "ui_session")]
             ui: Box<UiSessionWire>,
             #[serde(default)]
             workbench: Box<WorkbenchWire>,
@@ -193,8 +191,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             simulation_results: Box<ProjectSimulationResults>,
             // A context that decodes but does not restore is reported below,
             // and the rest of the session is kept.
-            #[serde(default)]
-            execution_context: Option<Box<ProjectExecutionContext>>,
+            execution_context: Box<ProjectExecutionContext>,
             #[serde(default)]
             native_project_binding_receipt: Option<serde_json::Value>,
             #[serde(default)]
@@ -318,21 +315,15 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .routing_mode = state.design.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
-        let execution_warnings = match de.execution_context {
-            Some(context) => match crate::io::restore_execution_context(*context) {
-                Ok((simulation_plan, model_library_manager, warnings)) => {
-                    state.model.sim_setup = simulation_plan;
-                    state.model.model_library_manager = model_library_manager;
-                    warnings
-                }
-                Err(error) => vec![format!(
-                    "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
-                )],
-            },
-            None => vec![
-                "This legacy session predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
-                    .to_owned(),
-            ],
+        let execution_warnings = match crate::io::restore_execution_context(*de.execution_context) {
+            Ok((simulation_plan, model_library_manager, warnings)) => {
+                state.model.sim_setup = simulation_plan;
+                state.model.model_library_manager = model_library_manager;
+                warnings
+            }
+            Err(error) => vec![format!(
+                "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
+            )],
         };
         let mut simulation_results = *de.simulation_results;
         let simulation_results_warning = simulation_results
@@ -832,39 +823,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_session_without_results_loads_empty_result_history() {
-        let restored: AppState = serde_json::from_str("{}").expect("legacy session loads");
-
-        assert_eq!(restored.model.simulation.retained.run_count(), 0);
-        assert!(restored.model.simulation.view.waveforms.is_empty());
-        assert!(!restored.model.simulation.execution.is_running);
-        assert!(!restored.settings.browser_spoken_feedback);
-        assert!(restored.model.log_buffer.entries().any(|entry| {
-            entry
-                .message
-                .contains("legacy session predates durable simulation plans")
-        }));
-    }
-
-    #[test]
-    fn unversioned_session_with_explicitly_null_project_identity_is_rejected() {
-        let state = AppState::default();
-        let mut session = serde_json::to_value(state).expect("session serializes");
-        let descriptor = session["project_workspace"]["project"]
-            .as_object_mut()
-            .expect("project descriptor object");
-        descriptor.remove("schema_version");
-        descriptor.insert("id".to_owned(), serde_json::Value::Null);
-
-        let error = match serde_json::from_value::<AppState>(session) {
-            Ok(_) => panic!("explicit null project identity must not migrate as legacy absence"),
-            Err(error) => error,
-        };
-
-        assert!(error.to_string().contains("must not be explicitly null"));
-    }
-
-    #[test]
     fn session_round_trip_preserves_unsaved_plan_drafts_and_model_catalog() {
         use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
         use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
@@ -1255,23 +1213,6 @@ mod tests {
         assert!(
             !json.contains("V(out)/V(in)"),
             "project-scoped Waves expression text leaked into session JSON: {json}"
-        );
-    }
-
-    #[test]
-    fn legacy_session_expr_traces_are_ignored_on_load() {
-        let json = r#"{
-            "shell": {
-                "result_viewer": "Waves",
-                "expr_traces": [[0, "V(out)/V(in)"]]
-            }
-        }"#;
-
-        let restored: AppState = serde_json::from_str(json).expect("legacy session loads");
-
-        assert!(
-            restored.results.results.session.exprs.is_empty(),
-            "legacy project-scoped Waves traces must not be restored into a new session"
         );
     }
 

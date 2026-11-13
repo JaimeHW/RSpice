@@ -475,11 +475,6 @@ impl RSpiceApp {
         rspice_ui_kit::fonts::system::attach(&cc.egui_ctx);
         dialogs::help::report_problem::record_graphics_adapter(cc.wgpu_render_state.as_ref());
 
-        // Persisted sessions may still carry the legacy seeded
-        // "primitives" library (and tabs pointing into it); migrate any
-        // drawn content to the user library and drop the placeholders.
-        state.migrate_legacy_primitives();
-
         configure_platform_input_contract(&cc.egui_ctx);
         #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
         cc.egui_ctx
