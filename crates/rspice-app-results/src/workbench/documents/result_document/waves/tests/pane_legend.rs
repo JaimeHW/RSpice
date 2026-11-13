@@ -432,13 +432,32 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
     assert!(value.ends_with('V'), "the reading is in volts: {value:?}");
 }
 
-/// A pane with nothing to show is its header alone: the C4 strip's currents,
-/// none plotted, keep the row that offers them, with no autoscale and no log
-/// toggle for an axis the pane does not draw.
+/// The C4 strip's currents, which the run keeps but does not plot and
+/// nobody has plotted, open no pane: the strip draws its volts and its
+/// staircase, and the currents wait in the signal browser. Once the reader
+/// has hidden one, the currents' pane is its header alone, the row that
+/// offers them, with no autoscale and no log toggle for an axis the pane
+/// does not draw.
 #[test]
 fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
     let (mut state, _) = sar_strip(BusRadix::Unsigned, false);
     let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    assert!(
+        text(&output, "62 hidden").is_none() && text(&output, "45 hidden").is_some(),
+        "no pane is drawn for currents nobody plotted"
+    );
+    let (analysis, waveform) = {
+        let models = super::lanes::strip(&mut state);
+        let current = models[0]
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name.starts_with("I("))
+            .expect("the run keeps its currents");
+        (models[0].analysis_index(), current.waveform_index)
+    };
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
     let output = settled(&ctx, &mut state);
     let currents = text(&output, "62 hidden").expect("the currents' row offers them");
     let volts = text(&output, "45 hidden").expect("the volts pane's row");

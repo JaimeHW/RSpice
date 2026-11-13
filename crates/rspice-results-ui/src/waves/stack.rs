@@ -794,14 +794,18 @@ fn show_strip_plot(
     edits: &mut ExpressionEdits,
 ) {
     let t = Tokens::get(ui.ctx());
+    // A strip with signals and nothing of them plotted has no pane, and so
+    // no legend to enable one in: they wait in the signal browser.
+    const NOTHING_PLOTTED: &str = "Nothing plotted — tick a signal in Signals";
     let Some(x_domain) = model.x_range else {
-        well_hint(ui, "No data");
+        let retained = !model.traces.is_empty() || !model.lane_traces.is_empty();
+        well_hint(ui, if retained { NOTHING_PLOTTED } else { "No data" });
         return;
     };
     let panes = model.unit_panes();
     let wanted_lanes = host.event_lane_height(model).max(0.0);
     if panes.is_empty() && wanted_lanes == 0.0 {
-        well_hint(ui, "No visible traces — enable one in the legend");
+        well_hint(ui, NOTHING_PLOTTED);
         return;
     }
 

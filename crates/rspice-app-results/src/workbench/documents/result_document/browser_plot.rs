@@ -236,6 +236,15 @@ pub(crate) fn set_result_signal_plotted(
         }
         if plotted {
             reveal_strip(state, key.analysis());
+        } else if let Some(waveform) = state.model.simulation.retained.runs[run_index]
+            .analyses
+            .get(analysis_index)
+            .and_then(|analysis| analysis.waveforms.get(waveform_index))
+        {
+            // Taken off the plot here, a signal is unplotted, not hidden in
+            // its pane's legend.
+            let dataset_default = waveform.visible;
+            state.results.forget_waveform_hide(key, dataset_default);
         }
         return;
     }

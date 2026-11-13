@@ -106,7 +106,10 @@ impl ResultsState {
         dataset_default: bool,
     ) -> bool {
         let visible = !self.session.waveform_visibility(&key, dataset_default);
-        if visible == dataset_default {
+        // A hide is kept even when it restores the dataset's default: a pane
+        // whose signal the reader plotted and then hid keeps its header, where
+        // the signal waits to be shown again.
+        if visible && visible == dataset_default {
             self.session.waveform_visibility.remove(&key);
         } else {
             self.session.waveform_visibility.insert(key, visible);
@@ -116,6 +119,21 @@ impl ResultsState {
         self.session.derived = DerivedSeries::default();
         self.session.clear_cursors();
         visible
+    }
+
+    /// Forget the reader's hide of a source the dataset hides by default, so
+    /// it is unplotted as it was before the reader plotted it: a signal taken
+    /// off the plot from the browser leaves no pane behind for itself.
+    pub(super) fn forget_waveform_hide(
+        &mut self,
+        key: &SourceWaveformPresentationKey,
+        dataset_default: bool,
+    ) {
+        if !dataset_default && self.session.waveform_visibility.get(key) == Some(&false) {
+            self.session.waveform_visibility.remove(key);
+            self.models.invalidate();
+            self.session.cache.invalidate();
+        }
     }
 
     /// Replace quick-view visibility for one analysis with a document-owned

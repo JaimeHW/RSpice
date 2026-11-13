@@ -308,13 +308,46 @@ fn the_name_column_opens_as_wide_as_its_longest_name() {
     );
 }
 
-/// A pane whose traces are all hidden is its header row and nothing below
-/// it: the shared axis starts right under it, and no hint fills a pane
+/// The review's first current: its analysis and column, its name and its
+/// strip's identity.
+fn first_current(state: &mut ResultsTestHost) -> (usize, usize, String, AnalysisPresentationKey) {
+    let models = strip(state);
+    let model = &models[0];
+    let trace = model
+        .traces
+        .iter()
+        .find(|trace| trace.source_waveform_name.starts_with("I("))
+        .expect("the review keeps its currents");
+    (
+        model.analysis_index(),
+        trace.waveform_index,
+        trace.source_waveform_name.clone(),
+        model.analysis_key,
+    )
+}
+
+/// The units of the panes the review strip draws, in order.
+fn pane_units(state: &mut ResultsTestHost) -> Vec<String> {
+    strip(state)[0]
+        .unit_panes()
+        .iter()
+        .map(|pane| pane.unit.to_owned())
+        .collect()
+}
+
+/// A pane whose traces the reader has hidden is its header row and nothing
+/// below it: the shared axis starts right under it, and no hint fills a pane
 /// height with a sentence.
 #[test]
 fn a_pane_with_every_trace_hidden_is_its_header_alone() {
     let ctx = themed_context(crate::ui::Theme::default());
     let mut state = review_strip(false);
+    // The reader plots one of the currents and hides it again from the
+    // legend.
+    let (analysis, waveform, ..) = first_current(&mut state);
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    assert_eq!(pane_units(&mut state), ["V", "A"]);
     let output = settled(&ctx, &mut state);
     let found = texts(&output);
     assert!(
@@ -339,6 +372,69 @@ fn a_pane_with_every_trace_hidden_is_its_header_alone() {
         "the axis follows the header: header ends at {}, axis starts at {}",
         header.bottom(),
         axis.top()
+    );
+}
+
+/// A pane of signals the dataset only hides by default, which nobody has
+/// plotted, is not drawn: the review's currents open no "A" pane, as a
+/// waveform viewer shows no strip for a signal until it is plotted. Ticked in
+/// the signal browser, a current opens its pane; unticked there, it leaves
+/// none behind; hidden from its pane's legend, it keeps the pane's header.
+#[test]
+fn a_pane_only_the_default_hides_is_not_drawn() {
+    use crate::workbench::documents::result_document::browser_plot::set_result_signal_plotted;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    let ctx = themed_context(crate::ui::Theme::default());
+    let mut state = review_strip(false);
+    assert_eq!(pane_units(&mut state), ["V"]);
+    let output = settled(&ctx, &mut state);
+    let offered = texts(&output)
+        .into_iter()
+        .filter(|(text, _)| text.ends_with(" hidden"))
+        .count();
+    assert_eq!(offered, 1, "only the voltage pane offers hidden signals");
+
+    let (analysis, waveform, name, strip_key) = first_current(&mut state);
+    let key = SourceWaveformPresentationKey::new(strip_key, name);
+    set_result_signal_plotted(&mut state.results_parts(), &key, true);
+    assert_eq!(
+        pane_units(&mut state),
+        ["V", "A"],
+        "a ticked current opens its pane"
+    );
+    set_result_signal_plotted(&mut state.results_parts(), &key, false);
+    assert_eq!(
+        pane_units(&mut state),
+        ["V"],
+        "unticked in the browser, the current leaves no pane behind"
+    );
+    set_result_signal_plotted(&mut state.results_parts(), &key, true);
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    assert_eq!(
+        pane_units(&mut state),
+        ["V", "A"],
+        "hidden from its legend, the current keeps its pane's header"
+    );
+
+    // With nothing plotted at all, the strip says where signals are plotted
+    // from.
+    let mut state = review_strip(false);
+    for analysis in &mut state.model.simulation.retained.runs[0].analyses {
+        for waveform in &mut analysis.waveforms {
+            waveform.visible = false;
+        }
+    }
+    state.model.simulation.view.data_version =
+        state.model.simulation.view.data_version.wrapping_add(1);
+    assert!(pane_units(&mut state).is_empty());
+    let output = settled(&ctx, &mut state);
+    assert!(
+        text_rect(&output, "Nothing plotted — tick a signal in Signals").is_some(),
+        "an empty strip points at the signal browser: {:?}",
+        texts(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect::<Vec<_>>()
     );
 }
 

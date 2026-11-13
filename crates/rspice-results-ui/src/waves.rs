@@ -126,6 +126,10 @@ pub struct StripTrace {
     pub shape: Arc<SweepShape>,
     pub kind: TraceKind,
     pub visible: bool,
+    /// Hidden only because the dataset does not plot it by default: the
+    /// reader has neither shown nor hidden it. A pane of such traces alone is
+    /// not drawn (see [`StripModel::unit_panes`]).
+    pub hidden_by_default: bool,
     /// The run this trace belongs to (cache-key discriminator).
     pub run_id: u64,
     /// Overlay traces come from a non-active run: same signal hue, reduced
@@ -447,7 +451,11 @@ impl StripModel {
     /// The strip's panes: retained signal identities grouped by unit, in the
     /// order the units first appear so a strip's layout is stable across
     /// visibility changes. A pane with no visible trace remains as the exact
-    /// owner of its hidden signals so its Add signal control can restore one.
+    /// owner of its hidden signals so its Add signal control can restore one,
+    /// once the reader has hidden one of them or one of its expressions. A
+    /// pane of signals the dataset only hides by default, which nobody has
+    /// plotted, is not drawn, as a waveform viewer shows no strip for a
+    /// signal until it is plotted; those signals wait in the signal browser.
     ///
     /// Phase owns a stacked pane of its own — the mockup's Bode instrument
     /// reads magnitude over phase as two weighted panes sharing one X
@@ -455,21 +463,28 @@ impl StripModel {
     /// after the quantity panes so magnitude keeps the primary slot.
     pub fn unit_panes(&self) -> Vec<UnitPane<'_>> {
         let mut panes: Vec<UnitPane<'_>> = Vec::new();
+        // Whether each pane has something the reader plotted or hid: a pane of
+        // signals hidden only by the dataset's default is dropped at the end.
+        let mut chosen: Vec<bool> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
             let unit = self.trace_unit(trace);
-            match panes.iter_mut().find(|pane| pane.unit == unit) {
-                Some(pane) => {
+            match panes.iter().position(|pane| pane.unit == unit) {
+                Some(ordinal) => {
                     if trace.visible {
-                        pane.traces.push(index);
+                        panes[ordinal].traces.push(index);
                     }
+                    chosen[ordinal] |= !trace.hidden_by_default;
                 }
-                None => panes.push(UnitPane {
-                    unit,
-                    traces: trace.visible.then_some(index).into_iter().collect(),
-                    expressions: Vec::new(),
-                    hidden_expressions: Vec::new(),
-                    unlabeled: false,
-                }),
+                None => {
+                    panes.push(UnitPane {
+                        unit,
+                        traces: trace.visible.then_some(index).into_iter().collect(),
+                        expressions: Vec::new(),
+                        hidden_expressions: Vec::new(),
+                        unlabeled: false,
+                    });
+                    chosen.push(!trace.hidden_by_default);
+                }
             }
         }
         // A real lane is drawn in the pane of its unit, which it opens when
@@ -480,14 +495,18 @@ impl StripModel {
             .filter(|lane| lane.visible && lane.kind == LaneTraceKind::Real)
         {
             let unit = self.lane_unit(lane);
-            if !panes.iter().any(|pane| pane.unit == unit) {
-                panes.push(UnitPane {
-                    unit,
-                    traces: Vec::new(),
-                    expressions: Vec::new(),
-                    hidden_expressions: Vec::new(),
-                    unlabeled: false,
-                });
+            match panes.iter().position(|pane| pane.unit == unit) {
+                Some(ordinal) => chosen[ordinal] = true,
+                None => {
+                    panes.push(UnitPane {
+                        unit,
+                        traces: Vec::new(),
+                        expressions: Vec::new(),
+                        hidden_expressions: Vec::new(),
+                        unlabeled: false,
+                    });
+                    chosen.push(true);
+                }
             }
         }
         // An expression joins the pane whose unit is its own however the two
@@ -510,23 +529,32 @@ impl StripModel {
         };
         for expression in self.expression_panes.iter().filter(|e| e.visible) {
             match owner(&panes, expression) {
-                Some(owner) => panes[owner].expressions.push(expression.slot),
-                None => panes.push(UnitPane {
-                    unit: expression.unit.as_str(),
-                    traces: Vec::new(),
-                    expressions: vec![expression.slot],
-                    hidden_expressions: Vec::new(),
-                    unlabeled: expression.unknown.is_some(),
-                }),
+                Some(owner) => {
+                    panes[owner].expressions.push(expression.slot);
+                    chosen[owner] = true;
+                }
+                None => {
+                    panes.push(UnitPane {
+                        unit: expression.unit.as_str(),
+                        traces: Vec::new(),
+                        expressions: vec![expression.slot],
+                        hidden_expressions: Vec::new(),
+                        unlabeled: expression.unknown.is_some(),
+                    });
+                    chosen.push(true);
+                }
             }
         }
         for expression in self.expression_panes.iter().filter(|e| !e.visible) {
             if let Some(owner) = owner(&panes, expression) {
                 panes[owner].hidden_expressions.push(expression.slot);
+                chosen[owner] = true;
             }
         }
         let (quantity, phase): (Vec<_>, Vec<_>) = panes
             .into_iter()
+            .zip(chosen)
+            .filter_map(|(pane, chosen)| chosen.then_some(pane))
             .partition(|pane| !matches!(pane.unit, "°" | "rad"));
         quantity.into_iter().chain(phase).collect()
     }

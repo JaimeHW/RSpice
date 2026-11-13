@@ -406,10 +406,12 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
     );
 }
 
+/// A pane whose signal the reader hid stays, as the owner of the signal it
+/// can show again.
 #[test]
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
-    state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible = false;
+    toggle_visibility(&mut state.results_parts(), 0, 0);
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,

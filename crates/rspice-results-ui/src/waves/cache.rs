@@ -209,6 +209,8 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
         for trace in &mut model.traces {
             let Some(waveform) = analysis.waveforms.get(trace.waveform_index) else {
                 trace.visible = false;
+                // Nothing to plot holds no pane open.
+                trace.hidden_by_default = true;
                 source_visible.push(false);
                 continue;
             };
@@ -216,12 +218,15 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 model.analysis_key,
                 trace.source_waveform_name.clone(),
             );
-            let shown = overrides.get(&key).copied().unwrap_or(waveform.visible);
+            let chosen = overrides.get(&key).copied();
+            let shown = chosen.unwrap_or(waveform.visible);
             source_visible.push(shown);
-            trace.visible = shown
-                && trace
-                    .family_visibility_key
-                    .is_none_or(|key| !hidden_family_traces.contains(&key));
+            let family_shown = trace
+                .family_visibility_key
+                .is_none_or(|key| !hidden_family_traces.contains(&key));
+            trace.visible = shown && family_shown;
+            // An override is the reader's choice, a hide as much as a show.
+            trace.hidden_by_default = !shown && chosen.is_none() && family_shown;
         }
         let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, palette);
         for lane in &mut model.lane_traces {

@@ -129,7 +129,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 }
 
 /// Hiding the last trace leaves the strip with nothing to scale against, and
-/// every caption, axis and viewport gesture reads that as "No data". An extent
+/// every caption, axis and viewport gesture reads that as nothing plotted. An extent
 /// baked before the overrides were applied reports a span instead.
 #[test]
 fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
