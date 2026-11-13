@@ -12,27 +12,157 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::{MessageId, RSpiceApp};
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::code::CodeFeature;
+use crate::workbench::documents::text_editor_commands::ActiveSourceEditor;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::{MessageId, RSpiceApp, WorkbenchSession};
 
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
+    CodeEditorLanguage, CodeWorkspaceRuntimeState, EditorFindings, show_veriloga_document_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
 const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
 
 /// A Verilog-A cell view, as the Design workspace's document.
+///
+/// The design page draws the view through this, which lends the page the
+/// code feature's context: the page prepares, putting its editor in front,
+/// and then draws in a context holding the source menu's answers while
+/// [`source_menu_open`] says the menu is open or opening, and whether an
+/// application-modal dialog is open. What the reader pressed on the
+/// interface strip changes the design's own state, past the code feature,
+/// so it is carried out here once the page has drawn. This adapter goes
+/// when design stops calling it and the shell draws the page by name.
 pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
+    let application_modal = app.state.application_modal_open();
+    prepare(&mut crate::workbench::features::cx(app));
+    let ctx = ui.ctx().clone();
+    let pressed = show(
+        ui,
+        &mut crate::workbench::features::cx_with_menu_answers(app, |app| {
+            source_menu_open(&ctx, &app.state.workbench)
+        })
+        .with_application_modal(application_modal),
+    );
+    match pressed {
+        None => {}
+        Some(InterfaceAction::UpdateSymbol) => app.state.update_active_veriloga_symbol(),
+        Some(InterfaceAction::Place) => match app.state.place_offered_veriloga_device() {
+            // The canvas takes the keyboard, as the shelf leaves it, so R, M
+            // and Esc work before the pointer reaches the sheet. No status
+            // line: the armed cursor is the answer, and a sentence about it
+            // outlives the arm.
+            Ok(()) => rspice_schematic_editor::view::canvas::request_focus(ui.ctx()),
+            Err(error) => app.state.prompt(error),
+        },
+    }
+}
+
+/// Before the page draws, in the code feature's context: put the page's
+/// editor in front, before the shell takes the dispatcher's answers the
+/// page's context holds, so they are the answers the editor gets. The page
+/// publishes it again as it draws it.
+fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+    use crate::workbench::documents::code_workspace::{
+        active_veriloga_file_path, selected_veriloga_source_in, viewed_veriloga_header,
+    };
+
+    let Ok(selected) = selected_veriloga_source_in(cx.model) else {
+        return;
+    };
+    let active_path = active_veriloga_file_path(&cx.state.code_workspace, &selected);
+    let header = viewed_veriloga_header(
+        &cx.state.code_workspace.veriloga,
+        selected.bundle().id(),
+        &active_path,
+    );
+    let shown_path =
+        header.map_or_else(|| active_path.clone(), |(identity, _)| identity.to_owned());
+    cx.wb.active_source_editor = Some(page_editor(
+        cx.model,
+        &cx.state.code_workspace,
+        cx.platform,
+        &selected,
+        &shown_path,
+        editor_language(&selected, &active_path, header.is_some()),
+        header.is_none(),
+    ));
+}
+
+/// Whether the page's editor's right-click menu is open, or may open on
+/// what this frame carries, read from the editor the page put in front.
+/// The page's context holds the menu's answers only then, so this is read
+/// before the context is lent.
+fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
+    wb.active_source_editor.is_some_and(|editor| {
+        crate::workbench::documents::virtual_text_editor::context_menu_may_show(ctx, editor.id)
+    })
+}
+
+/// The language the editor reads the file it shows in: the build profile
+/// beside the module is TOML; its sources, and a built-in header read in
+/// place of one, are Verilog-A.
+fn editor_language(
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    active_path: &str,
+    header_shown: bool,
+) -> CodeEditorLanguage {
+    if !header_shown
+        && selected.bundle().role_for_path(active_path)
+            == Some(crate::state::ProjectSourceRole::VerilogABuildProfile)
+    {
+        CodeEditorLanguage::Toml
+    } else {
+        CodeEditorLanguage::VerilogA
+    }
+}
+
+/// The page's editor of `shown_path`, as the Edit menu and the source menu
+/// act on it. `editable` is false for a built-in header.
+fn page_editor(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    shown_path: &str,
+    editor_language: CodeEditorLanguage,
+    editable: bool,
+) -> ActiveSourceEditor {
+    let language = crate::state::ProjectSourceLanguage::VerilogA;
+    let bundle_id = selected.bundle().id();
+    ActiveSourceEditor {
+        id: crate::workbench::documents::code_workspace::source_editor_id(
+            language, bundle_id, shown_path,
+        ),
+        // A built-in header is read here whatever the bundle allows.
+        editable: editable
+            && crate::workbench::documents::code_workspace::source_bundle_document_is_editable_in(
+                model, code, platform, language, bundle_id, shown_path,
+            ),
+        // The build profile beside the module is TOML, which the language
+        // service does not index, and a built-in header is not part of the
+        // bundle it indexes.
+        navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
+    }
+}
+
+/// Draw a Verilog-A cell view in the code feature's context, and say what
+/// the reader pressed on the interface strip.
+fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
     // Import and compile results are consumed by the frame loop, so a result
     // that lands while the editor is off screen is still published. Only what
     // needs this surface's pointer and context stays here.
-    handle_veriloga_file_drop(ui.ctx(), app);
+    handle_veriloga_file_drop(ui.ctx(), cx);
     let t = Tokens::get(ui.ctx());
-    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(app);
+    let selected =
+        crate::workbench::documents::code_workspace::selected_veriloga_source_in(cx.model);
+    let mut pressed = None;
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -41,29 +171,22 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
         let selected = match selected {
             Ok(selected) => selected,
             Err(error) => {
-                missing_source(ui, app, &error);
+                missing_source(ui, cx, &error);
                 return;
             }
         };
         let active_path = crate::workbench::documents::code_workspace::active_veriloga_file_path(
-            &app.code_workspace_parts(),
+            &cx.state.code_workspace,
             &selected,
         );
         // A built-in header the navigator opened is read in this same well,
         // in place of the file, and never edited.
         let header = crate::workbench::documents::code_workspace::viewed_veriloga_header(
-            &app.state.code.code_workspace.veriloga,
+            &cx.state.code_workspace.veriloga,
             selected.bundle().id(),
             &active_path,
         );
-        let editor_language = if header.is_none()
-            && selected.bundle().role_for_path(&active_path)
-                == Some(crate::state::ProjectSourceRole::VerilogABuildProfile)
-        {
-            CodeEditorLanguage::Toml
-        } else {
-            CodeEditorLanguage::VerilogA
-        };
+        let editor_language = editor_language(&selected, &active_path, header.is_some());
         let (shown_path, mut source) = match header {
             Some((identity, text)) => (identity.to_owned(), text.to_owned()),
             None => (
@@ -75,7 +198,7 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
                     .to_owned(),
             ),
         };
-        let diagnostics = current_diagnostics(app, &selected);
+        let diagnostics = current_diagnostics(cx, &selected);
         // The inspector dock states the module's facts, so the editor takes
         // the whole document well at every width. A second copy of them beside
         // or below it would only push the source off a phone.
@@ -85,9 +208,9 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
                 .max_rect(available)
                 .layout(Layout::top_down(Align::Min)),
         );
-        source_editor(
+        pressed = source_editor(
             &mut editor_ui,
-            app,
+            cx,
             &selected,
             &shown_path,
             &mut source,
@@ -97,10 +220,11 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         ui.allocate_rect(available, Sense::hover());
     });
+    pressed
 }
 
-fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.application_modal_open() {
+fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if cx.application_modal_open() {
         return;
     }
     let dropped = ctx.input(|input| input.raw.dropped_files.clone());
@@ -115,13 +239,13 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         .collect::<Result<Vec<_>, _>>()
         .and_then(|sources| {
             crate::workbench::documents::code_workspace::import_dropped_veriloga_sources(
-                &app.state.model,
-                &mut app.state.code.code_workspace.veriloga,
+                cx.model,
+                &mut cx.state.code_workspace.veriloga,
                 sources,
             )
         });
     if let Err(error) = result {
-        app.state.record(
+        cx.model.record(
             LogSeverity::Error,
             LogSource::Studio,
             format!("Verilog-A/AMS drop import failed: {error}"),
@@ -179,9 +303,11 @@ fn dropped_source(
     })
 }
 
+/// The editor and the rows above it, and what the reader pressed on the
+/// interface strip.
 fn source_editor(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, CodeFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
@@ -191,7 +317,7 @@ fn source_editor(
     // False for a built-in header: it is read here, and nothing that writes
     // a file, searches the bundle, or records a place in it applies.
     editable: bool,
-) {
+) -> Option<InterfaceAction> {
     let t = Tokens::get(ui.ctx());
     let editor_id = egui::Id::new((
         "workbench.veriloga.source",
@@ -214,9 +340,9 @@ fn source_editor(
         egui::pos2(toolbar.left() + 8.0, toolbar.top()),
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
-    let messages = app.state.workbench.messages();
+    let messages = cx.wb.messages();
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    if app.state.code.code_workspace.veriloga.pending.is_some() {
+    if cx.state.code_workspace.veriloga.pending.is_some() {
         // The strip counts the seconds of a running compile.
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
@@ -224,8 +350,8 @@ fn source_editor(
     // Neutral text, and a mark only where the reader has to act. A clean
     // compile leaves the corner empty and gives the whole row to the path.
     let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(
-        &app.state.code.code_workspace.veriloga,
-        app.state.model.workspace.content.project.id(),
+        &cx.state.code_workspace.veriloga,
+        cx.model.workspace.content.project.id(),
         selected,
         messages,
     )
@@ -279,7 +405,7 @@ fn source_editor(
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_dim,
     );
-    interface_strip(ui, &mut app.state, selected);
+    let pressed = interface_strip(ui, cx, selected);
     let search_input = editable
         .then(|| {
             crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
@@ -290,26 +416,16 @@ fn source_editor(
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
-    // A built-in header is read here whatever the bundle allows.
-    let writable = editable
-        && crate::workbench::documents::code_workspace::source_bundle_document_is_editable(
-            app,
-            crate::state::ProjectSourceLanguage::VerilogA,
-            selected.bundle().id(),
-            active_path,
-        );
-    super::netlist::publish_source_editor(
-        ui.ctx(),
-        &mut app.state.workbench,
-        crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
-            id: editor_id,
-            editable: writable,
-            // The build profile beside the module is TOML, which the
-            // language service does not index, and a built-in header is
-            // not part of the bundle it indexes.
-            navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
-        },
+    let editor = page_editor(
+        cx.model,
+        &cx.state.code_workspace,
+        cx.platform,
+        selected,
+        active_path,
+        editor_language,
+        editable,
     );
+    super::netlist::publish_source_editor(ui.ctx(), cx.wb, editor);
     // What an include in this file may name: the bundle's other sources.
     let include_files = selected
         .bundle()
@@ -344,7 +460,7 @@ fn source_editor(
             );
             if editable && interaction.changed {
                 match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
-                    &mut app.code_workspace_parts(),
+                    &mut CodeFeature::workspace_parts(cx),
                     selected,
                     active_path,
                     source.clone(),
@@ -352,7 +468,7 @@ fn source_editor(
                     Ok(true) => {}
                     Ok(false) => {}
                     Err(error) => {
-                        app.state
+                        cx.wb
                             .prompt(format!("Could not update {active_path}: {error}"));
                         // The editor goes back to the source as it is stored.
                         crate::workbench::documents::virtual_text_editor::resynchronize(
@@ -370,56 +486,63 @@ fn source_editor(
         })
         .inner;
     // A built-in header keeps the menu for reading: its writes are disabled
-    // and its language group hidden through the editor published above.
-    crate::workbench::chrome::title_bar::source_editor_context_menu(&interaction.response, app);
+    // and its language group hidden through the editor published above. The
+    // rows read the page's context, which holds the menu's answers while the
+    // menu is open or opening; the row chosen runs once the page has drawn.
+    let choice = crate::workbench::chrome::title_bar::source_editor_context_menu_over(
+        &interaction.response,
+        |ctx| {
+            super::netlist::source_menu::rows(crate::workbench::code::SOURCE_EDITOR_MENU, cx, ctx)
+        },
+    );
+    if let Some(choice) = choice {
+        cx.execute(choice.command());
+    }
     if let Some(announcement) = interaction.announcement.clone() {
-        app.state.prompt(announcement);
+        cx.wb.prompt(announcement);
     }
     if !editable {
-        return;
+        return pressed;
     }
     // Every request below names the bundle this editor is showing, never a
     // language-wide default: Find, Format and the language tools must act on
     // the cell view in front of the reader.
     let bundle_id = selected.bundle().id();
     if let Some(step) = interaction.unanswered_history {
-        let workbench = &mut app.state;
-        match workbench.code.code_workspace.source_edit_history.step(
-            &mut workbench.model.workspace.content,
+        match cx.state.code_workspace.source_edit_history.step(
+            &mut cx.model.workspace.content,
             bundle_id,
             step,
         ) {
             Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
-                &mut app.code_workspace_parts(),
+                &mut CodeFeature::workspace_parts(cx),
                 bundle_id,
             ),
             Ok(false) => {}
-            Err(error) => app.state.prompt(error),
+            Err(error) => cx.wb.prompt(error),
         }
     }
-    app.state.code.code_workspace.source_carets.insert(
+    cx.state.code_workspace.source_carets.insert(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
     if editor_language == CodeEditorLanguage::VerilogA {
-        let project_id = app.state.model.workspace.content.project.id();
+        let project_id = cx.model.workspace.content.project.id();
         crate::workbench::documents::code_workspace::drive_veriloga_live_check(
             ui.ctx(),
-            &mut app.state.code.code_workspace.veriloga,
+            &mut cx.state.code_workspace.veriloga,
             project_id,
             selected,
         );
     }
     let selection_key = (bundle_id, active_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
-        app.state
-            .code
+        cx.state
             .code_workspace
             .source_selections
             .insert(selection_key, range);
     } else {
-        app.state
-            .code
+        cx.state
             .code_workspace
             .source_selections
             .remove(&selection_key);
@@ -427,43 +550,44 @@ fn source_editor(
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
     ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
-        &mut app.code_workspace_parts(),
+        &mut CodeFeature::workspace_parts(cx),
         crate::state::ProjectSourceLanguage::VerilogA,
         bundle_id,
         active_path,
     ) {
-        app.state.prompt(error);
+        cx.wb.prompt(error);
     }
     drop(preceding_input);
     if let Some(input) = search_input {
         // Bind the search to source revisions and selection after preceding edits.
         if let Err(error) =
             crate::workbench::documents::code_workspace::open_source_search_in_bundle(
-                &mut app.code_workspace_parts(),
+                &mut CodeFeature::workspace_parts(cx),
                 crate::state::ProjectSourceLanguage::VerilogA,
                 bundle_id,
                 active_path,
             )
         {
-            app.state.prompt(error);
+            cx.wb.prompt(error);
         }
         input.route(
             ui.ctx(),
             crate::workbench::documents::code_workspace::source_search_query_id(),
         );
     }
+    pressed
 }
 
 /// The line under the toolbar that states a finding about the module's
 /// interface: its ports differ from the cell's schematic, they could not be
 /// written, or a hand-edited symbol has drifted from them, with Update symbol
 /// and Open symbol beside the drift. With nothing to say it takes no room at
-/// all.
+/// all. It says what the reader pressed.
 fn interface_strip(
     ui: &mut Ui,
-    state: &mut crate::workbench::app_state::AppState,
+    cx: &Cx<'_, CodeFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-) {
+) -> Option<InterfaceAction> {
     use crate::workbench::app_state::model::interface_mismatch_detail;
     use crate::workbench::documents::code_workspace::{
         VerilogAInterfaceFinding, interface_finding, symbol_drift_text, veriloga_receipt,
@@ -471,13 +595,9 @@ fn interface_strip(
 
     let reference = selected.view();
     let t = Tokens::get(ui.ctx());
-    let messages = state.workbench.messages();
-    let veriloga = &state.code.code_workspace.veriloga;
-    let receipt = veriloga_receipt(
-        veriloga,
-        state.model.workspace.content.project.id(),
-        selected,
-    );
+    let messages = cx.wb.messages();
+    let veriloga = &cx.state.code_workspace.veriloga;
+    let receipt = veriloga_receipt(veriloga, cx.model.workspace.content.project.id(), selected);
     let (text, tone, detail, action) = match interface_finding(veriloga, receipt, reference) {
         Some(VerilogAInterfaceFinding::SchematicMismatch { schematic, module }) => (
             messages.text(MessageId::VerilogAInterfaceMismatchStrip),
@@ -510,11 +630,11 @@ fn interface_strip(
             let Some((receipt, target)) = receipt.and_then(|receipt| {
                 let handoff = receipt.placement.as_ref()?;
                 (&handoff.view == reference)
-                    .then(|| veriloga_placement_target(&state.model, handoff))
+                    .then(|| veriloga_placement_target(cx.model, handoff))
                     .flatten()
                     .map(|target| (receipt, target))
             }) else {
-                return;
+                return None;
             };
             let ports = receipt.compilation.report().abi.formal_ports.len();
             let text = if ports == 1 {
@@ -590,20 +710,21 @@ fn interface_strip(
         response.on_hover_text(detail);
     }
     if !clicked {
-        return;
+        return None;
     }
     match action {
-        StripAction::None => {}
-        StripAction::UpdateSymbol => state.update_active_veriloga_symbol(),
-        StripAction::Place(_) => match state.place_offered_veriloga_device() {
-            // The canvas takes the keyboard, as the shelf leaves it, so R, M
-            // and Esc work before the pointer reaches the sheet. No status
-            // line: the armed cursor is the answer, and a sentence about it
-            // outlives the arm.
-            Ok(()) => rspice_schematic_editor::view::canvas::request_focus(ui.ctx()),
-            Err(error) => state.prompt(error),
-        },
+        StripAction::None => None,
+        StripAction::UpdateSymbol => Some(InterfaceAction::UpdateSymbol),
+        StripAction::Place(_) => Some(InterfaceAction::Place),
     }
+}
+
+/// What the reader pressed on the interface strip.
+enum InterfaceAction {
+    /// Update symbol, beside a hand-edited symbol's drift.
+    UpdateSymbol,
+    /// Place the new device in the schematic the strip named.
+    Place,
 }
 
 /// What the interface strip offers.
@@ -617,12 +738,12 @@ enum StripAction {
 }
 
 fn current_diagnostics(
-    app: &RSpiceApp,
+    cx: &Cx<'_, CodeFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) -> Option<std::sync::Arc<CodeDiagnosticCollection>> {
     crate::workbench::documents::code_workspace::veriloga_current_diagnostics(
-        &app.state.code.code_workspace.veriloga,
-        app.state.model.workspace.content.project.id(),
+        &cx.state.code_workspace.veriloga,
+        cx.model.workspace.content.project.id(),
         selected,
     )
 }
@@ -632,14 +753,11 @@ fn current_diagnostics(
 /// A Verilog-A cell view without its bundle is a defect of that view, and the
 /// resolver's error names it exactly. Nothing here offers a remedy that is not
 /// one: there is no project-wide source to fall back to.
-fn missing_source(ui: &mut Ui, app: &RSpiceApp, error: &str) {
+fn missing_source(ui: &mut Ui, cx: &Cx<'_, CodeFeature>, error: &str) {
     super::super::design_system::empty_state(
         ui,
         super::super::design_system::WorkbenchIcon::VerilogA,
-        &app.state
-            .workbench
-            .messages()
-            .text(MessageId::VerilogANoSource),
+        &cx.wb.messages().text(MessageId::VerilogANoSource),
         error,
     );
 }

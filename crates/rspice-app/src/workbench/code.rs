@@ -29,9 +29,10 @@ use crate::workbench::commands::code_context::{
 };
 use crate::workbench::commands::foreign_import_refusal;
 use crate::workbench::documents::code_workspace::{
-    CodeWorkspacePage, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
-    design_hosts_veriloga, netlist_page_shown, poll_automation_source_import,
-    poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
+    CodeWorkspacePage, CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile,
+    consume_veriloga_compile_request, design_hosts_veriloga, netlist_page_shown,
+    poll_automation_source_import, poll_veriloga_compile, poll_veriloga_import,
+    refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -496,6 +497,27 @@ impl CodeFeature {
     /// Stop the automation runtime, as the application shuts down.
     pub(crate) fn terminate_runtime(cx: &mut Cx<'_, Self>) {
         let _ = cx.own.automation_runtime.terminate();
+    }
+}
+
+/// What the code workspace's operations take, lent from the feature's
+/// context.
+impl CodeFeature {
+    /// The code workspace's parts, lent from `cx` for one call.
+    pub(in crate::workbench) fn workspace_parts<'c>(
+        cx: &'c mut Cx<'_, Self>,
+    ) -> CodeWorkspaceParts<'c> {
+        CodeWorkspaceParts {
+            code: &mut cx.state.code_workspace,
+            netlist: &mut cx.state.netlist,
+            handles: &mut *cx.own,
+            model: &mut *cx.model,
+            wb: &mut *cx.wb,
+            platform: &*cx.platform,
+            runs: &mut *cx.runs,
+            run_controller: &mut *cx.handles.run_controller,
+            export_io: cx.handles.export_io,
+        }
     }
 }
 

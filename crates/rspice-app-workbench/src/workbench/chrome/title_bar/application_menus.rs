@@ -116,24 +116,11 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
     };
 }
 
-/// The source editor's right-click menu, drawn with the menu bar's own rows
-/// and separators so its row height, text edge and rules match the menus
-/// above it. A long press opens it on touch.
-pub fn source_editor_context_menu(
-    response: &Response,
-    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
-) {
-    let choice = source_editor_context_menu_over(response, |ctx| {
-        menu_rows(app.source_editor_menu(), app, ctx)
-    });
-    if let Some(choice) = choice {
-        choice.run(app);
-    }
-}
-
 /// The source editor's right-click menu over the rows `rows` builds, and the
-/// row the reader chose from it. `rows` is called only while the menu is
-/// open, so a closed menu reads nothing.
+/// row the reader chose from it, drawn with the menu bar's own rows and
+/// separators so its row height, text edge and rules match the menus above
+/// it. A long press opens it on touch. `rows` is called only while the menu
+/// is open, so a closed menu reads nothing.
 pub fn source_editor_context_menu_over(
     response: &Response,
     rows: impl FnOnce(&Context) -> Vec<MenuRow>,

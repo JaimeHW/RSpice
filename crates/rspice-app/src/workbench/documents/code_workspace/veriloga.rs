@@ -205,12 +205,10 @@ pub(crate) use import::{
 pub(crate) use import::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 
 pub(crate) fn active_veriloga_file_path(
-    parts: &CodeWorkspaceParts<'_>,
+    code: &CodeWorkspaceRuntimeState,
     selected: &SelectedVerilogASource,
 ) -> String {
-    parts
-        .code
-        .veriloga
+    code.veriloga
         .selected_file
         .as_ref()
         .filter(|selection| selection.bundle_id == selected.bundle().id())

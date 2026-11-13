@@ -73,9 +73,9 @@ pub(crate) use source_files::{
     commit_source_workspace_dialog, import_dropped_automation_files, open_source_file_dialog,
     open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
     poll_automation_source_import, request_automation_source_import,
-    source_bundle_contains_document, source_bundle_document_is_editable,
-    source_bundle_document_is_editable_in, source_document_is_editable,
-    source_file_mutation_block_reason, source_file_mutation_block_reason_in,
+    source_bundle_contains_document, source_bundle_document_is_editable_in,
+    source_document_is_editable, source_file_mutation_block_reason,
+    source_file_mutation_block_reason_in,
 };
 pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,

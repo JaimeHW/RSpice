@@ -6,8 +6,8 @@
   },
   "lower->upper": {},
   "whole-app": {
-    "&RSpiceApp params outside shell": 28,
-    "&mut RSpiceApp params outside shell": 76,
+    "&RSpiceApp params outside shell": 25,
+    "&mut RSpiceApp params outside shell": 74,
     "impl AppState methods outside session": 41,
     "impl RSpiceApp methods outside shell": 9
   }

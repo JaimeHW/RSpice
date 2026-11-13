@@ -9,7 +9,6 @@ use crate::state::{
     ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
 };
-use crate::workbench::RSpiceApp;
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -369,27 +368,10 @@ pub(crate) fn source_document_is_editable(
     source_bundle_document_is_editable_in(model, code, platform, language, bundle_id, logical_path)
 }
 
-/// Resolve edit authority for an exact source bundle. A Verilog-A bundle
+/// Resolve edit authority for an exact source bundle, over the model, the
+/// Code workspace's runtime state and the platform's. A Verilog-A bundle
 /// belongs to its cell view; Automation remains confined to its singleton
 /// project workspace.
-pub(crate) fn source_bundle_document_is_editable(
-    app: &RSpiceApp,
-    language: ProjectSourceLanguage,
-    bundle_id: crate::state::ProjectSourceId,
-    logical_path: &str,
-) -> bool {
-    source_bundle_document_is_editable_in(
-        &app.state.model,
-        &app.state.code.code_workspace,
-        &app.state.platform,
-        language,
-        bundle_id,
-        logical_path,
-    )
-}
-
-/// [`source_bundle_document_is_editable`], over the model, the Code
-/// workspace's runtime state and the platform's.
 pub(crate) fn source_bundle_document_is_editable_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
@@ -1335,6 +1317,7 @@ fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     #[test]
     fn production_source_lifecycle_has_no_panic_based_state_transitions() {
