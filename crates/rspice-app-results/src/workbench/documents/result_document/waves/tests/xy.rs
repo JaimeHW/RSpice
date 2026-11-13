@@ -328,6 +328,51 @@ fn making_or_closing_a_strip_against_a_signal_leaves_the_time_strip_as_it_was() 
     );
 }
 
+/// The full-width rectangles a frame filled with `color`.
+fn filled_rects(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, color: egui::Color32, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.fill == color => out.push(rect.rect),
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, color, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, color, &mut out);
+    }
+    out.retain(|rect| rect.width() >= 0.9 * super::lanes::FRAME.x);
+    out
+}
+
+/// Between the time strip and the strip after it lies a gap of canvas, then
+/// a hairline in border ink on top of the next strip's header: the time
+/// strip's overview track ends its own strip, and the next header plainly
+/// starts another.
+#[test]
+fn strips_stand_apart_by_a_gap_of_canvas_and_a_rule() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    frame(&ctx, &mut state, Vec::new());
+    let shapes = frame(&ctx, &mut state, Vec::new());
+    let top = strip_top(&texts(&shapes), "vs V(a)");
+    let color = rspice_ui_kit::tokens::Tokens::get(&ctx).color;
+    let rule = filled_rects(&shapes, color.border)
+        .into_iter()
+        .find(|rect| {
+            rect.height() == 1.0
+                && rect.bottom() <= top
+                && rect.bottom() >= top - rspice_results_ui::strip::HEADER_HEIGHT
+        })
+        .expect("a rule in border ink stands on top of the next strip's header");
+    let gap = filled_rects(&shapes, color.canvas_bg)
+        .into_iter()
+        .find(|rect| rect.bottom() == rule.top())
+        .expect("a gap of canvas lies over the rule");
+    assert_eq!(gap.height(), 8.0, "the gap is 8 px of canvas: {gap:?}");
+}
+
 /// The header's span field narrows the curve to the time it names: typed
 /// "250u" for its end, the strip draws the first quarter period alone, where
 /// V(a) never goes negative.
