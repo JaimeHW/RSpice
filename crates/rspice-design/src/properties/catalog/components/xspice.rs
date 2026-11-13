@@ -118,10 +118,7 @@ struct CodeModelFacet {
 /// Group and unit for a parameter, keyed off the naming convention the XSPICE
 /// catalog follows throughout: `*_delay` and `t_*` are times, `*_load` are
 /// capacitive loads, and the rest shape the transfer behavior.
-fn code_model_facet(
-    name: &str,
-    param_type: rspice_core::xspice::ParamType,
-) -> CodeModelFacet {
+fn code_model_facet(name: &str, param_type: rspice_core::xspice::ParamType) -> CodeModelFacet {
     use rspice_core::xspice::ParamType;
 
     // `inertial_delay` is a mode flag that happens to end in `_delay`, so the
