@@ -205,3 +205,62 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
     );
     assert_eq!(coincident[0].slope, READOUT_ABSENT);
 }
+
+#[test]
+fn interval_measurements_and_copied_values_cover_every_visible_trace() {
+    // The readout used to measure the first four visible traces and copy the
+    // first six, with nothing saying the rest were left out.
+    let mut state = ResultsTestHost::default();
+    let run = state.model.simulation.start_run();
+    let traces = (1..=8)
+        .map(|n| {
+            RetainedTrace::new(
+                format!("V(n{n})"),
+                vec![0.0, 1.0],
+                vec![0.0, f64::from(n)],
+                "#fff",
+            )
+        })
+        .collect();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(traces),
+    );
+    state.model.simulation.complete_run();
+    let models = cached_models(
+        &state.model.simulation,
+        &mut state.results.results,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    assert_eq!(model.traces.iter().filter(|trace| trace.visible).count(), 8);
+    let policy = state.model.preferences.quantity_presentation_policy();
+    let rows = readout::measurement_values(
+        &mut state.results.results.session.derived,
+        model,
+        Some((0.25, 0.75)),
+        8,
+        policy,
+    );
+    for n in 1..=8 {
+        for stat in ["min", "max", "rms"] {
+            let label = format!("V(n{n}) {stat}");
+            assert!(rows.iter().any(|(row, _)| *row == label), "no {label} row");
+        }
+    }
+    let mut copied = String::new();
+    append_copied_cursor(
+        &mut copied,
+        "A",
+        0.5,
+        model,
+        SampleInterpolation::Linear,
+        policy,
+    );
+    for n in 1..=8 {
+        assert!(
+            copied.contains(&format!("V(n{n}) = ")),
+            "V(n{n}) not copied: {copied}"
+        );
+    }
+}

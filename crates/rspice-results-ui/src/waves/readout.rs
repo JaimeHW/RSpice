@@ -518,7 +518,7 @@ pub fn measurement_values(
     quantity_policy: QuantityPresentationPolicy,
 ) -> Vec<(String, String)> {
     let mut rows = Vec::new();
-    for trace in model.traces.iter().filter(|t| t.visible).take(4) {
+    for trace in readout_traces(model) {
         let branches: Vec<Option<usize>> = if trace.shape.class() == SweepClass::MultiBranch
             && trace.shape.branch_count() <= MAX_READOUT_BRANCHES
         {
@@ -597,7 +597,7 @@ pub fn append_copied_cursor(
         model.x_label(),
         copied_x.trim_end()
     );
-    for trace in model.traces.iter().filter(|trace| trace.visible).take(6) {
+    for trace in readout_traces(model) {
         // The copy has to say what the table says. Read unshaped, a loop's
         // line pasted a value off the far side of its turnaround while the
         // register on screen reported each branch.
