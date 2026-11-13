@@ -1196,7 +1196,7 @@ fn site_cost_table() -> String {
     fixture.state.model.schematic.ensure_canvas_cache();
     let state = &fixture.state;
     let symbols = super::schematic_symbol_context(state);
-    let design = super::schematic_design_view(state);
+    let design = super::canvas_facts(state).design_view();
     let sheet = state.model.active_drawing_sheet();
     let viewport = super::viewport::Viewport {
         offset: egui::Pos2::ZERO,
@@ -1243,7 +1243,7 @@ fn site_cost_table() -> String {
     let pick_ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&pick_ctx);
     let pointer_view = rspice_schematic_editor::view::tool_input::ToolPointerView {
-        design: super::schematic_design_view(state),
+        design: super::canvas_facts(state).design_view(),
         snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: true,
     };

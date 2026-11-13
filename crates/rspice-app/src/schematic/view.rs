@@ -76,8 +76,8 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
-use self::parts::canvas_facts;
 pub(crate) use self::parts::canvas_parts;
+use self::parts::{CanvasFacts, canvas_facts};
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet_in;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -95,15 +95,6 @@ pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
         && canvas::contains_pointer(ctx)
 }
 
-pub(super) fn schematic_design_view(
-    state: &AppState,
-) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
-    model_design_view(
-        &state.model,
-        state.design.schematic_visibility.review_markers,
-    )
-}
-
 /// Take the step the canvas menu left to the application, where the menu
 /// would have taken it.
 fn apply_menu_follow_up(state: &mut AppState, follow_up: context_menu::MenuFollowUp) {
@@ -118,8 +109,8 @@ fn apply_menu_follow_up(state: &mut AppState, follow_up: context_menu::MenuFollo
 
 /// Compose the editor's resolved symbols from the current app-owned sources,
 /// as the model composes them.
-pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolContext {
-    state.model.schematic_symbol_context()
+pub(crate) fn schematic_symbol_context(state: &impl AsRef<Model>) -> SchematicSymbolContext {
+    state.as_ref().schematic_symbol_context()
 }
 
 /// The resolved symbols a frame paints and hit-tests with.
@@ -129,25 +120,25 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
 /// revision, the topology, the pending placement, and every instance binding.
 /// The canvas and the Sheet inspector therefore share one context, and a
 /// steady frame resolves nothing.
-pub(crate) fn frame_symbol_context(state: &mut AppState) -> Arc<SchematicSymbolContext> {
-    state.model.frame_symbol_context()
+pub(crate) fn frame_symbol_context(model: &mut Model) -> Arc<SchematicSymbolContext> {
+    model.frame_symbol_context()
 }
 
 /// Pick up whatever an interaction changed under the frame's symbols.
 /// Returns whether the context was resolved afresh.
 fn refresh_symbol_context_after_interactions(
-    state: &mut AppState,
+    model: &mut Model,
     symbol_context: &mut Arc<SchematicSymbolContext>,
 ) -> bool {
-    let current = frame_symbol_context(state);
+    let current = frame_symbol_context(model);
     let refreshed = !Arc::ptr_eq(&current, symbol_context);
     *symbol_context = current;
     refreshed
 }
 
-fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityView<'_> {
+fn canvas_accessibility_view<'a>(state: &CanvasFacts<'a>) -> canvas::CanvasAccessibilityView<'a> {
     canvas::CanvasAccessibilityView {
-        design: schematic_design_view(state),
+        design: state.design_view(),
         editor: &state.model.schematic.session.editor,
         keyboard_focus: state.design.interaction.schematic_keyboard_focus,
         filter: state.design.schematic_selection_filter,
@@ -159,7 +150,7 @@ fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityVie
 }
 
 fn schematic_accessibility_shortcuts(
-    state: &AppState,
+    model: &Model,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
@@ -168,7 +159,7 @@ fn schematic_accessibility_shortcuts(
         design::commands::DesignCommand,
     };
     crate::workbench::app_state::accessibility_shortcut_summary(
-        state.model.preferences.shortcuts(),
+        model.preferences.shortcuts(),
         &CommandRegistry,
         command_registry(),
         platform,
@@ -194,19 +185,19 @@ fn schematic_accessibility_shortcuts(
 
 /// Query the same host-authorized geometry that selection uses.
 pub(crate) fn drawn_failure_site_count(
-    state: &AppState,
+    state: &impl AsRef<Model>,
     nets: &[String],
     devices: &[String],
 ) -> Result<usize, LocateSignalError> {
-    let occurrence = state.model.workspace.content.occurrence_path();
+    let model = state.as_ref();
+    let occurrence = model.workspace.content.occurrence_path();
     let view = cross_probe::CrossProbeView {
-        document: state.model.schematic.document(),
+        document: model.schematic.document(),
         sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
-        net_to_points: state
-            .model
+        net_to_points: model
             .result_mapping_is_current()
-            .then_some(&state.model.active_sheet_net_geometry().net_to_points),
+            .then_some(&model.active_sheet_net_geometry().net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
@@ -249,7 +240,7 @@ pub(crate) fn select_failure_sites(
 fn set_canvas_cursor(
     ui: &Ui,
     response: &egui::Response,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     shelf_drop: Option<bool>,
 ) {
     if !(response.hovered() || response.dragged() || shelf_drop.is_some()) {
@@ -283,7 +274,7 @@ fn set_canvas_cursor(
 fn full_crosshair_at(
     ui: &Ui,
     response: &egui::Response,
-    state: &AppState,
+    state: &CanvasFacts<'_>,
     viewport: &viewport::Viewport,
 ) -> Option<egui::Pos2> {
     if !state.model.preferences.schematic_full_crosshair()
@@ -302,7 +293,7 @@ fn full_crosshair_at(
     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     Some(
         if state.model.schematic.session.editor.tool.cursor() == egui::CursorIcon::Crosshair {
-            let snapped = snap_resolution::resolve_grid_pointer(&state.model, viewport, pointer);
+            let snapped = snap_resolution::resolve_grid_pointer(state.model, viewport, pointer);
             viewport.schematic_to_screen(snapped.snapped_position)
         } else {
             pointer
@@ -316,7 +307,7 @@ pub fn render_schematic_view(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let available = ui.available_rect_before_wrap();
-    let mut symbol_context = frame_symbol_context(state);
+    let mut symbol_context = frame_symbol_context(&mut state.model);
     let drawing_sheet = state.model.active_drawing_sheet();
     let (canvas_width, canvas_height) = (available.width() as f64, available.height() as f64);
     let min_zoom = crate::state::SchematicState::zoom_floor_for_sheet(
@@ -455,7 +446,7 @@ pub fn render_schematic_view(
             &symbol_context,
         );
     }
-    refresh_symbol_context_after_interactions(state, &mut symbol_context);
+    refresh_symbol_context_after_interactions(&mut state.model, &mut symbol_context);
     let menu_follow_up = context_menu::handle_context_menu(
         &response,
         &mut canvas_parts(state),
@@ -467,9 +458,9 @@ pub fn render_schematic_view(
         apply_menu_follow_up(state, follow_up);
     }
     handle_keyboard_object_navigation(&response, &mut canvas_parts(state), &symbol_context);
-    set_canvas_cursor(ui, &response, state, shelf_drop);
-    let crosshair = full_crosshair_at(ui, &response, state, &viewport);
-    refresh_symbol_context_after_interactions(state, &mut symbol_context);
+    set_canvas_cursor(ui, &response, &canvas_facts(state), shelf_drop);
+    let crosshair = full_crosshair_at(ui, &response, &canvas_facts(state), &viewport);
+    refresh_symbol_context_after_interactions(&mut state.model, &mut symbol_context);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
@@ -519,29 +510,30 @@ pub fn render_schematic_view(
         );
     }
     // Report the cursor position in grid units; the workbench status bar shows it.
-    let to_grid_units = |pos: egui::Pos2, state: &AppState| {
-        let grid = f64::from(state.model.schematic.document().grid_size.max(1));
-        let x = ((f64::from(pos.x - available.min.x)) - state.model.schematic.session.editor.pan.0)
-            / state.model.schematic.session.editor.zoom
+    let to_grid_units = |pos: egui::Pos2, model: &Model| {
+        let grid = f64::from(model.schematic.document().grid_size.max(1));
+        let x = ((f64::from(pos.x - available.min.x)) - model.schematic.session.editor.pan.0)
+            / model.schematic.session.editor.zoom
             / grid;
-        let y = ((f64::from(pos.y - available.min.y)) - state.model.schematic.session.editor.pan.1)
-            / state.model.schematic.session.editor.zoom
+        let y = ((f64::from(pos.y - available.min.y)) - model.schematic.session.editor.pan.1)
+            / model.schematic.session.editor.zoom
             / grid;
         (x, y)
     };
     state.design.canvas_hover = shelf_drag_position
         .or_else(|| response.hover_pos())
-        .map(|cursor| to_grid_units(cursor, state));
-    state.design.canvas_view_center = Some(to_grid_units(available.center(), state));
+        .map(|cursor| to_grid_units(cursor, &state.model));
+    state.design.canvas_view_center = Some(to_grid_units(available.center(), &state.model));
 
     let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
-    let shortcuts = schematic_accessibility_shortcuts(state, shortcut_platform, operating_system);
+    let shortcuts =
+        schematic_accessibility_shortcuts(&state.model, shortcut_platform, operating_system);
     canvas::finish(
         ui,
         &response,
         available,
-        &canvas_accessibility_view(state),
+        &canvas_accessibility_view(&canvas_facts(state)),
         &shortcuts,
     );
     crate::workbench::app_state::report_engineering_canvas_focus(
@@ -714,9 +706,9 @@ mod tests {
         library.add_cell(cell);
         state.model.library_manager.add_library(library);
 
-        let mut context = frame_symbol_context(&mut state);
+        let mut context = frame_symbol_context(&mut state.model);
         assert!(!refresh_symbol_context_after_interactions(
-            &mut state,
+            &mut state.model,
             &mut context,
         ));
 
@@ -730,7 +722,7 @@ mod tests {
             .schematic
             .add_library_cell_component(Point::new(100, 50), binding);
 
-        let refreshed = refresh_symbol_context_after_interactions(&mut state, &mut context);
+        let refreshed = refresh_symbol_context_after_interactions(&mut state.model, &mut context);
         let component = state
             .model
             .schematic
@@ -785,8 +777,8 @@ mod tests {
     #[test]
     fn a_steady_frame_resolves_no_symbol() {
         let (mut state, _) = state_with_amp_instance();
-        let first = frame_symbol_context(&mut state);
-        let second = frame_symbol_context(&mut state);
+        let first = frame_symbol_context(&mut state.model);
+        let second = frame_symbol_context(&mut state.model);
         assert!(Arc::ptr_eq(&first, &second));
     }
 
@@ -797,9 +789,9 @@ mod tests {
     fn every_symbol_input_resolves_the_frame_context_afresh() {
         let (mut state, id) = state_with_amp_instance();
         let refreshed = |state: &mut AppState, change: &dyn Fn(&mut AppState)| {
-            let before = frame_symbol_context(state);
+            let before = frame_symbol_context(&mut state.model);
             change(state);
-            let after = frame_symbol_context(state);
+            let after = frame_symbol_context(&mut state.model);
             !Arc::ptr_eq(&before, &after)
         };
 
@@ -830,7 +822,7 @@ mod tests {
         }));
 
         let terminals = |state: &mut AppState| {
-            let context = frame_symbol_context(state);
+            let context = frame_symbol_context(&mut state.model);
             let component = state
                 .model
                 .schematic
@@ -967,9 +959,9 @@ mod tests {
         state.model.schematic.session.editor.tool = crate::state::Tool::Wire;
 
         let description = canvas::accessibility_description(
-            &canvas_accessibility_view(&state),
+            &canvas_accessibility_view(&canvas_facts(&state)),
             &schematic_accessibility_shortcuts(
-                &state,
+                &state.model,
                 crate::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             ),
@@ -990,15 +982,17 @@ mod tests {
         assert!(description.contains("S: Stretch"));
         assert!(!description.contains("S: Stretch selection"));
         assert_eq!(
-            canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
+            canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(
+                &state
+            ))),
             "Selected instance unnamed, Resistor."
         );
         state.model.schematic.session.editor.selection.clear();
         assert_eq!(
             canvas::accessibility_description(
-                &canvas_accessibility_view(&state),
+                &canvas_accessibility_view(&canvas_facts(&state)),
                 &schematic_accessibility_shortcuts(
-                    &state,
+                    &state.model,
                     crate::state::command_catalog::CommandPlatform::Desktop,
                     egui::os::OperatingSystem::Windows,
                 )
@@ -1006,7 +1000,9 @@ mod tests {
             description
         );
         assert_eq!(
-            canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
+            canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(
+                &state
+            ))),
             "No schematic object selected."
         );
     }
