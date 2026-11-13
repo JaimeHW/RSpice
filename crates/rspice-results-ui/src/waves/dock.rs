@@ -694,9 +694,15 @@ pub fn marker_section(
             });
         // The kind is stated, not cycled: a click that silently reclassifies
         // what a marker asserts is a decision made by accident. The id
-        // already carries the marker's colour, so the kind is plain words.
+        // already carries the marker's colour, so the kind is plain words,
+        // padded to the longest kind so the controls after it line up.
+        let kind_width = MarkerKind::ALL
+            .iter()
+            .map(|kind| kind.label().len())
+            .max()
+            .unwrap_or(0);
         row_ui.label(
-            egui::RichText::new(kind.label())
+            egui::RichText::new(format!("{:<kind_width$}", kind.label()))
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(c.text_dim),
         );
@@ -725,10 +731,12 @@ pub fn marker_section(
         // word "retained" on the row said it a second time.
         if row_ui
             .add(
+                // A word, as `ref` is: the pencil glyph is not in the mono
+                // face and drew as an empty box.
                 egui::Button::new(
-                    egui::RichText::new("\u{270e}")
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                        .color(c.text_dim),
+                    egui::RichText::new("edit")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(c.text_faint),
                 )
                 .frame(false),
             )
