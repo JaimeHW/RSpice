@@ -16,7 +16,7 @@ mod language;
 mod ownership;
 mod revision;
 pub(crate) mod search;
-pub(super) mod source_menu;
+pub(crate) mod source_menu;
 pub(crate) mod toolbar;
 pub(crate) mod transfer;
 
@@ -177,7 +177,7 @@ pub(crate) fn reveal_in_netlist(
 /// before the shell takes the dispatcher's answers the page's context holds,
 /// so they are the answers the editor gets; the page publishes it again as
 /// it draws it.
-pub(in crate::workbench) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
+pub(crate) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::{
         active_netlist_source_is_editable_in, editor_id_in,
     };

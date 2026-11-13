@@ -292,7 +292,7 @@ pub(in crate::workbench) enum SourceDocumentRequest {
 /// Automation document, applied after rendering so a transaction never
 /// mutates the project while its own rows are still on screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workbench) enum LifecycleAction {
+pub(crate) enum LifecycleAction {
     None,
     Begin(CodeSourceFileAction),
     Commit,

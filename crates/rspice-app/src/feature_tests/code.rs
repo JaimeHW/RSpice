@@ -11,12 +11,14 @@ use crate::workbench::app::{dialogs, navigate_source_bundle, veriloga_interface_
 mod netlist_document;
 mod netlist_generation;
 mod netlist_search;
+mod netlist_source_menu;
 mod netlist_surface;
 mod netlist_toolbar;
 mod netlist_transfer;
 mod netlist_validation;
 mod netlist_workflow;
 mod new_veriloga_device;
+mod source_document;
 mod source_editor_commands;
 mod source_find;
 mod source_language_tools;

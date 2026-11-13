@@ -820,8 +820,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "workflows/file_actions"),
     ("app", "frame"),
     ("app", "cross_probe"),
-    // The source find dialog's test, which only seeds and reads code's state,
-    // runs over the code feature's harness, as code's own seeders do.
+    // The source find and source document dialogs' tests that only seed and
+    // read code's state run over the code feature's harness, as code's own
+    // seeders do.
     ("app", "code"), // retires at the code flip
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.

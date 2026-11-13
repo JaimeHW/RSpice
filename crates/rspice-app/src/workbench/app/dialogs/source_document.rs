@@ -160,15 +160,15 @@ fn visible_language_in(
 /// Read once per frame into owned values so applying a transaction cannot
 /// invalidate a borrow the body is still rendering from, and so every row is
 /// measured from the same closure.
-struct DocumentFacts {
-    language: ProjectSourceLanguage,
-    logical_path: String,
+pub(crate) struct DocumentFacts {
+    pub(crate) language: ProjectSourceLanguage,
+    pub(crate) logical_path: String,
     leaf: String,
     role: String,
     is_entry: bool,
     is_environment_lock: bool,
     editable: bool,
-    is_root: bool,
+    pub(crate) is_root: bool,
     line_endings: MessageId,
     validation_current: bool,
     imports: Vec<String>,
@@ -184,21 +184,21 @@ struct RevisionRow {
     current: bool,
 }
 
-struct NetlistLifecycleFacts {
-    deck_id: Option<uuid::Uuid>,
+pub(crate) struct NetlistLifecycleFacts {
+    pub(crate) deck_id: Option<uuid::Uuid>,
     logical_path: String,
     line_endings: MessageId,
     /// The file on disk the deck or include was saved to or opened from;
     /// `None` for one that lives only inside the project.
     native_path: Option<String>,
     history_count: usize,
-    decks: Vec<(uuid::Uuid, String)>,
+    pub(crate) decks: Vec<(uuid::Uuid, String)>,
     operations_blocked: Option<String>,
     include_identity: Option<String>,
     include_owned: bool,
 }
 
-fn netlist_lifecycle_facts(
+pub(crate) fn netlist_lifecycle_facts(
     model: &Model,
     netlist: &NetlistDocumentState,
 ) -> Option<NetlistLifecycleFacts> {
@@ -541,7 +541,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
 
 /// Carry out a lifecycle choice on the Verilog-A or Automation document at
 /// `logical_path` that the dialog handed the shell.
-pub(in crate::workbench) fn apply_lifecycle_action(
+pub(crate) fn apply_lifecycle_action(
     parts: &mut CodeWorkspaceParts<'_>,
     action: LifecycleAction,
     language: ProjectSourceLanguage,
@@ -2063,28 +2063,29 @@ fn revision_history(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Offscreen renders of the include search chain.
 #[cfg(test)]
 mod include_search_raster {
     use super::*;
+    use crate::workbench::code::tests::{CodeHarness, harness};
 
-    fn chain_state(entries: &[&str], root: Option<&str>) -> AppState {
-        let mut state = AppState::default();
-        state.model.workspace.content.project.path =
+    fn chain_state(entries: &[&str], root: Option<&str>) -> CodeHarness {
+        let mut harness = harness();
+        harness.model.workspace.content.project.path =
             root.map(|root| std::path::PathBuf::from(root).join("x.rspiceproj"));
-        state
+        harness
             .model
             .workspace
             .content
             .project
             .set_include_search_paths(entries.iter().map(std::path::PathBuf::from).collect())
             .expect("fixture chain is valid");
-        state
+        harness
     }
 
-    fn render(width: f32, height: f32, state: &mut AppState) -> crate::ui::raster::Canvas {
+    fn render(width: f32, height: f32, harness: &mut CodeHarness) -> crate::ui::raster::Canvas {
         crate::ui::raster::render(egui::vec2(width, height), |ui, background| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
@@ -2094,8 +2095,8 @@ mod include_search_raster {
                     );
                     let _ = include_search_paths(
                         ui,
-                        &mut state.code.code_workspace,
-                        &state.model,
+                        &mut harness.state.code_workspace,
+                        &harness.model,
                         messages,
                     );
                 });

@@ -110,7 +110,7 @@ fn page_editor(
 /// page's editor in front, before the shell takes the dispatcher's answers
 /// the page's context holds, so they are the answers the editor gets; the
 /// page publishes it again as it draws it.
-pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+pub(crate) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
     let bundle = automation_bundle(cx.model);
     let runtime_stale = cx
         .state
@@ -165,7 +165,7 @@ pub(in crate::workbench) fn source_menu_open(
 /// Draw the Automation page in the code feature's context, once it has
 /// prepared. The context holds its menu's answers while
 /// [`source_menu_open`] says the menu is open or opening.
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // A file dropped on the page is imported once the page has drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {

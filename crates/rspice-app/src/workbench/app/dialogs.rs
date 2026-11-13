@@ -52,7 +52,7 @@ pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
 pub(in crate::workbench) mod rule_setup;
 pub(in crate::workbench) mod selection;
-pub(in crate::workbench) mod source_document;
+pub(crate) mod source_document;
 pub(crate) mod source_find;
 pub(crate) mod source_language_tools;
 pub(in crate::workbench) mod state;

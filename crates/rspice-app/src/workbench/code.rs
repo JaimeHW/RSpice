@@ -57,7 +57,7 @@ pub(crate) struct CodeFeature;
 /// clipboard, then the line edits. Mutating rows are greyed on a read-only
 /// source. Every page that draws a source editor is the code feature's:
 /// the deck, Automation and a Verilog-A view.
-pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
+pub(crate) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
