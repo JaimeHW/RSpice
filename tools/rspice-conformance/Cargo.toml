@@ -202,6 +202,11 @@ path = "tests/mixed_corpus.rs"
 required-features = ["mixed-corpus"]
 
 [[test]]
+name = "mixed_family_measurements"
+path = "tests/mixed_family_measurements.rs"
+required-features = ["mixed-corpus"]
+
+[[test]]
 name = "ngspice_regression"
 path = "tests/ngspice_regression.rs"
 required-features = ["circuit-suites"]
