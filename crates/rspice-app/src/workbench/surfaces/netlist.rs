@@ -1139,11 +1139,11 @@ fn document_syntax_status(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::workbench::AppState;
+    use crate::workbench::code::tests::{CodeHarness, harness};
     use egui::vec2;
 
-    fn configured_veriloga_state() -> (AppState, String) {
-        let mut state = AppState::default();
+    fn configured_veriloga_state() -> (CodeHarness, String) {
+        let mut harness = harness();
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
         let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
         view.metadata
@@ -1154,7 +1154,7 @@ pub(crate) mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new("behavioral");
         library.add_cell(cell);
-        state.model.library_manager.add_library(library);
+        harness.model.library_manager.add_library(library);
 
         let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::cell_view(reference),
@@ -1187,7 +1187,7 @@ pub(crate) mod tests {
             ],
         )
         .expect("valid source closure");
-        state
+        harness
             .model
             .workspace
             .content
@@ -1197,11 +1197,11 @@ pub(crate) mod tests {
 
         let mut placed = crate::state::LibraryCellInstance::new("behavioral", "gain", "schematic");
         placed.terminal_order = vec!["p".to_owned(), "n".to_owned()];
-        state
+        harness
             .model
             .schematic
             .add_library_cell_component(crate::state::Point::new(20, 20), placed);
-        state
+        harness
             .model
             .workspace
             .content
@@ -1221,13 +1221,13 @@ pub(crate) mod tests {
                 owner: "Mixed-signal design".to_owned(),
             })
             .expect("create mixed-signal configuration");
-        let projection = state
+        let projection = harness
             .model
             .workspace
             .configuration_execution_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+                &harness.model.library_manager,
+                &harness.model.workspace.content.active_view,
+                &harness.model.schematic,
             )
             .expect("resolve configured behavioral view");
         let source_key = projection
@@ -1237,98 +1237,103 @@ pub(crate) mod tests {
             .expect("project Verilog-A binding")
             .source_key()
             .to_owned();
-        (state, source_key)
+        (harness, source_key)
     }
 
-    pub(crate) fn retain_generated(state: &mut AppState, source: &str) {
+    pub(crate) fn retain_generated(
+        model: &mut rspice_app_state::workbench::app_state::model::Model,
+        netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+        source: &str,
+    ) {
         let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
         let source = source.to_owned();
-        let (document, owned) = generation::publish_generated_document(
-            &state.model,
-            &state.code.netlist,
-            input_digest,
-            source.clone(),
-        )
-        .expect("canonical generated fixture");
-        state.model.netlist_artifacts.generated_source = source;
-        state.model.netlist_artifacts.generated_document = Some(document);
-        state.code.netlist.owned_document = owned;
-        state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
-        state
-            .model
-            .netlist_artifacts
-            .current_generation_input_digest = Some(input_digest);
+        let (document, owned) =
+            generation::publish_generated_document(model, netlist, input_digest, source.clone())
+                .expect("canonical generated fixture");
+        model.netlist_artifacts.generated_source = source;
+        model.netlist_artifacts.generated_document = Some(document);
+        netlist.owned_document = owned;
+        model.netlist_artifacts.generated_input_digest = Some(input_digest);
+        model.netlist_artifacts.current_generation_input_digest = Some(input_digest);
     }
 
     #[test]
     fn editable_source_and_generated_primary_coexist_without_overwrite() {
-        let mut state = AppState::default();
-        retain_generated(&mut state, "generated\n.end\n");
-        let retained_generated = state.model.netlist_artifacts.generated_source.clone();
-        state.model.simulation.source.netlist_content =
-            state.model.netlist_artifacts.generated_source.clone();
+        let mut harness = harness();
+        retain_generated(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            "generated\n.end\n",
+        );
+        let retained_generated = harness.model.netlist_artifacts.generated_source.clone();
+        harness.model.simulation.source.netlist_content =
+            harness.model.netlist_artifacts.generated_source.clone();
 
         ownership::create_owned_source(
-            &mut state.model,
-            &mut state.code.netlist,
+            &mut harness.model,
+            &mut harness.state.netlist,
             "top_override.sp",
             crate::state::OwnedNetlistEditStrategy::OwnedSource,
         )
         .expect("create owned source");
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some(retained_generated.as_str())
         );
         assert!(
             crate::workbench::documents::netlist_document::replace_owned_source(
-                &mut state.model,
-                &mut state.code.netlist,
-                &mut state.code.netlist_open_documents,
-                &mut state.workbench,
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &mut harness.state.netlist_open_documents,
+                &mut harness.wb,
                 "owned edit\n.end\n".to_owned()
             )
         );
 
         assert!(
             crate::workbench::documents::netlist_document::open_generated_primary_in(
-                &mut state.model,
-                &mut state.code.netlist
+                &mut harness.model,
+                &mut harness.state.netlist
             )
         );
         assert_eq!(
-            state.model.simulation.source.netlist_content,
+            harness.model.simulation.source.netlist_content,
             retained_generated
         );
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
         assert!(
             !crate::workbench::documents::netlist_document::open_generated_primary_in(
-                &mut state.model,
-                &mut state.code.netlist
+                &mut harness.model,
+                &mut harness.state.netlist
             )
         );
     }
 
     #[test]
     fn opening_existing_owned_source_never_overwrites_its_bytes() {
-        let mut state = AppState::default();
-        retain_generated(&mut state, "new generated\n.end\n");
-        state.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
+        let mut harness = harness();
+        retain_generated(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            "new generated\n.end\n",
+        );
+        harness.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
         assert!(
             crate::workbench::documents::netlist_document::open_owned_source_in(
-                &mut state.model,
-                &mut state.code.netlist
+                &mut harness.model,
+                &mut harness.state.netlist
             )
         );
         assert_eq!(
-            state.model.simulation.source.netlist_content,
+            harness.model.simulation.source.netlist_content,
             "retained owned\n.end\n"
         );
         assert_eq!(
-            state.model.workspace.content.netlist_source.as_deref(),
+            harness.model.workspace.content.netlist_source.as_deref(),
             Some("retained owned\n.end\n")
         );
     }
@@ -1368,21 +1373,21 @@ pub(crate) mod tests {
 
     #[test]
     fn empty_generated_primary_reports_blocked_without_claiming_staleness() {
-        let mut state = AppState::default();
-        state.code.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.model.netlist_artifacts.generation_error =
+        let mut harness = harness();
+        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
 
         assert!(generated_primary_unavailable(
-            &state.model,
-            &state.code.netlist
+            &harness.model,
+            &harness.state.netlist
         ));
-        assert!(!generated_primary_ready_in(&state.model));
+        assert!(!generated_primary_ready_in(&harness.model));
         assert_eq!(
             document_syntax_status(
-                &state.model,
-                &state.code.netlist,
-                state.workbench.messages()
+                &harness.model,
+                &harness.state.netlist,
+                harness.wb.messages()
             ),
             Some(("generation blocked".to_owned(), Problem::Warning))
         );
@@ -1390,21 +1395,25 @@ pub(crate) mod tests {
 
     #[test]
     fn retained_generated_primary_reports_stale_when_regeneration_is_blocked() {
-        let mut state = AppState::default();
-        retain_generated(&mut state, "retained\n.end\n");
-        state.code.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.model.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
+        let mut harness = harness();
+        retain_generated(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            "retained\n.end\n",
+        );
+        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.model.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
 
         assert!(!generated_primary_unavailable(
-            &state.model,
-            &state.code.netlist
+            &harness.model,
+            &harness.state.netlist
         ));
-        assert!(generated_primary_ready_in(&state.model));
+        assert!(generated_primary_ready_in(&harness.model));
         assert_eq!(
             document_syntax_status(
-                &state.model,
-                &state.code.netlist,
-                state.workbench.messages()
+                &harness.model,
+                &harness.state.netlist,
+                harness.wb.messages()
             ),
             Some(("stale · generation blocked".to_owned(), Problem::Warning))
         );
@@ -1412,28 +1421,32 @@ pub(crate) mod tests {
 
     #[test]
     fn split_generated_state_fails_closed_as_unavailable() {
-        let mut state = AppState::default();
-        retain_generated(&mut state, "retained\n.end\n");
-        state.code.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.model.netlist_artifacts.generated_source.clear();
-        state.model.netlist_artifacts.generation_error = None;
+        let mut harness = harness();
+        retain_generated(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            "retained\n.end\n",
+        );
+        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.model.netlist_artifacts.generated_source.clear();
+        harness.model.netlist_artifacts.generation_error = None;
 
-        assert!(state.model.netlist_artifacts.generated_document.is_some());
+        assert!(harness.model.netlist_artifacts.generated_document.is_some());
         assert!(generated_primary_unavailable(
-            &state.model,
-            &state.code.netlist
+            &harness.model,
+            &harness.state.netlist
         ));
-        assert!(!generated_primary_ready_in(&state.model));
+        assert!(!generated_primary_ready_in(&harness.model));
         assert!(!active_document_available(
-            &state.model,
-            &state.code.netlist,
-            &state.runs
+            &harness.model,
+            &harness.state.netlist,
+            &harness.runs
         ));
         assert_eq!(
             document_syntax_status(
-                &state.model,
-                &state.code.netlist,
-                state.workbench.messages()
+                &harness.model,
+                &harness.state.netlist,
+                harness.wb.messages()
             ),
             Some(("generation blocked".to_owned(), Problem::Warning))
         );
@@ -1442,7 +1455,7 @@ pub(crate) mod tests {
     /// Seal one manual-deck run into history the way a dispatch does, so the
     /// strip has a real receipt to read its digest and revision back off.
     pub(crate) fn seal_manual_run(
-        state: &mut AppState,
+        model: &mut rspice_app_state::workbench::app_state::model::Model,
         run_number: u64,
         deck_digest: u8,
         revision: u64,
@@ -1479,27 +1492,28 @@ pub(crate) mod tests {
             receipt,
         )))
         .expect("fresh run accepts its receipt");
-        state.model.simulation.retained.runs.push(run);
+        model.simulation.retained.runs.push(run);
     }
 
-    fn ran_owned_deck(deck: &str) -> AppState {
-        let mut state = AppState::default();
-        state.model.workspace.content.netlist_source = Some(deck.to_owned());
-        state.model.simulation.source.netlist_content = deck.to_owned();
-        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.code.netlist.active_document_initialized = true;
-        state.runs.manual_run.last_run_buffer = Some(deck.to_owned());
-        state.runs.manual_run.last_run_id = Some(7);
-        seal_manual_run(&mut state, 7, 0xAB, 4);
-        state
+    fn ran_owned_deck(deck: &str) -> CodeHarness {
+        let mut harness = harness();
+        harness.model.workspace.content.netlist_source = Some(deck.to_owned());
+        harness.model.simulation.source.netlist_content = deck.to_owned();
+        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        harness.state.netlist.active_document_initialized = true;
+        harness.runs.manual_run.last_run_buffer = Some(deck.to_owned());
+        harness.runs.manual_run.last_run_id = Some(7);
+        seal_manual_run(&mut harness.model, 7, 0xAB, 4);
+        harness
     }
 
     #[test]
     fn run_strip_states_the_run_identity_from_the_run_receipt_alone() {
-        let state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        let harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
 
-        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
-            .expect("a completed run owns the strip");
+        let projection =
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
+                .expect("a completed run owns the strip");
         assert_eq!(projection.phase, RunStripPhase::Current);
         assert_eq!(projection.run_id, 7);
         assert_eq!(projection.revision, 4);
@@ -1515,13 +1529,14 @@ pub(crate) mod tests {
 
     #[test]
     fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
-        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.model.workspace.content.netlist_source =
+        let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        harness.model.workspace.content.netlist_source =
             Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
-        state.model.simulation.source.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+        harness.model.simulation.source.netlist_content =
+            "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
 
         assert_eq!(
-            run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
                 .map(|projection| projection.phase),
             Some(RunStripPhase::Edited)
         );
@@ -1529,14 +1544,15 @@ pub(crate) mod tests {
 
     #[test]
     fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
-        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.model.workspace.content.netlist_source =
+        let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        harness.model.workspace.content.netlist_source =
             Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
-        seal_manual_run(&mut state, 8, 0xCD, 5);
-        state.runs.manual_run.pending_manual_run_id = Some(8);
+        seal_manual_run(&mut harness.model, 8, 0xCD, 5);
+        harness.runs.manual_run.pending_manual_run_id = Some(8);
 
-        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
-            .expect("an active run owns the strip");
+        let projection =
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
+                .expect("an active run owns the strip");
         assert_eq!(projection.phase, RunStripPhase::Running);
         assert_eq!(projection.run_id, 8);
         assert_eq!(projection.revision, 5);
@@ -1544,42 +1560,49 @@ pub(crate) mod tests {
 
     #[test]
     fn run_strip_is_silent_without_a_retained_manual_run() {
-        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.model.simulation.retained.runs.clear();
+        let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        harness.model.simulation.retained.runs.clear();
 
-        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
+        assert!(
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs).is_none()
+        );
     }
 
     #[test]
     fn run_strip_does_not_speak_for_an_include_or_a_comparison() {
-        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
+        let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        harness.state.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+        assert!(
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs).is_none()
+        );
 
-        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.code.netlist.active_dependency_identity = Some("models/r.inc".to_owned());
-        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
+        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        harness.state.netlist.active_dependency_identity = Some("models/r.inc".to_owned());
+        assert!(
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs).is_none()
+        );
     }
 
     #[test]
     fn run_snapshot_document_owns_the_strip_as_its_immutable_header() {
-        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
         assert!(
             crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
-                &mut state.model,
-                &mut state.code.netlist,
-                &state.runs
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &harness.runs
             )
         );
 
-        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
-            .expect("the snapshot states its run");
+        let projection =
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
+                .expect("the snapshot states its run");
         assert_eq!(projection.phase, RunStripPhase::Snapshot);
         assert_eq!(projection.run_id, 7);
         assert!(
             !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
-                &state.model,
-                &state.code.netlist
+                &harness.model,
+                &harness.state.netlist
             )
         );
     }
@@ -1598,8 +1621,8 @@ pub(crate) mod tests {
 
         const DECK: &str = "deck\nR1 out 0 1k\n.op\n.end\n";
 
-        let mut state = ran_owned_deck(DECK);
-        let baseline = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+        let mut harness = ran_owned_deck(DECK);
+        let baseline = run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
             .expect("a completed run owns the strip");
         assert_eq!(baseline.tasks, 0);
         assert_eq!(
@@ -1617,7 +1640,7 @@ pub(crate) mod tests {
                 deck,
             }
         };
-        state
+        harness
             .model
             .simulation
             .retained
@@ -1630,7 +1653,7 @@ pub(crate) mod tests {
                 ],
             });
 
-        let held = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+        let held = run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
             .expect("the run still owns the strip");
         assert_eq!(held.tasks, 2);
         assert_eq!(
@@ -1641,15 +1664,15 @@ pub(crate) mod tests {
 
         assert!(
             crate::workbench::documents::netlist_document::open_executed_deck_in(
-                &mut state.model,
-                &mut state.code.netlist,
-                &state.runs,
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &harness.runs,
                 7,
                 0,
             ),
             "the route the strip offers is one the document honours"
         );
-        let first = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+        let first = run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
             .expect("the executed deck owns the strip");
         assert_eq!(first.phase, RunStripPhase::Snapshot);
         assert_eq!(first.point.as_deref(), Some("TT 27C"));
@@ -1666,14 +1689,14 @@ pub(crate) mod tests {
 
         assert!(
             crate::workbench::documents::netlist_document::open_executed_deck_in(
-                &mut state.model,
-                &mut state.code.netlist,
-                &state.runs,
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &harness.runs,
                 7,
                 1,
             )
         );
-        let last = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+        let last = run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
             .expect("the executed deck owns the strip");
         assert_eq!(last.point.as_deref(), Some("SS 27C"));
         assert_eq!(
@@ -1685,21 +1708,23 @@ pub(crate) mod tests {
 
     #[test]
     fn generated_deck_does_not_inject_unreferenced_code_workspace_veriloga() {
-        let state = AppState::default();
+        let harness = harness();
         let source = "R1 1 0 1k\n.end\n".to_owned();
 
-        let dependencies = generation::generated_project_source_dependencies(&state.model, &source)
-            .expect("unreferenced source does not create a dependency");
+        let dependencies =
+            generation::generated_project_source_dependencies(&harness.model, &source)
+                .expect("unreferenced source does not create a dependency");
         assert!(dependencies.is_empty());
     }
 
     #[test]
     fn generated_deck_retains_the_exact_transitive_cell_view_source_closure() {
-        let (state, source_key) = configured_veriloga_state();
+        let (harness, source_key) = configured_veriloga_state();
         let source = format!("configured deck\n.veriloga \"{source_key}\" sealed_gain\n.end\n");
 
-        let dependencies = generation::generated_project_source_dependencies(&state.model, &source)
-            .expect("retain exact project source closure");
+        let dependencies =
+            generation::generated_project_source_dependencies(&harness.model, &source)
+                .expect("retain exact project source closure");
 
         assert_eq!(dependencies.len(), 2);
         assert!(dependencies.iter().all(|dependency| {

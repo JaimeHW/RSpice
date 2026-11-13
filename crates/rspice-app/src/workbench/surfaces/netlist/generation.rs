@@ -538,14 +538,14 @@ fn source_line_component(
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, Point, SchematicState};
-    use crate::workbench::AppState;
+    use crate::workbench::code::tests::harness;
 
     /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a
     /// keyword-headed card names its element after the keyword.
     #[test]
     fn a_keyword_headed_card_names_the_component_after_its_keyword() {
-        let mut state = AppState::default();
-        let view = state.model.workspace.content.active_view.key();
+        let mut harness = harness();
+        let view = harness.model.workspace.content.active_view.key();
         let mut schematic = SchematicState::default();
         schematic.document_mut_for_test().components.extend([
             Component::new(4, ComponentType::Memristor, Point::origin()).with_name_value("MR1", ""),
@@ -553,7 +553,7 @@ mod tests {
                 .with_name_value("R1", "1k"),
         ]);
         let (design, _) = schematic.into_parts();
-        state
+        harness
             .model
             .workspace
             .content
@@ -561,7 +561,7 @@ mod tests {
             .insert(view.clone(), design);
 
         let entries = generated_source_map(
-            &state.model,
+            &harness.model,
             "* title\nYMEMRISTOR MR1 a 0 mem_MR1\nR1 a 0 1k\nYMEMRISTOR R1 a 0 m\n",
         )
         .expect("source map");

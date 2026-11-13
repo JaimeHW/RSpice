@@ -117,7 +117,7 @@ fn run_strip_band(width: f32, phase: RunStripPhase) -> (crate::ui::raster::Canva
     app.state.code.netlist.active_document_initialized = true;
     app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
     app.state.runs.manual_run.last_run_id = Some(7);
-    seal_manual_run(&mut app.state, 7, 0xAB, 4);
+    seal_manual_run(&mut app.state.model, 7, 0xAB, 4);
     match phase {
         RunStripPhase::Current => {}
         RunStripPhase::Snapshot => {
@@ -134,7 +134,7 @@ fn run_strip_band(width: f32, phase: RunStripPhase) -> (crate::ui::raster::Canva
             app.state.model.simulation.source.netlist_content = EDITED.to_owned();
         }
         RunStripPhase::Running => {
-            seal_manual_run(&mut app.state, 8, 0xCD, 5);
+            seal_manual_run(&mut app.state.model, 8, 0xCD, 5);
             app.state.runs.manual_run.pending_manual_run_id = Some(8);
         }
     }

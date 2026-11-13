@@ -24,7 +24,11 @@ fn netlist_first_app() -> RSpiceApp {
 fn schematic_first_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-    retain_generated(&mut app.state, "generated\nR1 out 0 1k\n.op\n.end\n");
+    retain_generated(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        "generated\nR1 out 0 1k\n.op\n.end\n",
+    );
     app.state.model.simulation.source.netlist_content =
         app.state.model.netlist_artifacts.generated_source.clone();
     app.state.code.netlist.active_document = ActiveNetlistDocument::Generated;

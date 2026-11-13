@@ -69,7 +69,7 @@ fn deck_page(page: DeckPage, project_open: bool) -> RSpiceApp {
     if matches!(page, DeckPage::RunSnapshot) {
         app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
         app.state.runs.manual_run.last_run_id = Some(7);
-        seal_manual_run(&mut app.state, 7, 0xAB, 4);
+        seal_manual_run(&mut app.state.model, 7, 0xAB, 4);
         assert!(open_run_deck_snapshot_in(
             &mut app.state.model,
             &mut app.state.code.netlist,
