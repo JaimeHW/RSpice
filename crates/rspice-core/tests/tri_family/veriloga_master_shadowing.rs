@@ -5,7 +5,6 @@
 //! resolves it by precedence, and used to do so without saying a word; a deck
 //! that misspells a master used to lose its typed refusal the moment a
 //! `.VERILOGA` include appeared beside it.
-#![cfg(feature = "veriloga")]
 
 use std::path::PathBuf;
 

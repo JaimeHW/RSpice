@@ -21,7 +21,6 @@
 //! `RSPICE_TRI_FAMILY_EMIT=1` and run with `--nocapture` to re-measure them all
 //! in one pass without asserting any of them. They are self-agreement
 //! tripwires, not oracles.
-#![cfg(feature = "veriloga")]
 
 use rspice_core::{Engine, Netlist};
 use std::sync::atomic::{AtomicU64, Ordering};

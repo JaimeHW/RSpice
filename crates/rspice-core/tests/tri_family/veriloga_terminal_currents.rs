@@ -13,7 +13,6 @@
 //! The decks are small, so an operating point or a DC sweep agrees to solver
 //! round-off; a transient agrees to well inside its own tolerance, because
 //! the two halves share every time point.
-#![cfg(feature = "veriloga")]
 
 use rspice_core::analysis::AcResult;
 use rspice_core::engine::TransientResult;
@@ -1405,7 +1404,7 @@ fn a_deck_naming_every_device_current_is_metered_in_linear_time() {
     }
 
     let netlist = Netlist::parse_with_options(
-        include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_507_SON/bug_507.cir"),
+        include_str!("../../../../tests/xyce/Netlists/Certification_Tests/BUG_507_SON/bug_507.cir"),
         NetlistParseOptions {
             expression_dialect: ExpressionDialect::Xyce,
             ..NetlistParseOptions::default()
@@ -1428,7 +1427,7 @@ fn a_deck_naming_every_device_current_is_metered_in_linear_time() {
     // to Xyce's RELTOL of 1e-3 with a 1 nV / 1 nA floor: a resistor current
     // is the difference of two near-volt nodes.
     let reference = include_str!(
-        "../../../tests/xyce/OutputData/Certification_Tests/BUG_507_SON/bug_507.cir.prn"
+        "../../../../tests/xyce/OutputData/Certification_Tests/BUG_507_SON/bug_507.cir.prn"
     );
     let mut lines = reference.lines();
     let header = lines.next().expect("reference header");

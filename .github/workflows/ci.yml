@@ -222,10 +222,11 @@ jobs:
           --test veriloga_include_resolution
           --test veriloga_mixed_signal_hardening
           --test veriloga_transient
-      # A second invocation rather than five more names above: these suites
-      # need a generated model compiled in, and adding `veriloga-model-diode-cmc`
-      # to the list above would reroute cards the suites there assert about
-      # through the generated device instead of the native one.
+      # A second invocation rather than one more target above: the suites in
+      # the `tri_family` folder need a generated model compiled in, and adding
+      # `veriloga-model-diode-cmc` to the list above would reroute cards the
+      # suites there assert about through the generated device instead of the
+      # native one.
       #
       # `veriloga_master_shadowing` belongs here and not above for the same
       # reason read the other way: its case for a `.VERILOGA` stem that shadows a
@@ -240,12 +241,7 @@ jobs:
         run: >-
           cargo test --locked -p rspice-core
           --features veriloga,veriloga-model-diode-cmc,veriloga-model-r2-cmc --no-fail-fast
-          --test tri_family_transient
-          --test tri_family_events
-          --test tri_family_small_signal
-          --test generated_route_parity
-          --test veriloga_master_shadowing
-          --test veriloga_terminal_currents
+          --test tri_family
 
   test-libraries:
     name: Test workspace libraries & tools (Linux)
@@ -398,12 +394,7 @@ jobs:
         run: >-
           cargo test --locked -p rspice-core
           --features veriloga-native,veriloga-model-diode-cmc,veriloga-model-r2-cmc --no-fail-fast
-          --test tri_family_transient
-          --test tri_family_events
-          --test tri_family_small_signal
-          --test generated_route_parity
-          --test veriloga_master_shadowing
-          --test veriloga_terminal_currents
+          --test tri_family
           -- --test-threads=1
       # Three suites the native lane never named. `numeric_integrity` and
       # `device_eval` are ungated, so the libraries job compiles them against the

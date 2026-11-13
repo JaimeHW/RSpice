@@ -22,12 +22,9 @@
 //! Pinned quantities print as `TRIFAMILY <key>=<value>`; set
 //! `RSPICE_TRI_FAMILY_EMIT=1` and run with `--nocapture` to re-measure them all
 //! in one pass without asserting any of them.
-#![cfg(feature = "veriloga")]
 
-#[path = "common/determinism_fingerprint.rs"]
-mod determinism_fingerprint;
-#[path = "common/digital_trace_invariants.rs"]
-mod digital_trace_invariants;
+use super::determinism_fingerprint;
+use super::digital_trace_invariants;
 
 use determinism_fingerprint::{
     EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, assert_grid_survives_a_nudge,
@@ -311,7 +308,7 @@ fn deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc() {
 fn deck_e_hashes_are_identical_across_processes() {
     assert_fingerprints_survive_new_processes(
         "deck_e",
-        &["deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc"],
+        &["tri_family_events::deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc"],
         8,
         &DECK_E_FINGERPRINT.records("deck_e"),
     );

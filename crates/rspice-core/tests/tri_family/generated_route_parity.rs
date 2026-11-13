@@ -17,7 +17,6 @@
 //! Each row asserts it actually took two different routes — a deck that
 //! silently resolved both runs to the same device would pass while testing
 //! nothing.
-#![cfg(all(feature = "veriloga", feature = "veriloga-model-diode-cmc"))]
 
 use rspice_core::{Engine, Netlist};
 

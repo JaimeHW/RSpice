@@ -34,12 +34,9 @@
 //! with. Copy the printed values into the constants below — per route, because
 //! the interpreter and the x64 JIT are separate routes and may land on
 //! different grids — and re-run without the variable.
-#![cfg(feature = "veriloga")]
 
-#[path = "common/determinism_fingerprint.rs"]
-mod determinism_fingerprint;
-#[path = "common/digital_trace_invariants.rs"]
-mod digital_trace_invariants;
+use super::determinism_fingerprint;
+use super::digital_trace_invariants;
 
 use determinism_fingerprint::{
     EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, assert_grid_survives_a_nudge,
@@ -1362,7 +1359,7 @@ fn deck_a_hashes_are_identical_across_processes() {
         let output = Command::new(&executable)
             .args([
                 "--exact",
-                "deck_a_tri_family_transient_sequence_golden",
+                "tri_family_transient::deck_a_tri_family_transient_sequence_golden",
                 "--nocapture",
             ])
             .env(EMIT_ENV, "1")
@@ -1421,7 +1418,7 @@ fn deck_a_hashes_are_identical_across_processes() {
 fn deck_c2_hashes_are_identical_across_processes() {
     assert_fingerprints_survive_new_processes(
         "deck_c2",
-        &["deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period"],
+        &["tri_family_transient::deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period"],
         8,
         &deck_c2_records(),
     );
