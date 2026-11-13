@@ -16,12 +16,9 @@ impl Bjt {
         } else {
             0.0
         };
-        let reverse_is = self.legacy_reverse_saturation_current();
         let (ifi, gfi) = self.legacy_junction_iv(LegacyCurrent::Forward, self.is, vbe_eff, self.nf);
-        let (iri, gri) =
-            self.legacy_junction_iv(LegacyCurrent::Reverse, reverse_is, vbc_eff, self.nr);
         let (ifi, gfi) = (ifi + gmin * vbe_eff, gfi + gmin);
-        let (iri, gri) = (iri + gmin * vbc_eff, gri + gmin);
+        let TransportChargeState { iri, gri, .. } = self.legacy_reverse_transport_state(vbc_eff);
 
         let raw_q1_inv =
             1.0 - if self.var.is_finite() && self.var > 0.0 {
@@ -128,12 +125,22 @@ impl Bjt {
         vcs: Value,
         forward_limit: bool,
     ) -> LegacyTransientChargeState {
-        self.legacy_transient_charge_state_from(vbe, vbc, vbx, vcs, forward_limit, None)
+        self.legacy_transient_charge_state_from(
+            vbe,
+            vbc,
+            vbx,
+            vcs,
+            forward_limit,
+            None,
+            LegacyChargeTerms::ALL,
+        )
     }
 
     /// [`Self::legacy_transient_charge_state_with_forward_limit`], with the
     /// transport taken from `transport` when it was computed at this junction
-    /// bias.
+    /// bias. Only the charges `terms` names are computed; the others are
+    /// zero.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::device::semiconductor::bjt) fn legacy_transient_charge_state_from(
         &self,
         vbe: Value,
@@ -142,6 +149,7 @@ impl Bjt {
         vcs: Value,
         forward_limit: bool,
         transport: Option<BiasedTransport>,
+        terms: LegacyChargeTerms,
     ) -> LegacyTransientChargeState {
         let p = self.polarity();
         let vbe_eff = p * vbe;
@@ -152,7 +160,13 @@ impl Bjt {
         let vsub_eff = -substrate_polarity * vcs;
         let transport = transport
             .and_then(|shared| shared.at(vbe_eff, vbc_eff))
-            .unwrap_or_else(|| self.legacy_transport_charge_state(vbe_eff, vbc_eff));
+            .unwrap_or_else(|| {
+                if terms.forward_transport || self.tf != 0.0 {
+                    self.legacy_transport_charge_state(vbe_eff, vbc_eff)
+                } else {
+                    self.legacy_reverse_transport_state(vbc_eff)
+                }
+            });
         let forward = vbe_eff > 0.0 || (vbe_eff == 0.0 && forward_limit);
 
         let mut argtf = 0.0;
@@ -192,10 +206,16 @@ impl Bjt {
             self.vbic_depletion_charge_and_derivative(vbe_eff, self.vje, self.mje, self.fc, 0.0);
         let (qbc_dep_norm, capbc_dep) =
             self.vbic_depletion_charge_and_derivative(vbc_eff, self.vjc, self.mjc, self.fc, 0.0);
-        let (qbx_dep_norm, capbx_dep) =
-            self.vbic_depletion_charge_and_derivative(vbx_eff, self.vjc, self.mjc, self.fc, 0.0);
-        let (qsub_norm, capsub_dep) =
-            self.vbic_depletion_charge_and_derivative(vsub_eff, self.ps, self.ms, 0.0, 0.0);
+        let (qbx_dep_norm, capbx_dep) = if terms.external_bc {
+            self.vbic_depletion_charge_and_derivative(vbx_eff, self.vjc, self.mjc, self.fc, 0.0)
+        } else {
+            (0.0, 0.0)
+        };
+        let (qsub_norm, capsub_dep) = if terms.substrate {
+            self.vbic_depletion_charge_and_derivative(vsub_eff, self.ps, self.ms, 0.0, 0.0)
+        } else {
+            (0.0, 0.0)
+        };
         let cjc_internal = self.cjc * self.xcjc;
         let cjc_external = self.cjc - cjc_internal;
 
@@ -209,6 +229,25 @@ impl Bjt {
             capbx: cjc_external * capbx_dep,
             qcs: -substrate_polarity * (self.cjcp * qsub_norm),
             capcs: self.cjcp * capsub_dep,
+        }
+    }
+
+    /// The reverse junction's current and conductance, the part of
+    /// [`Self::legacy_transport_charge_state`] the stored charges of a card
+    /// without TF read, and nothing else.
+    fn legacy_reverse_transport_state(&self, vbc_eff: Value) -> TransportChargeState {
+        let gmin = if self.xyce_compatibility {
+            self.nonlinear_branch_gmin()
+        } else {
+            0.0
+        };
+        let reverse_is = self.legacy_reverse_saturation_current();
+        let (iri, gri) =
+            self.legacy_junction_iv(LegacyCurrent::Reverse, reverse_is, vbc_eff, self.nr);
+        TransportChargeState {
+            iri: iri + gmin * vbc_eff,
+            gri: gri + gmin,
+            ..TransportChargeState::default()
         }
     }
 

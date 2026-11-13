@@ -3548,6 +3548,56 @@ mod tests {
         }
     }
 
+    /// A Gummel-Poon card with every stored charge: an external base-collector
+    /// depletion charge (XCJC < 1), a substrate junction and reverse transit
+    /// time, but no forward transit time.
+    const SPLIT_JUNCTION_GUMMEL_POON: &[(&str, Value)] = &[
+        ("BF", 75.0),
+        ("RB", 100.0),
+        ("CJE", 1e-12),
+        ("CJC", 3e-12),
+        ("XCJC", 0.5),
+        ("CJS", 2e-12),
+        ("TR", 1e-9),
+        ("VAF", 50.0),
+    ];
+
+    /// The charge branches computed from only the charges the device has a
+    /// branch for (no external base-collector or substrate depletion charge
+    /// without its branch, no forward transport without TF) are bit for bit
+    /// the branches computed from every charge.
+    #[test]
+    fn gummel_poon_charge_branches_compute_only_the_charges_they_read() {
+        let mut loads = gummel_poon_loads_in_every_region();
+        for region in GUMMEL_POON_REGIONS {
+            loads.push(settled_gummel_poon(SPLIT_JUNCTION_GUMMEL_POON, region));
+        }
+        for (bjt, bias) in loads {
+            let external = bjt.mna_external_state();
+            let internal = bjt.mna_internal_state();
+            let all = bjt.legacy_dynamic_charge_branches_of(
+                external,
+                internal,
+                false,
+                None,
+                LegacyChargeTerms::ALL,
+            );
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    bjt.legacy_dynamic_charge_branches(external, internal)
+                ),
+                format!("{all:?}"),
+                "{bias:?}"
+            );
+            assert_eq!(
+                format!("{:?}", bjt.mna_charge_cache.get()),
+                format!("{all:?}"),
+                "{bias:?}"
+            );
+        }
+    }
+
     /// Collector, base and emitter biases the Gummel-Poon fast paths are held
     /// to: forward active, saturated, cut off and reverse active.
     const GUMMEL_POON_REGIONS: [[Value; 3]; 4] = [

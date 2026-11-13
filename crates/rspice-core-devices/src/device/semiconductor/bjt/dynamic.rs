@@ -905,13 +905,33 @@ impl Bjt {
 
     /// [`Self::legacy_dynamic_charge_branches_with_forward_limit`], with the
     /// transport taken from `transport` when it was computed at this
-    /// junction bias.
+    /// junction bias, computing only the charges the branches read.
     pub(super) fn legacy_dynamic_charge_branches_from(
         &self,
         external: [Value; EXTERNAL_DIM],
         internal: [Value; BJT_INTERNAL_STATE_DIM],
         forward_limit: bool,
         transport: Option<BiasedTransport>,
+    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
+        // The conditions under which the branches below exist.
+        let terms = LegacyChargeTerms {
+            external_bc: self.cjc * (1.0 - self.xcjc) != 0.0
+                && self.legacy_external_bc_base_node().is_none(),
+            substrate: self.cjcp != 0.0,
+            forward_transport: self.tf != 0.0,
+        };
+        self.legacy_dynamic_charge_branches_of(external, internal, forward_limit, transport, terms)
+    }
+
+    /// The charge branches, from the charges `terms` names. A branch reads
+    /// only charges its existence implies are named.
+    pub(super) fn legacy_dynamic_charge_branches_of(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+        forward_limit: bool,
+        transport: Option<BiasedTransport>,
+        terms: LegacyChargeTerms,
     ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
         let mut branches = [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT];
         let vbe = internal[IDX_VBI] - internal[IDX_VEI];
@@ -933,8 +953,15 @@ impl Bjt {
         let vbx = external[EXT_B] - terminal_voltage(collector_terminal);
         let vcs =
             terminal_voltage(substrate_connection_terminal) - terminal_voltage(substrate_terminal);
-        let charges =
-            self.legacy_transient_charge_state_from(vbe, vbc, vbx, vcs, forward_limit, transport);
+        let charges = self.legacy_transient_charge_state_from(
+            vbe,
+            vbc,
+            vbx,
+            vcs,
+            forward_limit,
+            transport,
+            terms,
+        );
 
         // Storage topology belongs to the model, not the current bias. A zero
         // or negative local derivative still owns its accepted charge history;

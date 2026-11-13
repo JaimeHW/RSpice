@@ -151,6 +151,28 @@ impl BiasedTransport {
     }
 }
 
+/// Which of a Gummel-Poon device's stored charges a caller reads. The
+/// depletion charge of a branch the device does not have, and the forward
+/// transport of a card without TF, are left out of the computation.
+#[derive(Debug, Clone, Copy)]
+struct LegacyChargeTerms {
+    /// The base-collector depletion charge outside the intrinsic base (qbx).
+    external_bc: bool,
+    /// The substrate junction's depletion charge (qcs).
+    substrate: bool,
+    /// The forward transport (`ifi`, `gfi` and `qb`). The reverse junction's
+    /// current and conductance are always computed.
+    forward_transport: bool,
+}
+
+impl LegacyChargeTerms {
+    const ALL: Self = Self {
+        external_bc: true,
+        substrate: true,
+        forward_transport: true,
+    };
+}
+
 /// The external terminal rows `update_mna` summed from the evaluation it
 /// cached. They are a function of that evaluation alone, so they print as
 /// nothing and a device compares equal with or without them.
