@@ -55,13 +55,13 @@ pub(crate) fn dispatch_file_menu_action(
             );
         }
         FileMenuAction::RevertActiveDocument => {
-            crate::workbench::workflows::project_workflow::request_revert_active_document(state);
+            state.request_revert_active_document();
         }
         FileMenuAction::CloseActiveDocument => {
-            crate::workbench::workflows::project_workflow::close_active_document(state);
+            state.close_active_document();
         }
         FileMenuAction::CloseProject => {
-            crate::workbench::workflows::project_workflow::request_close_project(state);
+            state.request_close_project();
         }
         FileMenuAction::Open => {
             // Inside a project the file is imported as a new cell view and

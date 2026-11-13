@@ -1057,7 +1057,7 @@ impl DocumentHost for AppState {
             // forward first.
             WorkspaceDocumentId::CellView(_) => Some(
                 crate::workbench::chrome::document_bar::activate_document_by_id(state, document)
-                    && crate::workbench::workflows::project_workflow::close_active_document(state),
+                    && state.close_active_document(),
             ),
             WorkspaceDocumentId::NetlistDependency { .. } => {
                 crate::workbench::chrome::document_bar::code::close_netlist_dependency(

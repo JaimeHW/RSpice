@@ -889,7 +889,7 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
         );
-        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
+        assert!(state.request_close_project());
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
@@ -938,7 +938,7 @@ mod tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
 
-        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
+        assert!(state.request_close_project());
 
         assert!(state.workbench.project_review_dialog.request.is_none());
         assert!(!state.platform.project_lifecycle.is_open());
@@ -971,7 +971,7 @@ mod tests {
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(3, 8));
         let close_ac_id = insert_ac_analysis(&mut state);
-        crate::workbench::workflows::project_workflow::request_close_project(&mut state);
+        state.request_close_project();
         let mut app = test_app_with_file_io(
             state,
             TestFileWorkflowIo {
@@ -1040,7 +1040,7 @@ mod tests {
             .model
             .schematic
             .add_component(ComponentType::Inductor, Point::new(6, 10));
-        crate::workbench::workflows::project_workflow::request_close_project(&mut state);
+        state.request_close_project();
         std::fs::write(&path, b"external owner replaced this project snapshot")
             .expect("simulate external replacement");
         let mut app = test_app_with_file_io(

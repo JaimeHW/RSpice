@@ -1,8 +1,9 @@
 //! Project file workflows.
 //!
-//! New, open, save, save-as, and close for a project, including the
-//! checkpoint and binding-receipt bookkeeping that makes a reopened project
-//! resume where it left off.
+//! The project's own phases of new, open, save, save-as, and close, over
+//! its parts, including the checkpoint and binding-receipt bookkeeping that
+//! makes a reopened project resume where it left off. The whole-app
+//! sequences that run them are the shell's, in `session::project_transactions`.
 
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
@@ -10,13 +11,15 @@ use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::SlotFacts;
-use crate::workbench::app_state::{AppState, Model, PlatformState};
-use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::app_state::{Model, PlatformState};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::lifecycle::project_lifecycle::PersistenceBinding;
+#[cfg(test)]
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView,
@@ -997,19 +1000,6 @@ pub(crate) fn cancel_pending_browser_file_operation(
     cancelled
 }
 
-pub(crate) fn request_revert_active_document(state: &mut AppState) -> bool {
-    match crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(state) {
-        Ok(token) => {
-            state.workbench.project_review_dialog.show_revert(token);
-            true
-        }
-        Err(error) => {
-            lifecycle_error(state, error, "Revert review unavailable");
-            false
-        }
-    }
-}
-
 /// Say how the reverted document's revert went: record it, or answer the
 /// refusal or failure. Returns whether it was reverted.
 pub(crate) fn report_revert(
@@ -1032,64 +1022,6 @@ pub(crate) fn report_revert(
             false
         }
     }
-}
-
-pub(crate) fn close_active_document(state: &mut AppState) -> bool {
-    match crate::workbench::app_state::services_access::close_active_document(state) {
-        Ok(()) => {
-            state.prompt("Closed the document; the project keeps its data.");
-            true
-        }
-        Err(error) => {
-            lifecycle_error(state, error, "Close document failed");
-            false
-        }
-    }
-}
-
-/// Close the project, asking first only when something would be lost: an
-/// unsaved document or model candidate, or a local run that has to stop. A
-/// clean, idle project closes at once. Either way the close leaves the
-/// application on the no-project landing, not in the project launcher.
-pub(crate) fn request_close_project(state: &mut AppState) -> bool {
-    if !state.platform.project_lifecycle.is_open() {
-        lifecycle_error(
-            state,
-            ProjectLifecycleError::NoProject,
-            "Close project unavailable",
-        );
-        return false;
-    }
-    let destination = ProjectCloseDestination::EmptyWorkbench;
-    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
-        state,
-        crate::workbench::app::ConfirmationAction::CloseProject(destination),
-        None,
-    ) {
-        return true;
-    }
-    if closing_loses_nothing(state) {
-        return state.close_project_discard(destination);
-    }
-    state
-        .workbench
-        .project_review_dialog
-        .show_close_project(destination);
-    true
-}
-
-/// Whether closing the open project loses nothing: no unsaved document or
-/// model candidate, no configuration edits left unapplied, and no local run
-/// that would have to stop. A project never saved to a file always has
-/// something to lose.
-pub(crate) fn closing_loses_nothing(state: &AppState) -> bool {
-    !state.model.simulation.execution.has_active_execution()
-        && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
-        && !state
-            .project
-            .configuration
-            .is_dirty(&state.model.workspace.content.configuration_sets)
-        && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
 }
 
 /// Whether Projects and files ▸ On startup keeps the project the restored
@@ -1185,7 +1117,12 @@ pub(crate) fn apply_loaded_project(
         match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
             Err(error) => {
-                lifecycle_error(state, error, "Project open blocked");
+                report_lifecycle_error(
+                    &mut state.model,
+                    &mut state.workbench,
+                    error,
+                    "Project open blocked",
+                );
                 return false;
             }
         };
@@ -1835,17 +1772,12 @@ pub(crate) fn settle_browser_canonical_open(
     true
 }
 
-/// Answer a lifecycle command that did not take effect.
+/// Answer a lifecycle command that did not take effect, over the two parts
+/// it answers through: the model's log and notices, and the status bar.
 ///
 /// A guard that refused the command (no project, a run in progress, another
 /// operation pending) answers the gesture; a project that could not be read
 /// or written is a failure the session records and tells the user about.
-fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
-    report_lifecycle_error(&mut state.model, &mut state.workbench, error, context);
-}
-
-/// [`lifecycle_error`] over the two parts it answers through: the model's
-/// log and notices, and the status bar.
 pub(crate) fn report_lifecycle_error(
     model: &mut Model,
     workbench: &mut WorkbenchSession,

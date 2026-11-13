@@ -21,6 +21,7 @@ use crate::workbench::app_state::model::LibraryRemoval;
 use crate::workbench::app_state::model::WorkspacePruned;
 use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
+use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
@@ -234,7 +235,7 @@ impl AppState {
         if project_workflow::startup_keeps_project(&self.model, &self.platform) {
             return;
         }
-        if project_workflow::closing_loses_nothing(self) {
+        if self.closing_loses_nothing() {
             close_project_discard(self, ProjectCloseDestination::EmptyWorkbench);
         } else {
             project_workflow::report_startup_project_kept(&mut self.model, &self.platform);
@@ -500,6 +501,85 @@ impl AppState {
     }
 }
 
+/// Closing a document or the project, or reverting the active document:
+/// the refusals answered, the review asked for, and the close carried out
+/// at once when it loses nothing.
+impl AppState {
+    /// Ask the reader to review reverting the active document to what its
+    /// project last saved. Returns whether the review opened.
+    pub(crate) fn request_revert_active_document(&mut self) -> bool {
+        match crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(self) {
+            Ok(token) => {
+                self.workbench.project_review_dialog.show_revert(token);
+                true
+            }
+            Err(error) => {
+                lifecycle_error(self, error, "Revert review unavailable");
+                false
+            }
+        }
+    }
+
+    /// Close the active document; the project keeps its data. Returns
+    /// whether it closed.
+    pub(crate) fn close_active_document(&mut self) -> bool {
+        match crate::workbench::app_state::services_access::close_active_document(self) {
+            Ok(()) => {
+                self.prompt("Closed the document; the project keeps its data.");
+                true
+            }
+            Err(error) => {
+                lifecycle_error(self, error, "Close document failed");
+                false
+            }
+        }
+    }
+
+    /// Close the project, asking first only when something would be lost: an
+    /// unsaved document or model candidate, or a local run that has to stop. A
+    /// clean, idle project closes at once. Either way the close leaves the
+    /// application on the no-project landing, not in the project launcher.
+    pub(crate) fn request_close_project(&mut self) -> bool {
+        if !self.platform.project_lifecycle.is_open() {
+            lifecycle_error(
+                self,
+                ProjectLifecycleError::NoProject,
+                "Close project unavailable",
+            );
+            return false;
+        }
+        let destination = ProjectCloseDestination::EmptyWorkbench;
+        if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+            self,
+            crate::workbench::app::ConfirmationAction::CloseProject(destination),
+            None,
+        ) {
+            return true;
+        }
+        if self.closing_loses_nothing() {
+            return self.close_project_discard(destination);
+        }
+        self.workbench
+            .project_review_dialog
+            .show_close_project(destination);
+        true
+    }
+
+    /// Whether closing the open project loses nothing: no unsaved document or
+    /// model candidate, no configuration edits left unapplied, and no local run
+    /// that would have to stop. A project never saved to a file always has
+    /// something to lose.
+    pub(crate) fn closing_loses_nothing(&self) -> bool {
+        !self.model.simulation.execution.has_active_execution()
+            && !ModelsPort::model_editor_has_unsaved_changes(&*self.models)
+            && !self
+                .project
+                .configuration
+                .is_dirty(&self.model.workspace.content.configuration_sets)
+            && crate::workbench::lifecycle::project_lifecycle::dirty_documents(self).is_empty()
+    }
+}
+
 /// Reverting the active document to what its project last saved, answered
 /// from the revert review: the shell's revert over the whole project, then
 /// the project's report of it.
@@ -631,9 +711,11 @@ impl AppState {
     }
 }
 
-/// Answer a lifecycle refusal on the status bar, or a project that could not
-/// be read or written as a failure the session records, as the project's
-/// report of it says.
+/// Answer a lifecycle command that did not take effect.
+///
+/// A guard that refused the command (no project, a run in progress, another
+/// operation pending) answers the gesture; a project that could not be read
+/// or written is a failure the session records and tells the user about.
 fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
     project_workflow::report_lifecycle_error(
         &mut state.model,
@@ -1150,7 +1232,7 @@ mod tests {
             "apply_startup_project_choice",
             &[
                 "project_workflow::startup_keeps_project(",
-                "project_workflow::closing_loses_nothing(self)",
+                "self.closing_loses_nothing()",
                 "close_project_discard(self, ProjectCloseDestination::EmptyWorkbench)",
                 "project_workflow::report_startup_project_kept(",
             ],

@@ -170,7 +170,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
         .rename("edited")
         .expect("valid name");
 
-    assert!(request_close_project(&mut state));
+    assert!(state.request_close_project());
     assert!(matches!(
         state.workbench.project_review_dialog.request,
         Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
@@ -2203,7 +2203,7 @@ fn close_project_asks_about_configuration_edits_before_its_review() {
         });
     assert!(state.project.configuration.is_dirty(&catalog));
 
-    assert!(request_close_project(&mut state));
+    assert!(state.request_close_project());
 
     assert_eq!(
         state
