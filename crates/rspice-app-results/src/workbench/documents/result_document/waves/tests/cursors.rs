@@ -18,9 +18,8 @@ use rspice_results::feature_search::Direction;
 use rspice_results::result_presentation::{MarkerKind, WavePanePresentationKey};
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
 use rspice_results_ui::session::MarkerSelector;
-use rspice_results_ui::waves::dock::marker_position;
+use rspice_results_ui::waves::cursor_values::{marker_position, x_separation};
 use rspice_results_ui::waves::navigation::CursorJump;
-use rspice_results_ui::waves::readout::x_separation;
 use std::f64::consts::PI;
 
 /// `exp(-t/TAU) sin(2 pi F t)` over five periods.

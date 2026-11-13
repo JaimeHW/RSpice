@@ -2,7 +2,8 @@
 use super::{
     CursorDomain, ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key,
     cursor_interpolation,
-    dock::{marker_color, marker_label, marker_position},
+    cursor_values::marker_position,
+    dock::{marker_color, marker_label},
     extent::{self, FamilyEnvelopePlan},
     header::{self as pane_header, WAVE_PANE_HEADER_HEIGHT, elide},
     navigation::{self, WAVE_SHARED_X_HEIGHT},

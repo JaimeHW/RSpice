@@ -14,6 +14,7 @@ use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
 use std::sync::Arc;
 
 pub mod cache;
+pub mod cursor_values;
 pub mod dock;
 pub mod expression_editor;
 pub mod extent;

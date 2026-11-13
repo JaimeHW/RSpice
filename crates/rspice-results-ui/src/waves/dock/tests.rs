@@ -5,7 +5,7 @@ use crate::waves::TraceKind;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
-    result_presentation::{ResultMarker, TracePresentationKey},
+    result_presentation::{ResultMarker, TracePresentationKey, WaveformPresentationKey},
     waveform::RetainedWaveform,
 };
 use rspice_vocabulary::product::{DatasetId, ResultDocumentId};

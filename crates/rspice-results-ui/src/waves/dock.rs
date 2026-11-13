@@ -6,13 +6,13 @@
 //! Deltas and slopes are shown only when both cursors sit on the same strip,
 //! because a difference across two domains is not a measurement.
 
-use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows, x_separation};
+use super::cursor_values::{marker_position, x_separation};
+use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows};
 use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
 use crate::session::{HorizontalCursors, MarkerSelector, MarkerView, ResultViewerState};
 use egui::Ui;
-use rspice_results::feature_search;
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, MarkerKind, WavePanePresentationKey, WaveformPresentationKey,
+    AnalysisPresentationKey, MarkerKind, WavePanePresentationKey,
 };
 use rspice_ui_kit::plot::{CursorPair, fmt_si_significant, sample::sample_at_with_shape};
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -97,30 +97,6 @@ pub fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
         MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) => t.color.accent,
         MarkerKind::Spec => t.color.warn,
     }
-}
-
-/// Where a marker sits on its trace as the trace is now.
-///
-/// A peak, valley or crossing marker is found again from where it was put
-/// every time it is read, so a result that changes under it moves it with
-/// its feature; `Err` carries where it was put when its trace no longer has
-/// that feature there. Any other marker stays where it was put.
-pub fn marker_position(
-    model: &StripModel,
-    anchor: &WaveformPresentationKey,
-    x: f64,
-    kind: MarkerKind,
-) -> Result<f64, f64> {
-    let Some(search) = kind.search() else {
-        return Ok(x);
-    };
-    model
-        .traces
-        .iter()
-        .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
-        .and_then(|trace| feature_search::nearest(&trace.x, &trace.y, x, search))
-        .map(|found| found.x)
-        .ok_or(x)
 }
 
 /// Tag text: the id always, the note only when the user wrote one.

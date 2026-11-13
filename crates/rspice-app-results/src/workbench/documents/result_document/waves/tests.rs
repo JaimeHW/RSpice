@@ -286,7 +286,7 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
         "and the X column beside them"
     );
     assert_eq!(
-        rspice_results_ui::waves::readout::x_separation(
+        rspice_results_ui::waves::cursor_values::x_separation(
             model,
             0.0,
             1.0e-3,
