@@ -114,7 +114,23 @@ fn soa_plan(
     Some(built)
 }
 
+/// The reader's significant digits and temperature unit, for every number
+/// the sheet and its inspector state.
+fn soa_numbers(state: &ResultsParts<'_>) -> viewer::SoaNumbers {
+    viewer::SoaNumbers {
+        significant_digits: usize::from(
+            state
+                .results_reads()
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        ),
+        quantity_policy: state.model.preferences.quantity_presentation_policy(),
+    }
+}
+
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let numbers = soa_numbers(state);
     let Some(dataset_id) = state
         .model
         .simulation
@@ -160,6 +176,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             filter: state.results.session.soa_rule_filter,
             trace_open: state.results.session.soa_stress_trace_open,
             stress_view: state.results.session.plot_view(super::ResultViewer::Soa, 0),
+            numbers,
         },
         &mut state.results.session.cache,
         |key, device| {
@@ -203,6 +220,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let numbers = soa_numbers(state);
     let Some(selection) = state.results.session.selected_soa_rule.clone() else {
         viewer::selection_note(ui, viewer::SoaSelectionAbsence::Unselected);
         return;
@@ -253,6 +271,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 &evaluation.device_id,
             )
             .is_some(),
+            numbers,
         },
     );
     if response.open_trace {
@@ -356,12 +375,7 @@ mod tests {
         let mut state = soa_state(2, 32, 3.0);
         let key = active_key(&state);
         let before = soa_plan(&mut state.results_parts(), key).expect("a validated SOA plan");
-        let before_interval = before
-            .presentation
-            .facts(0)
-            .expect("rule 0")
-            .interval_compact
-            .clone();
+        let before_interval = before.presentation.facts(0).expect("rule 0").worst_interval;
 
         // Replace the stress history with one that never crosses the warning
         // band, so the interval the plan reports has to change.
@@ -373,11 +387,7 @@ mod tests {
 
         let after = soa_plan(&mut state.results_parts(), key).expect("a validated SOA plan");
         assert_ne!(
-            after
-                .presentation
-                .facts(0)
-                .expect("rule 0")
-                .interval_compact,
+            after.presentation.facts(0).expect("rule 0").worst_interval,
             before_interval,
             "the plan reported the previous dataset generation's interval"
         );

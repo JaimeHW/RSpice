@@ -165,8 +165,8 @@ fn soa_source_nested_edits_refresh_facts_without_a_version_bump() {
     let after = plan(&mut state);
     assert_eq!(state.model.simulation.view.data_version, version);
     assert_ne!(
-        before.presentation.facts(0).unwrap().interval_full,
-        after.presentation.facts(0).unwrap().interval_full
+        before.presentation.facts(0).unwrap().worst_interval,
+        after.presentation.facts(0).unwrap().worst_interval
     );
 }
 

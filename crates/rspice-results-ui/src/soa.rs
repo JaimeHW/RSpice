@@ -2,7 +2,7 @@
 
 use crate::{
     optimization::{mono, table_header},
-    presentation::{PlotView, panel_note, stat_table, well_hint},
+    presentation::{PlotView, panel_note, plain_readout, stat_table, well_hint},
     strip::StripHeader,
 };
 use egui::{RichText, Ui};
@@ -20,8 +20,43 @@ use rspice_ui_kit::{
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_readout},
     tokens::Tokens,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 const ROW_HEIGHT: f32 = 29.0;
+
+/// The reader's notation for every number the SOA sheet states: engineering
+/// prefixes at the displayed significant digits, and a temperature in the
+/// unit Units ▸ Temperature chose. Full precision belongs to copy and export.
+#[derive(Debug, Clone, Copy)]
+pub struct SoaNumbers {
+    pub significant_digits: usize,
+    pub quantity_policy: QuantityPresentationPolicy,
+}
+
+impl SoaNumbers {
+    /// A stress, limit, temperature or instant.
+    fn value(self, value: f64, unit: &str) -> String {
+        if unit == "K" {
+            let (scale, offset, shown) = self.quantity_policy.celsius_display_transform();
+            return plain_readout(
+                (value - 273.15) * scale + offset,
+                shown,
+                self.significant_digits,
+            );
+        }
+        fmt_si_readout(value, unit, self.significant_digits)
+    }
+
+    /// A difference of two values, such as a margin: a temperature
+    /// difference scales with the display unit but takes no offset.
+    fn difference(self, value: f64, unit: &str) -> String {
+        if unit == "K" {
+            let (scale, _, shown) = self.quantity_policy.celsius_display_transform();
+            return plain_readout(value * scale, shown, self.significant_digits);
+        }
+        fmt_si_readout(value, unit, self.significant_digits)
+    }
+}
 
 /// Which safe-operating-area rules the SOA table lists.
 ///
@@ -61,16 +96,101 @@ pub struct SoaRuleFacts {
     pub stress_waveform: Option<usize>,
     pub limit_waveform: Option<usize>,
     pub temperature_waveform: Option<usize>,
-    /// The worst-interval cell, as the table prints it.
-    pub interval_compact: String,
-    /// The same interval, as the inspector prints it.
-    pub interval_full: String,
+    /// Where in time the rule's worst stress lies, which the table and the
+    /// inspector print in the reader's notation.
+    pub worst_interval: SoaWorstInterval,
     /// The stress card's padded axis extents. Both walk the whole history,
     /// and the card asked for them on every frame it was open.
     pub stress_axes: Option<((f64, f64), (f64, f64))>,
     /// Decimation-cache identity for the stress polyline. Without one the
     /// renderer re-reduces every retained sample per frame.
     pub stress_cache_key: u64,
+}
+
+/// Where in time a rule's worst stress lies, as its retained history states
+/// it. Held as numbers so the plan, built once per dataset generation, does
+/// not freeze one notation into the text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SoaWorstInterval {
+    /// The rule passed; only its worst instant is of interest.
+    Passed { worst_s: f64 },
+    /// The complete stress history was not retained.
+    NotRetained { worst_s: f64 },
+    /// The retained history does not reproduce the rule's verdict.
+    NotReproduced { worst_s: f64 },
+    /// The duration-qualified excursion holding the worst sample, between
+    /// its linear threshold crossings.
+    Excursion {
+        qualified: bool,
+        start_s: f64,
+        end_s: f64,
+    },
+    /// The run of samples above the warning band or the limit around the
+    /// worst sample.
+    AboveThreshold {
+        warning: bool,
+        start_s: f64,
+        end_s: f64,
+    },
+}
+
+impl SoaWorstInterval {
+    /// The table's cell.
+    fn compact(self, numbers: SoaNumbers) -> String {
+        let instant = |seconds| numbers.value(seconds, "s");
+        match self {
+            Self::Passed { worst_s } => format!("— · worst {}", instant(worst_s)),
+            Self::NotRetained { worst_s } | Self::NotReproduced { worst_s } => {
+                format!("worst {}", instant(worst_s))
+            }
+            Self::Excursion { start_s, end_s, .. }
+            | Self::AboveThreshold { start_s, end_s, .. } => {
+                format!("{}…{}", instant(start_s), instant(end_s))
+            }
+        }
+    }
+
+    /// The inspector's sentence.
+    fn full(self, numbers: SoaNumbers) -> String {
+        let instant = |seconds| numbers.value(seconds, "s");
+        match self {
+            Self::Passed { .. } => "Not applicable (rule passed)".to_owned(),
+            Self::NotRetained { .. } => {
+                "Complete interval was not retained; rerun the analysis".to_owned()
+            }
+            Self::NotReproduced { .. } => {
+                "Retained history does not reproduce the rule verdict".to_owned()
+            }
+            Self::Excursion {
+                qualified,
+                start_s,
+                end_s,
+            } => format!(
+                "{} excursion: {} to {} (linear threshold crossings)",
+                if qualified {
+                    "Qualified"
+                } else {
+                    "Unqualified"
+                },
+                instant(start_s),
+                instant(end_s)
+            ),
+            Self::AboveThreshold {
+                warning,
+                start_s,
+                end_s,
+            } => format!(
+                "{}: {} to {}",
+                if warning {
+                    "Warning band"
+                } else {
+                    "Limit exceedance"
+                },
+                instant(start_s),
+                instant(end_s)
+            ),
+        }
+    }
 }
 
 /// Scanned stress facts and visible rule ordinals for one retained analysis.
@@ -117,18 +237,7 @@ pub fn build_soa_plan(
                 limit_waveform: limits.map(|found| found.index),
                 temperature_waveform: temperature.map(|found| found.index),
                 stress_waveform: stress.map(|found| found.index),
-                interval_compact: worst_interval_text(
-                    stress,
-                    limits.map(|w| w.y.as_slice()),
-                    evaluation,
-                    true,
-                ),
-                interval_full: worst_interval_text(
-                    stress,
-                    limits.map(|w| w.y.as_slice()),
-                    evaluation,
-                    false,
-                ),
+                worst_interval: worst_interval(stress, limits.map(|w| w.y.as_slice()), evaluation),
                 stress_axes: stress.map(|waveform| {
                     let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
                     let (y_min, y_max) = padded_range(
@@ -170,6 +279,7 @@ pub struct SoaControls<'a> {
     pub filter: SoaRuleFilter,
     pub trace_open: bool,
     pub stress_view: PlotView,
+    pub numbers: SoaNumbers,
 }
 
 pub struct SoaResponse {
@@ -184,6 +294,7 @@ pub struct SoaResponse {
 struct StressPlot<'a> {
     view: PlotView,
     cache: &'a mut plot::DecimationCache,
+    numbers: SoaNumbers,
 }
 
 pub struct SoaInspector<'a> {
@@ -191,6 +302,7 @@ pub struct SoaInspector<'a> {
     pub facts: Option<&'a SoaRuleFacts>,
     pub event_count: usize,
     pub schematic_available: bool,
+    pub numbers: SoaNumbers,
 }
 
 pub struct SoaInspectorResponse {
@@ -235,8 +347,10 @@ pub fn show(
     let mut plot = StressPlot {
         view: controls.stress_view,
         cache,
+        numbers: controls.numbers,
     };
     let mut stress_view_change = None;
+    let numbers = controls.numbers;
     let selected = controls.selected;
     let initial_filter = controls.filter;
     let mut filter = initial_filter;
@@ -414,18 +528,21 @@ pub fn show(
                         row.col(|ui| {
                             ui.label(parameter_label(evaluation.parameter));
                         });
+                        let unit = &evaluation.unit;
                         row.col(|ui| {
-                            exact_quantity(ui, evaluation.worst_actual_value, &evaluation.unit)
+                            mono(ui, &numbers.value(evaluation.worst_actual_value, unit));
                         });
-                        row.col(|ui| exact_quantity(ui, evaluation.limit_value, &evaluation.unit));
+                        row.col(|ui| mono(ui, &numbers.value(evaluation.limit_value, unit)));
                         row.col(|ui| {
-                            exact_quantity(
+                            mono(
                                 ui,
-                                evaluation.limit_value - evaluation.worst_actual_value,
-                                &evaluation.unit,
-                            )
+                                &numbers.difference(
+                                    evaluation.limit_value - evaluation.worst_actual_value,
+                                    unit,
+                                ),
+                            );
                         });
-                        row.col(|ui| mono(ui, &facts.interval_compact));
+                        row.col(|ui| mono(ui, &facts.worst_interval.compact(numbers)));
                         row.col(|ui| verdict(ui, evaluation.verdict));
                         row.col(|ui| {
                             ui.horizontal(|ui| {
@@ -486,6 +603,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
         evaluation,
         facts,
         event_count,
+        numbers,
         ..
     } = source;
     let margin = evaluation.limit_value - evaluation.worst_actual_value;
@@ -519,19 +637,19 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             ),
             (
                 "Observed",
-                fmt_si_readout(evaluation.worst_actual_value, &evaluation.unit, 4),
+                numbers.value(evaluation.worst_actual_value, &evaluation.unit),
                 true,
             ),
             (
                 "Limit",
-                fmt_si_readout(evaluation.limit_value, &evaluation.unit, 4),
+                numbers.value(evaluation.limit_value, &evaluation.unit),
                 false,
             ),
             (
                 "Signed margin",
                 format!(
                     "{}{margin_percent}",
-                    fmt_si_readout(margin, &evaluation.unit, 4)
+                    numbers.difference(margin, &evaluation.unit)
                 ),
                 true,
             ),
@@ -539,11 +657,13 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
                 "Worst at",
                 format!(
                     "{} ({})",
-                    fmt_si_readout(evaluation.worst_time_s, "s", 4),
-                    facts.map_or_else(
-                        || worst_interval_text(None, None, evaluation, false),
-                        |facts| facts.interval_full.clone(),
-                    )
+                    numbers.value(evaluation.worst_time_s, "s"),
+                    facts
+                        .map_or_else(
+                            || worst_interval(None, None, evaluation),
+                            |facts| facts.worst_interval,
+                        )
+                        .full(numbers)
                 ),
                 false,
             ),
@@ -556,12 +676,12 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             &[
                 (
                     "Longest excursion",
-                    fmt_si_readout(duration.longest_excursion_s, "s", 4),
+                    numbers.value(duration.longest_excursion_s, "s"),
                     true,
                 ),
                 (
                     "Total time above limit",
-                    fmt_si_readout(duration.total_exceedance_s, "s", 4),
+                    numbers.value(duration.total_exceedance_s, "s"),
                     false,
                 ),
                 (
@@ -576,7 +696,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
                 ui,
                 &[(
                     "Peak exposure",
-                    fmt_si_readout(cumulative.peak_exposure_s, "s", 4),
+                    numbers.value(cumulative.peak_exposure_s, "s"),
                     true,
                 )],
             );
@@ -770,27 +890,19 @@ fn stress_waveform<'a>(
     })
 }
 
-fn worst_interval_text(
+fn worst_interval(
     stress: Option<SoaTrace<'_>>,
     limits: Option<&[f64]>,
     evaluation: &SoaEvaluationEvidence,
-    compact: bool,
-) -> String {
+) -> SoaWorstInterval {
+    let worst_s = evaluation.worst_time_s;
     if evaluation.verdict == SoaRuleVerdictEvidence::Pass {
-        return if compact {
-            format!("— · worst {:.6e} s", evaluation.worst_time_s)
-        } else {
-            "Not applicable (rule passed)".to_owned()
-        };
+        return SoaWorstInterval::Passed { worst_s };
     }
     let Some(waveform) = stress else {
-        return if compact {
-            format!("worst {:.6e} s", evaluation.worst_time_s)
-        } else {
-            "Complete interval was not retained; rerun the analysis".to_owned()
-        };
+        return SoaWorstInterval::NotRetained { worst_s };
     };
-    let worst_index = nearest_sample_index(waveform.x.as_slice(), evaluation.worst_time_s);
+    let worst_index = nearest_sample_index(waveform.x.as_slice(), worst_s);
     if let Some(duration) = evaluation.duration {
         use rspice_results::safety::{SoaLimitTrace, scan_soa_duration_with_mode};
         let limit_trace = limits.map_or(
@@ -807,25 +919,17 @@ fn worst_interval_text(
         ) && let Some(excursion) = scan.excursions.iter().find(|excursion| {
             (excursion.first_sample..=excursion.last_sample).contains(&worst_index)
         }) {
-            return if compact {
-                format!("{:.5e}…{:.5e} s", excursion.start_s, excursion.end_s)
-            } else {
-                format!(
-                    "{} excursion: {:.17e} s to {:.17e} s (linear threshold crossings)",
-                    if excursion.qualified {
-                        "Qualified"
-                    } else {
-                        "Unqualified"
-                    },
-                    excursion.start_s,
-                    excursion.end_s
-                )
+            return SoaWorstInterval::Excursion {
+                qualified: excursion.qualified,
+                start_s: excursion.start_s,
+                end_s: excursion.end_s,
             };
         }
     }
+    let warning = evaluation.verdict == SoaRuleVerdictEvidence::Warning;
     let threshold = |index: usize| {
         let limit = limits.map_or(evaluation.limit_value, |limits| limits[index]);
-        if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
+        if warning {
             limit
                 * evaluation
                     .thresholds
@@ -838,22 +942,12 @@ fn worst_interval_text(
     let Some((start, end)) =
         dynamic_active_interval_indices(waveform.y.as_slice(), worst_index, threshold)
     else {
-        return if compact {
-            format!("worst {:.6e} s", evaluation.worst_time_s)
-        } else {
-            "Retained history does not reproduce the rule verdict".to_owned()
-        };
+        return SoaWorstInterval::NotReproduced { worst_s };
     };
-    let (start, end) = (waveform.x[start], waveform.x[end]);
-    if compact {
-        format!("{start:.5e}…{end:.5e} s")
-    } else {
-        let kind = if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
-            "Warning band"
-        } else {
-            "Limit exceedance"
-        };
-        format!("{kind}: {start:.17e} s to {end:.17e} s")
+    SoaWorstInterval::AboveThreshold {
+        warning,
+        start_s: waveform.x[start],
+        end_s: waveform.x[end],
     }
 }
 
@@ -882,6 +976,8 @@ fn stress_trace_card(
     limits: Option<SoaTrace<'_>>,
     temperatures: Option<SoaTrace<'_>>,
 ) -> Option<plot::ViewChange> {
+    let unit = evaluation.unit.as_str();
+    let numbers = plot.numbers;
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.canvas_bg)
@@ -905,12 +1001,10 @@ fn stress_trace_card(
                 mono(
                     ui,
                     &format!(
-                        "worst {:.9e} {} at {:.9e} s · limit {:.9e} {} · {} exact samples",
-                        evaluation.worst_actual_value,
-                        evaluation.unit,
-                        evaluation.worst_time_s,
-                        evaluation.limit_value,
-                        evaluation.unit,
+                        "worst {} at {} · limit {} · {} exact samples",
+                        numbers.value(evaluation.worst_actual_value, unit),
+                        numbers.value(evaluation.worst_time_s, "s"),
+                        numbers.value(evaluation.limit_value, unit),
                         waveform.x.len()
                     ),
                 );
@@ -929,12 +1023,10 @@ fn stress_trace_card(
                 parameter_label(evaluation.parameter)
             );
             let detail = format!(
-                "Exact retained stress samples; limit at the worst point is {:.17e} {}. Worst point {:.17e} {} at {:.17e} seconds. A varying limit uses its retained trace at each time.",
-                evaluation.limit_value,
-                evaluation.unit,
-                evaluation.worst_actual_value,
-                evaluation.unit,
-                evaluation.worst_time_s
+                "Exact retained stress samples; limit at the worst point is {}. Worst point {} at {}. A varying limit uses its retained trace at each time.",
+                numbers.value(evaluation.limit_value, unit),
+                numbers.value(evaluation.worst_actual_value, unit),
+                numbers.value(evaluation.worst_time_s, "s")
             );
             let mut spec = PlotSpec::new(
                 Axis::linear(x_min, x_max, "s").with_label("Time"),
@@ -961,7 +1053,7 @@ fn stress_trace_card(
                 spec.limit_lines.push(LimitLine {
                     y: evaluation.limit_value,
                     color: t.color.err,
-                    label: format!("LIMIT {:.6e} {}", evaluation.limit_value, evaluation.unit),
+                    label: format!("LIMIT {}", numbers.value(evaluation.limit_value, unit)),
                 });
             }
             spec.markers.push(Marker::point(
@@ -973,23 +1065,22 @@ fn stress_trace_card(
             let readout = |hover_x: f64| {
                 let index = nearest_sample_index(waveform.x.as_slice(), hover_x);
                 let mut readout = vec![
-                    ("t".to_owned(), format!("{:.17e} s", waveform.x[index])),
+                    ("t".to_owned(), numbers.value(waveform.x[index], "s")),
                     (
                         parameter_label(evaluation.parameter).to_owned(),
-                        format!("{:.17e} {}", waveform.y[index], evaluation.unit),
+                        numbers.value(waveform.y[index], unit),
                     ),
                     (
                         "Margin".to_owned(),
-                        format!(
-                            "{:.17e} {}",
+                        numbers.difference(
                             limits.map_or(evaluation.limit_value, |wave| wave.y[index]) - waveform.y[index],
-                            evaluation.unit
+                            unit,
                         ),
                     ),
                 ];
                 if let Some(temperatures) = temperatures {
-                    readout.push(("Device temperature".into(), format!("{:.17e} K", temperatures.y[index])));
-                    readout.push(("Allowed power".into(), format!("{:.17e} W", limits.expect("derated limit").y[index])));
+                    readout.push(("Device temperature".into(), numbers.value(temperatures.y[index], "K")));
+                    readout.push(("Allowed power".into(), numbers.value(limits.expect("derated limit").y[index], "W")));
                 }
                 readout
             };
@@ -1166,10 +1257,6 @@ fn verdict_color(
     }
 }
 
-fn exact_quantity(ui: &mut Ui, value: f64, unit: &str) {
-    mono(ui, &format!("{value:.9e} {unit}"));
-}
-
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
     use super::*;
@@ -1317,18 +1404,43 @@ mod tests {
         };
         let mut evaluation = evaluations[0].clone();
         evaluation.thresholds.warning_fraction = Some(0.5);
-        let text = worst_interval_text(
-            Some((&analysis.waveforms[0]).into()),
-            None,
-            &evaluation,
-            false,
-        );
+        let interval = worst_interval(Some((&analysis.waveforms[0]).into()), None, &evaluation);
         assert_eq!(
-            text,
-            format!("Warning band: {:.17e} s to {:.17e} s", 2e-12, 3e-12)
+            interval,
+            SoaWorstInterval::AboveThreshold {
+                warning: true,
+                start_s: 2e-12,
+                end_s: 3e-12
+            }
         );
+        let numbers = SoaNumbers {
+            significant_digits: 4,
+            quantity_policy: QuantityPresentationPolicy::default(),
+        };
+        assert_eq!(interval.full(numbers), "Warning band: 2 ps to 3 ps");
+        assert_eq!(interval.compact(numbers), "2 ps…3 ps");
         assert_eq!(threshold_text(None), "Disabled");
         assert_eq!(threshold_text(Some(1.5)), "150% of limit");
+    }
+
+    #[test]
+    fn the_sheet_states_numbers_at_the_readers_digits_and_temperature_unit() {
+        use rspice_vocabulary::quantity::{TemperatureDisplay, UnitsPreferences};
+        let mut units = UnitsPreferences::default();
+        let celsius = SoaNumbers {
+            significant_digits: 4,
+            quantity_policy: units.presentation_policy(),
+        };
+        assert_eq!(celsius.value(-0.012_345_678_9, "A"), "-12.35 mA");
+        assert_eq!(celsius.value(398.15, "K"), "125 °C");
+        assert_eq!(celsius.difference(10.0, "K"), "10 °C");
+        units.set_temperature_display(TemperatureDisplay::Fahrenheit);
+        let fahrenheit = SoaNumbers {
+            significant_digits: 4,
+            quantity_policy: units.presentation_policy(),
+        };
+        assert_eq!(fahrenheit.value(398.15, "K"), "257 °F");
+        assert_eq!(fahrenheit.difference(10.0, "K"), "18 °F");
     }
 
     #[test]
@@ -1350,13 +1462,8 @@ mod tests {
             let facts = plan.facts(rule).expect("one fact set per rule");
             assert_eq!(facts.stress_waveform.is_some(), scanned.is_some(), "{rule}");
             assert_eq!(
-                facts.interval_compact,
-                worst_interval_text(scanned, None, evaluation, true),
-                "{rule}"
-            );
-            assert_eq!(
-                facts.interval_full,
-                worst_interval_text(scanned, None, evaluation, false),
+                facts.worst_interval,
+                worst_interval(scanned, None, evaluation),
                 "{rule}"
             );
             let expected_axes = scanned.map(|waveform| {
