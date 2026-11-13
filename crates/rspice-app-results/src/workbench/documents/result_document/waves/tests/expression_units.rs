@@ -5,16 +5,23 @@
 use super::*;
 
 fn power_fixture() -> ResultsTestHost {
-    let mut state = ResultsTestHost::default();
     let x = vec![0.0, 1.0e-3, 2.0e-3];
-    state.model.simulation.start_run().add_analysis(
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", x.clone(), vec![0.0, 2.0, 4.0], "#fff"),
             RetainedTrace::new("V(in)", x.clone(), vec![1.0, 1.0, 1.0], "#fff"),
             RetainedTrace::new("I(vdd)", x, vec![-1.0e-3, -2.0e-3, -3.0e-3], "#fff"),
         ]),
     );
-    state.model.simulation.complete_run();
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("legacy provenance");
+    run.restore_lifecycle(crate::state::SimulationRunLifecycle::LegacyUnknown, 0.0)
+        .expect("legacy lifecycle");
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state
 }
 
@@ -191,6 +198,144 @@ fn a_declared_unit_survives_a_save_and_reload() {
             .results
             .results
             .session
+            .expression_units
+            .get(&(analysis, "V(out)*I(vdd)".to_owned()))
+            .map(String::as_str),
+        Some("mW")
+    );
+}
+
+/// One frame of a project result document.
+fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultDocumentId) {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200.0, 800.0),
+        )),
+        ..Default::default()
+    };
+    let mut controller = crate::simulation::SimulationController::new();
+    let _ = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::super::super::persistent_document::show(
+                ui,
+                &mut state.results_parts(),
+                &mut controller,
+                None,
+                document,
+            );
+        });
+    });
+}
+
+/// A saved view keeps its expressions, as text and the pane's dataset, with
+/// the units declared for them, and the quick view gets its own back.
+#[test]
+fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
+    let mut state = power_fixture();
+    add(&mut state, "V(out)*I(vdd)");
+    add(&mut state, "V(out)/V(in)");
+    let analysis = AnalysisPresentationKey::new(
+        state.model.simulation.retained.runs[0].dataset_id,
+        &state.model.simulation.retained.runs[0].analyses[0],
+    );
+    state
+        .results
+        .results
+        .session
+        .expression_units
+        .insert((analysis, "V(out)*I(vdd)".to_owned()), "mW".to_owned());
+    let document_id = {
+        let mut parts = state.results_parts();
+        super::super::super::create_document::open(&mut parts);
+        parts.create_result_document.layout_id =
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane
+                .id()
+                .to_owned();
+        super::super::super::create_document::commit(&mut parts).expect("the view is saved")
+    };
+    for _ in 0..2 {
+        document_frame(&mut state, document_id);
+    }
+    let saved = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project keeps the document")
+        .clone();
+    let held: Vec<_> = saved
+        .expression_traces()
+        .iter()
+        .map(|trace| {
+            (
+                trace.text.as_str(),
+                trace.unit.as_deref(),
+                trace.datasets.len(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        held,
+        [("V(out)*I(vdd)", Some("mW"), 1), ("V(out)/V(in)", None, 1)]
+    );
+    let settled = saved.revision();
+    document_frame(&mut state, document_id);
+    assert_eq!(
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .unwrap()
+            .revision(),
+        settled,
+        "an idle frame writes nothing"
+    );
+    // The quick view keeps its own expressions while the view shows the
+    // document's, and has them back when the view is left.
+    state
+        .results
+        .results
+        .session
+        .analysis_exprs
+        .get_mut(&analysis)
+        .unwrap()
+        .pop();
+    state.results.results.session.leave_persistent_document();
+    assert_eq!(
+        state.results.results.session.analysis_exprs[&analysis].len(),
+        2,
+        "the quick view's expressions come back"
+    );
+
+    let json = serde_json::to_string(&saved).expect("the document writes out");
+    let mut fresh = ResultsTestHost::default();
+    fresh.model.simulation.retained.runs = state.model.simulation.retained.runs.clone();
+    fresh.model.simulation.view.active_run_idx = Some(0);
+    fresh.model.simulation.view.active_analysis_idx = Some(0);
+    let reopened: rspice_results::visualization_document::VisualizationDocument =
+        serde_json::from_str(&json).expect("it reads back");
+    let reopened_id = fresh
+        .model
+        .workspace
+        .content
+        .insert_visualization_document(reopened)
+        .expect("the project takes the document back");
+    document_frame(&mut fresh, reopened_id);
+    document_frame(&mut fresh, reopened_id);
+    let session = &fresh.results.results.session;
+    assert_eq!(
+        session.analysis_exprs[&analysis]
+            .iter()
+            .map(|expr| expr.text.as_str())
+            .collect::<Vec<_>>(),
+        ["V(out)*I(vdd)", "V(out)/V(in)"]
+    );
+    assert_eq!(
+        session
             .expression_units
             .get(&(analysis, "V(out)*I(vdd)".to_owned()))
             .map(String::as_str),

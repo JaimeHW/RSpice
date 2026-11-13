@@ -15,9 +15,9 @@ use crate::product::{
 };
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
-    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, Marker, Measurement, Page,
-    PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
-    VisualizationDocument,
+    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, ExpressionTrace, Marker,
+    Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace,
+    TypedValue, VisualizationDocument,
 };
 use crate::simulation::SimulationController;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
@@ -996,6 +996,38 @@ pub fn project_pane_presentation(
     state
         .results
         .project_waveform_visibility(analysis_key, visibility);
+    // The expressions this pane keeps are the ones its strip draws.
+    if let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+        && let Some(analysis_index) = state.model.simulation.view.active_analysis_idx
+    {
+        let held: Vec<_> = document
+            .expression_traces()
+            .iter()
+            .filter(|trace| trace.pane_id == pane.id)
+            .collect();
+        let traces = held
+            .iter()
+            .map(|trace| super::ExprTrace {
+                text: trace.text.clone(),
+                complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
+                visible: trace.visible,
+            })
+            .collect();
+        let units = held
+            .iter()
+            .filter_map(|trace| Some((trace.text.clone(), trace.unit.clone()?)))
+            .collect();
+        state.results.session.project_document_expressions(
+            analysis_key,
+            analysis_index,
+            traces,
+            units,
+        );
+    }
     if let Some(names) = lanes
         && let Some(document) = state
             .model
@@ -1209,6 +1241,7 @@ pub fn capture_pane_presentation(
             document, pane.id, &names, layout, &plotted,
         ));
     }
+    edits.extend(expression_edits(state, document, pane));
     if edits.is_empty() {
         return;
     }
@@ -1224,6 +1257,57 @@ pub fn capture_pane_presentation(
             "Could not keep this pane's view and cursors: {error}"
         ));
     }
+}
+
+/// The edits that make the pane keep the expressions its strip draws: each
+/// as its text, the pane's dataset and the unit the reader declared for it.
+fn expression_edits(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane: &PaneProjection,
+) -> Vec<DocumentEdit> {
+    let (Some(binding), Some(run), Some(analysis)) = (
+        pane.binding,
+        state.model.simulation.active_run(),
+        state.model.simulation.active_analysis(),
+    ) else {
+        return Vec::new();
+    };
+    let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let session = &state.results.session;
+    let drawn = session
+        .analysis_exprs
+        .get(&analysis_key)
+        .map_or(&[][..], Vec::as_slice);
+    let held: Vec<_> = document
+        .expression_traces()
+        .iter()
+        .filter(|trace| trace.pane_id == pane.id)
+        .collect();
+    let mut edits: Vec<DocumentEdit> = held
+        .iter()
+        .filter(|trace| !drawn.iter().any(|expr| expr.text == trace.text))
+        .map(|trace| DocumentEdit::RemoveExpressionTrace {
+            pane_id: pane.id,
+            text: trace.text.clone(),
+        })
+        .collect();
+    for expr in drawn {
+        let wanted = ExpressionTrace {
+            pane_id: pane.id,
+            text: expr.text.clone(),
+            datasets: vec![binding.dataset],
+            unit: session
+                .expression_units
+                .get(&(analysis_key, expr.text.clone()))
+                .cloned(),
+            visible: expr.visible,
+        };
+        if !held.iter().any(|trace| **trace == wanted) {
+            edits.push(DocumentEdit::AddExpressionTrace(wanted));
+        }
+    }
+    edits
 }
 
 fn select_pane_context(state: &mut ResultsParts<'_>, pane: &PaneProjection) -> Result<(), String> {

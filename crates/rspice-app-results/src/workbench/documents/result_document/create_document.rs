@@ -727,7 +727,49 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
         resolved.run,
         resolved.analysis,
     );
-    let document = build_document(resolved, tracking)?;
+    // The strip's expressions, with the units declared for them, are part of
+    // the view being saved; each pane reading the analysis keeps them.
+    let analysis_key =
+        super::AnalysisPresentationKey::new(resolved.run.dataset_id, resolved.analysis);
+    let session = &state.results.session;
+    let expressions: Vec<(String, Option<String>, bool)> = session
+        .analysis_exprs
+        .get(&analysis_key)
+        .into_iter()
+        .flatten()
+        .map(|expr| {
+            (
+                expr.text.clone(),
+                session
+                    .expression_units
+                    .get(&(analysis_key, expr.text.clone()))
+                    .cloned(),
+                expr.visible,
+            )
+        })
+        .collect();
+    let mut document = build_document(resolved, tracking)?;
+    let edits: Vec<DocumentEdit> = document
+        .panes()
+        .iter()
+        .filter_map(|pane| Some((pane.id, pane.binding?.dataset)))
+        .flat_map(|(pane_id, dataset)| {
+            expressions.iter().map(move |(text, unit, visible)| {
+                DocumentEdit::AddExpressionTrace(
+                    rspice_results::visualization_document::ExpressionTrace {
+                        pane_id,
+                        text: text.clone(),
+                        datasets: vec![dataset],
+                        unit: unit.clone(),
+                        visible: *visible,
+                    },
+                )
+            })
+        })
+        .collect();
+    if !edits.is_empty() {
+        document.transact(document.revision(), edits)?;
+    }
     let previous_documents_dirty = state.model.workspace.content.visualization_documents_dirty;
     let previous_workspace = state.workbench.workspace;
     let document_id = state

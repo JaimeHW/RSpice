@@ -356,8 +356,17 @@ impl ResultsState {
         &self,
         simulation: &crate::state::SimulationState,
     ) -> Vec<ResultExpressionGroup> {
-        let mut stable = self.session.analysis_exprs.clone();
-        if let Some(run) = simulation.active_run() {
+        // While a document pane shows its own expressions, the project
+        // keeps the quick view's, which are set aside until it is left.
+        let quick = self.session.quick_view_expressions.as_ref();
+        let units = quick.map_or(&self.session.expression_units, |quick| {
+            &quick.expression_units
+        });
+        let mut stable = quick.map_or_else(
+            || self.session.analysis_exprs.clone(),
+            |quick| quick.analysis_exprs.clone(),
+        );
+        if let Some(run) = simulation.active_run().filter(|_| quick.is_none()) {
             for (analysis_index, analysis) in run.analyses.iter().enumerate() {
                 let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
                 let may_import = self
@@ -384,10 +393,7 @@ impl ResultsState {
                 units: traces
                     .iter()
                     .filter_map(|trace| {
-                        let unit = self
-                            .session
-                            .expression_units
-                            .get(&(*analysis, trace.text.clone()))?;
+                        let unit = units.get(&(*analysis, trace.text.clone()))?;
                         Some(
                             rspice_results::result_presentation::DeclaredExpressionUnit {
                                 text: trace.text.clone(),

@@ -273,6 +273,16 @@ impl TracePick {
     }
 }
 
+/// The quick view's own expressions, set aside while a result document's
+/// pane shows the expressions it keeps in their place.
+#[derive(Debug, Clone, Default)]
+pub struct QuickViewExpressions {
+    pub analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
+    pub expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
+    pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
+}
+
 /// State of the inline expression editor under a strip header.
 #[derive(Debug, Clone)]
 pub struct ExprEditor {
@@ -543,6 +553,10 @@ pub struct ResultViewerState {
     /// The unit typed in the open expression editor; empty to take the
     /// inferred one.
     pub expr_editor_unit: Box<String>,
+    /// The quick view's expressions while a document pane shows its own,
+    /// boxed: the results state is built by value before it is boxed, and
+    /// a stash held only while a document is open need not grow it.
+    pub quick_view_expressions: Option<Box<QuickViewExpressions>>,
     /// Bit period the reader has pinned the eye to, per result.
     ///
     /// Absent means the eye recovers the period from the waveform. Project
@@ -809,6 +823,43 @@ impl ResultViewerState {
             .unwrap_or(dataset_default)
     }
 
+    /// Show a document pane's expressions, with the units declared for
+    /// them, on its analysis' strip. The quick view's own are set aside the
+    /// first time and come back when the document is left.
+    pub fn project_document_expressions(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        analysis_index: usize,
+        traces: Vec<ExprTrace>,
+        units: Vec<(String, String)>,
+    ) {
+        if self.quick_view_expressions.is_none() {
+            self.quick_view_expressions = Some(Box::new(QuickViewExpressions {
+                analysis_exprs: self.analysis_exprs.clone(),
+                exprs: self.exprs.clone(),
+                expr_projection_keys: self.expr_projection_keys.clone(),
+                expression_units: self.expression_units.clone(),
+            }));
+        }
+        let held = self
+            .analysis_exprs
+            .get(&analysis)
+            .map_or(&[][..], Vec::as_slice);
+        if held != traces.as_slice() {
+            if traces.is_empty() {
+                self.analysis_exprs.remove(&analysis);
+            } else {
+                self.analysis_exprs.insert(analysis, traces);
+            }
+        }
+        self.expression_units
+            .retain(|(owner, _), _| *owner != analysis);
+        for (text, unit) in units {
+            self.expression_units.insert((analysis, text), unit);
+        }
+        self.sync_expression_projection(analysis, analysis_index);
+    }
+
     pub fn sync_expression_projection(
         &mut self,
         analysis: AnalysisPresentationKey,
@@ -894,6 +945,13 @@ impl ResultViewerState {
     /// Leave the persistent projection: the pane context and the retained
     /// marker overlay it scopes both belong to the document that was open.
     pub fn leave_persistent_document(&mut self) {
+        if let Some(quick) = self.quick_view_expressions.take() {
+            let quick = *quick;
+            self.analysis_exprs = quick.analysis_exprs;
+            self.exprs = quick.exprs;
+            self.expr_projection_keys = quick.expr_projection_keys;
+            self.expression_units = quick.expression_units;
+        }
         self.persistent_pane_context = None;
         self.document_markers.clear();
         self.document_presentation = None;
