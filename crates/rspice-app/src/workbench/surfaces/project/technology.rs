@@ -171,13 +171,6 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
                 })
                 .map(pdk_package_key)
         })
-        .or_else(|| {
-            cx.model
-                .pdk_config
-                .technology_registry
-                .active_package()
-                .map(pdk_package_key)
-        })
         .or_else(|| packages.first().map(pdk_package_key));
     cx.state
         .technology_attachment
@@ -226,18 +219,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                 .any(|package| pdk_package_key(package) == selected)
         });
     if !selected_package_is_current {
-        cx.state.technology_attachment.selected_pdk_package = cx
-            .model
-            .pdk_config
-            .technology_registry
-            .active_package()
-            .filter(|active| {
-                packages
-                    .iter()
-                    .any(|package| pdk_package_key(package) == pdk_package_key(active))
-            })
-            .or_else(|| packages.first())
-            .map(pdk_package_key);
+        cx.state.technology_attachment.selected_pdk_package = packages.first().map(pdk_package_key);
     }
 
     let selected_name = cx.state.technology_attachment.selected_library.clone();

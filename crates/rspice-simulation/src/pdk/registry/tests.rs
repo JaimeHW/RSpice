@@ -609,7 +609,7 @@ fn network_callbacks_and_incomplete_stream_maps_are_rejected() {
 }
 
 #[test]
-fn target_declarations_are_nonempty_and_activation_is_platform_scoped() {
+fn target_declarations_are_nonempty_and_a_platform_restricted_package_installs() {
     let (bytes, authority) = fixture_archive();
     let mut archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
@@ -636,55 +636,26 @@ fn target_declarations_are_nonempty_and_activation_is_platform_scoped() {
             "Install platform-restricted package",
         )
         .expect("a platform-restricted package can be inspected");
-    assert!(matches!(
-        registry.activate(
-            "demo180",
-            "2.3.1",
-            &authority,
-            "Attempt incompatible activation"
-        ),
-        Err(PdkTechnologyError::IncompatibleRuntime(_))
-    ));
-    assert!(registry.active_binding().is_none());
 }
 
 #[test]
-fn install_activation_and_rollback_are_hash_chained_and_revalidated() {
+fn install_is_hash_chained_and_revalidated_after_restore() {
     let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     let install = registry
         .install_archive_bytes(&bytes, &authority, "Install reviewed package")
         .expect("install");
-    let activate = registry
-        .activate(
-            "demo180",
-            "2.3.1",
-            &authority,
-            "Activate for new project bindings",
-        )
-        .expect("activate");
-    assert_eq!(
-        activate.previous_receipt_digest,
-        Some(install.receipt_digest)
-    );
+    assert_eq!(install.sequence, 1);
+    assert_eq!(install.previous_receipt_digest, None);
     registry.validate_audit_chain().expect("audit chain");
-    assert!(registry.active_package().is_some());
 
     let json = serde_json::to_string(&registry).unwrap();
     let mut restored: PdkTechnologyRegistry = serde_json::from_str(&json).unwrap();
-    assert!(restored.active_package().is_none());
-    assert!(!restored.runtime_ready());
+    assert!(restored.validated_packages().is_empty());
     restored
         .revalidate_installed()
         .expect("revalidate persisted archive");
-    assert!(restored.active_package().is_some());
-
-    // The same active target is not a rollback. A future revision must be
-    // activated before returning to this retained prior binding.
-    assert!(matches!(
-        restored.rollback_to("demo180", "2.3.1", &authority, "No intervening revision"),
-        Err(PdkTechnologyError::InvalidTransition(_))
-    ));
+    assert_eq!(restored.validated_packages().len(), 1);
 }
 
 #[test]
@@ -704,29 +675,15 @@ fn immutable_revision_and_tampered_audit_fail_before_mutation() {
     registry.audit[0].reason = "altered".to_owned();
     let tampered = registry.clone();
     assert!(matches!(
-        registry.activate("demo180", "2.3.1", &authority, "Activate"),
+        registry.install_archive_bytes(&bytes, &authority, "Install again"),
         Err(PdkTechnologyError::AuditCorrupted(_))
     ));
     assert_eq!(registry, tampered);
 }
 
 #[test]
-fn recomputed_hashes_cannot_disguise_impossible_transitions_or_wrong_archives() {
+fn a_recomputed_hash_cannot_disguise_a_wrong_archive() {
     let (bytes, authority) = fixture_archive();
-    let mut registry = PdkTechnologyRegistry::default();
-    registry
-        .install_archive_bytes(&bytes, &authority, "Install")
-        .unwrap();
-
-    let target = registry.audit[0].target.clone();
-    registry.audit[0].after_active = Some(target.clone());
-    registry.audit[0].receipt_digest = registry.audit[0].calculate_digest().unwrap();
-    registry.active = Some(target);
-    assert!(matches!(
-        registry.validate_audit_chain(),
-        Err(PdkTechnologyError::AuditCorrupted(_))
-    ));
-
     let mut registry = PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(&bytes, &authority, "Install")

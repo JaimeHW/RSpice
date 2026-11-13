@@ -4,7 +4,7 @@ mod callback;
 mod config;
 mod registry;
 pub use config::PdkConfig;
-pub use registry::{PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, PdkTechnologyRegistry};
+pub use registry::{PdkTechnologyAuditReceipt, PdkTechnologyRegistry};
 mod package;
 mod project_binding;
 #[cfg(any(test, feature = "pdk-test-fixtures"))]

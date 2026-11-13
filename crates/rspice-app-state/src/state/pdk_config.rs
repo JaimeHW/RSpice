@@ -55,7 +55,7 @@ pub use rspice_simulation::pdk::test_fixtures::{
     fixture_archive_with_veriloga_source as pdk_veriloga_source_test_fixture,
 };
 pub use rspice_simulation::pdk::{
-    PdkConfig, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
+    PdkConfig, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
 };
 pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(any(test, feature = "test-support"))]

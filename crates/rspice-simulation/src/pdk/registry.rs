@@ -8,12 +8,11 @@
 //! - layer, purpose, stream-map, connectivity, callback, and platform
 //!   contracts are validated before installation;
 //! - installed revisions are immutable;
-//! - activation and rollback are append-only, hash-chained transactions; and
+//! - installs are append-only, hash-chained transactions; and
 //! - deserialized packages are never executable until they are revalidated.
 
 use super::{
     SealedPdkModelSources, ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
-    validate_runtime_compatibility,
 };
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{PdkTechnologyManifest, validate_version};
@@ -25,26 +24,15 @@ use rspice_model_library::pdk::{
 use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PdkTechnologyAuditAction {
-    Install,
-    Activate,
-    Rollback,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyAuditReceipt {
     pub sequence: u64,
-    pub action: PdkTechnologyAuditAction,
     pub actor_id: String,
     pub authority_id: String,
     pub reason: String,
     pub target: PdkTechnologyBinding,
     pub archive_digest: ContentDigest,
-    pub before_active: Option<PdkTechnologyBinding>,
-    pub after_active: Option<PdkTechnologyBinding>,
     pub previous_receipt_digest: Option<ContentDigest>,
     pub receipt_digest: ContentDigest,
 }
@@ -52,14 +40,11 @@ pub struct PdkTechnologyAuditReceipt {
 #[derive(Serialize)]
 struct PdkTechnologyAuditPayload<'a> {
     sequence: u64,
-    action: PdkTechnologyAuditAction,
     actor_id: &'a str,
     authority_id: &'a str,
     reason: &'a str,
     target: &'a PdkTechnologyBinding,
     archive_digest: ContentDigest,
-    before_active: &'a Option<PdkTechnologyBinding>,
-    after_active: &'a Option<PdkTechnologyBinding>,
     previous_receipt_digest: Option<ContentDigest>,
 }
 
@@ -67,14 +52,11 @@ impl PdkTechnologyAuditReceipt {
     fn calculate_digest(&self) -> Result<ContentDigest, PdkTechnologyError> {
         let payload = PdkTechnologyAuditPayload {
             sequence: self.sequence,
-            action: self.action,
             actor_id: &self.actor_id,
             authority_id: &self.authority_id,
             reason: &self.reason,
             target: &self.target,
             archive_digest: self.archive_digest,
-            before_active: &self.before_active,
-            after_active: &self.after_active,
             previous_receipt_digest: self.previous_receipt_digest,
         };
         let bytes = serde_json::to_vec(&payload)
@@ -86,14 +68,12 @@ impl PdkTechnologyAuditReceipt {
 /// Persisted PDK archives and administrative history.  `validated_packages`
 /// is intentionally runtime-only: loading serialized state cannot restore
 /// validation.  Call `revalidate_installed` before any package can be
-/// activated or consumed.
+/// consumed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyRegistry {
     #[serde(default)]
     archives: Vec<PdkTechnologyArchive>,
-    #[serde(default)]
-    active: Option<PdkTechnologyBinding>,
     #[serde(default)]
     audit: Vec<PdkTechnologyAuditReceipt>,
     #[serde(skip)]
@@ -142,11 +122,6 @@ impl PdkTechnologyRegistry {
     }
 
     #[must_use]
-    pub fn active_binding(&self) -> Option<&PdkTechnologyBinding> {
-        self.active.as_ref()
-    }
-
-    #[must_use]
     pub fn audit(&self) -> &[PdkTechnologyAuditReceipt] {
         &self.audit
     }
@@ -161,25 +136,11 @@ impl PdkTechnologyRegistry {
         &self.validation_errors
     }
 
-    #[must_use]
-    pub fn active_package(&self) -> Option<&ValidatedPdkTechnologyPackage> {
-        let active = self.active.as_ref()?;
-        self.validated_packages.iter().find(|package| {
-            package
-                .manifest()
-                .package_id
-                .eq_ignore_ascii_case(&active.package_id)
-                && package.manifest().revision == active.revision
-                && package.manifest_digest() == active.manifest_digest
-        })
-    }
-
     /// Seal the exact PDK model-source closure named by a project pin.
     ///
     /// The project binding, manifest digest, archive digest, decoded artifact
     /// bytes, package-relative dependency graph, and process-section contract
     /// are all checked again before runtime source authority is returned.
-    /// This method never falls back to the administratively active revision.
     pub fn seal_model_sources_for_binding(
         &self,
         binding: &PdkTechnologyBinding,
@@ -320,12 +281,6 @@ impl PdkTechnologyRegistry {
         package.execute_callback(archive, callback_id, input)
     }
 
-    #[must_use]
-    pub fn runtime_ready(&self) -> bool {
-        self.validation_errors.is_empty()
-            && (self.active.is_none() || self.active_package().is_some())
-    }
-
     pub fn install_archive_bytes(
         &mut self,
         bytes: &[u8],
@@ -356,15 +311,7 @@ impl PdkTechnologyRegistry {
             )));
         }
 
-        let receipt = self.next_receipt(
-            PdkTechnologyAuditAction::Install,
-            authority,
-            reason,
-            binding,
-            package.archive_digest(),
-            self.active.clone(),
-            self.active.clone(),
-        )?;
+        let receipt = self.next_receipt(authority, reason, binding, package.archive_digest())?;
         self.archives.push(archive);
         self.validated_packages.push(package);
         self.sort_packages();
@@ -411,27 +358,6 @@ impl PdkTechnologyRegistry {
         }
         if errors.is_empty() {
             packages.sort_by(package_order);
-            if let Some(active) = &self.active {
-                match packages
-                    .iter()
-                    .find(|package| package.binding() == *active)
-                {
-                    None => errors.push(format!(
-                        "active binding {} {} does not resolve to an exact currently trusted package",
-                        active.package_id, active.revision
-                    )),
-                    Some(package) => {
-                        if let Err(error) = validate_runtime_compatibility(package.manifest()) {
-                            errors.push(format!(
-                                "active binding {} {} is incompatible: {error}",
-                                active.package_id, active.revision
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        if errors.is_empty() {
             self.validated_packages = packages;
             self.validation_errors.clear();
             Ok(self.validated_packages.len())
@@ -442,48 +368,6 @@ impl PdkTechnologyRegistry {
         }
     }
 
-    pub fn activate(
-        &mut self,
-        package_id: &str,
-        revision: &str,
-        authority: &PdkAdministrativeAuthority,
-        reason: &str,
-    ) -> Result<PdkTechnologyAuditReceipt, PdkTechnologyError> {
-        self.activate_as(
-            PdkTechnologyAuditAction::Activate,
-            package_id,
-            revision,
-            authority,
-            reason,
-        )
-    }
-
-    pub fn rollback_to(
-        &mut self,
-        package_id: &str,
-        revision: &str,
-        authority: &PdkAdministrativeAuthority,
-        reason: &str,
-    ) -> Result<PdkTechnologyAuditReceipt, PdkTechnologyError> {
-        let appeared_before = self.audit.iter().any(|receipt| {
-            receipt.after_active.as_ref().is_some_and(|binding| {
-                binding.package_id.eq_ignore_ascii_case(package_id) && binding.revision == revision
-            })
-        });
-        if !appeared_before {
-            return Err(PdkTechnologyError::InvalidTransition(format!(
-                "{package_id} {revision} has never been an active trusted binding"
-            )));
-        }
-        self.activate_as(
-            PdkTechnologyAuditAction::Rollback,
-            package_id,
-            revision,
-            authority,
-            reason,
-        )
-    }
-
     pub fn validate_audit_chain(&self) -> Result<(), PdkTechnologyError> {
         if self.audit.len() > MAX_PDK_AUDIT_RECEIPTS {
             return Err(PdkTechnologyError::LimitExceeded(format!(
@@ -491,7 +375,6 @@ impl PdkTechnologyRegistry {
             )));
         }
         let mut previous = None;
-        let mut expected_active = None;
         for (index, receipt) in self.audit.iter().enumerate() {
             let expected_sequence = u64::try_from(index).map_err(|_| {
                 PdkTechnologyError::LimitExceeded("audit index overflow".to_owned())
@@ -526,106 +409,17 @@ impl PdkTechnologyRegistry {
                     "receipt[{index}] content digest does not match its payload"
                 )));
             }
-            if receipt.before_active != expected_active {
-                return Err(PdkTechnologyError::AuditCorrupted(format!(
-                    "receipt[{index}] before_active does not match the preceding transaction"
-                )));
-            }
-            match receipt.action {
-                PdkTechnologyAuditAction::Install => {
-                    if receipt.after_active != receipt.before_active {
-                        return Err(PdkTechnologyError::AuditCorrupted(format!(
-                            "receipt[{index}] install transaction changes the active binding"
-                        )));
-                    }
-                }
-                PdkTechnologyAuditAction::Activate | PdkTechnologyAuditAction::Rollback => {
-                    if receipt.after_active.as_ref() != Some(&receipt.target) {
-                        return Err(PdkTechnologyError::AuditCorrupted(format!(
-                            "receipt[{index}] activation target and resulting binding differ"
-                        )));
-                    }
-                    if receipt.after_active == receipt.before_active {
-                        return Err(PdkTechnologyError::AuditCorrupted(format!(
-                            "receipt[{index}] records a no-op activation transition"
-                        )));
-                    }
-                }
-            }
-            expected_active = receipt.after_active.clone();
             previous = Some(receipt.receipt_digest);
-        }
-        if self.active != expected_active {
-            return Err(PdkTechnologyError::AuditCorrupted(
-                "registry active binding does not match the final audit transaction".to_owned(),
-            ));
         }
         Ok(())
     }
 
-    fn activate_as(
-        &mut self,
-        action: PdkTechnologyAuditAction,
-        package_id: &str,
-        revision: &str,
-        authority: &PdkAdministrativeAuthority,
-        reason: &str,
-    ) -> Result<PdkTechnologyAuditReceipt, PdkTechnologyError> {
-        authority.validate()?;
-        validate_text("reason", reason, 1_024)?;
-        self.validate_audit_chain()?;
-        let package = self
-            .validated_packages
-            .iter()
-            .find(|candidate| {
-                candidate
-                    .manifest()
-                    .package_id
-                    .eq_ignore_ascii_case(package_id)
-                    && candidate.manifest().revision == revision
-            })
-            .cloned()
-            .ok_or_else(|| {
-                PdkTechnologyError::NotRuntimeValidated(format!(
-                    "{package_id} {revision} is not present in the current trusted runtime catalog"
-                ))
-            })?;
-        let after = package.binding();
-        validate_runtime_compatibility(package.manifest())?;
-        if self.active.as_ref() == Some(&after) {
-            return Err(PdkTechnologyError::InvalidTransition(format!(
-                "{} {} is already active",
-                after.package_id, after.revision
-            )));
-        }
-        let before = self.active.clone();
-        let receipt = self.next_receipt(
-            action,
-            authority,
-            reason,
-            after.clone(),
-            package.archive_digest(),
-            before,
-            Some(after.clone()),
-        )?;
-        self.active = Some(after);
-        self.audit.push(receipt.clone());
-        Ok(receipt)
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Keep the before and after bindings explicit at each audited operation"
-    )]
     fn next_receipt(
         &self,
-        action: PdkTechnologyAuditAction,
         authority: &PdkAdministrativeAuthority,
         reason: &str,
         target: PdkTechnologyBinding,
         archive_digest: ContentDigest,
-        before_active: Option<PdkTechnologyBinding>,
-        after_active: Option<PdkTechnologyBinding>,
     ) -> Result<PdkTechnologyAuditReceipt, PdkTechnologyError> {
         if self.audit.len() >= MAX_PDK_AUDIT_RECEIPTS {
             return Err(PdkTechnologyError::LimitExceeded(format!(
@@ -637,14 +431,11 @@ impl PdkTechnologyRegistry {
             + 1;
         let mut receipt = PdkTechnologyAuditReceipt {
             sequence,
-            action,
             actor_id: authority.actor_id.clone(),
             authority_id: authority.authority_id.clone(),
             reason: reason.to_owned(),
             target,
             archive_digest,
-            before_active,
-            after_active,
             previous_receipt_digest: self.audit.last().map(|receipt| receipt.receipt_digest),
             receipt_digest: content_digest(&[]),
         };
