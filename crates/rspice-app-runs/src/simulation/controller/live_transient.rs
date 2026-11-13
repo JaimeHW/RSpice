@@ -405,13 +405,12 @@ impl LiveTransientAccumulator {
         let waveforms = self
             .waveforms
             .iter()
-            .enumerate()
-            .map(|(index, waveform)| {
+            .map(|waveform| {
                 RetainedTrace::new(
                     waveform.name.clone(),
                     waveform.x.clone(),
                     waveform.y.clone(),
-                    SimulationController::color_for_index(index),
+                    "",
                 )
             })
             .collect();

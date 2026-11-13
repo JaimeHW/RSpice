@@ -1007,7 +1007,9 @@ fn parse_delimited_result_dataset(
                 headers[index + 1].name.clone(),
                 Arc::clone(&coordinate),
                 values,
-                trace_color(index),
+                // No stored colour: the canvas theme's palette colours an
+                // imported trace by its slot, as it does a simulated one.
+                "",
             );
             waveform.unit = headers[index + 1].canonical_unit().map(str::to_owned);
             waveform
@@ -1037,13 +1039,6 @@ fn imported_analysis_type(domain: rspice_formats::WaveformDomain) -> AnalysisTyp
         rspice_formats::WaveformDomain::Ac => AnalysisType::Ac,
         rspice_formats::WaveformDomain::DcSweep => AnalysisType::DcSweep,
     }
-}
-
-fn trace_color(index: usize) -> &'static str {
-    const COLORS: &[&str] = &[
-        "#4FC3F7", "#FFB74D", "#81C784", "#BA68C8", "#E57373", "#4DB6AC", "#FFF176", "#7986CB",
-    ];
-    COLORS[index % COLORS.len()]
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -46,10 +46,9 @@ pub(super) fn present_imported_waveforms(
         waveforms: imported
             .waveforms
             .into_iter()
-            .enumerate()
-            .map(|(index, data)| RetainedTrace {
+            .map(|data| RetainedTrace {
                 data,
-                color: trace_color(index).to_owned(),
+                color: String::new(),
                 visible: true,
                 display_cache: None,
             })

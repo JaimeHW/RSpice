@@ -37,33 +37,18 @@ impl SimulationController {
             rspice_simulation::result_conversion::convert(sim_result, analysis_type, label, || {
                 crate::time_compat::unix_epoch().as_secs_f64()
             });
-        let mut index = 0;
         AnalysisResult {
-            data: retained.map_waveforms(|data| {
-                let waveform = crate::state::RetainedTrace {
-                    data,
-                    color: Self::color_for_index(index),
-                    visible: true,
-                    display_cache: None,
-                };
-                index += 1;
-                waveform
+            // A trace stores no colour until the reader picks one: the canvas
+            // theme's palette colours it by its slot, so a light canvas gets
+            // inks that stand off paper and a dark one inks that stand off
+            // black, and the logic lanes beside it share the same cycle.
+            data: retained.map_waveforms(|data| crate::state::RetainedTrace {
+                data,
+                color: String::new(),
+                visible: true,
+                display_cache: None,
             }),
         }
-    }
-
-    pub(super) fn color_for_index(idx: usize) -> String {
-        const COLORS: &[&str] = &[
-            "#3B82F6", // Blue
-            "#10B981", // Green
-            "#F97316", // Orange
-            "#8B5CF6", // Purple
-            "#EC4899", // Pink
-            "#EAB308", // Yellow
-            "#14B8A6", // Teal
-            "#EF4444", // Red
-        ];
-        COLORS[idx % COLORS.len()].to_string()
     }
 }
 
