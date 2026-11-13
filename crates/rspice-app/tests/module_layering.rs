@@ -818,6 +818,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // listed in. A context holds the model, so it sits above the session
     // aggregate; every feature sits above it.
     "framework/feature",
+    // The run tier's host over a feature command's context: it takes the
+    // context's parts, the peers and the registry, so it sits above the
+    // feature and below every feature that starts a run.
+    "framework/run_view",
     // The live-session engine the application pumps each frame, and result
     // import. Both take the session aggregate, not the application root.
     "live_session",

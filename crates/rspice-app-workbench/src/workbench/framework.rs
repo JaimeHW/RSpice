@@ -7,4 +7,5 @@ pub mod feature;
 pub mod host;
 pub mod ports;
 pub mod requests;
+pub mod run_view;
 pub mod workbench_host;

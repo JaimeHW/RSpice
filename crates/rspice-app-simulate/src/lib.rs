@@ -37,11 +37,9 @@ use rspice_app_state::results;
 use rspice_app_workbench::ui;
 
 pub mod simulation {
+    pub(crate) use rspice_app_runs::simulation::RunHost;
     pub(crate) use rspice_app_runs::simulation::controller;
     pub use rspice_app_runs::simulation::status;
-    pub(crate) use rspice_app_runs::simulation::{
-        NetlistShown, RunHost, ViewerHost, ViewerReading,
-    };
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_simulation::execution;
@@ -81,7 +79,7 @@ pub mod workbench {
     }
     pub mod app_state {
         pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
-        pub(crate) use rspice_app_state::workbench::app_state::{design_checks, model, sim_setup};
+        pub(crate) use rspice_app_state::workbench::app_state::{model, sim_setup};
         pub(crate) use rspice_app_workbench::workbench::app_state::session;
         pub(crate) use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 
@@ -131,11 +129,6 @@ pub mod workbench {
     }
     pub mod simulate;
     pub mod slots {
-        pub(crate) use rspice_app_runs::workbench::slots::runs;
-        pub(crate) use rspice_app_services::workbench::slots::platform;
-
-        pub(crate) use platform::PlatformState;
-        pub(crate) use runs::RunsState;
         pub(crate) use simulate::SimulateState;
 
         pub mod simulate;

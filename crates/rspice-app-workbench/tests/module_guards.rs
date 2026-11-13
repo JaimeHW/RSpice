@@ -80,6 +80,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("workbench/framework.rs", "host"),
     ("workbench/framework.rs", "ports"),
     ("workbench/framework.rs", "requests"),
+    ("workbench/framework.rs", "run_view"),
     ("workbench/framework.rs", "workbench_host"),
     ("workbench/framework/command_registry.rs", "ids"),
     ("workbench/framework/feature.rs", "harness"),
