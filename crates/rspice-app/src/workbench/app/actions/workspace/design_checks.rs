@@ -87,8 +87,8 @@ fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
     use crate::diagnostics::LogSeverity;
+    use crate::workbench::app_state::AppState;
     use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
 
     fn finding(severity: DrcSeverity) -> DrcResult {

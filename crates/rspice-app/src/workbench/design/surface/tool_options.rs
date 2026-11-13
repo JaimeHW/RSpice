@@ -109,8 +109,8 @@ fn strip(ui: &mut Ui, command: &str, options: impl FnOnce(&mut Ui)) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
     use crate::state::{ComponentType, Point, Wire};
+    use crate::workbench::AppState;
 
     fn armed_move() -> AppState {
         let mut state = AppState::default();
