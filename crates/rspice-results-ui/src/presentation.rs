@@ -201,8 +201,13 @@ pub(crate) fn table_row_height(ui: &Ui) -> f32 {
 /// it cannot spill into the rows beside it. Call it on the table's own
 /// child `Ui`.
 pub(crate) fn fit_controls_to_rows(ui: &mut Ui, row_height: f32) {
+    let text_height = ui.text_style_height(&egui::TextStyle::Button);
     let spacing = ui.spacing_mut();
     spacing.interact_size.y = spacing.interact_size.y.min(row_height - 2.0);
+    spacing.button_padding.y = spacing
+        .button_padding
+        .y
+        .min(((row_height - 2.0 - text_height) * 0.5).max(0.0));
 }
 
 /// Dimmed names and mono values. A key row is set in primary text with a

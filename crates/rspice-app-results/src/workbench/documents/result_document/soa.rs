@@ -441,6 +441,50 @@ mod tests {
         assert_eq!(served.analysis, active);
     }
 
+    /// The rule table's rows are as dense as the density preference asks,
+    /// buttons and all: a row's controls take the row's height instead of
+    /// pushing every row out to the height of a toolbar button.
+    #[test]
+    fn the_rule_table_rows_are_dense() {
+        let mut state = soa_state(12, 8, 3.0);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+            },
+        );
+        let mut tops: Vec<f64> = output
+            .platform_output
+            .accesskit_update
+            .expect("the SOA sheet publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Stress trace"))
+            .filter_map(|(_, node)| node.bounds())
+            .map(|bounds| bounds.y0)
+            .collect();
+        tops.sort_by(f64::total_cmp);
+        assert!(tops.len() >= 6, "the sheet drew {} rules", tops.len());
+        let row = f64::from(crate::ui::tokens::Tokens::get(&ctx).metrics.row_h) - 4.0;
+        let pitch = row + f64::from(ctx.global_style().spacing.item_spacing.y);
+        for pair in tops.windows(2) {
+            assert!(
+                (pair[1] - pair[0] - pitch).abs() <= 1.0,
+                "rows {:.1} px apart, wanted {row} px rows {pitch} px apart",
+                pair[1] - pair[0]
+            );
+        }
+    }
+
     #[test]
     fn the_rule_table_lays_out_only_the_rows_the_viewport_shows() {
         let mut state = soa_state(400, 8, 3.0);
