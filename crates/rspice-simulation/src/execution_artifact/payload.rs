@@ -419,7 +419,7 @@ impl TransientTrajectoryArtifact {
     }
 
     fn digest(&self) -> ContentDigest {
-        let mut writer = CanonicalWriter::new("rspice.transient-trajectory-artifact/v2");
+        let mut writer = CanonicalWriter::new("rspice.transient-trajectory-artifact/v3");
         writer.option(self.convergence.as_ref(), |writer, quality| {
             quality.encode(writer)
         });
@@ -435,18 +435,14 @@ impl TransientTrajectoryArtifact {
                 writer.f64(*value);
             }
         }
-        // A conditional tail, so a trajectory that recorded no spectrum
-        // digests exactly as it did before spectra existed.
-        if !self.spectra.is_empty() {
-            writer.domain("recorded-fft-spectra");
-            writer.sequence(self.spectra.len());
-            for spectrum in &self.spectra {
-                writer.string(&spectrum.request_key);
-                for column in [&spectrum.frequency, &spectrum.real, &spectrum.imaginary] {
-                    writer.sequence(column.len());
-                    for value in column {
-                        writer.f64(*value);
-                    }
+        writer.domain("recorded-fft-spectra");
+        writer.sequence(self.spectra.len());
+        for spectrum in &self.spectra {
+            writer.string(&spectrum.request_key);
+            for column in [&spectrum.frequency, &spectrum.real, &spectrum.imaginary] {
+                writer.sequence(column.len());
+                for value in column {
+                    writer.f64(*value);
                 }
             }
         }
@@ -477,14 +473,12 @@ impl TransientTrajectoryArtifact {
                     writer.f64(point.time);
                     writer.f64(point.charge_coulombs);
                 }
-                if !trace.derivatives.is_empty() {
-                    writer.domain("current-impulse-derivatives-v1");
-                    writer.sequence(trace.derivatives.len());
-                    for point in &trace.derivatives {
-                        writer.f64(point.time);
-                        writer.u64(u64::from(point.order));
-                        writer.f64(point.coefficient);
-                    }
+                writer.domain("current-impulse-derivatives-v1");
+                writer.sequence(trace.derivatives.len());
+                for point in &trace.derivatives {
+                    writer.f64(point.time);
+                    writer.u64(u64::from(point.order));
+                    writer.f64(point.coefficient);
                 }
             }
         }
