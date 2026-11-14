@@ -337,6 +337,14 @@ fn restore_active_symbol_snapshot(
     Ok(())
 }
 
+/// Whether the active symbol's history holds a step to take back.
+#[cfg(test)]
+pub(crate) fn can_undo_active_symbol_document(symbol: &SymbolUiState, model: &Model) -> bool {
+    symbol
+        .history
+        .can_undo(&model.workspace.content.active_key())
+}
+
 /// Step the active symbol's history back; `Ok(false)` when it holds
 /// no step to take.
 pub(crate) fn undo_active_symbol_document(

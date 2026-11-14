@@ -16,8 +16,8 @@ use crate::workbench::app::actions::workspace::history::{
 };
 use crate::workbench::app::actions::workspace::inline_edit_authority;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    redo_active_symbol_document, refuse_unsavable_active_symbol, store_active_symbol_editor_bundle,
-    undo_active_symbol_document,
+    can_undo_active_symbol_document, redo_active_symbol_document, refuse_unsavable_active_symbol,
+    store_active_symbol_editor_bundle, undo_active_symbol_document,
 };
 use crate::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use crate::workbench::state::InlineEditAuthority;
@@ -93,11 +93,9 @@ impl AppState {
         refuse_unsavable_active_symbol(&self.model)
     }
 
+    /// [`can_undo_active_symbol_document`] for the session.
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
-        self.design
-            .symbol
-            .history
-            .can_undo(&self.model.workspace.content.active_key())
+        can_undo_active_symbol_document(&self.design.symbol, &self.model)
     }
 
     /// [`undo_active_symbol_document`] for the session.
