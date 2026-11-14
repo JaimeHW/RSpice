@@ -1,6 +1,6 @@
 //! Event lanes and user buses: what the waveform stack draws a trace as, and
-//! the logic lanes the reader grouped into a word, survive a save and reload,
-//! migrate in from schema 8 unchanged, and keep the document graph valid.
+//! the logic lanes the reader grouped into a word, survive a save and reload
+//! and keep the document graph valid.
 
 use super::*;
 
@@ -248,14 +248,10 @@ fn a_bus_keeps_its_value_names_across_a_reload() {
         saved["user_buses"][0]["value_names"][2],
         serde_json::json!({"value": 3, "name": "DONE"})
     );
-    let reloaded: VisualizationDocument = serde_json::from_value(saved.clone()).unwrap();
+    let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
     assert_eq!(reloaded.user_buses()[0].value_names, states);
     assert_eq!(bus_value_name(&states, 3), Some("DONE"));
     assert_eq!(bus_value_name(&states, 2), None);
-
-    let mut legacy = saved;
-    legacy["schema_version"] = serde_json::json!(11);
-    assert!(serde_json::from_value::<VisualizationDocument>(legacy).is_err());
 
     for unordered in [
         vec![named(1, "LOAD"), named(0, "IDLE")],
@@ -270,54 +266,6 @@ fn a_bus_keeps_its_value_names_across_a_reload() {
                 .is_err()
         );
     }
-}
-
-/// A schema-8 document is one whose every trace is a value lane and that
-/// groups no bus. It loads unchanged, and its saved bytes differ only in the
-/// version it states.
-#[test]
-fn a_schema_eight_document_loads_unchanged_and_round_trips() {
-    let (document, _, _) = lane_document();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(8);
-    assert!(legacy.get("user_buses").is_none());
-    assert!(
-        legacy["traces"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|trace| trace.get("lane").is_none()),
-        "a value lane writes nothing, so a schema-8 trace is already one"
-    );
-
-    let migrated: VisualizationDocument = serde_json::from_value(legacy.clone()).unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        VisualizationDocument::SCHEMA_VERSION
-    );
-    assert_eq!(migrated, document);
-    assert!(migrated.traces().iter().all(|trace| trace.lane.is_value()));
-    assert!(migrated.user_buses().is_empty());
-
-    let mut resaved = serde_json::to_value(&migrated).unwrap();
-    resaved["schema_version"] = serde_json::json!(8);
-    assert_eq!(resaved, legacy);
-
-    let again: VisualizationDocument =
-        serde_json::from_value(serde_json::to_value(&migrated).unwrap()).unwrap();
-    assert_eq!(again, migrated);
-}
-
-#[test]
-fn an_older_document_cannot_carry_lanes_its_schema_never_had() {
-    let (mut document, pane, traces) = lane_document();
-    reviewed_lanes(&mut document, pane, traces);
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(8);
-    let error = serde_json::from_value::<VisualizationDocument>(legacy)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("schema 9"), "{error}");
 }
 
 #[test]
@@ -445,14 +393,6 @@ fn an_event_lane_order_survives_a_save_and_reload() {
     );
     let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
     assert_eq!(reloaded.event_lane_order(pane), lanes.as_slice());
-
-    // A schema-9 document never had an order to carry.
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(9);
-    let error = serde_json::from_value::<VisualizationDocument>(legacy)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("schema 10"), "{error}");
 }
 
 /// An order names each lane once, and only logic traces of its own pane;

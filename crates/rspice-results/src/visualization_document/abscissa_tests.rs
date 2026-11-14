@@ -258,28 +258,6 @@ fn a_malformed_plot_is_refused() {
     assert!(serde_json::from_value::<VisualizationDocument>(wire).is_err());
 }
 
-#[test]
-fn a_schema_twelve_document_reads_unchanged_and_cannot_carry_a_plot() {
-    let (mut document, pane, _) = document();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(12);
-    let reloaded: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-    assert_eq!(reloaded, document);
-
-    document
-        .transact(
-            document.revision(),
-            vec![plots(pane, vec![plot(pane, "V", signal("V(in)"))])],
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(12);
-    let error = serde_json::from_value::<VisualizationDocument>(legacy)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("schema 13"), "{error}");
-}
-
 /// A trace may read one signal column against another, as a transfer curve
 /// does, and still never against itself.
 #[test]

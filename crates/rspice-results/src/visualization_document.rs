@@ -1314,10 +1314,6 @@ fn default_page_template_id() -> String {
     "engineering-dark".to_owned()
 }
 
-fn default_viewer_id() -> String {
-    "viewer-waveform".to_owned()
-}
-
 const fn default_viewer_id_for_kind(kind: PaneKind) -> &'static str {
     match kind {
         PaneKind::Cartesian => "viewer-waveform",
@@ -1415,12 +1411,9 @@ pub struct Page {
     pub id: PageId,
     #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
-    #[serde(default)]
     pub layout: PageLayout,
-    #[serde(default = "default_page_template_id")]
     #[serde(deserialize_with = "deserialize_key_string")]
     pub template_id: String,
-    #[serde(default)]
     pub update_policy: PageUpdatePolicy,
 }
 
@@ -1431,14 +1424,11 @@ pub struct Pane {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     pub kind: PaneKind,
-    #[serde(default = "default_viewer_id")]
     #[serde(deserialize_with = "deserialize_key_string")]
     pub viewer_id: String,
     #[serde(default)]
     pub binding: Option<PaneDataBinding>,
-    #[serde(default)]
     pub placement: PanePlacement,
-    #[serde(default)]
     pub order: u32,
     #[serde(default)]
     pub family_policy: Option<FamilyPresentationPolicy>,
@@ -1474,7 +1464,7 @@ pub struct Trace {
     pub coordinate_key: String,
     /// Exact coordinate-column predicates selecting this trace's rows from a
     /// lossless long-form source dataset.
-    #[serde(default, deserialize_with = "deserialize_trace_row_predicates")]
+    #[serde(deserialize_with = "deserialize_trace_row_predicates")]
     pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
@@ -1491,8 +1481,8 @@ pub struct Trace {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub visible: bool,
-    /// How the waveform stack draws this trace. Absent before schema 9,
-    /// when every trace was an interpolated value trace.
+    /// How the waveform stack draws this trace. Absent for an interpolated
+    /// value trace.
     #[serde(default, skip_serializing_if = "TraceLane::is_value")]
     pub lane: TraceLane,
 }
@@ -1979,8 +1969,7 @@ pub struct Measurement {
     pub value: Option<f64>,
     /// The distribution of the expression over the family the pane shows,
     /// when it was evaluated once per member; `value` is then the statistic
-    /// it names. Absent before schema 12, when every measurement was one
-    /// evaluation.
+    /// it names. Absent when the measurement was one evaluation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family: Option<FamilyMeasurementSummary>,
 }
@@ -2426,15 +2415,12 @@ pub struct VisualizationDocument {
 
 #[derive(Deserialize)]
 struct VisualizationDocumentWire {
-    #[serde(default = "legacy_visualization_schema_version")]
     schema_version: u16,
     id: ResultDocumentId,
     revision: ObjectRevision,
     #[serde(deserialize_with = "deserialize_label_string")]
     title: String,
-    #[serde(default)]
     tracking: ResultDocumentTracking,
-    #[serde(default)]
     presentation: VisualizationPresentationPolicy,
     next_serial: u64,
     datasets: BoundedSourceDatasets,
@@ -2483,17 +2469,13 @@ struct VisualizationDocumentWire {
     xy_plots: Option<BoundedVec<XyPlot, MAX_VISUALIZATION_XY_PLOTS>>,
 }
 
-const fn legacy_visualization_schema_version() -> u16 {
-    1
-}
-
 impl<'de> Deserialize<'de> for VisualizationDocument {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let wire = VisualizationDocumentWire::deserialize(deserializer)?;
-        let mut document = Self {
+        let document = Self {
             schema_version: wire.schema_version,
             id: wire.id,
             revision: wire.revision,
@@ -2524,107 +2506,11 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 .map_or_else(Vec::new, BoundedVec::into_inner),
             xy_plots: wire.xy_plots.map_or_else(Vec::new, BoundedVec::into_inner),
         };
-        if document.schema_version < 13 && !document.xy_plots.is_empty() {
-            return Err(serde::de::Error::custom(
-                "a plot against a signal or an expression requires visualization schema 13",
-            ));
-        }
-        if document.schema_version < 12
-            && document
-                .user_buses
-                .iter()
-                .any(|bus| !bus.value_names.is_empty())
-        {
-            return Err(serde::de::Error::custom(
-                "a bus with named values requires visualization schema 12",
-            ));
-        }
-        if document.schema_version < 12 && !document.expression_traces.is_empty() {
-            return Err(serde::de::Error::custom(
-                "an expression trace requires visualization schema 12",
-            ));
-        }
-        if document.schema_version < 11
-            && document
-                .datasets
-                .iter()
-                .any(|dataset| dataset.run.is_some())
-        {
-            return Err(serde::de::Error::custom(
-                "a dataset that references its run requires visualization schema 11",
-            ));
-        }
-        if document.schema_version < 10 && !document.event_lane_orders.is_empty() {
-            return Err(serde::de::Error::custom(
-                "an event-lane order requires visualization schema 10",
-            ));
-        }
-        if document.schema_version < 10
-            && document.user_buses.iter().any(|bus| !bus.nets.is_empty())
-        {
-            return Err(serde::de::Error::custom(
-                "a user bus over history-only nets requires visualization schema 10",
-            ));
-        }
-        if document.schema_version < 9
-            && (!document.user_buses.is_empty()
-                || document.traces.iter().any(|trace| !trace.lane.is_value()))
-        {
-            return Err(serde::de::Error::custom(
-                "event lanes and user buses require visualization schema 9",
-            ));
-        }
-        if document.schema_version < 8
-            && document.datasets.iter().any(|dataset| {
-                dataset
-                    .rows
-                    .iter()
-                    .any(|row| row.values.iter().any(TypedValue::is_missing))
-            })
-        {
-            return Err(serde::de::Error::custom(
-                "unavailable source samples require visualization schema 8",
-            ));
-        }
-        match document.schema_version {
-            1 => {
-                document.migrate_v1_to_v2();
-                document.migrate_v2_to_v3();
-                document.migrate_v3_to_v4();
-                document.migrate_v4_to_v5();
-                document.migrate_v5_to_v6();
-                document.migrate_v6_to_v7();
-            }
-            2 => {
-                document.migrate_v2_to_v3();
-                document.migrate_v3_to_v4();
-                document.migrate_v4_to_v5();
-                document.migrate_v5_to_v6();
-                document.migrate_v6_to_v7();
-            }
-            3 => {
-                document.migrate_v3_to_v4();
-                document.migrate_v4_to_v5();
-                document.migrate_v5_to_v6();
-                document.migrate_v6_to_v7();
-            }
-            4 => {
-                document.migrate_v4_to_v5();
-                document.migrate_v5_to_v6();
-                document.migrate_v6_to_v7();
-            }
-            5 => {
-                document.migrate_v5_to_v6();
-                document.migrate_v6_to_v7();
-            }
-            6 => document.migrate_v6_to_v7(),
-            7..=12 => document.schema_version = Self::SCHEMA_VERSION,
-            Self::SCHEMA_VERSION => {}
-            version => {
-                return Err(serde::de::Error::custom(format!(
-                    "unsupported visualization document schema version {version}"
-                )));
-            }
+        if document.schema_version != Self::SCHEMA_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "unsupported visualization document schema version {}",
+                document.schema_version
+            )));
         }
         document.validate().map_err(serde::de::Error::custom)?;
         Ok(document)
@@ -2632,44 +2518,10 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    /// Schema 12 keeps three things a schema-11 document could not hold:
-    ///
-    /// - a measurement evaluated once per member of a family with the
-    ///   distribution its members formed: statistic, count, mean, sample
-    ///   standard deviation, minimum, maximum, and a yield against its limits
-    ///   with the failing members named;
-    /// - the names a reader gives a user bus's words;
-    /// - calculator expressions plotted on a pane, as their text and the
-    ///   datasets they read.
-    ///
-    /// A schema-11 document reads as one whose measurements were each one
-    /// evaluation, whose buses name no values and that plots no expression,
-    /// which is what it held.
-    ///
-    /// Schema 11 lets a dataset reference its retained run by identity and
-    /// content digest instead of holding a copy of every sample, and lets a
-    /// document embed that run's record when it is archived. A schema-10
-    /// document reads as one whose datasets are all embedded tables, which is
-    /// what it held.
-    ///
-    /// Schema 10 records the order each pane draws its event lanes in. A
-    /// schema-9 document reads as one that recorded no order, so its lanes
-    /// keep the order they are shown in.
-    ///
-    /// Schema 9 records each trace's lane (logic, bus or real event lanes,
-    /// a bus's radix and whether it is expanded) and the reader's user buses.
-    /// A schema-8 document reads as one whose traces are all value lanes and
-    /// that groups no bus, which is what it meant.
-    ///
-    /// Schema 8 preserves explicitly unavailable signal samples in source tables.
-    ///
-    /// V1 through V6 documents within the published resource limits retain
-    /// their prior deterministic interpretation. Inputs above those limits
-    /// are rejected as unsafe containers; the limits do not reinterpret or
-    /// migrate any accepted source value, identity, or presentation entity.
-    /// Unknown extension fields remain ignored for schema-v7 forward
-    /// compatibility; introducing required semantics still requires a schema
-    /// revision.
+    /// The one schema a document is written in and read from. A document
+    /// stating any other version is refused, never migrated. Unknown
+    /// extension fields are ignored; a new required meaning takes a new
+    /// version.
     pub const SCHEMA_VERSION: u16 = 13;
 
     pub fn new(
@@ -2708,7 +2560,7 @@ impl VisualizationDocument {
                 page_id,
                 title: "Plot 1".to_owned(),
                 kind: PaneKind::Cartesian,
-                viewer_id: default_viewer_id(),
+                viewer_id: default_viewer_id_for_kind(PaneKind::Cartesian).to_owned(),
                 binding: None,
                 placement: PanePlacement::Primary,
                 order: 0,
@@ -2993,134 +2845,6 @@ impl VisualizationDocument {
             .checked_add(1)
             .ok_or(VisualizationError::IdentitySpaceExhausted)?;
         Ok(serial)
-    }
-
-    fn migrate_v1_to_v2(&mut self) {
-        for page in &mut self.pages {
-            page.layout = PageLayout::default();
-            page.template_id = default_page_template_id();
-            page.update_policy = PageUpdatePolicy::default();
-        }
-        let mut previous_by_page = HashMap::<PageId, PaneId>::new();
-        let mut next_order_by_page = HashMap::<PageId, u32>::new();
-        for pane in &mut self.panes {
-            pane.viewer_id = default_viewer_id_for_kind(pane.kind).to_owned();
-            pane.binding = None;
-            pane.order = *next_order_by_page.entry(pane.page_id).or_default();
-            pane.placement = previous_by_page
-                .get(&pane.page_id)
-                .copied()
-                .map_or(PanePlacement::Primary, |anchor_pane_id| {
-                    PanePlacement::Below { anchor_pane_id }
-                });
-            previous_by_page.insert(pane.page_id, pane.id);
-            next_order_by_page
-                .entry(pane.page_id)
-                .and_modify(|order| *order = order.saturating_add(1));
-        }
-        self.schema_version = 2;
-    }
-
-    fn migrate_v2_to_v3(&mut self) {
-        // Schema 2 had no family policy. Ignore any forward field smuggled into
-        // an older envelope so migration has one deterministic interpretation.
-        for pane in &mut self.panes {
-            pane.family_policy = None;
-        }
-        self.schema_version = 3;
-    }
-
-    fn migrate_v3_to_v4(&mut self) {
-        // Earlier documents were bound only by immutable DatasetBinding and
-        // therefore had pinned semantics. Migration must not invent plan
-        // ownership or silently follow a newer run.
-        self.tracking = ResultDocumentTracking::pinned();
-        self.schema_version = 4;
-    }
-
-    fn migrate_v4_to_v5(&mut self) {
-        // Schema 4 had no project-owned document formatting policy. Ignore a
-        // forward field injected into a relabeled older envelope so migration
-        // has one deterministic interpretation.
-        self.presentation = VisualizationPresentationPolicy::default();
-        self.schema_version = 5;
-    }
-
-    fn migrate_v5_to_v6(&mut self) {
-        // Trace row predicates are additive and deserialize to an empty set
-        // for v5 traces, preserving their original column-oriented meaning.
-        self.schema_version = 6;
-    }
-
-    fn migrate_v6_to_v7(&mut self) {
-        for dataset in &mut self.datasets {
-            let is_long_form = ["trace-index", "trace-name", "component", "sample", "x", "y"]
-                .iter()
-                .all(|key| dataset.columns.iter().any(|column| column.key == *key));
-            if !is_long_form
-                || dataset
-                    .columns
-                    .iter()
-                    .any(|column| column.key == "analysis-id")
-            {
-                continue;
-            }
-            let analysis_ids = self
-                .panes
-                .iter()
-                .filter_map(|pane| pane.binding)
-                .filter(|binding| binding.dataset == dataset.binding)
-                .map(|binding| binding.analysis_id)
-                .collect::<HashSet<_>>();
-            if analysis_ids.len() != 1 {
-                // A legacy document that already bound one source table to
-                // multiple analysis identities cannot be disambiguated by a
-                // migration. Preserve its exact old interpretation instead of
-                // inventing row ownership.
-                continue;
-            }
-            if self.traces.iter().any(|trace| {
-                trace.binding == dataset.binding
-                    && trace.row_predicates.len() >= MAX_TRACE_ROW_PREDICATES
-            }) {
-                continue;
-            }
-            let Some(analysis_id) = analysis_ids.into_iter().next() else {
-                continue;
-            };
-            let analysis_id = analysis_id.to_string();
-            let added_text_bytes = dataset.rows.len().checked_mul(analysis_id.len());
-            let retained_text_bytes = dataset.retained_text_bytes().ok();
-            if added_text_bytes
-                .zip(retained_text_bytes)
-                .and_then(|(added, retained)| retained.checked_add(added))
-                .is_none_or(|total| total > MAX_SOURCE_TEXT_BYTES_PER_DATASET)
-            {
-                continue;
-            }
-            dataset.columns.push(SourceColumn {
-                key: "analysis-id".to_owned(),
-                label: "Analysis identity".to_owned(),
-                value_type: ValueType::Text,
-                role: ColumnRole::Coordinate,
-                unit: None,
-            });
-            let analysis_id = TypedValue::Text(analysis_id);
-            for row in &mut dataset.rows {
-                row.values.push(analysis_id.clone());
-            }
-            for trace in self
-                .traces
-                .iter_mut()
-                .filter(|trace| trace.binding == dataset.binding)
-            {
-                trace.row_predicates.push(QueryCoordinate {
-                    column: "analysis-id".to_owned(),
-                    value: analysis_id.clone(),
-                });
-            }
-        }
-        self.schema_version = Self::SCHEMA_VERSION;
     }
 }
 

@@ -306,12 +306,3 @@ fn a_report_copy_carries_exactly_the_samples_its_traces_draw() {
             .contains("not retained")
     );
 }
-
-#[test]
-fn a_schema_ten_document_cannot_claim_a_run_reference() {
-    let (document, _, _) = referencing_document();
-    let mut value = serde_json::to_value(&document).unwrap();
-    value["schema_version"] = serde_json::json!(10);
-    let error = serde_json::from_value::<VisualizationDocument>(value).unwrap_err();
-    assert!(error.to_string().contains("schema 11"));
-}

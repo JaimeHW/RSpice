@@ -1,8 +1,8 @@
-//! Tests for document edits, family policy, and schema migration.
+//! Tests for document edits, family policy, and the schema a document reads.
 //!
 //! A rejected edit must roll back everything it touched, a typed family
-//! filter must catch type drift before commit, and every schema migration
-//! must be deterministic for the same input document.
+//! filter must catch type drift before commit, and a document stating any
+//! other schema version is refused.
 
 use super::*;
 
@@ -66,14 +66,6 @@ fn unavailable_source_samples_are_typed_versioned_and_never_certified_as_zeroes(
     assert_eq!(
         restored.content_digest().unwrap(),
         document.content_digest().unwrap()
-    );
-    let mut old = encoded;
-    old["schema_version"] = 7.into();
-    assert!(
-        serde_json::from_value::<VisualizationDocument>(old)
-            .unwrap_err()
-            .to_string()
-            .contains("schema 8")
     );
     let request = ComparisonRequest {
         baseline,
@@ -272,60 +264,6 @@ fn result_document_tracking_is_revisioned_and_requires_exact_plan_authority() {
     assert!(error.to_string().contains("present together"));
     assert_eq!(document.revision(), revision);
     assert_eq!(document.tracking(), latest);
-}
-
-#[test]
-fn schema_three_migrates_to_pinned_tracking_without_inventing_plan_identity() {
-    let (document, _) = document();
-    let mut value = serde_json::to_value(document).unwrap();
-    value["schema_version"] = serde_json::json!(3);
-    value
-        .as_object_mut()
-        .expect("document JSON is an object")
-        .remove("tracking");
-
-    let restored: VisualizationDocument = serde_json::from_value(value).unwrap();
-    assert_eq!(restored.tracking(), ResultDocumentTracking::pinned());
-    assert_eq!(
-        serde_json::to_value(restored).unwrap()["schema_version"],
-        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
-    );
-}
-
-#[test]
-fn schema_five_traces_migrate_with_their_original_unfiltered_row_meaning() {
-    let (mut document, source) = document();
-    let pane_id = document.panes()[0].id;
-    document
-        .transact(
-            document.revision(),
-            vec![DocumentEdit::SetPaneSource {
-                pane_id,
-                viewer_id: "viewer-waveform".to_owned(),
-                binding: Some(PaneDataBinding {
-                    analysis_id: AnalysisInstanceId::new(),
-                    dataset: source,
-                }),
-            }],
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(document).unwrap();
-    legacy["schema_version"] = serde_json::json!(5);
-    for trace in legacy["traces"].as_array_mut().unwrap() {
-        trace.as_object_mut().unwrap().remove("row_predicates");
-    }
-
-    let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        VisualizationDocument::SCHEMA_VERSION
-    );
-    assert!(
-        migrated
-            .traces()
-            .iter()
-            .all(|trace| trace.row_predicates.is_empty())
-    );
 }
 
 #[test]
@@ -1003,7 +941,7 @@ fn retained_source_text_accounting_accepts_the_boundary_and_rejects_one_more_byt
 }
 
 #[test]
-fn resource_hardening_preserves_extensions_and_bounded_schema_migrations() {
+fn unknown_extensions_are_ignored_and_another_schema_version_is_refused() {
     let source = dataset(binding(34), 0.0);
     let mut source_json = serde_json::to_value(&source).unwrap();
     source_json["untrusted_extension"] = serde_json::json!([]);
@@ -1016,17 +954,30 @@ fn resource_hardening_preserves_extensions_and_bounded_schema_migrations() {
     extended["untrusted_document_extension"] = serde_json::json!({ "future": true });
     let restored_extended: VisualizationDocument = serde_json::from_value(extended).unwrap();
     assert_eq!(restored_extended, document);
-    for schema_version in [1, 2] {
-        let mut legacy = serde_json::to_value(&document).unwrap();
-        legacy["schema_version"] = serde_json::json!(schema_version);
-        let restored: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-        assert_eq!(
-            restored.schema_version,
-            VisualizationDocument::SCHEMA_VERSION
+    assert_eq!(restored_extended.datasets()[0].binding(), source_binding);
+    for schema_version in [
+        1,
+        VisualizationDocument::SCHEMA_VERSION - 1,
+        VisualizationDocument::SCHEMA_VERSION + 1,
+    ] {
+        let mut other = serde_json::to_value(&document).unwrap();
+        other["schema_version"] = serde_json::json!(schema_version);
+        let error = serde_json::from_value::<VisualizationDocument>(other)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(&format!(
+                "unsupported visualization document schema version {schema_version}"
+            )),
+            "{error}"
         );
-        assert_eq!(restored.datasets()[0].binding(), source_binding);
-        assert_eq!(restored.datasets()[0].rows(), document.datasets()[0].rows());
     }
+    let mut unversioned = serde_json::to_value(&document).unwrap();
+    unversioned
+        .as_object_mut()
+        .expect("document JSON is an object")
+        .remove("schema_version");
+    assert!(serde_json::from_value::<VisualizationDocument>(unversioned).is_err());
 }
 
 #[test]
@@ -1940,95 +1891,6 @@ fn typed_family_filter_rejects_type_drift_before_commit() {
     ));
 }
 
-#[test]
-fn schema_v2_documents_migrate_to_an_unconfigured_family_policy_deterministically() {
-    let source = binding(43);
-    let mut document =
-        VisualizationDocument::new("PVT family", vec![family_dataset(source)]).unwrap();
-    let pane_id = document.panes()[0].id;
-    document
-        .transact(
-            document.revision(),
-            vec![
-                DocumentEdit::SetPaneSource {
-                    pane_id,
-                    viewer_id: "viewer-waveform".to_owned(),
-                    binding: Some(PaneDataBinding {
-                        analysis_id: AnalysisInstanceId::new(),
-                        dataset: source,
-                    }),
-                },
-                DocumentEdit::SetPaneFamilyPresentation {
-                    pane_id,
-                    policy: Some(family_policy()),
-                },
-            ],
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(2);
-
-    let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        VisualizationDocument::SCHEMA_VERSION
-    );
-    assert!(
-        migrated
-            .panes()
-            .iter()
-            .all(|pane| pane.family_policy.is_none())
-    );
-}
-
-#[test]
-fn schema_v1_documents_migrate_page_and_pane_composition_deterministically() {
-    let (mut document, _) = document();
-    let page_id = document.pages()[0].id;
-    document
-        .transact(
-            document.revision(),
-            vec![DocumentEdit::AddPane {
-                page_id,
-                title: "Legacy table".to_owned(),
-                kind: PaneKind::Table,
-            }],
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(1);
-    for page in legacy["pages"].as_array_mut().unwrap() {
-        let page = page.as_object_mut().unwrap();
-        page.remove("layout");
-        page.remove("template_id");
-        page.remove("update_policy");
-    }
-    for pane in legacy["panes"].as_array_mut().unwrap() {
-        let pane = pane.as_object_mut().unwrap();
-        pane.remove("viewer_id");
-        pane.remove("binding");
-        pane.remove("placement");
-        pane.remove("order");
-    }
-    let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        VisualizationDocument::SCHEMA_VERSION
-    );
-    assert_eq!(migrated.pages()[0].layout, PageLayout::Rows);
-    assert_eq!(migrated.pages()[0].template_id, "engineering-dark");
-    assert_eq!(migrated.panes()[0].viewer_id, "viewer-waveform");
-    assert_eq!(migrated.panes()[1].viewer_id, "viewer-table");
-    assert_eq!(migrated.panes()[0].order, 0);
-    assert_eq!(migrated.panes()[1].order, 1);
-    assert_eq!(
-        migrated.panes()[1].placement,
-        PanePlacement::Below {
-            anchor_pane_id: migrated.panes()[0].id,
-        }
-    );
-}
-
 /// One pane with one `V(out)` trace, ready to keep a measurement on.
 fn document_with_trace() -> (VisualizationDocument, PaneId, TraceId) {
     let (mut document, source) = document();
@@ -2125,18 +1987,8 @@ fn a_family_measurement_keeps_its_distribution_and_reads_back() {
         encoded["schema_version"],
         serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
     );
-    let decoded: VisualizationDocument = serde_json::from_value(encoded.clone()).unwrap();
+    let decoded: VisualizationDocument = serde_json::from_value(encoded).unwrap();
     assert_eq!(decoded.measurements()[0].family.as_ref(), Some(&summary));
-
-    // A schema-11 document is one whose measurements were single evaluations.
-    let mut older = encoded;
-    older["schema_version"] = serde_json::json!(11);
-    older["measurements"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("family");
-    let read: VisualizationDocument = serde_json::from_value(older).unwrap();
-    assert_eq!(read.measurements()[0].family, None);
 }
 
 /// A Monte Carlo population is measured on each trial's own retained values,

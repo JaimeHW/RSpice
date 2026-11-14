@@ -187,28 +187,6 @@ fn an_expression_leaves_with_its_pane() {
     assert_eq!(document.expression_traces(), [power(pane, source)]);
 }
 
-#[test]
-fn a_schema_eleven_document_reads_unchanged_and_cannot_carry_expressions() {
-    let (mut document, pane, source) = document();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(11);
-    let reloaded: VisualizationDocument = serde_json::from_value(legacy).unwrap();
-    assert_eq!(reloaded, document);
-
-    document
-        .transact(
-            document.revision(),
-            vec![DocumentEdit::AddExpressionTrace(power(pane, source))],
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(&document).unwrap();
-    legacy["schema_version"] = serde_json::json!(11);
-    let error = serde_json::from_value::<VisualizationDocument>(legacy)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("schema 12"), "{error}");
-}
-
 /// A horizontal axis switches scale; a range read on the linear axis that a
 /// logarithmic one cannot show is dropped rather than kept.
 #[test]
