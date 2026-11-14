@@ -6501,9 +6501,9 @@ impl Engine {
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
 
         // Decode every engine-owned junction history/cache into temporary
-        // runtime pieces before checkpoint injection mutates the circuit. A
-        // legacy checkpoint is admitted here only when the live elaboration
-        // has no BJT or diode topology.
+        // runtime pieces before checkpoint injection mutates the circuit. An
+        // image without junction history is admitted here only when the live
+        // elaboration has no junction device.
         if let Some(checkpoint) = resume {
             self.ensure_transport_history_bytes(checkpoint.transport_copy_bytes())?;
         }

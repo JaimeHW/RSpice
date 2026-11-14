@@ -1834,7 +1834,7 @@ D1 b 0 DM
         );
 
         let unavailable = AcceptedJunctionTransientHistoryCheckpoint::unavailable(
-            "legacy checkpoint has no transient history",
+            "checkpoint has no transient history",
         );
         assert!(
             Engine::validate_accepted_junction_transient_history_checkpoint(

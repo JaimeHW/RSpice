@@ -2106,10 +2106,6 @@ d1 out 0 dcmc
 
     let checkpoint_text = checkpoint.to_text();
     assert!(
-        checkpoint_text.contains("generated_veriloga_state_available 1\n"),
-        "current checkpoints record generated-state availability"
-    );
-    assert!(
         checkpoint_text.contains("generated_veriloga_states 1\n"),
         "the generated diode instance is serialized"
     );
@@ -2189,31 +2185,6 @@ d1 out 0 dcmc
             .to_bits(),
         memory_resume.voltages[resumed_out][0].to_bits(),
         "generated checkpoint carries the seam solution bit-exactly"
-    );
-
-    let generated_prefix = checkpoint_text
-        .lines()
-        .take_while(|line| !line.starts_with("generated_veriloga_state_available "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let following_sections = checkpoint_text
-        .lines()
-        .skip_while(|line| !line.starts_with("runtime_veriloga_state_available "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let upgraded_legacy_text = format!(
-        "{generated_prefix}\ngenerated_veriloga_state_available 0\ngenerated_veriloga_states 0\n{following_sections}\n"
-    );
-    let legacy = TransientCheckpoint::from_text(&upgraded_legacy_text)
-        .expect("the upgraded legacy checkpoint parses with unavailable generated state");
-    let legacy_error = engine
-        .run_tran_resume(&netlist, &legacy, STOP, STEP)
-        .expect_err("legacy checkpoints cannot silently reset generated reactive history");
-    assert!(
-        legacy_error
-            .to_string()
-            .contains("does not contain generated Verilog-A persistent state"),
-        "legacy refusal identifies missing generated persistent state: {legacy_error}"
     );
 
     let generated_header = checkpoint_text

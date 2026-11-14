@@ -425,8 +425,7 @@ impl XyceTestRunner {
         let has_history = counts
             .iter()
             .any(|field| field.parse::<usize>().is_ok_and(|count| count > 0));
-        if !text.lines().any(|line| line == "tline_state_available 1")
-            || !text.lines().any(|line| line == "tline_blockers 0")
+        if !text.lines().any(|line| line == "tline_blockers 0")
             || !text.lines().any(|line| line == "tline_states 1")
             || fields
                 .get(1)
@@ -836,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn bug442_packed_codec_corruption_and_history_loss_fail_closed() {
+    fn bug442_packed_codec_corruption_fails_closed() {
         let runner = XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default());
         let (plan, netlist) = runner
             .bug442_read_worker_plan(Bug442Role::PackedBaseline)
@@ -859,10 +858,6 @@ mod tests {
             )
             .is_err()
         );
-        let history_lost = checkpoint
-            .to_text()
-            .replace("tline_state_available 1", "tline_state_available 0");
-        assert!(TransientCheckpoint::from_text(&history_lost).is_err());
     }
 
     #[test]

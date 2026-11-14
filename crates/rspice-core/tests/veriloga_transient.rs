@@ -1512,38 +1512,6 @@ endmodule
         );
     }
 
-    let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 1.3e-6, 0.2e-6)
-        .expect("missing-state refusal fixture captures");
-    let checkpoint = checkpoint.into_checkpoint().unwrap();
-    let text = checkpoint.to_text();
-    let (prefix, _) = text
-        .split_once("runtime_veriloga_state_available ")
-        .expect("current checkpoint contains runtime Verilog-A provenance");
-    // The mixed-runtime section (format 57), the switch section (format 59),
-    // the edge-completion section (format 60), the model-breakpoint section
-    // (format 61), the replayed-VCD section (format 62) and the floor march
-    // (format 63) close the image, after the runtime Verilog-A states; keep
-    // them so only the model state is absent.
-    let (_, mixed_runtime) = text
-        .rsplit_once("\nmixed_runtime_image ")
-        .expect("current checkpoint closes with its mixed-runtime section");
-    let missing_state = format!(
-        "{prefix}runtime_veriloga_state_available 0\nruntime_veriloga_states 0\n\
-         mixed_runtime_image {mixed_runtime}"
-    );
-    let legacy = TransientCheckpoint::from_text(&missing_state)
-        .expect("state-absent checkpoint remains parseable for a precise refusal");
-    let error = engine
-        .run_tran_resume(&netlist, &legacy, 3.5e-6, 0.2e-6)
-        .expect_err("legacy checkpoint must not invent runtime operator history");
-    assert!(
-        error
-            .to_string()
-            .contains("runtime-compiled Verilog-A accepted state"),
-        "unexpected legacy refusal: {error}"
-    );
-
     let _ = std::fs::remove_file(model);
 }
 

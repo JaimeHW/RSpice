@@ -8,8 +8,7 @@
 //! evaluation. Current files also retain the post-accept next-step proposal,
 //! its active Xyce breakpoint-span ceiling, its effective controller maximum,
 //! and the accepted analysis/restart phase controls that govern the next
-//! interval; legacy continuation state fails closed rather than silently
-//! reconstructing different controls.
+//! interval.
 //! Source timing defaults belong to the original analysis and remain fixed
 //! when a later segment changes its stop time or timestep ceiling.
 //!
@@ -165,7 +164,7 @@ pub const DEFAULT_MAX_CHECKPOINT_BYTES: usize = 256 * 1024 * 1024;
 /// Portable checkpoint representation selected by save and in-memory APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransientCheckpointEncoding {
-    /// Canonical, versioned UTF-8 text. This is the legacy/default core save format.
+    /// Canonical, versioned UTF-8 text. This is the default core save format.
     Unpacked,
     /// Versioned binary envelope containing zlib-compressed canonical text.
     Packed,
@@ -245,11 +244,6 @@ pub(super) struct AcceptedTransientRuntime {
     pub accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
     pub accepted_integration_runtime: AcceptedIntegrationRuntime,
 }
-
-/// Historical blocker retained for classifying older checkpoint inventories.
-/// New mixed images carry the accepted digital design and do not add this entry.
-pub(crate) const MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER: &str =
-    "mixed Verilog-AMS accepted digital state is not checkpointed";
 
 /// One deterministic reason a transient checkpoint cannot be resumed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -509,9 +503,9 @@ pub struct TransientCheckpoint {
     /// endpoints and step ceilings must not silently redefine that waveform.
     source_time_basis: Option<crate::circuit::SourceTimeBasis>,
     /// Typed continuation contract: an exact in-flight proposal, a deliberate
-    /// endpoint breakpoint restart, an authenticated synthetic t=0 origin, or
-    /// unavailable legacy state. These cases must never alias during format
-    /// upgrades because only the first restores the in-flight controller.
+    /// endpoint breakpoint restart, or an authenticated synthetic t=0 origin.
+    /// These cases must never alias because only the first restores the
+    /// in-flight controller.
     integration_continuation: IntegrationContinuation,
     accepted_integration_runtime: AcceptedIntegrationRuntime,
     accepted_solver_state: Option<StaticMatrixSolverCheckpoint>,
@@ -546,48 +540,39 @@ pub struct TransientCheckpoint {
     cap_v_prev_prev_prev: Vec<Value>,
     cap_i_prev: Vec<Value>,
     cap_i_eq: Vec<Value>,
-    solution_dependent_capacitor_state_available: bool,
-    solution_dependent_capacitor_increment_available: bool,
     solution_dependent_capacitor_states: Vec<Option<SolutionDependentCapacitorState>>,
     cap_effective_capacitances: Vec<Value>,
     ind_i_prev: Vec<Value>,
     ind_i_prev_prev: Vec<Value>,
-    /// Empty when `inductor_flux_history_available` is false: files older
-    /// than format 13 never recorded the third accepted inductor current, and
-    /// resume must not invent it.
     ind_i_prev_prev_prev: Vec<Value>,
     ind_v_prev: Vec<Value>,
-    inductor_flux_history_available: bool,
     xyce_memristor_resistance_stores: Vec<Value>,
     xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
     switch_states: Vec<crate::device::AcceptedSwitchCheckpoint>,
     behavioral_states: Vec<BehavioralAcceptedState>,
     capacitor_sdt_states: Vec<capacitor_sdt::State>,
-    accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
     accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
-    tline_state_available: bool,
     tline_resume_blockers: Vec<String>,
     tline_states: Vec<TransmissionLineCheckpoint>,
     lte_signal_global_reference: Value,
     lte_signal_local_reference: Vec<Value>,
     lte_reference_history_available: bool,
     lte_reference_mode: Option<TransientLteReference>,
-    xspice_instances: Vec<String>,
     xspice_resume_blockers: Vec<String>,
     xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
     mixed_runtime_image: Option<mixed::Image>,
-    generated_veriloga_state_available: bool,
     generated_veriloga_instance_states: Vec<GeneratedVerilogAInstanceCheckpoint>,
-    runtime_veriloga_state_available: bool,
     #[cfg(feature = "veriloga")]
     runtime_veriloga_instance_states: Vec<VerilogADeviceCheckpoint>,
 }
 
-/// Stable legacy fingerprint of the netlist identity (FNV-1a over source text
-/// when available). Resume authorization additionally requires the complete
-/// collision-resistant semantic identity below.
+/// FNV-1a fingerprint of the netlist source text (or of its element names and
+/// nodes when there is no text). An ordinary resume requires it to match, so a
+/// changed deck is refused even where its semantic identity is unchanged;
+/// resume authorization additionally requires the complete collision-resistant
+/// semantic identity below.
 pub fn netlist_fingerprint(netlist: &Netlist) -> u64 {
     const OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01B3;
@@ -5237,9 +5222,9 @@ impl TransientCheckpoint {
     /// Every message arrives under exactly one source. The stored accepted
     /// integration runtime carries one flat inventory that already includes
     /// the extension-owned messages, so those are picked back out of it by
-    /// identity — the mixed Verilog-AMS message, and whatever the image
-    /// recorded as its own XSPICE inventory, report as extension state —
-    /// rather than a second time as an integration-runtime blocker.
+    /// identity — whatever the image recorded as its own XSPICE inventory
+    /// reports as extension state — rather than a second time as an
+    /// integration-runtime blocker.
     pub fn capability(&self) -> TransientCheckpointCapability {
         let mut blockers = Vec::new();
         let mut push = |source, message: String| {
@@ -5313,15 +5298,14 @@ impl TransientCheckpoint {
     /// the extension-owned messages are folded in beside the device-integration
     /// ones so the thing a resume compares stays a single sorted string list,
     /// and that encoding may not change. Classification therefore happens on
-    /// the way out, by identity: the mixed Verilog-AMS message, and whatever
-    /// the image recorded as its own XSPICE inventory, are extension state.
-    /// Everything else is the integration runtime's.
+    /// the way out, by identity: whatever the image recorded as its own
+    /// XSPICE inventory is extension state. Everything else is the
+    /// integration runtime's.
     fn accepted_runtime_blocker_source(&self, message: &str) -> TransientCheckpointBlockerSource {
-        if message == MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER
-            || self
-                .xspice_resume_blockers
-                .iter()
-                .any(|blocker| blocker == message)
+        if self
+            .xspice_resume_blockers
+            .iter()
+            .any(|blocker| blocker == message)
         {
             TransientCheckpointBlockerSource::ExtensionState
         } else {
@@ -5350,7 +5334,7 @@ impl TransientCheckpoint {
         if let Some(image) = &self.mixed_runtime_image {
             image.validate(self.time, self.solution.len())?;
             if !self.xspice_instance_states.is_empty() || !self.xspice_resume_blockers.is_empty() {
-                return Err("mixed runtime image conflicts with legacy XSPICE state".into());
+                return Err("mixed runtime image conflicts with standalone XSPICE state".into());
             }
         }
         behavioral::validate(&self.behavioral_states, self.time, &mut budget)?;
@@ -5507,105 +5491,86 @@ impl TransientCheckpoint {
                 "checkpoint capacitor history vectors have inconsistent lengths".to_string(),
             );
         }
-        if self.solution_dependent_capacitor_state_available {
-            if self.solution_dependent_capacitor_states.len() != capacitor_len
-                || self.cap_effective_capacitances.len() != capacitor_len
-            {
-                return Err(
-                    "checkpoint solution-dependent capacitor state shape does not match capacitor history"
-                        .to_string(),
-                );
-            }
-            if self
-                .cap_effective_capacitances
-                .iter()
-                .any(|value| !value.is_finite() || *value < 0.0)
-            {
-                return Err(
-                    "checkpoint effective capacitor values must be finite and non-negative"
-                        .to_string(),
-                );
-            }
-            for (index, state) in self.solution_dependent_capacitor_states.iter().enumerate() {
-                let Some(state) = state else {
-                    continue;
-                };
-                if !state.c_prev.is_finite()
-                    || state.c_prev < 0.0
-                    || !state.q_prev.is_finite()
-                    || !state.q_prev_prev.is_finite()
-                    || !state.charge_increment_prev.is_finite()
-                    || (!self.solution_dependent_capacitor_increment_available
-                        && state.charge_increment_prev != 0.0)
-                {
-                    return Err(format!(
-                        "checkpoint solution-dependent capacitor state {index} contains invalid accepted charge data"
-                    ));
-                }
-                if state.c_prev.to_bits() != self.cap_effective_capacitances[index].to_bits() {
-                    return Err(format!(
-                        "checkpoint solution-dependent capacitor state {index} disagrees with its accepted effective capacitance"
-                    ));
-                }
-                for (name, partials) in [("dC/dx", &state.dcdx_prev), ("dQ/dx", &state.dqdx_prev)] {
-                    if partials
-                        .iter()
-                        .any(|(column, value)| *column >= self.solution.len() || !value.is_finite())
-                    {
-                        return Err(format!(
-                            "checkpoint solution-dependent capacitor state {index} has invalid {name} history"
-                        ));
-                    }
-                    let mut columns = match budget.as_deref_mut() {
-                        Some(budget) => allocate_checkpoint_capacity(
-                            partials.len(),
-                            "solution-dependent capacitor validation columns",
-                            budget,
-                        )?,
-                        None => {
-                            let mut columns = Vec::new();
-                            columns.try_reserve_exact(partials.len()).map_err(|_| {
-                                "solution-dependent capacitor validation column count exceeds allocation limits"
-                                    .to_string()
-                            })?;
-                            columns
-                        }
-                    };
-                    columns.extend(partials.iter().map(|(column, _)| *column));
-                    columns.sort_unstable();
-                    if columns.windows(2).any(|pair| pair[0] == pair[1]) {
-                        return Err(format!(
-                            "checkpoint solution-dependent capacitor state {index} has duplicate {name} columns"
-                        ));
-                    }
-                }
-            }
-        } else if !self.solution_dependent_capacitor_states.is_empty()
-            || !self.cap_effective_capacitances.is_empty()
+        if self.solution_dependent_capacitor_states.len() != capacitor_len
+            || self.cap_effective_capacitances.len() != capacitor_len
         {
             return Err(
-                "checkpoint contains solution-dependent capacitor state without availability provenance"
+                "checkpoint solution-dependent capacitor state shape does not match capacitor history"
                     .to_string(),
             );
         }
+        if self
+            .cap_effective_capacitances
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(
+                "checkpoint effective capacitor values must be finite and non-negative".to_string(),
+            );
+        }
+        for (index, state) in self.solution_dependent_capacitor_states.iter().enumerate() {
+            let Some(state) = state else {
+                continue;
+            };
+            if !state.c_prev.is_finite()
+                || state.c_prev < 0.0
+                || !state.q_prev.is_finite()
+                || !state.q_prev_prev.is_finite()
+                || !state.charge_increment_prev.is_finite()
+            {
+                return Err(format!(
+                    "checkpoint solution-dependent capacitor state {index} contains invalid accepted charge data"
+                ));
+            }
+            if state.c_prev.to_bits() != self.cap_effective_capacitances[index].to_bits() {
+                return Err(format!(
+                    "checkpoint solution-dependent capacitor state {index} disagrees with its accepted effective capacitance"
+                ));
+            }
+            for (name, partials) in [("dC/dx", &state.dcdx_prev), ("dQ/dx", &state.dqdx_prev)] {
+                if partials
+                    .iter()
+                    .any(|(column, value)| *column >= self.solution.len() || !value.is_finite())
+                {
+                    return Err(format!(
+                        "checkpoint solution-dependent capacitor state {index} has invalid {name} history"
+                    ));
+                }
+                let mut columns = match budget.as_deref_mut() {
+                    Some(budget) => allocate_checkpoint_capacity(
+                        partials.len(),
+                        "solution-dependent capacitor validation columns",
+                        budget,
+                    )?,
+                    None => {
+                        let mut columns = Vec::new();
+                        columns.try_reserve_exact(partials.len()).map_err(|_| {
+                            "solution-dependent capacitor validation column count exceeds allocation limits"
+                                .to_string()
+                        })?;
+                        columns
+                    }
+                };
+                columns.extend(partials.iter().map(|(column, _)| *column));
+                columns.sort_unstable();
+                if columns.windows(2).any(|pair| pair[0] == pair[1]) {
+                    return Err(format!(
+                        "checkpoint solution-dependent capacitor state {index} has duplicate {name} columns"
+                    ));
+                }
+            }
+        }
         let inductor_len = self.ind_i_prev.len();
-        if [self.ind_i_prev_prev.len(), self.ind_v_prev.len()]
-            .into_iter()
-            .any(|len| len != inductor_len)
+        if [
+            self.ind_i_prev_prev.len(),
+            self.ind_i_prev_prev_prev.len(),
+            self.ind_v_prev.len(),
+        ]
+        .into_iter()
+        .any(|len| len != inductor_len)
         {
             return Err(
                 "checkpoint inductor history vectors have inconsistent lengths".to_string(),
-            );
-        }
-        let expected_flux_history_len = if self.inductor_flux_history_available {
-            inductor_len
-        } else {
-            0
-        };
-        if self.ind_i_prev_prev_prev.len() != expected_flux_history_len {
-            return Err(
-                "checkpoint inductor flux history length disagrees with its availability"
-                    .to_string(),
             );
         }
         if self
@@ -5657,17 +5622,6 @@ impl TransientCheckpoint {
                     state.instance_name
                 ));
             }
-        }
-        if !self.accepted_nonlinear_state_available
-            && (!self.accepted_nonlinear_states.resume_blockers.is_empty()
-                || !self.accepted_nonlinear_states.diodes.is_empty()
-                || !self.accepted_nonlinear_states.bjts.is_empty()
-                || !self.accepted_nonlinear_states.jfets.is_empty())
-        {
-            return Err(
-                "accepted native nonlinear checkpoint state is present without availability provenance"
-                    .to_string(),
-            );
         }
         if self
             .accepted_nonlinear_states
@@ -5906,29 +5860,6 @@ impl TransientCheckpoint {
                     .any(|value| !value.is_finite())
         }) {
             return Err("checkpoint XSPICE floating-point state must be finite".to_string());
-        }
-        if !self.generated_veriloga_state_available
-            && !self.generated_veriloga_instance_states.is_empty()
-        {
-            return Err(
-                "generated Verilog-A checkpoint state is present without availability provenance"
-                    .to_string(),
-            );
-        }
-        #[cfg(feature = "veriloga")]
-        if !self.runtime_veriloga_state_available
-            && !self.runtime_veriloga_instance_states.is_empty()
-        {
-            return Err(
-                "runtime Verilog-A checkpoint state is present without availability provenance"
-                    .into(),
-            );
-        }
-        if !self.tline_state_available && !self.tline_states.is_empty() {
-            return Err(
-                "transmission-line checkpoint state is present without availability provenance"
-                    .to_string(),
-            );
         }
         for (index, state) in self.tline_states.iter().enumerate() {
             TransmissionLine::validate_checkpoint_state(state).map_err(|error| {
@@ -6237,11 +6168,6 @@ impl TransientCheckpoint {
                 tline_resume_blockers.join("; ")
             );
         }
-        let xspice_instances: Vec<String> = circuit
-            .xspice_instances
-            .iter()
-            .map(|instance| format!("{}({})", instance.name, instance.model_name()))
-            .collect();
         #[cfg(feature = "veriloga")]
         let mixed_runtime_image = circuit
             .has_mixed_signal_hosts()
@@ -6350,15 +6276,12 @@ impl TransientCheckpoint {
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
             cap_i_prev: circuit.capacitors.i_prev.clone(),
             cap_i_eq: circuit.capacitors.i_eq.clone(),
-            solution_dependent_capacitor_state_available: true,
-            solution_dependent_capacitor_increment_available: true,
             solution_dependent_capacitor_states: circuit.capacitors.value_expression_states.clone(),
             cap_effective_capacitances: circuit.capacitors.effective_capacitances.clone(),
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
             ind_i_prev_prev_prev: circuit.inductors.i_prev_prev_prev.clone(),
             ind_v_prev: circuit.inductors.v_prev.clone(),
-            inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: circuit
                 .xyce_memristors
                 .iter()
@@ -6370,23 +6293,18 @@ impl TransientCheckpoint {
             switch_states: switch::capture(circuit),
             behavioral_states: circuit.behavioral_sources.accepted_history(),
             capacitor_sdt_states: capacitor_sdt::capture(circuit),
-            accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
             accepted_junction_history,
-            tline_state_available: true,
             tline_resume_blockers,
             tline_states,
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_estimator.is_some(),
             lte_reference_mode: lte_estimator.map(LteEstimator::reference_mode),
-            xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
             mixed_runtime_image,
-            generated_veriloga_state_available: true,
             generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states()?,
-            runtime_veriloga_state_available: true,
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
         })
@@ -6500,7 +6418,7 @@ impl TransientCheckpoint {
                 return Ok(());
             }
             return Err(
-                "legacy transient checkpoint does not contain accepted junction transient history; re-run the transient from t=0"
+                "transient checkpoint does not contain accepted junction transient history; re-run the transient from t=0"
                     .to_string(),
             );
         }
@@ -6553,14 +6471,6 @@ impl TransientCheckpoint {
     pub(crate) fn inject(&self, circuit: &mut CircuitData) -> Result<(), String> {
         self.validate_numeric_state()?;
 
-        if !self.accepted_nonlinear_state_available
-            && (!circuit.diodes.is_empty() || !circuit.bjts.is_empty() || !circuit.jfets.is_empty())
-        {
-            return Err(
-                "legacy transient checkpoint does not contain accepted native nonlinear state; re-run the transient from t=0"
-                    .to_string(),
-            );
-        }
         // Validate identity-bearing device state before ordinal storage
         // shapes. Named instance mismatches are the most specific evidence
         // that a checkpoint belongs to a different elaboration, whereas a
@@ -6580,13 +6490,10 @@ impl TransientCheckpoint {
         }
         circuit.validate_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
-            self.generated_veriloga_state_available,
         )?;
         #[cfg(feature = "veriloga")]
-        circuit.validate_runtime_veriloga_checkpoint_states(
-            &self.runtime_veriloga_instance_states,
-            self.runtime_veriloga_state_available,
-        )?;
+        circuit
+            .validate_runtime_veriloga_checkpoint_states(&self.runtime_veriloga_instance_states)?;
         circuit.validate_accepted_native_nonlinear_checkpoint_states(
             &self.accepted_nonlinear_states,
         )?;
@@ -6601,14 +6508,6 @@ impl TransientCheckpoint {
                 self.tline_resume_blockers.join("; ")
             ));
         }
-        if !self.tline_state_available
-            && (!circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty())
-        {
-            return Err(
-                "legacy transient checkpoint does not contain transmission-line history; re-run the transient from t=0"
-                    .to_string(),
-            );
-        }
         if !circuit.coupled_tlines.is_empty() {
             return Err(
                 "transient checkpoint does not contain coupled transmission-line convolution history"
@@ -6617,7 +6516,7 @@ impl TransientCheckpoint {
         }
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() && self.mixed_runtime_image.is_none() {
-            return Err("legacy transient checkpoint does not contain mixed Verilog-AMS accepted digital state; re-run from t=0".into());
+            return Err("transient checkpoint does not contain mixed Verilog-AMS accepted digital state; re-run from t=0".into());
         }
         if self.tline_states.len() != circuit.tlines.len() {
             return Err(format!(
@@ -6657,32 +6556,6 @@ impl TransientCheckpoint {
             }
             line.restore_checkpoint_state(state)?;
         }
-        if !self.inductor_flux_history_available && !circuit.inductors.is_empty() {
-            return Err(format!(
-                "checkpoint predates the inductor flux history (format {FORMAT_VERSION} \
-                 records i_prev_prev_prev); it cannot resume a circuit with {} inductor(s) — \
-                 re-run the transient from t=0",
-                circuit.inductors.len()
-            ));
-        }
-        if !self.solution_dependent_capacitor_state_available
-            && circuit.capacitors.has_solution_dependent_values()
-        {
-            return Err(
-                "legacy transient checkpoint does not contain accepted solution-dependent capacitor charge state; re-run the transient from t=0"
-                    .to_string(),
-            );
-        }
-
-        if !self.solution_dependent_capacitor_increment_available
-            && circuit.capacitors.has_solution_dependent_values()
-        {
-            return Err(
-                "legacy transient checkpoint does not contain accepted capacitor charge increments; re-run the transient from t=0"
-                    .to_string(),
-            );
-        }
-
         let target_lengths = [
             (
                 "capacitor v_prev",
@@ -6712,20 +6585,12 @@ impl TransientCheckpoint {
             (
                 "solution-dependent capacitor states",
                 self.solution_dependent_capacitor_states.len(),
-                if self.solution_dependent_capacitor_state_available {
-                    circuit.capacitors.value_expression_states.len()
-                } else {
-                    0
-                },
+                circuit.capacitors.value_expression_states.len(),
             ),
             (
                 "effective capacitances",
                 self.cap_effective_capacitances.len(),
-                if self.solution_dependent_capacitor_state_available {
-                    circuit.capacitors.effective_capacitances.len()
-                } else {
-                    0
-                },
+                circuit.capacitors.effective_capacitances.len(),
             ),
             (
                 "inductor i_prev",
@@ -6766,12 +6631,11 @@ impl TransientCheckpoint {
                 "checkpoint {name} shape mismatch: captured {captured}, circuit has {target}"
             ));
         }
-        if self.solution_dependent_capacitor_state_available
-            && self
-                .solution_dependent_capacitor_states
-                .iter()
-                .zip(&circuit.capacitors.value_expressions)
-                .any(|(state, expression)| state.is_some() != expression.is_some())
+        if self
+            .solution_dependent_capacitor_states
+            .iter()
+            .zip(&circuit.capacitors.value_expressions)
+            .any(|(state, expression)| state.is_some() != expression.is_some())
         {
             return Err(
                 "checkpoint solution-dependent capacitor state presence does not match the target circuit"
@@ -6823,16 +6687,14 @@ impl TransientCheckpoint {
             .copy_from_slice(&self.cap_v_prev_prev_prev);
         circuit.capacitors.i_prev.copy_from_slice(&self.cap_i_prev);
         circuit.capacitors.i_eq.copy_from_slice(&self.cap_i_eq);
-        if self.solution_dependent_capacitor_state_available {
-            circuit
-                .capacitors
-                .value_expression_states
-                .clone_from(&self.solution_dependent_capacitor_states);
-            circuit
-                .capacitors
-                .effective_capacitances
-                .copy_from_slice(&self.cap_effective_capacitances);
-        }
+        circuit
+            .capacitors
+            .value_expression_states
+            .clone_from(&self.solution_dependent_capacitor_states);
+        circuit
+            .capacitors
+            .effective_capacitances
+            .copy_from_slice(&self.cap_effective_capacitances);
         circuit.inductors.i_prev.copy_from_slice(&self.ind_i_prev);
         circuit
             .inductors
@@ -6862,13 +6724,10 @@ impl TransientCheckpoint {
         }
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
-            self.generated_veriloga_state_available,
         )?;
         #[cfg(feature = "veriloga")]
-        circuit.restore_runtime_veriloga_checkpoint_states(
-            &self.runtime_veriloga_instance_states,
-            self.runtime_veriloga_state_available,
-        )?;
+        circuit
+            .restore_runtime_veriloga_checkpoint_states(&self.runtime_veriloga_instance_states)?;
         circuit.tlines = restored_tlines;
         #[cfg(feature = "veriloga")]
         if let Some(restored) = restored_mixed {
@@ -6884,8 +6743,7 @@ impl TransientCheckpoint {
     ) -> Result<(), String> {
         if estimator.requires_signal_reference_history() && !self.lte_reference_history_available {
             return Err(
-                "legacy transient checkpoint does not contain NEWLTE signal-history state"
-                    .to_string(),
+                "transient checkpoint does not contain NEWLTE signal-history state".to_string(),
             );
         }
         if self.lte_reference_history_available
@@ -6925,7 +6783,7 @@ impl TransientCheckpoint {
                 self.netlist_fingerprint, fingerprint
             ));
         }
-        self.validate_resume_capabilities(netlist)
+        self.validate_resume_capabilities()
     }
 
     /// Validate this checkpoint for an authored `.OPTIONS RESTART FILE` deck.
@@ -6933,7 +6791,7 @@ impl TransientCheckpoint {
     /// Restart decks intentionally change their transient stop horizon and
     /// restart I/O metadata. This validation path therefore uses the dedicated
     /// collision-resistant restart identity and intentionally does not consult
-    /// the legacy source-text fingerprint. All physical netlist semantics,
+    /// the source-text fingerprint. All physical netlist semantics,
     /// output contracts, external dependencies, and trajectory-affecting
     /// transient controls remain identity-bound.
     pub(crate) fn validate_for_restart(&self, netlist: &Netlist) -> Result<(), String> {
@@ -6943,7 +6801,7 @@ impl TransientCheckpoint {
             .expect("restart identity is available for every elaborated AST");
         let Some(captured_identity) = self.restart_identity.as_deref() else {
             return Err(
-                "legacy transient checkpoint does not contain a collision-resistant restart identity"
+                "transient checkpoint does not contain a collision-resistant restart identity"
                     .to_string(),
             );
         };
@@ -6952,10 +6810,10 @@ impl TransientCheckpoint {
                 "checkpoint was captured from a restart-incompatible netlist (identity {captured_identity}, this deck is {target_identity}); refusing to resume mismatched state"
             ));
         }
-        self.validate_resume_capabilities(netlist)
+        self.validate_resume_capabilities()
     }
 
-    fn validate_resume_capabilities(&self, netlist: &Netlist) -> Result<(), String> {
+    fn validate_resume_capabilities(&self) -> Result<(), String> {
         if matches!(
             self.accepted_integration_runtime,
             AcceptedIntegrationRuntime::Exact(_)
@@ -6981,14 +6839,6 @@ impl TransientCheckpoint {
                  state: {}. Run XSPICE transient decks unsegmented.",
                 self.xspice_resume_blockers.join("; ")
             ));
-        }
-        if self.xspice_instances.is_empty() && netlist_has_xspice(netlist) {
-            return Err(
-                "transient checkpoint resume cannot verify XSPICE state for this \
-                 legacy checkpoint format; the target netlist contains XSPICE \
-                 code-model instances. Run XSPICE transient decks unsegmented."
-                    .to_string(),
-            );
         }
         match &self.accepted_integration_runtime {
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
@@ -7059,20 +6909,21 @@ impl TransientCheckpoint {
     /// extending `.TRAN` over an otherwise identical deck, because RSpice
     /// derives the cap from that very line.
     ///
-    /// What must still hold is that the cap was recorded, so a legacy
-    /// checkpoint written before the field existed fails closed instead of
-    /// resuming with unknown provenance.
+    /// What must still hold is that the cap was recorded, so an image captured
+    /// outside a transient segment fails closed instead of resuming with
+    /// unknown provenance.
     pub(crate) fn validate_recorded_integration_max_step(&self) -> Result<(), String> {
         if self.integration_max_step.is_none() {
             return Err(
-                "legacy transient checkpoint does not record its per-run maximum step".to_string(),
+                "transient checkpoint does not record its per-run maximum step".to_string(),
             );
         }
         Ok(())
     }
 
-    /// Legacy images can continue fully specified waveforms. They cannot
-    /// reconstruct omitted timing from a different segment's horizon.
+    /// An image without a source time basis can continue fully specified
+    /// waveforms. It cannot reconstruct omitted timing from a different
+    /// segment's horizon.
     pub(super) fn source_time_basis_for_resume(
         &self,
         circuit: &CircuitData,
@@ -7728,47 +7579,27 @@ impl TransientCheckpoint {
                 &self.cap_i_eq,
             ],
         )?;
-        out.push_str(&format!(
-            "solution_dependent_capacitor_state_available {}\n",
-            u8::from(self.solution_dependent_capacitor_state_available)
-        ));
         write_value_vector(
             &mut out,
             "cap_effective_capacitances",
             &self.cap_effective_capacitances,
             abort,
         )?;
-        out.push_str(&format!(
-            "solution_dependent_capacitor_increment_available {}\n",
-            u8::from(self.solution_dependent_capacitor_increment_available)
-        ));
         write_solution_dependent_capacitor_states(
             &mut out,
             &self.solution_dependent_capacitor_states,
             abort,
         )?;
-        out.push_str(&format!(
-            "inductor_flux_history_available {}\n",
-            u8::from(self.inductor_flux_history_available)
-        ));
-        if self.inductor_flux_history_available {
-            section(
-                &mut out,
-                "inductors",
-                &[
-                    &self.ind_i_prev,
-                    &self.ind_i_prev_prev,
-                    &self.ind_i_prev_prev_prev,
-                    &self.ind_v_prev,
-                ],
-            )?;
-        } else {
-            section(
-                &mut out,
-                "inductors",
-                &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
-            )?;
-        }
+        section(
+            &mut out,
+            "inductors",
+            &[
+                &self.ind_i_prev,
+                &self.ind_i_prev_prev,
+                &self.ind_i_prev_prev_prev,
+                &self.ind_v_prev,
+            ],
+        )?;
         write_value_vector(
             &mut out,
             "xyce_memristor_resistance_stores",
@@ -7808,10 +7639,6 @@ impl TransientCheckpoint {
         }
         behavioral::write(&mut out, &self.behavioral_states, abort)?;
         capacitor_sdt::write(&mut out, &self.capacitor_sdt_states, abort)?;
-        out.push_str(&format!(
-            "accepted_nonlinear_state_available {}\n",
-            u8::from(self.accepted_nonlinear_state_available)
-        ));
         out.push_str(&format!(
             "accepted_nonlinear_blockers {}\n",
             self.accepted_nonlinear_states.resume_blockers.len()
@@ -8099,10 +7926,6 @@ impl TransientCheckpoint {
         bsim4::write(&mut out, junction, abort)?;
         mosfet::write(&mut out, junction, abort)?;
         out.push_str(&format!(
-            "tline_state_available {}\n",
-            u8::from(self.tline_state_available)
-        ));
-        out.push_str(&format!(
             "tline_blockers {}\n",
             self.tline_resume_blockers.len()
         ));
@@ -8171,12 +7994,6 @@ impl TransientCheckpoint {
                 ));
             }
         }
-        out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
-        for (index, instance) in self.xspice_instances.iter().enumerate() {
-            poll_checkpoint_abort(abort, index)?;
-            out.push_str(instance);
-            out.push('\n');
-        }
         out.push_str(&format!(
             "xspice_blockers {}\n",
             self.xspice_resume_blockers.len()
@@ -8206,10 +8023,6 @@ impl TransientCheckpoint {
             write_value_vector(&mut out, "state_prev", &instance.context.state_prev, abort)?;
             write_i64_vector(&mut out, "int_state", &instance.context.int_state, abort)?;
         }
-        out.push_str(&format!(
-            "generated_veriloga_state_available {}\n",
-            u8::from(self.generated_veriloga_state_available)
-        ));
         out.push_str(&format!(
             "generated_veriloga_states {}\n",
             self.generated_veriloga_instance_states.len()
@@ -8285,10 +8098,6 @@ impl TransientCheckpoint {
                 abort,
             )?;
         }
-        out.push_str(&format!(
-            "runtime_veriloga_state_available {}\n",
-            u8::from(self.runtime_veriloga_state_available)
-        ));
         #[cfg(feature = "veriloga")]
         {
             out.push_str(&format!(
@@ -8678,112 +8487,14 @@ impl TransientCheckpoint {
             read_accepted_integration_runtime(lines, &solution_cols[0], time, budget)?;
         let accepted_solver_state = read_solver_state(lines, budget)?;
         let cap_cols = read_value_section(lines, "capacitors", 5, budget)?;
-        let (
-            solution_dependent_capacitor_state_available,
-            solution_dependent_capacitor_increment_available,
-            cap_effective_capacitances,
-            solution_dependent_capacitor_states,
-        ) = {
-            let availability_line = lines.next().ok_or_else(|| {
-                "missing solution-dependent capacitor state availability line".to_string()
-            })?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("solution_dependent_capacitor_state_available") {
-                return Err(format!(
-                    "malformed solution-dependent capacitor state availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "solution-dependent capacitor state availability line is missing its boolean"
-                        .to_string()
-                })
-                .and_then(|field| {
-                    parse_checkpoint_bool(field, "solution-dependent capacitor state availability")
-                })?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "solution-dependent capacitor state availability line has extra field '{extra}'"
-                ));
-            }
-            let effective = read_value_vector(lines, "cap_effective_capacitances", budget)?;
-            let increment_available = {
-                let line = lines
-                    .next()
-                    .ok_or_else(|| "missing capacitor charge-increment availability".to_string())?;
-                let mut fields = line.split_whitespace();
-                if fields.next() != Some("solution_dependent_capacitor_increment_available") {
-                    return Err("malformed capacitor charge-increment availability".to_string());
-                }
-                let available = parse_checkpoint_bool(
-                    fields.next().ok_or_else(|| {
-                        "missing capacitor charge-increment availability value".to_string()
-                    })?,
-                    "capacitor charge-increment availability",
-                )?;
-                if fields.next().is_some() {
-                    return Err("extra capacitor charge-increment availability field".to_string());
-                }
-                available
-            };
-            let states = read_solution_dependent_capacitor_states(
-                lines,
-                if available {
-                    cap_cols.first().map_or(0, Vec::len)
-                } else {
-                    0
-                },
-                budget,
-            )?;
-            (available, increment_available, effective, states)
-        };
-        let inductor_flux_history_available = {
-            let availability_line = lines
-                .next()
-                .ok_or_else(|| "missing 'inductor_flux_history_available' line".to_string())?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("inductor_flux_history_available") {
-                return Err(format!(
-                    "malformed inductor flux history availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "inductor flux history availability line is missing its boolean".to_string()
-                })
-                .and_then(|field| {
-                    parse_checkpoint_bool(field, "inductor flux history availability")
-                })?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "inductor flux history availability line has extra field '{extra}'"
-                ));
-            }
-            available
-        };
-        let ind_columns = if inductor_flux_history_available {
-            4
-        } else {
-            3
-        };
-        let mut ind_cols = read_value_section(lines, "inductors", ind_columns, budget)?;
-        if !inductor_flux_history_available {
-            // Files that predate the flux history carry three columns; keep
-            // the missing history empty so resume fails closed instead of
-            // reading a neighbouring column as the third accepted current.
-            // Build a separate four-slot outer vector so both its complete
-            // replacement backing and the still-live three-slot source are
-            // reflected in the cumulative parsed-memory charge.
-            let mut legacy_cols = ind_cols.into_iter();
-            let mut expanded = allocate_checkpoint_capacity(4, "legacy inductor columns", budget)?;
-            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
-            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
-            expanded.push(Vec::new());
-            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
-            ind_cols = expanded;
-        }
+        let cap_effective_capacitances =
+            read_value_vector(lines, "cap_effective_capacitances", budget)?;
+        let solution_dependent_capacitor_states = read_solution_dependent_capacitor_states(
+            lines,
+            cap_cols.first().map_or(0, Vec::len),
+            budget,
+        )?;
+        let ind_cols = read_value_section(lines, "inductors", 4, budget)?;
         let xyce_memristor_resistance_stores =
             read_value_vector(lines, "xyce_memristor_resistance_stores", budget)?;
         let xyce_team_resistance_noise_states =
@@ -8805,42 +8516,15 @@ impl TransientCheckpoint {
         };
         let behavioral_states = behavioral::read(lines, budget)?;
         let capacitor_sdt_states = capacitor_sdt::read(lines, budget)?;
-        let (accepted_nonlinear_state_available, accepted_nonlinear_states) = {
-            let availability_line = lines
-                .next()
-                .ok_or_else(|| "missing accepted nonlinear state availability line".to_string())?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("accepted_nonlinear_state_available") {
-                return Err(format!(
-                    "malformed accepted nonlinear state availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "accepted nonlinear state availability line is missing its boolean".to_string()
-                })
-                .and_then(|field| {
-                    parse_checkpoint_bool(field, "accepted nonlinear state availability")
-                })?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "accepted nonlinear state availability line has extra field '{extra}'"
-                ));
-            }
-            (
-                available,
-                AcceptedNativeNonlinearCheckpointStates {
-                    resume_blockers: read_canonical_nonempty_line_vector(
-                        lines,
-                        "accepted_nonlinear_blockers",
-                        budget,
-                    )?,
-                    diodes: read_accepted_diode_nonlinear_states(lines, budget)?,
-                    bjts: read_accepted_bjt_nonlinear_states(lines, budget)?,
-                    jfets: read_accepted_jfet_nonlinear_states(lines, budget)?,
-                },
-            )
+        let accepted_nonlinear_states = AcceptedNativeNonlinearCheckpointStates {
+            resume_blockers: read_canonical_nonempty_line_vector(
+                lines,
+                "accepted_nonlinear_blockers",
+                budget,
+            )?,
+            diodes: read_accepted_diode_nonlinear_states(lines, budget)?,
+            bjts: read_accepted_bjt_nonlinear_states(lines, budget)?,
+            jfets: read_accepted_jfet_nonlinear_states(lines, budget)?,
         };
         let mut accepted_junction_history =
             read_accepted_junction_transient_history(lines, budget)?;
@@ -8848,94 +8532,13 @@ impl TransientCheckpoint {
         bsim3::read(lines, budget, &mut accepted_junction_history)?;
         bsim4::read(lines, budget, &mut accepted_junction_history)?;
         mosfet::read(lines, budget, &mut accepted_junction_history)?;
-        let (tline_state_available, tline_resume_blockers, tline_states) = {
-            let availability_line = lines
-                .next()
-                .ok_or_else(|| "missing 'tline_state_available' line".to_string())?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("tline_state_available") {
-                return Err(format!(
-                    "malformed transmission-line availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "transmission-line availability line is missing its boolean".to_string()
-                })
-                .and_then(|field| {
-                    parse_checkpoint_bool(field, "transmission-line state availability")
-                })?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "transmission-line availability line has extra field '{extra}'"
-                ));
-            }
-            (
-                available,
-                read_nonempty_line_vector(lines, "tline_blockers", budget)?,
-                read_tline_states(lines, budget)?,
-            )
-        };
-        let xspice_instances = read_nonempty_line_vector(lines, "xspice", budget)?;
+        let tline_resume_blockers = read_nonempty_line_vector(lines, "tline_blockers", budget)?;
+        let tline_states = read_tline_states(lines, budget)?;
         let xspice_resume_blockers = read_nonempty_line_vector(lines, "xspice_blockers", budget)?;
         let xspice_instance_states = read_xspice_instance_states(lines, budget)?;
-        let (generated_veriloga_state_available, generated_veriloga_instance_states) = {
-            let availability_line = lines
-                .next()
-                .ok_or_else(|| "missing 'generated_veriloga_state_available' line".to_string())?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("generated_veriloga_state_available") {
-                return Err(format!(
-                    "malformed generated Verilog-A availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "generated Verilog-A availability line is missing its boolean".to_string()
-                })
-                .and_then(|field| {
-                    parse_checkpoint_bool(field, "generated Verilog-A availability")
-                })?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "generated Verilog-A availability line has extra field '{extra}'"
-                ));
-            }
-            let states = read_generated_veriloga_states(lines, budget)?;
-            (available, states)
-        };
-        let parsed_runtime_veriloga_state_available = {
-            let availability_line = lines
-                .next()
-                .ok_or_else(|| "missing 'runtime_veriloga_state_available' line".to_string())?;
-            let mut fields = availability_line.split_whitespace();
-            if fields.next() != Some("runtime_veriloga_state_available") {
-                return Err(format!(
-                    "malformed runtime Verilog-A availability line: '{availability_line}'"
-                ));
-            }
-            let available = fields
-                .next()
-                .ok_or_else(|| {
-                    "runtime Verilog-A availability line is missing its boolean".to_string()
-                })
-                .and_then(|field| parse_checkpoint_bool(field, "runtime Verilog-A availability"))?;
-            if let Some(extra) = fields.next() {
-                return Err(format!(
-                    "runtime Verilog-A availability line has extra field '{extra}'"
-                ));
-            }
-            available
-        };
+        let generated_veriloga_instance_states = read_generated_veriloga_states(lines, budget)?;
         #[cfg(feature = "veriloga")]
-        let (runtime_veriloga_state_available, runtime_veriloga_instance_states) = (
-            parsed_runtime_veriloga_state_available,
-            read_runtime_veriloga_states(lines, budget)?,
-        );
-        #[cfg(not(feature = "veriloga"))]
-        let runtime_veriloga_state_available = parsed_runtime_veriloga_state_available;
+        let runtime_veriloga_instance_states = read_runtime_veriloga_states(lines, budget)?;
         #[cfg(not(feature = "veriloga"))]
         {
             let header = lines
@@ -8993,38 +8596,30 @@ impl TransientCheckpoint {
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
             cap_i_prev: cap_iter.next().unwrap(),
             cap_i_eq: cap_iter.next().unwrap(),
-            solution_dependent_capacitor_state_available,
-            solution_dependent_capacitor_increment_available,
             solution_dependent_capacitor_states,
             cap_effective_capacitances,
             ind_i_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev_prev: ind_iter.next().unwrap(),
             ind_v_prev: ind_iter.next().unwrap(),
-            inductor_flux_history_available,
             xyce_memristor_resistance_stores,
             xyce_team_resistance_noise_states,
             generic_switch_stores,
             switch_states,
             behavioral_states,
             capacitor_sdt_states,
-            accepted_nonlinear_state_available,
             accepted_nonlinear_states,
             accepted_junction_history,
-            tline_state_available,
             tline_resume_blockers,
             tline_states,
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_reference_mode.is_some(),
             lte_reference_mode,
-            xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
             mixed_runtime_image,
-            generated_veriloga_state_available,
             generated_veriloga_instance_states,
-            runtime_veriloga_state_available,
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
         };
@@ -9250,7 +8845,7 @@ impl TransientCheckpoint {
 /// path reports it as a persistence failure instead of an opaque parse
 /// message. Anything else — a missing header, a corrupt envelope, a truncated
 /// file — stays with the parsers, which describe it precisely. The
-/// string-returning legacy loaders keep their own inner version checks.
+/// string-returning loaders keep their own inner version checks.
 fn checkpoint_format_version_gate(bytes: &[u8]) -> Result<(), PersistenceIncompatibleError> {
     if bytes.starts_with(PACKED_MAGIC) {
         let start = PACKED_MAGIC.len();
@@ -9892,13 +9487,6 @@ fn reject_checkpoint_destination(path: &std::path::Path) -> std::io::Result<()> 
         Err(error) => Err(error),
     }
 }
-fn netlist_has_xspice(netlist: &Netlist) -> bool {
-    netlist
-        .elements
-        .iter()
-        .any(|element| matches!(element.kind, ElementKind::Xspice { .. }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -10870,7 +10458,6 @@ mod tests {
         .unwrap();
         line.update_history(checkpoint.time, 1.0, 0.0, -2.0, 0.0);
         checkpoint.tline_states = vec![line.checkpoint_state().unwrap()];
-        checkpoint.tline_state_available = true;
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
             TransientCheckpointEncoding::Packed,
@@ -11188,8 +10775,6 @@ mod tests {
             cap_v_prev_prev_prev: vec![0.08, -0.18],
             cap_i_prev: vec![1e-3, -2e-3],
             cap_i_eq: vec![5e-4, -6e-4],
-            solution_dependent_capacitor_state_available: true,
-            solution_dependent_capacitor_increment_available: true,
             solution_dependent_capacitor_states: vec![
                 Some(SolutionDependentCapacitorState {
                     c_prev: 2.5e-12,
@@ -11206,7 +10791,6 @@ mod tests {
             ind_i_prev_prev: vec![6.5e-3],
             ind_i_prev_prev_prev: vec![6.25e-3],
             ind_v_prev: vec![0.02],
-            inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: Vec::new(),
             xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
@@ -11226,7 +10810,6 @@ mod tests {
             ],
             behavioral_states: Vec::new(),
             capacitor_sdt_states: Vec::new(),
-            accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
                 jfets: Vec::new(),
                 resume_blockers: Vec::new(),
@@ -11261,18 +10844,15 @@ mod tests {
                 }],
             },
             accepted_junction_history: sample_junction_history(),
-            tline_state_available: true,
             tline_resume_blockers: Vec::new(),
             tline_states: Vec::new(),
             lte_signal_global_reference: 3.25,
             lte_signal_local_reference: Vec::new(),
             lte_reference_history_available: true,
             lte_reference_mode: Some(TransientLteReference::SignalGlobal),
-            xspice_instances: Vec::new(),
             xspice_resume_blockers: Vec::new(),
             xspice_instance_states: Vec::new(),
             mixed_runtime_image: None,
-            generated_veriloga_state_available: true,
             generated_veriloga_instance_states: vec![GeneratedVerilogAInstanceCheckpoint {
                 instance_name: "xgen1".to_string(),
                 model_name: "generated_model".to_string(),
@@ -11298,7 +10878,6 @@ mod tests {
                 },
                 terminal_currents: vec![1.25, -1.25],
             }],
-            runtime_veriloga_state_available: true,
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states: Vec::new(),
         }
@@ -11627,15 +11206,15 @@ mod tests {
         state_version: u32,
         words: &[u64],
     ) -> String {
-        let original = "runtime_veriloga_state_available 1\nruntime_veriloga_states 0\n";
+        let original = "runtime_veriloga_states 0\n";
         assert_eq!(
             text.matches(original).count(),
             1,
             "fixture must contain one empty runtime Verilog-A tail"
         );
         let mut replacement = format!(
-            "runtime_veriloga_state_available 1\nruntime_veriloga_states 1\n\
-             runtime_veriloga_state xlegacy legacy_model - {} {state_version}\n\
+            "runtime_veriloga_states 1\n\
+             runtime_veriloga_state xfixture fixture_model - {} {state_version}\n\
              runtime_veriloga_words {}\n",
             "0123456789abcdef".repeat(4),
             words.len()
@@ -12024,7 +11603,7 @@ mod tests {
         let blocked = TransientCheckpoint::from_text(&blocked.to_text())
             .expect("canonical accepted-runtime blocker round-trips");
         let error = blocked
-            .validate_resume_capabilities(&Netlist::default())
+            .validate_resume_capabilities()
             .expect_err("explicit runtime blockers must fail before circuit construction");
         assert!(
             error.contains("accepted integration runtime") && error.contains("QVBIC"),
@@ -12566,7 +12145,6 @@ mod tests {
     #[test]
     fn accepted_native_nonlinear_state_round_trips_and_restores_exactly() {
         let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
-        assert!(checkpoint.accepted_nonlinear_state_available);
         assert!(
             checkpoint
                 .accepted_nonlinear_states
@@ -12671,7 +12249,7 @@ mod tests {
         assert_eq!(restored, checkpoint);
         assert_eq!(restored.retained_value_count(), retained_before + 1);
         let error = restored
-            .validate_resume_capabilities(&Netlist::default())
+            .validate_resume_capabilities()
             .expect_err("named junction-history blocker must fail pre-build validation");
         assert!(error.contains("QVBIC"), "unexpected error: {error}");
     }
@@ -12816,7 +12394,7 @@ mod tests {
         assert_eq!(restored, checkpoint);
         assert_eq!(restored.retained_value_count(), retained_before + 1);
         let error = restored
-            .validate_resume_capabilities(&Netlist::default())
+            .validate_resume_capabilities()
             .expect_err("named unsupported native runtime must fail pre-build validation");
         assert!(error.contains("QVBIC"), "unexpected error: {error}");
     }
@@ -12967,7 +12545,6 @@ mod tests {
         let xspice = "A1(gain): model owns pending state".to_string();
         let mosfet =
             "classic MOSFET accepted transient integration history is not checkpointed".to_string();
-        let mixed = MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER.to_string();
 
         let mut checkpoint = sample();
         checkpoint.xspice_resume_blockers = vec![xspice.clone()];
@@ -12976,7 +12553,7 @@ mod tests {
         else {
             unreachable!("sample has exact accepted integration runtime")
         };
-        accepted.resume_blockers = vec![mixed.clone(), mosfet.clone(), xspice.clone()];
+        accepted.resume_blockers = vec![mosfet.clone(), xspice.clone()];
 
         let capability = checkpoint.capability();
         let owners = |message: &str| -> Vec<TransientCheckpointBlockerSource> {
@@ -12993,19 +12570,14 @@ mod tests {
             "an XSPICE model owns extension state"
         );
         assert_eq!(
-            owners(&mixed),
-            vec![TransientCheckpointBlockerSource::ExtensionState],
-            "a mixed Verilog-AMS host owns extension state"
-        );
-        assert_eq!(
             owners(&mosfet),
             vec![TransientCheckpointBlockerSource::IntegrationRuntime],
             "a device history is the integration runtime's"
         );
         assert_eq!(
             capability.blockers().len(),
-            3,
-            "three messages, three blockers: {:?}",
+            2,
+            "two messages, two blockers: {:?}",
             capability.blockers()
         );
     }
@@ -13125,7 +12697,6 @@ mod tests {
             let restored = TransientCheckpoint::from_text(&fixture).unwrap_or_else(|error| {
                 panic!("current initialized={initialized} failed: {error}")
             });
-            assert!(restored.runtime_veriloga_state_available);
             assert_eq!(restored.runtime_veriloga_instance_states.len(), 1);
             assert_eq!(
                 restored.to_text(),
@@ -13146,7 +12717,6 @@ mod tests {
 
         let restored = TransientCheckpoint::from_text(&fixture)
             .expect("current common-branch idtmod history must parse");
-        assert!(restored.runtime_veriloga_state_available);
         let state = &restored.runtime_veriloga_instance_states[0].accepted;
         assert_eq!(state.state_values_prev, vec![0.2]);
         assert_eq!(state.state_values_older, vec![-0.4]);
@@ -13164,7 +12734,6 @@ mod tests {
 
         let restored = TransientCheckpoint::from_text(&fixture)
             .expect("current exact Laplace integration history must parse");
-        assert!(restored.runtime_veriloga_state_available);
         let laplace = &restored.runtime_veriloga_instance_states[0]
             .accepted
             .laplace_filters[0];
@@ -13185,7 +12754,6 @@ mod tests {
 
         let restored = TransientCheckpoint::from_text(&fixture)
             .expect("current transition queue history must parse");
-        assert!(restored.runtime_veriloga_state_available);
         let transition = &restored.runtime_veriloga_instance_states[0]
             .accepted
             .transition_filters[0];
@@ -13209,7 +12777,6 @@ mod tests {
 
         let restored = TransientCheckpoint::from_text(&fixture)
             .expect("current absdelay configuration and samples must parse");
-        assert!(restored.runtime_veriloga_state_available);
         let delay = &restored.runtime_veriloga_instance_states[0]
             .accepted
             .delay_buffers[0];
@@ -13529,13 +13096,6 @@ mod tests {
     #[test]
     fn generated_state_parser_rejects_invalid_provenance_shape_and_values() {
         let text = sample().to_text();
-        let err = TransientCheckpoint::from_text(&text.replace(
-            "generated_veriloga_state_available 1",
-            "generated_veriloga_state_available 2",
-        ))
-        .expect_err("availability provenance must be a strict checkpoint boolean");
-        assert!(err.contains("must be 0 or 1"), "unexpected error: {err}");
-
         let identity = "0123456789abcdef".repeat(4);
         for invalid_identity in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
             let malformed = text.replacen(&identity, &invalid_identity, 1);
@@ -13645,7 +13205,6 @@ mod tests {
         ] {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
-            assert!(restored.solution_dependent_capacitor_increment_available);
             assert_eq!(
                 restored.solution_dependent_capacitor_states,
                 checkpoint.solution_dependent_capacitor_states
@@ -14620,7 +14179,6 @@ mod tests {
     #[test]
     fn xspice_blockers_round_trip() {
         let mut original = sample();
-        original.xspice_instances = vec!["a1(gain)".to_string()];
         original.xspice_resume_blockers = vec!["a1(gain): model owns pending state".to_string()];
         let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
         assert_eq!(original, restored);
@@ -14629,7 +14187,6 @@ mod tests {
     #[test]
     fn xspice_instance_states_round_trip() {
         let mut original = sample();
-        original.xspice_instances = vec!["a1(int)".to_string()];
         original.xspice_instance_states = vec![XspiceInstanceCheckpoint {
             name: "a1".to_string(),
             model: "int".to_string(),
@@ -14849,9 +14406,9 @@ mod tests {
             .expect_err("oversized integer vectors must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
-        let text = format!("xspice {count}\n");
+        let text = format!("xspice_blockers {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_nonempty_line_vector(&mut lines, "xspice", &mut budget)
+        let err = read_nonempty_line_vector(&mut lines, "xspice_blockers", &mut budget)
             .expect_err("oversized string sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 

@@ -4166,23 +4166,7 @@ impl CircuitData {
     pub(crate) fn validate_runtime_veriloga_checkpoint_states(
         &self,
         states: &[crate::device::veriloga::VerilogADeviceCheckpoint],
-        state_available: bool,
     ) -> Result<(), String> {
-        if !state_available {
-            if !states.is_empty() {
-                return Err(
-                    "runtime Verilog-A checkpoint state is present without availability provenance"
-                        .into(),
-                );
-            }
-            if !self.veriloga_devices.is_empty() {
-                return Err(
-                    "legacy transient checkpoint does not contain runtime-compiled Verilog-A accepted state; re-run the transient from t=0"
-                        .into(),
-                );
-            }
-            return Ok(());
-        }
         self.veriloga_devices.validate_checkpoint_states(states)
     }
 
@@ -4190,18 +4174,16 @@ impl CircuitData {
     pub(crate) fn restore_runtime_veriloga_checkpoint_states(
         &mut self,
         states: &[crate::device::veriloga::VerilogADeviceCheckpoint],
-        state_available: bool,
     ) -> Result<(), String> {
-        self.validate_runtime_veriloga_checkpoint_states(states, state_available)?;
+        self.validate_runtime_veriloga_checkpoint_states(states)?;
         self.veriloga_devices.restore_checkpoint_states(states)
     }
 
     pub(crate) fn restore_generated_veriloga_checkpoint_states(
         &mut self,
         states: &[crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint],
-        state_available: bool,
     ) -> Result<(), String> {
-        self.validate_generated_veriloga_checkpoint_states(states, state_available)?;
+        self.validate_generated_veriloga_checkpoint_states(states)?;
 
         #[cfg(feature = "veriloga-builtins-base")]
         {
@@ -4218,25 +4200,7 @@ impl CircuitData {
     pub(crate) fn validate_generated_veriloga_checkpoint_states(
         &self,
         states: &[crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint],
-        state_available: bool,
     ) -> Result<(), String> {
-        if !state_available {
-            if !states.is_empty() {
-                return Err(
-                    "generated Verilog-A checkpoint state is present without availability provenance"
-                        .to_string(),
-                );
-            }
-            #[cfg(feature = "veriloga-builtins-base")]
-            if !self.generated_veriloga_devices.is_empty() {
-                return Err(
-                    "legacy transient checkpoint does not contain generated Verilog-A persistent state"
-                        .to_string(),
-                );
-            }
-            return Ok(());
-        }
-
         #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices
@@ -5058,30 +5022,6 @@ impl CircuitData {
         &self,
         checkpoints: &[XspiceInstanceCheckpoint],
     ) -> Result<(), String> {
-        if checkpoints.is_empty() && !self.xspice_instances.is_empty() {
-            let blockers = self.xspice_checkpoint_resume_blockers();
-            if !blockers.is_empty() {
-                return Err(format!(
-                    "legacy checkpoint did not carry serialized XSPICE instance state, \
-                     and the target circuit contains unsupported XSPICE state: {}",
-                    blockers.join("; ")
-                ));
-            }
-
-            let context_state_present = self.xspice_instances.iter().any(|instance| {
-                let checkpoint = instance.checkpoint_state();
-                !checkpoint.context.state.is_empty()
-                    || !checkpoint.context.state_prev.is_empty()
-                    || !checkpoint.context.int_state.is_empty()
-            });
-            if context_state_present {
-                return Err(
-                    "legacy checkpoint did not carry serialized XSPICE context state".to_string(),
-                );
-            }
-            return Ok(());
-        }
-
         if self.xspice_instances.len() != checkpoints.len() {
             return Err(format!(
                 "checkpoint XSPICE shape mismatch: {} instance state(s) captured, \
