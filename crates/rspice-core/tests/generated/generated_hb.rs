@@ -565,7 +565,7 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 psp102eva\n",
             "d",
         ),
-        // Gear's rule for every PSP 103 build, chosen before the first
+        // Gear's rule for PSP 103 and 103t, chosen before the first
         // comparison: a start from rest gives the charges an inconsistent
         // derivative, which it damps in a few steps, as for PSP 102 above.
         #[cfg(feature = "veriloga-model-psp103va")]
@@ -620,13 +620,6 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
             "non-quasi-static MOSFET (PSP 102, electrical)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
                  M1 d g 0 0 nq\n.model nq PSPNQS102EVA SWNQS=3\n.options method=gear\n",
-            "d",
-        ),
-        #[cfg(feature = "veriloga-model-pspnqs103va")]
-        (
-            "non-quasi-static MOSFET (PSP 103)",
-            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-                 M1 d g 0 0 nq\n.model nq PSPNQS103VA SWNQS=3\n.options method=gear\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-pspnqs104va")]
@@ -811,9 +804,10 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 
 /// A generated model whose harmonics no settled transient has confirmed is
 /// refused before solving, by instance and module, with what is missing
-/// (BSIM-SOI 4.6.1 and e2aff994), as one whose generator could not prove its
-/// residual `F(x) + dQ(x)/dt` is with the generator's reason; the generator
-/// proves every shipped model's.
+/// (BSIM-SOI 4.6.1 and e2aff994), as is one a settled transient contradicts,
+/// with by how much (PSP NQS 103), and one whose generator could not prove
+/// its residual `F(x) + dQ(x)/dt`, with the generator's reason; the
+/// generator proves every shipped model's.
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
     let failures: Vec<String> = refused_models()
@@ -843,6 +837,18 @@ fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static s
             "XM",
             "bsimsoi_va",
             "harmonic balance and the transient disagree on the fundamental by a factor of 9",
+        ),
+        // The fixture a PSP NQS 103 admission would need: harmonic balance's
+        // fundamental is 3.2e-5 + 0.016318i against the settled transient's
+        // 2.76e-4 + 0.016315i, close to quasi-static PSP 103's 2.87e-4 +
+        // 0.016317i (PSP NQS 102 and 104 pass the same fixture).
+        #[cfg(feature = "veriloga-model-pspnqs103va")]
+        (
+            "XM d d 0 0 pspnqs103va",
+            "XM",
+            "pspnqs103va",
+            "harmonic balance and the settled transient disagree on the fundamental by 1.5e-2 of \
+             it",
         ),
     ]
 }

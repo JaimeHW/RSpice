@@ -1111,7 +1111,8 @@ fn carrier_refusal(
 }
 
 /// Generated compact models whose residual the generator proves but whose
-/// harmonics no settled transient has confirmed, with what is missing.
+/// harmonics no settled transient has confirmed, or one contradicts, with
+/// what is missing or wrong.
 #[cfg(feature = "veriloga-builtins-base")]
 const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
     (
@@ -1127,6 +1128,13 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
          stage its floating body's charging slows only as 1/t, so after 384 periods its \
          fundamental still moves by 1.7e-4 of itself each period, and harmonic balance and the \
          transient disagree on the fundamental by a factor of 9",
+    ),
+    (
+        "pspnqs103va",
+        "its harmonics disagree with a settled transient: on a common-source stage with three \
+         non-quasi-static collocation points (SWNQS=3), whose transient settles to 1e-5 of its \
+         fundamental a period, harmonic balance and the settled transient disagree on the \
+         fundamental by 1.5e-2 of it",
     ),
 ];
 
