@@ -469,6 +469,19 @@ pub struct PlotSpec<'a> {
     /// own grid (a Smith chart, a polar disc) has no Cartesian axes for them
     /// to stand for.
     pub frame: bool,
+    /// Where the Y axis states its unit: `None` at the top of its tick
+    /// column, where the top tick label gives way to it, or a row of its own
+    /// above the column, where every tick label is drawn.
+    pub y_caption_row: Option<YCaptionRow>,
+}
+
+/// The row above the Y tick column that states the axis' unit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct YCaptionRow {
+    /// What the row says for an axis with no unit of its own. Left out, such
+    /// an axis has no caption and gives the row back to the plot, as a plain
+    /// number's axis goes unmarked in ViVA and ADS.
+    pub without_unit: Option<String>,
 }
 
 impl<'a> PlotSpec<'a> {
@@ -494,6 +507,7 @@ impl<'a> PlotSpec<'a> {
             right_margin: None,
             x_axis_chrome: true,
             frame: true,
+            y_caption_row: None,
         }
     }
 
@@ -529,6 +543,13 @@ impl<'a> PlotSpec<'a> {
     #[must_use]
     pub fn with_right_margin(mut self, points: f32) -> Self {
         self.right_margin = points.is_finite().then_some(points.max(0.0));
+        self
+    }
+
+    /// State the Y axis' unit in a row of its own above the tick column.
+    #[must_use]
+    pub fn with_y_caption_row(mut self, row: YCaptionRow) -> Self {
+        self.y_caption_row = Some(row);
         self
     }
 

@@ -44,11 +44,11 @@ pub use format::{
 };
 pub use render::{
     InteractionMode, PlotResponse, ReadoutRow, ViewChange, plot_rect, set_interaction_mode, show,
-    square_outer_rect,
+    square_outer_rect, y_tick_pitch,
 };
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};
 pub use spec::{
-    Axis, Band, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace,
+    Axis, Band, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace, YCaptionRow,
     trace_cache_key,
 };

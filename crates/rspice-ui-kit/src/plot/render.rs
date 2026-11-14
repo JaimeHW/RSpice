@@ -85,6 +85,8 @@ pub struct PlotResponse {
     /// Where the X axis' own label was painted, so a surface can let the
     /// reader click it to change what the axis is drawn against.
     pub x_label_rect: Option<Rect>,
+    /// Where the Y axis' caption was drawn, for a caller that explains it.
+    pub y_caption: Option<Rect>,
 }
 
 /// A row of the hover readout: (label, value).
@@ -99,6 +101,18 @@ pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
 
 /// Margins around the inner plot area (tick labels, axis units).
 const MARGIN_TOP: f32 = 12.0;
+/// The top margin of a plot whose Y unit has a row of its own: the caption's
+/// row, centred on [`Y_CAPTION_CENTER`], then room for half of a tick label
+/// standing on the plot's top edge, so the two never touch.
+const MARGIN_TOP_CAPTIONED: f32 = 24.0;
+/// Where the Y caption's middle sits below the well's top.
+const Y_CAPTION_CENTER: f32 = 8.0;
+/// How far a drag must travel along an axis before it pans that axis.
+const PAN_DEAD_ZONE: f32 = 6.0;
+/// The size of the tick labels' font.
+const Y_TICK_FONT_SIZE: f32 = 10.0;
+/// The least gap between two Y tick labels that are both drawn.
+const Y_TICK_LABEL_GAP: f32 = 2.0;
 const MARGIN_BOTTOM: f32 = 26.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
 
@@ -806,9 +820,49 @@ fn bottom_margin(spec: &PlotSpec<'_>) -> f32 {
     }
 }
 
+/// What the Y axis states above its ticks: the anchor its ticks are offsets
+/// from, which carries the unit itself, else its unit, else what a caption
+/// row says for an axis without one.
+fn y_caption_text(spec: &PlotSpec<'_>) -> Option<String> {
+    spec.y
+        .offset_anchor
+        .clone()
+        .or_else(|| (!spec.y.unit.is_empty()).then(|| spec.y.unit.clone()))
+        .or_else(|| {
+            spec.y_caption_row
+                .as_ref()
+                .and_then(|row| row.without_unit.clone())
+        })
+}
+
+/// How close two Y tick labels may stand and both be drawn: a label's
+/// height and the gap the renderer keeps between neighbours.
+pub fn y_tick_pitch(ui: &Ui) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            "0".to_owned(),
+            theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular),
+            Color32::PLACEHOLDER,
+        )
+        .size()
+        .y
+        + Y_TICK_LABEL_GAP
+}
+
+fn top_margin(spec: &PlotSpec<'_>) -> f32 {
+    if spec.y_caption_row.is_some() && y_caption_text(spec).is_some() {
+        MARGIN_TOP_CAPTIONED
+    } else {
+        MARGIN_TOP
+    }
+}
+
 fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
     Rect::from_min_max(
-        pos2(rect.left() + spec.left_margin, rect.top() + MARGIN_TOP),
+        pos2(
+            rect.left() + spec.left_margin,
+            rect.top() + top_margin(spec),
+        ),
         pos2(
             rect.right() - right_margin(spec),
             rect.bottom() - bottom_margin(spec),
@@ -892,7 +946,7 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
 /// would lie about |Γ| = 1.
 pub fn square_outer_rect(avail: Rect, spec: &PlotSpec<'_>) -> Rect {
     let h_margins = spec.left_margin + right_margin(spec);
-    let v_margins = MARGIN_TOP + bottom_margin(spec);
+    let v_margins = top_margin(spec) + bottom_margin(spec);
     let inner = (avail.width() - h_margins)
         .min(avail.height() - v_margins)
         .max(48.0);
@@ -936,6 +990,7 @@ pub fn show(
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
         x_label_rect: None,
+        y_caption: None,
     };
     if plot_rect.width() < 24.0 || plot_rect.height() < 24.0 {
         theme::paint_focus_ring(ui, &out.response, rect);
@@ -972,7 +1027,7 @@ pub fn show(
     // plot area. Painted past it, a band or a limit line stops being a
     // statement about the data and becomes one about the tick gutter.
     let inside = ui.painter_at(plot_rect.expand(1.0));
-    let tick_font = theme::mono(10.0, FontWeight::Regular);
+    let tick_font = theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular);
     let grid = Stroke::new(1.0, c.canvas_grid);
     let frame = Stroke::new(1.0, c.canvas_frame);
 
@@ -1024,18 +1079,15 @@ pub fn show(
     }
     // The Y column's chrome is either its unit or, when the window is too
     // narrow to label absolutely, the anchor its ticks are offsets from —
-    // which carries the unit itself. Either way it owns the top of the
-    // column, so tick labels give way to it.
-    let y_chrome = spec
-        .y
-        .offset_anchor
-        .clone()
-        .unwrap_or_else(|| spec.y.unit.clone());
-    let y_chrome = (!y_chrome.is_empty())
-        .then(|| painter.layout_no_wrap(y_chrome, tick_font.clone(), c.canvas_text_dim));
-    let y_chrome_bottom = y_chrome.as_ref().map_or(f32::NEG_INFINITY, |galley| {
-        rect.top() + 8.0 + galley.size().y * 0.5
-    });
+    // which carries the unit itself. Without a row of its own it owns the
+    // top of the column, so tick labels give way to it; with one, the plot
+    // starts below it and every label is drawn.
+    let y_chrome = y_caption_text(spec)
+        .map(|text| painter.layout_no_wrap(text, tick_font.clone(), c.canvas_text_dim));
+    let y_chrome_bottom = match (&y_chrome, &spec.y_caption_row) {
+        (Some(galley), None) => rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5,
+        _ => f32::NEG_INFINITY,
+    };
     let mut last_label_right = f32::NEG_INFINITY;
     if spec.x_axis_chrome
         && let Some(anchor) = &spec.x.offset_anchor
@@ -1077,7 +1129,9 @@ pub fn show(
         painter.hline(plot_rect.x_range(), py, grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
         let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
-        if top + height <= last_label_top - 2.0 && top >= y_chrome_bottom + 2.0 {
+        if top + height <= last_label_top - Y_TICK_LABEL_GAP
+            && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
+        {
             last_label_top = top;
             painter.galley(
                 pos2(plot_rect.left() - 7.0 - galley.size().x, top),
@@ -1243,14 +1297,15 @@ pub fn show(
         painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
     }
     if let Some(galley) = y_chrome {
-        painter.galley(
+        let caption = Rect::from_min_size(
             pos2(
                 plot_rect.left() - 7.0 - galley.size().x,
-                rect.top() + 8.0 - galley.size().y * 0.5,
+                rect.top() + Y_CAPTION_CENTER - galley.size().y * 0.5,
             ),
-            galley,
-            c.canvas_text_dim,
+            galley.size(),
         );
+        painter.galley(caption.min, galley, c.canvas_text_dim);
+        out.y_caption = Some(caption);
     }
     if !x_end_label.is_empty() {
         out.x_label_rect = Some(painter.text(
@@ -1630,19 +1685,26 @@ fn handle_navigation(
         return;
     }
 
-    // Drag pan (primary, unmodified): the content follows the pointer.
+    // Drag pan (primary, unmodified): the content follows the pointer, along
+    // each axis once the drag has travelled past a dead zone on it. A pan in
+    // time wobbles by a pixel or two; moving Y by that pinned an axis that
+    // was following the data in view, and a fit the reader never asked to
+    // leave stopped refitting.
     if out.response.dragged_by(egui::PointerButton::Primary)
         && !shift
         && matches!(interaction, InteractionMode::All | InteractionMode::Pan)
     {
         let delta = out.response.drag_delta();
+        let travelled = ui
+            .input(|input| Some(input.pointer.interact_pos()? - input.pointer.press_origin()?))
+            .unwrap_or(egui::Vec2::INFINITY);
         if delta != egui::Vec2::ZERO {
             let dfx = -f64::from(delta.x) / f64::from(plot_rect.width());
-            if dfx != 0.0 {
+            if dfx != 0.0 && travelled.x.abs() > PAN_DEAD_ZONE {
                 out.view.x = store_x((denorm_x(dfx), denorm_x(1.0 + dfx)));
             }
             let dy = f64::from(delta.y) / f64::from(plot_rect.height());
-            if dy != 0.0 {
+            if dy != 0.0 && travelled.y.abs() > PAN_DEAD_ZONE {
                 out.view.y = store_y((denorm_y(dy), denorm_y(1.0 + dy)));
             }
         }
