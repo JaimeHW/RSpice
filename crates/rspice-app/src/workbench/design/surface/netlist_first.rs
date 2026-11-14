@@ -71,7 +71,7 @@ impl NetlistFirstAction {
     /// The command the action runs.
     fn command_key(self) -> CommandKey {
         match self {
-            Self::OpenNetlistWorkspace => Command::OpenWorkspace(Workspace::Netlist).key(),
+            Self::OpenNetlistWorkspace => ids::NETLIST_WORKSPACE,
             Self::CreateSchematic => ids::NEW_CELL,
         }
     }

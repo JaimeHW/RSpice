@@ -143,8 +143,9 @@ fn schematic_accessibility_shortcuts(
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::workbench::{
-        commands::vocabulary::{Command, CommandRegistry, command_registry},
+        commands::vocabulary::{CommandRegistry, command_registry},
         design::commands::DesignCommand,
+        framework::command_registry::ids,
     };
     crate::workbench::app_state::accessibility_shortcut_summary(
         model.preferences.shortcuts(),
@@ -165,8 +166,8 @@ fn schematic_accessibility_shortcuts(
             DesignCommand::MoveSelection.key(),
             DesignCommand::StretchSelection.key(),
             DesignCommand::ArraySelection.key(),
-            Command::ZoomFit.key(),
-            Command::Cancel.key(),
+            ids::ZOOM_FIT,
+            ids::CANCEL,
         ],
     )
 }

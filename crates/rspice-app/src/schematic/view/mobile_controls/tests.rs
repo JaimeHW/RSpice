@@ -289,5 +289,5 @@ fn the_strip_asks_only_the_answers_the_design_feature_reads() {
             crate::workbench::framework::command_registry::ids::TUNING,
         ]
     );
-    assert!(!foreign.contains(&Command::Cancel.key()));
+    assert!(!foreign.contains(&ids::CANCEL));
 }

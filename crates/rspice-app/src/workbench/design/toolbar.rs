@@ -12,8 +12,8 @@ use crate::state::{ComponentType, GridStyle, Tool};
 use crate::ui::tokens::Tokens;
 use crate::workbench::app::in_place_session;
 use crate::workbench::chrome::toolbar::toolbar_icon_button_size;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
     Cx, Reads, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarId, ToolbarTool,
 };
@@ -233,11 +233,11 @@ const SCHEMATIC: &[ToolbarEntry<DesignFeature>] = &[
         DesignCommand::MirrorSelectionVertical.key(),
         WorkbenchIcon::MirrorVertical,
     ),
-    named(Command::Duplicate.key(), WorkbenchIcon::Copy, "Duplicate"),
-    icon(Command::Delete.key(), WorkbenchIcon::Trash),
+    named(ids::DUPLICATE, WorkbenchIcon::Copy, "Duplicate"),
+    icon(ids::DELETE, WorkbenchIcon::Trash),
     ToolbarEntry::Separator,
-    icon(Command::Undo.key(), WorkbenchIcon::Undo),
-    icon(Command::Redo.key(), WorkbenchIcon::Redo),
+    icon(ids::UNDO, WorkbenchIcon::Undo),
+    icon(ids::REDO, WorkbenchIcon::Redo),
     ToolbarEntry::Separator,
     icon(
         DesignCommand::DescendHierarchyDirect.key(),
@@ -249,13 +249,9 @@ const SCHEMATIC: &[ToolbarEntry<DesignFeature>] = &[
         "Ascend to parent sheet · double-click the sheet background also ascends",
     ),
     ToolbarEntry::Separator,
-    icon(Command::ZoomOut.key(), WorkbenchIcon::ZoomOut),
-    icon(Command::ZoomIn.key(), WorkbenchIcon::ZoomIn),
-    named(
-        Command::ZoomFit.key(),
-        WorkbenchIcon::ZoomFit,
-        "Fit drawing sheet",
-    ),
+    icon(ids::ZOOM_OUT, WorkbenchIcon::ZoomOut),
+    icon(ids::ZOOM_IN, WorkbenchIcon::ZoomIn),
+    named(ids::ZOOM_FIT, WorkbenchIcon::ZoomFit, "Fit drawing sheet"),
     ToolbarEntry::Control(ToolbarControl {
         show: grid_display,
         overflow: Some(ToolbarIcon {
@@ -359,12 +355,12 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
         WorkbenchIcon::Pin,
     ),
     ToolbarEntry::Separator,
-    icon(Command::Undo.key(), WorkbenchIcon::Undo),
-    icon(Command::Redo.key(), WorkbenchIcon::Redo),
+    icon(ids::UNDO, WorkbenchIcon::Undo),
+    icon(ids::REDO, WorkbenchIcon::Redo),
     ToolbarEntry::Separator,
-    icon(Command::ZoomOut.key(), WorkbenchIcon::ZoomOut),
-    icon(Command::ZoomIn.key(), WorkbenchIcon::ZoomIn),
-    icon(Command::ZoomFit.key(), WorkbenchIcon::ZoomFit),
+    icon(ids::ZOOM_OUT, WorkbenchIcon::ZoomOut),
+    icon(ids::ZOOM_IN, WorkbenchIcon::ZoomIn),
+    icon(ids::ZOOM_FIT, WorkbenchIcon::ZoomFit),
     ToolbarEntry::Control(ToolbarControl {
         show: show_grid_toggle,
         overflow: None,

@@ -32,8 +32,9 @@ fn symbol_canvas_accessibility_label(
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::workbench::{
-        commands::vocabulary::{Command, CommandRegistry, command_registry},
+        commands::vocabulary::{CommandRegistry, command_registry},
         design::commands::DesignCommand,
+        framework::command_registry::ids,
     };
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
         state.model.preferences.shortcuts(),
@@ -50,8 +51,8 @@ fn symbol_canvas_accessibility_label(
             DesignCommand::SymbolArcTool.key(),
             DesignCommand::SymbolPolygonTool.key(),
             DesignCommand::SymbolTextTool.key(),
-            Command::ZoomFit.key(),
-            Command::Cancel.key(),
+            ids::ZOOM_FIT,
+            ids::CANCEL,
         ],
     );
     surface::symbol_canvas_accessibility_label(

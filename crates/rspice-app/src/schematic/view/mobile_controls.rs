@@ -8,8 +8,9 @@ use crate::state::Tool;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::SurfaceId;
 use crate::workbench::design::DesignFeature;
+use crate::workbench::design::commands::DesignCommand;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{commands::vocabulary::Command, design::commands::DesignCommand};
 use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
     self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest,
@@ -49,10 +50,10 @@ const fn product_command(action: MobileCanvasAction) -> Option<CommandKey> {
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => None,
         MobileCanvasAction::Rotate => Some(DesignCommand::RotateSelection.key()),
         MobileCanvasAction::Mirror => Some(DesignCommand::MirrorSelectionHorizontal.key()),
-        MobileCanvasAction::Cancel => Some(Command::Cancel.key()),
-        MobileCanvasAction::Undo => Some(Command::Undo.key()),
-        MobileCanvasAction::Redo => Some(Command::Redo.key()),
-        MobileCanvasAction::Fit => Some(Command::ZoomFit.key()),
+        MobileCanvasAction::Cancel => Some(ids::CANCEL),
+        MobileCanvasAction::Undo => Some(ids::UNDO),
+        MobileCanvasAction::Redo => Some(ids::REDO),
+        MobileCanvasAction::Fit => Some(ids::ZOOM_FIT),
     }
 }
 
