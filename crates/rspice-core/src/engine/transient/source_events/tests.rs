@@ -117,7 +117,7 @@ fn physical_source_events_include_xyce_activations_with_the_prepared_defaults() 
         BreakpointWindow {
             tstop: 0.4,
             tstep_hint: 0.001,
-            dialect: SpiceDialect::Xyce,
+            rules: SpiceDialect::Xyce.into(),
         },
         None,
         &mut ordinary,
@@ -399,7 +399,7 @@ fn physical_source_events_refuse_context_mismatch_limits_and_cancellation() {
                 tstep: 0.1,
                 tstop: 4.0
             },
-            SpiceDialect::Xyce,
+            SpiceDialect::Xyce.into(),
             &signal
         ),
         Err(SimulationError::Aborted)

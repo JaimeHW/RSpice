@@ -1550,7 +1550,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 fall,
                 width,
                 period,
-                width_defaults_to_zero,
                 ..
             } => {
                 let tstep_hint = if tran.step.is_finite() && tran.step > 0.0 {
@@ -1565,7 +1564,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         *fall,
                         *width,
                         *period,
-                        *width_defaults_to_zero,
                         tstep_hint,
                         tran.stop.max(f64::MIN_POSITIVE),
                         SpiceDialect::Xyce,

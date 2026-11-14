@@ -478,7 +478,7 @@ impl Engine {
                     tstep: config.period() / config.points_per_period as Value,
                     tstop: config.period(),
                 },
-                self.config.spice_dialect,
+                self.source_rules(netlist),
                 self.config.resource_limits,
             );
             Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Pnoise)?;

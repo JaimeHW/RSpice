@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::circuit::{SourceTimeBasis, SourceTimeSide, VoltageSources};
-use crate::netlist::SourceSpec;
+use crate::netlist::{SourceRules, SourceSpec};
 use breakpoints::{SourceBreakpointContext, SourceBreakpointGeometry, SourceClockSink};
 use rspice_veriloga_runtime::transport_delay::DelayEventOrder;
 use std::collections::BTreeSet;
@@ -98,7 +98,7 @@ impl SourceClockSink for ExactClocks {
     }
 }
 
-fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) -> Value {
+fn activation(spec: &SourceSpec, basis: SourceTimeBasis, rules: SourceRules) -> Value {
     match spec {
         SourceSpec::Distortion { inner, .. }
         | SourceSpec::RfPort { inner, .. }
@@ -110,7 +110,7 @@ fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) 
         }
         | SourceSpec::DcAcTransient {
             transient: inner, ..
-        } => activation(inner, basis, dialect),
+        } => activation(inner, basis, rules),
         SourceSpec::Pwl { delay, .. }
         | SourceSpec::PwlFile { delay, .. }
         | SourceSpec::Pulse { delay, .. } => delay.max(0.0),
@@ -126,7 +126,7 @@ fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) 
             *td2,
             *tau2,
             basis.tstep.max(1e-18),
-            dialect,
+            rules,
         )
         .0
         .max(0.0),
@@ -142,7 +142,7 @@ fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) 
 fn continuous(
     spec: &SourceSpec,
     basis: SourceTimeBasis,
-    dialect: SpiceDialect,
+    rules: SourceRules,
     abort: &dyn AbortSignal,
 ) -> Result<bool, SimulationError> {
     if abort.is_aborted() {
@@ -159,7 +159,7 @@ fn continuous(
         }
         | SourceSpec::DcAcTransient {
             transient: inner, ..
-        } => return continuous(inner, basis, dialect, abort),
+        } => return continuous(inner, basis, rules, abort),
         SourceSpec::Dc(_)
         | SourceSpec::Ac { .. }
         | SourceSpec::DcAc { .. }
@@ -171,7 +171,6 @@ fn continuous(
             width,
             period,
             pulse_count,
-            width_defaults_to_zero,
             ..
         } => {
             let (_, rise, fall, width, period) = VoltageSources::resolve_pulse_timing_with_defaults(
@@ -180,10 +179,9 @@ fn continuous(
                 *fall,
                 *width,
                 *period,
-                *width_defaults_to_zero,
                 basis.tstep.max(1e-18),
                 basis.tstop.max(1e-18),
-                dialect,
+                rules,
             );
             rise > 0.0
                 && fall > 0.0
@@ -231,7 +229,7 @@ fn continuous(
                 *td2,
                 *tau2,
                 basis.tstep.max(1e-18),
-                dialect,
+                rules,
             );
             first <= second && rise.is_finite() && rise > 0.0 && fall.is_finite() && fall > 0.0
         }
@@ -295,7 +293,7 @@ impl Engine {
         if circuit.voltage_sources.is_empty() && circuit.current_sources.is_empty() {
             return Ok(PhysicalSourceEvents::default());
         }
-        let (basis, dialect) = circuit.independent_source_event_basis().map_err(failure)?;
+        let (basis, rules) = circuit.independent_source_event_basis().map_err(failure)?;
         let mut events = Vec::new();
         // Preserve storage indices even when DC-only entries have no SourceSpec.
         let voltage = circuit
@@ -340,7 +338,7 @@ impl Engine {
                 times: BTreeSet::new(),
                 maximum: remaining,
                 overflow: false,
-                minimum: activation(spec, basis, dialect),
+                minimum: activation(spec, basis, rules),
             };
             Self::add_source_spec_breakpoints_with_pwl(
                 &mut clocks,
@@ -349,7 +347,7 @@ impl Engine {
                 BreakpointWindow {
                     tstop: stop,
                     tstep_hint: basis.tstep,
-                    dialect,
+                    rules,
                 },
                 SourceBreakpointContext {
                     basis: Some(basis),
@@ -358,7 +356,7 @@ impl Engine {
                 abort,
                 remaining,
             )?;
-            let base_order = u32::from(continuous(spec, basis, dialect, abort)?);
+            let base_order = u32::from(continuous(spec, basis, rules, abort)?);
             let initial_jump = pwl_starts_nonzero(spec);
             let activation_time = clocks.minimum;
             for (ordinal, bits) in clocks.times.into_iter().enumerate() {

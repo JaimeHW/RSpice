@@ -3386,7 +3386,7 @@ impl Engine {
         basis.validate().map_err(SimulationError::Circuit)?;
         circuit.set_independent_source_context(
             basis,
-            engine.config.spice_dialect,
+            engine.source_rules(netlist),
             engine.config.resource_limits,
         );
         let grid_steps = Self::ensure_pss_source_contract(
@@ -3480,7 +3480,7 @@ impl Engine {
             BreakpointWindow {
                 tstop,
                 tstep_hint: source_step_hint,
-                dialect: self.config.spice_dialect,
+                rules: circuit.independent_source_rules(self.config.spice_dialect),
             },
             (!selected.is_empty()).then_some(&selected),
             &mut breakpoints,
@@ -5016,7 +5016,7 @@ impl Engine {
         if image.is_none() {
             circuit.set_independent_source_context(
                 source_basis,
-                self.config.spice_dialect,
+                self.source_rules(netlist),
                 self.config.resource_limits,
             );
             circuit.set_xspice_transient_context(source_basis.tstep, source_basis.tstop);
@@ -5501,7 +5501,7 @@ impl Engine {
             BreakpointWindow {
                 tstop,
                 tstep_hint: source_step_hint,
-                dialect: self.config.spice_dialect,
+                rules: circuit.independent_source_rules(self.config.spice_dialect),
             },
             &mut breakpoints,
             abort,

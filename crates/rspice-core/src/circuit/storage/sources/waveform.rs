@@ -196,14 +196,14 @@ impl VoltageSources {
     /// waveform values (which could alias at the chosen times).
     pub(super) fn source_needs_time_basis(
         spec: &crate::netlist::SourceSpec,
-        dialect: crate::config::SpiceDialect,
+        rules: crate::netlist::SourceRules,
     ) -> bool {
         use crate::netlist::SourceSpec;
         let contexts = [(1.0, 1.0), (2.0, 3.0)].map(|(tstep, tstop)| {
             Some(TransientSourceContext {
                 tstep,
                 tstop,
-                dialect,
+                rules,
                 xyce_breakpoint_tolerance: Some(0.0),
                 resource_limits: crate::resource::ResourceLimits::default(),
             })
@@ -219,26 +219,17 @@ impl VoltageSources {
             }
             | SourceSpec::DcAcTransient {
                 transient: inner, ..
-            } => Self::source_needs_time_basis(inner, dialect),
+            } => Self::source_needs_time_basis(inner, rules),
             SourceSpec::Pulse {
                 delay,
                 rise,
                 fall,
                 width,
                 period,
-                width_defaults_to_zero,
                 ..
             } => {
                 let resolved = contexts.map(|context| {
-                    Self::resolve_pulse_timing(
-                        *delay,
-                        *rise,
-                        *fall,
-                        *width,
-                        *period,
-                        *width_defaults_to_zero,
-                        context,
-                    )
+                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context)
                 });
                 resolved[0] != resolved[1]
             }
@@ -289,98 +280,112 @@ impl VoltageSources {
         }
     }
 
+    /// SFFM's carrier, signal frequency and modulation index under
+    /// `context`. An omitted field takes the default the rules choose
+    /// ([`crate::netlist::SourceRules::default_for`]); an authored one is
+    /// read by the dialect.
     pub(super) fn sffm_parameters(
         carrier_freq: Value,
         modulation_index: Value,
         signal_freq: Value,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value) {
-        let authored_or_none = |modulation_index: Value| {
-            if modulation_index.is_finite() {
-                modulation_index
-            } else {
-                0.0
-            }
+        use crate::netlist::OmittedField;
+        let omitted = |field| Self::omitted_default(field, context, 0.0);
+        let index = if modulation_index.is_nan() {
+            omitted(OmittedField::SffmIndex)
+        } else {
+            modulation_index
         };
         match Self::pulse_dialect(context) {
+            // Xyce keeps an authored zero frequency.
             crate::config::SpiceDialect::Xyce => {
-                let default = Self::xyce_modulated_frequency_default(context);
-                let frequency = |authored: Value| {
-                    if authored.is_finite() {
-                        authored
+                let frequency = |authored: Value, field| {
+                    if authored.is_nan() {
+                        omitted(field)
                     } else {
-                        default
+                        authored
                     }
                 };
                 (
-                    frequency(carrier_freq),
-                    frequency(signal_freq),
-                    authored_or_none(modulation_index),
+                    frequency(carrier_freq, OmittedField::SffmCarrier),
+                    frequency(signal_freq, OmittedField::SffmSignal),
+                    index,
                 )
             }
             crate::config::SpiceDialect::BestAvailable => {
-                // QSPICE's rule: an omitted or zero FC or FS is one cycle
-                // over the stop time, an omitted MDI is no modulation, and
-                // an authored MDI stands as written.
+                // QSPICE reads an authored zero FC or FS as one cycle over the
+                // stop time, and an authored MDI or a negative frequency as
+                // written, with no limit at FC/FS.
                 let one_cycle = Self::modulated_frequency_default(1.0, context);
-                let frequency = |authored: Value| {
-                    if authored.is_finite() && authored != 0.0 {
+                let frequency = |authored: Value, field| {
+                    if authored.is_nan() {
+                        omitted(field)
+                    } else if authored != 0.0 {
                         authored
                     } else {
                         one_cycle
                     }
                 };
                 (
-                    frequency(carrier_freq),
-                    frequency(signal_freq),
-                    authored_or_none(modulation_index),
+                    frequency(carrier_freq, OmittedField::SffmCarrier),
+                    frequency(signal_freq, OmittedField::SffmSignal),
+                    index,
                 )
             }
             crate::config::SpiceDialect::Ngspice => {
-                let fc = if carrier_freq.is_finite() && carrier_freq > 0.0 {
+                // ngspice's manual (section 4.1) gives a zero field its
+                // default, FC 500/TSTOP and FM 5/TSTOP; a negative FC reads as
+                // zero.
+                let fc = if carrier_freq.is_nan() {
+                    omitted(OmittedField::SffmCarrier)
+                } else if carrier_freq > 0.0 {
                     carrier_freq
                 } else {
-                    Self::modulated_frequency_default(5.0, context)
+                    Self::modulated_frequency_default(500.0, context)
                 };
-                let fm = if signal_freq.is_finite() && signal_freq != 0.0 {
+                let fm = if signal_freq.is_nan() {
+                    omitted(OmittedField::SffmSignal)
+                } else if signal_freq != 0.0 {
                     signal_freq
                 } else {
-                    Self::modulated_frequency_default(500.0, context)
+                    Self::modulated_frequency_default(5.0, context)
                 };
                 // ngspice limits MDI with an if/else-if chain, not a symmetric
                 // clamp: a negative FM makes FC/FM negative, and any MDI above
                 // that ratio lands on the ratio itself. clamp(0.0, ratio) panics.
                 let ratio = fc / fm;
-                let mdi = if !modulation_index.is_finite() {
-                    90.0_f64.min(ratio)
-                } else if modulation_index > ratio {
+                let mdi = if index > ratio {
                     ratio
-                } else if modulation_index < 0.0 {
+                } else if index < 0.0 {
                     0.0
                 } else {
-                    modulation_index
+                    index
                 };
                 (fc, fm, mdi)
             }
         }
     }
 
+    /// AM's modulating and carrier frequencies under `context`: ngspice's
+    /// alone, which gives an omitted or non-positive one its default.
     pub(super) fn am_frequencies(
         modulating_freq: Value,
         carrier_freq: Value,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value) {
-        let fm = if modulating_freq.is_finite() && modulating_freq > 0.0 {
-            modulating_freq
-        } else {
-            Self::modulated_frequency_default(5.0, context)
+        use crate::netlist::OmittedField;
+        let frequency = |authored: Value, field| {
+            if authored.is_finite() && authored > 0.0 {
+                authored
+            } else {
+                Self::omitted_default(field, context, 0.0)
+            }
         };
-        let fc = if carrier_freq.is_finite() && carrier_freq > 0.0 {
-            carrier_freq
-        } else {
-            Self::modulated_frequency_default(500.0, context)
-        };
-        (fm, fc)
+        (
+            frequency(modulating_freq, OmittedField::AmModulating),
+            frequency(carrier_freq, OmittedField::AmCarrier),
+        )
     }
 
     #[inline]
@@ -487,19 +492,12 @@ impl VoltageSources {
                 width,
                 period,
                 pulse_count,
-                width_defaults_to_zero,
+                ..
             } => {
                 let xyce_boundaries =
                     Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
-                let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
-                    *delay,
-                    *rise,
-                    *fall,
-                    *width,
-                    *period,
-                    *width_defaults_to_zero,
-                    context,
-                );
+                let (delay, rise, fall, width, period) =
+                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context);
                 if side != SourceTimeSide::Published {
                     return Self::pulse_limit::<DERIVATIVE>(
                         [*v1, *v2],
@@ -795,15 +793,22 @@ impl VoltageSources {
                     );
                 }
                 if DERIVATIVE {
+                    // A zero time constant is an ideal step (LTspice's omitted
+                    // TAU1 and TAU2, an authored zero under Xyce): flat on
+                    // both sides of its edge.
+                    let slope = |delay: Value, tau: Value| {
+                        if tau == 0.0 {
+                            0.0
+                        } else {
+                            (v2 - v1) * (-(time - delay) / tau).exp() / tau
+                        }
+                    };
                     return if time < td1 {
                         0.0
+                    } else if time < td2 {
+                        slope(td1, tau1)
                     } else {
-                        let rise = (v2 - v1) * (-(time - td1) / tau1).exp() / tau1;
-                        if time < td2 {
-                            rise
-                        } else {
-                            rise - (v2 - v1) * (-(time - td2) / tau2).exp() / tau2
-                        }
+                        slope(td1, tau1) - slope(td2, tau2)
                     };
                 }
                 if time <= td1 {

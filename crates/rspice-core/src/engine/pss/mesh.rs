@@ -608,7 +608,7 @@ impl Engine {
             BreakpointWindow {
                 tstop: period,
                 tstep_hint: period / config.points_per_period as Value,
-                dialect: self.config.spice_dialect,
+                rules: circuit.independent_source_rules(self.config.spice_dialect),
             },
             Some(&selected),
             &mut breakpoints,

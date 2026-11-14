@@ -224,7 +224,7 @@ impl Engine {
                 tstep: config.source_time_step,
                 tstop: config.stop_time,
             },
-            engine.config.spice_dialect,
+            engine.source_rules(netlist),
             limits,
         );
         let mut selected = BTreeSet::new();

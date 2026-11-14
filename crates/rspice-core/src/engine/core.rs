@@ -627,6 +627,15 @@ impl Engine {
         &self.config
     }
 
+    /// How `netlist`'s independent sources read under this engine: the
+    /// dialect, and the simulator its `.options rspice_source=` names.
+    pub(crate) fn source_rules(&self, netlist: &Netlist) -> crate::netlist::SourceRules {
+        crate::netlist::SourceRules::new(
+            self.config.spice_dialect,
+            netlist.options.source_simulator,
+        )
+    }
+
     /// Resolve effective simulation configuration for a specific netlist.
     ///
     /// Applies `.OPTIONS` on top of the engine's base configuration.

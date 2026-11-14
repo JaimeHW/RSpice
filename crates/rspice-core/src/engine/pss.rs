@@ -2458,7 +2458,7 @@ impl Engine {
         source_basis.validate().map_err(SimulationError::Circuit)?;
         circuit.set_independent_source_context(
             source_basis,
-            self.config.spice_dialect,
+            self.source_rules(netlist),
             self.config.resource_limits,
         );
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
@@ -5301,7 +5301,7 @@ impl Engine {
                 BreakpointWindow {
                     tstop,
                     tstep_hint: max_step,
-                    dialect: self.config.spice_dialect,
+                    rules: circuit.independent_source_rules(self.config.spice_dialect),
                 },
                 &mut breakpoints,
                 abort,

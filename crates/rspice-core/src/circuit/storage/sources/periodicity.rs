@@ -78,18 +78,10 @@ impl VoltageSources {
                 fall,
                 width,
                 period,
-                width_defaults_to_zero,
                 ..
             } if v1 != v2 => {
-                let (_, rise, fall, width, period) = Self::resolve_pulse_timing(
-                    *delay,
-                    *rise,
-                    *fall,
-                    *width,
-                    *period,
-                    *width_defaults_to_zero,
-                    context,
-                );
+                let (_, rise, fall, width, period) =
+                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context);
                 if rise <= 0.0 && fall <= 0.0 && width <= 0.0 {
                     return None;
                 }
@@ -384,7 +376,7 @@ impl VoltageSources {
                 width,
                 period: source_period,
                 pulse_count,
-                width_defaults_to_zero,
+                ..
             } => {
                 if v1 == v2 {
                     return true;
@@ -395,7 +387,6 @@ impl VoltageSources {
                     *fall,
                     *width,
                     *source_period,
-                    *width_defaults_to_zero,
                     context,
                 );
                 // A pulse wider than its period jumps at the wrap. A finite

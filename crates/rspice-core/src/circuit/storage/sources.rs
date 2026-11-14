@@ -118,7 +118,8 @@ struct VoltageConstraintProjectionParent {
 struct TransientSourceContext {
     tstep: Value,
     tstop: Value,
-    dialect: crate::config::SpiceDialect,
+    /// The dialect's evaluation rules and whose defaults fill omitted fields.
+    rules: crate::netlist::SourceRules,
     /// Xyce `SolverState::bpTol_` from the current accepted transient state.
     /// `None` is reserved for stateless waveform previews, which have no
     /// integration controller and derive the closest available fallback from
@@ -193,23 +194,26 @@ impl crate::circuit::CircuitData {
     pub(crate) fn set_independent_source_context(
         &mut self,
         basis: SourceTimeBasis,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
         limits: crate::resource::ResourceLimits,
     ) {
+        let rules = rules.into();
         self.voltage_sources
-            .set_transient_context_with_dialect_and_limits(
-                basis.tstep,
-                basis.tstop,
-                dialect,
-                limits,
-            );
+            .set_transient_context_with_dialect_and_limits(basis.tstep, basis.tstop, rules, limits);
         self.current_sources
-            .set_transient_context_with_dialect_and_limits(
-                basis.tstep,
-                basis.tstop,
-                dialect,
-                limits,
-            );
+            .set_transient_context_with_dialect_and_limits(basis.tstep, basis.tstop, rules, limits);
+    }
+
+    /// The rules the prepared sources read under, or `fallback`'s when no
+    /// analysis has prepared them.
+    pub(crate) fn independent_source_rules(
+        &self,
+        fallback: crate::config::SpiceDialect,
+    ) -> crate::netlist::SourceRules {
+        self.voltage_sources
+            .transient_context
+            .or(self.current_sources.transient_context)
+            .map_or_else(|| fallback.into(), |context| context.rules)
     }
 
     pub(crate) fn independent_source_time_basis(&self) -> Result<Option<SourceTimeBasis>, String> {
@@ -234,7 +238,7 @@ impl crate::circuit::CircuitData {
     /// sided source evaluation, even when scheduling a shorter run segment.
     pub(crate) fn independent_source_event_basis(
         &self,
-    ) -> Result<(SourceTimeBasis, crate::config::SpiceDialect), String> {
+    ) -> Result<(SourceTimeBasis, crate::netlist::SourceRules), String> {
         let mut selected = None;
         for (count, context) in [
             (
@@ -256,7 +260,7 @@ impl crate::circuit::CircuitData {
                 tstop: context.tstop,
             };
             basis.validate()?;
-            let candidate = (basis, context.dialect);
+            let candidate = (basis, context.rules);
             if selected.is_some_and(|previous| previous != candidate) {
                 return Err(
                     "physical source events require matching voltage/current defaults and dialects"
@@ -270,14 +274,15 @@ impl crate::circuit::CircuitData {
 
     pub(crate) fn independent_sources_need_time_basis(
         &self,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> bool {
+        let rules = rules.into();
         self.voltage_sources
             .source_specs
             .iter()
             .chain(&self.current_sources.source_specs)
             .flatten()
-            .any(|spec| VoltageSources::source_needs_time_basis(spec, dialect))
+            .any(|spec| VoltageSources::source_needs_time_basis(spec, rules))
     }
 }
 
@@ -361,17 +366,18 @@ macro_rules! shared_source_methods {
             );
         }
 
-        /// Set transient context used to resolve waveform defaults for a SPICE dialect.
+        /// Set transient context used to resolve waveform defaults under a
+        /// SPICE dialect, or under full [`crate::netlist::SourceRules`].
         pub fn set_transient_context_with_dialect(
             &mut self,
             tstep: Value,
             tstop: Value,
-            dialect: crate::config::SpiceDialect,
+            rules: impl Into<crate::netlist::SourceRules>,
         ) {
             self.set_transient_context_with_dialect_and_limits(
                 tstep,
                 tstop,
-                dialect,
+                rules.into(),
                 crate::resource::ResourceLimits::default(),
             );
         }
@@ -380,7 +386,7 @@ macro_rules! shared_source_methods {
             &mut self,
             tstep: Value,
             tstop: Value,
-            dialect: crate::config::SpiceDialect,
+            rules: crate::netlist::SourceRules,
             resource_limits: crate::resource::ResourceLimits,
         ) {
             let step = if tstep.is_finite() && tstep > 0.0 {
@@ -396,8 +402,8 @@ macro_rules! shared_source_methods {
             self.transient_context = Some(TransientSourceContext {
                 tstep: step,
                 tstop: stop,
-                dialect,
-                xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                rules,
+                xyce_breakpoint_tolerance: (rules.dialect == crate::config::SpiceDialect::Xyce)
                     .then_some(0.0),
                 resource_limits,
             });
@@ -406,7 +412,7 @@ macro_rules! shared_source_methods {
         /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
         pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
             if let Some(context) = self.transient_context.as_mut()
-                && context.dialect == crate::config::SpiceDialect::Xyce
+                && context.rules.dialect == crate::config::SpiceDialect::Xyce
             {
                 context.xyce_breakpoint_tolerance =
                     (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
@@ -1206,7 +1212,7 @@ impl VoltageSources {
     pub(crate) fn xyce_max_timestep_at(&self, time: Value) -> Option<Value> {
         let context = self
             .transient_context
-            .filter(|ctx| ctx.dialect == crate::config::SpiceDialect::Xyce)?;
+            .filter(|ctx| ctx.rules.dialect == crate::config::SpiceDialect::Xyce)?;
 
         self.source_specs
             .iter()
@@ -1238,18 +1244,10 @@ impl VoltageSources {
                 fall,
                 width,
                 period,
-                width_defaults_to_zero,
                 ..
             } => {
-                let (delay, _, _, _, period) = Self::resolve_pulse_timing(
-                    *delay,
-                    *rise,
-                    *fall,
-                    *width,
-                    *period,
-                    *width_defaults_to_zero,
-                    context,
-                );
+                let (delay, _, _, _, period) =
+                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context);
                 Some(0.1 * if time < delay { delay } else { period })
             }
             SourceSpec::Sin { frequency, .. } => {
@@ -1422,21 +1420,23 @@ impl VoltageSources {
         log::warn!("{}", msg);
     }
 
-    /// Value of an independent source at a point in time, under a dialect.
+    /// Value of an independent source at a point in time, under a dialect or
+    /// under full [`crate::netlist::SourceRules`].
     ///
     /// Waveform previews and source inspectors need the engine's own
-    /// interpretation of `PULSE`/`SIN`/`PWL`, including dialect differences.
+    /// interpretation of `PULSE`/`SIN`/`PWL`, including dialect differences
+    /// and whose defaults fill the fields a card leaves out.
     pub fn evaluate_source_spec_at_time_with_dialect(
         spec: &crate::netlist::SourceSpec,
         time: Value,
         tstep: Value,
         tstop: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> Value {
         Self::evaluate_source_at_time_with_context(
             spec,
             time,
-            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+            Some(Self::stateless_preview_context(tstep, tstop, rules.into())),
         )
     }
 
@@ -1449,7 +1449,7 @@ impl VoltageSources {
     fn stateless_preview_context(
         tstep: Value,
         tstop: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: crate::netlist::SourceRules,
     ) -> TransientSourceContext {
         TransientSourceContext {
             tstep: if tstep.is_finite() && tstep > 0.0 {
@@ -1462,7 +1462,7 @@ impl VoltageSources {
             } else {
                 1e99
             },
-            dialect,
+            rules,
             xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         }
@@ -1470,7 +1470,8 @@ impl VoltageSources {
 
     /// The frequency a `SIN` card actually runs at under this transient.
     ///
-    /// An omitted or zero FREQ resolves to `1 / TSTOP`, so a surface that
+    /// An omitted FREQ, or a zero one under the ngspice dialect, can resolve
+    /// to `1 / TSTOP`, so a surface that
     /// states a sine's frequency beside its curve has to ask the engine what
     /// the substitution came out as rather than reading the card. Same
     /// resolution the evaluator uses; only the way the transient is named
@@ -1479,11 +1480,11 @@ impl VoltageSources {
         frequency: Value,
         tstep: Value,
         tstop: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> Value {
         Self::resolve_sin_frequency(
             frequency,
-            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+            Some(Self::stateless_preview_context(tstep, tstop, rules.into())),
         )
     }
 
@@ -1501,13 +1502,13 @@ impl VoltageSources {
         signal_freq: Value,
         tstep: Value,
         tstop: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> (Value, Value, Value) {
         Self::sffm_parameters(
             carrier_freq,
             modulation_index,
             signal_freq,
-            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+            Some(Self::stateless_preview_context(tstep, tstop, rules.into())),
         )
     }
 
@@ -1522,12 +1523,12 @@ impl VoltageSources {
         carrier_freq: Value,
         tstep: Value,
         tstop: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> (Value, Value) {
         Self::am_frequencies(
             modulating_freq,
             carrier_freq,
-            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+            Some(Self::stateless_preview_context(tstep, tstop, rules.into())),
         )
     }
 
@@ -1543,9 +1544,12 @@ impl VoltageSources {
 
     #[inline]
     fn pulse_dialect(context: Option<TransientSourceContext>) -> crate::config::SpiceDialect {
-        context
-            .map(|ctx| ctx.dialect)
-            .unwrap_or(crate::config::SpiceDialect::BestAvailable)
+        Self::source_rules(context).dialect
+    }
+
+    #[inline]
+    fn source_rules(context: Option<TransientSourceContext>) -> crate::netlist::SourceRules {
+        context.map(|ctx| ctx.rules).unwrap_or_default()
     }
 
     /// QSPICE, LTspice and Xyce read SFFM's first five values only. TD, both
@@ -1555,31 +1559,48 @@ impl VoltageSources {
         Self::pulse_dialect(context) == crate::config::SpiceDialect::Ngspice
     }
 
+    /// The value an omitted `field` takes under `context`'s rules and
+    /// analysis. With no transient, a time default falls back to the
+    /// fail-safe step and stop, and a frequency to cycles over 1 ms.
     #[inline]
-    fn sin_frequency_default(context: Option<TransientSourceContext>) -> Value {
-        context
-            .map(|ctx| ctx.tstop)
-            .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
-            .map(|tstop| 1.0 / tstop)
-            .unwrap_or(1e3)
+    fn omitted_default(
+        field: crate::netlist::OmittedField,
+        context: Option<TransientSourceContext>,
+        rise_delay: Value,
+    ) -> Value {
+        let rule = Self::source_rules(context).default_for(field);
+        let stop = if let crate::netlist::DefaultRule::CyclesOverTstop(_) = rule {
+            context
+                .map(|ctx| ctx.tstop)
+                .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
+                .unwrap_or(1e-3)
+        } else {
+            Self::pulse_stop_default(context)
+        };
+        rule.value(Self::pulse_step_default(context), stop, rise_delay)
     }
 
     #[inline]
     fn resolve_sin_frequency(frequency: Value, context: Option<TransientSourceContext>) -> Value {
-        // Xyce SinData defaults only an omitted frequency and preserves an
-        // authored zero. ngspice vsrcload also defaults an explicit zero.
-        if frequency.is_finite()
-            && (frequency != 0.0
-                || Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce)
+        // Xyce 7.10 and LTspice 26 keep an authored zero (measured); the
+        // ngspice manual (§4.1) gives a zero field its default, as ngspice-47
+        // runs it.
+        if frequency.is_nan() {
+            Self::omitted_default(crate::netlist::OmittedField::SinFrequency, context, 0.0)
+        } else if frequency != 0.0
+            || Self::pulse_dialect(context) != crate::config::SpiceDialect::Ngspice
         {
             frequency
         } else {
-            Self::sin_frequency_default(context)
+            context
+                .map(|ctx| ctx.tstop)
+                .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
+                .map_or(1e3, |tstop| 1.0 / tstop)
         }
     }
 
-    /// An omitted SFFM/AM frequency scaled to the analysis, `cycles / tstop`:
-    /// ngspice's vsrcload.c uses 5 and 500 cycles, QSPICE one.
+    /// A frequency scaled to the analysis, `cycles / tstop`, for an authored
+    /// zero that a dialect reads as its default.
     #[inline]
     fn modulated_frequency_default(
         cycles: Value,
@@ -1590,17 +1611,6 @@ impl VoltageSources {
             .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
             .map(|tstop| cycles / tstop)
             .unwrap_or(cycles * 1e3)
-    }
-
-    /// Xyce SFFM defaults omitted FC and FS to one cycle over the transient
-    /// stop time.
-    #[inline]
-    fn xyce_modulated_frequency_default(context: Option<TransientSourceContext>) -> Value {
-        context
-            .map(|ctx| ctx.tstop)
-            .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
-            .map(|tstop| 1.0 / tstop)
-            .unwrap_or(0.0)
     }
 
     /// Whether a bounded PULSE train has already delivered all its periods at
@@ -1620,7 +1630,6 @@ impl VoltageSources {
         fall: Value,
         width: Value,
         period: Value,
-        width_defaults_to_zero: bool,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value, Value, Value) {
         Self::resolve_pulse_timing_with_defaults(
@@ -1629,101 +1638,78 @@ impl VoltageSources {
             fall,
             width,
             period,
-            width_defaults_to_zero,
             Self::pulse_step_default(context),
             Self::pulse_stop_default(context),
-            Self::pulse_dialect(context),
+            Self::source_rules(context),
         )
     }
 
-    /// Resolve PULSE timing fields against explicit tstep/tstop defaults.
-    /// Shared with breakpoint scheduling so accepted timesteps land on the
-    /// same edges the waveform actually produces.
+    /// `PULSE` timing with defaults substituted for omitted fields, against
+    /// explicit TSTEP and TSTOP. Shared with breakpoint scheduling so accepted
+    /// timesteps land on the same edges the waveform actually produces.
+    ///
+    /// An omitted field takes the default `rules` choose
+    /// ([`crate::netlist::SourceRules::default_for`]); a PW left out after
+    /// both edges is its own field, because LTspice runs that card as one
+    /// triangle while holding V2 when the fall is left out too. An authored
+    /// field is read by the dialect: Xyce keys every timing default off whether
+    /// the field was authored, so an explicit zero rise or fall is an ideal
+    /// edge and an explicit zero period a one-shot. ngspice's manual (§4.1)
+    /// gives a zero TR, TF or PER its default, TSTEP or TSTOP, and vsrcload.c
+    /// does the same for a negative one. RSpice's own reading gives a zero edge
+    /// TSTEP and repeats a zero period on TR + PW + TF, as LTspice 26 does
+    /// (measured). Every dialect keeps an authored zero PW, as ngspice-47,
+    /// Xyce 7.10 and LTspice 26 all do, and an authored finite delay, including
+    /// a negative one, which advances the waveform.
     #[inline]
     #[allow(clippy::too_many_arguments)]
-    /// `PULSE` timing with dialect defaults substituted for omitted fields.
     pub fn resolve_pulse_timing_with_defaults(
         delay: Value,
         rise: Value,
         fall: Value,
         width: Value,
         period: Value,
-        width_defaults_to_zero: bool,
         step_default: Value,
         stop_default: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> (Value, Value, Value, Value, Value) {
-        let period_was_omitted = period.is_nan();
-        let width_was_omitted = width.is_nan();
-        let xyce_defaults = matches!(dialect, crate::config::SpiceDialect::Xyce);
-        // Only Xyce resolves an omitted PER to the transient stop. ngspice 46
-        // resolves it to TR + PW + TF, so the waveform repeats for the rest of
-        // the run rather than firing once. Measured against ngspice 46 on
-        // `tests/ngspice/general/rtlinv.cir`, whose source is
-        // `pulse(0 5 2ns 2ns 2ns 80ns)`: v(1) rises at 3ns, falls at 85ns,
-        // and rises again at 88ns and 172ns — a period of tr+pw+tf = 84ns,
-        // not a single pulse held low to tstop.
-        // Xyce keys every timing default off whether the field was authored,
-        // not off its numeric value. In particular, explicit zero rise/fall
-        // times are ideal edges and an explicit zero period is a one-shot
-        // source. ngspice instead replaces non-positive TR/TF/PER values with
-        // analysis-scaled defaults. The parser's NaN sentinels preserve the
-        // omitted-vs-authored distinction for the optional fields.
-        // Xyce 7.10 and ngspice 46 both preserve an authored finite delay,
-        // including a negative one.  A negative delay advances the waveform;
-        // clamping it would change both the initial source value and phase.
+        use crate::netlist::OmittedField;
+        let rules = rules.into();
+        let xyce = rules.dialect == crate::config::SpiceDialect::Xyce;
+        let omitted = |field: OmittedField| {
+            rules
+                .default_for(field)
+                .value(step_default, stop_default, 0.0)
+        };
         let td = if delay.is_finite() { delay } else { 0.0 };
-        let tr = if xyce_defaults {
-            if rise.is_nan() { step_default } else { rise }
-        } else if rise.is_finite() && rise > 0.0 {
-            rise
-        } else {
-            step_default
+        let edge = |authored: Value, field: OmittedField| {
+            if authored.is_nan() {
+                omitted(field)
+            } else if xyce || authored > 0.0 {
+                authored
+            } else {
+                step_default
+            }
         };
-        let tf = if xyce_defaults {
-            if fall.is_nan() { step_default } else { fall }
-        } else if fall.is_finite() && fall > 0.0 {
-            fall
-        } else {
-            step_default
-        };
-        let pw = if width_was_omitted && xyce_defaults {
-            stop_default
-        } else if xyce_defaults || (width.is_finite() && width >= 0.0) {
+        let tr = edge(rise, OmittedField::PulseRise);
+        let tf = edge(fall, OmittedField::PulseFall);
+        let pw = if width.is_nan() {
+            omitted(if fall.is_nan() {
+                OmittedField::PulseWidth
+            } else {
+                OmittedField::PulseWidthAfterEdges
+            })
+        } else if xyce || width >= 0.0 {
             width
-        } else if width_was_omitted && !width_defaults_to_zero {
-            // Holding an omitted PW to the transient stop is not an ngspice
-            // dialect quirk, it is what every reference this crate tracks
-            // does: Xyce above, and ngspice 47 here. Only ngspice 46 collapsed
-            // PW to zero, which — with the omitted PER below resolving to
-            // TR + PW + TF — turns the ordinary four-argument step
-            // `PULSE(V1 V2 TD TR)` into an oscillator running at the edge
-            // rate. Gating this on the ngspice dialect left `BestAvailable`,
-            // the default every GUI and CLI run uses, reproducing that
-            // ngspice 46 behaviour on the most common way there is to write a
-            // step.
-            stop_default
         } else {
             0.0
         };
-        // An omitted PER derived from a zero PW is nothing but the two edges,
-        // so repeating on it turns a one-shot into an oscillator running at
-        // the edge rate — which is what ngspice 46 did and ngspice 47 stopped
-        // doing. `tests/paranoia/xspice/original-examples/digital_models.deck`
-        // pins the difference: `pulse(0 1 2e-8 1e-9 1e-9)` fires its triangle
-        // at 20 ns and stays at V1 for the rest of the run under ngspice 47,
-        // while ngspice 46 re-fires it every 2 ns. An authored PW keeps the
-        // TR + PW + TF period, which ngspice still repeats on
-        // (`tests/ngspice/general/rtlinv.cir`).
-        let edges_only_period = period_was_omitted && width_was_omitted && width_defaults_to_zero;
-        let per = if period_was_omitted {
-            if xyce_defaults || edges_only_period {
-                stop_default
-            } else {
-                tr + pw + tf
-            }
-        } else if xyce_defaults || (period.is_finite() && period > 0.0) {
+        let per = if period.is_nan() {
+            omitted(OmittedField::PulsePeriod)
+        } else if xyce || period > 0.0 {
             period
+        } else if rules.dialect == crate::config::SpiceDialect::Ngspice {
+            stop_default
         } else {
             tr + pw + tf
         };
@@ -1731,11 +1717,7 @@ impl VoltageSources {
         (td, tr, tf, pw, per)
     }
 
-    /// Resolve dialect-specific EXP timing defaults.
-    ///
-    /// ngspice treats omitted and explicit-zero timing values alike. Xyce
-    /// retains the parser's `given` distinction: an authored `TD1=0` starts
-    /// immediately, while only an omitted TD1 receives the zero default.
+    /// Resolve EXP timing defaults under `context`'s rules.
     #[inline]
     fn resolve_exp_timing(
         td1: Value,
@@ -1750,51 +1732,68 @@ impl VoltageSources {
             td2,
             tau2,
             Self::pulse_step_default(context),
-            Self::pulse_dialect(context),
+            Self::source_rules(context),
         )
     }
 
-    /// `EXP` timing with dialect defaults substituted for omitted fields.
+    /// `EXP` timing with defaults substituted for omitted fields.
     ///
     /// Public for the same reason [`Self::resolve_pulse_timing_with_defaults`]
     /// is: the two time constants an exponential actually runs with are what a
     /// preview states beside its curve, and every one of the four fields has a
     /// substitution the card does not show.
+    ///
+    /// An omitted field takes the default `rules` choose; a fall that never
+    /// comes (QSPICE's omitted TD2 or TAU2) is an infinite TD2 and TAU2. An
+    /// authored zero is read by the dialect: the ngspice manual (§4.1) reads
+    /// it as omitted, Xyce 7.10 keeps it (measured), and RSpice's own rules
+    /// read it as QSPICE and LTspice 26 run it (measured): a zero time
+    /// constant is an ideal step and a zero TD2 starts the fall at TD1. TD1's
+    /// default is 0 everywhere, so a zero TD1 stands in every dialect.
     pub fn resolve_exp_timing_with_defaults(
         td1: Value,
         tau1: Value,
         td2: Value,
         tau2: Value,
         step: Value,
-        dialect: crate::config::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> (Value, Value, Value, Value) {
-        if dialect == crate::config::SpiceDialect::Xyce {
-            let td1 = if td1.is_finite() { td1 } else { 0.0 };
-            let tau1 = if tau1.is_finite() { tau1 } else { step };
-            let td2 = if td2.is_finite() { td2 } else { td1 + step };
-            let tau2 = if tau2.is_finite() { tau2 } else { step };
-            return (td1, tau1, td2, tau2);
-        }
-        let td1 = if td1.is_finite() && td1 != 0.0 {
+        use crate::netlist::OmittedField;
+        let rules = rules.into();
+        let dialect = rules.dialect;
+        let td1 = if td1.is_nan() {
+            rules
+                .default_for(OmittedField::ExpRiseDelay)
+                .value(step, Value::NAN, 0.0)
+        } else {
             td1
-        } else {
-            step
         };
-        let tau1 = if tau1.is_finite() && tau1 != 0.0 {
-            tau1
-        } else {
-            step
+        let resolve = |authored: Value, field: OmittedField| {
+            let omitted = || rules.default_for(field).value(step, Value::NAN, td1);
+            if authored.is_nan() {
+                omitted()
+            } else if authored != 0.0 {
+                authored
+            } else {
+                match dialect {
+                    crate::config::SpiceDialect::Ngspice => omitted(),
+                    crate::config::SpiceDialect::Xyce => authored,
+                    crate::config::SpiceDialect::BestAvailable => {
+                        if field == OmittedField::ExpFallDelay {
+                            td1
+                        } else {
+                            authored
+                        }
+                    }
+                }
+            }
         };
-        let td2 = if td2.is_finite() && td2 != 0.0 {
-            td2
-        } else {
-            td1 + step
-        };
-        let tau2 = if tau2.is_finite() && tau2 != 0.0 {
-            tau2
-        } else {
-            step
-        };
+        let tau1 = resolve(tau1, OmittedField::ExpRiseTau);
+        let td2 = resolve(td2, OmittedField::ExpFallDelay);
+        let tau2 = resolve(tau2, OmittedField::ExpFallTau);
+        if td2.is_infinite() || tau2.is_infinite() {
+            return (td1, tau1, Value::INFINITY, Value::INFINITY);
+        }
         (td1, tau1, td2, tau2)
     }
 
@@ -2765,7 +2764,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::config::SpiceDialect::BestAvailable,
+            rules: crate::config::SpiceDialect::BestAvailable.into(),
             xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
@@ -2775,7 +2774,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::config::SpiceDialect::Ngspice,
+            rules: crate::config::SpiceDialect::Ngspice.into(),
             xyce_breakpoint_tolerance: None,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
@@ -2785,7 +2784,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::config::SpiceDialect::Xyce,
+            rules: crate::config::SpiceDialect::Xyce.into(),
             xyce_breakpoint_tolerance: Some(0.0),
             resource_limits: crate::resource::ResourceLimits::default(),
         })
@@ -3208,81 +3207,166 @@ mod tests {
         assert_eq!(sources.xyce_max_timestep_at(0.0), None);
     }
 
-    #[test]
-    fn sin_omitted_frequency_defaults_to_inverse_stop_time() {
-        let spec = SourceSpec::Sin {
+    fn sine(frequency: Value) -> SourceSpec {
+        SourceSpec::Sin {
             offset: 0.0,
             amplitude: 1.0,
-            frequency: Value::NAN,
+            frequency,
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
             cycles: None,
-        };
-
-        let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
-
-        assert_close(value, 1.0);
+        }
     }
 
+    /// `SIN(0 1)`: FREQ omitted is 1/TSTOP in the ngspice manual (§4.1.2),
+    /// and ngspice-47 measured runs one cycle over TSTOP. LTspice 26 measured
+    /// runs the same card at 0 Hz, a constant VO, and RSpice's own rules
+    /// follow LTspice, the first measured oracle in precedence. Xyce 7.10
+    /// refuses a SIN without FREQ, so its dialect takes RSpice's value.
     #[test]
-    fn sin_zero_frequency_defaults_to_inverse_stop_time() {
-        let spec = SourceSpec::Sin {
-            offset: 0.0,
-            amplitude: 1.0,
-            frequency: 0.0,
-            delay: 0.0,
-            damping: 0.0,
-            phase: 0.0,
-            cycles: None,
-        };
+    fn sin_omitted_frequency_is_one_cycle_over_tstop_only_under_ngspice() {
+        let spec = sine(Value::NAN);
 
-        let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
-
-        assert_close(value, 1.0);
+        let ngspice = source_at(&spec, 2.5e-9, ngspice_transient_context(1.0e-9, 10.0e-9));
+        assert_close(ngspice, 1.0);
+        for ctx in [
+            transient_context(1.0e-9, 10.0e-9),
+            xyce_transient_context(1.0e-9, 10.0e-9),
+        ] {
+            assert_close(source_at(&spec, 2.5e-9, ctx), 0.0);
+        }
     }
 
+    /// An authored zero FREQ takes its default under the ngspice manual
+    /// (§4.1: a parameter set to zero takes its default), as ngspice-47
+    /// measured runs it. Xyce 7.10 and LTspice 26 measured keep the zero.
     #[test]
-    fn exp_omitted_timing_resolves_to_ngspice_tstep_defaults() {
-        // EXP(0 1): TD1=TAU1=TAU2=tstep, TD2=TD1+tstep (vsrcload.c).
-        let spec = SourceSpec::Exp {
+    fn sin_zero_frequency_is_one_cycle_over_tstop_only_under_ngspice() {
+        let spec = sine(0.0);
+
+        let ngspice = source_at(&spec, 2.5e-9, ngspice_transient_context(1.0e-9, 10.0e-9));
+        assert_close(ngspice, 1.0);
+        for ctx in [
+            transient_context(1.0e-9, 10.0e-9),
+            xyce_transient_context(1.0e-9, 10.0e-9),
+        ] {
+            assert_close(source_at(&spec, 2.5e-9, ctx), 0.0);
+        }
+    }
+
+    fn exponential(timing: [Value; 4]) -> SourceSpec {
+        let [td1, tau1, td2, tau2] = timing;
+        SourceSpec::Exp {
             v1: 0.0,
             v2: 1.0,
-            td1: Value::NAN,
-            tau1: Value::NAN,
-            td2: Value::NAN,
-            tau2: Value::NAN,
-        };
-        let ctx = transient_context(1.0e-9, 10.0e-9);
-
-        // Holds V1 through TD1.
-        let early = source_at(&spec, 0.5e-9, ctx);
-        assert_close(early, 0.0);
-
-        // Rising region: V1 + (V2-V1)*(1 - exp(-(t-TD1)/TAU1)).
-        let rising = source_at(&spec, 1.5e-9, ctx);
-        assert_close(rising, 1.0 - (-0.5f64).exp());
-
-        // Decaying region adds the TD2 term.
-        let decaying = source_at(&spec, 3.0e-9, ctx);
-        assert_close(decaying, (1.0 - (-2.0f64).exp()) - (1.0 - (-1.0f64).exp()));
+            td1,
+            tau1,
+            td2,
+            tau2,
+        }
     }
 
+    /// `EXP(0 1)` under the ngspice manual (§4.1.3) and Xyce 7.10 measured:
+    /// TD1 = 0, TAU1 = TAU2 = TSTEP, TD2 = TD1 + TSTEP. ngspice-47 measured
+    /// delays the rise by TSTEP, against its manual's TD1 default of 0.
     #[test]
-    fn exp_explicit_zero_timing_also_resolves_to_defaults() {
-        // ngspice treats an explicit 0.0 for TD1/TAU1/TD2/TAU2 exactly
-        // like an omitted value.
-        let spec = SourceSpec::Exp {
-            v1: 0.0,
-            v2: 1.0,
-            td1: 0.0,
-            tau1: 0.0,
-            td2: 0.0,
-            tau2: 0.0,
-        };
+    fn exp_omitted_timing_follows_the_manual_under_ngspice_and_xyce() {
+        let spec = exponential([Value::NAN; 4]);
+
+        for ctx in [
+            ngspice_transient_context(1.0e-9, 10.0e-9),
+            xyce_transient_context(1.0e-9, 10.0e-9),
+        ] {
+            // Rising from TD1 = 0: V1 + (V2-V1)*(1 - exp(-t/TAU1)).
+            assert_close(source_at(&spec, 0.5e-9, ctx), 1.0 - (-0.5f64).exp());
+            // Past TD2 = 1 ns the decay term comes in.
+            assert_close(
+                source_at(&spec, 1.5e-9, ctx),
+                (1.0 - (-1.5f64).exp()) - (1.0 - (-0.5f64).exp()),
+            );
+        }
+    }
+
+    /// `EXP(0 1)` under RSpice's own rules, field by field: QSPICE refuses
+    /// an EXP without TD1 and TAU1, so they take LTspice 26's measured 0, an
+    /// ideal rise at 0 s; QSPICE measured never falls when TD2 and TAU2 are
+    /// left out, so the card steps to V2 and holds. Under RSPICE_SOURCE=LTSPICE
+    /// the fall starts at TD1 too and the card is a constant V1, as LTspice
+    /// runs it.
+    #[test]
+    fn exp_omitted_timing_steps_and_holds_under_rspices_rules() {
+        let spec = exponential([Value::NAN; 4]);
+
         let ctx = transient_context(1.0e-9, 10.0e-9);
-        let rising = source_at(&spec, 1.5e-9, ctx);
-        assert_close(rising, 1.0 - (-0.5f64).exp());
+        assert_close(source_at(&spec, 0.0, ctx), 0.0);
+        for time in [0.5e-9, 1.5e-9, 9.0e-9] {
+            assert_close(source_at(&spec, time, ctx), 1.0);
+        }
+
+        let mut ltspice = ctx;
+        ltspice.as_mut().expect("transient context").rules = crate::netlist::SourceRules::new(
+            crate::config::SpiceDialect::BestAvailable,
+            Some(crate::netlist::SourceSimulator::Ltspice),
+        );
+        for time in [0.5e-9, 1.5e-9, 9.0e-9] {
+            assert_close(source_at(&spec, time, ltspice), 0.0);
+        }
+    }
+
+    /// `EXP(0 1 10u 5u 30u)` over `tran 1u 100u`: QSPICE measured never
+    /// falls with TAU2 left out, so RSpice's own rules hold V2 past TD2;
+    /// Xyce and ngspice fall from TD2 with a TSTEP time constant.
+    #[test]
+    fn exp_without_a_fall_time_constant_holds_under_rspices_rules() {
+        let spec = exponential([10.0e-6, 5.0e-6, 30.0e-6, Value::NAN]);
+
+        let best = transient_context(1.0e-6, 100.0e-6);
+        assert_close(source_at(&spec, 60.0e-6, best), 1.0 - (-10.0f64).exp());
+        let ngspice = ngspice_transient_context(1.0e-6, 100.0e-6);
+        assert_close(
+            source_at(&spec, 60.0e-6, ngspice),
+            (-30.0f64).exp() - (-10.0f64).exp(),
+        );
+    }
+
+    /// An authored zero TAU1, TD2 or TAU2 reads as omitted under the ngspice
+    /// manual (§4.1); the authored zero TD1 is its default and stands. QSPICE
+    /// and LTspice 26 measured run a zero time constant as an ideal step and a
+    /// zero TD2 as a fall with the rise, so under RSpice's own rules the card
+    /// is a constant V1.
+    #[test]
+    fn exp_explicit_zero_timing_is_read_by_the_dialect() {
+        let spec = exponential([0.0; 4]);
+
+        let ngspice = ngspice_transient_context(1.0e-9, 10.0e-9);
+        assert_close(source_at(&spec, 0.5e-9, ngspice), 1.0 - (-0.5f64).exp());
+        assert_close(
+            source_at(&spec, 1.5e-9, ngspice),
+            (1.0 - (-1.5f64).exp()) - (1.0 - (-0.5f64).exp()),
+        );
+
+        let best = transient_context(1.0e-9, 10.0e-9);
+        for time in [0.5e-9, 1.5e-9] {
+            assert_close(source_at(&spec, time, best), 0.0);
+        }
+    }
+
+    /// `EXP(0 1 10u 5u 0 10u)` over `tran 1u 100u`: QSPICE and LTspice 26
+    /// measured start the zero TD2's fall at TD1, with the rise (max error
+    /// 2.9e-5 and 2.4e-5 against that reading, 0.62 against a fall from 0 s);
+    /// ngspice-47 measured starts it at TD1 + TSTEP, the manual's default.
+    /// Xyce keeps the zero.
+    #[test]
+    fn exp_zero_fall_delay_falls_with_the_rise_under_rspices_rules() {
+        let spec = exponential([10.0e-6, 5.0e-6, 0.0, 10.0e-6]);
+        let at = 20.0e-6;
+
+        let best = source_at(&spec, at, transient_context(1.0e-6, 100.0e-6));
+        assert_close(best, (-1.0f64).exp() - (-2.0f64).exp());
+
+        let ngspice = source_at(&spec, at, ngspice_transient_context(1.0e-6, 100.0e-6));
+        assert_close(ngspice, (-0.9f64).exp() - (-2.0f64).exp());
     }
 
     #[test]
@@ -3315,8 +3399,14 @@ mod tests {
         assert_close(value, 3.0);
     }
 
+    /// `PULSE(V1 V2 TD TR TF)` holds V2 to TSTOP: PW omitted is TSTOP in the
+    /// ngspice manual (§4.1.1), and QSPICE and Xyce 7.10 measured hold
+    /// `PULSE(0 5 10u 4u 2u)` over `tran 1u 100u`. ngspice-47 measured runs
+    /// that card as one triangle, back at 0 V by 16 us, against its own
+    /// manual; the manual is ngspice's default. LTspice 26 measured runs the
+    /// same triangle, and a deck that says it came from LTspice gets it.
     #[test]
-    fn pulse_width_omitted_after_explicit_rise_and_fall_defaults_to_zero() {
+    fn pulse_width_omitted_after_explicit_rise_and_fall_holds_to_the_stop() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -3329,39 +3419,61 @@ mod tests {
             width_defaults_to_zero: true,
         };
 
-        let value = source_at(&spec, 3.5e-9, transient_context(0.5e-9, 20.0e-9));
+        for ctx in [
+            transient_context(0.5e-9, 20.0e-9),
+            ngspice_transient_context(0.5e-9, 20.0e-9),
+            xyce_transient_context(0.5e-9, 20.0e-9),
+        ] {
+            assert_close(source_at(&spec, 2.0e-9, ctx), 0.5);
+            assert_close(source_at(&spec, 3.5e-9, ctx), 1.0);
+            assert_close(source_at(&spec, 19.0e-9, ctx), 1.0);
+        }
 
-        assert_close(value, 5.0 / 6.0);
+        let mut ltspice = transient_context(0.5e-9, 20.0e-9);
+        ltspice.as_mut().expect("transient context").rules = crate::netlist::SourceRules::new(
+            crate::config::SpiceDialect::BestAvailable,
+            Some(crate::netlist::SourceSimulator::Ltspice),
+        );
+        assert_close(source_at(&spec, 2.0e-9, ltspice), 0.5);
+        assert_close(source_at(&spec, 3.5e-9, ltspice), 5.0 / 6.0);
+        assert_close(source_at(&spec, 19.0e-9, ltspice), 0.0);
     }
 
-    #[test]
-    fn pulse_omitted_period_repeats_after_waveform_duration_by_default() {
-        let spec = pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]);
-
-        let value = source_at(&spec, 100.01208e-3, transient_context(0.5e-6, 400.0e-3));
-
-        assert_close(value, 0.08);
-    }
-
-    #[test]
-    /// An omitted PER repeats the waveform, it does not hold the source at V1
-    /// until the transient stop.
+    /// An omitted PER is TSTOP, so the pulse fires once: the ngspice manual
+    /// (§4.1.1) and the Xyce Reference Guide (Table 2-60) say so.
     ///
-    /// Measured against ngspice 46 for exactly this source,
-    /// `pulse(0 1 10u 1u 1u 100m)` over `tran 200u 400m`: v(1) rises at
-    /// 10.65 us, falls at 100.0117 ms, and then rises again at 100.0130 ms,
-    /// 200.0150 ms and 300.0170 ms. That is a period of TR + PW + TF, so the
-    /// second cycle begins at TD + PER = 100.012 ms and the source is already
-    /// climbing 0.08 us later.
-    fn ngspice_pulse_omitted_period_repeats_after_the_waveform_duration() {
+    /// ngspice-47 measured, `PULSE(0 5 10u 4u 2u 20u)` over `tran 1u 100u`:
+    /// one pulse, falling at 34-36 us and holding 0 V to 99 us. ngspice-46
+    /// repeated it on TR + PW + TF, against its manual.
+    #[test]
+    fn pulse_omitted_period_is_the_stop_time() {
         let spec = pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]);
 
-        let ctx = ngspice_transient_context(0.5e-6, 400.0e-3);
-        assert_close(source_at(&spec, 100.0115e-3, ctx), 0.5);
-        assert_close(source_at(&spec, 100.01208e-3, ctx), 0.08);
-        // Second and third cycles land where ngspice put them.
-        assert_close(source_at(&spec, 150.0e-3, ctx), 1.0);
-        assert_close(source_at(&spec, 250.0e-3, ctx), 1.0);
+        for ctx in [
+            transient_context(0.5e-6, 400.0e-3),
+            ngspice_transient_context(0.5e-6, 400.0e-3),
+        ] {
+            assert_close(source_at(&spec, 100.0115e-3, ctx), 0.5);
+            assert_close(source_at(&spec, 100.01208e-3, ctx), 0.0);
+            assert_close(source_at(&spec, 150.0e-3, ctx), 0.0);
+            assert_close(source_at(&spec, 250.0e-3, ctx), 0.0);
+        }
+    }
+
+    /// An authored zero PER takes its default, TSTOP, under the ngspice
+    /// manual (§4.1: a parameter set to zero takes its default). ngspice-47
+    /// measured, `PULSE(0 5 10u 4u 2u 20u 0)` over `tran 1u 100u`: one pulse,
+    /// 0 V from 36 us to 99 us. Xyce keeps the authored zero, a one-shot.
+    #[test]
+    fn ngspice_pulse_authored_zero_period_is_the_stop_time() {
+        let spec = pulse([0.0, 5.0, 10.0e-6, 4.0e-6, 2.0e-6, 20.0e-6, 0.0, 0.0]);
+
+        let ctx = ngspice_transient_context(1.0e-6, 100.0e-6);
+        assert_close(source_at(&spec, 12.0e-6, ctx), 2.5);
+        assert_close(source_at(&spec, 35.0e-6, ctx), 2.5);
+        for time in [37.0e-6, 50.0e-6, 70.0e-6, 99.0e-6] {
+            assert_close(source_at(&spec, time, ctx), 0.0);
+        }
     }
 
     #[test]
@@ -3429,7 +3541,6 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            false,
             0.02,
             0.8,
             crate::config::SpiceDialect::Xyce,
@@ -3442,7 +3553,6 @@ mod tests {
             Value::NAN,
             Value::NAN,
             Value::NAN,
-            false,
             0.02,
             0.8,
             crate::config::SpiceDialect::Xyce,
@@ -3458,12 +3568,13 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            false,
             0.02,
             0.8,
             crate::config::SpiceDialect::Ngspice,
         );
-        assert_eq!(resolved, (-1.0, 0.02, 0.02, 0.0, 0.04));
+        // ngspice manual §4.1: a zero TR, TF or PER takes its default; an
+        // authored zero PW stays zero.
+        assert_eq!(resolved, (-1.0, 0.02, 0.02, 0.0, 0.8));
     }
 
     #[test]
@@ -3561,12 +3672,12 @@ mod tests {
     }
 
     /// `pulse(0 1 2e-8 1e-9 1e-9)` from
-    /// `tests/paranoia/xspice/original-examples/digital_models.deck`: PW and
-    /// PER are both omitted, so the only period the defaults could derive is
-    /// the two edges. That is not a period anyone asked for — the source
-    /// fires its triangle once and holds V1 for the rest of the run.
+    /// `tests/paranoia/xspice/original-examples/digital_models.deck`, whose
+    /// comment calls it an enable: PW and PER are both omitted, so both are
+    /// TSTOP (ngspice manual §4.1.1) and the source steps to V2 at 20 ns and
+    /// holds. ngspice-47 fires a single triangle instead, against its manual.
     #[test]
-    fn pulse_with_no_width_and_no_period_fires_once() {
+    fn pulse_with_no_width_and_no_period_steps_and_holds() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -3584,27 +3695,27 @@ mod tests {
             (1.9e-8, 0.0),
             (2.05e-8, 0.5),
             (2.1e-8, 1.0),
-            (2.15e-8, 0.5),
-            (2.2e-8, 0.0),
-            // One edge-width past the fall: a repeating train would be
-            // climbing again here.
-            (2.2168e-8, 0.0),
-            (5.0e-8, 0.0),
+            (2.2e-8, 1.0),
+            (5.0e-8, 1.0),
+            (1.0e-7, 1.0),
         ] {
             assert_close(source_at(&spec, time, ctx), expected);
         }
     }
 
-    /// An authored PW still supplies a period worth repeating on, which is
-    /// what `tests/ngspice/general/rtlinv.cir` measures.
+    /// `pulse(0 5 2ns 2ns 2ns 80ns)` from `tests/ngspice/general/rtlinv.cir`
+    /// over `tran 1ns 400ns`: PER omitted is TSTOP, so one pulse. ngspice-47
+    /// measured: high from 4 ns, falling at 84-86 ns, 0 V to 400 ns.
     #[test]
-    fn pulse_with_authored_width_still_repeats_on_its_derived_period() {
+    fn ngspice_pulse_with_authored_width_and_no_period_fires_once() {
         let spec = pulse([0.0, 5.0, 2.0e-9, 2.0e-9, 2.0e-9, 8.0e-8, Value::NAN, 0.0]);
 
-        let ctx = ngspice_transient_context(2.0e-9, 2.0e-7);
-        // Period is TR + PW + TF = 84 ns, so the second rise starts at
-        // 2 ns + 84 ns and reaches V2 two nanoseconds later.
-        assert_close(source_at(&spec, 8.8e-8, ctx), 5.0);
+        let ctx = ngspice_transient_context(1.0e-9, 4.0e-7);
+        assert_close(source_at(&spec, 5.0e-8, ctx), 5.0);
+        assert_close(source_at(&spec, 8.5e-8, ctx), 2.5);
+        for time in [8.8e-8, 1.72e-7, 3.0e-7] {
+            assert_close(source_at(&spec, time, ctx), 0.0);
+        }
     }
 
     #[test]

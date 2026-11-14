@@ -12,7 +12,9 @@ use crate::device::DistributedRlgc;
 pub(in crate::engine) struct BreakpointWindow {
     pub tstop: Value,
     pub tstep_hint: Value,
-    pub dialect: crate::engine::SpiceDialect,
+    /// How the run reads its sources, so breakpoints land on the edges the
+    /// waveform produces.
+    pub rules: crate::netlist::SourceRules,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -412,7 +414,7 @@ impl Engine {
         let BreakpointWindow {
             tstop,
             tstep_hint,
-            dialect,
+            rules,
         } = window;
         Self::add_source_spec_breakpoints_with_pwl(
             breakpoints,
@@ -421,7 +423,7 @@ impl Engine {
             BreakpointWindow {
                 tstop,
                 tstep_hint,
-                dialect,
+                rules,
             },
             SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
@@ -442,7 +444,7 @@ impl Engine {
         let BreakpointWindow {
             tstop,
             tstep_hint,
-            dialect,
+            rules,
         } = window;
         let defaults = context.basis.unwrap_or(crate::circuit::SourceTimeBasis {
             tstep: tstep_hint,
@@ -463,7 +465,7 @@ impl Engine {
                     BreakpointWindow {
                         tstop,
                         tstep_hint,
-                        dialect,
+                        rules,
                     },
                     context,
                     abort,
@@ -478,7 +480,7 @@ impl Engine {
                     BreakpointWindow {
                         tstop,
                         tstep_hint,
-                        dialect,
+                        rules,
                     },
                     context,
                     abort,
@@ -502,7 +504,7 @@ impl Engine {
                     BreakpointWindow {
                         tstop,
                         tstep_hint,
-                        dialect,
+                        rules,
                     },
                     context,
                     abort,
@@ -516,7 +518,6 @@ impl Engine {
                 width,
                 period,
                 pulse_count,
-                width_defaults_to_zero,
                 ..
             } => {
                 // Same resolution as the waveform runtime, so breakpoints
@@ -528,10 +529,9 @@ impl Engine {
                         *fall,
                         *width,
                         *period,
-                        *width_defaults_to_zero,
                         defaults.tstep.max(1e-18),
                         defaults.tstop.max(1e-18),
-                        dialect,
+                        rules,
                     );
 
                 let per_valid = per.is_finite() && per > 0.0;
@@ -539,7 +539,7 @@ impl Engine {
                 // negative period maps every nonnegative simulation time to a
                 // nonpositive local time, so PulseData remains at V1 and has
                 // no physical source edges to schedule.
-                if (exact || dialect == crate::engine::SpiceDialect::Xyce)
+                if (exact || rules.dialect == crate::engine::SpiceDialect::Xyce)
                     && per.is_finite()
                     && per < 0.0
                 {
@@ -638,7 +638,7 @@ impl Engine {
                 // Xyce 7.10 SinData inherits SourceData's no-op breakpoint
                 // implementation.  Its delay remains part of the waveform,
                 // but it is not registered with StepErrorControl.
-                if exact || dialect != crate::engine::SpiceDialect::Xyce {
+                if exact || rules.dialect != crate::engine::SpiceDialect::Xyce {
                     Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
                 }
                 // A SIN limited to NCYCLES bends where its last cycle ends.
@@ -856,53 +856,46 @@ impl Engine {
                 }
                 return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
             }
-            SourceSpec::Exp { td1, td2, .. } => {
+            SourceSpec::Exp {
+                td1,
+                tau1,
+                td2,
+                tau2,
+                ..
+            } => {
+                // Xyce 7.10 ExpData inherits SourceData's no-op breakpoint
+                // implementation.  Preserve ngspice/native edge scheduling,
+                // but do not introduce timestep boundaries that Xyce itself
+                // does not request when running in its compatibility dialect.
+                if !exact && rules.dialect == crate::engine::SpiceDialect::Xyce {
+                    return Ok(());
+                }
+                // The edges the waveform runtime resolves: a fall that never
+                // comes is an infinite TD2, which schedules nothing.
+                let (td1, _, td2, _) =
+                    crate::circuit::VoltageSources::resolve_exp_timing_with_defaults(
+                        *td1,
+                        *tau1,
+                        *td2,
+                        *tau2,
+                        defaults.tstep.max(1e-18),
+                        rules,
+                    );
+                Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
+                Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
                 if exact {
-                    let (td1, _, td2, _) =
-                        crate::circuit::VoltageSources::resolve_exp_timing_with_defaults(
-                            *td1,
-                            Value::NAN,
-                            *td2,
-                            Value::NAN,
-                            defaults.tstep.max(1e-18),
-                            dialect,
-                        );
-                    Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
-                    Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
                     return Self::check_source_breakpoint_collection(
                         breakpoints,
                         abort,
                         max_points,
                     );
                 }
-                // Xyce 7.10 ExpData inherits SourceData's no-op breakpoint
-                // implementation.  Preserve ngspice/native edge scheduling,
-                // but do not introduce timestep boundaries that Xyce itself
-                // does not request when running in its compatibility dialect.
-                if dialect == crate::engine::SpiceDialect::Xyce {
-                    return Ok(());
-                }
-                // Match the waveform runtime: omitted or zero delays
-                // resolve to tstep-based defaults (ngspice vsrcload.c).
-                let step_default = defaults.tstep.max(1e-18);
-                let td1 = if td1.is_finite() && *td1 != 0.0 {
-                    *td1
-                } else {
-                    step_default
-                };
-                let td2 = if td2.is_finite() && *td2 != 0.0 {
-                    *td2
-                } else {
-                    td1 + step_default
-                };
-                Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
-                Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
             }
             // ngspice's SFFM is exactly 0 until TD and generally
             // discontinuous there (vsrcload.c), so that dialect schedules the
             // switch-on instant. The other dialects do not read TD.
             SourceSpec::Sffm { delay, .. } => {
-                if dialect == crate::engine::SpiceDialect::Ngspice {
+                if rules.dialect == crate::engine::SpiceDialect::Ngspice {
                     Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
                 }
             }
@@ -1361,14 +1354,14 @@ impl Engine {
         let BreakpointWindow {
             tstop,
             tstep_hint,
-            dialect,
+            rules,
         } = window;
         Self::collect_independent_source_breakpoints(
             circuit,
             BreakpointWindow {
                 tstop,
                 tstep_hint,
-                dialect,
+                rules,
             },
             None,
             breakpoints,
@@ -1381,7 +1374,7 @@ impl Engine {
         // own clock at order one (`BreakpointLanding::ExpressionClock`), so
         // those times are gathered apart and recorded as such; the reference
         // dialects merge them as they always have.
-        let mut expression_clocks = (dialect == crate::engine::SpiceDialect::BestAvailable)
+        let mut expression_clocks = (rules.dialect == crate::engine::SpiceDialect::BestAvailable)
             .then(|| breakpoints.empty_like());
         let clocks = expression_clocks.as_mut().unwrap_or(&mut *breakpoints);
         for switch in &circuit.generic_switches {
@@ -1437,7 +1430,7 @@ impl Engine {
         let BreakpointWindow {
             tstop,
             tstep_hint,
-            dialect,
+            rules,
         } = window;
         let source_basis = circuit
             .independent_source_time_basis()
@@ -1463,7 +1456,7 @@ impl Engine {
                 BreakpointWindow {
                     tstop,
                     tstep_hint,
-                    dialect,
+                    rules,
                 },
                 SourceBreakpointContext {
                     basis: source_basis,
@@ -1842,7 +1835,7 @@ mod tests {
                 BreakpointWindow {
                     tstop: 2.5,
                     tstep_hint: 0.25,
-                    dialect,
+                    rules: dialect.into(),
                 },
                 None,
                 &mut events,
@@ -1918,7 +1911,7 @@ mod tests {
         let window = BreakpointWindow {
             tstop,
             tstep_hint,
-            dialect,
+            rules: dialect.into(),
         };
         Engine::add_source_spec_breakpoints(&mut breakpoints, spec, window);
         breakpoints.times().to_vec()
@@ -1996,7 +1989,7 @@ mod tests {
                     BreakpointWindow {
                         tstop: 100.0e-9,
                         tstep_hint: 1.0e-9,
-                        dialect,
+                        rules: dialect.into(),
                     },
                 );
                 // Only the ngspice dialect's SFFM reads TD.
@@ -2016,7 +2009,7 @@ mod tests {
                 BreakpointWindow {
                     tstop: 100.0e-9,
                     tstep_hint: 1.0e-9,
-                    dialect: crate::engine::SpiceDialect::Xyce,
+                    rules: crate::engine::SpiceDialect::Xyce.into(),
                 },
             );
             assert!(xyce_breakpoints.times().is_empty());
@@ -2046,7 +2039,7 @@ mod tests {
             BreakpointWindow {
                 tstop: 10.0,
                 tstep_hint: 0.1,
-                dialect: crate::engine::SpiceDialect::Xyce,
+                rules: crate::engine::SpiceDialect::Xyce.into(),
             },
             SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
@@ -2075,7 +2068,7 @@ mod tests {
             BreakpointWindow {
                 tstop: 300.0e-3,
                 tstep_hint: 100.0e-6,
-                dialect: crate::engine::SpiceDialect::Xyce,
+                rules: crate::engine::SpiceDialect::Xyce.into(),
             },
         );
         assert!(xyce_breakpoints.times().is_empty());
@@ -2091,7 +2084,7 @@ mod tests {
                 BreakpointWindow {
                     tstop: 300.0e-3,
                     tstep_hint: 100.0e-6,
-                    dialect,
+                    rules: dialect.into(),
                 },
             );
             assert_delays_close(breakpoints.times(), &[3.0e-3, 200.0e-3]);
@@ -2185,7 +2178,7 @@ mod tests {
             BreakpointWindow {
                 tstop: 2.0,
                 tstep_hint: 0.1,
-                dialect: crate::engine::SpiceDialect::Xyce,
+                rules: crate::engine::SpiceDialect::Xyce.into(),
             },
             SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
@@ -2340,7 +2333,7 @@ mod tests {
             BreakpointWindow {
                 tstop: 2.5e-9,
                 tstep_hint: 1.0e-9,
-                dialect: crate::engine::SpiceDialect::BestAvailable,
+                rules: crate::engine::SpiceDialect::BestAvailable.into(),
             },
             &mut breakpoints,
             &crate::abort_signal::NoAbort,
