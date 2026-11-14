@@ -784,12 +784,7 @@ impl ReportDocument {
         if records.is_empty() || records.len() > MAX_REPORT_REVISION_HISTORY_RECORDS {
             return Err(invalid_revision_history());
         }
-        let baseline_revision = match self.revision_history.origin {
-            ReportRevisionHistoryOrigin::Native
-            | ReportRevisionHistoryOrigin::ImportedSchemaOneBaseline => ObjectRevision::INITIAL,
-            ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline => records[0].revision,
-        };
-        if records[0].revision != baseline_revision
+        if records[0].revision != ObjectRevision::INITIAL
             || records[0].prior_revision_identity.is_some()
             || records[0].prior_record_digest.is_some()
             || records.last().map(|record| record.revision) != Some(self.revision)
@@ -802,7 +797,7 @@ impl ReportDocument {
         let mut prior_record_digest = None;
         for (index, record) in records.iter().enumerate() {
             let expected_revision = ObjectRevision::new(
-                baseline_revision
+                ObjectRevision::INITIAL
                     .get()
                     .checked_add(
                         u64::try_from(index).map_err(|_| ReportError::RevisionSpaceExhausted)?,
@@ -824,7 +819,6 @@ impl ReportDocument {
                 record.revision_identity,
                 record.document_id,
                 record.revision,
-                self.revision_history.origin,
                 record.prior_revision_identity,
                 record.prior_record_digest,
                 record.timestamp_unix_ms,

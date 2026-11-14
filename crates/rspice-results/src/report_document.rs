@@ -32,8 +32,6 @@ const MAX_BLOCKS_PER_SECTION: usize = 1_024;
 const MAX_BLOCKS_TOTAL: usize = 8_192;
 const MAX_TRANSACTION_EDITS: usize = 256;
 pub const MAX_REPORT_REVISION_HISTORY_RECORDS: usize = 8_192;
-const REPORT_MIGRATION_REVISION_ID_NAMESPACE: Uuid =
-    Uuid::from_u128(0x7273_7069_6365_2d72_6576_2d68_6973_742d);
 const MAX_DATASET_BINDINGS: usize = 4_096;
 const MAX_TABLE_COLUMNS: usize = 256;
 const MAX_TABLE_ROWS: usize = 100_000;
@@ -829,21 +827,6 @@ pub struct ReportReferenceAudit {
     pub entries: Vec<ReportReferenceAuditEntry>,
 }
 
-/// Provenance of the first reconstructable source revision retained by a
-/// report document.
-///
-/// Native documents retain revision one and every successor. Documents loaded
-/// from an older schema retain an explicit baseline instead: this preserves
-/// their exact current content without manufacturing revisions that the older
-/// format never stored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReportRevisionHistoryOrigin {
-    Native,
-    ImportedSchemaOneBaseline,
-    ImportedSchemaTwoBaseline,
-}
-
 /// The report source at one committed document revision, borrowed from the
 /// document for hashing. Its canonical JSON bytes are the revision's content
 /// digest; the history ledger itself is excluded.
@@ -860,7 +843,6 @@ struct ReportDocumentSnapshot<'a> {
     pages: &'a [ReportPage],
     receipts: &'a [ReportMutationReceipt],
     tombstones: &'a [ReportTombstone],
-    legacy_origin_entities: &'a [ReportEntityRef],
 }
 
 /// Immutable audit record for a complete report source revision.
@@ -935,7 +917,6 @@ impl ReportRevisionRecord {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReportRevisionHistory {
-    origin: ReportRevisionHistoryOrigin,
     records: Vec<ReportRevisionRecord>,
 }
 
@@ -1003,7 +984,6 @@ impl<'de> Deserialize<'de> for ReportRevisionHistory {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            origin: ReportRevisionHistoryOrigin,
             records: BoundedReportRevisionRecords,
         }
 
@@ -1013,7 +993,6 @@ impl<'de> Deserialize<'de> for ReportRevisionHistory {
                 record.revision_identity,
                 record.document_id,
                 record.revision,
-                wire.origin,
                 record.prior_revision_identity,
                 record.prior_record_digest,
                 record.timestamp_unix_ms,
@@ -1027,18 +1006,12 @@ impl<'de> Deserialize<'de> for ReportRevisionHistory {
             }
         }
         Ok(Self {
-            origin: wire.origin,
             records: wire.records.0,
         })
     }
 }
 
 impl ReportRevisionHistory {
-    #[must_use]
-    pub const fn origin(&self) -> ReportRevisionHistoryOrigin {
-        self.origin
-    }
-
     #[must_use]
     pub fn records(&self) -> &[ReportRevisionRecord] {
         &self.records
@@ -1059,7 +1032,6 @@ pub struct ReportDocument {
     pages: Vec<ReportPage>,
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
-    legacy_origin_entities: Vec<ReportEntityRef>,
     revision_history: ReportRevisionHistory,
 }
 
@@ -1081,30 +1053,7 @@ struct ReportDocumentWire {
     receipts: Vec<ReportMutationReceipt>,
     #[serde(default)]
     tombstones: Vec<ReportTombstone>,
-    #[serde(default)]
-    legacy_origin_entities: Vec<ReportEntityRef>,
-    #[serde(default)]
-    revision_history: ReportRevisionHistoryWireField,
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-enum ReportRevisionHistoryWireField {
-    #[default]
-    Missing,
-    Null,
-    Value(ReportRevisionHistory),
-}
-
-impl<'de> Deserialize<'de> for ReportRevisionHistoryWireField {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<ReportRevisionHistory>::deserialize(deserializer).map(|value| match value {
-            Some(history) => Self::Value(history),
-            None => Self::Null,
-        })
-    }
+    revision_history: Option<ReportRevisionHistory>,
 }
 
 impl<'de> Deserialize<'de> for ReportDocument {
@@ -1113,50 +1062,18 @@ impl<'de> Deserialize<'de> for ReportDocument {
         D: Deserializer<'de>,
     {
         let wire = ReportDocumentWire::deserialize(deserializer)?;
-        let revision_history = match (wire.schema_version, wire.revision_history) {
-            (ReportDocument::SCHEMA_VERSION, ReportRevisionHistoryWireField::Value(history)) => {
-                history
-            }
-            (ReportDocument::SCHEMA_VERSION, ReportRevisionHistoryWireField::Missing) => {
-                return Err(serde::de::Error::custom(ReportError::InvalidValue {
-                    field: "report-document.revision-history",
-                    message: "current-schema documents must retain their revision history"
-                        .to_owned(),
-                }));
-            }
-            (3..=6, ReportRevisionHistoryWireField::Value(history)) => history,
-            (version @ (3..=6), ReportRevisionHistoryWireField::Missing) => {
-                return Err(serde::de::Error::custom(ReportError::InvalidValue {
-                    field: "report-document.revision-history",
-                    message: format!(
-                        "schema {version} documents must retain their revision history"
-                    ),
-                }));
-            }
-            (1 | 2, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
-                origin: ReportRevisionHistoryOrigin::Native,
-                records: Vec::new(),
-            },
-            (_, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
-                origin: ReportRevisionHistoryOrigin::Native,
-                records: Vec::new(),
-            },
-            (version, ReportRevisionHistoryWireField::Value(_)) => {
-                return Err(serde::de::Error::custom(ReportError::InvalidValue {
-                    field: "report-document.revision-history",
-                    message: format!(
-                        "schema {version} must not contain a revision history introduced by a later schema"
-                    ),
-                }));
-            }
-            (_, ReportRevisionHistoryWireField::Null) => {
-                return Err(serde::de::Error::custom(ReportError::InvalidValue {
-                    field: "report-document.revision-history",
-                    message: "revision history must not be null".to_owned(),
-                }));
-            }
+        if wire.schema_version != ReportDocument::SCHEMA_VERSION {
+            return Err(serde::de::Error::custom(
+                ReportError::UnsupportedSchemaVersion(wire.schema_version),
+            ));
+        }
+        let Some(revision_history) = wire.revision_history else {
+            return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                field: "report-document.revision-history",
+                message: "report documents must retain their revision history".to_owned(),
+            }));
         };
-        let mut document = Self {
+        let document = Self {
             schema_version: wire.schema_version,
             id: wire.id,
             revision: wire.revision,
@@ -1167,10 +1084,8 @@ impl<'de> Deserialize<'de> for ReportDocument {
             pages: wire.pages,
             receipts: wire.receipts,
             tombstones: wire.tombstones,
-            legacy_origin_entities: wire.legacy_origin_entities,
             revision_history,
         };
-        document.migrate().map_err(serde::de::Error::custom)?;
         document.validate().map_err(serde::de::Error::custom)?;
         Ok(document)
     }
@@ -1198,9 +1113,7 @@ impl ReportDocument {
             pages: Vec::new(),
             receipts: Vec::new(),
             tombstones: Vec::new(),
-            legacy_origin_entities: Vec::new(),
             revision_history: ReportRevisionHistory {
-                origin: ReportRevisionHistoryOrigin::Native,
                 records: Vec::new(),
             },
         };
@@ -1378,9 +1291,7 @@ impl ReportDocument {
             pages: self.pages.clone(),
             receipts: self.receipts.clone(),
             tombstones: self.tombstones.clone(),
-            legacy_origin_entities: self.legacy_origin_entities.clone(),
             revision_history: ReportRevisionHistory {
-                origin: self.revision_history.origin,
                 records: Vec::new(),
             },
         };
@@ -1516,7 +1427,6 @@ impl ReportDocument {
             pages: &self.pages,
             receipts: &self.receipts,
             tombstones: &self.tombstones,
-            legacy_origin_entities: &self.legacy_origin_entities,
         }
     }
 
@@ -1531,28 +1441,6 @@ impl ReportDocument {
             ReportRevisionId::new(),
             timestamp_unix_ms,
             actor,
-            revision_note,
-            snapshot_digest,
-        )
-    }
-
-    fn append_migrated_revision_record(
-        &mut self,
-        source_schema_version: u16,
-        timestamp_unix_ms: u64,
-        revision_note: String,
-    ) -> Result<(), ReportError> {
-        let snapshot_digest = report_snapshot_digest(&self.current_snapshot())?;
-        let mut identity_material = Vec::with_capacity(16 + 8 + 2 + 32);
-        identity_material.extend_from_slice(self.id.as_uuid().as_bytes());
-        identity_material.extend_from_slice(&self.revision.get().to_be_bytes());
-        identity_material.extend_from_slice(&source_schema_version.to_be_bytes());
-        identity_material.extend_from_slice(snapshot_digest.as_bytes());
-        let revision_identity = migrated_report_revision_id(&identity_material)?;
-        self.append_prepared_revision_record(
-            revision_identity,
-            timestamp_unix_ms,
-            "rspice-schema-migration".to_owned(),
             revision_note,
             snapshot_digest,
         )
@@ -1587,7 +1475,6 @@ impl ReportDocument {
             revision_identity,
             self.id,
             self.revision,
-            self.revision_history.origin,
             prior_revision_identity,
             prior_record_digest,
             timestamp_unix_ms,
@@ -1609,152 +1496,6 @@ impl ReportDocument {
         });
         Ok(())
     }
-
-    fn migrate(&mut self) -> Result<(), ReportError> {
-        match self.schema_version {
-            Self::SCHEMA_VERSION => Ok(()),
-            1 => {
-                // Version one predates mutation receipts and tombstones. It is
-                // safe to import only an initial immutable snapshot; accepting
-                // a later revision would fabricate the missing audit chain.
-                if self.revision != ObjectRevision::INITIAL
-                    || !self.receipts.is_empty()
-                    || !self.tombstones.is_empty()
-                    || !self.legacy_origin_entities.is_empty()
-                {
-                    return Err(ReportError::UnsafeLegacyMigration {
-                        version: self.schema_version,
-                    });
-                }
-                self.legacy_origin_entities = self
-                    .pages
-                    .iter()
-                    .flat_map(|page| {
-                        std::iter::once(ReportEntityRef::Page(page.id)).chain(
-                            page.sections.iter().flat_map(|section| {
-                                std::iter::once(ReportEntityRef::Section(section.id)).chain(
-                                    section
-                                        .blocks
-                                        .iter()
-                                        .map(|block| ReportEntityRef::Block(block.id)),
-                                )
-                            }),
-                        )
-                    })
-                    .collect();
-                self.schema_version = Self::SCHEMA_VERSION;
-                self.revision_history.origin =
-                    ReportRevisionHistoryOrigin::ImportedSchemaOneBaseline;
-                self.append_migrated_revision_record(
-                    1,
-                    0,
-                    "Import schema 1 report source baseline".to_owned(),
-                )?;
-                Ok(())
-            }
-            2 => {
-                // Schema two validates a complete current source plus a
-                // contiguous mutation-receipt chain, but it did not retain
-                // the prior source bodies. Preserve only the exact source it
-                // actually contains and identify it as an imported baseline.
-                self.schema_version = Self::SCHEMA_VERSION;
-                self.revision_history.origin =
-                    ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline;
-                let timestamp_unix_ms = self
-                    .receipts
-                    .last()
-                    .map_or(0, |receipt| receipt.timestamp_unix_ms);
-                self.append_migrated_revision_record(
-                    2,
-                    timestamp_unix_ms,
-                    "Import schema 2 report source baseline".to_owned(),
-                )?;
-                Ok(())
-            }
-            3 => {
-                // Schema four adds page-publication policies. Every new field
-                // has a serialization-omitted default matching schema three,
-                // so the authenticated schema-three source and record digests
-                // remain byte-for-byte valid during this metadata-only upgrade.
-                let uses_schema_four_page_policy = |page: &ReportPage| {
-                    !page.inclusion.is_default()
-                        || !page.evidence_binding.is_default()
-                        || !page.blocked_gate_text_policy.is_default()
-                };
-                if self.pages.iter().any(uses_schema_four_page_policy) {
-                    return Err(ReportError::UnsafeLegacyMigration { version: 3 });
-                }
-                self.schema_version = 4;
-                self.migrate()
-            }
-            4 => {
-                // Schema five adds report-block inclusion. Enabled is the
-                // serialization-omitted default, so an authentic schema-four
-                // source keeps the exact bytes and digest it had before this
-                // metadata-only upgrade. A disabled block in a schema-four envelope is a
-                // mislabeled schema-five value and is rejected fail-closed.
-                let uses_schema_five_block_policy = |page: &ReportPage| {
-                    page.sections
-                        .iter()
-                        .flat_map(|section| section.blocks.iter())
-                        .any(|block| !block.enabled)
-                };
-                if self.pages.iter().any(uses_schema_five_block_policy) {
-                    return Err(ReportError::UnsafeLegacyMigration { version: 4 });
-                }
-                self.schema_version = 5;
-                self.migrate()
-            }
-            5 => {
-                // Schema six adds document output formats and publication
-                // policy. Their defaults are omitted from serialization, so
-                // authentic schema-five source bytes remain unchanged. A non-default value in a schema-five
-                // envelope is a mislabeled schema-six document and must fail
-                // closed rather than acquiring unauthenticated policy.
-                let uses_schema_six_publication_policy =
-                    |output_formats: ReportOutputFormats,
-                     publication_profile: ReportPublicationProfile| {
-                        !output_formats.is_default() || !publication_profile.is_default()
-                    };
-                if uses_schema_six_publication_policy(self.output_formats, self.publication_profile)
-                {
-                    return Err(ReportError::UnsafeLegacyMigration { version: 5 });
-                }
-                self.schema_version = 6;
-                self.migrate()
-            }
-            6 => {
-                // Schema seven adds an exact visualization page/pane locator
-                // to linked plot figures. An authentic schema-six linked
-                // figure cannot supply that identity, and selecting a pane
-                // during migration would invent engineering provenance. A
-                // locator inside a schema-six envelope is likewise a
-                // mislabeled schema-seven document. Both forms fail closed.
-                let has_unmigratable_figure = |page: &ReportPage| {
-                    page.sections
-                        .iter()
-                        .flat_map(|section| section.blocks.iter())
-                        .any(|block| {
-                            matches!(
-                                &block.kind,
-                                ReportBlockKind::PlotFigure(figure)
-                                    if figure.source_locator.is_some()
-                                        || matches!(
-                                            &figure.reference,
-                                            ReportReferenceMode::Linked { .. }
-                                        )
-                            )
-                        })
-                };
-                if self.pages.iter().any(has_unmigratable_figure) {
-                    return Err(ReportError::UnsafeLegacyMigration { version: 6 });
-                }
-                self.schema_version = Self::SCHEMA_VERSION;
-                Ok(())
-            }
-            version => Err(ReportError::UnsupportedSchemaVersion(version)),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -1765,7 +1506,6 @@ struct ReportDocumentContentView<'a> {
     pages: &'a [ReportPage],
     receipts: &'a [ReportMutationReceipt],
     tombstones: &'a [ReportTombstone],
-    legacy_origin_entities: &'a [ReportEntityRef],
 }
 
 impl<'a> ReportDocumentContentView<'a> {
@@ -1777,7 +1517,6 @@ impl<'a> ReportDocumentContentView<'a> {
             pages: &document.pages,
             receipts: &document.receipts,
             tombstones: &document.tombstones,
-            legacy_origin_entities: &document.legacy_origin_entities,
         }
     }
 
@@ -1823,7 +1562,7 @@ impl<'a> ReportDocumentContentView<'a> {
                 return Err(ReportError::DuplicateIdentity(page_entity));
             }
             validate_label("report-page.title", &page.title, 512)?;
-            self.validate_entity_creation(page_entity, page.created_at_document_revision)?;
+            self.validate_entity_creation(page.created_at_document_revision)?;
             if page.sections.len() > MAX_SECTIONS_PER_PAGE {
                 return Err(ReportError::CapacityExceeded("sections per report page"));
             }
@@ -1833,10 +1572,7 @@ impl<'a> ReportDocumentContentView<'a> {
                     return Err(ReportError::DuplicateIdentity(section_entity));
                 }
                 validate_label("report-section.title", &section.title, 512)?;
-                self.validate_entity_creation(
-                    section_entity,
-                    section.created_at_document_revision,
-                )?;
+                self.validate_entity_creation(section.created_at_document_revision)?;
                 if section.blocks.len() > MAX_BLOCKS_PER_SECTION {
                     return Err(ReportError::CapacityExceeded(
                         "content blocks per report section",
@@ -1847,53 +1583,21 @@ impl<'a> ReportDocumentContentView<'a> {
                     if !live.insert(block_entity) {
                         return Err(ReportError::DuplicateIdentity(block_entity));
                     }
-                    self.validate_entity_creation(
-                        block_entity,
-                        block.created_at_document_revision,
-                    )?;
+                    self.validate_entity_creation(block.created_at_document_revision)?;
                     block.kind.validate()?;
                 }
             }
         }
         self.validate_tombstones(&live)?;
-        self.validate_legacy_origins(&live)?;
         self.validate_receipts(&live)
     }
 
-    fn validate_entity_creation(
-        self,
-        entity: ReportEntityRef,
-        created_at: ObjectRevision,
-    ) -> Result<(), ReportError> {
-        if created_at > self.revision
-            || (created_at == ObjectRevision::INITIAL
-                && !self.legacy_origin_entities.contains(&entity))
-        {
+    fn validate_entity_creation(self, created_at: ObjectRevision) -> Result<(), ReportError> {
+        if created_at > self.revision || created_at == ObjectRevision::INITIAL {
             return Err(ReportError::InvalidValue {
                 field: "report-document.entity-created-at",
-                message: "entity creation revisions must name their creation receipt or a migrated version-one origin".to_owned(),
+                message: "entity creation revisions must name their creation receipt".to_owned(),
             });
-        }
-        Ok(())
-    }
-
-    fn validate_legacy_origins(self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
-        let tombstoned: HashSet<_> = self
-            .tombstones
-            .iter()
-            .map(|tombstone| tombstone.entity)
-            .collect();
-        let mut origins = HashSet::with_capacity(self.legacy_origin_entities.len());
-        for entity in self.legacy_origin_entities {
-            if !origins.insert(*entity) || (!live.contains(entity) && !tombstoned.contains(entity))
-            {
-                return Err(ReportError::InvalidValue {
-                    field: "report-document.legacy-origin-entities",
-                    message:
-                        "migrated origin identities must be unique and remain live or tombstoned"
-                            .to_owned(),
-                });
-            }
         }
         Ok(())
     }
@@ -1912,10 +1616,7 @@ impl<'a> ReportDocumentContentView<'a> {
                     message: "tombstones must be unique, identify no live entity, and name a committed removal revision".to_owned(),
                 });
             }
-            self.validate_entity_creation(
-                tombstone.entity,
-                tombstone.created_at_document_revision,
-            )?;
+            self.validate_entity_creation(tombstone.created_at_document_revision)?;
         }
         Ok(())
     }
@@ -1937,7 +1638,6 @@ impl<'a> ReportDocumentContentView<'a> {
         let mut operation_ids = HashSet::with_capacity(self.receipts.len());
         let mut created_ids = HashSet::new();
         let mut receipt_tombstones = HashSet::new();
-        let legacy_origins: HashSet<_> = self.legacy_origin_entities.iter().copied().collect();
         for (index, receipt) in self.receipts.iter().enumerate() {
             let previous = ObjectRevision::new(
                 u64::try_from(index)
@@ -2006,7 +1706,7 @@ impl<'a> ReportDocumentContentView<'a> {
         }
         if self.revision != ObjectRevision::INITIAL {
             for entity in live.iter().chain(tombstones.keys()) {
-                if !created_ids.contains(entity) && !legacy_origins.contains(entity) {
+                if !created_ids.contains(entity) {
                     return Err(invalid_receipt());
                 }
             }
@@ -2113,13 +1813,6 @@ fn report_snapshot_digest(
     Ok(ContentDigest::from_bytes(writer.0.finalize().into()))
 }
 
-fn migrated_report_revision_id(identity_material: &[u8]) -> Result<ReportRevisionId, ReportError> {
-    ReportRevisionId::try_from_uuid(Uuid::new_v5(
-        &REPORT_MIGRATION_REVISION_ID_NAMESPACE,
-        identity_material,
-    ))
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "persisted digest fields retain an explicit stable order"
@@ -2128,7 +1821,6 @@ fn report_revision_record_digest(
     revision_identity: ReportRevisionId,
     document_id: ResultDocumentId,
     revision: ObjectRevision,
-    history_origin: ReportRevisionHistoryOrigin,
     prior_revision_identity: Option<ReportRevisionId>,
     prior_record_digest: Option<ContentDigest>,
     timestamp_unix_ms: u64,
@@ -2142,7 +1834,6 @@ fn report_revision_record_digest(
         revision_identity: ReportRevisionId,
         document_id: ResultDocumentId,
         revision: ObjectRevision,
-        history_origin: ReportRevisionHistoryOrigin,
         prior_revision_identity: Option<ReportRevisionId>,
         prior_record_digest: Option<ContentDigest>,
         timestamp_unix_ms: u64,
@@ -2155,7 +1846,6 @@ fn report_revision_record_digest(
         revision_identity,
         document_id,
         revision,
-        history_origin,
         prior_revision_identity,
         prior_record_digest,
         timestamp_unix_ms,
@@ -2209,8 +1899,6 @@ pub enum ReportError {
     NilIdentity,
     #[error("unsupported report document schema version {0}")]
     UnsupportedSchemaVersion(u16),
-    #[error("schema version {version} cannot be migrated without fabricating audit history")]
-    UnsafeLegacyMigration { version: u16 },
     #[error("invalid {field}: {message}")]
     InvalidValue {
         field: &'static str,

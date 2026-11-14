@@ -1100,9 +1100,23 @@ fn serde_rejects_broken_receipts_nil_ids_and_unsupported_versions() {
     nil["pages"][0]["id"] = serde_json::json!(Uuid::nil());
     assert!(serde_json::from_value::<ReportDocument>(nil).is_err());
 
-    let mut future = value;
-    future["schema_version"] = serde_json::json!(u16::MAX);
-    assert!(serde_json::from_value::<ReportDocument>(future).is_err());
+    for version in (0..ReportDocument::SCHEMA_VERSION).chain([u16::MAX]) {
+        let mut other = value.clone();
+        other["schema_version"] = serde_json::json!(version);
+        let mut without_history = other.clone();
+        without_history
+            .as_object_mut()
+            .unwrap()
+            .remove("revision_history");
+        for refused in [other, without_history] {
+            assert_eq!(
+                serde_json::from_value::<ReportDocument>(refused)
+                    .unwrap_err()
+                    .to_string(),
+                ReportError::UnsupportedSchemaVersion(version).to_string()
+            );
+        }
+    }
 }
 
 #[test]
@@ -1264,75 +1278,6 @@ fn frozen_plot_is_publishable_without_inventory_and_artifact_changes_affect_audi
 }
 
 #[test]
-fn version_one_initial_snapshots_migrate_without_fabricating_history() {
-    let page = ReportPage {
-        id: ReportPageId::new(),
-        created_at_document_revision: ObjectRevision::INITIAL,
-        revision: ObjectRevision::INITIAL,
-        title: "Imported page".to_owned(),
-        update_policy: ReportPageUpdatePolicy::RefreshLinkedAutomatically,
-        inclusion: ReportPageInclusion::Included,
-        evidence_binding: ReportPageEvidenceBinding::Unbound,
-        blocked_gate_text_policy: ReportBlockedGateTextPolicy::VerbatimFromSource,
-        sections: vec![ReportSection {
-            id: ReportSectionId::new(),
-            created_at_document_revision: ObjectRevision::INITIAL,
-            revision: ObjectRevision::INITIAL,
-            title: "Imported section".to_owned(),
-            blocks: vec![ReportBlock {
-                id: ReportBlockId::new(),
-                created_at_document_revision: ObjectRevision::INITIAL,
-                revision: ObjectRevision::INITIAL,
-                enabled: true,
-                kind: all_block_kinds().remove(5),
-            }],
-        }],
-    };
-    let legacy = ReportDocument {
-        schema_version: 1,
-        id: ResultDocumentId::new(),
-        revision: ObjectRevision::INITIAL,
-        title: "Legacy report".to_owned(),
-        template: ReportTemplate::ReleaseVerification42,
-        output_formats: ReportOutputFormats::default(),
-        publication_profile: ReportPublicationProfile::default(),
-        pages: vec![page],
-        receipts: Vec::new(),
-        tombstones: Vec::new(),
-        legacy_origin_entities: Vec::new(),
-        revision_history: ReportRevisionHistory {
-            origin: ReportRevisionHistoryOrigin::Native,
-            records: Vec::new(),
-        },
-    };
-    let mut legacy_value = serde_json::to_value(&legacy).unwrap();
-    legacy_value
-        .as_object_mut()
-        .unwrap()
-        .remove("revision_history");
-    let mut migrated: ReportDocument = serde_json::from_value(legacy_value).unwrap();
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-    assert_eq!(migrated.legacy_origin_entities.len(), 3);
-    migrated
-        .transact(
-            migrated.revision(),
-            vec![ReportEdit::SetDocumentTitle {
-                title: "Migrated report".to_owned(),
-            }],
-            80,
-        )
-        .unwrap();
-
-    let mut unsafe_legacy = serde_json::to_value(&legacy).unwrap();
-    unsafe_legacy
-        .as_object_mut()
-        .unwrap()
-        .remove("revision_history");
-    unsafe_legacy["revision"] = serde_json::json!(2);
-    assert!(serde_json::from_value::<ReportDocument>(unsafe_legacy).is_err());
-}
-
-#[test]
 fn revision_history_chains_every_native_revision() {
     let mut document = ReportDocument::new("Verification report").unwrap();
     let initial_id = document.revision_history().records()[0].revision_identity();
@@ -1360,10 +1305,6 @@ fn revision_history_chains_every_native_revision() {
         .unwrap();
 
     let records = document.revision_history().records();
-    assert_eq!(
-        document.revision_history().origin(),
-        ReportRevisionHistoryOrigin::Native
-    );
     assert_eq!(records.len(), 3);
     assert_eq!(records[0].prior_revision_identity(), None);
     assert_eq!(records[1].prior_revision_identity(), Some(initial_id));
@@ -1430,11 +1371,6 @@ fn revision_history_deserialization_fails_closed_on_source_or_chain_tampering() 
     changed_actor["revision_history"]["records"][1]["actor"] = serde_json::json!("other-actor");
     assert!(serde_json::from_value::<ReportDocument>(changed_actor).is_err());
 
-    let mut falsified_origin = value.clone();
-    falsified_origin["revision_history"]["origin"] =
-        serde_json::json!("imported-schema-one-baseline");
-    assert!(serde_json::from_value::<ReportDocument>(falsified_origin).is_err());
-
     let mut broken_chain = value.clone();
     broken_chain["revision_history"]["records"][1]["prior_revision_identity"] =
         serde_json::json!(ReportRevisionId::new());
@@ -1444,181 +1380,16 @@ fn revision_history_deserialization_fails_closed_on_source_or_chain_tampering() 
     unknown_current_field["future_history_contract"] = serde_json::json!({"version": 4});
     assert!(serde_json::from_value::<ReportDocument>(unknown_current_field).is_err());
 
-    let mut missing_history = value;
+    let mut missing_history = value.clone();
     missing_history
         .as_object_mut()
         .unwrap()
         .remove("revision_history");
     assert!(serde_json::from_value::<ReportDocument>(missing_history).is_err());
 
-    let mut downgraded_with_null_history = serde_json::to_value(&document).unwrap();
-    downgraded_with_null_history["schema_version"] = serde_json::json!(2);
-    downgraded_with_null_history["revision_history"] = serde_json::Value::Null;
-    assert!(serde_json::from_value::<ReportDocument>(downgraded_with_null_history).is_err());
-}
-
-#[test]
-fn schema_two_migration_retains_an_explicit_current_source_baseline() {
-    let (document, _, _) = document_with_section();
-    assert_eq!(document.revision().get(), 3);
-    let expected_pages = document.pages().to_vec();
-    let expected_receipts = document.receipts().to_vec();
-    let mut schema_two = serde_json::to_value(&document).unwrap();
-    schema_two["schema_version"] = serde_json::json!(2);
-    schema_two
-        .as_object_mut()
-        .unwrap()
-        .remove("revision_history");
-
-    let first_migration: ReportDocument = serde_json::from_value(schema_two.clone()).unwrap();
-    let second_migration: ReportDocument = serde_json::from_value(schema_two).unwrap();
-    assert_eq!(first_migration, second_migration);
-    assert_eq!(
-        serde_json::to_vec(&first_migration).unwrap(),
-        serde_json::to_vec(&second_migration).unwrap()
-    );
-    let mut migrated = first_migration;
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-    assert_eq!(migrated.pages(), expected_pages);
-    assert_eq!(migrated.receipts(), expected_receipts);
-    assert_eq!(
-        migrated.revision_history().origin(),
-        ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline
-    );
-    assert_eq!(migrated.revision_history().records().len(), 1);
-    assert_eq!(
-        migrated.revision_history().records()[0].revision(),
-        migrated.revision()
-    );
-
-    migrated
-        .transact_with_context(
-            migrated.revision(),
-            vec![ReportEdit::SetDocumentTitle {
-                title: "Migrated and edited".to_owned(),
-            }],
-            300,
-            "migration-reviewer",
-            "Continue editing from imported baseline",
-        )
-        .unwrap();
-    assert_eq!(migrated.revision_history().records().len(), 2);
-    assert_eq!(
-        migrated.revision_history().records()[1].prior_revision_identity(),
-        Some(migrated.revision_history().records()[0].revision_identity())
-    );
-}
-
-#[test]
-fn schema_three_migration_preserves_authenticated_default_page_policies() {
-    let (document, _, _) = document_with_section();
-    let mut schema_three = serde_json::to_value(&document).unwrap();
-    schema_three["schema_version"] = serde_json::json!(3);
-
-    let migrated: ReportDocument = serde_json::from_value(schema_three).unwrap();
-
-    assert_eq!(migrated, document);
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-    for page in migrated.pages() {
-        assert_eq!(page.inclusion(), ReportPageInclusion::Included);
-        assert_eq!(page.evidence_binding(), ReportPageEvidenceBinding::Unbound);
-        assert_eq!(
-            page.blocked_gate_text_policy(),
-            ReportBlockedGateTextPolicy::VerbatimFromSource
-        );
-    }
-}
-
-#[test]
-fn schema_three_migration_rejects_mislabeled_schema_four_page_policies() {
-    let (mut document, page_id, _) = document_with_section();
-    let page_revision = document.page(page_id).unwrap().revision();
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::SetPageInclusion {
-                page_id,
-                expected_page_revision: page_revision,
-                inclusion: ReportPageInclusion::AppendixOnly,
-            }],
-            74,
-        )
-        .unwrap();
-    let mut mislabeled = serde_json::to_value(document).unwrap();
-    mislabeled["schema_version"] = serde_json::json!(3);
-
-    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
-}
-
-#[test]
-fn schema_four_migration_preserves_authenticated_default_block_inclusion() {
-    let (mut document, _, section_id) = document_with_section();
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::AddBlock {
-                section_id,
-                kind: ReportBlockKind::Prose(ProseBlock {
-                    style: ProseStyle::Method,
-                    markdown: "Retained schema-four block.".to_owned(),
-                }),
-            }],
-            78,
-        )
-        .unwrap();
-    let mut schema_four = serde_json::to_value(&document).unwrap();
-    schema_four["schema_version"] = serde_json::json!(4);
-
-    let migrated: ReportDocument = serde_json::from_value(schema_four).unwrap();
-
-    assert_eq!(migrated, document);
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-    assert!(
-        migrated
-            .pages()
-            .iter()
-            .flat_map(|page| page.sections())
-            .flat_map(|section| section.blocks())
-            .all(ReportBlock::enabled)
-    );
-}
-
-#[test]
-fn schema_four_migration_rejects_mislabeled_disabled_blocks() {
-    let (mut document, _, section_id) = document_with_section();
-    let receipt = document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::AddBlock {
-                section_id,
-                kind: ReportBlockKind::Prose(ProseBlock {
-                    style: ProseStyle::Warning,
-                    markdown: "Disabled only in schema five.".to_owned(),
-                }),
-            }],
-            79,
-        )
-        .unwrap();
-    let block_id = match receipt.created[0] {
-        ReportEntityRef::Block(id) => id,
-        _ => unreachable!(),
-    };
-    let block_revision = document.block(block_id).unwrap().revision();
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::SetBlockEnabled {
-                block_id,
-                expected_block_revision: block_revision,
-                enabled: false,
-            }],
-            80,
-        )
-        .unwrap();
-    let mut mislabeled = serde_json::to_value(document).unwrap();
-    mislabeled["schema_version"] = serde_json::json!(4);
-
-    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
+    let mut null_history = value;
+    null_history["revision_history"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<ReportDocument>(null_history).is_err());
 }
 
 #[test]
@@ -1688,131 +1459,6 @@ fn report_rejects_disabling_every_output_format_atomically() {
         })
     ));
     assert_eq!(document, before);
-}
-
-#[test]
-fn schema_five_migration_preserves_authenticated_default_publication_policy() {
-    let document = ReportDocument::new("Schema five report").unwrap();
-    let mut schema_five = serde_json::to_value(&document).unwrap();
-    schema_five["schema_version"] = serde_json::json!(5);
-
-    let migrated: ReportDocument = serde_json::from_value(schema_five).unwrap();
-
-    assert_eq!(migrated, document);
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-    assert_eq!(migrated.output_formats(), ReportOutputFormats::default());
-    assert_eq!(
-        migrated.publication_profile(),
-        ReportPublicationProfile::default()
-    );
-}
-
-#[test]
-fn schema_five_migration_rejects_mislabeled_publication_policy() {
-    let mut document = ReportDocument::new("Schema six report").unwrap();
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::SetOutputFormats {
-                output_formats: ReportOutputFormats {
-                    selected_csv: true,
-                    ..ReportOutputFormats::default()
-                },
-            }],
-            83,
-        )
-        .unwrap();
-    let mut mislabeled = serde_json::to_value(document).unwrap();
-    mislabeled["schema_version"] = serde_json::json!(5);
-
-    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
-}
-
-#[test]
-fn schema_six_migration_preserves_reports_without_figure_locators() {
-    let document = ReportDocument::new("Schema six report").unwrap();
-    let mut schema_six = serde_json::to_value(&document).unwrap();
-    schema_six["schema_version"] = serde_json::json!(6);
-
-    let migrated: ReportDocument = serde_json::from_value(schema_six).unwrap();
-
-    assert_eq!(migrated, document);
-    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
-}
-
-#[test]
-fn schema_six_migration_rejects_mislabeled_figure_locator() {
-    let (mut document, _, section_id) = document_with_section();
-    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 91);
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::AddBlock {
-                section_id,
-                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
-                    caption: "Exact pane".to_owned(),
-                    alternative_text: "One exact linked visualization pane.".to_owned(),
-                    sizing: FigureSizing::FitWidth,
-                    source_locator: Some(ReportFigureSourceLocator {
-                        page_id: 1,
-                        pane_id: 2,
-                    }),
-                    reference: ReportReferenceMode::Linked { snapshot },
-                }),
-            }],
-            92,
-        )
-        .unwrap();
-    let mut mislabeled = serde_json::to_value(document).unwrap();
-    mislabeled["schema_version"] = serde_json::json!(6);
-
-    let error = serde_json::from_value::<ReportDocument>(mislabeled).unwrap_err();
-
-    assert!(error.to_string().contains("schema version 6"));
-}
-
-#[test]
-fn schema_six_migration_rejects_linked_figure_without_inventing_a_locator() {
-    fn clear_figure_locators(page: &mut ReportPage) {
-        for section in &mut page.sections {
-            for block in &mut section.blocks {
-                if let ReportBlockKind::PlotFigure(figure) = &mut block.kind {
-                    figure.source_locator = None;
-                }
-            }
-        }
-    }
-
-    let (mut document, _, section_id) = document_with_section();
-    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 93);
-    document
-        .transact(
-            document.revision(),
-            vec![ReportEdit::AddBlock {
-                section_id,
-                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
-                    caption: "Legacy linked figure".to_owned(),
-                    alternative_text: "A schema-six link has no exact pane identity.".to_owned(),
-                    sizing: FigureSizing::FitWidth,
-                    source_locator: Some(ReportFigureSourceLocator {
-                        page_id: 1,
-                        pane_id: 1,
-                    }),
-                    reference: ReportReferenceMode::Linked { snapshot },
-                }),
-            }],
-            94,
-        )
-        .unwrap();
-    document.schema_version = 6;
-    for page in &mut document.pages {
-        clear_figure_locators(page);
-    }
-
-    assert!(matches!(
-        document.migrate(),
-        Err(ReportError::UnsafeLegacyMigration { version: 6 })
-    ));
 }
 
 #[test]
