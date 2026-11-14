@@ -8908,8 +8908,9 @@ instance.validate_parameters().unwrap();
 /// the body assigned it. A variable an event body writes but the body
 /// recomputes before every read is not history, nor is one only the initial
 /// step sets from parameters, which harmonic balance evaluates once, nor one
-/// assigned under every parameter test that guards its reads, however many
-/// merges decide it. A `ddt` that is not the
+/// assigned under every test that guards its reads: a parameter test however
+/// many merges decide it, or a bias test one evaluation repeats on the same
+/// values in a body without loops. A `ddt` that is not the
 /// derivative of a contributed charge, and every `idt`, is a site harmonic
 /// balance carries as an unknown of its own, listed in site order; one only a
 /// bias-dependent branch reads is still evaluated on every sample.
@@ -9013,6 +9014,36 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
              if (a10 > 0) m = exp(V(p,n)); \
              if (a10 > 1) I(p,n) <+ 1e-3*m; else I(p,n) <+ V(p,n);",
             None,
+            "",
+        ),
+        // Assigned and read under one bias test of the same values (BSIM-CMG
+        // 107's `T3`): one evaluation takes both branches alike.
+        (
+            14,
+            "real t;",
+            "if (V(p,n) > 0.1) t = V(p,n)*V(p,n); \
+             if (V(p,n) > 0.1) I(p,n) <+ t; else I(p,n) <+ V(p,n);",
+            None,
+            "",
+        ),
+        // The same test of a different value decides nothing about the first.
+        (
+            15,
+            "real t, x;",
+            "x = V(p,n); if (x > 0.1) t = x*x; x = V(p,n) - 0.2; \
+             if (x > 0.1) I(p,n) <+ t; else I(p,n) <+ V(p,n);",
+            Some("`t` is read before it is assigned on a path its parameters do not rule out"),
+            "",
+        ),
+        // A body with a loop computes a value more than once an evaluation,
+        // so no two of its tests are taken alike.
+        (
+            16,
+            "parameter integer count = 2; integer i; real s, t;",
+            "s = 0.0; for (i = 0; i < count; i = i + 1) s = s + V(p,n); \
+             if (V(p,n) > 0.1) t = V(p,n)*V(p,n); \
+             if (V(p,n) > 0.1) I(p,n) <+ t + 1e-3*s; else I(p,n) <+ V(p,n);",
+            Some("`t` is read before it is assigned on a path its parameters do not rule out"),
             "",
         ),
     ] {

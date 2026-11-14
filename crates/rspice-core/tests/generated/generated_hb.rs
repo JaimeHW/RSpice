@@ -283,6 +283,13 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 bsimcmg108\n",
             "d",
         ),
+        #[cfg(feature = "veriloga-model-bsimcmg107")]
+        (
+            "FinFET (BSIM-CMG 107)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 bsimcmg107\n",
+            "d",
+        ),
         #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
         (
             "UTBB FD-SOI MOSFET (L-UTSOI)",
@@ -802,12 +809,11 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// A generated model whose generator could not prove its residual
-/// `F(x) + dQ(x)/dt` is refused before solving, by instance and module, with
-/// the generator's reason: a variable read before the body assigns it on a
-/// path its parameters do not rule out (BSIM-CMG 107). So is one whose
-/// harmonics no settled transient has confirmed, with what is missing
-/// (BSIM-SOI 4.6.1 and e2aff994).
+/// A generated model whose harmonics no settled transient has confirmed is
+/// refused before solving, by instance and module, with what is missing
+/// (BSIM-SOI 4.6.1 and e2aff994), as one whose generator could not prove its
+/// residual `F(x) + dQ(x)/dt` is with the generator's reason; the generator
+/// proves every shipped model's.
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
     let failures: Vec<String> = refused_models()
@@ -824,15 +830,6 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
 /// ends with.
 fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     vec![
-        #[cfg(feature = "veriloga-model-bsimcmg107")]
-        (
-            "XM d d 0 0 bsimcmg107",
-            "XM",
-            "bsimcmg107",
-            "`T3` is read before it is assigned on a path its parameters do not rule out, so it \
-             keeps its value from the last accepted time point, which no harmonic-balance \
-             spectrum carries",
-        ),
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         (
             "XM d d 0 0 0 t bsimsoi__e2aff994",
@@ -927,25 +924,15 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Shooting refuses the generated models harmonic balance refuses, before
-/// solving, by instance and module, with the generator's reason, one with a
-/// site harmonic balance carries as an unknown of its own (the ASM-ESD
-/// diode), and one whose source branch stores flux at its parameters, with
-/// that reason, each with shooting's own token.
+/// Shooting refuses before solving, by instance and module, a generated
+/// model with a site harmonic balance carries as an unknown of its own (the
+/// ASM-ESD diode) and one whose source branch stores flux at its parameters,
+/// each with its reason and shooting's own token.
 #[test]
 fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
     use rspice_core::{SimulationError, UnsupportedCapabilityError};
     let cases: Vec<(&str, &str, &str, &str)> = vec![
-        #[cfg(feature = "veriloga-model-bsimcmg107")]
-        (
-            "XM d d 0 0 bsimcmg107",
-            "XM",
-            "bsimcmg107",
-            "`T3` is read before it is assigned on a path its parameters do not rule out, so it \
-             keeps its value from the last accepted time point, which no harmonic-balance \
-             spectrum carries",
-        ),
         #[cfg(feature = "veriloga-model-asmesd-dio")]
         ("XA d 0 asmesd_dio", "XA", "asmesd_dio", CARRIED_SITE),
         // A 1 mH drain inductance, whose current the period map would miss:

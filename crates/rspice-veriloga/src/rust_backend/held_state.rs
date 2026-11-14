@@ -20,7 +20,12 @@
 //! atoms (canonical comparisons and other static booleans) decides every
 //! instance-static branch, at every evaluation. `@(initial_step)` and
 //! `@(final_step)` are two atoms of their own, true at one evaluation each.
-//! A branch on anything else may go either way at each evaluation.
+//! A branch on anything else may go either way at each evaluation, except
+//! that in a body without loops, where one evaluation computes each value
+//! once, two branches on one test of the same values go the same way: each
+//! such repeated test is an atom of its own for that evaluation, and every
+//! formula that compares evaluations, or asks what σ fixes, has those atoms
+//! quantified out.
 //!
 //! The formula `P(B)` over those atoms holds for every σ under which block
 //! `B` may run. It is exact in σ, with every other branch free, and is held
@@ -254,6 +259,8 @@ enum Key {
     /// Any other pure operator, by its whole description: two of them are
     /// one only when they are written alike.
     Other(String),
+    /// Any other operator an evaluation applies, over its operands' keys.
+    Evaluated(String, Vec<u32>),
     /// A merge, which is its own identity.
     Merge(ValueId),
     /// A real used as a condition.
@@ -369,6 +376,14 @@ pub(super) struct HeldStateProof<'a> {
     /// Per value, the σ under which it can reach a residual (see
     /// [`Self::compute_influence`]); empty until the first classification.
     influence: Vec<u32>,
+    /// The atoms of conditions one evaluation decides, each tested by more
+    /// than one branch ([`Self::correlate_repeated_conditions`]).
+    evaluation_atoms: Vec<u32>,
+    /// Each repeated condition's structural key and its atom.
+    evaluation_atom_of: HashMap<u32, u32>,
+    /// The structural key of every value an evaluation computes, from its
+    /// operands' keys down to the values it reads.
+    evaluation_key_of: Vec<Option<u32>>,
 }
 
 impl<'a> HeldStateProof<'a> {
@@ -377,7 +392,190 @@ impl<'a> HeldStateProof<'a> {
     pub(super) fn new(function: &'a CfgFunction) -> Option<Self> {
         let mut proof = Self::skeleton(function);
         proof.solve().ok()?;
+        proof.correlate_repeated_conditions().ok()?;
         Some(proof)
+    }
+
+    /// Give each condition an evaluation decides, and more than one branch
+    /// tests, an atom of its own, so the branches agree within one
+    /// evaluation.
+    ///
+    /// BSIM-CMG 107 assigns `T3 = pow(T2, 2.0)` under `if ((F0-z2) >
+    /// -0.3/T14)` and reads `T3` further down under the same test of the
+    /// same values; with each test free, the read seemed to reach the kept
+    /// `T3`. Two tests that compute one structure from the same values agree
+    /// at every evaluation in a body without loops, where each value is
+    /// computed once. A body with a loop keeps every such test free, and a
+    /// test made once is free either way. The atoms describe one evaluation,
+    /// so every formula compared across evaluations, and every selection
+    /// tested for being fixed, has them quantified out
+    /// ([`Self::across_evaluations`]).
+    fn correlate_repeated_conditions(&mut self) -> Proved<()> {
+        let order = self.reverse_postorder();
+        let mut position = vec![usize::MAX; self.function.blocks.len()];
+        for (rank, &block) in order.iter().enumerate() {
+            position[block] = rank;
+        }
+        if self
+            .edges
+            .iter()
+            .any(|edge| position[edge.to] <= position[edge.from])
+        {
+            return Ok(());
+        }
+        let mut tested: HashMap<u32, usize> = HashMap::new();
+        let mut leaves = Vec::new();
+        for block in &self.function.blocks {
+            if let CfgTerminator::Branch { condition, .. } = &block.terminator {
+                leaves.clear();
+                self.evaluation_conditions(*condition, &mut leaves);
+                for &leaf in &leaves {
+                    let key = self.evaluation_key(leaf);
+                    *tested.entry(key).or_default() += 1;
+                }
+            }
+        }
+        let mut repeated: Vec<u32> = tested
+            .into_iter()
+            .filter(|&(_, count)| count > 1)
+            .map(|(key, _)| key)
+            .collect();
+        if repeated.is_empty() {
+            return Ok(());
+        }
+        repeated.sort_unstable();
+        for key in repeated {
+            let atom = self.next_atom;
+            self.next_atom = self.next_atom.checked_add(1).ok_or(Exhausted)?;
+            self.evaluation_atom_of.insert(key, atom);
+            self.evaluation_atoms.push(atom);
+        }
+        self.truth.clear();
+        self.compute_reach()
+    }
+
+    /// The tests a branch on `condition` makes that an evaluation decides:
+    /// the condition itself, or the operands of its `!`, `&&` and `||`.
+    fn evaluation_conditions(&self, condition: ValueId, leaves: &mut Vec<ValueId>) {
+        if self.instance_static[usize::from(condition)] {
+            return;
+        }
+        match &self.function.value(condition).kind {
+            CfgValueKind::Unary {
+                op: CfgUnaryOp::Not,
+                input,
+            } => self.evaluation_conditions(*input, leaves),
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::And | CfgBinaryOp::Or,
+                left,
+                right,
+            } => {
+                self.evaluation_conditions(*left, leaves);
+                self.evaluation_conditions(*right, leaves);
+            }
+            CfgValueKind::Analysis(name)
+                if is_step(name, "__rspice_initial_step") || is_step(name, "__rspice_final_step") => {}
+            _ => leaves.push(condition),
+        }
+    }
+
+    /// The structural identity of a value one evaluation computes: an
+    /// instance-static value's own key, a pure operator over its operands'
+    /// identities, and anything else (a probe, a merge, a call) itself.
+    fn evaluation_key(&mut self, root: ValueId) -> u32 {
+        if let Some(key) = self.evaluation_key_of[usize::from(root)] {
+            return key;
+        }
+        let function = self.function;
+        let mut stack = vec![(root, false)];
+        while let Some((value, expanded)) = stack.pop() {
+            if self.evaluation_key_of[usize::from(value)].is_some() {
+                continue;
+            }
+            let kind = &function.value(value).kind;
+            if self.instance_static[usize::from(value)] {
+                let key = self.key(value);
+                self.evaluation_key_of[usize::from(value)] = Some(key);
+                continue;
+            }
+            let pure = static_kind(kind) && !matches!(kind, CfgValueKind::BlockParameter);
+            if pure && !expanded {
+                stack.push((value, true));
+                for operand in kind.operands() {
+                    if self.evaluation_key_of[usize::from(operand)].is_none() {
+                        stack.push((operand, false));
+                    }
+                }
+                continue;
+            }
+            let operand =
+                |proof: &Self, id: &ValueId| proof.evaluation_key_of[usize::from(*id)].unwrap_or(0);
+            let key = if !pure {
+                Key::Merge(value)
+            } else {
+                match kind {
+                    CfgValueKind::Unary { op, input } => Key::Unary(*op, operand(self, input)),
+                    CfgValueKind::Binary { op, left, right } => {
+                        let (left, right) = (operand(self, left), operand(self, right));
+                        match op {
+                            CfgBinaryOp::Gt => Key::Binary(CfgBinaryOp::Lt, right, left),
+                            CfgBinaryOp::Ge => Key::Binary(CfgBinaryOp::Le, right, left),
+                            CfgBinaryOp::Add
+                            | CfgBinaryOp::Mul
+                            | CfgBinaryOp::Min
+                            | CfgBinaryOp::Max
+                            | CfgBinaryOp::Hypot
+                            | CfgBinaryOp::Eq
+                            | CfgBinaryOp::Ne
+                            | CfgBinaryOp::And
+                            | CfgBinaryOp::Or => Key::Binary(*op, left.min(right), left.max(right)),
+                            _ => Key::Binary(*op, left, right),
+                        }
+                    }
+                    CfgValueKind::Select {
+                        condition,
+                        then_value,
+                        else_value,
+                    } => Key::Select(
+                        operand(self, condition),
+                        operand(self, then_value),
+                        operand(self, else_value),
+                    ),
+                    other => Key::Evaluated(
+                        match other {
+                            CfgValueKind::SumProductsDiv { .. } => "SumProductsDiv".to_owned(),
+                            CfgValueKind::IntegerArithmetic { op, .. } => {
+                                format!("IntegerArithmetic {op:?}")
+                            }
+                            CfgValueKind::IntegerBitwise { op, .. } => {
+                                format!("IntegerBitwise {op:?}")
+                            }
+                            CfgValueKind::IntegerBitwiseNot { .. } => {
+                                "IntegerBitwiseNot".to_owned()
+                            }
+                            // Written alike, operands included, or not one.
+                            _ => format!("{other:?}"),
+                        },
+                        other
+                            .operands()
+                            .iter()
+                            .map(|id| operand(self, id))
+                            .collect(),
+                    ),
+                }
+            };
+            let key = self.intern(key);
+            self.evaluation_key_of[usize::from(value)] = Some(key);
+        }
+        self.evaluation_key_of[usize::from(root)].unwrap_or(0)
+    }
+
+    /// `f` with every evaluation atom free: what holds across evaluations.
+    fn across_evaluations(&mut self, mut f: u32) -> Proved<u32> {
+        for position in 0..self.evaluation_atoms.len() {
+            f = self.diagram.exists(f, self.evaluation_atoms[position])?;
+        }
+        Ok(f)
     }
 
     fn skeleton(function: &'a CfgFunction) -> Self {
@@ -454,6 +652,9 @@ impl<'a> HeldStateProof<'a> {
             reach: vec![FALSE; blocks],
             edge_reach: vec![FALSE; edges.len()],
             influence: Vec::new(),
+            evaluation_atoms: Vec::new(),
+            evaluation_atom_of: HashMap::new(),
+            evaluation_key_of: vec![None; function.values.len()],
             edges,
         }
     }
@@ -530,6 +731,8 @@ impl<'a> HeldStateProof<'a> {
             if reach == FALSE {
                 continue;
             }
+            // A choice one evaluation's own tests make is fixed by no σ.
+            reach = self.across_evaluations(reach)?;
             if across_evaluations {
                 reach = self.diagram.any_step(reach)?;
             }
@@ -707,7 +910,9 @@ impl<'a> HeldStateProof<'a> {
 
     /// An over-approximation of the σ under which `value` is `polarity`:
     /// exact for an instance-static condition, each step atom for its step,
-    /// and true for anything an evaluation decides.
+    /// its evaluation atom for a test one evaluation repeats
+    /// ([`Self::correlate_repeated_conditions`]), and true for anything else
+    /// an evaluation decides.
     fn truth(&mut self, value: ValueId, polarity: bool) -> Proved<u32> {
         if let Some(&known) = self.truth.get(&(value, polarity)) {
             return Ok(known);
@@ -757,6 +962,20 @@ impl<'a> HeldStateProof<'a> {
                         self.diagram.and(left, right)?
                     } else {
                         self.diagram.or(left, right)?
+                    }
+                }
+                _ if !self.evaluation_atoms.is_empty() => {
+                    let key = self.evaluation_key(value);
+                    match self.evaluation_atom_of.get(&key).copied() {
+                        Some(atom) => {
+                            let atom = self.diagram.atom(atom)?;
+                            if polarity {
+                                atom
+                            } else {
+                                self.diagram.not(atom)?
+                            }
+                        }
+                        None => TRUE,
                     }
                 }
                 _ => TRUE,
@@ -1054,8 +1273,10 @@ impl<'a> HeldStateProof<'a> {
         for &leaf in leaves {
             reads = self.diagram.or(reads, self.influence[usize::from(leaf)])?;
         }
+        let reads = self.across_evaluations(reads)?;
         let steady_reads = self.diagram.steady(reads)?;
         let assigned = self.assigned_formula(&carriers, &leaf_set, candidate)?;
+        let assigned = self.across_evaluations(assigned)?;
         let before_final = self.diagram.restrict(assigned, FINAL_STEP, false)?;
         let ever_assigned = self.diagram.exists(before_final, INITIAL_STEP)?;
         if !self.possible(steady_reads, ever_assigned)? {
