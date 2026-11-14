@@ -345,12 +345,12 @@ impl XspiceEventScheduler {
             .map(|(at, instance)| (instance, at.seconds()))
     }
 
-    /// The circuit net the earliest pending event writes.
+    /// Every circuit net an event at the earliest pending instant writes.
     #[doc(hidden)]
-    pub fn next_event_node(&self) -> Option<usize> {
+    pub fn next_event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.inner
-            .next_instant_target()
-            .map(|(_, target)| self.inner.target(target).node_id)
+            .next_instant_targets()
+            .map(|target| self.inner.target(target).node_id)
     }
 
     /// Whether an event is pending at or before the given time.

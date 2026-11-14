@@ -375,25 +375,48 @@ impl CircuitData {
 
     /// Whether the next code-model activation is a landing only
     /// ([`crate::numerics::integration::BreakpointManager::replace_landings`]):
-    /// the circuit runs no HDL, and the net the earliest event writes reaches
-    /// no instance that drives an analog output. Evaluating the readers there
-    /// changes no analog equation, so there is nothing to restart; the step
-    /// after it is the one the controller proposes, as ngspice runs an event
-    /// that reaches no analog breakpoint between its timepoints.
+    /// no net an event at that instant writes reaches an instance that drives
+    /// an analog output, and no mixed module shares one. Evaluating the
+    /// readers there changes no analog equation, so there is nothing to
+    /// restart; the step after it is the one the controller proposes, as
+    /// ngspice runs an event that reaches no analog breakpoint between its
+    /// timepoints.
+    ///
+    /// Every event at the instant answers, not only the first: two clocks
+    /// edging together, one into a process and one into a D/A bridge, step
+    /// an analog input there whichever the queue holds first. A net a module
+    /// shares wakes its processes, which may step a drive the analog side
+    /// reads at that instant, so its events restart. A coupled queue's events
+    /// are still exact landings (`ActivationLanes::landing`); this only says
+    /// which of them restart.
     pub(crate) fn next_xspice_activation_is_landing(&mut self) -> bool {
-        #[cfg(feature = "veriloga")]
-        if !self.mixed_signal_hosts.is_empty() || self.scheduler.mixed_digital_coordinator.is_some()
+        if self
+            .scheduler
+            .xspice_event_queue
+            .next_event_time()
+            .is_none()
         {
             return false;
         }
-        let Some(node) = self.scheduler.xspice_event_queue.next_event_node() else {
+        self.ensure_xspice_event_dispatch();
+        let Some(dispatch) = self.scheduler.xspice_event_dispatch.as_ref() else {
             return false;
         };
-        self.ensure_xspice_event_dispatch();
+        #[cfg(feature = "veriloga")]
+        let shared = |node: usize| {
+            self.scheduler
+                .mixed_xspice_bindings
+                .as_deref()
+                .is_some_and(|bindings| {
+                    bindings.contains_node(node) || bindings.contains_real_node(node)
+                })
+        };
+        #[cfg(not(feature = "veriloga"))]
+        let shared = |_: usize| false;
         self.scheduler
-            .xspice_event_dispatch
-            .as_ref()
-            .is_some_and(|dispatch| !dispatch.event_reaches_analog_output(node))
+            .xspice_event_queue
+            .next_event_nodes()
+            .all(|node| !shared(node) && !dispatch.event_reaches_analog_output(node))
     }
 
     /// Build the sensitivity map if it is not cached, so that later code can

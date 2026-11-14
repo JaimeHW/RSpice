@@ -1399,6 +1399,26 @@ impl EventQueues {
             .map(|event| (event.at, event.target))
     }
 
+    /// The driver of every live event dated at `at`, in neither tier's
+    /// order. A scan of both tiers, so it is for a question asked once per
+    /// accepted point rather than once per event.
+    fn targets_at(&self, at: Instant) -> impl Iterator<Item = TargetId> + '_ {
+        let slot = self
+            .slot
+            .iter()
+            .flatten()
+            .filter(move |event| event.at == at);
+        let future = self
+            .future
+            .iter()
+            .map(|Reverse(queued)| &queued.0)
+            .filter(move |event| {
+                event.at == at
+                    && (self.cancelled.is_empty() || !self.cancelled.contains(&event.sequence))
+            });
+        slot.chain(future).map(|event| event.target)
+    }
+
     /// [`Self::future_min_instant`] with the driver that event names.
     fn future_min_event(&self) -> Option<(Instant, TargetId)> {
         self.future
@@ -1713,6 +1733,14 @@ impl EventScheduler {
             (Some(slot), Some(future)) => Some(if future.0 < slot.0 { future } else { slot }),
             (slot, future) => slot.or(future),
         }
+    }
+
+    /// The driver of every event at [`Self::next_instant`], however many
+    /// share it.
+    pub(crate) fn next_instant_targets(&self) -> impl Iterator<Item = TargetId> + '_ {
+        self.next_instant()
+            .into_iter()
+            .flat_map(|at| self.queues.targets_at(at))
     }
 
     /// [`Self::next_instant_target`], resolved to the driver's own identity.

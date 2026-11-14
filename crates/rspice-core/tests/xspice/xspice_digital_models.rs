@@ -5613,3 +5613,54 @@ fn a_lookup_table_behind_an_oscillator_takes_the_steps_of_the_same_pulse_edge() 
         );
     }
 }
+
+/// Two oscillators edge together: one into nothing analog, one into a D/A
+/// bridge. Every edge steps the bridge's ramp, so every edge restarts the
+/// integrator, whichever oscillator's event the queue holds first; the deck
+/// is stepped as the bridged oscillator alone is, bit for bit, in either card
+/// order. The landing rule used to read only the first event of an instant,
+/// so with the idle oscillator first each ramp began on a landing that kept
+/// the integration order and the step across it.
+#[test]
+fn an_idle_clock_edging_with_a_bridged_one_leaves_its_edges_restarts() {
+    let oscillator = |name: &str, node: &str| {
+        format!(
+            "{name} cntl {node} osc1\n.model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] \
+             duty_cycle=0.5 init_phase=0 rise_delay=1e-10 fall_delay=1e-10)\n"
+        )
+    };
+    let bridged = format!(
+        "{}abr [cb] [dd] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n",
+        oscillator("aoscb", "cb")
+    );
+    let idle = "aosca cntl ca osc1\n";
+    let deck = |cards: &str| {
+        format!("* two clocks\nvc cntl 0 0.5\n{cards}r1 dd out 1k\nc1 out 0 1p\n.end\n")
+    };
+    let run = |prefix: &str, cards: &str| {
+        let result = run_temp_deck(prefix, "", &deck(cards), 20.0e-6, 400.0e-9);
+        let out = result.node_index_named("out").expect("V(out) is recorded");
+        let volts = result
+            .try_voltage_waveform(out)
+            .expect("node index in range")
+            .to_vec();
+        (result.time, volts)
+    };
+    let alone = run("rspice-two-clocks-alone", &bridged);
+    for (order, cards) in [
+        ("idle first", format!("{idle}{bridged}")),
+        ("bridged first", format!("{bridged}{idle}")),
+    ] {
+        let (times, volts) = run("rspice-two-clocks", &cards);
+        assert_eq!(
+            times.len(),
+            alone.0.len(),
+            "{order}: {} points, the bridged clock alone {}",
+            times.len(),
+            alone.0.len()
+        );
+        assert_eq!(times, alone.0, "{order}: the accepted times");
+        assert_eq!(volts, alone.1, "{order}: V(out)");
+    }
+}

@@ -72,38 +72,64 @@ fn d_process_beside_a_verilog_module_replays_rolled_back_trials_from_its_journal
     });
 }
 
-/// A Verilog observer of `d` reads no node voltage, so the coupled deck is
-/// stepped as the deck without it is, but for the landings of its coupled
-/// events.
+/// A Verilog observer of `d` reads no node voltage and drives nothing the
+/// analog side reads, so the coupled deck is stepped as the deck without it
+/// is: the same accepted points, at the same times and with the same `V(out)`
+/// to within the instants the coupled queue keys its events on. A coupled run
+/// keys a code model's output on the HDL's tick lattice, so `d` moves at
+/// exactly 501 ns where the deck alone dates it at the sum 500 ns + 1 ns,
+/// 5.009999999999999e-7; the step sequence carries that ulp on, and nowhere
+/// does it reach the femtosecond the events are checked against ngspice to.
 ///
 /// Any mixed module used to keep a deck with code models on the generic
 /// node-voltage estimator, which only a module that dates a crossing of a
-/// node voltage needs. Over 20 us the deck took 2,166 points with the
-/// observer and 593 without it; over 2 ms, 217,986 and 58,013, where
-/// ngspice-46 takes 46,642 with the module as an XSPICE inverter. The
-/// observer now leaves it 738.
+/// node voltage needs: over 20 us the deck took 2,166 points with an observer
+/// and 593 without it. Then each clock edge, which the stepper lands on
+/// because a coupled queue's events are exact landings, also restarted the
+/// integrator, though the clock reaches only the process and nothing analog
+/// steps there. A coupled event whose readers drive no analog output now
+/// lands without a restart, as the uncoupled queue's does.
+///
+/// An observer that drives its own output node `q` gets a converter there,
+/// whose zero-duration edges `q` steps on: one completion per `d` edge, and
+/// the controller's resume after it, is all it adds.
 #[test]
 fn a_verilog_observer_of_an_event_net_leaves_the_d_process_deck_its_steps() {
     let dir = unique_temp_dir("rspice-d-process-observer");
-    fs::create_dir_all(&dir).expect("create the module's directory");
-    let module = dir.join("obs.v");
+    fs::create_dir_all(&dir).expect("create the modules' directory");
+    let observer = dir.join("obs.v");
     fs::write(
-        &module,
+        &observer,
         "`timescale 1ns/1ps\n\
-         module obs(d, q);\n  input d; output q; reg q;\n  always @(d) q = d;\nendmodule\n",
+         module obs(d);\n  input d; reg q;\n  always @(d) q = d;\nendmodule\n",
     )
-    .expect("write the module");
-    let observed = Netlist::parse(&format!(
-        "d_process with a Verilog observer\n.hdl \"{}\"\nxobs d q obs\n{TOGGLE_PEER_DECK}.end\n",
-        module.display().to_string().replace('\\', "/")
-    ))
-    .expect("observed d_process deck parses");
-    let alone = Netlist::parse(&format!("d_process alone\n{TOGGLE_PEER_DECK}.end\n"))
-        .expect("d_process deck parses");
+    .expect("write the observer");
+    let follower = dir.join("follow.v");
+    fs::write(
+        &follower,
+        "`timescale 1ns/1ps\n\
+         module follow(d, q);\n  input d; output q; reg q;\n  always @(d) q = d;\nendmodule\n",
+    )
+    .expect("write the follower");
+    let deck = |title: &str, module: Option<(&PathBuf, &str)>| {
+        let hdl = module.map_or_else(String::new, |(path, card)| {
+            format!(
+                ".hdl \"{}\"\n{card}\n",
+                path.display().to_string().replace('\\', "/")
+            )
+        });
+        Netlist::parse(&format!("{title}\n{hdl}{TOGGLE_PEER_DECK}.end\n"))
+            .expect("the d_process deck parses")
+    };
+    let decks = [
+        deck("d_process alone", None),
+        deck("d_process observed", Some((&observer, "xobs d obs"))),
+        deck("d_process followed", Some((&follower, "xfol d q follow"))),
+    ];
 
     let engine = Engine::default();
-    let mut points = Vec::new();
-    for netlist in [&alone, &observed] {
+    let mut runs = Vec::new();
+    for netlist in &decks {
         let exchanges = ProcessExchangeLog::default();
         let _factory = ProcessFactoryGuard::toggle_peer(&exchanges);
         let result = engine
@@ -111,13 +137,45 @@ fn a_verilog_observer_of_an_event_net_leaves_the_d_process_deck_its_steps() {
             .expect("the d_process transient runs to its stop time");
         // The process reads the clock, high at every edge it is asked at.
         assert_toggle_peer_matches_ngspice(&result, &exchanges, |_| vec![1]);
-        points.push(result.time.len());
+        let out = result.node_index_named("out").expect("V(out) is recorded");
+        let volts = result
+            .try_voltage_waveform(out)
+            .expect("node index in range")
+            .to_vec();
+        let d_edges = result.digital_trace_named("d").map_or(0, <[_]>::len);
+        runs.push((result.time.clone(), volts, d_edges));
     }
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        points[1] as f64 <= 1.5 * points[0] as f64,
+    let [
+        (alone_times, alone_volts, d_edges),
+        (observed_times, observed_volts, _),
+        (followed_times, ..),
+    ] = &runs[..]
+    else {
+        unreachable!("three runs");
+    };
+    assert_eq!(
+        observed_times.len(),
+        alone_times.len(),
         "the observed deck took {} points, the deck alone {}",
-        points[1],
-        points[0]
+        observed_times.len(),
+        alone_times.len()
+    );
+    for (index, (observed, alone)) in observed_times.iter().zip(alone_times).enumerate() {
+        assert!(
+            (observed - alone).abs() < 1.0e-15,
+            "point {index}: observed at {observed:e} s, alone at {alone:e} s"
+        );
+        let (observed_v, alone_v) = (observed_volts[index], alone_volts[index]);
+        assert!(
+            (observed_v - alone_v).abs() < 1.0e-9,
+            "V(out) at point {index}: observed {observed_v}, alone {alone_v}"
+        );
+    }
+    assert!(
+        followed_times.len() <= alone_times.len() + 3 * d_edges,
+        "the followed deck took {} points, the deck alone {} over {d_edges} edges of d",
+        followed_times.len(),
+        alone_times.len()
     );
 }

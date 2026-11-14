@@ -8495,7 +8495,18 @@ impl Engine {
                     .or(exact_grid_time)
                     .or(breakpoint_clock),
             );
-            let landed_device_event = exact_device_event_time.is_some();
+            // A coupled code-model event is landed exactly, but one whose
+            // readers drive no analog output is a landing only, as the
+            // uncoupled queue's is (`BreakpointManager::replace_landings`):
+            // nothing analog steps there, so the step is cut to it like any
+            // breakpoint's and the step after it is the controller's.
+            let landing_only = exact_device_event_time.is_some_and(|time| {
+                Some(time) == pending_veriloga_event_time
+                    && pending_landing_serves_activation
+                    && !pending_analog_model_event
+                    && breakpoints.lands_without_restart(time)
+            });
+            let landed_device_event = exact_device_event_time.is_some() && !landing_only;
             let breakpoint_landing = if at_breakpoint {
                 Self::classify_breakpoint_landing(
                     &circuit,
