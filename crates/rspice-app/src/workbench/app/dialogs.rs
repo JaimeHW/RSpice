@@ -23,8 +23,6 @@ pub(crate) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
 pub(crate) mod hierarchy;
-#[cfg(test)]
-pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
 pub(crate) use rspice_app_code::workbench::app::dialogs::library;
 pub(crate) mod object_properties;
 pub(crate) mod placement;
@@ -34,8 +32,6 @@ pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 #[cfg(test)]
 pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_removal;
 pub(crate) mod property_dialog;
-#[cfg(test)]
-pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;
 pub(crate) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
 pub(crate) mod rule_setup;

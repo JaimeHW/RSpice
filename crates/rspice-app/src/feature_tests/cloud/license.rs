@@ -3,7 +3,7 @@
 
 use crate::services::license;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::license::*;
+use rspice_app_cloud::workbench::app::dialogs::license::*;
 
 /// Every text the dialog published for a reader to hear. Generic over the
 /// app so that a test helper is not counted as a handler that takes the
