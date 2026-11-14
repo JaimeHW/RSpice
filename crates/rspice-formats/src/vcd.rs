@@ -202,6 +202,8 @@ mod tests {
     #[test]
     fn every_strength_band_collapses_onto_the_bit_its_level_names() {
         // Zero at four strengths, one at four, unknown at four, then high-Z.
+        // High-impedance strength is written `z` whatever its level, as
+        // ngspice's get_vcdval (evtprint.c:461) writes it.
         let codes = [0_u8, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 12];
         let points = codes
             .iter()
@@ -222,7 +224,7 @@ mod tests {
         assert_eq!(
             bits,
             [
-                "0", "0", "0", "0", "1", "1", "1", "1", "x", "x", "x", "x", "z"
+                "0", "0", "z", "0", "1", "1", "z", "1", "x", "x", "z", "x", "z"
             ]
         );
     }
