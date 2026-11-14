@@ -3886,6 +3886,30 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Seed every runtime Verilog-A device's accepted state at a solved bias,
+    /// as a transient's t=0 point seeds it: the zero-interval evaluation
+    /// stores each `ddt` operand's charge there with no companion current,
+    /// and acceptance makes it the history the next step integrates from. A
+    /// shooting period starts from this state, so nothing a previous period
+    /// or derivative probe accepted reaches the next.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn seed_runtime_veriloga_bias(&mut self, solution: &[Value]) -> Result<(), String> {
+        if self.veriloga_devices.is_empty() {
+            return Ok(());
+        }
+        self.prepare_veriloga_timepoint(
+            0.0,
+            0.0,
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            false,
+            false,
+        )?;
+        self.evaluate_veriloga_timepoint(solution)?;
+        self.veriloga_devices.validate_timestep_acceptance()?;
+        self.veriloga_devices.apply_validated_timestep_acceptance();
+        Ok(())
+    }
+
     /// Re-evaluate generated Verilog-A devices at an exact accepted solution
     /// without disturbing the live Newton matrix. Static-probe evaluation
     /// recomputes DDT/IDT candidates, event-controlled variables, and terminal-

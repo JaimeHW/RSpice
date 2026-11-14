@@ -254,9 +254,14 @@ pub enum InstanceGate {
     /// The periodic steady state the analysis linearizes around decides: on a
     /// harmonic-balance carrier, every Verilog-A module
     /// [`Self::HbAdmissibleVerilogA`] admits; on a shooting carrier, the
-    /// generated models it admits, whose charges the period map carries, and
-    /// no runtime module, whose state it does not.
+    /// generated models it admits and the runtime modules
+    /// [`Self::PssAdmissibleVerilogA`] and [`Self::HbAdmissibleVerilogA`]
+    /// both admit, whose charges the period map carries.
     CarrierAdmitsVerilogA,
+    /// Every runtime Verilog-A module's state is the charges it contributes,
+    /// which shooting's period map integrates from node voltages at the
+    /// period start.
+    PssAdmissibleVerilogA,
 }
 
 impl InstanceGate {
@@ -269,6 +274,7 @@ impl InstanceGate {
             Self::NativeDeviceChecks => "native-device-checks",
             Self::HbAdmissibleVerilogA => "hb-admissible-veriloga",
             Self::CarrierAdmitsVerilogA => "carrier-admits-veriloga",
+            Self::PssAdmissibleVerilogA => "pss-admissible-veriloga",
         }
     }
 }
@@ -374,6 +380,10 @@ const fn rational_descriptor(evidence: &'static [&'static str]) -> CellSupport {
 /// The token of [`hb_veriloga_operator_refusal`].
 const HB_VERILOGA_OPERATOR: &str = "analysis.hb.veriloga_operator";
 
+/// The token of a shooting refusal of a Verilog-A instance, runtime
+/// ([`pss_veriloga_refusal`]) or generated.
+const PSS_VERILOGA_OPERATOR: &str = "analysis.pss.veriloga_operator";
+
 const HB_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::veriloga_twins_of_native_devices_give_the_native_harmonics",
     "tests/veriloga/veriloga_hb.rs::a_veriloga_rc_low_pass_matches_its_transfer_function",
@@ -426,9 +436,26 @@ const PSS_GENERATED_EVIDENCE: &[&str] = &[
 const fn pss_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
-        token: HB_VERILOGA_OPERATOR,
+        token: PSS_VERILOGA_OPERATOR,
         condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution that stores flux (an inductance) at its parameters; its charges are integrated over the period from the state the period starts at, with the nodes its own voltage contributions tie taken as one",
         evidence: PSS_GENERATED_EVIDENCE,
+    }
+}
+
+const PSS_VERILOGA_EVIDENCE: &[&str] = &[
+    "tests/veriloga/veriloga_hb.rs::a_charge_form_module_reaches_its_settled_transient_by_shooting",
+    "tests/veriloga/veriloga_hb.rs::shooting_refuses_each_operator_with_state_by_name",
+];
+
+/// Shooting takes a runtime Verilog-A module whose state is the charges it
+/// contributes: the period map integrates them from the node voltages the
+/// period starts at, as it does a generated model's.
+const fn pss_admissible_veriloga() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::PssAdmissibleVerilogA,
+        token: PSS_VERILOGA_OPERATOR,
+        condition: "every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, with no voltage contribution, no `ddt` it does not contribute as a charge, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points; its charges are integrated over the period from the node voltages the period starts at",
+        evidence: PSS_VERILOGA_EVIDENCE,
     }
 }
 
@@ -445,7 +472,7 @@ pub(in crate::engine) enum PeriodicCarrier {
 
 const PAC_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carrier",
-    "tests/veriloga/veriloga_hb.rs::a_shooting_carrier_refuses_a_veriloga_module_by_name",
+    "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
 ];
 
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
@@ -457,8 +484,9 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
 /// own F/Q samples of the carrier's orbit, solved by harmonic balance or
 /// projected from a shooting orbit, so they take what the carrier's analysis
 /// takes: on a harmonic-balance carrier what harmonic balance takes; on a
-/// shooting carrier the generated models shooting takes, and no runtime
-/// module, whose state no period map carries.
+/// shooting carrier the generated models shooting takes, and the runtime
+/// modules both shooting and harmonic balance take, whose state is the
+/// charges the period map carries.
 const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::CarrierAdmitsVerilogA,
@@ -466,7 +494,7 @@ const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
         condition: if generated {
             "every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier"
         } else {
-            "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; a shooting (PSS) carrier admits none"
+            "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; on a shooting (PSS) carrier, every one both shooting and harmonic balance admit"
         },
         evidence: if generated {
             PAC_GENERATED_EVIDENCE
@@ -571,6 +599,7 @@ pub const fn capability_cell(
                 reason: DISCRETE_STATE_REASON,
             },
             F::VerilogARuntime if matches!(analysis, A::Hb) => hb_admissible_veriloga(),
+            F::VerilogARuntime if matches!(analysis, A::Pss) => pss_admissible_veriloga(),
             F::VerilogARuntime if matches!(analysis, A::Pac | A::Pxf) => {
                 carrier_admits_veriloga(false)
             }
@@ -928,6 +957,81 @@ fn hb_veriloga_operator_refusal(
     None
 }
 
+/// Why shooting refuses a runtime Verilog-A operator, or `None` for one its
+/// period map carries: a `ddt` of a contributed charge, integrated from the
+/// node voltages the period starts at.
+#[cfg(feature = "veriloga")]
+fn pss_operator_reason(operator: &str) -> Option<&'static str> {
+    Some(match operator {
+        "ddt" => return None,
+        "idt" | "idtmod" | "laplace_*" | "absdelay" | "zi_*" => {
+            "whose operator state is not a node voltage the shooting state fixes at the period \
+             start"
+        }
+        "transition" | "slew" | "cross" | "last_crossing" | "above" | "timer" => {
+            "which schedules events in time that shooting's fixed period grid does not place; \
+             transient analysis runs it"
+        }
+        "$abstime" => "whose value is the absolute time, which no shooting state carries",
+        _ => "whose state lies outside the charges shooting integrates over the period",
+    })
+}
+
+/// Shooting refuses a runtime Verilog-A instance whose state is not the
+/// charges it contributes, naming the first operator in the way and where
+/// the module wrote it, or its voltage contribution.
+fn pss_veriloga_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    #[cfg(feature = "veriloga")]
+    for device in circuit.veriloga_devices().iter() {
+        use rspice_veriloga::vm::PeriodicOperatorKind;
+        let inventory = device.analog_operator_inventory();
+        let reason = if let Some((operator, why)) = inventory
+            .iter()
+            .find_map(|&operator| pss_operator_reason(operator).map(|why| (operator, why)))
+        {
+            format!("it uses {}, {why}", written_operator(device, operator))
+        } else if inventory.contains(&"ddt")
+            && (device.periodic_derivative_slots().is_none()
+                || device
+                    .periodic_operator_sites()
+                    .iter()
+                    .any(|site| site.kind == PeriodicOperatorKind::Derivative))
+        {
+            format!(
+                "it uses {} of a quantity it does not contribute as a charge, so its state is \
+                 not a node voltage the shooting state fixes at the period start",
+                written_operator(device, "ddt")
+            )
+        } else if device.num_branch_unknowns() > 0 {
+            "it has a voltage contribution, whose branch current the shooting state does not \
+             fix and whose ties its node coordinates would each fix at the period start"
+                .to_owned()
+        } else {
+            continue;
+        };
+        let instance = device.name.to_string();
+        let module = device.model_name().to_owned();
+        return Some(
+            UnsupportedCapabilityError::new(
+                PSS_VERILOGA_OPERATOR,
+                format!(
+                    "{} does not support Verilog-A instance '{instance}' (module '{module}'): \
+                     {reason}",
+                    analysis.label()
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .for_instance(instance)
+            .for_module(module),
+        );
+    }
+    let _ = (circuit, analysis);
+    None
+}
+
 /// The first Verilog-A instance of `family` harmonic balance cannot sample,
 /// refused by `analysis` with harmonic balance's reason.
 fn hb_admission_refusal(
@@ -941,10 +1045,9 @@ fn hb_admission_refusal(
     }
 }
 
-/// A periodic small-signal analysis on a shooting carrier refuses the first
-/// runtime Verilog-A instance of `family`: the period map the carrier was
-/// solved through carries no runtime module's state, so it has no
-/// linearization of one.
+/// A periodic small-signal analysis asked without its carrier refuses the
+/// first Verilog-A instance of `family`: what it linearizes is the carrier's,
+/// and no carrier was named.
 fn carrier_refusal(
     circuit: &CircuitData,
     family: CapabilityFamily,
@@ -958,8 +1061,8 @@ fn carrier_refusal(
     let mut refusal = UnsupportedCapabilityError::new(
         PERIODIC_VERILOGA,
         format!(
-            "{} '{instance}'{module_text} cannot take part in {} on a shooting (PSS) carrier: \
-             its period map carries no Verilog-A state; a harmonic-balance carrier takes it",
+            "{} '{instance}'{module_text} cannot take part in {} without the periodic steady \
+             state it linearizes around",
             family.label(),
             analysis.label(),
         ),
@@ -1042,9 +1145,14 @@ fn hb_generated_refusal(
         };
         let instance = device.instance_name.clone();
         let module = device.model_name.to_owned();
+        let token = if matches!(analysis, CapabilityAnalysis::Pss) {
+            PSS_VERILOGA_OPERATOR
+        } else {
+            HB_VERILOGA_OPERATOR
+        };
         return Some(
             UnsupportedCapabilityError::new(
-                HB_VERILOGA_OPERATOR,
+                token,
                 format!(
                     "{} does not support generated Verilog-A instance '{instance}' (module \
                      '{module}'): {reason}",
@@ -1250,6 +1358,11 @@ impl Engine {
                             return Err(refusal.into());
                         }
                     }
+                    InstanceGate::PssAdmissibleVerilogA => {
+                        if let Some(refusal) = pss_veriloga_refusal(circuit, analysis) {
+                            return Err(refusal.into());
+                        }
+                    }
                     InstanceGate::CarrierAdmitsVerilogA => {
                         let refusal = match carrier {
                             Some(PeriodicCarrier::HarmonicBalance) => {
@@ -1263,9 +1376,14 @@ impl Engine {
                             {
                                 hb_admission_refusal(circuit, family, analysis)
                             }
-                            Some(PeriodicCarrier::Shooting) | None => {
-                                carrier_refusal(circuit, family, analysis)
+                            // A runtime module rides a shooting orbit when
+                            // the period map carried its state and harmonic
+                            // balance's samples linearize it.
+                            Some(PeriodicCarrier::Shooting) => {
+                                pss_veriloga_refusal(circuit, analysis)
+                                    .or_else(|| hb_admission_refusal(circuit, family, analysis))
                             }
+                            None => carrier_refusal(circuit, family, analysis),
                         };
                         if let Some(refusal) = refusal {
                             return Err(refusal.into());

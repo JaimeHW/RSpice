@@ -99,6 +99,19 @@ enum ChargeBranch {
         pos: usize,
         neg: usize,
     },
+    /// A node a runtime Verilog-A module reaches, against ground: the
+    /// shooting gate admits only modules whose state is the charges they
+    /// contribute, functions of their nodes' voltages, which these
+    /// coordinates fix at the period start. `slot` is the node's place in
+    /// the instance, terminals first. A build without runtime modules has
+    /// none.
+    #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
+    Runtime {
+        device: usize,
+        slot: usize,
+        pos: usize,
+        neg: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -500,6 +513,29 @@ impl PssStateBasis {
                 }
             }
         }
+        // A runtime module's charges are opaque functions of the voltages of
+        // the nodes it reaches, so each is a coordinate unless something
+        // already fixes it. The gate refuses a module with a voltage
+        // contribution, whose ties these coordinates cannot see.
+        #[cfg(feature = "veriloga")]
+        for (device, instance) in circuit.veriloga_devices().iter().enumerate() {
+            let nodes = (0..instance.num_terminals())
+                .map(|terminal| instance.node_for_terminal(terminal))
+                .chain(
+                    (0..instance.num_internal_nodes())
+                        .filter_map(|index| instance.internal_node_index(index)),
+                );
+            for (slot, pos) in nodes.enumerate() {
+                if pos != 0 && add(pos, 0, ForestValue::State(charge_branches.len()))? {
+                    charge_branches.push(ChargeBranch::Runtime {
+                        device,
+                        slot,
+                        pos,
+                        neg: 0,
+                    });
+                }
+            }
+        }
         let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -630,6 +666,20 @@ impl PssStateBasis {
                     };
                     format!("A:{name}:n{slot}")
                 }
+                ChargeBranch::Runtime { device, slot, .. } => {
+                    #[cfg(feature = "veriloga")]
+                    let name = circuit
+                        .veriloga_devices()
+                        .iter()
+                        .nth(device)
+                        .map_or("", |instance| instance.name.as_str());
+                    #[cfg(not(feature = "veriloga"))]
+                    let name = {
+                        let _ = device;
+                        ""
+                    };
+                    format!("A:{name}:n{slot}")
+                }
             })
             .chain(
                 self.currents
@@ -655,7 +705,8 @@ impl PssStateBasis {
             | ChargeBranch::Mosfet { pos, neg, .. }
             | ChargeBranch::Bsim3 { pos, neg, .. }
             | ChargeBranch::Bsim4 { pos, neg, .. }
-            | ChargeBranch::Generated { pos, neg, .. } => (pos, neg),
+            | ChargeBranch::Generated { pos, neg, .. }
+            | ChargeBranch::Runtime { pos, neg, .. } => (pos, neg),
             ChargeBranch::Bsim3Nqs { node, .. } | ChargeBranch::Bsim4Nqs { node, .. } => (node, 0),
         }
     }
@@ -1039,7 +1090,8 @@ impl PssCircuit {
                 | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
                 | ChargeBranch::Bsim4 { pos, neg, .. }
-                | ChargeBranch::Generated { pos, neg, .. } => {
+                | ChargeBranch::Generated { pos, neg, .. }
+                | ChargeBranch::Runtime { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
@@ -1213,6 +1265,10 @@ impl PssCircuit {
         circuit
             .seed_generated_veriloga_bias(&self.solution_scratch[1..])
             .map_err(SimulationError::Circuit)?;
+        #[cfg(feature = "veriloga")]
+        circuit
+            .seed_runtime_veriloga_bias(&self.solution_scratch[1..])
+            .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 
@@ -1259,6 +1315,10 @@ impl PssCircuit {
         #[cfg(feature = "veriloga-builtins-base")]
         self.circuit
             .seed_generated_veriloga_bias(solution)
+            .map_err(SimulationError::Circuit)?;
+        #[cfg(feature = "veriloga")]
+        self.circuit
+            .seed_runtime_veriloga_bias(solution)
             .map_err(SimulationError::Circuit)?;
         Ok(())
     }
@@ -1352,7 +1412,8 @@ impl PssCircuit {
                 | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
                 | ChargeBranch::Bsim4 { pos, neg, .. }
-                | ChargeBranch::Generated { pos, neg, .. } => {
+                | ChargeBranch::Generated { pos, neg, .. }
+                | ChargeBranch::Runtime { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
@@ -1379,7 +1440,8 @@ impl PssCircuit {
                 | ChargeBranch::Bsim3Nqs { .. }
                 | ChargeBranch::Bsim4 { .. }
                 | ChargeBranch::Bsim4Nqs { .. }
-                | ChargeBranch::Generated { .. } => None,
+                | ChargeBranch::Generated { .. }
+                | ChargeBranch::Runtime { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(

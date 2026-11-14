@@ -957,38 +957,277 @@ fn a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carri
     let _ = std::fs::remove_file(model);
 }
 
-/// A shooting carrier's period map carries no Verilog-A state, so the
-/// shooting route refuses a Verilog-A module by instance and module before
-/// periodic AC or a periodic transfer function could linearize around it.
-#[test]
-fn a_shooting_carrier_refuses_a_veriloga_module_by_name() {
+/// Periodic AC from `vrf` into sidebands -2..=2 of `V(a)` at three offsets,
+/// and the periodic transfer function into the upper first sideband, on the
+/// deck's shooting (PSS) carrier.
+fn shooting_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
-    let (model, card) = two_terminal("pss_carrier", DIODE);
-    let deck = pumped_mixer("XD1 a 0 va_hb_diode is=1e-14", &card);
-    let netlist = Netlist::parse(&deck).expect("parse");
-    let error = Engine::new(SimulationConfig::default())
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    let (start, stop) = (0.13 * F0, 0.37 * F0);
+    let netlist = Netlist::parse(deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
         .run_pss_operating_point_with_abort(
             &netlist,
-            PssConfig::new(F0).with_harmonics(4),
+            PssConfig::new(F0)
+                .with_harmonics(8)
+                .with_points_per_period(256)
+                .with_tolerance(1e-9),
             &NoAbort,
         )
-        .map(drop)
-        .expect_err("the shooting carrier must refuse the module");
-    let SimulationError::UnsupportedCapability(refusal) = &error else {
-        panic!("expected a capability refusal, got {error}");
+        .unwrap_or_else(|error| panic!("shooting must run: {error}\n{deck}"));
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(start, stop, 3)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-2, 2)
+        .with_input_source("vrf")
+        .with_output_node("a");
+    let card = PxfCard {
+        sweep: PeriodicSweep {
+            variation: FreqVariation::Lin,
+            points: 3,
+            start_freq: start,
+            stop_freq: stop,
+        },
+        input_source: "vrf".into(),
+        input_sideband: 0,
+        output_node: "a".into(),
+        output_ref: None,
+        output_sideband: 1,
+        max_sideband: 2,
+        reltol: 1e-9,
+        abstol: 1e-15,
+        source: PeriodicSourceSelector::Preceding,
     };
-    let UnsupportedCapabilityError {
-        capability,
-        analysis_kind,
-        instance,
-        module,
-        detail,
-        ..
-    } = refusal.as_ref();
-    assert_eq!(*capability, "analysis.periodic.veriloga", "{error}");
-    assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
-    assert_eq!(instance.as_deref(), Some("XD1"), "{error}");
-    assert_eq!(module.as_deref(), Some("va_hb_diode"), "{error}");
-    assert!(detail.contains("PSS analysis"), "{detail}");
+    let pac = engine
+        .run_pac_from_pss_with_abort(&netlist, config, &point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PAC on the shooting carrier must run: {error}\n{deck}"));
+    let pxf = engine
+        .run_pxf_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PXF on the shooting carrier must run: {error}\n{deck}"));
+    let mut transfers = Vec::new();
+    for offset in 0..3 {
+        for sideband in -2..=2 {
+            transfers.push(
+                pac.result
+                    .conversion_matrix
+                    .get(offset, sideband, 0)
+                    .expect("sideband present"),
+            );
+        }
+    }
+    transfers.extend(pxf.points.iter().map(|point| point.transfer));
+    assert_eq!(transfers.len(), 3 * 5 + 3);
+    transfers
+}
+
+/// A shooting carrier now carries a runtime module whose state is the
+/// charges it contributes, and periodic AC and periodic transfer functions
+/// linearize its projected orbit through harmonic balance's own samples, so
+/// the pumped Verilog-A diode gives every sideband transfer its native twin
+/// gives on that carrier. Allowance: 1e-6 of the largest native transfer, as
+/// on the harmonic-balance carrier.
+#[test]
+fn a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier() {
+    let (model, card) = two_terminal("pss_carrier", DIODE);
+    let native = shooting_carrier_transfers(&pumped_mixer("D1 a 0 dmod", ""));
+    let twin = shooting_carrier_transfers(&pumped_mixer("XD1 a 0 va_hb_diode is=1e-14", &card));
     let _ = std::fs::remove_file(model);
+    let scale = native.iter().map(|value| value.norm()).fold(0.0, f64::max);
+    for (index, (twin_value, native_value)) in twin.iter().zip(&native).enumerate() {
+        assert!(
+            (twin_value - native_value).norm() <= 1.0e-6 * scale,
+            "transfer {index}: Verilog-A {twin_value} against native {native_value}"
+        );
+    }
+    assert!(
+        native[1].norm() > 1e-3 * scale && native[3].norm() > 1e-3 * scale,
+        "the pumped diode must convert into the first sidebands: {native:?}"
+    );
+}
+
+/// Shooting takes a runtime module whose state is the charges it contributes,
+/// integrating them over the period from the node voltages the period starts
+/// at, and reaches RSpice's own settled transient: a nonlinear varactor with
+/// a parallel conductance, and a series RC whose charge sits on a node the
+/// module declares internally.
+///
+/// Each module loads `a`, driven from one tone through 1 kΩ. Settle test and
+/// allowance as for the generated models' fixtures, fixed before the first
+/// comparison: the transient starts from rest (UIC) and runs 24 periods at
+/// T/512; the DC term and first three harmonics of its last period differ
+/// from the period before by at most 1e-5 of the fundamental, and shooting's
+/// are within 1e-3 of the fundamental of the transient's.
+#[test]
+fn a_charge_form_module_reaches_its_settled_transient_by_shooting() {
+    const PERIODS: f64 = 24.0;
+    const SAMPLES: usize = 512;
+    for (shape, declarations, body) in [
+        (
+            "varactor",
+            "",
+            "I(p, n) <+ V(p, n) / 2.0e3 + ddt(20.0e-12 * V(p, n) + 10.0e-12 * V(p, n) * V(p, n));",
+        ),
+        (
+            "internal_rc",
+            "electrical x;",
+            "I(p, x) <+ V(p, x) / 500.0;\n\
+             I(x, n) <+ ddt(100.0e-12 * V(x, n));",
+        ),
+    ] {
+        let module = format!("va_pss_{shape}");
+        let model = write_model(
+            &format!("pss_{shape}"),
+            &format!(
+                "`include \"disciplines.vams\"\n\
+                 module {module}(p, n);\n\
+                 inout p, n;\n\
+                 electrical p, n;\n\
+                 {declarations}\n\
+                 analog begin\n\
+                 {body}\n\
+                 end\n\
+                 endmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* shooting integrates a {shape} module's charges\n\
+             V1 in 0 DC 0 SIN(0.5 1 1meg)\n\
+             R1 in a 1k\n\
+             XVA a 0 {module}\n\
+             .va \"{model}\" {module}\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let engine = Engine::new(SimulationConfig::default());
+        let pss = engine
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(SAMPLES)
+                    .with_tolerance(1e-9),
+            )
+            .unwrap_or_else(|error| panic!("{shape}: shooting must run: {error}"))
+            .result;
+        let output = pss
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("a"))
+            .unwrap_or_else(|| panic!("{shape}: V(a) present"));
+        let end = *pss.time.last().expect("a periodic waveform");
+        let shooting = period_spectrum(&pss.time, &pss.waveforms[output].values, end, SAMPLES, 3);
+        let tstop = PERIODS / F0;
+        let tran = engine
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                tstop,
+                1.0 / (F0 * SAMPLES as f64),
+                TransientStartupMode::Uic,
+                &rspice_core::NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{shape}: transient must run: {error}"));
+        let _ = std::fs::remove_file(&model);
+        let waveform = tran
+            .try_voltage_waveform_named("a")
+            .unwrap_or_else(|| panic!("{shape}: V(a) present"));
+        let last = period_spectrum(&tran.time, waveform, tstop, SAMPLES, 3);
+        let before = period_spectrum(&tran.time, waveform, tstop - 1.0 / F0, SAMPLES, 3);
+        let fundamental = last[1].norm();
+        for k in 0..=3 {
+            assert!(
+                (last[k] - before[k]).norm() <= 1e-5 * fundamental,
+                "{shape}: harmonic {k} has not settled: {} then {}",
+                before[k],
+                last[k]
+            );
+            assert!(
+                (shooting[k] - last[k]).norm() <= 1e-3 * fundamental,
+                "{shape}: harmonic {k}: shooting {} against the settled transient {} \
+                 (fundamental {fundamental})",
+                shooting[k],
+                last[k]
+            );
+        }
+        eprintln!(
+            "{shape}: shooting worst {:.3e} of the fundamental {fundamental:.6}",
+            (0..=3)
+                .map(|k| (shooting[k] - last[k]).norm() / fundamental)
+                .fold(0.0, f64::max)
+        );
+    }
+}
+
+/// Shooting refuses a runtime module whose operator keeps state that is not
+/// a node voltage, before solving, by the operator's own name and the line
+/// the module wrote it on (the analog body is the sixth line of each module
+/// file), with the instance, the module and shooting's own token.
+#[test]
+fn shooting_refuses_each_operator_with_state_by_name() {
+    const STATE: &str = "whose operator state is not a node voltage the shooting state fixes at \
+                         the period start";
+    for (operator, body) in [
+        ("idt", "I(out) <+ 1.0e-3 * idt(V(in), 0.0);"),
+        (
+            "laplace_nd",
+            "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{1.0, 1.0e-7});",
+        ),
+        ("absdelay", "I(out) <+ 1.0e-3 * absdelay(V(in), 1.0e-7);"),
+    ] {
+        let module = "va_pss_refused";
+        let model = write_model(
+            &format!("pss_refused_{operator}"),
+            &format!(
+                "`include \"disciplines.vams\"\n\
+                 module {module}(in, out);\n\
+                 inout in, out;\n\
+                 electrical in, out;\n\
+                 analog begin\n\
+                 {body}\n\
+                 end\n\
+                 endmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* shooting refuses {operator}\n\
+             V1 in 0 DC 0 SIN(0 1 1meg)\n\
+             R1 out 0 1k\n\
+             XVA in out {module}\n\
+             .va \"{model}\" {module}\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let error = Engine::new(SimulationConfig::default())
+            .run_pss(&netlist, PssConfig::new(F0))
+            .map(drop)
+            .expect_err("shooting must refuse the operator");
+        let _ = std::fs::remove_file(&model);
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{operator}: expected a capability refusal, got {error}");
+        };
+        let UnsupportedCapabilityError {
+            capability,
+            analysis_kind,
+            instance,
+            module: refused_module,
+            detail,
+            ..
+        } = refusal.as_ref();
+        assert_eq!(
+            *capability, "analysis.pss.veriloga_operator",
+            "{operator}: {error}"
+        );
+        assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
+        assert_eq!(instance.as_deref(), Some("XVA"), "{error}");
+        assert_eq!(refused_module.as_deref(), Some(module), "{error}");
+        let file = model.rsplit('/').next().expect("file name");
+        assert!(
+            detail.contains("PSS analysis")
+                && detail.contains(&format!("`{operator}` at {file}:6"))
+                && detail.ends_with(STATE),
+            "{operator}: the refusal must name the analysis, the operator, its line and why: \
+             {detail}"
+        );
+    }
 }

@@ -660,7 +660,7 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
 /// solving, by instance and module, with the generator's reason, one with a
 /// site harmonic balance carries as an unknown of its own (the ASM-ESD
 /// diode), and one whose source branch stores flux at its parameters, with
-/// that reason.
+/// that reason, each with shooting's own token.
 #[test]
 fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
@@ -676,8 +676,8 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
         ),
         #[cfg(feature = "veriloga-model-asmesd-dio")]
         ("XA d 0 asmesd_dio", "XA", "asmesd_dio", CARRIED_SITE),
-        // A 1 mH drain inductance: admitted, the period map misses its
-        // current and shooting stops short of the settled transient.
+        // A 1 mH drain inductance, whose current the period map would miss:
+        // admitted, shooting stops short of the settled transient.
         #[cfg(feature = "veriloga-model-angelov")]
         (
             "MA d d 0 am\n.model am angelov ld=1m",
@@ -698,12 +698,14 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
             panic!("{module}: expected a capability refusal, got {error}");
         };
         let UnsupportedCapabilityError {
+            capability,
             analysis_kind,
             instance: refused_instance,
             module: refused_module,
             detail,
             ..
         } = refusal.as_ref();
+        assert_eq!(*capability, "analysis.pss.veriloga_operator", "{error}");
         assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
         assert_eq!(refused_instance.as_deref(), Some(instance), "{error}");
         assert!(

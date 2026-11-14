@@ -4607,6 +4607,16 @@ impl Engine {
                     .map_err(SimulationError::Circuit)?;
             }
         }
+        // A runtime module integrates its `ddt` operands the same way; the
+        // consistency solve evaluates it at a zero interval, which carries no
+        // companion rule and stamps no charge current.
+        #[cfg(feature = "veriloga")]
+        if circuit.has_veriloga_devices() {
+            let interval = if initialization { 0.0 } else { dt };
+            circuit
+                .prepare_veriloga_timepoint(t_next, interval, coeff, false, false)
+                .map_err(SimulationError::Circuit)?;
+        }
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
             if physical_probe {
@@ -5252,6 +5262,17 @@ impl Engine {
                         .validate_state_acceptance()
                         .map_err(SimulationError::Circuit)?;
                     devices.apply_validated_state_acceptance();
+                }
+                #[cfg(feature = "veriloga")]
+                if circuit.has_veriloga_devices() {
+                    circuit
+                        .evaluate_veriloga_timepoint(&new_solution)
+                        .map_err(SimulationError::Circuit)?;
+                    let devices = circuit.veriloga_devices_mut();
+                    devices
+                        .validate_timestep_acceptance()
+                        .map_err(SimulationError::Circuit)?;
+                    devices.apply_validated_timestep_acceptance();
                 }
             }
 

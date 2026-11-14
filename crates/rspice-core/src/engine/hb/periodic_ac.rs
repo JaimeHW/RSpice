@@ -135,7 +135,8 @@ impl Engine {
         // it the harmonic system would be assembled with a mixed host's
         // equations simply absent, which answers rather than refuses.
         // The carrier decides what Verilog-A it linearizes: harmonic balance's
-        // own F/Q samples, or a shooting orbit that carries none.
+        // own F/Q samples of its spectrum, or of a shooting orbit, which
+        // carries the modules whose state is the charges they contribute.
         Self::ensure_carrier_analysis_capability(
             &circuit,
             crate::engine::CapabilityAnalysis::Pac,
