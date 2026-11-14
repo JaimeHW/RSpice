@@ -647,7 +647,14 @@ fn check_topology(
     }
 
     // A node touched only by current sources has no element defining its
-    // voltage; KCL there may even be unsatisfiable.
+    // voltage; KCL there may even be unsatisfiable. Without a current source
+    // there is no such node, and no reason to key every node of the deck.
+    if !elements
+        .iter()
+        .any(|elem| matches!(elem.kind, ElementKind::CurrentSource(_)))
+    {
+        return;
+    }
     let mut only_current: HashMap<String, bool> = HashMap::new();
     for elem in elements {
         let is_current_source = matches!(elem.kind, ElementKind::CurrentSource(_));
