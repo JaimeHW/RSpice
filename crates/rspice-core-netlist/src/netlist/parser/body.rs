@@ -32,6 +32,23 @@ pub(super) fn parse(
         xyce_syntax,
         abort,
     )?;
+    // Any line that starts with a letter may be an element card. Sizing the
+    // element column and the maps keyed by element for them up front spares a
+    // large flat deck their repeated regrowth, each of which moved or rehashed
+    // every element read so far.
+    let element_cards = lines
+        .iter()
+        .skip(body_start)
+        .filter(|line| {
+            line.trim_start()
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
+        })
+        .count();
+    state.elements.reserve(element_cards);
+    state.element_origins.reserve(element_cards);
+    state.element_names.reserve(element_cards);
 
     process_source_events_at(
         source_schedule.as_mut(),

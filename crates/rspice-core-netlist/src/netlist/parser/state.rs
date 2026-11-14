@@ -15,6 +15,10 @@ pub(super) struct ElementNameRegistry {
 }
 
 impl ElementNameRegistry {
+    pub(super) fn reserve(&mut self, additional: usize) {
+        self.origins.reserve(additional);
+    }
+
     pub(super) fn register(
         &mut self,
         elements: &[Element],
