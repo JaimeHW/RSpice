@@ -311,12 +311,24 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
 
 /// The canvas's facts from the design feature's context.
 pub(crate) fn canvas_facts_in<'a>(cx: &'a Cx<'_, DesignFeature>) -> CanvasFacts<'a> {
+    canvas_facts_lent(cx.state, cx.model, cx.wb, cx.runs, cx.peers.results())
+}
+
+/// The canvas's facts from the design slot, the model, the session, the
+/// runs and the results workspace.
+pub(crate) fn canvas_facts_lent<'a>(
+    state: &'a DesignState,
+    model: &'a Model,
+    wb: &'a WorkbenchSession,
+    runs: &'a RunsState,
+    results: &'a dyn ResultsPort,
+) -> CanvasFacts<'a> {
     CanvasFacts {
-        design: &*cx.state,
-        model: &*cx.model,
-        runs: &*cx.runs,
-        results: cx.peers.results(),
-        probed_trace: probed_trace(&*cx.wb),
+        design: state,
+        model,
+        runs,
+        results,
+        probed_trace: probed_trace(wb),
     }
 }
 
