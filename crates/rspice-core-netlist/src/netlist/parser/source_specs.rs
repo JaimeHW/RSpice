@@ -1191,10 +1191,12 @@ fn parse_pulse_spec(
         required,
         leading_source_values(&[v1, v2]),
     )?;
-    let (v1, v2) = (v1.unwrap_or(0.0), v2.unwrap_or(1.0));
+    // Only a Xyce card can leave V2 out, and Xyce defaults it to 0 (Xyce
+    // Reference Guide 7.10, Table 2-60).
+    let (v1, v2) = (v1.unwrap_or(0.0), v2.unwrap_or(0.0));
     let delay = source_value_or_default(stream, line_num, params, "PULSE", "TD", has_paren, 0.0)?;
-    // Keep omitted timing fields as NaN sentinels so transient runtime can
-    // resolve ngspice-compatible defaults from .TRAN context (tstep/tstop).
+    // Keep omitted timing fields as NaN sentinels so the transient resolves
+    // them against its own TSTEP and TSTOP (`SourceRules::default_for`).
     let rise = source_optional_value(stream, line_num, params, "PULSE", "TR", has_paren)?;
     let fall = source_optional_value(stream, line_num, params, "PULSE", "TF", has_paren)?;
     let width = source_optional_value(stream, line_num, params, "PULSE", "PW", has_paren)?;

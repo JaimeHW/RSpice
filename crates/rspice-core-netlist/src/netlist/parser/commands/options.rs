@@ -147,9 +147,13 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     stream.advance();
                 }
                 (None, "RSPICE_SOURCE") => {
-                    options.vdmos_subthres_is_ltspice = match &stream.peek().kind {
-                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("QSPICE") => false,
-                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("LTSPICE") => true,
+                    let simulator = match &stream.peek().kind {
+                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("QSPICE") => {
+                            crate::netlist::SourceSimulator::Qspice
+                        }
+                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("LTSPICE") => {
+                            crate::netlist::SourceSimulator::Ltspice
+                        }
                         _ => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
@@ -157,6 +161,9 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             });
                         }
                     };
+                    options.source_simulator = Some(simulator);
+                    options.vdmos_subthres_is_ltspice =
+                        simulator == crate::netlist::SourceSimulator::Ltspice;
                     options.undeclared_subcircuit_m_is_ignored = true;
                     stream.advance();
                 }

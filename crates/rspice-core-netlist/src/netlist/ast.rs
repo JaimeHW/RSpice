@@ -4991,7 +4991,11 @@ pub struct SimulationOptions {
     /// expression syntax chosen when parsing the deck.
     pub spice_dialect: Option<crate::config::SpiceDialect>,
     /// RSpice `.OPTIONS RSPICE_SOURCE=QSPICE|LTSPICE`, the program a drawn deck
-    /// came from. The two read a VDMOS card's `subthres` differently: QSPICE as
+    /// came from, and so the simulator whose defaults its sources' omitted
+    /// fields ask for.
+    pub source_simulator: Option<super::SourceSimulator>,
+    /// The program named by `RSPICE_SOURCE` also decides how a VDMOS card's
+    /// `subthres` reads, which the two programs differ on: QSPICE as
     /// the weak-inversion slope in volts (the default), LTspice as a current
     /// per volt of Vds.
     pub vdmos_subthres_is_ltspice: bool,

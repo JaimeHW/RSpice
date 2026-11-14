@@ -702,6 +702,9 @@ fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
                     code: Some(diagnostic.code.clone()),
                 });
             }
+            // A note names a default RSpice chose; it is not a defect in
+            // the deck, so validation does not count it.
+            rspice_core::netlist::DiagnosticSeverity::Note => {}
         }
     }
 }

@@ -54,6 +54,7 @@ pub use qpxf_card::{QpxfCard, QpxfCardLattices, QpxfCardOutput, QpxfCardSources}
 mod qpss_card;
 pub use qpss_card::QpssCard;
 mod remove_unused;
+mod source_defaults;
 pub mod source_map;
 pub(crate) mod spectre_adapter;
 mod spectre_statistics;
@@ -121,6 +122,9 @@ pub(crate) use output_symbols::{
 pub use param_scope::ParamResolver;
 pub(crate) use parser::strip_semicolon_comment;
 pub use parser::*;
+pub use source_defaults::{
+    DefaultRule, OmittedField, SourceRules, SourceSimulator, omitted_field_note, omitted_fields,
+};
 pub use source_map::*;
 pub use spectre_statistics::*;
 #[doc(hidden)]
@@ -1584,6 +1588,9 @@ impl Netlist {
 pub enum DiagnosticSeverity {
     /// The deck parsed, but the simulator ignored or downgraded a construct.
     Warning,
+    /// The deck reads as written, but RSpice chose a value the card left
+    /// open, on which the simulators it follows disagree.
+    Note,
 }
 
 /// Structured parser diagnostic suitable for CLI, UI, and WASM callers.

@@ -263,6 +263,13 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
                     );
                 }
             }
+            rspice_core::netlist::DiagnosticSeverity::Note => {
+                crate::observability::diagnostic(
+                    &diagnostic.code,
+                    Some(diagnostic.line),
+                    &format!("note: {}", diagnostic.message),
+                );
+            }
         }
     }
 }

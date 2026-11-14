@@ -2467,6 +2467,7 @@ impl XyceTestRunner {
             fft_mode,
             fft_accurate,
             fft_output_metrics,
+            source_simulator: _,
             vdmos_subthres_is_ltspice: _,
             undeclared_subcircuit_m_is_ignored: _,
             replace_ground: _,

@@ -179,6 +179,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
         "diagnostics": netlist.diagnostics.iter().map(|diagnostic| serde_json::json!({
             "severity": match diagnostic.severity {
                 rspice_core::netlist::DiagnosticSeverity::Warning => "warning",
+                rspice_core::netlist::DiagnosticSeverity::Note => "note",
             },
             "line": diagnostic.line,
             "code": &diagnostic.code,

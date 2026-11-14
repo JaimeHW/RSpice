@@ -83,14 +83,21 @@ pub enum RedefinedParamsMode {
 }
 
 /// Compatibility policy applied consistently to parsing and simulation.
+///
+/// A field an independent source leaves out takes the default of the
+/// simulator the deck was written for: the program a deck's `.options
+/// RSPICE_SOURCE=QSPICE|LTSPICE` names, else the dialect's simulator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SpiceDialectArg {
     /// Use RSpice's most accurate available device evaluator while retaining
-    /// ngspice-compatible expression syntax.
+    /// ngspice-compatible expression syntax; omitted source fields take the
+    /// first established default of QSPICE, LTspice, Xyce, ngspice.
     Best,
-    /// Prefer ngspice-compatible expression and device semantics.
+    /// Prefer ngspice-compatible expression and device semantics; omitted
+    /// source fields take the ngspice manual's defaults.
     Ngspice,
-    /// Prefer Xyce-compatible expression, measurement, and device semantics.
+    /// Prefer Xyce-compatible expression, measurement, and device semantics;
+    /// omitted source fields take the Xyce Reference Guide's defaults.
     Xyce,
 }
 

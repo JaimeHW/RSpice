@@ -1063,6 +1063,7 @@ fn parse_netlist_impl(
 
     ensure_parse_not_aborted(abort)?;
     let root_redefinitions = std::mem::take(&mut state.root_redefinitions);
+    let spice_dialect = state.spice_dialect;
     let mut netlist = state.into_netlist(
         title,
         input,
@@ -1087,6 +1088,8 @@ fn parse_netlist_impl(
     // reported once against the source that defined it.
     let shadowed = shadowed_instance_master_diagnostics(&netlist, input);
     netlist.diagnostics.extend(shadowed);
+    let notes = super::source_defaults::omitted_source_field_notes(&netlist, spice_dialect);
+    netlist.diagnostics.extend(notes);
     Ok((netlist, temperatures))
 }
 

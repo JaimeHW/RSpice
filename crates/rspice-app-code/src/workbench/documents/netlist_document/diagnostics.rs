@@ -219,6 +219,7 @@ pub(super) fn parser_diagnostics(
                     rspice_core::netlist::DiagnosticSeverity::Warning => {
                         DiagnosticSeverity::Warning
                     }
+                    rspice_core::netlist::DiagnosticSeverity::Note => DiagnosticSeverity::Info,
                 },
                 diagnostic.message.clone(),
             )
