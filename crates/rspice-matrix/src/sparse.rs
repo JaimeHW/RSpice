@@ -402,6 +402,11 @@ pub struct StaticMatrix {
     /// Low component of the double-double Newton correction RHS. The high
     /// component is written directly into the caller-owned output buffer.
     correction_rhs_lo_scratch: Vec<Value>,
+    /// The positions [`Self::add`] found in the last assembly of the live
+    /// values and of a probe's, in call order.
+    add_sequences: [AddSequence; 2],
+    /// Which of `add_sequences` the assembly in progress follows.
+    add_sequence: usize,
     /// First attempted stamp outside the frozen sparsity pattern.
     stamping_error: Option<MatrixStampError>,
     /// Newton candidates returned without the backward-error certificate.
@@ -465,6 +470,60 @@ fn end_first_assembly_remainders(remainders: &mut RemainderTracking, values_lo: 
     }
 }
 
+/// The `add_sequences` slot of an assembly of the live values.
+const LIVE_ADD_SEQUENCE: usize = 0;
+/// The `add_sequences` slot of an assembly inside [`StaticMatrix::with_probe_values`].
+const PROBE_ADD_SEQUENCE: usize = 1;
+
+/// The `(row, column, offset)` each [`StaticMatrix::add`] call of an
+/// assembly found, in call order. Newton assembles the same devices in the
+/// same order every iteration, so the next assembly's call usually names the
+/// position its predecessor did and takes the offset without searching the
+/// column; a call that names another position searches and takes the
+/// predecessor's place.
+#[derive(Debug, Default)]
+struct AddSequence {
+    positions: Vec<(u32, u32, u32)>,
+    /// The next call's index.
+    cursor: usize,
+}
+
+impl AddSequence {
+    /// The offset the predecessor of the next call found, when it was of
+    /// `(row, col)`.
+    #[inline]
+    fn next(&mut self, row: usize, col: usize) -> (usize, Option<usize>) {
+        let call = self.cursor;
+        self.cursor += 1;
+        let kept = self
+            .positions
+            .get(call)
+            .filter(|&&(kept_row, kept_col, _)| {
+                kept_row as usize == row && kept_col as usize == col
+            })
+            .map(|&(_, _, offset)| offset as usize);
+        (call, kept)
+    }
+
+    /// Keep call `call`'s position for the next assembly, while the sequence
+    /// has fewer than `limit` calls. A position past `u32` is not kept.
+    #[cold]
+    fn keep(&mut self, call: usize, row: usize, col: usize, offset: usize, limit: usize) {
+        let (Ok(row), Ok(col), Ok(offset)) = (
+            u32::try_from(row),
+            u32::try_from(col),
+            u32::try_from(offset),
+        ) else {
+            return;
+        };
+        if let Some(position) = self.positions.get_mut(call) {
+            *position = (row, col, offset);
+        } else if call == self.positions.len() && call < limit {
+            self.positions.push((row, col, offset));
+        }
+    }
+}
+
 struct ProbeValuesGuard<'a> {
     matrix: &'a mut StaticMatrix,
     saved_values: Option<Vec<Value>>,
@@ -472,6 +531,8 @@ struct ProbeValuesGuard<'a> {
     /// Whether the matrix kept remainders when the probe began.
     tracked_remainders: bool,
     rhs: Option<Vec<Value>>,
+    /// The add sequence the assembly around the probe follows.
+    outer_add_sequence: usize,
 }
 
 impl Drop for ProbeValuesGuard<'_> {
@@ -479,6 +540,7 @@ impl Drop for ProbeValuesGuard<'_> {
         let Some(mut saved_values) = self.saved_values.take() else {
             return;
         };
+        self.matrix.add_sequence = self.outer_add_sequence;
         std::mem::swap(&mut self.matrix.values, &mut saved_values);
         self.matrix.probe_values = Some(saved_values);
         if let Some(mut saved_values_lo) = self.saved_values_lo.take() {
@@ -1795,6 +1857,8 @@ impl StaticMatrix {
             residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
+            add_sequences: Default::default(),
+            add_sequence: LIVE_ADD_SEQUENCE,
             stamping_error: None,
             newton_certificate_misses: NewtonCertificateMisses::default(),
         }
@@ -1826,12 +1890,16 @@ impl StaticMatrix {
 
         std::mem::swap(&mut self.values, &mut scratch);
         std::mem::swap(&mut self.values_lo, &mut scratch_lo);
+        // The probe assembles its zeroed values from the start.
+        let outer_add_sequence = std::mem::replace(&mut self.add_sequence, PROBE_ADD_SEQUENCE);
+        self.add_sequences[PROBE_ADD_SEQUENCE].cursor = 0;
         let mut guard = ProbeValuesGuard {
             matrix: self,
             saved_values: Some(scratch),
             saved_values_lo: Some(scratch_lo),
             tracked_remainders,
             rhs: Some(rhs),
+            outer_add_sequence,
         };
         let rhs = guard
             .rhs
@@ -1972,6 +2040,8 @@ impl StaticMatrix {
             residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
+            add_sequences: Default::default(),
+            add_sequence: LIVE_ADD_SEQUENCE,
             stamping_error: None,
             newton_certificate_misses: NewtonCertificateMisses::default(),
         })
@@ -2103,21 +2173,32 @@ impl StaticMatrix {
     /// dependency-neutral matrix crate to the simulator's optional SIMD layer.
     #[inline]
     pub fn clear_values(&mut self) {
+        self.add_sequences[self.add_sequence].cursor = 0;
         self.values.fill(0.0);
         if self.tracks_remainders() {
             self.values_lo.fill(0.0);
         }
     }
 
-    /// Add a value at `(row, col)` using a cache-local search of that column.
+    /// Add a value at `(row, col)`: at the offset the same call of the last
+    /// assembly found when it named the same position, else by a
+    /// cache-local search of that column.
     #[inline]
     pub fn add(&mut self, row: usize, col: usize, value: Value) {
-        let idx = match find_csc_offset(&self.csc, row, col) {
-            Some(idx) => idx,
-            None => {
-                self.record_missing_position("StaticMatrix::add", row, col);
-                return;
-            }
+        let idx = match self.add_sequences[self.add_sequence].next(row, col) {
+            (_, Some(idx)) => idx,
+            (call, None) => match find_csc_offset(&self.csc, row, col) {
+                Some(idx) => {
+                    // A sequence that no assembly restarts stops growing.
+                    let limit = 4 * self.values.len() + 1024;
+                    self.add_sequences[self.add_sequence].keep(call, row, col, idx, limit);
+                    idx
+                }
+                None => {
+                    self.record_missing_position("StaticMatrix::add", row, col);
+                    return;
+                }
+            },
         };
         self.accumulate(idx, value);
     }
@@ -8397,6 +8478,58 @@ mod tests {
                 .row_product_from_column(0, 1, &solution[..3])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn repeated_assemblies_land_every_add_where_a_search_does() {
+        let triplets = [
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (1, 1, 0.0),
+            (1, 2, 0.0),
+            (2, 0, 0.0),
+            (2, 1, 0.0),
+            (2, 2, 0.0),
+        ];
+        let mut matrix = StaticMatrix::from_triplets(3, 3, &triplets).unwrap();
+        // The second sequence drops a call and the third adds one, so their
+        // calls name other positions than their predecessors' did.
+        let sequences: [&[(usize, usize, Value)]; 4] = [
+            &[(0, 0, 1.0), (2, 1, 2.0), (1, 2, 3.0), (2, 2, 4.0)],
+            &[(0, 0, 5.0), (1, 2, 6.0), (2, 2, 7.0)],
+            &[
+                (2, 0, 8.0),
+                (0, 0, 9.0),
+                (1, 2, 10.0),
+                (2, 2, 11.0),
+                (1, 1, 12.0),
+            ],
+            &[
+                (2, 0, 13.0),
+                (0, 0, 14.0),
+                (1, 2, 15.0),
+                (2, 2, 16.0),
+                (1, 1, 17.0),
+            ],
+        ];
+        for sequence in sequences {
+            matrix.clear_values();
+            let mut expected = vec![0.0; triplets.len()];
+            for &(row, col, value) in sequence {
+                matrix.add(row, col, value);
+                expected[find_csc_offset(&matrix.csc, row, col).unwrap()] += value;
+            }
+            assert_eq!(matrix.values, expected);
+            // A probe follows its own sequence and leaves the live one's.
+            let probe = matrix.with_probe_values(|probe, _| {
+                probe.add(2, 1, 1.0);
+                probe.values.clone()
+            });
+            assert_eq!(probe[find_csc_offset(&matrix.csc, 2, 1).unwrap()], 1.0);
+            assert_eq!(matrix.values, expected);
+        }
+        matrix.add(0, 1, 1.0);
+        assert!(matrix.check_stamping_error().is_err());
     }
 
     #[test]
