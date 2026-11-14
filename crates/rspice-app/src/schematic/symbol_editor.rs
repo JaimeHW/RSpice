@@ -1,7 +1,7 @@
 //! Symbol view surface.
 
 mod in_place;
-mod interaction;
+pub(crate) mod interaction;
 
 #[cfg(test)]
 mod tests;
@@ -266,7 +266,10 @@ fn show_save_symbol_dialog(
     }
 }
 
-fn apply_surface_request(canvas: &mut CanvasFrame<'_>, request: SymbolSurfaceRequest) -> bool {
+pub(crate) fn apply_surface_request(
+    canvas: &mut CanvasFrame<'_>,
+    request: SymbolSurfaceRequest,
+) -> bool {
     if request.source != symbol_editor_request_source(canvas.model, canvas.workbench)
         || canvas.application_modal_open()
     {

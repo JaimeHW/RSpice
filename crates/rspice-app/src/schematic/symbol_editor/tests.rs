@@ -2,77 +2,8 @@
 
 use super::*;
 use crate::state::{Point, PortDirection, SymbolPin, SymbolShape};
+use crate::workbench::SymbolTool;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
-use crate::workbench::{AppState, SymbolTool};
-
-#[test]
-fn symbol_surface_requests_recheck_the_view_and_write_authority() {
-    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
-    for action in [
-        SymbolSurfaceAction::CopyToEditableLibrary,
-        SymbolSurfaceAction::GenerateFromSchematic,
-    ] {
-        for stale_view in [true, false] {
-            let mut state = AppState::default();
-            let mut library = Library::new("work");
-            let mut cell = Cell::new("amp");
-            cell.add_view(View::new("schematic", ViewType::Schematic));
-            cell.add_view(View::new("symbol", ViewType::Symbol));
-            library.add_cell(cell);
-            state.model.library_manager.add_library(library);
-            state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-            let before = state.model.load_active_symbol_document().unwrap();
-            let request = SymbolSurfaceRequest {
-                source: crate::workbench::app::symbol_editor_request_source(
-                    &state.model,
-                    &state.workbench,
-                ),
-                action,
-            };
-            if stale_view {
-                state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
-                state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-            } else {
-                state
-                    .model
-                    .workspace
-                    .content
-                    .set_active_read_only_reference(true);
-            }
-            assert!(
-                !apply_surface_request(
-                    &mut crate::schematic::view::canvas_frame(&mut state),
-                    request
-                ),
-                "{action:?}, stale view: {stale_view}"
-            );
-            assert!(!state.project.copy_cell_dialog);
-            assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
-            assert!(!state.can_undo_active_symbol_document());
-
-            state
-                .model
-                .workspace
-                .content
-                .set_active_read_only_reference(false);
-            let request = SymbolSurfaceRequest {
-                source: crate::workbench::app::symbol_editor_request_source(
-                    &state.model,
-                    &state.workbench,
-                ),
-                action: SymbolSurfaceAction::CopyToEditableLibrary,
-            };
-            assert!(apply_surface_request(
-                &mut crate::schematic::view::canvas_frame(&mut state),
-                request
-            ));
-            crate::workbench::commands::answer_surface_requests(&mut state);
-            assert!(state.project.copy_cell_dialog);
-            assert_eq!(state.project.copy_cell_source_library, "work");
-            assert_eq!(state.project.copy_cell_source_cell, "amp");
-        }
-    }
-}
 
 #[test]
 fn symbol_canvas_accessibility_label_reports_editing_contract() {
