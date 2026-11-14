@@ -110,11 +110,12 @@ struct KnownCapacitanceDeviation {
     why: &'static str,
 }
 
-/// Measured on the canonical backend, 2026-07-28, all 42 models.
+/// Measured 2026-11-14, all 60 models, with the charge recovered at 1e24 and
+/// 1e26 (see `CHARGE_RECOVERY_SCALES`).
 ///
 /// **Coverage gaps only. There is no capacitance defect in the corpus**: every
 /// model reports zero failures against the strict tolerance, so no entry here
-/// relaxes it except `PSP104TVA`.
+/// relaxes it.
 ///
 /// This list previously named two "defect clusters" — the `bjt505` family
 /// stamping `9.294565833142348e-16` against a difference of
@@ -145,16 +146,12 @@ struct KnownCapacitanceDeviation {
 /// counts below rose by exactly the number of formerly-failing entries in each
 /// model, which is the reclassification and not new blindness.
 const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
-    // Four more of the gaps are row b1 at probe point 1. That point drives
-    // about 2.2e5 A through b1 and b2, so the charge recovered at 1e10 and at
-    // 1e12 agrees only to rounding: b1's linearity sits at 4.3e-7 against the
-    // 1e-7 tolerance. Its entries are unverifiable there, not wrong.
     KnownCapacitanceDeviation {
         model: "bjt505_va",
         relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 13,
-        why: "coverage gaps only; four of them are the epilayer kink at \
-              equilibrium, where Mextram's `abs(Vc1c2) < 1e-5 * Vt` guard leaves \
+        unverified_significant: 4,
+        why: "the epilayer kink at equilibrium, where Mextram's \
+              `abs(Vc1c2) < 1e-5 * Vt` guard (505p5p0_va/evaluate.inc:120) leaves \
               the charge continuous but not differentiable",
     },
     KnownCapacitanceDeviation {
@@ -166,14 +163,49 @@ const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
     KnownCapacitanceDeviation {
         model: "bjtd505_va",
         relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 13,
-        why: "coverage gaps only, four of them the shared epilayer kink",
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries",
     },
     KnownCapacitanceDeviation {
         model: "bjtd505t_va",
         relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 15,
-        why: "coverage gaps only, four of them the shared epilayer kink",
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjt504va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 4,
+        why: "Mextram 504's epilayer kink at equilibrium: the same \
+              `abs(Vc1c2) < 1e-5 * Vt` guard (vacode_504.12.1/evaluate.inc:143)",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjt504tva",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries; the body is shared",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjtd504va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjtd504tva",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries",
+    },
+    // Probe point 2 is in accumulation. There PSP 102.5.0's release patch
+    // starts `mig` at 1e-40, PSP 103.4.0's own value, so `V(NOIR) / mig` gives
+    // the noise node NOI a 1e40 S conductance: `scale * q` rounds away beside
+    // it at any finite scale, and NOI's row has no oracle at that point.
+    KnownCapacitanceDeviation {
+        model: "PSPNQS102EVA",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 5,
+        why: "row NOI in accumulation, pinned by a 1e40 S conductance",
     },
     KnownCapacitanceDeviation {
         model: "bsimsoi__18c250bc",
@@ -185,56 +217,11 @@ const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
     KnownCapacitanceDeviation {
         model: "bsimsoi_va",
         relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 11,
+        unverified_significant: 3,
         why: "coverage gaps only; same kink as bsimsoi__18c250bc",
     },
     KnownCapacitanceDeviation {
-        model: "PSP104TVA",
-        relative_error: 1.0e-2,
-        unverified_significant: 1,
-        why: "1.6157e-19 F against 1.6314e-19 F; small, but the difference \
-              claims to have resolved it an order tighter than they disagree",
-    },
-    KnownCapacitanceDeviation {
-        model: "PSPNQS104VA",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 3,
-        why: "coverage gaps only; every comparable entry agrees",
-    },
-    KnownCapacitanceDeviation {
-        model: "bsimimg",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 32,
-        why: "coverage gaps only",
-    },
-    KnownCapacitanceDeviation {
-        model: "hicumL0va",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 8,
-        why: "coverage gaps only; its whole reactive block sits at 1e-20 F",
-    },
-    KnownCapacitanceDeviation {
-        model: "hicumL2va",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 9,
-        why: "coverage gaps only; its whole reactive block sits at 1e-20 F",
-    },
-    KnownCapacitanceDeviation {
         model: "hisimhv_va",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 3,
-        why: "coverage gaps only",
-    },
-    KnownCapacitanceDeviation {
-        model: "l_utsoi__485e0ac9",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 28,
-        why: "coverage gaps only; NQS internal nodes carry 1 nF regularising \
-              capacitors against femtofarad physics, which is a hard block to \
-              difference",
-    },
-    KnownCapacitanceDeviation {
-        model: "l_utsoi__832ce87d",
         relative_error: CAPACITANCE_TOLERANCE,
         unverified_significant: 3,
         why: "coverage gaps only",

@@ -150,15 +150,24 @@ const AUDIT_ABSOLUTE_FLOOR: Value = 1.0e-30;
 ///
 /// A charge has to be recovered by subtracting two current vectors, and the
 /// charge term is `scale * q` while the conduction term is whatever the device
-/// conducts. Too small a scale and the subtraction is pure cancellation: a
-/// picocoulomb against a milliamp at `scale = 1` leaves four significant digits.
-/// These correspond to timesteps of 100 ps and 1 ps, which put `scale * q` on
-/// the same order as the conduction current for a typical compact model and
-/// recover the charge to nearly full precision.
+/// conducts, so the recovered charge carries a rounding error of about
+/// `EPSILON * |I| / scale`. The scale has to dwarf the conduction current at
+/// the probe points, not at an operating point: a drawn point puts each
+/// internal node of a series resistance at its own voltage, and the current
+/// through it is then hundreds of amperes to megaamperes against femtocoulombs
+/// of charge. Mextram 504 drives 7.4e6 A through `c1` against 3.0e-14 C;
+/// BSIM-CMG 107 drives 8.1e2 A through `si` against 9.8e-18 C; PSP 102's
+/// correlated-noise node, at a drawn voltage across its `1 / mig`, conducts
+/// 4.2e11 A against 2.4e-15 C, a ratio of 1.7e26. At 1e10 and 1e12 those rows
+/// agreed only to 1e-6 and their reactive rows went unverified. At 1e24 the
+/// worst of them is recovered to 4e-14, and nothing is lost where the current
+/// is ordinary: the larger the scale, the closer the recovery comes to
+/// `EPSILON`, until `scale * q` itself would overflow, which a microcoulomb
+/// at 1e26 is nowhere near.
 ///
 /// Two of them, two orders apart, because agreement between them is the test
 /// that `ddt` enters the residual linearly — see [`GoldenHarness::charge_audit`].
-const CHARGE_RECOVERY_SCALES: [Value; 2] = [1.0e10, 1.0e12];
+const CHARGE_RECOVERY_SCALES: [Value; 2] = [1.0e24, 1.0e26];
 
 /// Disagreement between the two recovery scales, relative to the recovered
 /// charge, above which that row's charge is treated as unrecoverable.
@@ -868,7 +877,7 @@ impl GoldenHarness {
         let stamped = self.stamp_capacitance_dense(unknowns)?;
 
         let [coarse_scale, fine_scale] = CHARGE_RECOVERY_SCALES;
-        let coarse = self.device_charges(unknowns, coarse_scale)?;
+        let (coarse, rounding) = self.recovered_charges(unknowns, coarse_scale)?;
         let fine = self.device_charges(unknowns, fine_scale)?;
 
         let charge_floor = fine
@@ -877,14 +886,19 @@ impl GoldenHarness {
             .filter(|value| value.is_finite())
             .fold(0.0, |worst: Value, value| worst.max(value.abs()))
             * AUDIT_BLOCK_RELATIVE_FLOOR;
+        // Two scales that agree are no evidence when the charge was lost to
+        // rounding at both: a row conducting 1e40 A rounds `scale * q` away
+        // entirely, recovers exactly zero twice, and would hold the stamp
+        // against a derivative of nothing. So the coarser recovery's own
+        // rounding has to sit inside the same tolerance.
         let linear: Vec<bool> = (0..size)
             .map(|row| {
                 let (left, right) = (coarse[row], fine[row]);
+                let scale = magnitude_scale(left, right, charge_floor.max(AUDIT_ABSOLUTE_FLOOR));
                 left.is_finite()
                     && right.is_finite()
-                    && (left - right).abs()
-                        / magnitude_scale(left, right, charge_floor.max(AUDIT_ABSOLUTE_FLOOR))
-                        <= CHARGE_LINEARITY_TOLERANCE
+                    && (left - right).abs() / scale <= CHARGE_LINEARITY_TOLERANCE
+                    && rounding[row] / scale <= CHARGE_LINEARITY_TOLERANCE
             })
             .collect();
 
@@ -926,6 +940,17 @@ impl GoldenHarness {
         unknowns: &[Value],
         scale: Value,
     ) -> Result<Vec<Value>, GoldenError> {
+        Ok(self.recovered_charges(unknowns, scale)?.0)
+    }
+
+    /// [`Self::device_charges`] beside the rounding each recovered charge
+    /// carries: the last place of the larger current it was subtracted from,
+    /// divided by `scale`.
+    fn recovered_charges(
+        &mut self,
+        unknowns: &[Value],
+        scale: Value,
+    ) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
         // Inert first. `rspice_eval_ddt` latches its history on the inert path,
         // so running it first leaves every slot initialised and makes the active
         // pass depend on nothing but the value it is handed. `ddt` goes back
@@ -942,8 +967,13 @@ impl GoldenHarness {
         Ok(inert
             .iter()
             .zip(active.iter())
-            .map(|(inert, active)| (active - inert) / scale)
-            .collect())
+            .map(|(inert, active)| {
+                (
+                    (active - inert) / scale,
+                    Value::EPSILON * inert.abs().max(active.abs()) / scale,
+                )
+            })
+            .unzip())
     }
 
     /// Drive `ddt` with a bare derivative weight, or make it inert.
