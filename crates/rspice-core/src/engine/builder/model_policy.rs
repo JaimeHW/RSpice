@@ -2396,6 +2396,14 @@ impl CodeModelNodes {
         flat_elements: &[crate::netlist::Element],
     ) -> Self {
         let mut nodes = Self::default();
+        // Without a code model no node is driven by one or event-only, and a
+        // flat deck's tens of thousands of analog nodes need not be collected.
+        if !flat_elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Xspice { .. }))
+        {
+            return nodes;
+        }
         let mut event = BTreeSet::new();
         let mut analog = BTreeSet::new();
         for element in flat_elements {
