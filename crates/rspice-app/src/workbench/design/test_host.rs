@@ -14,7 +14,7 @@ use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts_lent, canvas
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, SchematicState, SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::app::actions::workspace::symbol_document::{
-    can_undo_active_symbol_document, redo_active_symbol_document, refuse_unsavable_active_symbol,
+    can_undo_active_symbol_document, redo_active_symbol_document,
     store_active_symbol_document, store_active_symbol_editor_bundle, undo_active_symbol_document,
 };
 use crate::workbench::app::actions::workspace::{
@@ -120,11 +120,6 @@ impl DesignTestHost {
             document,
             metadata,
         )
-    }
-
-    /// `AppState::refuse_unsavable_active_symbol`, the same one line.
-    pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
-        refuse_unsavable_active_symbol(&self.model)
     }
 
     /// `AppState::can_undo_active_symbol_document`, the same one line.
