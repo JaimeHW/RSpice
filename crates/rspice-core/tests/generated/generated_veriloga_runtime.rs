@@ -619,3 +619,57 @@ fn generated_noise_processes_take_their_xyce_branch_names() {
         }
     }
 }
+
+/// A thermal terminal the card ties to ground, on a model that holds its own
+/// thermal node at ambient (`V(t) <+ 0` with self-heating off), solves as
+/// the same card with the terminal on a net of its own: the model's tie then
+/// joins ground to ground, so it carries no unknown, as Xyce collapses a
+/// node a `V(a,b) <+ 0` ties (N_DEV_ADMSbsimcmg_111.C collapses its thermal
+/// node to GND when SHMOD=0, and N_DEV_ADMShic0_full.C its internal nodes).
+#[cfg(any(
+    feature = "veriloga-model-hicuml0va",
+    feature = "veriloga-model-bsimimg"
+))]
+#[test]
+fn a_grounded_thermal_terminal_solves_as_the_models_own_tie_to_ambient() {
+    use rspice_core::engine::Engine;
+    use rspice_core::netlist::Netlist;
+    let decks: Vec<(&str, &str, &[&str])> = vec![
+        #[cfg(feature = "veriloga-model-hicuml0va")]
+        (
+            "HICUM/L0",
+            "VCC vcc 0 3\nVB in 0 0.8\nRB in b 10k\nRC vcc c 1k\nXQ c b 0 0 {t} hicuml0va\n",
+            &["b", "c"],
+        ),
+        #[cfg(feature = "veriloga-model-bsimimg")]
+        (
+            "BSIM-IMG",
+            "VDD vdd 0 1\nVG in 0 0.6\nRG in g 1k\nRD vdd d 1k\nXM d g 0 0 {t} bsimimg\n",
+            &["g", "d"],
+        ),
+    ];
+    for (family, card, nodes) in decks {
+        let solve = |thermal: &str| {
+            let deck = format!(
+                "* {family} thermal terminal\n{}.end\n",
+                card.replace("{t}", thermal)
+            );
+            let netlist = Netlist::parse(&deck).expect("parse");
+            let result = Engine::default()
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|error| panic!("{family} with t on {thermal}: {error}"));
+            nodes
+                .iter()
+                .map(|node| result.try_voltage_named(node).expect("a node voltage"))
+                .collect::<Vec<_>>()
+        };
+        let own_net = solve("t");
+        let grounded = solve("0");
+        for ((node, own), grounded) in nodes.iter().zip(&own_net).zip(&grounded) {
+            assert!(
+                (own - grounded).abs() <= 1e-9 * own.abs().max(1.0),
+                "{family}: V({node}) {grounded} with t grounded, {own} with t on its own net"
+            );
+        }
+    }
+}

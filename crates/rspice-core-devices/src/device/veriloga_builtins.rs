@@ -2801,18 +2801,23 @@ pub fn unconnected_terminal_net(instance_name: &str, terminal: &str, index: usiz
 /// which of them were.
 ///
 /// Nodes are device-local, terminals first, and `bound` marks the ones already
-/// on a net: every terminal and each internal node the card binds. Entry `i`
-/// is `None` for ground, and otherwise the node whose net `i` shares (itself
-/// when it keeps its own). A switch in its flow arm only grounds its current.
-/// A short held on also merges its two sides, unless both already reach a
-/// bound net or ground: that would join two of the circuit's own nets, so the
-/// switch keeps its current instead. A potential arm that is not a short keeps
-/// its current too.
+/// on a net: every terminal and each internal node the card binds, on the
+/// circuit node `circuit_nodes` names. Entry `i` is `None` for ground, and
+/// otherwise the node whose net `i` shares (itself when it keeps its own).
+/// Bound nodes on one circuit node share its net from the start, and one the
+/// card ties to node 0 is ground. A switch in its flow arm only grounds its
+/// current. A short held on also merges its two sides, unless both already
+/// reach different bound nets or ground: that would join two of the
+/// circuit's own nets, so the switch keeps its current instead. A short whose
+/// two sides already share a net holds itself, so its current is grounded, as
+/// Xyce collapses the node a `V(a,b) <+ 0` ties. A potential arm that is not
+/// a short keeps its current too.
 #[cfg(feature = "veriloga-builtins-base")]
 fn fix_private_switches(
     switches: &[rspice_veriloga_runtime::GeneratedPrivateSwitch],
     kinds: u64,
     bound: &[bool],
+    circuit_nodes: &[usize],
 ) -> (Vec<Option<usize>>, u64) {
     fn root(parent: &mut [usize], mut node: usize) -> usize {
         while parent[node] != node {
@@ -2824,6 +2829,14 @@ fn fix_private_switches(
     let ground = bound.len();
     let anchored = |node: usize| node == ground || bound[node];
     let mut parent: Vec<usize> = (0..=ground).collect();
+    for node in (0..ground).filter(|&node| bound[node]) {
+        parent[node] = match circuit_nodes[node] {
+            0 => ground,
+            net => (0..node)
+                .find(|&other| bound[other] && circuit_nodes[other] == net)
+                .unwrap_or(node),
+        };
+    }
     let mut grounded = vec![false; ground];
     let mut fixed = 0;
     for (bit, switch) in switches.iter().enumerate().take(64) {
@@ -3001,10 +3014,28 @@ pub fn instantiate_builtin_scoped(
         ));
     }
 
+    // A source branch whose current only ground reads, because the card ties
+    // every node it reaches to node 0 (a thermal terminal grounded under the
+    // model's own `V(t) <+ 0`), joins ground to ground. It takes no unknown,
+    // as Xyce collapses the node such a branch ties; one would have an empty
+    // row and column, and the matrix would be singular.
     let branch_count = descriptor.branch_count;
     let mut branches = Vec::with_capacity(branch_count);
-    for _ in 0..branch_count {
-        branches.push(circuit.allocate_branch());
+    for branch in 0..branch_count {
+        let axis = total_nodes + branch;
+        let mut readers = descriptor
+            .stamp_pattern
+            .resistive
+            .iter()
+            .filter(|&&(row, column)| column == axis && row < total_nodes)
+            .peekable();
+        let grounded =
+            readers.peek().is_some() && readers.all(|&(row, _)| bound[row] && nodes[row] == 0);
+        branches.push(if grounded {
+            0
+        } else {
+            circuit.allocate_branch()
+        });
     }
 
     let Some(mut kind) = builtins::instantiate_scoped_with_simulation_parameters(
@@ -3045,7 +3076,7 @@ pub fn instantiate_builtin_scoped(
             0,
         ))
     };
-    let (nets, fixed_switches) = fix_private_switches(switches, kinds, &bound);
+    let (nets, fixed_switches) = fix_private_switches(switches, kinds, &bound, &nodes);
     let mut allocated = vec![None; total_nodes];
     let mut merged_terminal_currents = Vec::new();
     for (local, &net) in nets.iter().enumerate().skip(expected_nodes) {
@@ -4487,21 +4518,38 @@ mod tests {
             // A potential arm that is not a short keeps its current.
             switch(9, Some(2), Some(4), false),
         ];
-        let (nets, fixed) = super::fix_private_switches(&switches, 0b11111, &bound);
+        // Each bound node on a circuit node of its own.
+        let circuit_nodes: Vec<usize> = (1..=11).collect();
+        let (nets, fixed) = super::fix_private_switches(&switches, 0b11111, &bound, &circuit_nodes);
         assert_eq!(fixed, 0b00011);
         assert_eq!(nets[..5], [Some(0), Some(1), Some(0), Some(0), Some(4)]);
         assert_eq!(nets[5..], [None, None, Some(7), Some(8), Some(9), Some(10)]);
 
         // In the flow arm every switch drops its current and merges nothing.
-        let (nets, fixed) = super::fix_private_switches(&switches, 0, &bound);
+        let (nets, fixed) = super::fix_private_switches(&switches, 0, &bound, &circuit_nodes);
         assert_eq!(fixed, 0b11111);
         assert_eq!(nets[..5], [Some(0), Some(1), Some(2), Some(3), Some(4)]);
         assert_eq!(nets[5..10], [None; 5]);
 
         // A free node shorted to ground is ground.
         let to_ground = [switch(10, None, Some(3), true)];
-        let (nets, fixed) = super::fix_private_switches(&to_ground, 1, &bound);
+        let (nets, fixed) = super::fix_private_switches(&to_ground, 1, &bound, &circuit_nodes);
         assert_eq!(fixed, 1);
         assert_eq!((nets[2], nets[3], nets[10]), (Some(2), None, None));
+
+        // A short from a terminal the card ties to node 0 to ground holds
+        // itself: its current is grounded and nothing else moves. So does a
+        // short between two bound nodes the card puts on one net.
+        let mut tied = circuit_nodes.clone();
+        tied[1] = 0;
+        tied[4] = tied[0];
+        let held = [
+            switch(8, Some(1), None, true),
+            switch(9, Some(0), Some(4), true),
+        ];
+        let (nets, fixed) = super::fix_private_switches(&held, 0b11, &bound, &tied);
+        assert_eq!(fixed, 0b11);
+        assert_eq!((nets[8], nets[9]), (None, None));
+        assert_eq!((nets[2], nets[3]), (Some(2), Some(3)));
     }
 }
