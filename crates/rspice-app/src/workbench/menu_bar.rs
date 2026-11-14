@@ -6,9 +6,8 @@
 //! Rendering lives in the workbench title-bar menu module, which dispatches
 //! into the functions re-exported here.
 
-mod bom_export;
 mod file_menu;
-use rspice_app_code::workbench::menu_bar::netlist_actions;
+use rspice_app_code::workbench::menu_bar::{bom_export, netlist_actions};
 use rspice_app_results::workbench::menu_bar::waveform_export;
 
 pub(crate) use bom_export::action_export_bill_of_materials_with_io;

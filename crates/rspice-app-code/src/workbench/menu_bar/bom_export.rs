@@ -13,7 +13,7 @@ use rspice_design::schematic::bom::{bom_csv, bom_lines};
 
 const FAILURE: &str = "Bill of materials export failed";
 
-pub(crate) fn action_export_bill_of_materials_with_io(
+pub fn action_export_bill_of_materials_with_io(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     io: &(impl ExportWorkflowIo + ?Sized),

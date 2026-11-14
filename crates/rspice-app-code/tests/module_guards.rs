@@ -17,6 +17,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "app_state"),
     ("lib.rs", "automation"),
     ("lib.rs", "automation_workflow"),
+    ("lib.rs", "bom_export"),
     ("lib.rs", "browser"),
     ("lib.rs", "chrome"),
     ("lib.rs", "code"),

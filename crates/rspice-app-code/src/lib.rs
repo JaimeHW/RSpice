@@ -150,6 +150,7 @@ pub mod workbench {
         pub mod virtual_text_editor;
     }
     pub mod menu_bar {
+        pub mod bom_export;
         pub mod netlist_actions;
         pub mod netlist_compat;
         pub mod netlist_export;
