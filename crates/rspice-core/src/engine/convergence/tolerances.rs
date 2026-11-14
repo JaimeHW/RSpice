@@ -326,6 +326,20 @@ impl Engine {
         )
     }
 
+    /// Device convergence criteria for a transient Newton solve. Xyce's
+    /// transient update test weighs every MNA unknown, private device states
+    /// included ([`Self::transient_newton_update_convergence_met`]), so its
+    /// devices add no internal-node test of their own.
+    #[inline]
+    pub(crate) fn transient_device_convergence_criteria(&self) -> NonlinearConvergenceCriteria {
+        let criteria = self.device_convergence_criteria();
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            criteria.with_internal_nodes_in_update_test()
+        } else {
+            criteria
+        }
+    }
+
     #[inline]
     pub(crate) fn node_voltage_convergence_met(
         &self,

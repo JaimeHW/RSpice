@@ -970,7 +970,13 @@ impl Bjt {
         // and so does a promoted device whose internal states all collapse
         // onto its terminals: it never had a private solve, and its junction
         // voltages are terminal differences the global update test governs.
-        if self.mna_promoted() && self.mna_has_private_internal_nodes() {
+        // A solver whose update test weighs every MNA unknown (Xyce's
+        // transient DELTAXTOL norm) already governs the internal nodes, and
+        // Xyce's BJT reports convergence through origFlag alone.
+        if self.mna_promoted()
+            && self.mna_has_private_internal_nodes()
+            && !criteria.update_test_covers_internal_nodes
+        {
             let tolerance = criteria.voltage_tolerance().min(1e-10);
             for (current, previous) in [
                 (self.vbe, self.vbe_prev),

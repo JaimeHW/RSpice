@@ -9407,7 +9407,8 @@ impl Engine {
                     let device_converged = core_trial_converged(&circuit)
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_criteria()));
+                            || circuit
+                                .nonlinear_converged(self.transient_device_convergence_criteria()));
                     let behavioral_converged = stamp_trial_or_reject!(
                         circuit
                             .behavioral_linearizations_converged(
@@ -9761,8 +9762,9 @@ impl Engine {
                             let device_converged = core_trial_converged(&circuit)
                                 && (!enforce_device_convergence
                                     || !circuit.has_nonlinear_devices()
-                                    || circuit
-                                        .nonlinear_converged(self.device_convergence_criteria()));
+                                    || circuit.nonlinear_converged(
+                                        self.transient_device_convergence_criteria(),
+                                    ));
                             let behavioral_converged = stamp_trial_or_reject!(
                                 circuit
                                     .behavioral_linearizations_converged(
@@ -9912,7 +9914,7 @@ impl Engine {
                                             .then_some(&mut mosfet_static_terms_scratch),
                                         classic_mos_truncation_context.as_ref(),
                                         enforce_device_convergence
-                                            .then(|| self.device_convergence_criteria()),
+                                            .then(|| self.transient_device_convergence_criteria()),
                                     )?;
                                     cached_mosfet_truncation_limit = evaluation.truncation_limit;
                                     fused_classic_mos_device_converged =
@@ -9975,7 +9977,9 @@ impl Engine {
                             && (!enforce_device_convergence
                                 || !circuit.has_nonlinear_devices()
                                 || fused_classic_mos_device_converged.unwrap_or_else(|| {
-                                    circuit.nonlinear_converged(self.device_convergence_criteria())
+                                    circuit.nonlinear_converged(
+                                        self.transient_device_convergence_criteria(),
+                                    )
                                 }));
                         // This is RSpice's consistency check for its internal
                         // behavioral-expression linearization, not a device
@@ -10088,7 +10092,7 @@ impl Engine {
                                     && (!enforce_device_convergence
                                         || !circuit.has_nonlinear_devices()
                                         || circuit.nonlinear_converged(
-                                            self.device_convergence_criteria(),
+                                            self.transient_device_convergence_criteria(),
                                         ));
                                 behavioral_converged = stamp_trial_or_reject!(
                                     circuit
@@ -10175,7 +10179,8 @@ impl Engine {
                     let d_conv = core_trial_converged(&circuit)
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_criteria()));
+                            || circuit
+                                .nonlinear_converged(self.transient_device_convergence_criteria()));
                     let r_conv = self.transient_residual_convergence_met(
                         &circuit,
                         &mut matrix,
@@ -10327,7 +10332,8 @@ impl Engine {
                     if core_trial_converged(&circuit)
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_criteria()))
+                            || circuit
+                                .nonlinear_converged(self.transient_device_convergence_criteria()))
                     {
                         failed_residual_only += 1;
                     } else {

@@ -3973,4 +3973,28 @@ mod tests {
             );
         }
     }
+
+    /// A promoted Gummel-Poon device with a private base node holds its
+    /// internal junction voltages to 1e-10 V itself, unless the solver's
+    /// update test already weighs every MNA unknown, as Xyce's transient
+    /// DELTAXTOL norm does: then, as in Xyce, only junction limiting holds
+    /// it back.
+    #[test]
+    fn a_private_base_node_test_yields_to_an_update_test_over_every_unknown() {
+        let criteria = crate::device::NonlinearConvergenceCriteria::new(1e-6, 1e-12, 1e-2);
+        for xyce in [false, true] {
+            let (mut bjt, mut bias) = settled_gummel_poon(GUMMEL_POON_CARDS[0], FORWARD_ACTIVE);
+            bjt.set_xyce_compatibility(xyce);
+            assert!(bjt.mna_has_private_internal_nodes());
+            bjt.update(&bias);
+            assert!(bjt.is_converged(criteria), "xyce={xyce}");
+            bias[bjt.node_bi - 1] += 1e-6;
+            bjt.update(&bias);
+            assert!(!bjt.legacy_junction_limited, "xyce={xyce}");
+            assert!(!bjt.is_converged(criteria), "xyce={xyce}");
+            if xyce {
+                assert!(bjt.is_converged(criteria.with_internal_nodes_in_update_test()));
+            }
+        }
+    }
 }

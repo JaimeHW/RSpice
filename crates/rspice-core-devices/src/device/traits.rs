@@ -8,6 +8,10 @@ pub struct NonlinearConvergenceCriteria {
     pub voltage_abs: Value,
     pub current_abs: Value,
     pub rel: Value,
+    /// The solver's own update test weighs every MNA unknown, device-internal
+    /// nodes included, as Xyce's transient DELTAXTOL norm does. A device whose
+    /// internal states are MNA unknowns then needs no test of its own on them.
+    pub update_test_covers_internal_nodes: bool,
 }
 
 impl Default for NonlinearConvergenceCriteria {
@@ -16,6 +20,7 @@ impl Default for NonlinearConvergenceCriteria {
             voltage_abs: 1e-6,
             current_abs: 1e-12,
             rel: 1e-3,
+            update_test_covers_internal_nodes: false,
         }
     }
 }
@@ -27,6 +32,17 @@ impl NonlinearConvergenceCriteria {
             voltage_abs,
             current_abs,
             rel,
+            update_test_covers_internal_nodes: false,
+        }
+    }
+
+    /// These criteria under a solver whose update test weighs every MNA
+    /// unknown, device-internal nodes included.
+    #[inline]
+    pub fn with_internal_nodes_in_update_test(self) -> Self {
+        Self {
+            update_test_covers_internal_nodes: true,
+            ..self
         }
     }
 
