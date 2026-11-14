@@ -487,7 +487,7 @@ fn resolve_draft_for_repaint(
     (validation, bus_choices)
 }
 
-fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
+pub(crate) fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
     let (target_matches_baseline, draft_source) = match draft {
         ObjectPropertiesDraft::Bus(draft) => (
             model
