@@ -3,15 +3,28 @@
 //! and the properties and rows the frame draws.
 
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use crate::workbench::AppState;
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::source_document::fixtures::facts_of;
 use crate::workbench::app::dialogs::source_document::{
     apply_lifecycle_action, begin_new_top_deck_in, netlist_lifecycle_facts,
-    source_document_dialog_is_available,
+    open_source_document_dialog_in, source_document_dialog_is_available,
 };
-use crate::workbench::app::{RSpiceApp, open_source_document_dialog};
 use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::documents::code_workspace::{CodeSourceFileAction, CodeWorkspacePage};
 use egui::Context;
+
+/// Bring the lifecycle dialog up for the page that is showing, as Manage
+/// source document does.
+fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
+    open_source_document_dialog_in(
+        state.workbench.workspace,
+        &state.model,
+        &mut state.code.code_workspace,
+        &state.code.netlist,
+        &state.platform,
+    )
+}
 
 /// The defect this dialog exists for. Every file operation was reachable
 /// only from a test, so the whole lifecycle shipped unreachable. Assert a

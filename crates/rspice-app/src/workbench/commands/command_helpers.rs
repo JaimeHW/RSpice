@@ -348,7 +348,13 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             super::netlist_validation::validate_visible_netlist_source(app);
         }
         CodeRequest::ManageSourceDocument => {
-            if let Err(error) = crate::workbench::app::open_source_document_dialog(&mut app.state) {
+            if let Err(error) = source_document::open_source_document_dialog_in(
+                app.state.workbench.workspace,
+                &app.state.model,
+                &mut app.state.code.code_workspace,
+                &app.state.code.netlist,
+                &app.state.platform,
+            ) {
                 app.state.prompt(error);
             }
         }
@@ -492,7 +498,15 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             let opened =
                 crate::workbench::documents::code_workspace::open_source_file_dialog_in_bundle(&mut app.code_workspace_parts(), language, bundle_id, action, &path, &path,
                 )
-                .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
+                .and_then(|()| {
+                    source_document::open_source_document_dialog_in(
+                        app.state.workbench.workspace,
+                        &app.state.model,
+                        &mut app.state.code.code_workspace,
+                        &app.state.code.netlist,
+                        &app.state.platform,
+                    )
+                });
             if let Err(error) = opened {
                 app.state.code.code_workspace.source_file_dialog = None;
                 app.state.prompt(error);
@@ -783,14 +797,23 @@ fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRe
             }
         }
         SourceDocumentRequest::Netlist { action, close } => {
-            crate::workbench::app::code_adapters::apply_netlist_lifecycle_action(
-                &mut app.state,
+            crate::workbench::app::netlist_lifecycle::apply_netlist_lifecycle_action(
+                &mut app.state.code.code_workspace,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                &mut app.state.model,
+                &mut app.state.workbench,
                 action,
                 close,
             );
         }
         SourceDocumentRequest::CreateTopDeck => {
-            crate::workbench::app::code_adapters::commit_new_top_deck(&mut app.state);
+            crate::workbench::app::netlist_lifecycle::commit_new_top_deck(
+                &mut app.state.code.code_workspace,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                &mut app.state.model,
+            );
         }
     }
 }

@@ -5,10 +5,10 @@ use crate::state::{
     ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
 };
 use crate::workbench::AppState;
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
-    Draft, Line, cell_line, draft_in, ports_line,
+    Draft, Line, cell_line, draft_in, open_new_veriloga_device_form_in, ports_line,
 };
-use crate::workbench::app::{RSpiceApp, open_new_veriloga_device_form};
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
 
@@ -31,7 +31,7 @@ fn app_with_draft(name: &str, ports: &str) -> RSpiceApp {
     let mut library = Library::new(LIBRARY);
     library.add_cell(Cell::new("taken"));
     app.state.model.library_manager.add_library(library);
-    open_new_veriloga_device_form(&mut app.state);
+    open_new_veriloga_device_form_in(&app.state.model, &mut app.state.code.new_veriloga_device);
     let form = &mut app.state.code.new_veriloga_device;
     form.library = LIBRARY.to_owned();
     form.name = name.to_owned();
@@ -463,7 +463,7 @@ fn the_form_opens_on_the_active_designs_library() {
         .active_view
         .library
         .clone();
-    open_new_veriloga_device_form(&mut app.state);
+    open_new_veriloga_device_form_in(&app.state.model, &mut app.state.code.new_veriloga_device);
     assert_eq!(app.state.code.new_veriloga_device.library, active);
 
     app.state
@@ -472,6 +472,6 @@ fn the_form_opens_on_the_active_designs_library() {
         .get_library_mut(&active)
         .expect("the active design's library")
         .read_only = true;
-    open_new_veriloga_device_form(&mut app.state);
+    open_new_veriloga_device_form_in(&app.state.model, &mut app.state.code.new_veriloga_device);
     assert_eq!(app.state.code.new_veriloga_device.library, LIBRARY);
 }

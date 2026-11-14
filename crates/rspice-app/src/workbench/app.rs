@@ -82,6 +82,7 @@ pub(crate) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
 pub(crate) mod code_adapters;
+pub(crate) mod netlist_lifecycle;
 pub(crate) mod project_transactions;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
@@ -115,7 +116,6 @@ pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 
 pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
-pub(crate) use code_adapters::{open_new_veriloga_device_form, open_source_document_dialog};
 pub(crate) use dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
 

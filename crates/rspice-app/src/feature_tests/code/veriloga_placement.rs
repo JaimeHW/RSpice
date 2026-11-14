@@ -9,6 +9,7 @@ use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
+use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use crate::workbench::app::veriloga_design_tests::open_project_app;
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::state::Workspace;
@@ -41,7 +42,7 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
         ViewType::Schematic,
         "the form is opened from a schematic"
     );
-    crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
+    open_new_veriloga_device_form_in(&app.state.model, &mut app.state.code.new_veriloga_device);
     let form = &mut app.state.code.new_veriloga_device;
     form.library = LIBRARY.to_owned();
     form.name = "gain".to_owned();

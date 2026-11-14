@@ -5,7 +5,8 @@
 //! and the shell answers it once the surface has drawn, in the same frame.
 
 use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use crate::workbench::app::{open_create_model_bound_symbol_dialog, open_new_veriloga_device_form};
+use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
+use crate::workbench::app::open_create_model_bound_symbol_dialog;
 use crate::workbench::documents::result_document::open_specification_editor;
 use crate::workbench::{AppState, ResultViewer};
 
@@ -24,7 +25,9 @@ pub(in crate::workbench) fn answer_surface_request(
         DesignSurfaceRequest::OpenSpecificationEditor => {
             open_specification_editor(&mut state.results_parts());
         }
-        DesignSurfaceRequest::NewVerilogADevice => open_new_veriloga_device_form(state),
+        DesignSurfaceRequest::NewVerilogADevice => {
+            open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
+        }
         DesignSurfaceRequest::CreateSymbolFromPorts => {
             open_create_model_bound_symbol_dialog(
                 &mut state.design.create_model_bound_symbol,
