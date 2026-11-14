@@ -3,15 +3,14 @@ use crate::xspice::external::{
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
-    EvaluationPhase, ParamSpec, PortSpec, PortType,
+    EvaluationPhase, ParamSpec, PortSpec, PortType, TransactionalContextResource,
 };
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// External digital process code model.
 #[derive(Debug, Default)]
 pub struct DigitalProcess;
-
-type DigitalProcessChannelResource = Mutex<DigitalProcessChannel>;
 
 const RESOURCE_CHANNEL: &str = "d_process.channel";
 const STATE_PREV_CLK: usize = 0;
@@ -39,31 +38,268 @@ fn d_process_delay(ctx: &CmContext, name: &str, default: f64) -> CmResult<f64> {
     Ok(value)
 }
 
-/// One instance's connection to its external process: the runtime and the
-/// packet buffers its exchanges reuse.
+/// One instance's connection to its external process: the runtime, the
+/// packet buffers its exchanges reuse, and the journal of what the process
+/// has answered.
 ///
-/// The buffers sit behind the runtime's lock, not in the model context as a
-/// resource of their own. The engine keeps a copy of every context it may
-/// have to undo, in the acceptance rollback image or taken just before the
-/// model call, and every copy shares the context's resources; a buffer kept
-/// there is never uniquely owned while a transient runs and cannot be
-/// borrowed mutably. The lock already serializes the exchanges, and nothing
-/// in the buffers survives from one exchange to the next, so the copies that
-/// share this connection need no buffers of their own.
+/// The connection is one transactional resource shared by every copy of the
+/// instance's context. The engine keeps a copy of every context it may have
+/// to undo, in the acceptance rollback image or taken just before the model
+/// call, and every copy shares this connection, so nothing in it is reached
+/// through the copy-on-write resource map: the lock serializes the
+/// exchanges, and nothing in the buffers survives from one exchange to the
+/// next.
+struct DigitalProcessConnection(Mutex<DigitalProcessChannel>);
+
 struct DigitalProcessChannel {
     runtime: Box<dyn DigitalProcessRuntime>,
     input_bytes: Vec<u8>,
     output_bytes: Vec<u8>,
+    journal: ExchangeJournal,
 }
 
-impl DigitalProcessChannel {
+impl DigitalProcessConnection {
     fn new(runtime: Box<dyn DigitalProcessRuntime>) -> Self {
-        Self {
+        Self(Mutex::new(DigitalProcessChannel {
             runtime,
             input_bytes: Vec::new(),
             output_bytes: Vec::new(),
+            journal: ExchangeJournal::default(),
+        }))
+    }
+
+    fn lock(&self) -> CmResult<MutexGuard<'_, DigitalProcessChannel>> {
+        self.0
+            .lock()
+            .map_err(|_| d_process_error("runtime lock is poisoned"))
+    }
+}
+
+/// The process protocol has no undo, so a rollback cannot take an exchange
+/// back from the process. The journal keeps every answer an open transaction
+/// can still rewind past; a rollback moves only the cursor back, and a retried
+/// trial replays the answers ahead of it.
+impl TransactionalContextResource for DigitalProcessConnection {
+    fn capture_transaction_state(&self) -> CmResult<Vec<u8>> {
+        Ok(self.lock()?.journal.open_mark().encode())
+    }
+
+    fn restore_transaction_state(&self, state: &[u8]) -> CmResult<()> {
+        let mark = JournalMark::decode(state)?;
+        self.lock()?.journal.rewind(mark)
+    }
+
+    fn commit_transaction_state(&self, state: &[u8]) {
+        let (Ok(mark), Ok(mut channel)) = (JournalMark::decode(state), self.0.lock()) else {
+            return;
+        };
+        channel.journal.close_mark(mark);
+    }
+}
+
+/// One answered exchange: the signed time and packed inputs the process was
+/// sent and the packed outputs it returned.
+struct JournalEntry {
+    signed_time: f64,
+    inputs: Box<[u8]>,
+    outputs: Box<[u8]>,
+}
+
+/// Where an open transaction rewinds the journal to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct JournalMark {
+    id: u64,
+    cursor: u64,
+}
+
+impl JournalMark {
+    fn encode(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(&self.id.to_le_bytes());
+        bytes.extend_from_slice(&self.cursor.to_le_bytes());
+        bytes
+    }
+
+    fn decode(state: &[u8]) -> CmResult<Self> {
+        let (Some(id), Some(cursor)) = (state.get(..8), state.get(8..16)) else {
+            return Err(d_process_error("exchange journal mark is malformed"));
+        };
+        if state.len() != 16 {
+            return Err(d_process_error("exchange journal mark is malformed"));
+        }
+        let word = |bytes: &[u8]| {
+            let mut word = [0; 8];
+            word.copy_from_slice(bytes);
+            u64::from_le_bytes(word)
+        };
+        Ok(Self {
+            id: word(id),
+            cursor: word(cursor),
+        })
+    }
+}
+
+/// The exchanges an instance's process has answered, by sequence number.
+///
+/// Entries before the cursor belong to the run the circuit has kept or is
+/// trying; entries from the cursor on were answered for a trial that was
+/// rolled back and wait to be replayed. Entries older than every point an
+/// open transaction can rewind to are dropped, so an accepted run keeps
+/// nothing.
+#[derive(Default)]
+struct ExchangeJournal {
+    entries: VecDeque<JournalEntry>,
+    /// Sequence number of `entries[0]`.
+    first: u64,
+    /// Sequence number of the next exchange the circuit makes.
+    cursor: u64,
+    /// Every open transaction's mark.
+    open: Vec<JournalMark>,
+    next_mark: u64,
+}
+
+impl ExchangeJournal {
+    fn open_mark(&mut self) -> JournalMark {
+        let mark = JournalMark {
+            id: self.next_mark,
+            cursor: self.cursor,
+        };
+        self.next_mark = self.next_mark.wrapping_add(1);
+        self.open.push(mark);
+        mark
+    }
+
+    fn rewind(&mut self, mark: JournalMark) -> CmResult<()> {
+        self.forget_mark(mark);
+        let end = self.first + self.entries.len() as u64;
+        if mark.cursor < self.first || mark.cursor > end {
+            self.prune();
+            return Err(d_process_error(format!(
+                "the exchange journal no longer holds rollback point {} (it holds {} to {end})",
+                mark.cursor, self.first
+            )));
+        }
+        self.cursor = mark.cursor;
+        self.prune();
+        Ok(())
+    }
+
+    fn close_mark(&mut self, mark: JournalMark) {
+        self.forget_mark(mark);
+        self.prune();
+    }
+
+    fn forget_mark(&mut self, mark: JournalMark) {
+        if let Some(index) = self.open.iter().position(|open| open.id == mark.id) {
+            self.open.swap_remove(index);
         }
     }
+
+    /// Drop the entries no open transaction can rewind to.
+    fn prune(&mut self) {
+        let keep = self
+            .open
+            .iter()
+            .map(|mark| mark.cursor)
+            .fold(self.cursor, u64::min);
+        while self.first < keep && self.entries.pop_front().is_some() {
+            self.first += 1;
+        }
+    }
+
+    /// The answer the process already gave to the next exchange, if a
+    /// rolled-back trial asked it.
+    fn pending(&self) -> Option<&JournalEntry> {
+        self.cursor
+            .checked_sub(self.first)
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| self.entries.get(index))
+    }
+
+    fn record(&mut self, signed_time: f64, inputs: &[u8], outputs: &[u8]) {
+        self.entries.push_back(JournalEntry {
+            signed_time,
+            inputs: inputs.into(),
+            outputs: outputs.into(),
+        });
+        self.cursor += 1;
+        self.prune();
+    }
+}
+
+impl DigitalProcessChannel {
+    /// Exchange the packed inputs for the outputs at `signed_time`, from the
+    /// journal when a rolled-back trial already asked the process this.
+    fn exchange(&mut self, signed_time: f64, input_width: usize) -> CmResult<()> {
+        let Self {
+            runtime,
+            input_bytes,
+            output_bytes,
+            journal,
+        } = self;
+        if let Some(entry) = journal.pending() {
+            if entry.signed_time.to_bits() != signed_time.to_bits()
+                || *entry.inputs != input_bytes[..]
+            {
+                return Err(replay_refusal(entry, signed_time, input_bytes, input_width));
+            }
+            output_bytes.copy_from_slice(&entry.outputs);
+            journal.cursor += 1;
+            journal.prune();
+            return Ok(());
+        }
+        if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
+            log::warn!(
+                "d_process external exchange failed at {signed_time:.16e}; applying the returned output buffer like ngspice: {err}"
+            );
+        }
+        journal.record(signed_time, input_bytes, output_bytes);
+        Ok(())
+    }
+}
+
+/// A retried exchange the process has already answered differently: sending
+/// it would ask the process a second time, and replaying the answer would
+/// give the wrong one.
+fn replay_refusal(
+    entry: &JournalEntry,
+    signed_time: f64,
+    inputs: &[u8],
+    input_width: usize,
+) -> CmError {
+    let reason = if entry.signed_time.to_bits() != signed_time.to_bits() {
+        "at a different time"
+    } else {
+        "with different inputs"
+    };
+    d_process_error(format!(
+        "a retried circuit trial asks its process {reason} than it already answered: the \
+         process answered {} and the trial now asks {}; the process protocol has no undo, so \
+         the answer cannot be taken back and the exchange cannot be asked again",
+        describe_exchange(entry.signed_time, &entry.inputs, input_width),
+        describe_exchange(signed_time, inputs, input_width),
+    ))
+}
+
+fn describe_exchange(signed_time: f64, inputs: &[u8], input_width: usize) -> String {
+    let bits: String = (0..input_width)
+        .map(|bit| {
+            let set = inputs
+                .get(bit >> 3)
+                .is_some_and(|byte| (byte >> (bit & 7)) & 1 != 0);
+            if set { '1' } else { '0' }
+        })
+        .collect();
+    let reset = if signed_time.is_sign_negative() {
+        " with reset high"
+    } else {
+        ""
+    };
+    format!(
+        "t = {:e} s{reset}, in[0..{input_width}] = {}",
+        signed_time.abs(),
+        if bits.is_empty() { "none" } else { &bits }
+    )
 }
 
 fn packed_byte_len(bit_count: usize) -> usize {
@@ -254,9 +490,10 @@ impl CodeModel for DigitalProcess {
             output_count: output_width,
         };
         let runtime = start_digital_process_runtime(&spec)?;
-        let channel: Arc<DigitalProcessChannelResource> =
-            Arc::new(Mutex::new(DigitalProcessChannel::new(runtime)));
-        ctx.set_resource(RESOURCE_CHANNEL, channel);
+        ctx.set_transactional_resource(
+            RESOURCE_CHANNEL,
+            Arc::new(DigitalProcessConnection::new(runtime)),
+        );
         set_unknown_outputs(ctx, output_width)?;
         Ok(())
     }
@@ -266,11 +503,6 @@ impl CodeModel for DigitalProcess {
         let output_width = ctx.port_width("out");
         validate_shape(input_width, output_width)?;
 
-        if ctx.evaluation_phase() == EvaluationPhase::CircuitTrial {
-            return Err(CmError::EvaluationError(
-                "d_process cannot participate in a circuit trial: its external process has no rollback protocol".into(),
-            ));
-        }
         if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
             return Ok(());
         }
@@ -294,29 +526,21 @@ impl CodeModel for DigitalProcess {
         let prev_clk_code = ctx.int_state(STATE_PREV_CLK);
 
         if prev_clk_code != STATE_ONE && clk_code == STATE_ONE {
-            let channel = ctx
-                .resource::<DigitalProcessChannelResource>(RESOURCE_CHANNEL)
+            // Fetching the connection enlists it in the evaluation's
+            // transaction, which marks the journal before this exchange.
+            let connection = ctx
+                .transactional_resource::<DigitalProcessConnection>(RESOURCE_CHANNEL)?
                 .ok_or_else(|| d_process_error("runtime is not initialized"))?;
-            let mut channel = channel
-                .lock()
-                .map_err(|_| d_process_error("runtime lock is poisoned"))?;
-            let DigitalProcessChannel {
-                runtime,
-                input_bytes,
-                output_bytes,
-            } = &mut *channel;
-            pack_input_bits(ctx, input_width, input_bytes)?;
-            resize_zeroed(output_bytes, packed_byte_len(output_width))?;
+            let mut channel = connection.lock()?;
+            pack_input_bits(ctx, input_width, &mut channel.input_bytes)?;
+            resize_zeroed(&mut channel.output_bytes, packed_byte_len(output_width))?;
             let signed_time = if reset_code == STATE_ONE {
                 -ctx.time
             } else {
                 ctx.time
             };
-            if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
-                log::warn!(
-                    "d_process external exchange failed at {signed_time:.16e}; applying the returned output buffer like ngspice: {err}"
-                );
-            }
+            channel.exchange(signed_time, input_width)?;
+            let output_bytes = &channel.output_bytes;
 
             let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
             for index in 0..output_width {
@@ -376,9 +600,10 @@ mod tests {
     }
 
     fn install_channel(ctx: &mut CmContext, runtime: Box<dyn DigitalProcessRuntime>) {
-        let channel: Arc<DigitalProcessChannelResource> =
-            Arc::new(Mutex::new(DigitalProcessChannel::new(runtime)));
-        ctx.set_resource(RESOURCE_CHANNEL, channel);
+        ctx.set_transactional_resource(
+            RESOURCE_CHANNEL,
+            Arc::new(DigitalProcessConnection::new(runtime)),
+        );
     }
 
     /// A clocked context one edge away from an exchange, as the transient
@@ -643,5 +868,203 @@ mod tests {
         assert_eq!(events[0].port_name, "out");
         assert_eq!(events[0].values, vec![DigitalValue::zero()]);
         assert_eq!(events[0].delay, 1.0e-9);
+    }
+
+    /// Every exchange a process was asked: the signed time and packed inputs.
+    type Asked = Arc<Mutex<Vec<(f64, Vec<u8>)>>>;
+
+    /// The toggle peer: answers each exchange with a bit that flips on every
+    /// call, so a repeated exchange would show in its answers.
+    struct CountingTogglePeer {
+        q: u8,
+        asked: Asked,
+    }
+
+    impl DigitalProcessRuntime for CountingTogglePeer {
+        fn exchange(
+            &mut self,
+            signed_time: f64,
+            input_bytes: &[u8],
+            output_bytes: &mut [u8],
+        ) -> CmResult<()> {
+            self.asked
+                .lock()
+                .unwrap()
+                .push((signed_time, input_bytes.to_vec()));
+            self.q ^= 1;
+            output_bytes.fill(0);
+            output_bytes[0] = self.q;
+            Ok(())
+        }
+    }
+
+    fn toggle_context(asked: &Asked) -> CmContext {
+        let mut ctx = rising_edge_context(Box::new(CountingTogglePeer {
+            q: 0,
+            asked: Arc::clone(asked),
+        }));
+        ctx.set_port_width("in", 2);
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![DigitalValue::one(), DigitalValue::zero()]),
+        );
+        ctx
+    }
+
+    fn scoped(ctx: &mut CmContext, transaction: &crate::xspice::ResourceTransaction) {
+        ctx.set_resource_transaction(Some(crate::xspice::ResourceTransactionScope {
+            transaction: transaction.clone(),
+            owner: 0,
+        }));
+    }
+
+    fn journal_len(ctx: &CmContext) -> usize {
+        let connection = ctx
+            .transactional_resource::<DigitalProcessConnection>(RESOURCE_CHANNEL)
+            .unwrap()
+            .unwrap();
+        connection.lock().unwrap().journal.entries.len()
+    }
+
+    /// A circuit trial exchanges with the process and is rolled back; the
+    /// acceptance at the same time with the same inputs replays the answer
+    /// from the journal. The process is asked once, the outputs are the ones
+    /// it gave, and the accepted journal keeps nothing.
+    #[test]
+    fn d_process_replays_a_rolled_back_trial_from_its_journal_without_asking_the_process_again() {
+        let asked = Asked::default();
+        let accepted = toggle_context(&asked);
+
+        let mut trial = accepted.clone();
+        trial.set_evaluation_phase(EvaluationPhase::CircuitTrial);
+        let rollback = crate::xspice::ResourceTransaction::default();
+        scoped(&mut trial, &rollback);
+        DigitalProcess
+            .evaluate(&mut trial)
+            .expect("the trial exchanges");
+        assert_eq!(trial.int_state(STATE_DOUT_START), STATE_ONE);
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        assert!(rollback.rollback().is_empty(), "the journal rewinds");
+        drop(trial);
+
+        let mut acceptance = accepted.clone();
+        let commit = crate::xspice::ResourceTransaction::default();
+        scoped(&mut acceptance, &commit);
+        DigitalProcess
+            .evaluate(&mut acceptance)
+            .expect("the acceptance replays the trial's exchange");
+        assert_eq!(
+            asked.lock().unwrap().as_slice(),
+            &[(1.0e-9, vec![0b01])],
+            "the process answered the exchange once"
+        );
+        assert_eq!(
+            acceptance.int_state(STATE_DOUT_START),
+            STATE_ONE,
+            "the replay gives the process's own answer"
+        );
+        let events = acceptance.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, vec![DigitalValue::one()]);
+        assert_eq!(journal_len(&acceptance), 1, "the open acceptance keeps it");
+        commit.commit();
+        acceptance.set_resource_transaction(None);
+        assert_eq!(
+            journal_len(&acceptance),
+            0,
+            "an accepted exchange is dropped"
+        );
+
+        // The next edge is a new exchange, answered by the process.
+        acceptance.set_int_state(STATE_PREV_CLK, STATE_ZERO);
+        acceptance.time = 2.0e-9;
+        DigitalProcess.evaluate(&mut acceptance).expect("next edge");
+        assert_eq!(asked.lock().unwrap().len(), 2);
+        assert_eq!(acceptance.int_state(STATE_DOUT_START), STATE_ZERO);
+        assert_eq!(journal_len(&acceptance), 0);
+    }
+
+    /// A retried trial that asks with other inputs, or at another time, than
+    /// the process already answered is refused with both exchanges, and the
+    /// process is not asked again.
+    #[test]
+    fn d_process_refuses_a_retry_its_process_answered_differently_with_both_exchanges() {
+        for (time, inputs, reason, asks) in [
+            (
+                1.0e-9,
+                [DigitalValue::zero(), DigitalValue::one()],
+                "with different inputs",
+                "t = 1e-9 s, in[0..2] = 01",
+            ),
+            (
+                1.5e-9,
+                [DigitalValue::one(), DigitalValue::zero()],
+                "at a different time",
+                "t = 1.5e-9 s, in[0..2] = 10",
+            ),
+        ] {
+            let asked = Asked::default();
+            let accepted = toggle_context(&asked);
+            let mut trial = accepted.clone();
+            trial.set_evaluation_phase(EvaluationPhase::CircuitTrial);
+            let rollback = crate::xspice::ResourceTransaction::default();
+            scoped(&mut trial, &rollback);
+            DigitalProcess
+                .evaluate(&mut trial)
+                .expect("the trial exchanges");
+            assert!(rollback.rollback().is_empty());
+
+            let mut retry = accepted.clone();
+            retry.set_evaluation_phase(EvaluationPhase::CircuitTrial);
+            retry.time = time;
+            retry.set_input("in", InputValue::DigitalVector(inputs.to_vec()));
+            let transaction = crate::xspice::ResourceTransaction::default();
+            scoped(&mut retry, &transaction);
+            let error = DigitalProcess
+                .evaluate(&mut retry)
+                .expect_err("a different retry is refused")
+                .to_string();
+            assert!(error.contains(reason), "{error}");
+            assert!(
+                error.contains("answered t = 1e-9 s, in[0..2] = 10"),
+                "{error}"
+            );
+            assert!(error.contains(&format!("now asks {asks}")), "{error}");
+            assert!(error.contains("no undo"), "{error}");
+            assert_eq!(
+                asked.lock().unwrap().len(),
+                1,
+                "the process is not asked again"
+            );
+            assert!(transaction.rollback().is_empty());
+        }
+    }
+
+    /// A rollback inside an open outer transaction keeps the entries the
+    /// outer one can still rewind past, and the outer rollback replays them.
+    #[test]
+    fn d_process_journal_keeps_what_an_open_outer_transaction_can_still_rewind() {
+        let asked = Asked::default();
+        let accepted = toggle_context(&asked);
+        let outer = crate::xspice::ResourceTransaction::default();
+        let mut ctx = accepted.clone();
+        scoped(&mut ctx, &outer);
+        let connection = ctx
+            .transactional_resource::<DigitalProcessConnection>(RESOURCE_CHANNEL)
+            .unwrap()
+            .unwrap();
+
+        let inner = crate::xspice::ResourceTransaction::default();
+        scoped(&mut ctx, &inner);
+        DigitalProcess.evaluate(&mut ctx).expect("exchange");
+        inner.commit();
+        assert_eq!(connection.lock().unwrap().journal.entries.len(), 1);
+
+        assert!(outer.rollback().is_empty());
+        let mut retry = accepted.clone();
+        DigitalProcess.evaluate(&mut retry).expect("replay");
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        assert_eq!(retry.int_state(STATE_DOUT_START), STATE_ONE);
+        assert_eq!(connection.lock().unwrap().journal.entries.len(), 0);
     }
 }

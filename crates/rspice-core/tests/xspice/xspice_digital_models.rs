@@ -5319,89 +5319,93 @@ impl DigitalProcessRuntimeFactory for TogglePeerFactory {
     }
 }
 
-/// Puts back the process provider a test replaced.
-struct ProcessFactoryGuard(Option<Arc<dyn DigitalProcessRuntimeFactory>>);
+static PROCESS_FACTORY_LOCK: Mutex<()> = Mutex::new(());
 
-impl Drop for ProcessFactoryGuard {
-    fn drop(&mut self) {
-        set_digital_process_runtime_factory(self.0.take());
+/// Installs a process provider for one test and puts back the one it
+/// replaced. The provider is global, so tests that install one run one at a
+/// time.
+struct ProcessFactoryGuard {
+    previous: Option<Arc<dyn DigitalProcessRuntimeFactory>>,
+    _serial: MutexGuard<'static, ()>,
+}
+
+impl ProcessFactoryGuard {
+    fn toggle_peer(exchanges: &ProcessExchangeLog) -> Self {
+        let serial = PROCESS_FACTORY_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = set_digital_process_runtime_factory(Some(Arc::new(TogglePeerFactory {
+            exchanges: Arc::clone(exchanges),
+        })));
+        Self {
+            previous,
+            _serial: serial,
+        }
     }
 }
 
-/// A clocked `d_process` through a transient, against ngspice-46 running the
-/// same deck with the C toggle peer: `d` matches at every event, though the
-/// stepper rejects steps around the clock edges, and the peer sees exactly
-/// one exchange per rising edge, so no rejected or rolled-back step replays
-/// one. The transient used to stop at the first edge with "I/O scratch is not
-/// initialized or is not uniquely owned".
-#[test]
-fn d_process_toggle_peer_matches_ngspice_across_rejected_steps() {
-    // ngspice-46 `eprint d`: unknown at the operating point, then a toggle
-    // one clk_delay after each rising edge of the 1 MHz clock.
-    const NGSPICE_D: [(f64, &str); 21] = [
-        (0.0, "Uz"),
-        (5.01e-7, "1s"),
-        (1.501e-6, "0s"),
-        (2.501e-6, "1s"),
-        (3.501e-6, "0s"),
-        (4.501e-6, "1s"),
-        (5.501e-6, "0s"),
-        (6.501e-6, "1s"),
-        (7.501e-6, "0s"),
-        (8.501e-6, "1s"),
-        (9.501e-6, "0s"),
-        (1.0501e-5, "1s"),
-        (1.1501e-5, "0s"),
-        (1.2501e-5, "1s"),
-        (1.3501e-5, "0s"),
-        (1.4501e-5, "1s"),
-        (1.5501e-5, "0s"),
-        (1.6501e-5, "1s"),
-        (1.7501e-5, "0s"),
-        (1.8501e-5, "1s"),
-        (1.9501e-5, "0s"),
-    ];
+impl Drop for ProcessFactoryGuard {
+    fn drop(&mut self) {
+        set_digital_process_runtime_factory(self.previous.take());
+    }
+}
 
-    let exchanges = ProcessExchangeLog::default();
-    let _factory = ProcessFactoryGuard(set_digital_process_runtime_factory(Some(Arc::new(
-        TogglePeerFactory {
-            exchanges: Arc::clone(&exchanges),
-        },
-    ))));
-    let netlist = Netlist::parse(
-        "d_process toggle peer\n\
-         vc cntl 0 0.5\n\
-         aosc cntl dosc osc1\n\
-         .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 \
-         rise_delay=1e-10 fall_delay=1e-10)\n\
-         aproc [dosc] dosc null [d] proc1\n\
-         .model proc1 d_process(process_file=\"toggle\" clk_delay=1e-9 reset_delay=1e-9)\n\
-         abr [d] [dd] dac1\n\
-         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
-         r1 dd out 1k\n\
-         c1 out 0 1p\n\
-         .tran 1n 20u 0 400n\n\
-         .end\n",
-    )
-    .expect("d_process deck parses");
-    let engine = Engine::default();
-    let result = engine
-        .run_tran(&netlist, 20.0e-6, 400.0e-9)
-        .expect("d_process transient runs to its stop time");
+/// ngspice-46 `eprint d` for [`TOGGLE_PEER_DECK`] with the C toggle peer:
+/// unknown at the operating point, then a toggle one clk_delay after each
+/// rising edge of the 1 MHz clock.
+const TOGGLE_PEER_NGSPICE_D: [(f64, &str); 21] = [
+    (0.0, "Uz"),
+    (5.01e-7, "1s"),
+    (1.501e-6, "0s"),
+    (2.501e-6, "1s"),
+    (3.501e-6, "0s"),
+    (4.501e-6, "1s"),
+    (5.501e-6, "0s"),
+    (6.501e-6, "1s"),
+    (7.501e-6, "0s"),
+    (8.501e-6, "1s"),
+    (9.501e-6, "0s"),
+    (1.0501e-5, "1s"),
+    (1.1501e-5, "0s"),
+    (1.2501e-5, "1s"),
+    (1.3501e-5, "0s"),
+    (1.4501e-5, "1s"),
+    (1.5501e-5, "0s"),
+    (1.6501e-5, "1s"),
+    (1.7501e-5, "0s"),
+    (1.8501e-5, "1s"),
+    (1.9501e-5, "0s"),
+];
 
-    let quality = engine.convergence_quality();
-    assert!(
-        quality.timestep_reductions > 0,
-        "the deck must exercise a rejected step: {quality:?}"
-    );
+/// A 1 MHz `d_osc` clocks a `d_process` toggle peer whose output drives an
+/// RC load through a `dac_bridge`; the run is 20 us.
+const TOGGLE_PEER_DECK: &str = "\
+vc cntl 0 0.5
+aosc cntl dosc osc1
+.model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 rise_delay=1e-10 fall_delay=1e-10)
+aproc [dosc] dosc null [d] proc1
+.model proc1 d_process(process_file=\"toggle\" clk_delay=1e-9 reset_delay=1e-9)
+abr [d] [dd] dac1
+.model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)
+r1 dd out 1k
+c1 out 0 1p
+.tran 1n 20u 0 400n
+";
 
-    let d = digital_tokens(&result, "d");
+/// `d` against [`TOGGLE_PEER_NGSPICE_D`] to 1 fs, and the peer asked exactly
+/// once per rising edge, with the clock high, at the edge.
+fn assert_toggle_peer_matches_ngspice(
+    result: &TransientResult,
+    exchanges: &ProcessExchangeLog,
+    expected_inputs: impl Fn(usize) -> Vec<u8>,
+) {
+    let d = digital_tokens(result, "d");
     assert_eq!(
         d.len(),
-        NGSPICE_D.len(),
+        TOGGLE_PEER_NGSPICE_D.len(),
         "d events against ngspice-46: {d:?}"
     );
-    for ((time, token), (ngspice_time, ngspice_token)) in d.iter().zip(NGSPICE_D) {
+    for ((time, token), (ngspice_time, ngspice_token)) in d.iter().zip(TOGGLE_PEER_NGSPICE_D) {
         assert!(
             (time - ngspice_time).abs() <= 1.0e-15 && token == ngspice_token,
             "d = {token} at {time:e}, ngspice-46 has {ngspice_token} at {ngspice_time:e}: {d:?}"
@@ -5417,11 +5421,88 @@ fn d_process_toggle_peer_matches_ngspice_across_rejected_steps() {
     for (edge, (signed_time, input_bytes)) in exchanges.iter().enumerate() {
         let edge_time = (edge as f64 + 0.5) * 1.0e-6;
         assert!(
-            (signed_time - edge_time).abs() <= 1.0e-15 && input_bytes == &[1],
-            "exchange {edge} at {signed_time:e} with {input_bytes:?}, expected the clock high at \
-             {edge_time:e}"
+            (signed_time - edge_time).abs() <= 1.0e-15 && *input_bytes == expected_inputs(edge),
+            "exchange {edge} at {signed_time:e} with {input_bytes:?}, expected {:?} at \
+             {edge_time:e}",
+            expected_inputs(edge)
         );
     }
+}
+
+/// A clocked `d_process` through a transient, against ngspice-46 running the
+/// same deck with the C toggle peer: `d` matches at every event, though the
+/// stepper rejects steps around the clock edges, and the peer sees exactly
+/// one exchange per rising edge, so no rejected or rolled-back step replays
+/// one. The transient used to stop at the first edge with "I/O scratch is not
+/// initialized or is not uniquely owned".
+#[test]
+fn d_process_toggle_peer_matches_ngspice_across_rejected_steps() {
+    let exchanges = ProcessExchangeLog::default();
+    let _factory = ProcessFactoryGuard::toggle_peer(&exchanges);
+    let netlist = Netlist::parse(&format!("d_process toggle peer\n{TOGGLE_PEER_DECK}.end\n"))
+        .expect("d_process deck parses");
+    let engine = Engine::default();
+    let result = engine
+        .run_tran(&netlist, 20.0e-6, 400.0e-9)
+        .expect("d_process transient runs to its stop time");
+
+    let quality = engine.convergence_quality();
+    assert!(
+        quality.timestep_reductions > 0,
+        "the deck must exercise a rejected step: {quality:?}"
+    );
+    assert_toggle_peer_matches_ngspice(&result, &exchanges, |_| vec![1]);
+}
+
+/// A `d_process` whose input a Verilog module drives from its output takes
+/// part in every coupled circuit trial. The process protocol has no undo, so
+/// each exchange a trial makes is journaled; the circuit rolls the trial back
+/// and the acceptance at the same time, with the same inputs, replays the
+/// answer. The peer is still asked exactly once per rising edge, and `d`
+/// matches ngspice-46 (the module as an XSPICE inverter) at every event, as
+/// the uncoupled deck does. The transient used to stop at the first edge with
+/// "d_process cannot participate in a circuit trial: its external process has
+/// no rollback protocol".
+#[cfg(feature = "veriloga")]
+#[test]
+fn d_process_beside_a_verilog_module_replays_rolled_back_trials_from_its_journal() {
+    let dir = unique_temp_dir("rspice-d-process-coupled");
+    fs::create_dir_all(&dir).expect("create the module's directory");
+    let module = dir.join("inv.v");
+    fs::write(
+        &module,
+        "`timescale 1ns/1ps\n\
+         module inv(d, q);\n  input d; output q; reg q;\n  always @(d) q = ~d;\nendmodule\n",
+    )
+    .expect("write the module");
+    let deck = TOGGLE_PEER_DECK.replace("aproc [dosc]", "aproc [q]");
+    let netlist = Netlist::parse(&format!(
+        "d_process beside a Verilog module\n.hdl \"{}\"\nxinv d q inv\n{deck}.end\n",
+        module.display().to_string().replace('\\', "/")
+    ))
+    .expect("coupled d_process deck parses");
+
+    let exchanges = ProcessExchangeLog::default();
+    let _factory = ProcessFactoryGuard::toggle_peer(&exchanges);
+    let engine = Engine::default();
+    let result = engine
+        .run_tran(&netlist, 20.0e-6, 400.0e-9)
+        .expect("the coupled d_process transient runs to its stop time");
+    let _ = fs::remove_dir_all(dir);
+
+    // The module inverts d, so the process reads the complement of the bit it
+    // last answered; d is unknown before the first edge, which the process
+    // protocol packs as its seeded pseudo-random bit.
+    let first = exchanges.lock().expect("lock the exchange log")[0]
+        .1
+        .clone();
+    assert_toggle_peer_matches_ngspice(&result, &exchanges, |edge| {
+        if edge == 0 {
+            first.clone()
+        } else {
+            vec![u8::from(edge % 2 == 0)]
+        }
+    });
 }
 
 /// v(out) of 1 kOhm into 1 pF driven through a 1 ns ramp from the most recent

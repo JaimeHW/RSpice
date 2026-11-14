@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex};
 pub trait TransactionalContextResource: Any + Send + Sync {
     fn capture_transaction_state(&self) -> CmResult<Vec<u8>>;
     fn restore_transaction_state(&self, state: &[u8]) -> CmResult<()>;
+    /// The transaction that captured `state` was kept: nothing will restore
+    /// it, so the provider may release what it held to undo back to it.
+    fn commit_transaction_state(&self, _state: &[u8]) {}
 }
 
 pub(crate) struct ResourceEntry {
@@ -141,10 +144,23 @@ impl ResourceTransaction {
 
     #[doc(hidden)]
     pub fn commit(&self) {
-        let mut journal = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        journal.closed = true;
-        journal.undo.clear();
-        journal.seen.clear();
+        let undo = {
+            let mut journal = self.0.lock().unwrap_or_else(|error| error.into_inner());
+            journal.closed = true;
+            journal.seen.clear();
+            std::mem::take(&mut journal.undo)
+        };
+        for undo in undo {
+            if provider_call("commit", || {
+                undo.entry.resource.commit_transaction_state(&undo.state);
+                Ok(())
+            })
+            .is_err()
+            {
+                undo.entry
+                    .poison("resource provider panicked during commit".into());
+            }
+        }
     }
 
     #[doc(hidden)]
