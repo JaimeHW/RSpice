@@ -219,7 +219,10 @@ impl WorkerRequestTransport {
         })
     }
 
-    #[cfg(any(feature = "browser-worker", test))]
+    // Its checks and restores are the browser worker's, which exist only in a
+    // wasm32 worker build (and in tests): a native build of the worker crate
+    // in a workspace build turns `browser-worker` on beside `test-support`.
+    #[cfg(any(all(target_arch = "wasm32", feature = "browser-worker"), test))]
     pub(crate) fn into_request(self) -> Result<WorkerRequest, String> {
         if self.protocol != WORKER_REQUEST_TRANSPORT_PROTOCOL {
             return Err(format!(

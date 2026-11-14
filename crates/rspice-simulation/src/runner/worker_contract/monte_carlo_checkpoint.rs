@@ -36,7 +36,7 @@ pub(crate) fn take_worker_request_checkpoint(
     .map(|bytes| vec![bytes])
     .map_err(|error| error.to_string())
 }
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(any(all(target_arch = "wasm32", feature = "browser-worker"), test))]
 pub(super) fn restore_worker_request_checkpoint(
     request: &mut WorkerRequest,
     mut buffers: Vec<Vec<u8>>,
