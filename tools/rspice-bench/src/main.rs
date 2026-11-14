@@ -17,6 +17,9 @@
 //! * `native-jit` — in-process Verilog-A native JIT gate.
 //! * `run` — execute the benchmark suite and write the JSON scoreboard.
 //!
+//! `rspice-bench --spawn-floor` exits at once; `run` times it as
+//! the process floor under every measurement.
+//!
 //! The `generated-stamp` subcommand is behind `generated-stamp-base`, the gate
 //! that `generated-stamp` and `generated-stamp-subset` build on to select a
 //! corpus. Verilog-A golden-oracle ownership lives in `rspice-conformance`.
@@ -30,6 +33,7 @@ mod generated_rust;
 mod generated_stamp;
 mod klu;
 mod native_jit;
+mod population;
 mod provenance;
 mod report;
 mod runner;
@@ -72,6 +76,13 @@ pub(crate) fn workspace_root() -> PathBuf {
 }
 
 fn main() -> ExitCode {
+    // The spawn floor: exit before parsing anything.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|argument| argument == population::SPAWN_FLOOR_ARG)
+    {
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
     let outcome = match cli.command {
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),

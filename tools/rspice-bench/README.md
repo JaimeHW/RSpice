@@ -31,6 +31,9 @@ times them with the hand-written `tools/rspice-bench/circuits/*.cir`, and writes
 `target/benchmarks/scoreboard.json`. `--circuits <DIR>` times only that directory. It always times RSpice; set
 `RSPICE_BENCH_NGSPICE` to a release/console ngspice executable to include the
 comparison column. `RSPICE_BENCH_RSPICE` overrides the RSpice executable.
+ngspice runs as `ngspice -b -r <raw> <deck>`: its batch mode runs no analysis
+for a deck without an output request, so its column includes writing a
+rawfile, which `rspice run -q` does not.
 
 Create a local baseline and compare a candidate on the same machine:
 
@@ -55,6 +58,42 @@ controlled. Reports contain min/median/mean; comparisons use the median.
 A failed simulator run or baseline comparison produces a nonzero exit code.
 
 Use `rspice-bench <command> --help` for all flags and defaults.
+
+## Named populations
+
+`run --suite <name>` times a fixed population
+instead of the default deck set. Each run writes the suite's generated decks
+fresh into `target/benchmarks/decks/<suite>/`; corpus decks run in place under
+`tests/`, because they include model files by relative path.
+
+| Suite | Workloads |
+| --- | --- |
+| `startup` | Spawn floor, `--version`, and `check`, `run -q` and `run -q -o x.raw` on a five-line deck |
+| `flat` | `check` and `run -q` on a flat 40,002-element diode ladder |
+| `neospice` | 34 generated shapes: dividers (op, dc sweep, noise), RC/RLC/PULSE transients, resistor meshes, diode ladders, RC and diode-RC grids (ac, tran, noise), and op+ac op-amp cases |
+| `gf180` | One GF180MCU BSIM4 I-V deck |
+| `iscas` | ISCAS85 c499 and c880 gate-level BSIM4 transients (minute-scale; c432, the smallest, writes plot files beside itself) |
+| `mixed` | Three mixed-signal corpus designs (op and ac) |
+| `all` | Every suite above |
+
+The op-amp cases use the transistor-level `opampal` from
+`tests/xyce/Netlists/MCNC_BJT_OPAMPAL/`, read at generation time, in place of
+vendor macromodels that cannot be shipped. PSP and BSIM-CMG ring oscillators
+are not in the population: they need the generated Verilog-A model catalog,
+which the default build refuses.
+
+The spawn floor is `rspice-bench --spawn-floor`, which exits before doing
+anything: a minimal Rust process, the same on every platform. Every report
+records it, and `run` prints each RSpice median above it.
+
+`--filter <text>` keeps the workloads whose id contains the text; a filter
+that keeps nothing is an error. Minute-scale workloads take no warm-up and run
+`--heavy-repeats` times in `run` (default 1). `--label <text>` records the
+machine state. On Linux and macOS every workload also records the load
+averages it started under, and the table prints the one-minute figure;
+Windows has no load average, so there the label is the only record.
+`RSPICE_BENCH_ESPICE` adds a column for an ESpice executable run as
+`<exe> <deck>` on simulating workloads.
 
 ## Other commands
 

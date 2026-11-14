@@ -11,11 +11,12 @@
 
 use crate::error::BenchError;
 use crate::generate::{self, GENERATED_DECKS_DIR};
+use crate::population::{self, Suite, Workload};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -33,11 +34,17 @@ const RSPICE_ENV: &str = "RSPICE_BENCH_RSPICE";
 /// is not set the ngspice column is skipped and noted in the scoreboard.
 const NGSPICE_ENV: &str = "RSPICE_BENCH_NGSPICE";
 
+/// Environment variable supplying an ESpice executable for a second context
+/// column. ESpice runs as `<exe> <deck>`, on simulating workloads only.
+const ESPICE_ENV: &str = "RSPICE_BENCH_ESPICE";
+
 /// Timing-methodology note embedded in every scoreboard.
 const METHODOLOGY: &str = "wall-clock of the full child process (parse + solve + output) timed \
      with std::time::Instant around spawn and an OS-backed timed wait (no polling interval); child \
      stdin/stdout/stderr attached to the null device; one untimed warmup run per deck/simulator \
-     precedes the timed repeats; cold OS cache not controlled";
+     precedes the timed repeats; cold OS cache not controlled; ngspice runs as `-b -r <raw>` \
+     because its batch mode simulates nothing without an output request, while `rspice run -q` \
+     writes no result file";
 
 /// Note recorded in the scoreboard when ngspice timings are skipped.
 const NGSPICE_SKIPPED_NOTE: &str =
@@ -56,6 +63,11 @@ pub struct RunArgs {
     /// Timed repetitions per deck and simulator (one untimed warmup runs first).
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..))]
     pub repeats: u32,
+
+    /// Timed repetitions of a minute-scale suite workload (ISCAS), which
+    /// takes no warm-up.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    pub heavy_repeats: u32,
 
     /// Path of the JSON scoreboard to write. Keep measurements in ignored
     /// target/benchmarks or CI artifact storage; this file is overwritten.
@@ -92,6 +104,20 @@ pub struct RunArgs {
     /// This is unsafe for release gates and intended only for exploratory runs.
     #[arg(long, requires = "baseline")]
     pub allow_host_mismatch: bool,
+
+    /// Time a named workload population (decks generated into
+    /// target/benchmarks/decks/<suite>/, corpus decks run in place) instead
+    /// of the default deck set.
+    #[arg(long, value_enum, conflicts_with = "circuits")]
+    pub suite: Option<Suite>,
+
+    /// Time only the workloads whose id contains this text.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Option<String>,
+
+    /// Free-text label recorded in the scoreboard, such as the machine state.
+    #[arg(long, value_name = "TEXT")]
+    pub label: Option<String>,
 }
 
 /// Complete scoreboard document serialized to `--out`.
@@ -101,6 +127,18 @@ struct Scoreboard {
     generated_with: &'static str,
     /// Machine the run was executed on.
     host: HostInfo,
+    /// Free-text label the run was given (`--label`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+    /// The named population timed, when one was (`--suite`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suite: Option<&'static str>,
+    /// One-, five- and fifteen-minute load averages before and after the run.
+    load_average_start: Option<[f64; 3]>,
+    load_average_end: Option<[f64; 3]>,
+    /// Spawning a minimal executable (`rspice-bench --spawn-floor`): the
+    /// floor every process pays.
+    spawn_floor_ms: TimingStats,
     /// Timed repetitions per deck/simulator.
     repeats: u32,
     /// Timing-methodology caveats for downstream consumers.
@@ -111,6 +149,8 @@ struct Scoreboard {
     ngspice_exe: Option<String>,
     /// Present when the ngspice column was skipped (env var missing).
     ngspice_note: Option<&'static str>,
+    /// ESpice executable that was benchmarked, if configured.
+    espice_exe: Option<String>,
     /// Per-deck timing results, in deck order.
     results: Vec<DeckResult>,
     /// Baseline comparison report when `--baseline` was supplied.
@@ -120,7 +160,7 @@ struct Scoreboard {
 
 /// Host descriptor recorded in the scoreboard.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct HostInfo {
+pub(crate) struct HostInfo {
     /// Operating system and architecture, e.g. `windows x86_64`.
     os: String,
     /// Logical CPU count reported by the OS.
@@ -129,28 +169,40 @@ struct HostInfo {
 
 /// Wall-clock statistics over the timed repeats, in milliseconds.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-struct TimingStats {
+pub(crate) struct TimingStats {
     /// Fastest timed run.
-    min: f64,
+    pub min: f64,
     /// Median of the timed runs (midpoint average for even counts).
-    median: f64,
+    pub median: f64,
     /// Arithmetic mean of the timed runs.
-    mean: f64,
+    pub mean: f64,
 }
 
-/// Result row for a single benchmark deck.
+/// Result row for a single benchmark workload.
 #[derive(Serialize)]
 struct DeckResult {
-    /// Deck file name (relative to the circuits directory).
+    /// Workload id: the deck file name outside a named suite.
     deck: String,
+    /// Suite the workload belongs to.
+    suite: &'static str,
+    /// The command timed.
+    command: &'static str,
+    /// Load averages when the workload started.
+    load_average: Option<[f64; 3]>,
     /// RSpice timing statistics in milliseconds.
     rspice_ms: TimingStats,
+    /// RSpice median minus the spawn-floor median.
+    rspice_above_floor_ms: f64,
     /// Whether every RSpice run (warmup included) exited with status 0.
     rspice_all_ok: bool,
     /// ngspice timing statistics in milliseconds; `null` when skipped.
     ngspice_ms: Option<TimingStats>,
     /// Whether every ngspice run exited with status 0; `null` when skipped.
     ngspice_all_ok: Option<bool>,
+    /// ESpice timing statistics in milliseconds; `null` when skipped.
+    espice_ms: Option<TimingStats>,
+    /// Whether every ESpice run exited with status 0; `null` when skipped.
+    espice_all_ok: Option<bool>,
     /// `ngspice median / rspice median`; greater than 1.0 means RSpice is
     /// faster. `null` unless both simulators ran and succeeded.
     speedup_median: Option<f64>,
@@ -223,48 +275,66 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
     }
     let baseline = args.baseline.as_deref().map(load_baseline).transpose()?;
     let rspice = locate_rspice()?;
-    let ngspice = locate_ngspice()?;
-    let (decks, source) = match &args.circuits {
-        Some(dir) => (discover_decks(dir)?, format!("`{}`", dir.display())),
-        None => (
-            shipped_decks()?,
-            format!("`{SHIPPED_CIRCUITS_DIR}` and `{GENERATED_DECKS_DIR}`"),
-        ),
-    };
+    let ngspice = locate_context(NGSPICE_ENV)?;
+    let espice = locate_context(ESPICE_ENV)?;
+    let (workloads, source) = select_workloads(args.suite, args.circuits.as_deref())?;
+    let workloads = filter_workloads(workloads, args.filter.as_deref())?;
 
     println!("rspice : {}", rspice.display());
     match &ngspice {
         Some(path) => println!("ngspice: {}", path.display()),
         None => println!("ngspice: skipped ({NGSPICE_ENV} not set)"),
     }
+    if let Some(path) = &espice {
+        println!("espice : {}", path.display());
+    }
     println!(
         "decks  : {} from {source}; repeats: {} (+1 warmup)\n",
-        decks.len(),
+        workloads.len(),
         args.repeats
     );
 
     let timeout = std::time::Duration::from_secs(args.timeout_secs);
-    let mut results = Vec::with_capacity(decks.len());
+    let load_average_start = load_average();
+    let spawn_floor = spawn_floor(args.repeats, timeout)?;
+    println!("spawn floor: median {:.2} ms", spawn_floor.median);
+    let mut results = Vec::with_capacity(workloads.len());
     let mut any_failure = false;
-    for deck in &decks {
-        let result = bench_deck(deck, &rspice, ngspice.as_deref(), args.repeats, timeout)?;
-        any_failure |= !result.rspice_all_ok || result.ngspice_all_ok == Some(false);
+    for workload in &workloads {
+        let result = bench_workload(
+            workload,
+            &rspice,
+            Context {
+                ngspice: ngspice.as_deref(),
+                espice: espice.as_deref(),
+            },
+            Repeats {
+                light: args.repeats,
+                heavy: args.heavy_repeats,
+            },
+            timeout,
+            spawn_floor.median,
+        )?;
+        any_failure |= !result.rspice_all_ok
+            || result.ngspice_all_ok == Some(false)
+            || result.espice_all_ok == Some(false);
         results.push(result);
     }
 
     let mut scoreboard = Scoreboard {
         generated_with: "rspice-bench",
-        host: HostInfo {
-            os: format!("{} {}", env::consts::OS, env::consts::ARCH),
-            cpu_count: std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1),
-        },
+        host: host_info(),
+        label: args.label.clone(),
+        suite: args.suite.map(Suite::name),
+        load_average_start,
+        load_average_end: load_average(),
+        spawn_floor_ms: spawn_floor,
         repeats: args.repeats,
         methodology: METHODOLOGY,
         rspice_exe: rspice.display().to_string(),
         ngspice_exe: ngspice.as_ref().map(|p| p.display().to_string()),
         ngspice_note: ngspice.is_none().then_some(NGSPICE_SKIPPED_NOTE),
+        espice_exe: espice.as_ref().map(|p| p.display().to_string()),
         results,
         regression_gate: None,
     };
@@ -279,10 +349,14 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
         any_failure |= !gate.passed;
         scoreboard.regression_gate = Some(gate);
     }
-    write_scoreboard(&args.out, &scoreboard)?;
+    write_json(&args.out, &scoreboard)?;
 
     println!();
-    print_table(&scoreboard.results);
+    print_table(
+        &scoreboard.results,
+        spawn_floor.median,
+        args.label.as_deref(),
+    );
     if let Some(gate) = &scoreboard.regression_gate {
         println!();
         print_regression_gate(gate);
@@ -296,35 +370,132 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
     })
 }
 
-/// Benchmarks one deck on RSpice and (when configured) ngspice.
-fn bench_deck(
-    deck: &Path,
-    rspice: &Path,
-    ngspice: Option<&Path>,
+/// The workloads a run times: a named suite, every deck of a directory, or
+/// the default deck set, with a description of where they came from.
+pub(crate) fn select_workloads(
+    suite: Option<Suite>,
+    circuits: Option<&Path>,
+) -> Result<(Vec<Workload>, String), BenchError> {
+    Ok(match (suite, circuits) {
+        (Some(suite), _) => (
+            population::population(
+                suite,
+                &crate::workspace_root(),
+                Path::new(GENERATED_DECKS_DIR),
+            )?,
+            format!("suite `{}`", suite.name()),
+        ),
+        (None, Some(dir)) => (
+            discover_decks(dir)?
+                .into_iter()
+                .map(Workload::run_quiet)
+                .collect(),
+            format!("`{}`", dir.display()),
+        ),
+        (None, None) => (
+            shipped_decks()?
+                .into_iter()
+                .map(Workload::run_quiet)
+                .collect(),
+            format!("`{SHIPPED_CIRCUITS_DIR}` and `{GENERATED_DECKS_DIR}`"),
+        ),
+    })
+}
+
+/// Keep the workloads whose id contains `filter`; refuse an empty selection,
+/// which would otherwise pass vacuously.
+pub(crate) fn filter_workloads(
+    workloads: Vec<Workload>,
+    filter: Option<&str>,
+) -> Result<Vec<Workload>, BenchError> {
+    let Some(filter) = filter else {
+        return Ok(workloads);
+    };
+    let kept: Vec<Workload> = workloads
+        .into_iter()
+        .filter(|workload| workload.id.contains(filter))
+        .collect();
+    if kept.is_empty() {
+        return Err(BenchError::BenchmarkPolicy {
+            message: format!("--filter `{filter}` matches no workload"),
+        });
+    }
+    Ok(kept)
+}
+
+/// The context simulators a run times beside RSpice.
+#[derive(Clone, Copy)]
+pub(crate) struct Context<'a> {
+    pub ngspice: Option<&'a Path>,
+    pub espice: Option<&'a Path>,
+}
+
+/// Times the spawn floor ([`population::SPAWN_FLOOR_ARG`]), the cost under
+/// every measurement.
+pub(crate) fn spawn_floor(
     repeats: u32,
     timeout: std::time::Duration,
-) -> Result<DeckResult, BenchError> {
-    let deck_file = deck
-        .file_name()
-        .ok_or(BenchError::Internal("deck path has no file name"))?;
-    let deck_name = deck_file.to_string_lossy().into_owned();
-    // Children run inside the circuits directory and receive the bare file
-    // name, so any relative artifacts a simulator might emit land there.
-    let cwd = deck.parent().unwrap_or_else(|| Path::new("."));
+) -> Result<TimingStats, BenchError> {
+    let (exe, args) = population::spawn_floor_command()?;
+    let measured = measure_args(&exe, &args, Path::new("."), 1, repeats, timeout)?;
+    if !measured.all_ok {
+        return Err(BenchError::BenchmarkPolicy {
+            message: format!("the spawn floor `{}` failed", exe.display()),
+        });
+    }
+    Ok(measured.stats)
+}
 
-    println!("benchmarking {deck_name}");
-    let rspice_args = [OsStr::new("run"), deck_file, OsStr::new("-q")];
-    let rspice_run = measure(rspice, &rspice_args, cwd, repeats, timeout)?;
+/// Timed runs per workload: `light` after one untimed warm-up, `heavy`
+/// (minute-scale) workloads with none.
+#[derive(Clone, Copy)]
+struct Repeats {
+    light: u32,
+    heavy: u32,
+}
+
+/// Benchmarks one workload on RSpice and the configured context simulators.
+fn bench_workload(
+    workload: &Workload,
+    rspice: &Path,
+    context: Context<'_>,
+    repeats: Repeats,
+    timeout: std::time::Duration,
+    floor_ms: f64,
+) -> Result<DeckResult, BenchError> {
+    let cwd = workload.cwd();
+    let scratch = tempfile::tempdir().map_err(|error| {
+        BenchError::io("failed to create a scratch directory for rawfiles", error)
+    })?;
+    let raw = (workload.action == population::Action::RunRaw).then(|| scratch.path().join("x.raw"));
+    let (warmups, repeats) = if workload.heavy {
+        (0, repeats.heavy)
+    } else {
+        (1, repeats.light)
+    };
+    let load_average = load_average();
+
+    println!("benchmarking {} ({})", workload.id, workload.action.label());
+    let (exe, args) = workload.rspice_command(rspice, raw.as_deref())?;
+    let rspice_run = measure_args(&exe, &args, &cwd, warmups, repeats, timeout)?;
     print_progress("rspice", &rspice_run);
 
-    let ngspice_run = match ngspice {
-        Some(exe) => {
-            let ngspice_args = [OsStr::new("-b"), deck_file];
-            let measurement = measure(exe, &ngspice_args, cwd, repeats, timeout)?;
+    let ngspice_raw = scratch.path().join("ngspice.raw");
+    let ngspice_run = match (context.ngspice, workload.ngspice_command(&ngspice_raw)) {
+        (Some(exe), Some(args)) => {
+            let measurement = measure_args(exe, &args, &cwd, warmups, repeats, timeout)?;
             print_progress("ngspice", &measurement);
             Some(measurement)
         }
-        None => None,
+        _ => None,
+    };
+    let espice_run = match (context.espice, workload.espice_command()) {
+        (Some(exe), Some(args)) => {
+            let measurement = measure_args(exe, &args, &cwd, warmups, repeats, timeout)?;
+            print_progress("espice", &measurement);
+            Some(measurement)
+        }
+        _ => None,
     };
 
     let both_succeeded = rspice_run.all_ok
@@ -339,11 +510,17 @@ fn bench_deck(
     };
 
     Ok(DeckResult {
-        deck: deck_name,
+        deck: workload.id.clone(),
+        suite: workload.suite,
+        command: workload.action.label(),
+        load_average,
         rspice_ms: rspice_run.stats,
+        rspice_above_floor_ms: rspice_run.stats.median - floor_ms,
         rspice_all_ok: rspice_run.all_ok,
         ngspice_ms: ngspice_run.as_ref().map(|measurement| measurement.stats),
         ngspice_all_ok: ngspice_run.as_ref().map(|measurement| measurement.all_ok),
+        espice_ms: espice_run.as_ref().map(|measurement| measurement.stats),
+        espice_all_ok: espice_run.as_ref().map(|measurement| measurement.all_ok),
         speedup_median,
         both_succeeded,
     })
@@ -358,19 +535,35 @@ fn print_progress(label: &str, measurement: &SimMeasurement) {
     );
 }
 
-/// Runs one warmup plus `repeats` timed executions of `exe args` in `cwd`.
-/// A run that exceeds `timeout` is killed and the whole measurement is
-/// marked failed; the remaining repeats are skipped (they would only
+fn measure_args(
+    exe: &Path,
+    args: &[OsString],
+    cwd: &Path,
+    warmups: u32,
+    repeats: u32,
+    timeout: std::time::Duration,
+) -> Result<SimMeasurement, BenchError> {
+    let args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    measure(exe, &args, cwd, warmups, repeats, timeout)
+}
+
+/// Runs `warmups` untimed plus `repeats` timed executions of `exe args` in
+/// `cwd`. A run that exceeds `timeout` is killed and the whole measurement
+/// is marked failed; the remaining repeats are skipped (they would only
 /// repeat the timeout).
 fn measure(
     exe: &Path,
     args: &[&OsStr],
     cwd: &Path,
+    warmups: u32,
     repeats: u32,
     timeout: std::time::Duration,
 ) -> Result<SimMeasurement, BenchError> {
-    let (_, warmup_ok) = time_child(exe, args, cwd, timeout)?;
-    let mut all_ok = warmup_ok;
+    let mut all_ok = true;
+    for _ in 0..warmups {
+        let (_, warmup_ok) = time_child(exe, args, cwd, timeout)?;
+        all_ok &= warmup_ok;
+    }
     let mut samples_ms = Vec::with_capacity(repeats as usize);
     for _ in 0..repeats {
         let (elapsed_ms, ok) = time_child(exe, args, cwd, timeout)?;
@@ -391,7 +584,7 @@ fn measure(
 /// does not dominate the measurement; the elapsed time still includes the
 /// child's own parsing and output formatting work. A child that outlives
 /// `timeout` is killed and reported as failed.
-fn time_child(
+pub(crate) fn time_child(
     exe: &Path,
     args: &[&OsStr],
     cwd: &Path,
@@ -434,7 +627,7 @@ fn time_child(
 
 /// Computes min/median/mean over a non-empty sample set (milliseconds).
 /// Returns `None` for an empty input instead of panicking.
-fn timing_stats(samples_ms: &[f64]) -> Option<TimingStats> {
+pub(crate) fn timing_stats(samples_ms: &[f64]) -> Option<TimingStats> {
     if samples_ms.is_empty() {
         return None;
     }
@@ -457,7 +650,7 @@ fn timing_stats(samples_ms: &[f64]) -> Option<TimingStats> {
 /// a sibling of the running benchmark binary (both live in
 /// `target/release/`), then `target/release/` relative to the working
 /// directory.
-fn locate_rspice() -> Result<PathBuf, BenchError> {
+pub(crate) fn locate_rspice() -> Result<PathBuf, BenchError> {
     if let Some(raw) = env::var_os(RSPICE_ENV) {
         let path = PathBuf::from(raw);
         return if path.is_file() {
@@ -490,23 +683,71 @@ fn locate_rspice() -> Result<PathBuf, BenchError> {
     Err(BenchError::MissingRspice { tried })
 }
 
-/// Resolves the optional ngspice executable from `RSPICE_BENCH_NGSPICE`.
-/// An unset variable is a skip; a set-but-invalid path is a hard error.
-fn locate_ngspice() -> Result<Option<PathBuf>, BenchError> {
-    match env::var_os(NGSPICE_ENV) {
+/// Resolves an optional context executable (`RSPICE_BENCH_NGSPICE`,
+/// `RSPICE_BENCH_ESPICE`). An unset variable is a skip; a set-but-invalid
+/// path is a hard error.
+fn locate_context(env_var: &'static str) -> Result<Option<PathBuf>, BenchError> {
+    match env::var_os(env_var) {
         None => Ok(None),
         Some(raw) => {
             let path = PathBuf::from(raw);
             if path.is_file() {
                 Ok(Some(path))
             } else {
-                Err(BenchError::ExeNotFound {
-                    env_var: NGSPICE_ENV,
-                    path,
-                })
+                Err(BenchError::ExeNotFound { env_var, path })
             }
         }
     }
+}
+
+/// This machine, as a baseline must match it.
+pub(crate) fn host_info() -> HostInfo {
+    HostInfo {
+        os: format!("{} {}", env::consts::OS, env::consts::ARCH),
+        cpu_count: std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
+    }
+}
+
+/// One-, five- and fifteen-minute load averages: `/proc/loadavg` on Linux,
+/// `sysctl -n vm.loadavg` on macOS. `None` elsewhere: Windows has no load
+/// average, so a run there records the machine state only in `--label`.
+pub(crate) fn load_average() -> Option<[f64; 3]> {
+    parse_load_average(&load_average_text()?)
+}
+
+#[cfg(target_os = "linux")]
+fn load_average_text() -> Option<String> {
+    fs::read_to_string("/proc/loadavg").ok()
+}
+
+#[cfg(target_os = "macos")]
+fn load_average_text() -> Option<String> {
+    Command::new("sysctl")
+        .args(["-n", "vm.loadavg"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn load_average_text() -> Option<String> {
+    None
+}
+
+/// The first three numbers of `/proc/loadavg` (`0.52 0.58 0.59 1/389 12`)
+/// or of macOS's `{ 0.52 0.58 0.59 }`.
+fn parse_load_average(text: &str) -> Option<[f64; 3]> {
+    let mut values = text
+        .split(|character: char| character.is_whitespace() || character == '{' || character == '}')
+        .filter(|field| !field.is_empty())
+        .map(str::parse::<f64>);
+    let mut next = || values.next()?.ok();
+    Some([next()?, next()?, next()?])
 }
 
 /// The shipped deck set: the hand-written decks plus the generated ones,
@@ -724,9 +965,9 @@ fn evaluate_regression(
     })
 }
 
-/// Serializes the scoreboard to pretty JSON and writes it to `out`,
-/// creating parent directories as needed.
-fn write_scoreboard(out: &Path, scoreboard: &Scoreboard) -> Result<(), BenchError> {
+/// Serializes a report to pretty JSON and writes it to `out`, creating
+/// parent directories as needed.
+pub(crate) fn write_json(out: &Path, scoreboard: &impl Serialize) -> Result<(), BenchError> {
     if let Some(parent) = out.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -753,22 +994,59 @@ fn write_scoreboard(out: &Path, scoreboard: &Scoreboard) -> Result<(), BenchErro
     })
 }
 
+/// The table's machine-state lines: the label, and a note where the
+/// platform reports no load average for the `load1` column.
+pub(crate) fn print_machine_state(label: Option<&str>, load_reported: bool) {
+    if let Some(label) = label {
+        println!("label: {label}");
+    }
+    if !load_reported {
+        println!(
+            "load average: not reported on {}; the label records the machine state",
+            env::consts::OS
+        );
+    }
+}
+
 /// Prints the aligned, human-readable results table to stdout.
-fn print_table(results: &[DeckResult]) {
+fn print_table(results: &[DeckResult], floor_ms: f64, label: Option<&str>) {
     let name_width = results
         .iter()
         .map(|result| result.deck.len())
         .chain(std::iter::once("deck".len()))
         .max()
         .unwrap_or(4);
+    print_machine_state(
+        label,
+        results.iter().any(|result| result.load_average.is_some()),
+    );
+    println!("spawn floor: median {floor_ms:.2} ms");
+    let espice = results.iter().any(|result| result.espice_ms.is_some());
+    // A workload ngspice has no counterpart for (`--version`, `check`)
+    // shows `-` in its columns; "skipped" means no ngspice was configured.
+    let ngspice_configured = results.iter().any(|result| result.ngspice_ms.is_some());
     println!(
-        "{:<name_width$}  {:>14}  {:>14}  {:>15}  {:>15}  {:>8}  status",
-        "deck", "rspice med ms", "rspice min ms", "ngspice med ms", "ngspice min ms", "speedup"
+        "{:<name_width$}  {:<16}  {:>14}  {:>14}  {:>13}  {:>15}  {:>15}  {:>8}{}  {:>6}  status",
+        "deck",
+        "command",
+        "rspice med ms",
+        "rspice min ms",
+        "above floor",
+        "ngspice med ms",
+        "ngspice min ms",
+        "speedup",
+        if espice { "  espice med ms" } else { "" },
+        "load1"
     );
     for result in results {
         let (ngspice_median, ngspice_min) = match result.ngspice_ms {
             Some(stats) => (format!("{:.1}", stats.median), format!("{:.1}", stats.min)),
             None => ("-".to_string(), "-".to_string()),
+        };
+        let espice_column = match (espice, result.espice_ms) {
+            (false, _) => String::new(),
+            (true, Some(stats)) => format!("  {:>13.1}", stats.median),
+            (true, None) => format!("  {:>13}", "-"),
         };
         let speedup = match result.speedup_median {
             Some(ratio) => format!("{ratio:.2}x"),
@@ -776,18 +1054,25 @@ fn print_table(results: &[DeckResult]) {
         };
         let status = if !result.rspice_all_ok {
             "rspice FAILED"
-        } else if result.ngspice_ms.is_none() {
-            "ngspice skipped"
         } else if result.ngspice_all_ok == Some(false) {
             "ngspice FAILED"
+        } else if result.espice_all_ok == Some(false) {
+            "espice FAILED"
+        } else if !ngspice_configured {
+            "ngspice skipped"
         } else {
             "ok"
         };
+        let load = result
+            .load_average
+            .map_or_else(|| "-".to_string(), |load| format!("{:.1}", load[0]));
         println!(
-            "{:<name_width$}  {:>14.1}  {:>14.1}  {:>15}  {:>15}  {:>8}  {status}",
+            "{:<name_width$}  {:<16}  {:>14.1}  {:>14.1}  {:>13.1}  {:>15}  {:>15}  {:>8}{espice_column}  {load:>6}  {status}",
             result.deck,
+            result.command,
             result.rspice_ms.median,
             result.rspice_ms.min,
+            result.rspice_above_floor_ms,
             ngspice_median,
             ngspice_min,
             speedup
@@ -837,19 +1122,31 @@ mod tests {
                 os: "test x86_64".to_string(),
                 cpu_count: 8,
             },
+            label: None,
+            suite: None,
+            load_average_start: None,
+            load_average_end: None,
+            spawn_floor_ms: timing(1.0),
             repeats: 5,
             methodology: METHODOLOGY,
             rspice_exe: "rspice".to_string(),
             ngspice_exe: None,
             ngspice_note: Some(NGSPICE_SKIPPED_NOTE),
+            espice_exe: None,
             results: results
                 .iter()
                 .map(|(deck, median)| DeckResult {
                     deck: (*deck).to_string(),
+                    suite: "circuits",
+                    command: "run -q",
+                    load_average: None,
                     rspice_ms: timing(*median),
+                    rspice_above_floor_ms: *median - 1.0,
                     rspice_all_ok: true,
                     ngspice_ms: None,
                     ngspice_all_ok: None,
+                    espice_ms: None,
+                    espice_all_ok: None,
                     speedup_median: None,
                     both_succeeded: false,
                 })
@@ -934,6 +1231,34 @@ mod tests {
             ),
             Err(BenchError::BenchmarkPolicy { message }) if message.contains("deck set differs")
         ));
+    }
+
+    #[test]
+    fn load_averages_parse_from_linux_and_macos_text() {
+        assert_eq!(
+            parse_load_average("0.52 0.58 0.59 1/389 12\n"),
+            Some([0.52, 0.58, 0.59])
+        );
+        assert_eq!(
+            parse_load_average("{ 1.25 2.50 3.75 }\n"),
+            Some([1.25, 2.5, 3.75])
+        );
+        assert_eq!(parse_load_average("0.5 0.6"), None);
+        if let Some([one, five, fifteen]) = load_average() {
+            assert!(one >= 0.0 && five >= 0.0 && fifteen >= 0.0);
+        }
+    }
+
+    #[test]
+    fn a_filter_that_matches_nothing_is_refused() {
+        let workloads = vec![Workload::run_quiet(PathBuf::from("a/rc.cir"))];
+        assert_eq!(
+            filter_workloads(workloads.clone(), Some("rc"))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(filter_workloads(workloads, Some("mesh")).is_err());
     }
 
     #[test]
