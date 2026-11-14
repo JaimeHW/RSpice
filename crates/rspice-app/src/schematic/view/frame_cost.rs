@@ -12,8 +12,6 @@ use crate::state::{
 use crate::workbench::app_state::Model;
 use crate::workbench::design::test_host::DesignTestHost;
 
-use super::AppState;
-
 /// Components per sheet, laid out as a lattice of this many columns.
 pub(crate) const COLUMNS: usize = 40;
 pub(crate) const ROWS: usize = 25;
@@ -27,7 +25,7 @@ const OPERATING_POINT_NODES: usize = 300;
 
 /// What the scale fixture holds, so a probe or a test can address it.
 pub(crate) struct ScaleFixture {
-    pub(crate) state: AppState,
+    pub(crate) state: DesignTestHost,
     /// Object ids of each sheet's components, in lattice order.
     pub(crate) components: [Vec<u64>; 2],
     /// How many objects each sheet holds: components, wires and junctions.
@@ -418,7 +416,7 @@ pub(crate) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     ];
     let first = sheets[0].ids().collect::<Vec<_>>();
     let second = sheets[1].ids().collect::<Vec<_>>();
-    let mut state = super::sheet_visibility::two_sheet_state(&first, &second);
+    let mut state = super::sheet_visibility::two_sheet_host(&first, &second);
     state.model.library_manager.add_library(master_library());
 
     let nets = cross_probe_nets(&sheets);

@@ -14,6 +14,7 @@
 use rspice_design::projection::{materialization_count, reset_materialization_count};
 use rspice_design_model::work_tally::{self, WorkTally};
 
+use super::app_state_of;
 use crate::schematic::view::frame_cost::{COLUMNS, ROWS, scale_fixture_of};
 use crate::state::{Point, SchematicAnnotationVisibility};
 use crate::workbench::app_state::AppState;
@@ -76,7 +77,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
     // with.
     let other_sheet = fixture.objects[1];
     let part = fixture.components[0][columns * (rows / 2) + columns / 2];
-    let mut state = fixture.state;
+    let mut state = app_state_of(fixture.state);
     let at = state
         .model
         .schematic
