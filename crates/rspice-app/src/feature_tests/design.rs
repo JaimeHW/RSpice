@@ -76,8 +76,10 @@ use crate::state::{
     ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::design::commands::DesignCommand;
+use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
 
@@ -89,6 +91,84 @@ fn design_app() -> RSpiceApp {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     app
+}
+
+/// A whole application made of the design test host: its four fields moved
+/// into a new application. The host's `Default` and one-liners are
+/// `AppState`'s own lines, so a fixture built on the host makes the
+/// application the same fixture made on `AppState`, for a test that reads
+/// past the host.
+pub(crate) fn app_state_of(host: DesignTestHost) -> AppState {
+    let DesignTestHost {
+        design,
+        model,
+        workbench,
+        runs,
+    } = host;
+    let mut state = AppState::default();
+    state.design = design;
+    state.model = model;
+    state.workbench = workbench;
+    state.runs = runs;
+    state
+}
+
+/// The application made of a new host is a new application, on the four
+/// fields the host lends. A map's `Debug` order is its own per instance, so
+/// the state is compared by its sorted lines; the model, which has no
+/// `Debug`, by the session it writes. A new session mints its own project,
+/// plan and source identities, so those are compared by where each recurs,
+/// not by value.
+#[test]
+fn the_application_made_of_a_new_host_is_a_new_application() {
+    fn lines(value: &impl std::fmt::Debug) -> Vec<String> {
+        let mut lines = format!("{value:#?}")
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        lines.sort();
+        lines
+    }
+    fn session(state: &AppState) -> serde_json::Value {
+        fn is_identity(text: &str) -> bool {
+            text.len() == 36
+                && text.char_indices().all(|(index, c)| match index {
+                    8 | 13 | 18 | 23 => c == '-',
+                    _ => c.is_ascii_hexdigit(),
+                })
+        }
+        fn renumber(value: &mut serde_json::Value, seen: &mut Vec<String>) {
+            match value {
+                serde_json::Value::String(text) if is_identity(text) => {
+                    let ordinal = match seen.iter().position(|id| id == text) {
+                        Some(ordinal) => ordinal,
+                        None => {
+                            seen.push(text.clone());
+                            seen.len() - 1
+                        }
+                    };
+                    *text = format!("identity {ordinal}");
+                }
+                serde_json::Value::Array(items) => {
+                    items.iter_mut().for_each(|item| renumber(item, seen));
+                }
+                serde_json::Value::Object(fields) => {
+                    fields.values_mut().for_each(|item| renumber(item, seen));
+                }
+                _ => {}
+            }
+        }
+        let mut session = serde_json::to_value(state).expect("the session serializes");
+        renumber(&mut session, &mut Vec::new());
+        session
+    }
+    let made = app_state_of(DesignTestHost::default());
+    let new = AppState::default();
+
+    assert_eq!(lines(&made.design), lines(&new.design));
+    assert_eq!(lines(&made.workbench), lines(&new.workbench));
+    assert_eq!(lines(&made.runs), lines(&new.runs));
+    assert_eq!(session(&made), session(&new));
 }
 
 /// Place a resistor on the open schematic; its id.
