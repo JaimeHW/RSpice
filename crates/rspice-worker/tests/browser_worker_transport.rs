@@ -792,19 +792,28 @@ fn install_wasm_jit_models(request: &serde_json::Value) -> u32 {
     property(&preparation, "dispatchToken").as_f64().unwrap() as u32
 }
 
-/// The Verilog-A source of a manual deck's `.hdl` line, sealed as the
-/// prepared manual-deck route seals it (`seal_deck_hdl_sources`): compiled
-/// with the unified runtime options against the deck's cells and selection,
-/// keyed by `deck_source_key`, and named on its line by that key. The
-/// browser has no file system to read the file from, so the test seals the
-/// text it would have read. Returns the deck and the serialized runtime set.
-fn deck_with_sealed_clock() -> (String, serde_json::Value) {
-    const SOURCE: &str = "`timescale 1ns/1ps\nmodule clk(q);\n  output q;\n  reg q;\n  \
-                          initial q = 1'b0;\n  always #5 q = ~q;\nendmodule\n";
-    let digest = rspice_vocabulary::canonical::content_digest("rspice.test/clk", SOURCE.as_bytes());
+/// The Verilog-A sources of a manual deck's `.hdl` lines, sealed as the
+/// prepared manual-deck route seals them (`seal_deck_hdl_sources`): `roots`
+/// compiled as one unit with the unified runtime options against the deck's
+/// cells and selection, `module` keyed by `deck_source_key`, and named on
+/// its line by that key. The browser has no file system to read the files
+/// from, so the test seals the text the route would have read, headers
+/// included. Returns the deck and the serialized runtime set.
+fn deck_with_sealed_module(
+    title: &str,
+    files: &[(&str, &str)],
+    roots: &[&str],
+    module: &str,
+) -> (String, serde_json::Value) {
+    let text: String = files
+        .iter()
+        .map(|(name, text)| format!("{name}\n{text}"))
+        .collect();
+    let digest = rspice_vocabulary::canonical::content_digest("rspice.test/unit", text.as_bytes());
+    let file_name = roots[0].rsplit('/').next().unwrap();
     let key =
-        rspice_simulation::netlist_preparation::deck_source_key(digest, "clk", "clk", "clk.v");
-    let deck = format!("Worker HDL clock\n.veriloga \"{key}\" clk\nX1 q clk\nR1 q 0 1k\n.end\n");
+        rspice_simulation::netlist_preparation::deck_source_key(digest, module, module, file_name);
+    let deck = format!("{title}\n.veriloga \"{key}\" {module}\nX1 q {module}\nR1 q 0 1k\n.end\n");
     let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
     let cells = rspice_core::engine::hdl_external_cells(&netlist);
     let delay_select =
@@ -814,11 +823,10 @@ fn deck_with_sealed_clock() -> (String, serde_json::Value) {
             &rspice_core::SimulationConfigOverrides::default(),
         ));
     let bundle = rspice_veriloga::VirtualSourceBundle::new(
-        "clk.v".to_owned(),
-        [rspice_veriloga::VirtualSourceFile::new(
-            "clk.v".to_owned(),
-            SOURCE,
-        )],
+        roots[0].to_owned(),
+        files
+            .iter()
+            .map(|(name, text)| rspice_veriloga::VirtualSourceFile::new((*name).to_owned(), *text)),
     )
     .unwrap();
     let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
@@ -827,19 +835,21 @@ fn deck_with_sealed_clock() -> (String, serde_json::Value) {
         wreal_resolution: rspice_core::engine::hdl_wreal_resolution(&netlist),
         ..rspice_simulation::compilation::unified_runtime_compiler_options()
     });
-    let compilation = compiler
-        .prepare_virtual_runtime_source(
-            &bundle,
-            rspice_simulation::project_veriloga::project_virtual_compile_limits(),
-        )
-        .expect("the source prepares")
-        .compile_runtime("clk")
+    let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
+    let prepared = if roots.len() > 1 {
+        compiler.prepare_virtual_unit_runtime_source(&bundle, roots, limits)
+    } else {
+        compiler.prepare_virtual_runtime_source(&bundle, limits)
+    };
+    let compilation = prepared
+        .expect("the sources prepare")
+        .compile_runtime(module)
         .expect("the module compiles");
     let runtime =
         rspice_simulation::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation_against(
             key,
             digest,
-            "clk".to_owned(),
+            module.to_owned(),
             &compilation,
             Some(&cells),
             delay_select,
@@ -850,20 +860,53 @@ fn deck_with_sealed_clock() -> (String, serde_json::Value) {
     (deck, serde_json::to_value(&set).unwrap())
 }
 
+const CLOCK: &str = "`timescale 1ns/1ps\nmodule clk(q);\n  output q;\n  reg q;\n  \
+                     initial q = 1'b0;\n  always #5 q = ~q;\nendmodule\n";
+
 /// A manual deck's sealed HDL runtime reaches the worker as a project
-/// runtime does, in the request's runtime set, and runs there: the clock's
-/// `always #5` toggles `q` every 5 ns, and the default `d2a` drives the 1 kΩ
-/// load through its 20 Ω `rhi`/`rlo` from 3.3 V or 0 V.
+/// runtime does, in the request's runtime set, and runs there.
 #[wasm_bindgen_test]
 fn a_manual_decks_sealed_hdl_runs_in_the_worker() {
-    let (deck, runtimes) = deck_with_sealed_clock();
+    let (deck, runtimes) =
+        deck_with_sealed_module("Worker HDL clock", &[("clk.v", CLOCK)], &["clk.v"], "clk");
+    assert_sealed_clock_runs_in_the_worker(11, &deck, runtimes);
+}
+
+/// Two files compiled as one unit, one reading its half period from a local
+/// header, run in the worker from the sealed bytes alone: `top` in one file
+/// instantiates `leaf` from another, whose `` `include "half.vh" `` the
+/// seal carried, and `q` toggles every 5 ns as it does on the desktop.
+#[wasm_bindgen_test]
+fn a_two_file_unit_with_a_local_header_runs_in_the_worker() {
+    const TOP: &str = "`timescale 1ns/1ps\nmodule top(q);\n  output q;\n  wire q;\n  \
+                       leaf u1(.y(q));\nendmodule\n";
+    const LEAF: &str = "`include \"half.vh\"\n`timescale 1ns/1ps\nmodule leaf(y);\n  \
+                        output y;\n  reg y;\n  initial y = 1'b0;\n  always #`HALF y = ~y;\n\
+                        endmodule\n";
+    let (deck, runtimes) = deck_with_sealed_module(
+        "Worker HDL unit",
+        &[
+            ("rtl/top.v", TOP),
+            ("lib/leaf.v", LEAF),
+            ("lib/half.vh", "`define HALF 5\n"),
+        ],
+        &["rtl/top.v", "lib/leaf.v"],
+        "top",
+    );
+    assert_sealed_clock_runs_in_the_worker(13, &deck, runtimes);
+}
+
+/// The worker runs `deck` with its sealed runtime set: `q` toggles every
+/// 5 ns, and the default `d2a` drives the 1 kΩ load through its 20 Ω
+/// `rhi`/`rlo` from 3.3 V or 0 V.
+fn assert_sealed_clock_runs_in_the_worker(id: u64, deck: &str, runtimes: serde_json::Value) {
     let mut request = worker_request_json(
-        11,
+        id,
         serde_json::json!({"Transient": {
             "stop_time": 20e-9, "step_time": 1e-10, "start_time": 0.0,
             "max_timestep": 1e-10, "uic": false
         }}),
-        &deck,
+        deck,
     );
     request["request"]["request"]["project_veriloga_runtimes"] = runtimes;
     let dispatch_token = install_wasm_jit_models(&request);
