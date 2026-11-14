@@ -24,10 +24,13 @@
 //!   passes before it is published.
 //! - [`pac`]: PAC, and PXF through it, on the orbit in the time domain.
 //! - [`pnoise`]: PNOISE on the orbit, by the transposed recurrence.
+//! - [`monodromy`]: the linearized period's map, reduced once for every
+//!   frequency's periodicity solve.
 
 mod basis;
 mod boundary;
 mod certify;
+mod monodromy;
 mod newton;
 mod pac;
 mod pnoise;

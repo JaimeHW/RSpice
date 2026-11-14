@@ -57,6 +57,14 @@ type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 /// The largest step a Newton update may move a generated model's node by.
 const GENERATED_STEP_LIMIT: Value = 0.5;
 
+/// Which shooting solves a PSS.
+enum PssRoute {
+    /// Event shooting, whose stabilization builds the transient's own circuit.
+    Event,
+    /// Native shooting, on the circuit the choice built.
+    Native(CircuitData),
+}
+
 struct PssGridSolution {
     state: ShootingState,
     waveform: TransientResult,
@@ -531,35 +539,6 @@ impl PssDenseLu {
                 value -= self.lu[row * self.n + column] * entry;
             }
             solution[row] = value / self.lu[row * self.n + row];
-        }
-        solution
-    }
-
-    /// Solve `Aᵀ·x = rhs` with the same factor: `PA = LU` gives
-    /// `Aᵀ = Uᵀ·Lᵀ·P`, so `Uᵀ` forward, `Lᵀ` back, and the row swaps undone
-    /// in reverse order.
-    pub(in crate::engine) fn solve_transposed(&self, rhs: &[Value]) -> Vec<Value> {
-        debug_assert_eq!(rhs.len(), self.n);
-        let n = self.n;
-        let mut solution = rhs.to_vec();
-        for row in 0..n {
-            let mut value = solution[row];
-            for (k, &entry) in solution.iter().enumerate().take(row) {
-                value -= self.lu[k * n + row] * entry;
-            }
-            solution[row] = value / self.lu[row * n + row];
-        }
-        for row in (0..n).rev() {
-            let mut value = solution[row];
-            for (k, &entry) in solution.iter().enumerate().skip(row + 1) {
-                value -= self.lu[k * n + row] * entry;
-            }
-            solution[row] = value;
-        }
-        for k in (0..n).rev() {
-            if self.pivots[k] != k {
-                solution.swap(k, self.pivots[k]);
-            }
         }
         solution
     }
@@ -1816,13 +1795,23 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
-            return engine
-                .run_event_pss(netlist, &config, None, abort)
-                .map(|event| event.analysis);
-        }
+        let circuit = match engine.pss_route(netlist, &config, abort)? {
+            PssRoute::Event => {
+                return engine
+                    .run_event_pss(netlist, &config, None, abort)
+                    .map(|event| event.analysis);
+            }
+            PssRoute::Native(circuit) => circuit,
+        };
         engine
-            .run_pss_with_state_abort(netlist, config, abort)
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &std::collections::BTreeSet::new(),
+                None,
+                Some(circuit),
+                abort,
+            )
             .map(|(result, _, _, _)| result)
     }
 
@@ -1841,17 +1830,21 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
-            return engine
-                .run_event_pss(netlist, &config, Some(dc_seed), abort)
-                .map(|event| event.analysis);
-        }
+        let circuit = match engine.pss_route(netlist, &config, abort)? {
+            PssRoute::Event => {
+                return engine
+                    .run_event_pss(netlist, &config, Some(dc_seed), abort)
+                    .map(|event| event.analysis);
+            }
+            PssRoute::Native(circuit) => circuit,
+        };
         engine
             .run_pss_with_state_and_frozen_sources_abort(
                 netlist,
                 config,
                 &std::collections::BTreeSet::new(),
                 Some(dc_seed),
+                Some(circuit),
                 abort,
             )
             .map(|(result, _, _, _)| result)
@@ -1867,14 +1860,24 @@ impl Engine {
     ) -> Result<PssOperatingPoint, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         config.validate().map_err(PssError::InvalidConfig)?;
-        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
-            return engine.event_pss_operating_point(netlist, config, None, abort);
-        }
         let retained_config = config.clone();
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
-        let (analysis, circuit, _, shooting_state) =
-            engine.run_pss_with_state_abort(netlist, config, abort)?;
+        let circuit = match engine.pss_route(netlist, &config, abort)? {
+            PssRoute::Event => {
+                return engine.event_pss_operating_point(netlist, config, None, abort);
+            }
+            PssRoute::Native(circuit) => circuit,
+        };
+        let (analysis, circuit, _, shooting_state) = engine
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &std::collections::BTreeSet::new(),
+                None,
+                Some(circuit),
+                abort,
+            )?;
         if producer
             != PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?
         {
@@ -1912,18 +1915,22 @@ impl Engine {
     ) -> Result<PssOperatingPoint, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         config.validate().map_err(PssError::InvalidConfig)?;
-        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
-            return engine.event_pss_operating_point(netlist, config, Some(dc_seed), abort);
-        }
         let retained_config = config.clone();
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
+        let circuit = match engine.pss_route(netlist, &config, abort)? {
+            PssRoute::Event => {
+                return engine.event_pss_operating_point(netlist, config, Some(dc_seed), abort);
+            }
+            PssRoute::Native(circuit) => circuit,
+        };
         let (analysis, circuit, _, shooting_state) = engine
             .run_pss_with_state_and_frozen_sources_abort(
                 netlist,
                 config,
                 &std::collections::BTreeSet::new(),
                 Some(dc_seed),
+                Some(circuit),
                 abort,
             )?;
         if producer
@@ -2022,6 +2029,7 @@ impl Engine {
                 netlist,
                 config,
                 &frozen_source_set,
+                None,
                 None,
                 abort,
             )?;
@@ -2198,28 +2206,24 @@ impl Engine {
         Ok((result, end.into_checkpoint()?))
     }
 
-    /// Refuse any orbit whose state the shooting period map cannot carry.
-    ///
-    /// The blockers come from the declared `PssStateMap` capability of every
-    /// family present, so a device family that gains or loses period-map state
-    /// changes this answer by editing its declaration, not this function.
-    /// Whether event shooting solves this netlist's PSS: native shooting
-    /// refuses it only for state event shooting carries, and event shooting's
-    /// own preflight admits it. A circuit the preflight refuses is refused
-    /// here, by name, before any solver work.
-    fn pss_takes_event_shooting(
+    /// Which shooting solves this netlist's PSS: event shooting when native
+    /// shooting refuses it only for state event shooting carries and event
+    /// shooting's own preflight admits it, else native shooting on the
+    /// circuit built here. A circuit the preflight refuses is refused here, by
+    /// name, before any solver work.
+    fn pss_route(
         &self,
         netlist: &Netlist,
         config: &PssConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<bool, SimulationError> {
+    ) -> Result<PssRoute, SimulationError> {
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         if !super::pss_event::takes_event_shooting(&circuit) {
-            return Ok(false);
+            return Ok(PssRoute::Native(circuit));
         }
         match super::pss_event::admission_refusal(&circuit, netlist, config) {
             Some(refusal) => Err(refusal),
-            None => Ok(true),
+            None => Ok(PssRoute::Event),
         }
     }
 
@@ -2260,6 +2264,11 @@ impl Engine {
         )
     }
 
+    /// Refuse any orbit whose state the shooting period map cannot carry.
+    ///
+    /// The blockers come from the declared `PssStateMap` capability of every
+    /// family present, so a device family that gains or loses period-map state
+    /// changes this answer by editing its declaration, not this function.
     fn ensure_pss_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
         match periodic_capability::summarize(&periodic_capability::pss_state_gaps(circuit)) {
             None => Ok(()),
@@ -2349,16 +2358,20 @@ impl Engine {
             config,
             &std::collections::BTreeSet::new(),
             None,
+            None,
             abort,
         )
     }
 
+    /// Native shooting, on `built` when the caller has already built the
+    /// circuit from `netlist` with this engine.
     fn run_pss_with_state_and_frozen_sources_abort(
         &self,
         netlist: &Netlist,
         config: PssConfig,
         frozen_sources: &std::collections::BTreeSet<String>,
         dc_seed: Option<&PssDcOperatingPointSeed>,
+        built: Option<CircuitData>,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, PssCircuit, StaticMatrix, Vec<Value>), SimulationError> {
         if abort.is_aborted() {
@@ -2368,7 +2381,10 @@ impl Engine {
         self.ensure_analysis_points(config.points_per_period)?;
 
         // Build and prepare circuit
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let mut circuit = match built {
+            Some(circuit) => circuit,
+            None => self.build_circuit_with_abort(netlist, abort)?,
+        };
         let source_basis = crate::circuit::SourceTimeBasis {
             tstep: config.period() / config.points_per_period as Value,
             tstop: config.period(),

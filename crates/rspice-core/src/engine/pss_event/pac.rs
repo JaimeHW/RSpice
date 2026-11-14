@@ -9,16 +9,21 @@
 //!   traversed; it must close within the transient tolerances the orbit was
 //!   certified against.
 //! - **The linearized period.** At every accepted point of that period the
-//!   circuit's small-signal operator `Y(jω) = G + jωC` is read at `ω = 1`.
+//!   circuit's small-signal operator `Y(jω) = G + jωC` is read at `ω = 1`, on
+//!   one scratch circuit that takes the run's device state at each point.
 //!   One step of the period is
 //!   `(C_k/h + θG_k)·x_k = (C_{k−1}/h − (1−θ)G_{k−1})·x_{k−1} + b·(θu_k + (1−θ)u_{k−1})`,
 //!   with `θ = ½` (trapezoidal), and `θ = 1` on an algebraic row and on the
 //!   step a switch changes in, as the transient restarts its integration
-//!   there.
+//!   there. `G`, `C`, `A` and `B` live on the circuit matrix's stored
+//!   positions, and each step's `A` is factored once by the sparse solver the
+//!   transient uses.
 //! - **The periodic response.** For `u(t) = e^{jωt}` the response satisfies
 //!   `x(t₀ + T) = e^{jωT}·x(t₀)`. A sweep from rest gives `r(ω)`, the
 //!   recurrence's monodromy `M` gives `x(t₀) = (e^{jωT}I − M)⁻¹·r(ω)`, and a
-//!   second sweep gives `x(t_k)`. Sideband `m` is
+//!   second sweep gives `x(t_k)`. `M` is formed once, one block sweep of its
+//!   columns, and reduced to Hessenberg form ([`super::monodromy`]), so each
+//!   frequency's periodicity solve is O(n²). Sideband `m` is
 //!   `Y_m = (1/T)∫x(t)·e^{−j(ω+mω₀)t}dt` over absolute time, by the
 //!   trapezoidal rule on the mesh; an input at sideband `m'` is the same
 //!   solve at `ω + m'ω₀`.
@@ -30,20 +35,24 @@
 //!   recomputed on the bisected mesh and must agree within the analysis's
 //!   relative tolerance and the run's voltage tolerance.
 
+use std::cell::RefCell;
+
 use super::basis::CoordinateUnit;
+use super::monodromy::Monodromy;
 use super::newton::Orbit;
 use super::pnoise::{NoiseCatalog, PointNoise};
 use super::{DISCRETE_ITERATIONS, EVENT_CARRIER, MESH_REFINEMENTS, boundary};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pac::{PacConfig, PacResult};
 use crate::engine::ac::SmallSignalAnalysisKind;
-use crate::engine::pss::PssDenseLu;
 use crate::engine::transient::state_capture::{AcceptedPointObserver, CapturedTransientState};
 use crate::engine::{
     Engine, PacAnalysisResult, PssOperatingPoint, SimulationError, UnsupportedCapabilityError,
 };
 use crate::identity::AnalysisKind;
-use crate::solver::{ComplexMatrix, StaticMatrix};
+use crate::solver::{
+    ComplexMatrix, FactorizationRequest, NumericFactorizationPolicy, StaticMatrix,
+};
 use crate::{CircuitData, Complex64, Netlist, Value};
 
 pub(super) const SMALL_SIGNAL_MESH_UNCERTIFIED: &str =
@@ -84,9 +93,9 @@ fn analysis_name(analysis: AnalysisKind) -> &'static str {
 /// The small-signal operator at one accepted point of the period.
 struct Operator {
     time: Value,
-    /// `G`, row-major.
+    /// `G` on the structure's stored positions.
     g: Vec<Value>,
-    /// `C`, row-major.
+    /// `C` on the structure's stored positions.
     c: Vec<Value>,
     /// Every voltage and then current switch's state.
     switches: Vec<u64>,
@@ -97,9 +106,10 @@ struct Operator {
 
 /// One step of the linearized period.
 pub(super) struct Step {
-    pub(super) a: PssDenseLu,
-    /// `B`, row-major.
-    pub(super) b: Vec<Value>,
+    /// `A`, factored once by the sparse solver and reused by every solve.
+    a: RefCell<StaticMatrix>,
+    /// `B` on the structure's stored positions.
+    b: Vec<Value>,
     /// Each row's `θ`: the weight of the input at the step's end.
     pub(super) theta: Vec<Value>,
     /// The switches that change in this step.
@@ -113,9 +123,11 @@ pub(super) struct LinearPeriod {
     /// Every accepted point's absolute time from the start of the period
     /// that holds the boundary.
     pub(super) phases: Vec<Value>,
+    /// The row and column of every stored position, in the structure's
+    /// order.
+    positions: Vec<(usize, usize)>,
     pub(super) steps: Vec<Step>,
-    /// `M`, row-major.
-    pub(super) monodromy: Vec<Value>,
+    pub(super) monodromy: Monodromy,
     pub(super) excitation: Vec<Value>,
     /// Every accepted point's device noise sources, when collected.
     pub(super) noise: Vec<Vec<PointNoise>>,
@@ -529,58 +541,86 @@ pub(super) fn reproduce_boundary(
     ))
 }
 
-/// `Y(jω)` at `ω = 1` around `solution`, split into `G` and `C`.
-fn operator(
-    time: Value,
-    circuit: &CircuitData,
-    solution: &[Value],
-    structure: &StaticMatrix,
-    matrix: &mut ComplexMatrix,
-    omega: Value,
-    noise: Option<&NoiseCatalog>,
-) -> Result<Operator, SimulationError> {
-    let mut circuit = circuit.clone();
-    circuit.link_indices(structure);
-    Engine::prepare_small_signal_state(&mut circuit, solution)?;
-    circuit
-        .prepare_behavioral_small_signal_at_frequency(solution, omega / std::f64::consts::TAU)
-        .map_err(SimulationError::Circuit)?;
-    Engine::try_fill_small_signal_matrix_with_vbic_delay_mode(
-        &circuit,
-        matrix,
-        solution,
-        omega,
-        SmallSignalAnalysisKind::Ac,
-        true,
-        true,
-    )?;
-    let n = circuit.matrix_size();
-    let mut g = vec![0.0; n * n];
-    let mut c = vec![0.0; n * n];
-    matrix.for_each_stored(|row, col, value| {
-        g[row * n + col] += value.re;
-        c[row * n + col] += value.im;
-    });
-    if omega != 1.0 {
-        c.iter_mut().for_each(|entry| *entry /= omega);
+/// Reads `Y(jω) = G + jωC` at accepted points on one scratch circuit, linked
+/// to the structure once: at every point the run's evolving device state is
+/// copied into it, and one matrix takes every fill.
+struct Linearizer<'a> {
+    circuit: CircuitData,
+    matrix: ComplexMatrix,
+    stored: usize,
+    noise: Option<&'a NoiseCatalog>,
+}
+
+impl<'a> Linearizer<'a> {
+    fn new(
+        circuit: &CircuitData,
+        structure: &StaticMatrix,
+        noise: Option<&'a NoiseCatalog>,
+    ) -> Self {
+        let mut circuit = circuit.clone();
+        circuit.link_indices(structure);
+        Self {
+            circuit,
+            matrix: ComplexMatrix::from_real_structure(structure),
+            stored: structure.stored_positions().count(),
+            noise,
+        }
     }
-    let switches = circuit
-        .vswitches
-        .iter()
-        .map(|switch| switch.state() as u64)
-        .chain(circuit.iswitches.iter().map(|switch| switch.state() as u64))
-        .collect();
-    let noise = match noise {
-        Some(catalog) => catalog.collect(&circuit, solution)?,
-        None => Vec::new(),
-    };
-    Ok(Operator {
-        time,
-        g,
-        c,
-        switches,
-        noise,
-    })
+
+    /// The operator at `time` of the run whose circuit and solution there are
+    /// `run` and `solution`, read at `omega` and split into `G` and `C`; the
+    /// device noise sources are read when `with_noise` and the period
+    /// collects them.
+    fn operator(
+        &mut self,
+        time: Value,
+        run: &CircuitData,
+        solution: &[Value],
+        omega: Value,
+        with_noise: bool,
+    ) -> Result<Operator, SimulationError> {
+        let circuit = &mut self.circuit;
+        circuit.restore_nonlinear_state(run.transient_trial_state_snapshot());
+        Engine::prepare_small_signal_state(circuit, solution)?;
+        circuit
+            .prepare_behavioral_small_signal_at_frequency(solution, omega / std::f64::consts::TAU)
+            .map_err(SimulationError::Circuit)?;
+        Engine::try_fill_small_signal_matrix_with_vbic_delay_mode(
+            circuit,
+            &mut self.matrix,
+            solution,
+            omega,
+            SmallSignalAnalysisKind::Ac,
+            true,
+            true,
+        )?;
+        let mut g = Vec::with_capacity(self.stored);
+        let mut c = Vec::with_capacity(self.stored);
+        self.matrix.for_each_stored(|_, _, value| {
+            g.push(value.re);
+            c.push(value.im);
+        });
+        if omega != 1.0 {
+            c.iter_mut().for_each(|entry| *entry /= omega);
+        }
+        let switches = circuit
+            .vswitches
+            .iter()
+            .map(|switch| switch.state() as u64)
+            .chain(circuit.iswitches.iter().map(|switch| switch.state() as u64))
+            .collect();
+        let noise = match self.noise {
+            Some(catalog) if with_noise => catalog.collect(circuit, solution)?,
+            _ => Vec::new(),
+        };
+        Ok(Operator {
+            time,
+            g,
+            c,
+            switches,
+            noise,
+        })
+    }
 }
 
 impl Orbit<'_> {
@@ -602,26 +642,11 @@ impl Orbit<'_> {
             AnalysisKind::Pac
         };
         let start = self.basis.write(image, z)?;
-        let mut matrix = ComplexMatrix::from_real_structure(structure);
-        let first = operator(
-            start.time,
-            &start.circuit,
-            &start.solution,
-            structure,
-            &mut matrix,
-            1.0,
-            noise,
-        )?;
+        let mut linearizer = Linearizer::new(&start.circuit, structure, noise);
+        let first = linearizer.operator(start.time, &start.circuit, &start.solution, 1.0, true)?;
         // A stamp that is not `G + jωC` cannot be split at one frequency.
-        let doubled = operator(
-            start.time,
-            &start.circuit,
-            &start.solution,
-            structure,
-            &mut matrix,
-            2.0,
-            None,
-        )?;
+        let doubled =
+            linearizer.operator(start.time, &start.circuit, &start.solution, 2.0, false)?;
         let scale = first
             .g
             .iter()
@@ -645,10 +670,12 @@ impl Orbit<'_> {
                 None,
             ));
         }
-        let operators = std::cell::RefCell::new(vec![first]);
+        let linearizer = RefCell::new(linearizer);
+        let operators = RefCell::new(vec![first]);
         let observer = |time: Value, circuit: &CircuitData, solution: &[Value]| {
-            let mut matrix = ComplexMatrix::from_real_structure(structure);
-            let point = operator(time, circuit, solution, structure, &mut matrix, 1.0, noise)?;
+            let point = linearizer
+                .borrow_mut()
+                .operator(time, circuit, solution, 1.0, true)?;
             let mut operators = operators.borrow_mut();
             // The segment offers its start, and an instant it accepts twice
             // keeps its later state, which the next step starts from.
@@ -677,21 +704,43 @@ impl Orbit<'_> {
                  boundary at {t0:.9e} s"
             )));
         }
-        LinearPeriod::new(operators, excitation.to_vec(), period, t0)
+        LinearPeriod::new(operators, structure, excitation.to_vec(), period, t0)
     }
 }
 
 impl LinearPeriod {
     fn new(
         mut operators: Vec<Operator>,
+        structure: &StaticMatrix,
         excitation: Vec<Value>,
         period: Value,
         t0: Value,
     ) -> Result<Self, SimulationError> {
         let n = excitation.len();
+        let positions: Vec<(usize, usize)> = structure.stored_positions().collect();
+        // Each step's `A` is factored once and solved many times.
+        let mut options = structure.solver_options();
+        options.numeric_factorization = NumericFactorizationPolicy::ReusePivotSequence;
+        let pattern: Vec<(usize, usize, Value)> = positions
+            .iter()
+            .map(|&(row, col)| (row, col, 0.0))
+            .collect();
+        let template =
+            StaticMatrix::from_triplets_with_options(n, n, &pattern, options).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "the linearized period has no step matrix: {error}"
+                ))
+            })?;
+        if !template.stored_positions().eq(positions.iter().copied()) {
+            return Err(SimulationError::Circuit(
+                "the linearized period's step matrix does not keep the operators' positions"
+                    .to_string(),
+            ));
+        }
         let origin = (t0 / period).floor() * period;
         let phases = operators.iter().map(|point| point.time - origin).collect();
         let mut steps = Vec::with_capacity(operators.len().saturating_sub(1));
+        let mut dynamic = vec![false; n];
         for pair in operators.windows(2) {
             let (before, after) = (&pair[0], &pair[1]);
             let h = after.time - before.time;
@@ -709,36 +758,36 @@ impl LinearPeriod {
                 .filter(|(_, (a, b))| a != b)
                 .map(|(index, _)| index)
                 .collect();
-            let theta: Vec<Value> = (0..n)
-                .map(|row| {
-                    let row_range = row * n..(row + 1) * n;
-                    let algebraic = before.c[row_range.clone()].iter().all(|v| *v == 0.0)
-                        && after.c[row_range].iter().all(|v| *v == 0.0);
-                    if algebraic || !changes.is_empty() {
+            dynamic.fill(false);
+            for (entry, &(row, _)) in positions.iter().enumerate() {
+                if before.c[entry] != 0.0 || after.c[entry] != 0.0 {
+                    dynamic[row] = true;
+                }
+            }
+            let theta: Vec<Value> = dynamic
+                .iter()
+                .map(|&dynamic| {
+                    if !dynamic || !changes.is_empty() {
                         1.0
                     } else {
                         0.5
                     }
                 })
                 .collect();
-            let a: Vec<Vec<Value>> = (0..n)
-                .map(|row| {
-                    (row * n..(row + 1) * n)
-                        .map(|index| after.c[index] / h + theta[row] * after.g[index])
-                        .collect()
+            let mut a = template.clone_structure();
+            for (entry, (value, &(row, _))) in a.values_mut().iter_mut().zip(&positions).enumerate()
+            {
+                *value = after.c[entry] / h + theta[row] * after.g[entry];
+            }
+            let b = positions
+                .iter()
+                .enumerate()
+                .map(|(entry, &(row, _))| {
+                    before.c[entry] / h - (1.0 - theta[row]) * before.g[entry]
                 })
                 .collect();
-            let b: Vec<Value> = (0..n * n)
-                .map(|index| before.c[index] / h - (1.0 - theta[index / n]) * before.g[index])
-                .collect();
-            let a = PssDenseLu::factor(&a).ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "the linearized step at {:.9e} s is singular",
-                    after.time
-                ))
-            })?;
             steps.push(Step {
-                a,
+                a: RefCell::new(a),
                 b,
                 theta,
                 changes,
@@ -752,52 +801,129 @@ impl LinearPeriod {
             n,
             period,
             phases,
+            positions,
             steps,
-            monodromy: vec![0.0; n * n],
+            monodromy: Monodromy::default(),
             excitation,
             noise,
         };
-        let mut monodromy = vec![0.0; n * n];
-        for col in 0..n {
-            let mut x = vec![0.0; n];
-            x[col] = 1.0;
-            for step in &period_map.steps {
-                x = step.a.solve(&multiply(&step.b, &x, n));
-            }
-            for (row, value) in x.into_iter().enumerate() {
-                monodromy[row * n + col] = value;
-            }
-        }
-        period_map.monodromy = monodromy;
+        period_map.monodromy = Monodromy::reduce(period_map.monodromy_columns()?, n);
         Ok(period_map)
     }
 
+    /// `M`, row-major: column `j` is the period's map of `e_j`. The columns
+    /// go through the steps a few at a time, since each step's solver keeps a
+    /// workspace as wide as the widest block it has solved. A column the
+    /// first step's `B` never reads maps to zero.
+    fn monodromy_columns(&self) -> Result<Vec<Value>, SimulationError> {
+        const COLUMNS_PER_BLOCK: usize = 8;
+        let n = self.n;
+        let mut read = vec![false; n];
+        if let Some(step) = self.steps.first() {
+            for (&(_, col), value) in self.positions.iter().zip(&step.b) {
+                read[col] |= *value != 0.0;
+            }
+        }
+        let columns: Vec<usize> = (0..n).filter(|&col| read[col]).collect();
+        let mut monodromy = vec![0.0; n * n];
+        let mut block = Vec::with_capacity(n * COLUMNS_PER_BLOCK);
+        let mut product = Vec::with_capacity(n * COLUMNS_PER_BLOCK);
+        let mut solved = Vec::with_capacity(n * COLUMNS_PER_BLOCK);
+        for chunk in columns.chunks(COLUMNS_PER_BLOCK) {
+            let count = chunk.len();
+            block.clear();
+            block.resize(n * count, 0.0);
+            for (j, &col) in chunk.iter().enumerate() {
+                block[j * n + col] = 1.0;
+            }
+            for index in 0..self.steps.len() {
+                product.clear();
+                product.resize(n * count, 0.0);
+                for (x, out) in block.chunks_exact(n).zip(product.chunks_exact_mut(n)) {
+                    self.multiply(index, x, out, false);
+                }
+                self.solve_step(index, &product, count, false, &mut solved)?;
+                std::mem::swap(&mut block, &mut solved);
+            }
+            for (j, &col) in chunk.iter().enumerate() {
+                for row in 0..n {
+                    monodromy[row * n + col] = block[j * n + row];
+                }
+            }
+        }
+        Ok(monodromy)
+    }
+
+    /// `out += B·x` for step `index`, or `Bᵀ·x` when `transposed`.
+    pub(super) fn multiply<T>(&self, index: usize, x: &[T], out: &mut [T], transposed: bool)
+    where
+        T: Copy + std::ops::Mul<Value, Output = T> + std::ops::AddAssign,
+    {
+        for (&(row, col), &value) in self.positions.iter().zip(&self.steps[index].b) {
+            if value != 0.0 {
+                if transposed {
+                    out[col] += x[row] * value;
+                } else {
+                    out[row] += x[col] * value;
+                }
+            }
+        }
+    }
+
+    /// Step `index`'s `A⁻¹` (or `A⁻ᵀ` when `transposed`) on `count`
+    /// right-hand sides of `n` values each.
+    pub(super) fn solve_step(
+        &self,
+        index: usize,
+        rhs: &[Value],
+        count: usize,
+        transposed: bool,
+        out: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        let mut a = self.steps[index].a.borrow_mut();
+        let request = FactorizationRequest::Automatic;
+        if transposed {
+            a.solve_many_transpose_into_with_factorization(rhs, count, out, request)
+        } else {
+            a.solve_many_into_with_factorization(rhs, count, out, request)
+        }
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "the linearized step at {:.9e} s does not solve: {error}",
+                self.phases[index + 1]
+            ))
+        })
+    }
+
     /// One sweep of the recurrence from `x0` under `u(t) = e^{jωt}`.
-    fn sweep(&self, x0: Vec<Complex64>, omega: Value, keep: bool) -> Vec<Vec<Complex64>> {
+    fn sweep(
+        &self,
+        x0: Vec<Complex64>,
+        omega: Value,
+        keep: bool,
+    ) -> Result<Vec<Vec<Complex64>>, SimulationError> {
         let n = self.n;
         let input = |phase: Value| Complex64::from_polar(1.0, omega * phase);
         let mut trajectory = Vec::with_capacity(if keep { self.phases.len() } else { 1 });
         let mut x = x0;
+        let mut product = vec![Complex64::new(0.0, 0.0); n];
+        let mut rhs = vec![0.0; 2 * n];
+        let mut solved = Vec::with_capacity(2 * n);
         for (index, step) in self.steps.iter().enumerate() {
             let (u0, u1) = (input(self.phases[index]), input(self.phases[index + 1]));
-            let mut re = vec![0.0; n];
-            let mut im = vec![0.0; n];
-            for row in 0..n {
-                let mut sum: Complex64 = x
-                    .iter()
-                    .zip(&step.b[row * n..(row + 1) * n])
-                    .map(|(value, entry)| value * entry)
-                    .sum();
+            product.fill(Complex64::new(0.0, 0.0));
+            self.multiply(index, &x, &mut product, false);
+            for (row, &sum) in product.iter().enumerate() {
                 let theta = step.theta[row];
-                sum += self.excitation[row] * (u1 * theta + u0 * (1.0 - theta));
-                re[row] = sum.re;
-                im[row] = sum.im;
+                let sum = sum + self.excitation[row] * (u1 * theta + u0 * (1.0 - theta));
+                rhs[row] = sum.re;
+                rhs[n + row] = sum.im;
             }
-            let (re, im) = (step.a.solve(&re), step.a.solve(&im));
-            let next: Vec<Complex64> = re
-                .into_iter()
-                .zip(im)
-                .map(|(re, im)| Complex64::new(re, im))
+            self.solve_step(index, &rhs, 2, false, &mut solved)?;
+            let next: Vec<Complex64> = solved[..n]
+                .iter()
+                .zip(&solved[n..])
+                .map(|(re, im)| Complex64::new(*re, *im))
                 .collect();
             if keep {
                 trajectory.push(std::mem::replace(&mut x, next));
@@ -806,33 +932,18 @@ impl LinearPeriod {
             }
         }
         trajectory.push(x);
-        trajectory
+        Ok(trajectory)
     }
 
     /// The periodic response to `u(t) = e^{jωt}`.
     fn respond(&self, omega: Value) -> Result<Response, SimulationError> {
-        let n = self.n;
-        let rest = vec![Complex64::new(0.0, 0.0); n];
+        let rest = vec![Complex64::new(0.0, 0.0); self.n];
         let r = self
-            .sweep(rest, omega, false)
+            .sweep(rest, omega, false)?
             .pop()
             .expect("a sweep ends somewhere");
         let rotation = Complex64::from_polar(1.0, omega * self.period);
-        let mut system: Vec<Vec<Complex64>> = (0..n)
-            .map(|row| {
-                (0..n)
-                    .map(|col| {
-                        let identity = if row == col {
-                            rotation
-                        } else {
-                            Complex64::new(0.0, 0.0)
-                        };
-                        identity - self.monodromy[row * n + col]
-                    })
-                    .collect()
-            })
-            .collect();
-        let x0 = solve_complex(&mut system, r).ok_or_else(|| {
+        let x0 = self.monodromy.solve(rotation, r, false).ok_or_else(|| {
             carrier_refusal(format!(
                 "PAC on the event orbit is singular at {:.6e} Hz: e^(jωT) is a Floquet \
                  multiplier of the orbit",
@@ -840,7 +951,7 @@ impl LinearPeriod {
             ))
         })?;
         Ok(Response {
-            trajectory: self.sweep(x0, omega, true),
+            trajectory: self.sweep(x0, omega, true)?,
         })
     }
 
@@ -954,57 +1065,4 @@ impl LinearPeriod {
         }
         Ok(())
     }
-}
-
-fn multiply(matrix: &[Value], x: &[Value], n: usize) -> Vec<Value> {
-    (0..n)
-        .map(|row| {
-            matrix[row * n..(row + 1) * n]
-                .iter()
-                .zip(x)
-                .map(|(a, b)| a * b)
-                .sum()
-        })
-        .collect()
-}
-
-/// Gaussian elimination with partial pivoting on a small dense complex
-/// system; `None` when it is singular.
-pub(super) fn solve_complex(
-    system: &mut [Vec<Complex64>],
-    mut rhs: Vec<Complex64>,
-) -> Option<Vec<Complex64>> {
-    let n = rhs.len();
-    let scale = system
-        .iter()
-        .flatten()
-        .fold(0.0, |m: Value, v| m.max(v.norm()));
-    for k in 0..n {
-        let pivot = (k..n).max_by(|&a, &b| system[a][k].norm().total_cmp(&system[b][k].norm()))?;
-        if system[pivot][k].norm() <= 1.0e-14 * scale.max(Value::MIN_POSITIVE) {
-            return None;
-        }
-        system.swap(k, pivot);
-        rhs.swap(k, pivot);
-        for row in k + 1..n {
-            let factor = system[row][k] / system[k][k];
-            if factor == Complex64::new(0.0, 0.0) {
-                continue;
-            }
-            let (upper, lower) = system.split_at_mut(row);
-            for (target, value) in lower[0][k..].iter_mut().zip(&upper[k][k..]) {
-                *target -= factor * value;
-            }
-            let value = rhs[k];
-            rhs[row] -= factor * value;
-        }
-    }
-    for row in (0..n).rev() {
-        let mut value = rhs[row];
-        for col in row + 1..n {
-            value -= system[row][col] * rhs[col];
-        }
-        rhs[row] = value / system[row][row];
-    }
-    Some(rhs)
 }

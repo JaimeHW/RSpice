@@ -36,7 +36,7 @@
 
 use super::pac::{
     LinearPeriod, SMALL_SIGNAL_MESH_UNCERTIFIED, input_excitation, output_selection,
-    probe_frequencies, reproduce_boundary, small_signal_refusal, solve_complex,
+    probe_frequencies, reproduce_boundary, small_signal_refusal,
 };
 use super::{EVENT_CARRIER, MESH_REFINEMENTS, boundary};
 use crate::abort_signal::AbortSignal;
@@ -244,33 +244,32 @@ impl LinearPeriod {
         output: (usize, Option<usize>),
         closure: Option<&[Complex64]>,
         mut visit: impl FnMut(usize, &[Complex64]),
-    ) -> Vec<Complex64> {
+    ) -> Result<Vec<Complex64>, SimulationError> {
         let n = self.n;
-        let mut next = closure.map_or_else(|| vec![Complex64::new(0.0, 0.0); n], <[_]>::to_vec);
-        let mut re = vec![0.0; n];
-        let mut im = vec![0.0; n];
-        for (k, step) in self.steps.iter().enumerate().rev() {
+        let zero = Complex64::new(0.0, 0.0);
+        let mut next = closure.map_or_else(|| vec![zero; n], <[_]>::to_vec);
+        let mut rhs = vec![0.0; 2 * n];
+        let mut solved = Vec::with_capacity(2 * n);
+        let mut lambda = vec![zero; n];
+        for k in (0..self.steps.len()).rev() {
             let weight = forcing[k + 1];
             next[output.0] += weight;
             if let Some(reference) = output.1 {
                 next[reference] -= weight;
             }
             for (row, value) in next.iter().enumerate() {
-                re[row] = value.re;
-                im[row] = value.im;
+                rhs[row] = value.re;
+                rhs[n + row] = value.im;
             }
-            let (re_l, im_l) = (step.a.solve_transposed(&re), step.a.solve_transposed(&im));
-            let lambda: Vec<Complex64> = re_l
-                .iter()
-                .zip(&im_l)
-                .map(|(re, im)| Complex64::new(*re, *im))
-                .collect();
+            self.solve_step(k, &rhs, 2, true, &mut solved)?;
+            for (row, value) in lambda.iter_mut().enumerate() {
+                *value = Complex64::new(solved[row], solved[n + row]);
+            }
             visit(k, &lambda);
-            for (col, entry) in next.iter_mut().enumerate() {
-                *entry = (0..n).map(|row| lambda[row] * step.b[row * n + col]).sum();
-            }
+            next.fill(zero);
+            self.multiply(k, &lambda, &mut next, true);
         }
-        next
+        Ok(next)
     }
 
     /// The noise `observation` sees at offset `omega`, and the input's gain
@@ -283,25 +282,10 @@ impl LinearPeriod {
         output: (usize, Option<usize>),
         input: Option<i32>,
     ) -> Result<OffsetNoise, SimulationError> {
-        let n = self.n;
         let forcing = self.forcing(omega, fundamental, observation);
-        let first = self.sweep_back(&forcing, output, None, |_, _| {});
+        let first = self.sweep_back(&forcing, output, None, |_, _| {})?;
         let rotation = Complex64::from_polar(1.0, omega * self.period);
-        let mut system: Vec<Vec<Complex64>> = (0..n)
-            .map(|row| {
-                (0..n)
-                    .map(|col| {
-                        let identity = if row == col {
-                            rotation
-                        } else {
-                            Complex64::new(0.0, 0.0)
-                        };
-                        identity - self.monodromy[col * n + row]
-                    })
-                    .collect()
-            })
-            .collect();
-        let closure = solve_complex(&mut system, first).ok_or_else(|| {
+        let closure = self.monodromy.solve(rotation, first, true).ok_or_else(|| {
             refusal(
                 EVENT_CARRIER,
                 format!(
@@ -351,7 +335,7 @@ impl LinearPeriod {
                     }
                 }
             }
-        });
+        })?;
         Ok(OffsetNoise {
             shares,
             gain: input.map(|_| gain),
@@ -368,6 +352,8 @@ impl LinearPeriod {
         fundamental: Value,
         output_noise: Value,
     ) -> Result<(), SimulationError> {
+        // Switches on one control that change at one point cross together.
+        let mut checked = Vec::new();
         for (index, step) in self.steps.iter().enumerate() {
             for &switch in &step.changes {
                 let (name, positive, negative) =
@@ -392,6 +378,10 @@ impl LinearPeriod {
                     }
                     (positive, _) => (positive - 1, None),
                 };
+                if checked.contains(&(index, control)) {
+                    continue;
+                }
+                checked.push((index, control));
                 let time = self.phases[index + 1];
                 let noise = self
                     .noise(omega, fundamental, Observation::Sample(time), control, None)?
