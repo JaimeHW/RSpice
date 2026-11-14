@@ -1,21 +1,43 @@
 //! The code toolbars: the Verilog-A cell view's build and source tools, and
 //! the Code & Automation workspace's netlist and automation pages.
 //!
-//! They draw their commands through the host, as every toolbar does, and
-//! read the code workspace's state through its session at the point they
-//! draw, after any tool to their left has run.
+//! They are the code feature's toolbars, drawn in its context. Each group
+//! asks what the code workspace shows at the point it draws, after any tool
+//! to its left has run.
 
-use crate::workbench::AppState;
+use crate::state::command_catalog::CommandKey;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::framework::feature::{
+    Cx, Reads, ToolbarAction, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarTool,
+};
 use crate::workbench::layout::LayoutSpec;
 
-use super::{
-    context_separator, explicit_label_width, overflow, take_projected_tool_slot,
-    toolbar_icon_button_size, toolbar_icon_command, toolbar_text_command,
-};
+use super::{explicit_label_width, toolbar_icon_button_size};
+
+/// A command drawn as a labelled button.
+const fn labelled(
+    key: CommandKey,
+    icon: WorkbenchIcon,
+    label: &'static str,
+) -> ToolbarEntry<CodeFeature> {
+    ToolbarEntry::Tool(ToolbarTool { key, icon, label })
+}
+
+/// A command drawn as an icon, named by its own label and pressed as its
+/// own check mark says.
+const fn icon(key: CommandKey, icon: WorkbenchIcon) -> ToolbarEntry<CodeFeature> {
+    ToolbarEntry::Icon(ToolbarIcon {
+        key,
+        icon,
+        label: None,
+        pressed: None,
+    })
+}
 
 /// Toolbar of an open Verilog-A cell view.
 ///
@@ -27,90 +49,81 @@ use super::{
 /// and every source tool are in the command palette as well, and Format in the
 /// editor's own menu. A schematic's placement and transform tools have nothing
 /// to act on here.
-pub(in crate::workbench) fn veriloga_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost<Session = AppState>,
-    layout: LayoutSpec,
-) {
+pub(in crate::workbench) const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
     // The control is Cancel until the compile finishes, as Run is Stop.
-    if app.session().code.code_workspace.veriloga.pending.is_some() {
-        toolbar_text_command(
-            ui,
-            app,
-            CodeCommand::CancelVerilogACompile.key(),
-            WorkbenchIcon::Stop,
-            "Cancel Verilog-A/AMS compile",
-            layout,
-        );
-    } else {
-        toolbar_text_command(
-            ui,
-            app,
+    // Compile is asked first: Cancel ends the compile as it is pressed, and
+    // asked first it would leave Compile to draw beside it for that frame.
+    ToolbarEntry::Only(
+        no_compile_pending,
+        &[labelled(
             CodeCommand::CompileVerilogA.key(),
             WorkbenchIcon::Run,
             "Compile Verilog-A/AMS",
-            layout,
-        );
-    }
-    generated_netlist_tool(ui, app, layout);
-    toolbar_text_command(
-        ui,
-        app,
+        )],
+    ),
+    ToolbarEntry::Only(
+        compile_pending,
+        &[labelled(
+            CodeCommand::CancelVerilogACompile.key(),
+            WorkbenchIcon::Stop,
+            "Cancel Verilog-A/AMS compile",
+        )],
+    ),
+    // The generated deck, in the Netlist workspace: what the design this
+    // module is placed in netlists to. The overflow row and the button take
+    // the reader to the same place.
+    ToolbarEntry::Action(ToolbarAction {
+        show: generated_netlist_tool,
+        icon: WorkbenchIcon::Netlist,
+        label: crate::workbench::MessageId::CodeGeneratedNetlist,
+        run: show_generated_deck,
+    }),
+    labelled(
         CodeCommand::VerilogAOpenSymbol.key(),
         WorkbenchIcon::Instance,
         "Open symbol",
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
+    ),
+    icon(
         CodeCommand::VerilogABuildSettings.key(),
         WorkbenchIcon::Sliders,
-        layout,
-    );
-    context_separator(ui, layout);
-    veriloga_format_tool(ui, app, layout);
-    toolbar_icon_command(
-        ui,
-        app,
-        CodeCommand::FindCodeDocument.key(),
-        WorkbenchIcon::Search,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
+    ),
+    ToolbarEntry::Separator,
+    ToolbarEntry::Control(ToolbarControl {
+        show: veriloga_format_tool,
+        overflow: None,
+    }),
+    icon(CodeCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
+    icon(
         CodeCommand::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
-        layout,
+    ),
+];
+
+fn compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
+    reads.state.code_workspace.veriloga.pending.is_some()
+}
+
+fn no_compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
+    !compile_pending(reads)
+}
+
+/// Take the reader to the generated deck: its page in the Netlist workspace,
+/// with the generated primary in front.
+fn show_generated_deck(cx: &mut Cx<'_, CodeFeature>) {
+    crate::workbench::documents::netlist_document::show_generated_deck(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.code_workspace.page,
+        cx.wb,
     );
 }
 
-/// The generated deck, in the Netlist workspace: what the design this module
-/// is placed in netlists to.
-fn generated_netlist_tool<H: WorkbenchHost<Session = AppState>>(
-    ui: &mut egui::Ui,
-    app: &mut H,
-    layout: LayoutSpec,
-) {
-    let label = app
-        .workbench()
+/// The generated deck's button, in the slot the toolbar took for it.
+fn generated_netlist_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+    let label = cx
+        .wb
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
-    if !take_projected_tool_slot(ui, layout) {
-        let action = overflow::OverflowAction::<H>::Run(&GeneratedDeck);
-        let (icon, selected) = (WorkbenchIcon::Netlist, false);
-        overflow::set_aside(
-            ui,
-            overflow::OverflowTool {
-                action,
-                icon,
-                label,
-                selected,
-            },
-        );
-        return;
-    }
     let response = if layout.toolbar_labels {
         labeled_icon_button_sized(
             ui,
@@ -130,29 +143,8 @@ fn generated_netlist_tool<H: WorkbenchHost<Session = AppState>>(
         )
     };
     if response.clicked() {
-        show_generated_deck(app.session_mut());
+        show_generated_deck(cx);
     }
-}
-
-/// The generated deck's row in More tools. The row and the button take the
-/// reader to the same place.
-struct GeneratedDeck;
-
-impl<H: WorkbenchHost<Session = AppState>> overflow::OverflowRun<H> for GeneratedDeck {
-    fn run(&self, app: &mut H) {
-        show_generated_deck(app.session_mut());
-    }
-}
-
-/// Take the reader to the generated deck: its page in the Netlist workspace,
-/// with the generated primary in front.
-fn show_generated_deck(state: &mut AppState) {
-    crate::workbench::documents::netlist_document::show_generated_deck(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.code_workspace.page,
-        &mut state.workbench,
-    );
 }
 
 /// Format the source the editor is showing.
@@ -161,26 +153,18 @@ fn show_generated_deck(state: &mut AppState) {
 /// as a reviewable document action — so the tool hands the request to the
 /// visible editor rather than rewriting text itself. Offered only when that
 /// file may be edited.
-fn veriloga_format_tool(
-    ui: &mut egui::Ui,
-    app: &impl WorkbenchHost<Session = AppState>,
-    layout: LayoutSpec,
-) {
+fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::documents::code_workspace;
 
-    if !take_projected_tool_slot(ui, layout) {
-        return;
-    }
     let language = crate::state::ProjectSourceLanguage::VerilogA;
-    let state = app.session();
-    let code = &state.code.code_workspace;
-    let editor = code_workspace::selected_veriloga_editor_snapshot_in(&state.model, code)
+    let code = &cx.state.code_workspace;
+    let editor = code_workspace::selected_veriloga_editor_snapshot_in(cx.model, code)
         .ok()
         .filter(|snapshot| {
             code_workspace::source_bundle_document_is_editable_in(
-                &state.model,
+                cx.model,
                 code,
-                &state.platform,
+                cx.platform,
                 language,
                 snapshot.bundle_id(),
                 snapshot.active_path(),
@@ -215,107 +199,79 @@ fn veriloga_format_tool(
 /// mistake, and here it was worse than redundant — the find window is drawn
 /// only by the netlist page, so the button silently did nothing on the other
 /// two and then ambushed the user on return.
-pub(in crate::workbench) fn netlist_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost<Session = AppState>,
-    layout: LayoutSpec,
-) {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    match app.session().code.code_workspace.page {
-        CodeWorkspacePage::Netlist => netlist_page_tools(ui, app, layout),
-        CodeWorkspacePage::Automation => {
-            toolbar_text_command(
-                ui,
-                app,
+///
+/// The netlist page's set follows the document it is showing: a generated
+/// primary is exported and compared, an owned deck is saved and run. The
+/// Automation page's source tools manage the document and search the
+/// closure.
+pub(in crate::workbench) const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
+    ToolbarEntry::Only(
+        generated_deck_shown,
+        &[
+            labelled(
+                CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+                WorkbenchIcon::Export,
+                "Export generated deck",
+            ),
+            labelled(
+                CodeCommand::ValidateCodeDocument.key(),
+                WorkbenchIcon::Check,
+                "Validate generated netlist",
+            ),
+            ToolbarEntry::Separator,
+            labelled(
+                CodeCommand::CompareGeneratedRevisions.key(),
+                WorkbenchIcon::Compare,
+                "Compare generated revisions",
+            ),
+        ],
+    ),
+    ToolbarEntry::Only(
+        owned_deck_shown,
+        &[
+            labelled(ids::SAVE, WorkbenchIcon::Save, "Save deck"),
+            labelled(
+                CodeCommand::ValidateCodeDocument.key(),
+                WorkbenchIcon::Check,
+                "Validate source",
+            ),
+            ToolbarEntry::Separator,
+            labelled(
+                CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+                WorkbenchIcon::Export,
+                "Export deck copy",
+            ),
+        ],
+    ),
+    ToolbarEntry::Only(
+        automation_page_shown,
+        &[
+            labelled(
                 CodeCommand::AutomationConsole.key(),
                 WorkbenchIcon::Terminal,
                 "Automation console",
-                layout,
-            );
-            source_page_tools(ui, app, layout);
-        }
-    }
-    toolbar_icon_command(ui, app, ids::RUN_SIMULATION, WorkbenchIcon::Run, layout);
+            ),
+            ToolbarEntry::Separator,
+            icon(
+                CodeCommand::ManageSourceDocument.key(),
+                WorkbenchIcon::Folder,
+            ),
+            icon(CodeCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
+        ],
+    ),
+    icon(ids::RUN_SIMULATION, WorkbenchIcon::Run),
+];
+
+fn generated_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
+    reads.state.code_workspace.page == CodeWorkspacePage::Netlist
+        && reads.state.netlist.active_document == ActiveNetlistDocument::Generated
 }
 
-/// The Automation page's source tools: manage the document, search the
-/// closure.
-fn source_page_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost<Session = AppState>,
-    layout: LayoutSpec,
-) {
-    context_separator(ui, layout);
-    toolbar_icon_command(
-        ui,
-        app,
-        CodeCommand::ManageSourceDocument.key(),
-        WorkbenchIcon::Folder,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
-        CodeCommand::FindCodeDocument.key(),
-        WorkbenchIcon::Search,
-        layout,
-    );
+fn owned_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
+    reads.state.code_workspace.page == CodeWorkspacePage::Netlist
+        && reads.state.netlist.active_document != ActiveNetlistDocument::Generated
 }
 
-/// The netlist page's set follows the document it is showing: a generated
-/// primary is exported and compared, an owned deck is saved and run.
-fn netlist_page_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost<Session = AppState>,
-    layout: LayoutSpec,
-) {
-    let generated = app.session().code.netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
-    if generated {
-        toolbar_text_command(
-            ui,
-            app,
-            CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
-            WorkbenchIcon::Export,
-            "Export generated deck",
-            layout,
-        );
-        toolbar_text_command(
-            ui,
-            app,
-            CodeCommand::ValidateCodeDocument.key(),
-            WorkbenchIcon::Check,
-            "Validate generated netlist",
-            layout,
-        );
-        context_separator(ui, layout);
-        toolbar_text_command(
-            ui,
-            app,
-            CodeCommand::CompareGeneratedRevisions.key(),
-            WorkbenchIcon::Compare,
-            "Compare generated revisions",
-            layout,
-        );
-        return;
-    }
-    toolbar_text_command(ui, app, ids::SAVE, WorkbenchIcon::Save, "Save deck", layout);
-    toolbar_text_command(
-        ui,
-        app,
-        CodeCommand::ValidateCodeDocument.key(),
-        WorkbenchIcon::Check,
-        "Validate source",
-        layout,
-    );
-    context_separator(ui, layout);
-    toolbar_text_command(
-        ui,
-        app,
-        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
-        WorkbenchIcon::Export,
-        "Export deck copy",
-        layout,
-    );
+fn automation_page_shown(reads: &Reads<'_, CodeFeature>) -> bool {
+    reads.state.code_workspace.page == CodeWorkspacePage::Automation
 }

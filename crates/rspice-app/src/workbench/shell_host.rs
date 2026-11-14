@@ -404,7 +404,7 @@ impl Host for RSpiceApp {
             Point::Inspector(InspectorScope::Document(_)) => {}
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
-                use crate::workbench::chrome::toolbar::code::{netlist_tools, veriloga_tools};
+                use crate::workbench::chrome::toolbar::code::{NETLIST, VERILOGA};
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
@@ -451,7 +451,9 @@ impl Host for RSpiceApp {
                             if app.state.model.workspace.content.active_view_type()
                                 == Some(ViewType::VerilogA) =>
                         {
-                            veriloga_tools(ui, app, layout);
+                            features::show_toolbar_entries::<CodeFeature>(
+                                app, ui, VERILOGA, layout,
+                            );
                         }
                         Workspace::Design => {
                             features::show_toolbar::<DesignFeature>(
@@ -488,7 +490,9 @@ impl Host for RSpiceApp {
                         }
                         Workspace::Verify => verification_tools(ui, app, layout),
                         Workspace::Models => models_tools(ui, app, layout),
-                        Workspace::Netlist => netlist_tools(ui, app, layout),
+                        Workspace::Netlist => {
+                            features::show_toolbar_entries::<CodeFeature>(app, ui, NETLIST, layout);
+                        }
                     },
                 }
             }

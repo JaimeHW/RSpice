@@ -533,15 +533,26 @@ pub(super) fn show_toolbar<F: Registered>(
     layout: crate::workbench::layout::LayoutSpec,
 ) {
     if let Some(entries) = F::registry().toolbar_entries(id) {
-        crate::workbench::chrome::toolbar::feature_toolbar(
-            ui,
-            app,
-            entries,
-            layout,
-            |app, ask| ask(&F::reads(app)),
-            |app, ui, show, layout| show(&mut cx::<F>(app), ui, layout),
-        );
+        show_toolbar_entries(app, ui, entries, layout);
     }
+}
+
+/// Draw `entries` as `F`'s toolbar, in `F`'s context: a toolbar the shell
+/// still holds for the feature, which the feature has not registered.
+pub(super) fn show_toolbar_entries<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    entries: &'static [crate::workbench::framework::feature::ToolbarEntry<F>],
+    layout: crate::workbench::layout::LayoutSpec,
+) {
+    crate::workbench::chrome::toolbar::feature_toolbar(
+        ui,
+        app,
+        entries,
+        layout,
+        |app, ask| ask(&F::reads(app)),
+        |app, ui, show, layout| show(&mut cx::<F>(app), ui, layout),
+    );
 }
 
 /// A toolbar action of `F`'s that More tools carries out runs in `F`'s
