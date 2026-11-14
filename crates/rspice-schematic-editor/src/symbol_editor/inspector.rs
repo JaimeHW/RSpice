@@ -233,14 +233,20 @@ fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: 
     painter.text(
         at(49.0),
         egui::Align2::LEFT_CENTER,
-        format!(
-            "{} pins · {} body shapes",
-            document.pins.len(),
-            document.body.len()
-        ),
+        document_counts(document),
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
+}
+
+/// What the symbol holds, as the header counts it: "1 pin · 3 body shapes".
+pub fn document_counts(document: &SymbolDocument) -> String {
+    use rspice_ui_kit::accessibility::counted;
+    format!(
+        "{} · {}",
+        counted(document.pins.len(), "pin", "pins"),
+        counted(document.body.len(), "body shape", "body shapes"),
+    )
 }
 
 // =============================================================================
@@ -856,5 +862,23 @@ mod tests {
         // on one of the four the combo offers.
         assert_eq!(arrow_rotation_label(5), "90\u{b0}");
         assert_eq!(arrow_rotation_label(-1), "270\u{b0}");
+    }
+
+    /// One of a thing is singular: "1 body shapes" read as a typo.
+    #[test]
+    fn the_header_counts_one_of_a_thing_in_the_singular() {
+        let one = SymbolDocument {
+            pins: vec![SymbolPin::new("IN", PortDirection::In, None)],
+            body: vec![SymbolShape::Dot {
+                center: Point::origin(),
+                radius: 2,
+            }],
+            ..SymbolDocument::default()
+        };
+        assert_eq!(document_counts(&one), "1 pin · 1 body shape");
+        assert_eq!(
+            document_counts(&SymbolDocument::default()),
+            "0 pins · 0 body shapes"
+        );
     }
 }

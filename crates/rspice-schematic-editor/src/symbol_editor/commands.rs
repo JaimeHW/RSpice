@@ -77,7 +77,7 @@ pub fn apply_edit(
             paste(session, document, clipboard, target, &mut outcome)
         }
         SymbolEditAction::Delete { cut } => {
-            delete(session, document, &selection, cut, &mut outcome)
+            delete(session, document, metadata, &selection, cut, &mut outcome)
         }
         SymbolEditAction::Transform(transform) => {
             if let Some(metadata) = metadata {
@@ -245,9 +245,12 @@ fn paste(
     outcome.changed = true;
 }
 
+/// Delete the selected shapes and pins. A selected Reference, Value or Model
+/// label is part of every symbol, so deleting it hides it instead.
 fn delete(
     session: &mut SymbolEditorSession,
     document: &mut SymbolDocument,
+    metadata: Option<&mut SymbolEditorMetadata>,
     selection: &SymbolSelection,
     cut: bool,
     outcome: &mut SymbolEditOutcome,
@@ -255,6 +258,17 @@ fn delete(
     let before = document.clone();
     let mut clipboard = SymbolClipboard::default();
     let mut changed = false;
+
+    if let Some(metadata) = metadata {
+        for kind in &selection.attributes {
+            if let Some(attribute) = metadata.attribute_mut(*kind)
+                && attribute.shown
+            {
+                attribute.shown = false;
+                changed = true;
+            }
+        }
+    }
 
     for index in selection.shapes.iter().rev().copied() {
         if index < document.body.len() {

@@ -5,10 +5,11 @@
 //! the ordered pins, the body geometry, and the label anchors.
 
 use egui::{ScrollArea, Ui};
+use rspice_schematic_editor::symbol_editor::session::shape_summary;
 
 use crate::state::{
     PortDirection, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
-    SymbolElectricalType, SymbolPin, SymbolPinSide, SymbolShape,
+    SymbolElectricalType, SymbolPin, SymbolPinSide,
 };
 use crate::ui::widgets::TreeRow;
 use crate::workbench::app::actions::workspace::symbol_document::{
@@ -229,34 +230,14 @@ fn next_pin_name(document: &SymbolDocument) -> String {
         .expect("the symbol pin identity space is not exhausted")
 }
 
-/// What a body shape is, for a list whose job is picking one out from under
-/// another. Point counts, radii and sweeps are geometry the inspector edits.
-fn shape_label(shape: &SymbolShape) -> String {
-    match shape {
-        SymbolShape::Polyline { closed, .. } => {
-            if *closed { "polygon" } else { "polyline" }.to_owned()
-        }
-        SymbolShape::Circle { .. } => "circle".to_owned(),
-        SymbolShape::Arc { .. } | SymbolShape::Curve(_) => "arc".to_owned(),
-        SymbolShape::Arrow { .. } => "arrow".to_owned(),
-        SymbolShape::Dot { .. } => "dot".to_owned(),
-        SymbolShape::Text { text, .. } => {
-            let label = text.trim();
-            if label.is_empty() {
-                "text".to_owned()
-            } else {
-                format!("text {label}")
-            }
-        }
-    }
-}
-
 fn body_section(ui: &mut Ui, design: &mut DesignState, document: &SymbolDocument) {
     // A new symbol's empty list says so with the "0" on its header.
     section_header(ui, "Body geometry", Some(&document.body.len().to_string()));
     let mut select: Option<usize> = None;
     for (index, shape) in document.body.iter().enumerate() {
-        let row = TreeRow::new(&shape_label(shape))
+        // A pick list: each row tells its shape from the next one by the
+        // measure that sets it apart.
+        let row = TreeRow::new(&shape_summary(shape))
             .indent(1)
             .selected(design.symbol.editor.selection.shapes.contains(&index))
             .show(ui);
@@ -300,7 +281,7 @@ fn attributes_section(ui: &mut Ui, design: &mut DesignState, metadata: &SymbolEd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Point;
+    use crate::state::{Point, SymbolShape};
 
     /// A pin the interface does not declare is flagged — but only when there
     /// is an interface. A hand-drawn symbol whose cell has no schematic, no
@@ -379,26 +360,37 @@ mod tests {
         );
     }
 
-    /// The body list is a pick list: a shape row says what the shape is, and
-    /// the text one carries its words. Point counts, radii and sweeps are the
-    /// inspector's editable geometry.
+    /// The body list is a pick list: two rectangles of different sizes, or a
+    /// line and a polygon, read differently, and a text row carries its words.
     #[test]
-    fn a_body_row_names_the_shape_and_the_text_it_carries() {
+    fn a_body_row_tells_its_shape_apart_from_the_next() {
         assert_eq!(
-            shape_label(&SymbolShape::Polyline {
+            shape_summary(&SymbolShape::Polyline {
                 points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
                 closed: true,
             }),
-            "polygon"
+            "Polygon, 3 points"
         );
         assert_eq!(
-            shape_label(&SymbolShape::Text {
+            shape_summary(&SymbolShape::Polyline {
+                points: vec![
+                    Point::origin(),
+                    Point::new(60, 0),
+                    Point::new(60, 40),
+                    Point::new(0, 40)
+                ],
+                closed: true,
+            }),
+            "Rectangle 60 \u{00d7} 40"
+        );
+        assert_eq!(
+            shape_summary(&SymbolShape::Text {
                 anchor: Point::new(120, -40),
                 text: "VDD".to_owned(),
                 size: rspice_design::symbol::SymbolTextSize::Normal,
                 align: rspice_design::symbol::SymbolTextAlign::Center,
             }),
-            "text VDD"
+            "Text \"VDD\""
         );
     }
 }

@@ -418,12 +418,15 @@ const DESIGN_MENU: &[MenuEntry] = &[
         &[MenuEntry::submenu("Place", SYMBOL_PLACE_MENU).access('P')],
     ),
     MenuEntry::submenu("Arrange", ARRANGE_MENU).access('A'),
-    // No letter is left on this menu that its name holds.
+    // A symbol has no sheets and no standard values. No letter is left on
+    // this menu that "Standard values" holds.
     MenuEntry::Only(
         MenuContext::NotSymbolView,
-        &[MenuEntry::submenu("Standard values", STANDARD_VALUES_MENU)],
+        &[
+            MenuEntry::submenu("Standard values", STANDARD_VALUES_MENU),
+            MenuEntry::submenu("Sheet", SHEET_MENU).access('S'),
+        ],
     ),
-    MenuEntry::submenu("Sheet", SHEET_MENU).access('S'),
     Separator,
     project(ProjectCommand::Variants).access('N'),
     project(ProjectCommand::Annotate).access('O'),

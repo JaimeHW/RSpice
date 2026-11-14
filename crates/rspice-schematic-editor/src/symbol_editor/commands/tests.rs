@@ -131,3 +131,38 @@ fn placing_text_puts_the_typed_text_at_the_anchor() {
     assert!(!outcome.changed);
     assert_eq!(document.body.len(), 1);
 }
+
+/// Every symbol carries its Reference, Value and Model labels, so Delete on
+/// a selected label hides it, undoably, and leaves the rest of the symbol.
+#[test]
+fn deleting_a_selected_label_hides_it() {
+    let mut document = SymbolDocument {
+        body: vec![SymbolShape::Dot {
+            center: Point::origin(),
+            radius: 3,
+        }],
+        ..SymbolDocument::default()
+    };
+    let mut metadata = SymbolEditorMetadata::for_document(&document);
+    let mut session = SymbolEditorSession::default();
+    session.select_attribute(SymbolAttributeKind::Value);
+
+    let outcome = apply_edit(
+        &mut session,
+        &mut document,
+        Some(&mut metadata),
+        SymbolEditAction::Delete { cut: false },
+        SymbolEditCapabilities { edit: true },
+    );
+
+    assert!(outcome.changed);
+    assert!(
+        outcome.undo_before.is_some(),
+        "the hide is a step undo takes back"
+    );
+    let shown = |kind| metadata.attribute(kind).map(|attribute| attribute.shown);
+    assert_eq!(shown(SymbolAttributeKind::Value), Some(false));
+    assert_eq!(shown(SymbolAttributeKind::Reference), Some(true));
+    assert_eq!(document.body.len(), 1);
+    assert!(session.effective_selection().is_empty());
+}

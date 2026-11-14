@@ -579,6 +579,115 @@ pub fn symbol_shape_bounds(
     }
 }
 
+/// What a body shape is, in a word: "Rectangle", "Line", "Text". A closed
+/// four-corner outline with square corners is a rectangle, as the rectangle
+/// tool draws it.
+pub fn shape_kind(shape: &rspice_design::symbol::SymbolShape) -> &'static str {
+    use rspice_design::symbol::SymbolShape;
+    match shape {
+        SymbolShape::Polyline { points, closed } => match rectangle_size(points, *closed) {
+            Some(_) => "Rectangle",
+            None if *closed => "Polygon",
+            None => "Line",
+        },
+        SymbolShape::Circle { .. } => "Circle",
+        SymbolShape::Arc { .. } => "Arc",
+        SymbolShape::Curve(curve) if curve.radii[0] != curve.radii[1] => {
+            if curve.sweep_degrees >= 360.0 {
+                "Ellipse"
+            } else {
+                "Elliptical arc"
+            }
+        }
+        SymbolShape::Curve(curve) if curve.sweep_degrees >= 360.0 => "Circle",
+        SymbolShape::Curve(_) => "Arc",
+        SymbolShape::Arrow { .. } => "Arrow",
+        SymbolShape::Dot { .. } => "Dot",
+        SymbolShape::Text { .. } => "Text",
+    }
+}
+
+/// A body shape told apart from its neighbours: "Rectangle 60 × 40",
+/// "Line, 3 points", "Circle r 10", "Text \"+\"".
+pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
+    use rspice_design::symbol::SymbolShape;
+    let kind = shape_kind(shape);
+    match shape {
+        SymbolShape::Polyline { points, closed } => match rectangle_size(points, *closed) {
+            Some((width, height)) => format!("{kind} {width} \u{00d7} {height}"),
+            None => format!("{kind}, {} points", points.len()),
+        },
+        SymbolShape::Circle { radius, .. } => format!("{kind} r {radius}"),
+        SymbolShape::Arc {
+            radius,
+            sweep_degrees,
+            ..
+        } => format!("{kind} r {radius}, {sweep_degrees}\u{00b0}"),
+        SymbolShape::Curve(curve) => {
+            let [rx, ry] = curve.radii;
+            let sweep = whole_or_tenths(curve.sweep_degrees);
+            match (rx == ry, curve.sweep_degrees >= 360.0) {
+                (true, true) => format!("{kind} r {}", whole_or_tenths(rx)),
+                (true, false) => format!("{kind} r {}, {sweep}\u{00b0}", whole_or_tenths(rx)),
+                (false, true) => format!(
+                    "{kind} {} \u{00d7} {}",
+                    whole_or_tenths(2.0 * rx),
+                    whole_or_tenths(2.0 * ry)
+                ),
+                (false, false) => format!("{kind}, {sweep}\u{00b0}"),
+            }
+        }
+        SymbolShape::Arrow { .. } => kind.to_owned(),
+        SymbolShape::Dot { radius, .. } => format!("{kind} r {radius}"),
+        SymbolShape::Text { text, .. } => match text.trim() {
+            "" => kind.to_owned(),
+            words => format!("{kind} \"{words}\""),
+        },
+    }
+}
+
+/// The width and height of a closed outline that is an upright rectangle.
+fn rectangle_size(points: &[rspice_design_model::Point], closed: bool) -> Option<(i32, i32)> {
+    let corners: &[rspice_design_model::Point] = match points {
+        // An outline may repeat its first corner to close itself.
+        [first, rest @ .., last] if rest.len() == 3 && first == last => &points[..4],
+        _ if points.len() == 4 => points,
+        _ => return None,
+    };
+    let closes = closed || points.len() == 5;
+    // Each side runs straight across or straight down, and the two kinds take
+    // turns round the outline.
+    let across = |index: usize| {
+        let (from, to) = (corners[index % 4], corners[(index + 1) % 4]);
+        (from.y == to.y && from.x != to.x)
+            .then_some(true)
+            .or((from.x == to.x && from.y != to.y).then_some(false))
+    };
+    let square = (0..4).all(|index| match (across(index), across(index + 1)) {
+        (Some(this), Some(next)) => this != next,
+        _ => false,
+    });
+    let (min, max) = corners
+        .iter()
+        .fold((corners[0], corners[0]), |(min, max), point| {
+            (
+                rspice_design_model::Point::new(min.x.min(point.x), min.y.min(point.y)),
+                rspice_design_model::Point::new(max.x.max(point.x), max.y.max(point.y)),
+            )
+        });
+    (closes && square).then_some((max.x - min.x, max.y - min.y))
+}
+
+/// A measure as it reads: whole when it is, otherwise to a tenth.
+fn whole_or_tenths(value: f64) -> String {
+    let tenths = (value * 10.0).round() / 10.0;
+    if tenths.fract() == 0.0 {
+        format!("{tenths:.0}")
+    } else {
+        format!("{tenths:.1}")
+    }
+}
+
 fn point_in_bounds(
     point: rspice_design_model::Point,
     min: rspice_design_model::Point,
@@ -697,6 +806,93 @@ mod tests {
         assert_eq!(session.next_step(), Some("Arc: click where the arc starts"));
         session.arc_sweep = Some(SymbolArcSweep::new(Point::origin(), Point::new(10, 0)));
         assert_eq!(session.next_step(), Some("Arc: click where the arc ends"));
+    }
+
+    /// A body row tells one shape from the next: what it is and the measure
+    /// that sets it apart, not just the kind.
+    #[test]
+    fn a_shape_summary_tells_shapes_apart() {
+        use rspice_design::symbol::{SymbolTextAlign, SymbolTextSize};
+        let summary = |shape: SymbolShape| shape_summary(&shape);
+        assert_eq!(
+            summary(super::super::interaction::rectangle_shape(
+                Point::new(-30, -20),
+                Point::new(30, 20)
+            )),
+            "Rectangle 60 \u{00d7} 40"
+        );
+        assert_eq!(
+            summary(SymbolShape::Polyline {
+                points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
+                closed: false,
+            }),
+            "Line, 3 points"
+        );
+        assert_eq!(
+            summary(SymbolShape::Polyline {
+                points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
+                closed: true,
+            }),
+            "Polygon, 3 points"
+        );
+        // Four corners that do not square up are a polygon, and so is a
+        // square outline left open.
+        assert_eq!(
+            summary(SymbolShape::Polyline {
+                points: vec![
+                    Point::origin(),
+                    Point::new(10, 0),
+                    Point::new(12, 10),
+                    Point::new(0, 10)
+                ],
+                closed: true,
+            }),
+            "Polygon, 4 points"
+        );
+        assert_eq!(
+            summary(SymbolShape::Polyline {
+                points: vec![
+                    Point::origin(),
+                    Point::new(10, 0),
+                    Point::new(10, 10),
+                    Point::new(0, 10)
+                ],
+                closed: false,
+            }),
+            "Line, 4 points"
+        );
+        assert_eq!(
+            summary(SymbolShape::Circle {
+                center: Point::origin(),
+                radius: 10
+            }),
+            "Circle r 10"
+        );
+        assert_eq!(
+            summary(SymbolShape::Arc {
+                center: Point::origin(),
+                radius: 10,
+                start_degrees: 0,
+                sweep_degrees: 90
+            }),
+            "Arc r 10, 90\u{00b0}"
+        );
+        assert_eq!(
+            summary(SymbolShape::Text {
+                anchor: Point::origin(),
+                text: "+".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Center,
+            }),
+            "Text \"+\""
+        );
+        assert_eq!(
+            shape_kind(&super::super::interaction::rectangle_shape(
+                Point::origin(),
+                Point::new(10, 10)
+            )),
+            "Rectangle"
+        );
     }
 
     #[test]
