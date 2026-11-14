@@ -1024,6 +1024,9 @@ struct ModelPlan {
     /// The `ddt` sites harmonic balance carries as unknowns of their own,
     /// each to its index among the model's carried sites, in slot order.
     periodic_ddt: HashMap<ExprId, usize>,
+    /// The `idt` sites, every one carried, numbered after the `ddt` sites in
+    /// slot order.
+    periodic_idt: HashMap<ExprId, usize>,
     requires_nodeset_phase: bool,
 }
 
@@ -1646,26 +1649,49 @@ impl ModelPlan {
                 .map(|(site, (_, operator))| (operator, site))
                 .collect();
         }
+        // Every `idt` is carried: its integral has no charge form.
+        let mut periodic_idt: HashMap<ExprId, usize> = HashMap::new();
+        if harmonic_balance_refusal.is_none() {
+            let mut slots: Vec<(usize, ExprId)> = idt_slots
+                .iter()
+                .map(|(&operator, &slot)| (slot, operator))
+                .collect();
+            slots.sort_unstable();
+            periodic_idt = slots
+                .into_iter()
+                .enumerate()
+                .map(|(index, (_, operator))| (operator, periodic_ddt.len() + index))
+                .collect();
+        }
         // A carried site under a condition that holds once the temperature is
         // fixed is either evaluated on every sample or on none, and one on
         // none is never read; a site a bias-dependent condition switches on
         // and off over the period has no waveform harmonic balance can carry.
-        if !periodic_ddt.is_empty() {
+        if !periodic_ddt.is_empty() || !periodic_idt.is_empty() {
             let conditional = crate::canonical_ir::schedule::computed_under_varying_condition(
                 &function,
                 &parameter_scopes,
             );
-            if function.values.iter().any(|value| {
-                matches!(value.kind, CfgValueKind::Ddt { operator, .. }
-                    if periodic_ddt.contains_key(&operator))
-                    && conditional[usize::from(value.id)]
-            }) {
-                harmonic_balance_refusal = Some(
-                    "a `ddt` it would carry as an unknown of its own is evaluated only while a \
-                     bias-dependent condition holds, so it switches on and off over the period"
-                        .to_owned(),
-                );
+            let switched = function.values.iter().find_map(|value| {
+                let written = match value.kind {
+                    CfgValueKind::Ddt { operator, .. } if periodic_ddt.contains_key(&operator) => {
+                        "ddt"
+                    }
+                    CfgValueKind::Idt { operator, .. } if periodic_idt.contains_key(&operator) => {
+                        "idt"
+                    }
+                    _ => return None,
+                };
+                conditional[usize::from(value.id)].then_some(written)
+            });
+            if let Some(written) = switched {
+                harmonic_balance_refusal = Some(format!(
+                    "a `{written}` it would carry as an unknown of its own is evaluated only \
+                     while a bias-dependent condition holds, so it switches on and off over the \
+                     period"
+                ));
                 periodic_ddt.clear();
+                periodic_idt.clear();
             }
         }
         measurements.metrics_mut().kernel_regions =
@@ -1823,6 +1849,7 @@ impl ModelPlan {
             one_step_dae_split_safe,
             harmonic_balance_refusal,
             periodic_ddt,
+            periodic_idt,
             requires_nodeset_phase,
         })
     }
@@ -2626,6 +2653,7 @@ impl ModelPlan {
         EmitBindings {
             ddt_slots: self.ddt_slots.clone(),
             periodic_ddt: self.periodic_ddt.clone(),
+            periodic_idt: self.periodic_idt.clone(),
             idt_slots: self.idt_slots.clone(),
             idtmod_slots: self.idtmod_slots.clone(),
             cross_slots: self.cross_slots.clone(),
@@ -5004,7 +5032,9 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
     /// The kind of each operator site harmonic balance carries as unknowns
     /// of its own, in site order, as `GeneratedPeriodicKind` names it.
     fn harmonic_balance_periodic_sites(&self) -> Vec<&'static str> {
-        vec!["Derivative"; self.periodic_ddt.len()]
+        let mut sites = vec!["Derivative"; self.periodic_ddt.len()];
+        sites.resize(sites.len() + self.periodic_idt.len(), "Integral");
+        sites
     }
 
     fn has_analog_tasks(&self) -> bool {

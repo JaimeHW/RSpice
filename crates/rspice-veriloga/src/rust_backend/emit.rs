@@ -112,6 +112,7 @@ pub struct EmitBindings {
     /// Each evaluates at the output the context's periodic frame supplies,
     /// when it has one.
     pub periodic_ddt: HashMap<crate::canonical_ir::ExprId, usize>,
+    pub periodic_idt: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt: String,
     pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
@@ -183,6 +184,7 @@ impl Default for EmitBindings {
             ddt_derivative: "ddt_derivative".into(),
             ddt_slots: HashMap::new(),
             periodic_ddt: HashMap::new(),
+            periodic_idt: HashMap::new(),
             idt: "idt".into(),
             idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
@@ -2189,17 +2191,23 @@ impl<'a> Emitter<'a> {
                 operator,
                 input,
                 ic,
-            } => format!(
-                "{}({}, {}, {})",
-                bindings.idt,
-                bindings
+            } => {
+                let slot = bindings
                     .idt_slots
                     .get(operator)
                     .copied()
-                    .unwrap_or_else(|| usize::from(*operator)),
-                self.numeric_operand(*input),
-                self.numeric_operand(*ic)
-            ),
+                    .unwrap_or_else(|| usize::from(*operator));
+                let input = self.numeric_operand(*input);
+                let ic = self.numeric_operand(*ic);
+                let ordinary = format!("{}({slot}, {input}, {ic})", bindings.idt);
+                match bindings.periodic_idt.get(operator) {
+                    Some(site) => format!(
+                        "match ctx.periodic_frame() {{ Some(periodic_frame) => \
+                         periodic_frame.primal({site}, {input}, {ic}), None => {ordinary} }}"
+                    ),
+                    None => ordinary,
+                }
+            }
             CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
             CfgValueKind::IdtMod {
                 operator,
@@ -2330,23 +2338,49 @@ impl<'a> Emitter<'a> {
                     .get(operator)
                     .copied()
                     .unwrap_or_else(|| usize::from(*operator));
-                let width = self.function.lanes_of(value).map_or(1, |lanes| lanes.len());
+                let lanes = self.function.lanes_of(value);
+                let width = lanes.map_or(1, <[u32]>::len);
+                let periodic = bindings.periodic_idt.get(operator);
                 if width == 1 {
-                    format!(
-                        "{}({slot},{},{},{})",
+                    let input = self.lane_element(*input_derivative, 0);
+                    let ic = self.lane_element(*ic_derivative, 0);
+                    let ordinary = format!(
+                        "{}({slot},{},{input},{ic})",
                         bindings.idt_derivative,
-                        self.numeric_operand(*primal),
-                        self.lane_element(*input_derivative, 0),
-                        self.lane_element(*ic_derivative, 0)
-                    )
+                        self.numeric_operand(*primal)
+                    );
+                    match periodic {
+                        Some(site) => format!(
+                            "match ctx.periodic_frame() {{ Some(periodic_frame) => \
+                             periodic_frame.derivative({site}, {input}, {ic}, {}u32), None => {ordinary} }}",
+                            lanes.and_then(<[u32]>::first).copied().unwrap_or(u32::MAX)
+                        ),
+                        None => ordinary,
+                    }
                 } else {
-                    format!(
-                        "{}(std::array::from_fn(|i| {}({slot},{},({})[i],({})[i])))",
-                        lane_type_name(width),
+                    let input = self.operand(*input_derivative);
+                    let ic = self.operand(*ic_derivative);
+                    let ordinary = format!(
+                        "{}({slot},{},({input})[i],({ic})[i])",
                         bindings.idt_derivative,
-                        self.numeric_operand(*primal),
-                        self.operand(*input_derivative),
-                        self.operand(*ic_derivative)
+                        self.numeric_operand(*primal)
+                    );
+                    let element = match periodic {
+                        Some(site) => format!(
+                            "match ctx.periodic_frame() {{ Some(periodic_frame) => \
+                             periodic_frame.derivative({site}, ({input})[i], ({ic})[i], [{}][i]), None => {ordinary} }}",
+                            lanes
+                                .unwrap_or_default()
+                                .iter()
+                                .map(|lane| format!("{lane}u32"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        None => ordinary,
+                    };
+                    format!(
+                        "{}(std::array::from_fn(|i| {element}))",
+                        lane_type_name(width)
                     )
                 }
             }

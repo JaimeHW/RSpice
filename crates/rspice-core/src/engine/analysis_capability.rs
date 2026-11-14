@@ -409,7 +409,7 @@ const fn hb_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every generated compact model whose harmonics a settled-transient fixture confirmed and whose generator proved its residual memoryless equations plus `ddt` (of a charge it contributes, or carried as an unknown of its own): no idt, idtmod, cross, above, timer, last_crossing or $abstime in its equations, no `ddt` a bias-dependent condition switches, and no variable the next evaluation reads back after the body assigned it",
+        condition: "every generated compact model whose harmonics a settled-transient fixture confirmed and whose generator proved its residual memoryless equations plus `ddt` (of a charge it contributes, or carried as an unknown of its own) and `idt` with an initial condition that fixes its DC output: no idtmod, cross, above, timer, last_crossing or $abstime in its equations, no `ddt` or `idt` a bias-dependent condition switches, and no variable the next evaluation reads back after the body assigned it",
         evidence: HB_GENERATED_EVIDENCE,
     }
 }
@@ -426,7 +426,7 @@ const fn pss_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` carried as an unknown of its own and no voltage contribution; its charges are integrated over the period from the state the period starts at",
+        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution; its charges are integrated over the period from the state the period starts at",
         evidence: PSS_GENERATED_EVIDENCE,
     }
 }

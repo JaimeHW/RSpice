@@ -360,8 +360,9 @@ const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equatio
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
-     charges it contributes, F(x) + dQ(x)/dt, with every other `ddt` carried as an unknown \
-     of its own, no `idt`, no event operator and no variable the next evaluation reads back";
+     charges it contributes, F(x) + dQ(x)/dt, with every other `ddt` and every `idt` carried \
+     as an unknown of its own, no event operator and no variable the next evaluation reads \
+     back";
 /// The condition behind the state shooting's period map carries for a
 /// generated compact model: the charges of F(x) + dQ(x)/dt and nothing else.
 const GENERATED_VERILOGA_PSS_STATE: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \

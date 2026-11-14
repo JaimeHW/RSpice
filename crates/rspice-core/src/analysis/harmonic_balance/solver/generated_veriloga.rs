@@ -30,8 +30,14 @@
 //! tangent along one lane its input was differentiated along differs from
 //! the held probe, in that lane's column, by exactly `∂F/∂y`, `∂Q/∂y` and
 //! every other site's `∂u/∂y`.
+//!
+//! Every `idt` is carried the same way with `Y = U/(jkω)` at each harmonic,
+//! as the runtime route carries one: its initial condition fixes its DC
+//! output, so it must not depend on the circuit's unknowns, and an orbit in
+//! which its input has a mean over the period is refused after the solve.
 
 use super::HbOperatorTransfer;
+use super::HbSolverState;
 use super::native_bjt::NativeStamp;
 use crate::Value;
 use crate::analysis::harmonic_balance::HbError;
@@ -55,6 +61,9 @@ struct HbGeneratedOperator {
     input: usize,
     /// Zero-based augmented row of the output `y`.
     output: usize,
+    /// An `idt`'s initial condition, read at setup, which fixes its DC
+    /// output; `None` for a `ddt` or an `idt` the model does not evaluate.
+    initial_condition: Option<Value>,
 }
 
 /// Scratch the carried sites' rows are built in, sized once.
@@ -202,6 +211,7 @@ impl HbGeneratedDevice {
                 kind,
                 input,
                 output,
+                initial_condition: None,
             })
             .collect();
         let mut stamped_rows = rows.clone();
@@ -284,6 +294,7 @@ impl HbGeneratedDevice {
                     .map_err(|error| failure("reference charge", &error))
             })?;
         }
+        sampler.read_initial_conditions();
         let transfers = sampler
             .operators
             .iter()
@@ -441,6 +452,81 @@ impl HbGeneratedDevice {
         Ok(())
     }
 
+    /// Keep each `idt`'s initial condition from the reference evaluation.
+    fn read_initial_conditions(&mut self) {
+        let Some(frame) = self.static_probe.periodic_frame() else {
+            return;
+        };
+        for (site, operator) in self.operators.iter_mut().enumerate() {
+            if matches!(operator.kind, GeneratedPeriodicKind::Integral) {
+                operator.initial_condition =
+                    Some(frame.initial_condition(site)).filter(|ic| !ic.is_nan());
+            }
+        }
+    }
+
+    /// Stamp an evaluated `idt`'s DC output, which its initial condition
+    /// fixes, refusing one whose initial condition the orbit moves.
+    fn stamp_integral_dc(
+        frame: &rspice_veriloga_runtime::GeneratedPeriodicFrame,
+        site: usize,
+        operator: &HbGeneratedOperator,
+        f: &mut NativeStamp,
+    ) -> Result<(), &'static str> {
+        let ic = frame.initial_condition(site);
+        if ic.is_nan() {
+            return Ok(());
+        }
+        if frame.initial_condition_is_dependent(site) {
+            return Err(
+                "its initial condition depends on the circuit's unknowns, so it fixes no DC value",
+            );
+        }
+        if operator.initial_condition.map(Value::to_bits) != Some(ic.to_bits()) {
+            return Err("its initial condition changes over the period");
+        }
+        f.stamp_rhs(operator.output + 1, ic);
+        Ok(())
+    }
+
+    /// Refuse an orbit in which an `idt` input has a mean over the period:
+    /// its initial condition fixes the output's DC term, so a nonzero mean is
+    /// a ramp no periodic output carries.
+    pub(super) fn check_periodic_integrals(
+        &self,
+        state: &HbSolverState,
+        reltol: Value,
+        abstol: Value,
+    ) -> Result<(), HbError> {
+        for (site, operator) in self.operators.iter().enumerate() {
+            if !matches!(operator.kind, GeneratedPeriodicKind::Integral) {
+                continue;
+            }
+            let Some((mean, harmonics)) = operator
+                .input
+                .checked_sub(self.num_nodes)
+                .and_then(|branch| state.mna_branch_currents.get(branch))
+                .and_then(|spectrum| spectrum.split_first())
+            else {
+                continue;
+            };
+            let scale = harmonics
+                .iter()
+                .map(|value| value.norm())
+                .fold(0.0, Value::max);
+            if mean.norm() > reltol * scale + abstol {
+                return Err(HbError::InvalidCircuit(format!(
+                    "harmonic balance cannot carry `idt` site {site} of generated Verilog-A \
+                     device '{}': its input has mean {:e} over the period, so its output ramps \
+                     and has no periodic steady state",
+                    self.name(),
+                    mean.re
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Supply every carried site's output from `solution` to both probes,
     /// seeding `seeded`'s output tangent along its chosen lane.
     fn prepare_frames(&mut self, solution: &[Value], seeded: Option<usize>) {
@@ -529,6 +615,10 @@ impl HbGeneratedDevice {
                 };
                 f.stamp_rhs(operator.input + 1, input - solution[operator.input]);
                 f.stamp(operator.input + 1, operator.input + 1, 1.0);
+                if matches!(operator.kind, GeneratedPeriodicKind::Integral) {
+                    Self::stamp_integral_dc(frame, site, operator, f)
+                        .map_err(|reason| refuse(site, operator.kind, reason))?;
+                }
                 frame.input_lanes(site, &mut self.scratch.lanes);
                 for &lane in &self.scratch.lanes {
                     if let Some(column) = self.static_probe.lane_unknown(lane, self.num_nodes)

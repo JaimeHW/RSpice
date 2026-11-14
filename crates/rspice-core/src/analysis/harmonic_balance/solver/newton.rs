@@ -1001,6 +1001,16 @@ impl HbSolver {
                 )?;
             }
         }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if state.converged {
+            for device in &self.generated_nonlinear_devices {
+                device.check_periodic_integrals(
+                    state,
+                    self.config.tolerance,
+                    self.voltage_abstol,
+                )?;
+            }
+        }
         Ok(())
     }
 

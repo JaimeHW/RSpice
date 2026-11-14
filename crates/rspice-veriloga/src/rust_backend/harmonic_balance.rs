@@ -100,13 +100,6 @@ fn operator_refusal(cfg: &CfgModel) -> Option<String> {
                 .to_owned(),
         );
     }
-    if used(|kind| matches!(kind, CfgValueKind::Idt { .. })) {
-        return Some(
-            "it uses `idt`, whose integral the generated model accumulates as accepted transient \
-             history rather than as an unknown the analysis solves for"
-                .to_owned(),
-        );
-    }
     for (operator, wanted) in [
         (
             "cross",

@@ -8896,19 +8896,22 @@ instance.validate_parameters().unwrap();
 
 /// The generator decides once per model whether harmonic balance can sample
 /// its residual, and states the reason when it cannot: an operator with state
-/// in time, `$abstime`, a variable the next evaluation reads back after the
-/// body assigned it, or a `ddt` that is not the derivative of a contributed
-/// charge. A variable an event body writes but the body recomputes before
-/// every read is not history.
+/// in time, `$abstime`, or a variable the next evaluation reads back after
+/// the body assigned it. A variable an event body writes but the body
+/// recomputes before every read is not history. A `ddt` that is not the
+/// derivative of a contributed charge, and every `idt`, is a site harmonic
+/// balance carries as an unknown of its own, listed in site order; one only a
+/// bias-dependent branch reads is still evaluated on every sample.
 #[test]
 fn generated_models_state_whether_harmonic_balance_can_sample_them() {
-    for (index, declarations, body, expected) in [
-        (0, "", "I(p,n) <+ V(p,n)/1k + ddt(1p*V(p,n));", None),
+    for (index, declarations, body, expected, sites) in [
+        (0, "", "I(p,n) <+ V(p,n)/1k + ddt(1p*V(p,n));", None, ""),
         (
             1,
             "real g;",
             "@(initial_step) g = 1.0; g = 2.0e-3; I(p,n) <+ g*V(p,n);",
             None,
+            "",
         ),
         (
             2,
@@ -8918,12 +8921,14 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
                 "`x` is read before it is assigned, so it keeps its value from the last \
                  accepted time point, which no harmonic-balance spectrum carries",
             ),
+            "",
         ),
         (
             3,
             "real g;",
             "@(initial_step) g = 1.0e-3; I(p,n) <+ g*V(p,n);",
             Some("`g` is read before it is assigned"),
+            "",
         ),
         (
             4,
@@ -8933,8 +8938,9 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
                 "it uses `idtmod`, whose integral wraps at its modulus, which is state outside \
                  the waveform's spectrum",
             ),
+            "",
         ),
-        (5, "", "I(p,n) <+ idt(V(p,n), 0.0);", Some("it uses `idt`")),
+        (5, "", "I(p,n) <+ idt(V(p,n), 0.0);", None, "Integral"),
         (
             6,
             "real s;",
@@ -8943,33 +8949,43 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
                 "it uses `cross`, which schedules events in time that a harmonic-balance \
                  spectrum does not carry; transient analysis runs it",
             ),
+            "",
         ),
         (
             7,
             "real s;",
             "@(timer(1.0e-9)) s = 1.0; I(p,n) <+ V(p,n);",
             Some("it uses `timer`"),
+            "",
         ),
         (
             8,
             "",
             "I(p,n) <+ V(p,n)*$abstime;",
             Some("it reads `$abstime`"),
-        ),
-        (
-            9,
             "",
-            "I(p,n) <+ V(p,n)*ddt(V(p,n));",
-            Some("so its residual is not F(x) + dQ(x)/dt"),
         ),
+        (9, "", "I(p,n) <+ V(p,n)*ddt(V(p,n));", None, "Derivative"),
         (
             10,
             "",
             "if (ddt(V(p,n)) > 0) I(p,n) <+ V(p,n); else I(p,n) <+ 2.0*V(p,n);",
-            Some(
-                "a branch or a switch-branch form depends on a `ddt` value, so its residual is \
-                 not F(x) + dQ(x)/dt",
-            ),
+            None,
+            "Derivative",
+        ),
+        (
+            11,
+            "",
+            "I(p,n) <+ V(p,n)*ddt(V(p,n)) + idt(V(p,n), 0.0);",
+            None,
+            "Derivative, Integral",
+        ),
+        (
+            12,
+            "real d;",
+            "d = V(p,n)*ddt(V(p,n)); if (V(p,n) > 0) I(p,n) <+ d;",
+            None,
+            "Derivative",
         ),
     ] {
         let source = format!(
@@ -8989,6 +9005,16 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
             .lines()
             .find_map(|line| line.trim().strip_prefix("pub const HB_ADMISSIBLE: bool = "))
             .unwrap_or_else(|| panic!("{name}: no HB_ADMISSIBLE was generated"));
+        let carried = state
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("pub const HB_PERIODIC_SITES: "))
+            .unwrap_or_else(|| panic!("{name}: no HB_PERIODIC_SITES was generated"));
+        let carried: Vec<&str> = carried
+            .split("GeneratedPeriodicKind::")
+            .skip(1)
+            .filter_map(|kind| kind.split(|c: char| !c.is_alphanumeric()).next())
+            .collect();
+        assert_eq!(carried.join(", "), sites, "{name}: {body}");
         match expected {
             None => {
                 assert_eq!(refusal, "None;", "{name}: {body}");
