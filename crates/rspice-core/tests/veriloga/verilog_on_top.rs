@@ -4,8 +4,8 @@
 //! Each case has a closed-form answer. A leaf is built as a card of the deck,
 //! so the leaves' arithmetic is the deck's. A discrete port inside the design
 //! that lands on a circuit node converts as a deck-level port does: a
-//! converter where the node is analog, and no converter where only XSPICE
-//! digital inputs read it.
+//! converter where the node is analog, no converter where only XSPICE digital
+//! inputs read it, and a split where both read it.
 
 use rspice_core::circuit::{ConverterKind, ConverterSource};
 use rspice_core::engine::TransientResult;
@@ -239,16 +239,25 @@ fn a_reg_on_a_digital_only_leaf_port_shares_its_event_net() {
     }
 }
 
-/// A leaf port that reaches an XSPICE digital input and a resistor both has
-/// no one discipline: the build refuses it, naming the port and the node,
-/// rather than choosing one.
+/// A leaf port that reaches an XSPICE digital input and a resistor splits its
+/// net as Verilog-AMS auto-insertion does: the buffer stays on the digital
+/// segment and reads the `reg` itself, and one D/A in front of the resistor
+/// serves the analog side. So the buffer repeats each edge exactly one buffer
+/// delay later, with no converter ramp or threshold between, while the node
+/// holds `.param vcc` = 3.3 V behind the D/A's 20 ohm into 1k,
+/// 3.3 * 1000 / 1020 = 3.235294 V, and 0 V while `q` is low.
 #[test]
-fn a_leaf_port_reaching_digital_and_analog_elements_is_refused() {
+fn a_leaf_port_reaching_digital_and_analog_elements_splits_its_net() {
     let source = SourceFile::new(
         "`timescale 1ns/1ps\n\
          module top;\n\
          \x20 reg q;\n\
-         \x20 initial q = 1'b1;\n\
+         \x20 initial begin\n\
+         \x20   q = 1'b0;\n\
+         \x20   #10 q = 1'b1;\n\
+         \x20   #10 q = 1'b0;\n\
+         \x20   #10 q = 1'b1;\n\
+         \x20 end\n\
          \x20 mixed u1(q);\n\
          endmodule\n",
     );
@@ -260,6 +269,102 @@ fn a_leaf_port_reaching_digital_and_analog_elements_is_refused() {
          .ends\n\
          .model buf d_buffer(rise_delay=1n fall_delay=1n)\n\
          .hdl \"{}\" module=top\n\
+         .param vcc=3.3\n\
+         xtop top\n\
+         .tran 0.1n 40n\n\
+         .end\n",
+        source.path()
+    ));
+    let circuit = Engine::default()
+        .build_circuit(&deck)
+        .unwrap_or_else(|error| panic!("a port reaching both domains splits its net: {error}"));
+    let insertions = circuit.converter_insertions();
+    println!("ATTRIBUTE insertions={insertions:?}");
+    assert_eq!(
+        insertions.len(),
+        1,
+        "one converter serves the net: {insertions:?}"
+    );
+    let record = &insertions[0];
+    assert_eq!(record.boundary, "xtop.q", "{record:?}");
+    assert_eq!(record.kind, ConverterKind::D2a, "{record:?}");
+    let supply = record.supply.as_ref().expect("a D/A has a supply");
+    assert_eq!(supply.level, 3.3, "{record:?}");
+    assert_eq!(
+        supply.source,
+        ConverterSource::Parameter("vcc".into()),
+        "{record:?}"
+    );
+
+    let result = Engine::default()
+        .run_tran(&deck, 40.0e-9, 0.1e-9)
+        .unwrap_or_else(|error| panic!("transient solves: {error}"));
+    let reg = edges(&result, "xtop.q");
+    let buffered = edges(&result, "xtop.u1.y");
+    println!("ATTRIBUTE reg={reg:?} buffered={buffered:?}");
+    let expected = [
+        (10.0e-9, DigitalState::One),
+        (20.0e-9, DigitalState::Zero),
+        (30.0e-9, DigitalState::One),
+    ];
+    for (trace, delay) in [(&reg, 0.0), (&buffered, 1.0e-9)] {
+        assert_eq!(trace.len(), expected.len(), "{trace:?}");
+        for ((time, state), (at, value)) in trace.iter().zip(expected) {
+            assert_eq!(*state, value, "{trace:?}");
+            assert!(
+                (time - (at + delay)).abs() < 1.0e-15,
+                "the buffer reads the reg on the segment: an edge at {at:e} lands at {:e}, \
+                 got {time:e}: {trace:?}",
+                at + delay
+            );
+        }
+    }
+
+    let node = result
+        .try_voltage_waveform_named("xtop.q")
+        .expect("the split net keeps its electrical node");
+    let held = |at: f64| {
+        let index = result.time.iter().rposition(|time| *time <= at).unwrap();
+        node[index]
+    };
+    let high = 3.3 * 1000.0 / 1020.0;
+    for (at, level) in [
+        (5.0e-9, 0.0),
+        (18.0e-9, high),
+        (28.0e-9, 0.0),
+        (38.0e-9, high),
+    ] {
+        let value = held(at);
+        println!("ATTRIBUTE v(xtop.q)@{at:e}={value:.9}");
+        assert!(
+            (value - level).abs() < 1.0e-6,
+            "v(xtop.q) at {at:e} is {level}, got {value}"
+        );
+    }
+}
+
+/// The one split a net cannot take: its module port is four-state and the
+/// code model on it reads real values, so the net holds no one value a
+/// converter could carry. The build refuses it, naming the instance, the
+/// port, the node and why.
+#[test]
+fn a_leaf_port_meeting_unlike_event_domains_and_an_analog_element_is_refused() {
+    let source = SourceFile::new(
+        "`timescale 1ns/1ps\n\
+         module top;\n\
+         \x20 reg q;\n\
+         \x20 initial q = 1'b1;\n\
+         \x20 mixed u1(q);\n\
+         endmodule\n",
+    );
+    let deck = parse(&format!(
+        "* unlike domains on a leaf port\n\
+         .subckt mixed a\n\
+         a1 a y gain\n\
+         rl a 0 1k\n\
+         .ends\n\
+         .model gain real_gain\n\
+         .hdl \"{}\" module=top\n\
          xtop top\n\
          .tran 0.1n 10n\n\
          .end\n",
@@ -267,13 +372,13 @@ fn a_leaf_port_reaching_digital_and_analog_elements_is_refused() {
     ));
     let message = match Engine::default().build_circuit(&deck) {
         Ok(circuit) => panic!(
-            "a port reaching both domains is refused, not converted: {:?}",
+            "four-state and real-valued ports on one split net are refused: {:?}",
             circuit.converter_insertions()
         ),
         Err(error) => error.to_string(),
     };
     println!("ATTRIBUTE refusal={message}");
-    for fragment in ["'xtop'", "'q'", "'xtop.q'", "continuous loading"] {
+    for fragment in ["'xtop'", "'q'", "'xtop.q'", "unlike event domains"] {
         assert!(
             message.to_ascii_lowercase().contains(fragment),
             "the refusal names {fragment}: {message}"

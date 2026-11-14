@@ -2878,6 +2878,22 @@ fn mixed_module_drives_analog_load(circuit: &CircuitData, loaded: &BTreeSet<usiz
     })
 }
 
+/// The nodes a mixed module's event ports sit on.
+#[cfg(feature = "veriloga")]
+fn mixed_module_port_nodes(circuit: &CircuitData) -> BTreeSet<usize> {
+    circuit
+        .mixed_signal_hosts
+        .iter()
+        .flat_map(|host| host.direct_event_ports().map(|(port, _)| port.node))
+        .filter(|node| *node > 0)
+        .collect()
+}
+
+#[cfg(not(feature = "veriloga"))]
+fn mixed_module_port_nodes(_circuit: &CircuitData) -> BTreeSet<usize> {
+    BTreeSet::new()
+}
+
 fn collect_flat_analog_nodes(
     nodes: &mut BTreeSet<usize>,
     circuit: &CircuitData,
@@ -3311,6 +3327,10 @@ fn plan_xspice_auto_bridges(
     let mut explicit_real_bridge_nodes = BTreeSet::new();
 
     collect_flat_analog_nodes(&mut analog_nodes, circuit, flat_elements);
+    // A net a mixed module's port shares is the module route's to split
+    // (`mixed_boundaries::plan_conversions`): the code models' event ports
+    // there join the module's digital segment, so no bridge is planned here.
+    let module_nodes = mixed_module_port_nodes(circuit);
 
     for instance in &circuit.xspice_instances {
         let explicit_digital_bridge = is_xspice_digital_bridge_model(instance.model_name());
@@ -3356,7 +3376,7 @@ fn plan_xspice_auto_bridges(
     let mut planned: Vec<PlannedXspiceAutoBridge> = digital_nodes
         .into_iter()
         .filter_map(|(node, usage)| {
-            if !analog_nodes.contains(&node) {
+            if !analog_nodes.contains(&node) || module_nodes.contains(&node) {
                 return None;
             }
             let coverage = explicit_digital_bridge_coverage
@@ -3392,7 +3412,7 @@ fn plan_xspice_auto_bridges(
         .collect();
 
     planned.extend(real_nodes.into_iter().filter_map(|(node, usage)| {
-        if !analog_nodes.contains(&node) {
+        if !analog_nodes.contains(&node) || module_nodes.contains(&node) {
             return None;
         }
         let kind = if usage.real_output {
@@ -5661,7 +5681,10 @@ fn add_connect_rule_converter(
     let law = connect_modules::converter_law(selected, bridge.kind, supply)?;
     let tracking = live_supply.is_some();
 
-    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac && bridge.event_node.is_none() {
+    // A D/A reads the code models that drive its event node: every driver of
+    // a legacy XSPICE boundary, and those a split net's segment holds when no
+    // module port drives it. An HDL port's own endpoint has none.
+    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac {
         connect_modules::event_node_drivers(circuit, event_node)
     } else {
         Vec::new()
@@ -5724,12 +5747,14 @@ fn add_connect_rule_converter(
     instance.set_ramptime(context.ramptime);
     instance.set_digital_delay_type(context.digital_delay_type);
     instance.set_resource_limits(context.resource_limits);
-    if !drivers.is_empty() {
+    let taps_code_models = !drivers.is_empty();
+    if taps_code_models {
         instance.tap_digital_drivers("in", drivers);
     }
     // An HDL port's converter reads the design's strength levels, which the
-    // XSPICE value on its event node carries only as a class.
-    if bridge.event_node.is_some() {
+    // XSPICE value on its event node carries only as a class, unless code
+    // models drive its segment instead.
+    if bridge.event_node.is_some() && !taps_code_models {
         match bridge.kind {
             XspiceAutoBridgeKind::Adc => {}
             XspiceAutoBridgeKind::Dac => instance.read_hdl_drives("in"),

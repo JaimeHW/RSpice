@@ -50,6 +50,7 @@ use super::digital_trace_invariants;
 use crate::model_outcome::RunWithOutcome;
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
 use rspice_core::engine::{DigitalBusSource, TransientResult};
+use rspice_core::xspice::DigitalState as Logic;
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::io::Write;
 use std::path::PathBuf;
@@ -1145,62 +1146,305 @@ fn saving_one_bus_member_retains_every_member() {
     );
 }
 
+/// The value `points` holds at `at`: the last event at or before it.
+fn state_at(points: &[rspice_core::engine::DigitalTracePoint], at: f64) -> Logic {
+    points
+        .iter()
+        .rev()
+        .find(|point| point.time <= at)
+        .map(|point| point.value.state)
+        .expect("a value at the time")
+}
+
+/// The voltage `node` holds at `at`: the last accepted point at or before it.
+fn volts_at(result: &TransientResult, node: &str, at: f64) -> f64 {
+    let index = result.time.iter().rposition(|time| *time <= at).unwrap();
+    waveform(result, node)[index]
+}
+
+/// The divider's `qdiv` drives a net that a `d_inverter` reads and a 1k
+/// resistor loads. The net splits: the inverter stays on the digital segment
+/// and reads the divider itself, and one D/A in front of the resistor serves
+/// the analog side. The divider toggles `qdiv` at 5, 15 and 25 ns from 0, so
+/// the inverter answers exactly its 1 ns delay later, and the resistor sits
+/// at the D/A's high level, supply * 1000 / 1020, while `qdiv` is One and at
+/// 0 V while it is Zero. Card order changes none of it.
 #[test]
-fn a_discrete_port_with_an_unimplemented_xspice_domain_boundary_is_refused() {
-    let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
-    for (event_card, declaration, kind) in [
-        (
-            "a_adc [in] [qdiv] adc",
-            ".model adc adc_bridge (in_low=0.4 in_high=0.6)",
-            "four-state digital",
-        ),
-        (
-            "a_real qdiv observed rg",
-            ".model rg real_gain",
-            "real-valued",
-        ),
-    ] {
-        let mut previous_error = None;
-        for mixed_first in [false, true] {
-            let mixed = "x1 p 0 qdiv clock_divider";
-            let cards = if mixed_first {
-                format!("{mixed}\n{event_card}")
-            } else {
-                format!("{event_card}\n{mixed}")
+fn a_module_output_on_a_net_a_code_model_and_a_resistor_read_splits_the_net() {
+    use rspice_core::circuit::ConverterKind;
+
+    let model = ModelFile::new("split_event_net", CLOCK_DIVIDER);
+    let mut previous: Option<Vec<f64>> = None;
+    for mixed_first in [false, true] {
+        let mixed = "x1 p 0 qdiv clock_divider";
+        let inverter = "a_inv qdiv qbar inv";
+        let cards = if mixed_first {
+            format!("{mixed}\n{inverter}")
+        } else {
+            format!("{inverter}\n{mixed}")
+        };
+        let deck = format!(
+            "* a module output that a code model and a resistor read\n\
+             {cards}\n\
+             .model inv d_inverter (rise_delay=1n fall_delay=1n)\n\
+             rp p 0 1meg\n\
+             rqdiv qdiv 0 1k\n\
+             .va \"{}\" clock_divider\n\
+             .end\n",
+            model.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|error| panic!("the net splits: {error}"));
+        let insertions = circuit.converter_insertions();
+        assert_eq!(insertions.len(), 1, "one converter: {insertions:?}");
+        assert_eq!(insertions[0].kind, ConverterKind::D2a, "{insertions:?}");
+        let high = insertions[0].supply.as_ref().expect("a supply").level * 1000.0 / 1020.0;
+
+        let result = run(&deck, 40.0e-9, 0.1e-9);
+        let qbar = result
+            .digital_trace_named("qbar")
+            .expect("the inverter output has a trace");
+        let mut volts = Vec::new();
+        for (at, divider) in [
+            (10.0e-9, Logic::One),
+            (20.0e-9, Logic::Zero),
+            (30.0e-9, Logic::One),
+        ] {
+            let inverted = match divider {
+                Logic::One => Logic::Zero,
+                _ => Logic::One,
             };
-            let deck = format!(
-                "* loaded or unlike mixed/event boundaries require a conversion contract\n\
-                 vin in 0 dc 1\n\
-                 r1 in 0 1k\n\
-                 {cards}\n\
-                 {declaration}\n\
-                 rp p 0 1meg\n\
-                 rqdiv qdiv 0 1k\n\
-                 .va \"{}\" clock_divider\n\
-                 .end\n",
-                model.deck_path()
+            let value = volts_at(&result, "qdiv", at);
+            println!(
+                "ATTRIBUTE mixed_first={mixed_first} at={at:e} qbar={:?} v(qdiv)={value:.9}",
+                state_at(qbar, at)
             );
-            let netlist = Netlist::parse(&deck).unwrap();
-            let error = Engine::default()
-                .build_circuit(&netlist)
-                .unwrap_err()
-                .to_string();
-            let lowered = error.to_lowercase();
+            assert_eq!(
+                state_at(qbar, at),
+                inverted,
+                "the inverter reads qdiv at {at:e}"
+            );
+            let level = if divider == Logic::One { high } else { 0.0 };
             assert!(
-                lowered.contains("event-driven")
-                    && lowered.contains("qdiv")
-                    && lowered.contains("x1")
-                    && lowered.contains(kind),
-                "the refusal must identify the actual instance, port, node and event type: {error}"
+                (value - level).abs() < 1.0e-6,
+                "the D/A holds the resistor at {level} V at {at:e}, got {value}"
             );
-            if let Some(previous) = previous_error {
-                assert_eq!(
-                    error, previous,
-                    "card order must not change the connection contract"
-                );
-            }
-            previous_error = Some(error);
+            volts.push(value);
         }
+        // Each toggle of the divider at 5 + 10k ns reaches the inverter's
+        // output exactly its 1 ns delay later: it reads the segment, not the
+        // converter's ramp and a threshold.
+        for (index, point) in qbar.iter().filter(|point| point.time > 0.0).enumerate() {
+            let expected = 6.0e-9 + 10.0e-9 * index as f64;
+            assert!(
+                (point.time - expected).abs() < 1.0e-15,
+                "the inverter's edge {index} lands at {expected:e}, got {:e}",
+                point.time
+            );
+        }
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &volts, "card order changes nothing");
+        }
+        previous = Some(volts);
+    }
+}
+
+/// A module that only reads the net: an `adc_bridge` drives `d` from a 1 V
+/// step, a 1k resistor loads it, and the module's `q` follows `d` with no
+/// delay. The code model is the segment's only driver, so the D/A in front of
+/// the resistor reads it, and the module reads it on the segment: `q`'s
+/// edges are `d`'s edges, and both resistors sit at the D/A's high level once
+/// the bridge reads the step.
+#[test]
+fn a_module_input_on_a_net_a_code_model_drives_and_a_resistor_reads_splits_the_net() {
+    let model = ModelFile::new(
+        "split_follower",
+        r#"
+`include "disciplines.vams"
+module follower(d, q);
+    input d;
+    output q;
+    reg q;
+    initial q = 1'b0;
+    always @(d) q = d;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* a code model drives a net a module and a resistor read\n\
+         vin in 0 pulse(0 1 10n 1n 1n 20n 60n)\n\
+         a_adc [in] [d] adc\n\
+         .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
+         x1 d q follower\n\
+         rd d 0 1k\n\
+         rq q 0 1k\n\
+         .va \"{}\" follower\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let circuit = Engine::default()
+        .build_circuit(&netlist)
+        .unwrap_or_else(|error| panic!("the net splits: {error}"));
+    let insertions = circuit.converter_insertions();
+    println!("ATTRIBUTE insertions={insertions:?}");
+    assert_eq!(insertions.len(), 2, "one D/A per net: {insertions:?}");
+    let high = insertions[0].supply.as_ref().expect("a supply").level * 1000.0 / 1020.0;
+
+    let result = run(&deck, 50.0e-9, 0.1e-9);
+    let d = result.digital_trace_named("d").expect("d has a trace");
+    let q = result.digital_trace_named("q").expect("q has a trace");
+    let changes = |points: &[rspice_core::engine::DigitalTracePoint]| {
+        let mut changes = Vec::new();
+        let mut last = None;
+        for point in points {
+            if last != Some(point.value.state) {
+                changes.push((point.time, point.value.state));
+            }
+            last = Some(point.value.state);
+        }
+        changes
+    };
+    println!("ATTRIBUTE d={:?} q={:?}", changes(d), changes(q));
+    let rises: Vec<f64> = changes(d)
+        .into_iter()
+        .filter(|(time, state)| *time > 0.0 && *state == Logic::One)
+        .map(|(time, _)| time)
+        .collect();
+    assert_eq!(
+        rises.len(),
+        1,
+        "the bridge reads one rising step: {:?}",
+        changes(d)
+    );
+    assert_eq!(
+        changes(d)
+            .into_iter()
+            .filter(|(time, _)| *time > 0.0)
+            .collect::<Vec<_>>(),
+        changes(q)
+            .into_iter()
+            .filter(|(time, _)| *time > 0.0)
+            .collect::<Vec<_>>(),
+        "the module reads d on the segment, so q changes when d does"
+    );
+    for node in ["d", "q"] {
+        let value = volts_at(&result, node, 25.0e-9);
+        println!("ATTRIBUTE v({node})@25ns={value:.9}");
+        assert!(
+            (value - high).abs() < 1.0e-6,
+            "the D/A holds {node}'s resistor at {high} V, got {value}"
+        );
+    }
+}
+
+/// A net that the divider and an `adc_bridge` output both drive and a
+/// resistor loads. Four-state resolution combines the two drivers on the
+/// event segment, but a converter reads one side's drive: the module port's
+/// design-level strengths or the code model's driver. So the build refuses
+/// it, naming the instance, the port, the node and the other driver, the
+/// same in either card order.
+#[test]
+fn a_net_a_module_and_a_code_model_both_drive_and_a_resistor_reads_is_refused() {
+    let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
+    let mut previous_error = None;
+    for mixed_first in [false, true] {
+        let mixed = "x1 p 0 qdiv clock_divider";
+        let adc = "a_adc [in] [qdiv] adc";
+        let cards = if mixed_first {
+            format!("{mixed}\n{adc}")
+        } else {
+            format!("{adc}\n{mixed}")
+        };
+        let deck = format!(
+            "* a module and a code model drive one loaded net\n\
+             vin in 0 dc 1\n\
+             r1 in 0 1k\n\
+             {cards}\n\
+             .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
+             rp p 0 1meg\n\
+             rqdiv qdiv 0 1k\n\
+             .va \"{}\" clock_divider\n\
+             .end\n",
+            model.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_err()
+            .to_string();
+        let lowered = error.to_lowercase();
+        for fragment in ["'x1'", "'qdiv'", "'a_adc'", "also drives"] {
+            assert!(
+                lowered.contains(fragment),
+                "the refusal names {fragment}: {error}"
+            );
+        }
+        if let Some(previous) = previous_error {
+            assert_eq!(
+                error, previous,
+                "card order must not change the connection contract"
+            );
+        }
+        previous_error = Some(error);
+    }
+}
+
+/// The one split a loaded net cannot take: the module's port is four-state
+/// and the code model on the net reads real values, so the net holds no one
+/// value a converter could carry. The refusal names the instance, the port,
+/// the node, both domains and why, the same in either card order.
+#[test]
+fn a_discrete_port_meeting_unlike_event_domains_on_a_loaded_net_is_refused() {
+    let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
+    let mut previous_error = None;
+    for mixed_first in [false, true] {
+        let mixed = "x1 p 0 qdiv clock_divider";
+        let real = "a_real qdiv observed rg";
+        let cards = if mixed_first {
+            format!("{mixed}\n{real}")
+        } else {
+            format!("{real}\n{mixed}")
+        };
+        let deck = format!(
+            "* unlike event domains on a loaded net\n\
+             vin in 0 dc 1\n\
+             r1 in 0 1k\n\
+             {cards}\n\
+             .model rg real_gain\n\
+             rp p 0 1meg\n\
+             rqdiv qdiv 0 1k\n\
+             .va \"{}\" clock_divider\n\
+             .end\n",
+            model.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_err()
+            .to_string();
+        let lowered = error.to_lowercase();
+        for fragment in [
+            "'x1'",
+            "'qdiv'",
+            "four-state",
+            "real-valued event-driven",
+            "unlike event domains",
+        ] {
+            assert!(
+                lowered.contains(fragment),
+                "the refusal names {fragment}: {error}"
+            );
+        }
+        if let Some(previous) = previous_error {
+            assert_eq!(
+                error, previous,
+                "card order must not change the connection contract"
+            );
+        }
+        previous_error = Some(error);
     }
 }
 
