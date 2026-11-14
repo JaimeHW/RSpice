@@ -1,0 +1,17 @@
+* C11 analog-clock twin (RSpice-authored): the switched-capacitor filter of
+* net/sc.cir, element for element, clocked by two PULSE sources with
+* nonov_clk's edges and no HDL. Each phase rises over 1 ns from its rise edge
+* (ph1 at 20 ns, ph2 at 520 ns), holds vcc and falls over 1 ns from its fall
+* edge (480 ns, 980 ns). A switch closes above vt+vh = 1.0 V and opens below
+* vt-vh = 0.8 V, so S1 closes at 20 + 1/1.8 ns and opens at 480 + 1/1.8 ns,
+* and S2 closes at 520 + 1/1.8 ns and opens at 980 + 1/1.8 ns, of every 1 us
+* period: the input is sampled at t_s = 480.556 ns and the output updated at
+* t_u = 520.556 ns, 40 ns later, as with the module's clock.
+.param vcc=1.8
+vph1 ph1 0 pulse(0 {vcc} 20n 1n 1n 459n 1u)
+vph2 ph2 0 pulse(0 {vcc} 520n 1n 1n 459n 1u)
+s1 in a ph1 0 swc
+c1 a 0 1p
+s2 a out ph2 0 swc
+c2 out 0 9p
+.model swc sw vt=0.9 vh=0.1 ron=1k roff=1e12

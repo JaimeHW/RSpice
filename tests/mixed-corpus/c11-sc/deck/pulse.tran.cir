@@ -1,0 +1,8 @@
+* C11 switched-capacitor filter, variant pulse, tran
+* The analog-clock twin (net/sc_pulse.cir) over 20 periods, stepped at 2 ns
+* as the mx deck is: it checks the twin is the same filter before its
+* periodic cells use it.
+.include ../net/sc_pulse.cir
+vin in 0 dc 0.5 sin(0.5 0.2 10k) ac 1
+.tran 2n 20u
+.end

@@ -36,14 +36,14 @@ why = "the peer answers each ph1 rise (20 ns + k us) with the complement of its 
 [[q]]
 id = "filter"
 analysis = "tran"
-variants = ["proc"]
+variants = ["proc", "pulse"]
 kind = "held_at"
 signal = "v(out)"
 times = { start = 1.99e-6, step = 1e-6, count = 19 }
 oracle = "O6"
 expect = "c11::rec"
 abs = 5e-5
-why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; the deck steps at 2 ns as mx does, so mx's allowance and its reasons hold"
+why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; the deck steps at 2 ns as mx does, so mx's allowance and its reasons hold; the twin samples 0.556 ns after the fall edge, ≤ 7 uV at the input's slope"
 
 # The design's transient FFT, on the deck's 300 us: the 10 kHz amplitude of
 # v(out) over [100 us, 300 us] (two input periods, coherent; the recursion's
@@ -79,7 +79,7 @@ why = "kT/C2 = 4.60e-10 V² (design; derivation in analytic/c11.rs)"
 [[q]]
 id = "pac"
 analysis = "pac"
-variants = ["mx"]
+variants = ["mx", "pulse"]
 kind = "ac"
 signal = "v(out)"
 points = [100.0, 1e3, 1e4, 1e5]
@@ -87,4 +87,71 @@ oracle = "O6"
 expect = "c11::pac"
 abs_db = 0.05
 abs_deg = 0.5
-why = "0.1/(1 − 0.9·e^−jωT) · sinc(πfT) · e^−jω·0.54T: sampled at the ph1 fall (0.48 T), held from the ph2 rise (0.52 T) for one period"
+why = "0.1/(1 − 0.9·e^−jωT) · sinc(πfT) · e^−jω·0.54T: sampled at the ph1 fall (0.48 T), held from the ph2 rise (0.52 T) for one period; the twin's sample and update are both 0.556 ns later, 40 ns apart as the module's"
+
+# P7, analog-clock twin: the periodic steady state. The 1 MHz carrier peaks
+# where S1 opens, so every period samples the same value and v(out) holds it
+# over the whole period.
+[[q]]
+id = "held"
+analysis = "pss"
+variants = ["pulse"]
+kind = "mean"
+signal = "v(out)"
+window = [0.0, 1e-6]
+oracle = "O6"
+expect = "c11::held"
+abs = 5e-5
+why = "the fixed point of y = 0.1·x_s + 0.9·y is x_s = 0.5 + 0.2/(1 + (ω₀·Ron·C1)²) = 0.6999921 V (C1 follows the carrier through Ron·C1 = 1 ns, sampled at its lagged peak); ROFF leakage over a period < 1e-7 V; trapezoidal amplitude error of the tracking at T/256 steps ≈ 1e-5 V. Ten periods of transient from the 0.5 V operating point leave v(out) 0.07 V short"
+
+# P7, analog-clock twin: v(a) in absolute time mod T, tracking the carrier
+# while S1 is closed (300 ns) and holding the sample on ph2 (700 ns).
+[[q]]
+id = "track"
+analysis = "pss"
+variants = ["pulse"]
+kind = "interp_at"
+signal = "v(a)"
+at = [3e-7, 7e-7]
+oracle = "O6"
+expect = "c11::track"
+abs = 5e-5
+why = "0.5 + 0.2·|H|·sin(ω₀t − 83° − atan(ω₀τ)), τ = Ron·C1, at 300 ns (slope 1.1e6 V/s: 44 ps of phase alignment) and the held x_s at 700 ns; linear interpolation of the sine between T/256 mesh points ≤ 7 uV, trapezoidal amplitude error ≈ 1e-5 V"
+
+# P7, analog-clock twin: sideband −1 of the periodic small-signal transfer.
+[[q]]
+id = "pac_lsb"
+analysis = "pac"
+variants = ["pulse"]
+kind = "ac"
+signal = "v(out)[sb=-1]"
+points = [1e3, 1e4, 1e5]
+oracle = "O6"
+expect = "c11::pac_lsb"
+abs_db = 0.0433
+abs_deg = 0.5
+why = "design-p7 §5.1: Y₋₁ = H_d·e^{jω(t_s − t_u)}·e^{jω₀t_u}·(1 − e^{−jωT})/(j(ω − ω₀)T), |Y₋₁(10 kHz)| = 0.0086755; 0.5 % in magnitude (0.0433 dB) and 0.5° as sideband 0; the Ron·C time constants (≈ 1 ns) shift the phase ≤ 0.04° at 100 kHz"
+
+# P7, analog-clock twin: the sampled output noise over the pnoise sweep, as
+# the one-sided spectrum of the sample sequence on [0, f₀/2].
+[[q]]
+id = "pn_band"
+analysis = "pnoise"
+variants = ["pulse"]
+kind = "noise_int"
+window = [100.0, 5e5]
+oracle = "O6"
+expect = "c11::pn_band"
+rel = 0.02
+why = "the samples are AR(1) with innovation 0.19·kT/C2 and stationary variance kT/C2 (equipartition); [100 Hz, f₀/2] holds kT/C2·(1 − (2/π)·atan(19·tan(π·100 Hz·T))) = 4.5870e-10 V²; the measure's power-law quadrature on the dec 10 grid is 0.17 % low; the result is deterministic (design-p7 §5.1: 2 %)"
+
+[[q]]
+id = "pn_psd"
+analysis = "pnoise"
+variants = ["pulse"]
+kind = "noise"
+points = [100.0, 1e4, 1e5, 4.99e5]
+oracle = "O6"
+expect = "c11::pn_psd"
+rel = 0.05
+why = "S_y(f) = (2/f₀)·0.19·(kT/C2)/|1 − 0.9·e^{−j2πf/f₀}|²: 1.7496e-14 V²/Hz at 100 Hz, 1.2911e-14 at 10 kHz, 4.9459e-16 at 100 kHz, 4.8469e-17 at 499 kHz; log interpolation between dec 10 points (design-p7 §5.1: 5 %)"

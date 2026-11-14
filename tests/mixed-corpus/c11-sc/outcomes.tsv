@@ -5,12 +5,24 @@ mx	tran	worker	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464
 proc	tran	interp	pass	filter (O6) [12] |a−e|=8.015e-6 allowed 5.000e-5 (a=5.774946e-1, e=5.775027e-1)
 proc	tran	native	pass	filter (O6) [12] |a−e|=8.015e-6 allowed 5.000e-5 (a=5.774946e-1, e=5.775027e-1)
 proc	tran	worker	refused	xspice.d_process.program; label="line 22"; instance=aproc form=structured; token-form=structured; analysis-form=location; site=line 22
+pulse	tran	interp	pass	filter (O6) [11] |a−e|=3.463e-6 allowed 5.000e-5 (a=5.694600e-1, e=5.694634e-1)
+pulse	tran	native	pass	filter (O6) [11] |a−e|=3.463e-6 allowed 5.000e-5 (a=5.694600e-1, e=5.694634e-1)
+pulse	tran	worker	pass	filter (O6) [11] |a−e|=3.463e-6 allowed 5.000e-5 (a=5.694600e-1, e=5.694634e-1)
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+pulse	pss	interp	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pss	native	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pss	worker	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
 mx	pac	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+pulse	pac	interp	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pac	native	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pac	worker	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+pulse	pnoise	interp	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pnoise	native	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device
+pulse	pnoise	worker	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device

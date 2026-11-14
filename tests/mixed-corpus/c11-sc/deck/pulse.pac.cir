@@ -1,0 +1,10 @@
+* C11 switched-capacitor filter, variant pulse, pac
+* Driven PSS as in deck/pulse.pss.cir, then the periodic small-signal
+* transfer from vin's `ac 1` to v(out) over the design's 100 Hz .. 100 kHz.
+* The circuit is linear between the clock's switch events, so the transfer
+* does not depend on the 1 MHz carrier.
+.include ../net/sc_pulse.cir
+vin in 0 dc 0.5 sin(0.5 0.2 1meg 0 0 -83) ac 1
+.pss fund=1meg tstab=10u
+.pac dec 10 100 100k input=vin out=v(out)
+.end

@@ -1,0 +1,11 @@
+* C11 switched-capacitor filter, variant pulse, pss
+* Driven PSS at the 1 MHz clock of the analog-clock twin. The input is a
+* 1 MHz sine whose peak falls where S1 opens (t_s = 480.556 ns, 173 deg of
+* the period, so phase -83 deg): every period samples the same value, and
+* the held output's fixed point is that sample. The recurrence reaches it
+* only as 0.9^k from the 0.5 V operating point, so ten periods of
+* stabilization leave it 35% of the way short; the shooting must close it.
+.include ../net/sc_pulse.cir
+vin in 0 dc 0.5 sin(0.5 0.2 1meg 0 0 -83) ac 1
+.pss fund=1meg tstab=10u
+.end

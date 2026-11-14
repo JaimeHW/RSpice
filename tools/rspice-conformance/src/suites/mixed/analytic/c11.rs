@@ -23,6 +23,11 @@ pub const REGISTRY: Registry = &[
     ("fft", fft),
     ("pn", pn),
     ("proc", proc),
+    ("held", held),
+    ("track", track),
+    ("pac_lsb", pac_lsb),
+    ("pn_band", pn_band),
+    ("pn_psd", pn_psd),
 ];
 
 const PERIOD: f64 = 1e-6;
@@ -34,6 +39,23 @@ const SHARE: f64 = 1e-12 / (1e-12 + 9e-12);
 const INPUT_OFFSET: f64 = 0.5;
 const INPUT_AMPLITUDE: f64 = 0.2;
 const INPUT_FREQUENCY: f64 = 10e3;
+
+// The analog-clock twin (variant `pulse`, net/sc_pulse.cir). Each PULSE edge
+// takes 1 ns between 0 and vcc = 1.8 V; a switch opens below 0.8 V and closes
+// above 1.0 V, so S1 opens (the sample) 1/1.8 ns after the ph1 fall edge and
+// S2 closes (the update) 1/1.8 ns after the ph2 rise edge.
+const TWIN_SAMPLE: f64 = PH1_FALL + 1e-9 / 1.8;
+const TWIN_UPDATE: f64 = PH2_RISE + 1e-9 / 1.8;
+const TWIN_PH1_CLOSE: f64 = PH1_RISE + 1e-9 / 1.8;
+/// Ron·C1: C1 follows the input through the closed S1.
+const TWIN_TRACK_TAU: f64 = 1e3 * 1e-12;
+/// The periodic decks' input: 0.5 + 0.2·sin(ω₀t − 83°) at the 1 MHz clock,
+/// whose peak falls at the sample.
+const TWIN_CARRIER_PHASE_DEG: f64 = -83.0;
+const BOLTZMANN: f64 = 1.380_649e-23;
+/// The corpus runs at 27 °C.
+const KELVIN: f64 = 300.15;
+const C2: f64 = 9e-12;
 
 /// Variant `proc`: the `d_process` toggle peer, clocked by ph1, answers every
 /// ph1 rise with the complement of its last answer (1 first), and `d` takes
@@ -144,10 +166,137 @@ fn fft(context: &Context<'_>) -> Result<Expected, String> {
 /// noise survives. The stationary variance a²kT(1/C1 + (C1 + C2)/(C1C2)) /
 /// (1 − (1 − a)²) is exactly kT/C2 (design: 4.60e-10 V² at 27 °C).
 fn pn(_: &Context<'_>) -> Result<Expected, String> {
-    const BOLTZMANN: f64 = 1.380_649e-23;
-    const KELVIN: f64 = 300.15;
-    const C2: f64 = 9e-12;
     Ok(values(vec![BOLTZMANN * KELVIN / C2]))
+}
+
+/// C1's voltage while S1 is closed, once the switch's 1 ns transient has
+/// gone: the carrier through the first-order Ron·C1 low-pass.
+fn twin_tracking(time: f64) -> f64 {
+    let omega = 2.0 * std::f64::consts::PI / PERIOD;
+    let lag = (omega * TWIN_TRACK_TAU).atan();
+    let gain = 1.0 / (1.0 + (omega * TWIN_TRACK_TAU).powi(2)).sqrt();
+    INPUT_OFFSET
+        + INPUT_AMPLITUDE * gain * (omega * time + TWIN_CARRIER_PHASE_DEG.to_radians() - lag).sin()
+}
+
+/// The value the twin's periodic steady state holds: the sample C1 takes
+/// when S1 opens. The carrier peaks there, so C1, lagging it by
+/// atan(ω₀·Ron·C1), holds 0.5 + 0.2/(1 + (ω₀·Ron·C1)²); every period samples
+/// it, and y = 0.1·x + 0.9·y holds it on C2.
+fn twin_held() -> f64 {
+    twin_tracking(TWIN_SAMPLE)
+}
+
+/// Variant `pulse` pss: the held output, constant over the period.
+fn held(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![twin_held()]))
+}
+
+/// Variant `pulse` pss: v(a) at times in absolute time mod T. While S1 is
+/// closed (and its closing transient has gone, 10 Ron·C1) C1 follows the
+/// carrier; from the sample to S1's next closing it holds the sample, which
+/// C2 already holds, so sharing it on ph2 changes neither.
+fn track(context: &Context<'_>) -> Result<Expected, String> {
+    let times = context
+        .quantity
+        .measure
+        .at
+        .clone()
+        .ok_or("c11::track needs the quantity's sample times")?;
+    let expected = times
+        .into_iter()
+        .map(|time| {
+            let phase = time.rem_euclid(PERIOD);
+            if phase > TWIN_PH1_CLOSE + 10.0 * TWIN_TRACK_TAU && phase < TWIN_SAMPLE {
+                Ok(twin_tracking(phase))
+            } else if !(TWIN_PH1_CLOSE..=TWIN_SAMPLE).contains(&phase) {
+                Ok(twin_held())
+            } else {
+                Err(format!(
+                    "c11::track: {time:e} s is inside S1's closing transient"
+                ))
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(values(expected))
+}
+
+/// Variant `pulse` pac, sideband −1 (the output at f − f₀ per unit input at
+/// f), design-p7 §5.1: with the sample at t_s, the hold from the update t_u
+/// for one period and H_d(ω) = a/(1 − (1 − a)e^{−jωT}),
+/// Y_m = H_d(ω)·e^{jω(t_s − t_u)}·e^{−jmω₀t_u}·(1 − e^{−jωT})/(j(ω + mω₀)T).
+/// Ron·C1 and Ron·C1C2/(C1 + C2) (about 1 ns each) are neglected: ≤ 0.04°
+/// at 100 kHz.
+fn pac_lsb(context: &Context<'_>) -> Result<Expected, String> {
+    let sideband = -1.0;
+    let omega_0 = 2.0 * std::f64::consts::PI / PERIOD;
+    let expected = points(context.quantity)?
+        .into_iter()
+        .map(|frequency| {
+            let omega = 2.0 * std::f64::consts::PI * frequency;
+            let z_inverse = Complex64::from_polar(1.0, -omega * PERIOD);
+            let recursion = SHARE / (1.0 - (1.0 - SHARE) * z_inverse);
+            let delay = Complex64::from_polar(1.0, omega * (TWIN_SAMPLE - TWIN_UPDATE));
+            let update = Complex64::from_polar(1.0, -sideband * omega_0 * TWIN_UPDATE);
+            let hold = (1.0 - z_inverse) / (Complex64::i() * (omega + sideband * omega_0) * PERIOD);
+            recursion * delay * update * hold
+        })
+        .collect();
+    Ok(complex(expected))
+}
+
+/// The one-sided spectrum of the twin's output sample sequence on
+/// [0, f₀/2], normalized to integrate to the sample variance (design-p7
+/// §5.1): the samples are AR(1), y_k = 0.9·y_{k−1} + e_k, with innovation
+/// variance 0.19·kT/C2, so S_y(f) = (2/f₀)·0.19·(kT/C2)/|1 − 0.9e^{−j2πf/f₀}|².
+fn twin_sample_psd(frequency: f64) -> f64 {
+    let pole = 1.0 - SHARE;
+    let innovation = (1.0 - pole * pole) * BOLTZMANN * KELVIN / C2;
+    let denominator = (1.0
+        - pole * Complex64::from_polar(1.0, -2.0 * std::f64::consts::PI * frequency * PERIOD))
+    .norm_sqr();
+    2.0 * PERIOD * innovation / denominator
+}
+
+/// Variant `pulse` pnoise: S_y integrated over the quantity's window, in
+/// closed form: ∫ S_y df from f₁ to f₂ ≤ f₀/2 is
+/// (kT/C2)·(2/π)·[atan(((1 + b)/(1 − b))·tan(πfT))] with b = 0.9, so the
+/// whole of [0, f₀/2] is kT/C2 (4.6045e-10 V²) and [100 Hz, f₀/2] is
+/// 4.5870e-10 V².
+fn pn_band(context: &Context<'_>) -> Result<Expected, String> {
+    let [low, high] = context
+        .quantity
+        .measure
+        .window
+        .ok_or("c11::pn_band needs the quantity's window")?;
+    if !(0.0..=0.5 / PERIOD).contains(&low) || !(low..=0.5 / PERIOD).contains(&high) {
+        return Err(format!(
+            "c11::pn_band: [{low:e}, {high:e}] Hz is not inside [0, f0/2]"
+        ));
+    }
+    let pole = 1.0 - SHARE;
+    let primitive = |frequency: f64| {
+        let half_angle = std::f64::consts::PI * frequency * PERIOD;
+        if (half_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-15 {
+            std::f64::consts::FRAC_PI_2
+        } else {
+            ((1.0 + pole) / (1.0 - pole) * half_angle.tan()).atan()
+        }
+    };
+    let variance = BOLTZMANN * KELVIN / C2;
+    Ok(values(vec![
+        variance * std::f64::consts::FRAC_2_PI * (primitive(high) - primitive(low)),
+    ]))
+}
+
+/// Variant `pulse` pnoise: S_y at the quantity's points.
+fn pn_psd(context: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(
+        points(context.quantity)?
+            .into_iter()
+            .map(twin_sample_psd)
+            .collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -166,5 +315,46 @@ mod tests {
             y = SHARE * 0.5 + (1.0 - SHARE) * y;
         }
         assert!((y - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_twin_constants_match_the_design() {
+        // design-p7 §5.1 at 10 kHz: |Y₋₁| = 0.0086755.
+        let lower = {
+            let omega = 2.0 * std::f64::consts::PI * 10e3;
+            let omega_0 = 2.0 * std::f64::consts::PI / PERIOD;
+            let z_inverse = Complex64::from_polar(1.0, -omega * PERIOD);
+            SHARE / (1.0 - (1.0 - SHARE) * z_inverse)
+                * Complex64::from_polar(1.0, omega * (TWIN_SAMPLE - TWIN_UPDATE))
+                * (1.0 - z_inverse)
+                / (Complex64::i() * (omega - omega_0) * PERIOD)
+        };
+        assert!((lower.norm() - 0.0086755).abs() < 5e-8, "{}", lower.norm());
+        // S_y(100 Hz) = 1.7496e-14 V²/Hz; [100 Hz, f₀/2] holds 4.587e-10 V².
+        assert!((twin_sample_psd(100.0) / 1.7496e-14 - 1.0).abs() < 1e-4);
+        // The closed-form band integral equals a fine quadrature of S_y.
+        let (low, high) = (100.0, 0.5 / PERIOD);
+        let steps = 200_000;
+        let width = (high - low) / f64::from(steps);
+        let quadrature: f64 = (0..steps)
+            .map(|step| twin_sample_psd(low + (f64::from(step) + 0.5) * width) * width)
+            .sum();
+        let pole: f64 = 1.0 - SHARE;
+        let closed = BOLTZMANN * KELVIN / C2
+            * std::f64::consts::FRAC_2_PI
+            * (std::f64::consts::FRAC_PI_2
+                - ((1.0 + pole) / (1.0 - pole) * (std::f64::consts::PI * low * PERIOD).tan())
+                    .atan());
+        assert!(
+            (quadrature / closed - 1.0).abs() < 1e-6,
+            "{quadrature} vs {closed}"
+        );
+        assert!((closed / 4.587e-10 - 1.0).abs() < 1e-3, "{closed}");
+        // The held value: 0.5 + 0.2/(1 + (2π·1e6·1e-9)²).
+        assert!(
+            (twin_held() - 0.699_992_104_6).abs() < 1e-9,
+            "{}",
+            twin_held()
+        );
     }
 }
