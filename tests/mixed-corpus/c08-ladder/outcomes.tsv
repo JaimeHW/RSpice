@@ -1,13 +1,19 @@
 # variant	analysis	route	outcome	detail
 tr	tran	interp	pass	ovs (O6) [0] |a−e|=3.718e-3 allowed 6.000e-3 (a=-6.222104e-1, e=-6.259284e-1)
 tr	tran	native	pass	ovs (O6) [0] |a−e|=3.718e-3 allowed 6.000e-3 (a=-6.222104e-1, e=-6.259284e-1)
+tr	tran	worker	pass	ovs (O6) [0] |a−e|=3.715e-3 allowed 6.000e-3 (a=-6.222138e-1, e=-6.259284e-1)
 va	tran	interp	pass	ovs (O6) [0] |a−e|=1.712e-6 allowed 2.000e-3 (a=-6.259301e-1, e=-6.259284e-1)
 va	tran	native	pass	ovs (O6) [0] |a−e|=1.712e-6 allowed 2.000e-3 (a=-6.259301e-1, e=-6.259284e-1)
+va	tran	worker	gap	harness gap: Verilog-A module 'sk_va' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 wr	tran	interp	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 wr	tran	native	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
+wr	tran	worker	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 sv	tran	interp	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 sv	tran	native	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
+sv	tran	worker	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 tr	ac	interp	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
 tr	ac	native	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
+tr	ac	worker	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
 va	ac	interp	pass	acH (O6) [6] Δ=1.080e-13 dB, 0.000e0° allowed 1e-3 dB, 1e-2°
 va	ac	native	pass	acH (O6) [6] Δ=1.080e-13 dB, 0.000e0° allowed 1e-3 dB, 1e-2°
+va	ac	worker	gap	harness gap: Verilog-A module 'sk_va' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width

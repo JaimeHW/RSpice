@@ -1,27 +1,40 @@
 # variant	analysis	route	outcome	detail
 xs	tran	interp	pass	fdiv (O6) [0] |a−e|=1.346e-12 allowed 5.000e-11 (a=9.999865e-8, e=1.000000e-7)
 xs	tran	native	pass	fdiv (O6) [0] |a−e|=1.346e-12 allowed 5.000e-11 (a=9.999865e-8, e=1.000000e-7)
+xs	tran	worker	fail	resource: resource: Resource limit exceeded for waveform values a browser run can hand back: requested 25005075, limit 16777216
 mx	tran	interp	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540855e-6, e=5.703179e-6)
 mx	tran	native	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540855e-6, e=5.703179e-6)
+mx	tran	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 xs	op	interp	pass	op (O8) [0] |a−e|=2.220e-16 allowed 1.000e-3 (a=1.650000e0, e=1.650000e0)
 xs	op	native	pass	op (O8) [0] |a−e|=2.220e-16 allowed 1.000e-3 (a=1.650000e0, e=1.650000e0)
+xs	op	worker	pass	op (O8) [0] |a−e|=2.220e-16 allowed 1.000e-3 (a=1.650000e0, e=1.650000e0)
 mx	op	interp	pass	op (O5) [2] |a−e|=4.441e-16 allowed 3.500e-5 (a=2.500000e0, e=2.500000e0)
 mx	op	native	pass	op (O5) [2] |a−e|=4.441e-16 allowed 3.500e-5 (a=2.500000e0, e=2.500000e0)
+mx	op	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 xs	op-ngspice	interp	pass	op (O1) [2] |a−e|=1.776e-15 allowed 1.000e-3 (a=1.417255e0, e=1.417255e0)
 xs	op-ngspice	native	pass	op (O1) [2] |a−e|=1.776e-15 allowed 1.000e-3 (a=1.417255e0, e=1.417255e0)
+xs	op-ngspice	worker	pass	op (O1) [2] |a−e|=4.663e-15 allowed 1.000e-3 (a=1.417255e0, e=1.417255e0)
 xs	ac	interp	pass	zlf (O1) [0] Δ=-2.228e-11 dB, 2.203e-11° allowed 1e-2 dB, 1e-1°
 xs	ac	native	pass	zlf (O1) [0] Δ=-2.228e-11 dB, 2.203e-11° allowed 1e-2 dB, 1e-1°
+xs	ac	worker	pass	zlf (O1) [0] Δ=-7.136e-14 dB, 1.272e-13° allowed 1e-2 dB, 1e-1°
 mx	ac	interp	pass	zlf (O6) [0] Δ=-5.005e-4 dB, 8.051e-2° allowed 5e-2 dB, 5e-1°
 mx	ac	native	pass	zlf (O6) [0] Δ=-5.005e-4 dB, 8.051e-2° allowed 5e-2 dB, 5e-1°
+mx	ac	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 mx	ac@lock	interp	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
 mx	ac@lock	native	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
+mx	ac@lock	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 xs	mc-tran	interp	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
 xs	mc-tran	native	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
+xs	mc-tran	worker	fail	resource: resource: Resource limit exceeded for waveform values a browser run can hand back: requested 24995850, limit 16777216
 mx	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	native	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
+mx	mc-tran	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 xs	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
 xs	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
+xs	pss	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xpfd form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xpfd form=structured; token-form=structured; analysis-form=structured
+mx	pss	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xpfd form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xpfd form=structured; token-form=structured; analysis-form=structured
+mx	pnoise	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width

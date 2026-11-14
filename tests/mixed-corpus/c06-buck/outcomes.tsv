@@ -1,19 +1,28 @@
 # variant	analysis	route	outcome	detail
 vdig	tran	interp	pass	env530 (O1) [0] |a−e|=1.583e-2 allowed 1.810e-2 (a=1.631721e0, e=1.615887e0)
 vdig	tran	native	pass	env530 (O1) [0] |a−e|=1.583e-2 allowed 1.810e-2 (a=1.631721e0, e=1.615887e0)
+vdig	tran	worker	pass	env530 (O1) [0] |a−e|=1.587e-2 allowed 1.810e-2 (a=1.631760e0, e=1.615887e0)
 vams	tran	interp	pass	ilmean (O6) [0] |a−e|=2.151e-3 allowed 3.000e-3 (a=9.025414e-1, e=9.003906e-1)
 vams	tran	native	pass	ilmean (O6) [0] |a−e|=2.151e-3 allowed 3.000e-3 (a=9.025414e-1, e=9.003906e-1)
+vams	tran	worker	gap	harness gap: Verilog-A module 'buck_ctrl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 p3	tran	interp	pass	vss_step (O6) [0] |a−e|=8.167e-4 allowed 6.000e-3 (a=1.801598e0, e=1.800781e0)
 p3	tran	native	pass	vss_step (O6) [0] |a−e|=8.167e-4 allowed 6.000e-3 (a=1.801598e0, e=1.800781e0)
+p3	tran	worker	fail	resource: resource: Resource limit exceeded for waveform values a browser run can hand back: requested 47498220, limit 16777216
 vsup	tran	interp	pass	vss (O6) [0] |a−e|=1.027e-3 allowed 6.000e-3 (a=1.801808e0, e=1.800781e0)
 vsup	tran	native	pass	vss (O6) [0] |a−e|=1.027e-3 allowed 6.000e-3 (a=1.801808e0, e=1.800781e0)
+vsup	tran	worker	pass	vss (O6) [0] |a−e|=9.399e-4 allowed 6.000e-3 (a=1.801721e0, e=1.800781e0)
 vdig	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 accepted times shared, 4 nets
 vdig	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 accepted times shared, 4 nets
+vdig	ckpt	worker	pass	resume (O7) resumed@4e-4: identical; 157136 of 157136 accepted times shared, 2 nets
 vams	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 157159 of 157159 accepted times shared, 2 nets
 vams	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 157159 of 157159 accepted times shared, 2 nets
+vams	ckpt	worker	gap	harness gap: Verilog-A module 'buck_ctrl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 vsup	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 2311173 of 2311173 accepted times shared, 2 nets
 vsup	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 2311173 of 2311173 accepted times shared, 2 nets
+vsup	ckpt	worker	pass	resume (O7) resumed@4e-4: identical; 2655072 of 2655072 accepted times shared, 2 nets
 vdig	mc-tran	interp	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)
 vdig	mc-tran	native	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)
+vdig	mc-tran	worker	pass	ripple (O6) trial 1: [0] |a−e|=1.601e-3 allowed 3.325e-3 (a=9.659611e-2, e=9.499542e-2)
 vams	mc-tran	interp	pass	ilmean (O6) trial 2: [0] |a−e|=2.748e-3 allowed 3.000e-3 (a=9.031385e-1, e=9.003906e-1)
 vams	mc-tran	native	pass	ilmean (O6) trial 2: [0] |a−e|=2.748e-3 allowed 3.000e-3 (a=9.031385e-1, e=9.003906e-1)
+vams	mc-tran	worker	gap	harness gap: Verilog-A module 'buck_ctrl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width

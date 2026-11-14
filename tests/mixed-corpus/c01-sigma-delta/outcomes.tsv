@@ -1,21 +1,31 @@
 # variant	analysis	route	outcome	detail
 xs	tran	interp	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
 xs	tran	native	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
+xs	tran	worker	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
 vams	tran	interp	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
 vams	tran	native	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
+vams	tran	worker	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
 xs	op	interp	pass	opdiff (O8) [0] |a−e|=0.000e0 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
 xs	op	native	pass	opdiff (O8) [0] |a−e|=0.000e0 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
+xs	op	worker	pass	opdiff (O8) [0] |a−e|=0.000e0 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
 vams	op	interp	pass	opdiff (O8) [0] |a−e|=5.551e-17 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
 vams	op	native	pass	opdiff (O8) [0] |a−e|=5.551e-17 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
+vams	op	worker	pass	opdiff (O8) [0] |a−e|=5.551e-17 allowed 1.400e-6 (a=3.999984e-1, e=3.999984e-1)
 xs	op-ngspice	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 xs	op-ngspice	native	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+xs	op-ngspice	worker	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 vams	op-ngspice	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 vams	op-ngspice	native	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+vams	op-ngspice	worker	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 xs	ac	interp	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
 xs	ac	native	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+xs	ac	worker	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
 vams	ac	interp	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
 vams	ac	native	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+vams	ac	worker	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
 xs	trnoise	interp	pass	var (O6) var over 49 samples: 1.463435e0 in [7.330000e-1, 3.970000e0]
 xs	trnoise	native	pass	var (O6) var over 49 samples: 1.463435e0 in [7.330000e-1, 3.970000e0]
+xs	trnoise	worker	pass	var (O6) var over 49 samples: 1.377551e0 in [7.330000e-1, 3.970000e0]
 vams	trnoise	interp	pass	var (O6) var over 49 samples: 1.337585e0 in [7.330000e-1, 3.970000e0]
 vams	trnoise	native	pass	var (O6) var over 49 samples: 1.337585e0 in [7.330000e-1, 3.970000e0]
+vams	trnoise	worker	pass	var (O6) var over 49 samples: 1.379252e0 in [7.330000e-1, 3.970000e0]

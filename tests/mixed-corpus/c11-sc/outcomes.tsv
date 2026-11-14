@@ -1,11 +1,16 @@
 # variant	analysis	route	outcome	detail
 mx	tran	interp	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
 mx	tran	native	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
+mx	tran	worker	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
 proc	tran	interp	fail	preparation: preparation: Executable netlist contains an unsealed external dependency (file-backed element or code-model parameter) at line 22: .model proc1 d_process(process_file="rspice-mixed-corpus" process_params=["peer" "toggle"]  clk_delay=1e-9 reset_delay=1e-
 proc	tran	native	fail	preparation: preparation: Executable netlist contains an unsealed external dependency (file-backed element or code-model parameter) at line 22: .model proc1 d_process(process_file="rspice-mixed-corpus" process_params=["peer" "toggle"]  clk_delay=1e-9 reset_delay=1e-
+proc	tran	worker	refused	xspice.d_process.program; label="line 22"; instance=aproc form=structured; token-form=structured; analysis-form=location; site=line 22
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pss	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pac	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pnoise	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
