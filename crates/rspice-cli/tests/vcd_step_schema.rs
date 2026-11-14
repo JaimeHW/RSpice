@@ -52,7 +52,7 @@ fn check(circuit: &str, expected: &[&str]) {
             serde_json::json!(vec![true; schema.len()])
         );
         let dump = parse_vcd_bytes_with_limits(
-            &std::fs::read(&dir.join(coordinate["artifact"].as_str().unwrap()))
+            &std::fs::read(dir.join(coordinate["artifact"].as_str().unwrap()))
                 .expect("read the VCD file"),
             Default::default(),
         )
