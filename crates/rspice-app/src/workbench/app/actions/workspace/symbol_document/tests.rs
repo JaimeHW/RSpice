@@ -10,7 +10,7 @@ use crate::workbench::design::test_host::DesignTestHost;
 use crate::diagnostics::LogSeverity;
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
-    PortDirection, SchematicState, SymbolPin, SymbolShape, View, ViewType, Wire, WireConnection,
+    PortDirection, SchematicState, SymbolPin, View, ViewType, Wire, WireConnection,
 };
 
 const PARENT: &str = "work/top/schematic";

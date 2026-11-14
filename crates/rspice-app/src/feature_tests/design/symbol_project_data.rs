@@ -270,29 +270,14 @@ fn symbol_edits_are_unsaved_project_work_until_the_project_is_saved() {
     );
 }
 
-/// What the symbol checks find stands on the Problems page; none of it
-/// stops the symbol being saved. A pin off the grid is found, and saved.
+/// Check and save with the symbol in front checks it, then saves it with the
+/// project: what the checks find stands on the Problems page, and none of it
+/// stops the save. A pin off the grid is found, and saved.
 #[test]
-fn symbol_findings_are_problems_and_never_refuse_the_save() {
+fn check_and_save_checks_the_symbol_and_never_refuses_the_save() {
     let mut fixture = Fixture::new("findings", Some(&["IN", "OUT"]), &["IN", "OUT"]);
     fixture.move_pin("OUT", Point::new(3, 0));
     let off_grid = fixture.pin("OUT");
-
-    fixture.save();
-
-    assert!(
-        fixture
-            .app
-            .state
-            .active_symbol_pin_finding_count()
-            .is_some_and(|found| found > 0),
-        "saving the symbol in front ran its checks and published what they found"
-    );
-    assert_eq!(
-        fixture.saved().0.pin("OUT").and_then(|pin| pin.position),
-        off_grid,
-        "the finding did not stop the save"
-    );
     assert!(
         fixture
             .app
@@ -300,6 +285,29 @@ fn symbol_findings_are_problems_and_never_refuse_the_save() {
             .is_available(),
         "Check and save is offered with the symbol in front"
     );
+
+    fixture
+        .app
+        .execute_command_key(ProjectCommand::CheckAndSave.key());
+
+    assert!(
+        fixture
+            .app
+            .state
+            .active_symbol_pin_finding_count()
+            .is_some_and(|found| found > 0),
+        "the symbol's checks ran and published what they found"
+    );
+    assert!(
+        !fixture.app.state.project.check_and_save.open,
+        "the schematic's validated save is not asked of a symbol"
+    );
+    assert_eq!(
+        fixture.saved().0.pin("OUT").and_then(|pin| pin.position),
+        off_grid,
+        "the finding did not stop the save"
+    );
+    assert!(!has_unsaved_changes(&fixture.app.state));
 }
 
 /// A cell with no schematic is drawn symbol first: its symbol defines the
