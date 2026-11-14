@@ -127,7 +127,6 @@ impl SimulationController {
                     crate::simulation::SimulationResult::Fft { .. } => None,
                     solved => solved.transient_convergence().cloned(),
                 };
-                let testbench_verdict = testbench_errors(&sim_result);
                 let truncation_line = match sim_result.transient_convergence() {
                     Some(quality) if quality.has_lte_exceptions() => self.placed_run_line(
                         state.model_mut(),
@@ -181,6 +180,18 @@ impl SimulationController {
                         run_sequence,
                         facts,
                     );
+                    // What the run's checks reported is filed beside them,
+                    // one row each. A testbench that reported an error
+                    // completed all the same: its results stand, and the
+                    // run's check verdict, not its lifecycle, says it failed.
+                    if !analysis_result.checks.is_empty() {
+                        state.model_mut().publish_run_checks(
+                            &current_label,
+                            &analysis_result.checks,
+                            run_sequence,
+                            facts,
+                        );
+                    }
                 }
                 let retention_error = analysis_result.error_message.clone();
                 if let Some(provenance) = self.current_provenance.take() {
@@ -206,14 +217,6 @@ impl SimulationController {
                                     state.model_mut(),
                                     export_io,
                                     prepared,
-                                );
-                            }
-                            if let Some(verdict) = testbench_verdict.as_deref() {
-                                self.fail_testbench_verdict(
-                                    state,
-                                    target_run_id,
-                                    &current_label,
-                                    verdict,
                                 );
                             }
                         }
@@ -482,56 +485,6 @@ impl SimulationController {
             None => format!("Not supported in {label}: {reason} [{capability}]"),
         })
     }
-
-    /// A testbench that reported errors did not pass, though its analysis
-    /// completed: the run is sealed as not passing, its results stay
-    /// available, and the Problems page files the testbench's verdict against
-    /// the run, as the CLI fails the run on the same records.
-    fn fail_testbench_verdict(
-        &self,
-        state: &mut impl RunHost,
-        target_run_id: Option<u64>,
-        analysis: &str,
-        verdict: &str,
-    ) {
-        let errors = self.seal_failed_run(state.model_mut(), target_run_id, None, None);
-        self.report_seal_errors(state.model_mut(), errors);
-        if let Some(run_sequence) = target_run_id {
-            let facts = state.slot_facts();
-            state
-                .model_mut()
-                .publish_run_failure(analysis, verdict, None, run_sequence, facts);
-        }
-    }
-}
-
-/// The verdict of a transient's testbench, from the records its `$error` and
-/// `$fatal` calls left in the result: `Testbench reported 2 errors: <the
-/// first one's message>`. `None` when it reported none.
-///
-/// Read off the result rather than the run's log, whose bound can withhold
-/// the very lines that failed the testbench.
-fn testbench_errors(result: &crate::simulation::SimulationResult) -> Option<String> {
-    use rspice_core::config::{HdlSeverity, HdlStream};
-
-    let crate::simulation::SimulationResult::Transient { hdl_output, .. } = result else {
-        return None;
-    };
-    let mut errors = hdl_output.iter().filter(|record| {
-        matches!(
-            record.stream,
-            HdlStream::Diagnostic {
-                severity: HdlSeverity::Error | HdlSeverity::Fatal
-            }
-        )
-    });
-    let first = errors.next()?;
-    let count = 1 + errors.count();
-    Some(format!(
-        "Testbench reported {count} {}: {}",
-        if count == 1 { "error" } else { "errors" },
-        first.text.trim_end()
-    ))
 }
 
 #[cfg(test)]
@@ -587,12 +540,11 @@ mod tests {
         );
     }
 
-    /// A transient whose testbench called `$error` and `$fatal` completes
-    /// with errors: its results are kept, the run does not pass, and the
-    /// Problems page files the testbench's verdict against the run.
-    #[test]
-    fn a_testbench_that_reported_errors_fails_its_run_and_keeps_its_results() {
-        use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+    /// A run whose transient carried `checks`, completed through the
+    /// controller, and the run's sequence.
+    fn complete_with_checks(
+        checks: rspice_simulation::results::SimulationChecks,
+    ) -> (RunTestHost, u64) {
         let mut state = RunTestHost::default();
         let mut controller = SimulationController::new();
         let export_io = super::super::test_execution::MockExportWorkflowIo::default();
@@ -619,18 +571,6 @@ mod tests {
         );
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
-        let record = |stream, text: &str| HdlOutputRecord {
-            point: HdlPoint::Transient { time: 1.0e-9 },
-            tick: 1,
-            seconds: 1.0e-9,
-            stream,
-            text: text.to_owned(),
-            origin: HdlOrigin {
-                scope: "tb".to_owned(),
-                file: "tb.v".to_owned(),
-                line: 9,
-            },
-        };
         let mut waveforms = std::collections::HashMap::new();
         waveforms.insert(
             "V(out)".to_owned(),
@@ -643,28 +583,14 @@ mod tests {
                 y_imag: None,
             },
         );
-
+        let hdl_output = checks.hdl.clone();
         controller.accept_completion(
             &mut state,
             &export_io,
             Ok(crate::simulation::SimulationResult::Transient {
                 spectra: Vec::new(),
-                checks: Default::default(),
-                hdl_output: vec![
-                    record(HdlStream::Stdout, "edge 1\n"),
-                    record(
-                        HdlStream::Diagnostic {
-                            severity: HdlSeverity::Error,
-                        },
-                        "out stuck low\n",
-                    ),
-                    record(
-                        HdlStream::Diagnostic {
-                            severity: HdlSeverity::Fatal,
-                        },
-                        "giving up\n",
-                    ),
-                ],
+                checks,
+                hdl_output,
                 time: vec![0.0, 1.0e-9],
                 waveforms,
                 measurements: Vec::new(),
@@ -673,27 +599,228 @@ mod tests {
                 events: Default::default(),
             }),
         );
+        (state, run_sequence)
+    }
 
+    fn hdl_record(
+        severity: rspice_core::config::HdlSeverity,
+        time: f64,
+        line: u32,
+        text: &str,
+    ) -> rspice_core::config::HdlOutputRecord {
+        use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlStream};
+        HdlOutputRecord {
+            point: HdlPoint::Transient { time },
+            tick: 1,
+            seconds: time,
+            stream: HdlStream::Diagnostic { severity },
+            text: format!("{text}\n"),
+            origin: HdlOrigin {
+                scope: "tb".to_owned(),
+                file: "tb.v".to_owned(),
+                line,
+            },
+        }
+    }
+
+    /// One Problems row: its code, level, scope, source line, message and
+    /// route.
+    type CheckRow = (
+        String,
+        rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel,
+        String,
+        Option<String>,
+        String,
+        Option<rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute>,
+    );
+
+    /// One row per check.
+    fn check_rows(state: &RunTestHost, run_sequence: u64) -> Vec<CheckRow> {
+        state
+            .model
+            .diagnostics
+            .published_run_records(run_sequence)
+            .into_iter()
+            .map(|record| {
+                (
+                    record.canonical.code.to_string(),
+                    record.level,
+                    record.subject.object.clone(),
+                    record.subject.source_line.clone(),
+                    record.message.clone(),
+                    record.route.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// A testbench that called `$error` and `$warning`, violated an
+    /// error-level `.ASSERT` and ended on `$fatal` gives exactly four
+    /// Problems rows, each with its severity, its time, its scope and its
+    /// source line. Its analysis completed: the run is Completed with its
+    /// results kept, and its check verdict is Failed. The `$fatal` is one row
+    /// although the engine reports it both as a record and as the finish.
+    #[test]
+    fn a_testbench_s_checks_are_one_problems_row_each_and_fail_its_verdict() {
+        use rspice_app_state::workbench::app_state::diagnostic_store::{
+            DiagnosticLevel, DiagnosticRoute,
+        };
+        use rspice_core::analysis::{AssertViolation, AssertionReport};
+        use rspice_core::config::HdlSeverity;
+        use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
+        use rspice_core::{ModelFinish, ModelFinishPoint, ModelFinishSource, ModelFinishTask};
+
+        let checks = rspice_simulation::results::SimulationChecks {
+            hdl: vec![
+                hdl_record(HdlSeverity::Error, 2.0e-9, 9, "out stuck low"),
+                hdl_record(HdlSeverity::Warning, 3.0e-9, 11, "slow edge"),
+                hdl_record(HdlSeverity::Fatal, 5.0e-9, 14, "giving up"),
+            ],
+            assertions: vec![AssertionReport {
+                name: "a".into(),
+                analysis: AssertAnalysis::Tran,
+                target: "V(out)".into(),
+                instance: None,
+                level: AssertLevel::Error,
+                message: None,
+                origin: NetlistSourceLocation::in_memory(5),
+                violations: vec![AssertViolation {
+                    start: Some(1.0e-9),
+                    end: None,
+                    extreme: Some(1.0),
+                    at: Some(1.0e-9),
+                }],
+                unknown_stretches: 0,
+                error: None,
+            }],
+            finish: Some(ModelFinish {
+                instance: "tb".into(),
+                model: "tb".into(),
+                site: 0,
+                point: ModelFinishPoint::Transient { time: 5.0e-9 },
+                diagnostic_level: 1,
+                task: ModelFinishTask::Fatal,
+                source: Some(ModelFinishSource {
+                    file: "tb.v".into(),
+                    line: 14,
+                }),
+                message: Some("giving up".into()),
+            }),
+        };
+        let (state, run_sequence) = complete_with_checks(checks);
+
+        let deck_line = Some(DiagnosticRoute::Repair(
+            crate::state::PreflightRemediation::NetlistSource { line: Some(5) },
+        ));
+        assert_eq!(
+            check_rows(&state, run_sequence),
+            [
+                (
+                    "HDL-ERROR".to_owned(),
+                    DiagnosticLevel::Error,
+                    "tb".to_owned(),
+                    Some("tb.v:9".to_owned()),
+                    "$error at t = 2ns: out stuck low".to_owned(),
+                    None,
+                ),
+                (
+                    "HDL-WARNING".to_owned(),
+                    DiagnosticLevel::Warning,
+                    "tb".to_owned(),
+                    Some("tb.v:11".to_owned()),
+                    "$warning at t = 3ns: slow edge".to_owned(),
+                    None,
+                ),
+                (
+                    "HDL-FATAL".to_owned(),
+                    DiagnosticLevel::Error,
+                    "tb".to_owned(),
+                    Some("tb.v:14".to_owned()),
+                    "$fatal at t = 5ns: giving up".to_owned(),
+                    None,
+                ),
+                (
+                    "ASSERT-VIOLATED".to_owned(),
+                    DiagnosticLevel::Error,
+                    "a".to_owned(),
+                    Some("line 5".to_owned()),
+                    "1 violation, first [1ns, open), extreme 1 at 1ns".to_owned(),
+                    deck_line,
+                ),
+            ]
+        );
         let run = state
             .model
             .simulation
             .retained
             .run_by_sequence(run_sequence)
             .expect("the run is retained");
-        assert!(!run.success, "the run did not pass");
-        assert_eq!(run.analyses.len(), 1);
+        assert_eq!(
+            run.lifecycle,
+            crate::state::SimulationRunLifecycle::Completed
+        );
+        assert!(run.success, "the analysis completed");
         assert!(run.analyses[0].success, "its results stay available");
         assert_eq!(
-            state.model.diagnostics.published_run_failures(run_sequence),
-            [(
-                format!("Transient · run {run_sequence}"),
-                "Testbench reported 2 errors: out stuck low".to_owned()
-            )]
+            run.check_verdict(),
+            Some(rspice_results::analysis_result::CheckVerdict::Failed)
         );
-        let summary = &run.log.lines().last().expect("a closed log").message;
-        assert!(
-            summary.starts_with(&format!("Run {run_sequence} completed with errors in ")),
-            "{summary}"
+    }
+
+    /// A run whose checks reported nothing files no row and claims no
+    /// verdict: having checked nothing, it has passed nothing.
+    #[test]
+    fn a_run_without_checks_files_no_row_and_claims_no_verdict() {
+        let (state, run_sequence) = complete_with_checks(Default::default());
+        assert!(check_rows(&state, run_sequence).is_empty());
+        let run = state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .expect("the run is retained");
+        assert_eq!(
+            run.lifecycle,
+            crate::state::SimulationRunLifecycle::Completed
+        );
+        assert_eq!(run.check_verdict(), None);
+    }
+
+    /// Warnings alone warn: the rows are warnings and the verdict is Warned.
+    /// A `$finish` that ended the run is no row and does not fail it.
+    #[test]
+    fn warnings_alone_give_a_warned_verdict() {
+        use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
+        use rspice_core::config::HdlSeverity;
+        use rspice_core::{ModelFinish, ModelFinishPoint, ModelFinishTask};
+
+        let checks = rspice_simulation::results::SimulationChecks {
+            hdl: vec![hdl_record(HdlSeverity::Warning, 3.0e-9, 11, "slow edge")],
+            assertions: Vec::new(),
+            finish: Some(ModelFinish {
+                instance: "tb".into(),
+                model: "tb".into(),
+                site: 0,
+                point: ModelFinishPoint::Transient { time: 6.0e-9 },
+                diagnostic_level: 1,
+                task: ModelFinishTask::Finish,
+                source: None,
+                message: None,
+            }),
+        };
+        let (state, run_sequence) = complete_with_checks(checks);
+        let rows = check_rows(&state, run_sequence);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].1, DiagnosticLevel::Warning);
+        let run = state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .expect("the run is retained");
+        assert_eq!(
+            run.check_verdict(),
+            Some(rspice_results::analysis_result::CheckVerdict::Warned)
         );
     }
 }

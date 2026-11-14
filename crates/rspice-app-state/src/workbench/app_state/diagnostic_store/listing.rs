@@ -452,6 +452,7 @@ pub fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<Diagnostic
                     .cell_view
                     .as_ref()
                     .map(|reference| reference.display_path())
+                    .or_else(|| record.subject.source_line.clone())
                     .unwrap_or_default(),
                 message: record.message.as_str(),
                 details: record.details.as_str(),

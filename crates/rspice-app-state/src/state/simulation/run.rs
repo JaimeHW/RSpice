@@ -111,6 +111,20 @@ impl SimulationRun {
         self.data.execution_identity()
     }
 
+    /// What the checks of this run's analyses say of it, worst first: a
+    /// `$error` in one analysis fails the run whatever the others reported.
+    /// `None` when no analysis reported a check, because a run that checked
+    /// nothing has not passed anything.
+    #[must_use]
+    pub fn check_verdict(&self) -> Option<rspice_results::analysis_result::CheckVerdict> {
+        self.data
+            .analyses
+            .iter()
+            .filter(|analysis| !analysis.checks.is_empty())
+            .map(|analysis| analysis.checks.verdict())
+            .max()
+    }
+
     /// Publish or refresh the single provisional result for an in-flight
     /// prepared task. This does not change run success: the task has not
     /// reached a terminal outcome yet.

@@ -69,7 +69,7 @@ fn checks_run() -> &'static SimulationRun {
                  v1 in 0 PULSE(0 1 5n 1n 1n 20n 40n)\nr2 in 0 1k\n.tran 0.1n 100n\n\
                  .ASSERT plow COND='D(p)==0' LEVEL=ERROR MESSAGE='p must stay low'\n.end\n"
             ),
-            SimulationRunLifecycle::Failed,
+            SimulationRunLifecycle::Completed,
         )
     })
 }
@@ -654,7 +654,7 @@ fn write_the_c12_picture() {
     let deck = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/mixed-corpus/c12-ldo-tb/deck/fail.tran.cir");
     let source = std::fs::read_to_string(&deck).expect("the corpus deck is readable");
-    let run = run_manual_batch_at(&source, &deck, SimulationRunLifecycle::Failed);
+    let run = run_manual_batch_at(&source, &deck, SimulationRunLifecycle::Completed);
     let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs.push(run);
     state.model.simulation.view.active_run_idx = Some(0);

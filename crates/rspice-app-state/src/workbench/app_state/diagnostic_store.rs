@@ -25,6 +25,7 @@ pub(crate) mod current;
 pub mod digest_memo;
 pub mod listing;
 pub mod producers;
+mod run_checks;
 pub mod run_notices;
 
 use std::collections::{BTreeMap, HashMap};
@@ -144,6 +145,10 @@ pub struct DiagnosticSubject {
     pub(in crate::workbench) project: ProjectId,
     pub cell_view: Option<CellViewRef>,
     pub object: String,
+    /// The source line the object was written on, `tb.v:40`, for a finding a
+    /// run's checks stated against a call or a card rather than a drawn
+    /// object. The location column prints it where no cell view is named.
+    pub source_line: Option<String>,
 }
 
 impl DiagnosticSubject {
@@ -152,11 +157,17 @@ impl DiagnosticSubject {
             project,
             cell_view: None,
             object: object.into(),
+            source_line: None,
         }
     }
 
     pub fn in_cell_view(mut self, cell_view: CellViewRef) -> Self {
         self.cell_view = Some(cell_view);
+        self
+    }
+
+    pub fn on_source_line(mut self, source_line: Option<String>) -> Self {
+        self.source_line = source_line;
         self
     }
 }
@@ -1088,6 +1099,17 @@ impl DiagnosticStore {
             .filter(|batch| batch.inputs == DiagnosticInputs::Run { run_sequence })
             .flat_map(|batch| batch.records.iter())
             .map(|record| (record.subject.object.clone(), record.message.clone()))
+            .collect()
+    }
+
+    /// Every record the store holds for one run, in the batch's order, for
+    /// the controller's tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn published_run_records(&self, run_sequence: u64) -> Vec<&DiagnosticRecord> {
+        self.batches
+            .values()
+            .filter(|batch| batch.inputs == DiagnosticInputs::Run { run_sequence })
+            .flat_map(|batch| batch.records.iter())
             .collect()
     }
 
