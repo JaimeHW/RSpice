@@ -18,8 +18,8 @@ const RASTER_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
 #[test]
 fn a_breadcrumb_level_opens_the_occurrence_it_names() {
     let mut app = RSpiceApp::test_instance();
-    descended(&mut app.state, "XAFE", "afe_core");
-    descended(&mut app.state, "XBIAS", "bias");
+    descended(&mut app.state.model, "XAFE", "afe_core");
+    descended(&mut app.state.model, "XBIAS", "bias");
 
     let crumbs = hierarchy_breadcrumb_segments(&app.state.model);
     let levels: Vec<Option<usize>> = crumbs.iter().map(|crumb| crumb.level).collect();
@@ -78,7 +78,7 @@ fn a_breadcrumb_level_opens_the_occurrence_it_names() {
 fn breadcrumb_segments_render_instance_and_master() {
     fn render(instance: &str, master: &str) -> crate::ui::raster::Canvas {
         let mut app = RSpiceApp::test_instance();
-        descended(&mut app.state, instance, master);
+        descended(&mut app.state.model, instance, master);
         crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
             breadcrumb(
                 ui.ctx(),

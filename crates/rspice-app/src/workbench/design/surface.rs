@@ -591,17 +591,21 @@ fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::workbench::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    fn crumb_labels(state: &AppState) -> Vec<String> {
+    fn crumb_labels(state: &DesignTestHost) -> Vec<String> {
         hierarchy_breadcrumb_segments(&state.model)
             .into_iter()
             .map(|crumb| crumb.label)
             .collect()
     }
 
-    pub(crate) fn descended(state: &mut AppState, instance: &str, cell: &str) {
-        state.model.workspace.descend_into(
+    pub(crate) fn descended(
+        model: &mut crate::workbench::app_state::Model,
+        instance: &str,
+        cell: &str,
+    ) {
+        model.workspace.descend_into(
             instance.to_owned(),
             crate::state::CellViewRef::new("user", cell, "schematic"),
             ViewType::Schematic,
@@ -610,14 +614,14 @@ pub(crate) mod tests {
 
     #[test]
     fn the_full_breadcrumb_names_the_root_cellview_then_the_occurrence_below_it() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         assert_eq!(
             crumb_labels(&state),
             vec!["user".to_owned(), "top".to_owned(), "schematic".to_owned()],
             "the design root owns no path segment"
         );
 
-        descended(&mut state, "XAFE", "afe_core");
+        descended(&mut state.model, "XAFE", "afe_core");
         assert_eq!(
             crumb_labels(&state),
             vec![
@@ -628,7 +632,7 @@ pub(crate) mod tests {
             ]
         );
 
-        descended(&mut state, "XBIAS", "bias");
+        descended(&mut state.model, "XBIAS", "bias");
         assert_eq!(
             state.model.workspace.content.occurrence_path().to_string(),
             "/XAFE/XBIAS"

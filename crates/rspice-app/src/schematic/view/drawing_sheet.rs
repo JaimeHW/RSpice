@@ -1,13 +1,13 @@
 //! The drawing sheet on the schematic canvas: its frame, and the overflow
 //! advisories the model holds for it, painted every frame.
 
-#[cfg(test)]
-use super::AppState;
 use super::viewport::Viewport;
 use super::{
     SchematicSymbolContext,
     parts::{CanvasFacts, CanvasParts},
 };
+#[cfg(test)]
+use crate::workbench::design::test_host::DesignTestHost;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
@@ -80,12 +80,12 @@ pub(super) fn refresh_overflow_summary(
 /// through the drawing as `state` shows it.
 #[cfg(test)]
 pub(super) fn drawing_sheet_overflow_summary(
-    state: &AppState,
+    state: &DesignTestHost,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> sheet_view::DrawingSheetOverflowSummary {
     state.model.overflow_summary(
-        review_markers(&super::canvas_facts(state)),
+        review_markers(&crate::workbench::design::test_host::canvas_facts(state)),
         symbol_context,
         sheet,
     )
@@ -96,6 +96,7 @@ mod tests {
     use super::super::schematic_symbol_context;
     use super::*;
     use crate::state::{Point, Wire};
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
     use rspice_schematic_editor::view::drawing_sheet::{
         DrawingSheetGeometry, DrawingSheetOverflowTarget,
     };
@@ -106,7 +107,7 @@ mod tests {
     /// frame.
     #[test]
     fn content_inside_the_filing_border_is_reported() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn overflow_navigation_selects_and_centers_the_exact_current_target() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -155,7 +156,7 @@ mod tests {
             drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).items[0].center()
         };
 
-        let markers = review_markers(&crate::schematic::view::canvas_facts(&state));
+        let markers = review_markers(&canvas_facts(&state));
         assert!(state.model.show_first_drawing_sheet_overflow(markers));
         assert_eq!(
             state.model.schematic.session.editor.selection.single_wire(),
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn the_overflow_summary_is_held_until_the_drawing_or_sheet_changes() {
         let overflowing = || {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             state
                 .model
                 .schematic
@@ -190,7 +191,7 @@ mod tests {
                 ));
             state
         };
-        let held = |state: &AppState, sheet: &ActiveDrawingSheet| {
+        let held = |state: &DesignTestHost, sheet: &ActiveDrawingSheet| {
             let symbol_context = schematic_symbol_context(state);
             state
                 .model
@@ -199,9 +200,9 @@ mod tests {
                 .overflow_summary
                 .current(&state.model.overflow_key(&symbol_context, sheet))
         };
-        let hold = |state: &mut AppState, sheet: &ActiveDrawingSheet| {
+        let hold = |state: &mut DesignTestHost, sheet: &ActiveDrawingSheet| {
             let symbol_context = schematic_symbol_context(state);
-            let review_markers = review_markers(&crate::schematic::view::canvas_facts(state));
+            let review_markers = review_markers(&canvas_facts(state));
             state
                 .model
                 .hold_overflow_summary(review_markers, &symbol_context, sheet);
@@ -228,7 +229,7 @@ mod tests {
         moved.geometry.content_area.max_x += 400.0;
         assert!(held(&state, &moved).is_none(), "sheet geometry");
 
-        type Change = (&'static str, fn(&mut AppState));
+        type Change = (&'static str, fn(&mut DesignTestHost));
         let changes: [Change; 3] = [
             ("topology", |state| {
                 state.model.schematic.bump_topology_version()
