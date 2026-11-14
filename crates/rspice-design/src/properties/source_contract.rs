@@ -320,11 +320,13 @@ fn pulse_findings(
             "A negative PW is read as 0 — the pulse becomes a triangle with no flat top",
         ));
     }
-    // A non-positive authored PER is replaced by the edge-to-edge time.
+    // A non-positive authored PER is replaced: by the edge-to-edge time under
+    // RSpice's own rules (as LTspice runs it), by TSTOP under the ngspice
+    // dialect (the ngspice manual, §4.1.1).
     if fields.number("per").is_some_and(|period| period <= 0.0) {
         findings.push(SourceContractFinding::advisory(
             "per",
-            "PER of 0 does not mean one shot: the engine repeats on TR + PW + TF",
+            "PER of 0 is not a period: RSpice's own rules repeat on TR + PW + TF, the ngspice dialect fires once",
         ));
     }
     if let (Some(rise), Some(width), Some(fall), Some(period)) = (
@@ -362,8 +364,9 @@ fn pulse_findings(
 
 /// `SIN(VO VA FREQ TD THETA PHASE)`.
 ///
-/// No refusals: `resolve_sin_frequency` substitutes for a zero frequency and
-/// keeps a negative one, and the damping term is evaluated as authored.
+/// No refusals: `resolve_sin_frequency` substitutes for a zero frequency under
+/// the ngspice dialect alone and keeps a negative one, and the damping term is
+/// evaluated as authored.
 fn sin_findings(
     kind: ComponentType,
     fields: &SourceFields<'_>,
@@ -377,7 +380,7 @@ fn sin_findings(
     {
         findings.push(SourceContractFinding::advisory(
             "freq",
-            "A FREQ of 0 is not DC: the engine substitutes 1 / TSTOP of the analysis that runs it",
+            "A FREQ of 0 holds the source at VO under RSpice's own rules, as QSPICE, LTspice and Xyce run it; the ngspice dialect substitutes 1 / TSTOP",
         ));
     }
     if fields
@@ -405,16 +408,19 @@ fn sin_findings(
 
 /// `EXP(V1 V2 TD1 TAU1 TD2 TAU2)`.
 ///
-/// `resolve_exp_timing` treats an authored zero exactly like an omitted field,
-/// so the sheet's own zero defaults are substituted rather than honoured. No
-/// refusals: an out-of-order pair runs.
+/// `resolve_exp_timing` reads an authored zero TAU1, TD2 or TAU2 by the
+/// dialect: RSpice's own rules run a zero time constant as an ideal step and a
+/// zero TD2 as a fall that starts with the rise, as QSPICE and LTspice do; the
+/// ngspice dialect reads each zero as omitted, as its manual says. A zero TD1
+/// is its default everywhere and stands. No refusals: an out-of-order pair
+/// runs.
 fn exp_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
-    for (field, label) in [("td1", "TD1"), ("tau1", "TAU1"), ("tau2", "TAU2")] {
+    for (field, label) in [("tau1", "TAU1"), ("tau2", "TAU2")] {
         if fields.number(field).is_some_and(|value| value == 0.0) {
             findings.push(SourceContractFinding::advisory(
                 field,
                 format!(
-                    "A {label} of 0 is read as omitted: the engine substitutes the analysis TSTEP"
+                    "A {label} of 0 is an ideal step under RSpice's own rules, as QSPICE and LTspice run it; the ngspice dialect substitutes the analysis TSTEP"
                 ),
             ));
         }
@@ -422,7 +428,7 @@ fn exp_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFind
     if fields.number("td2").is_some_and(|delay| delay == 0.0) {
         findings.push(SourceContractFinding::advisory(
             "td2",
-            "A TD2 of 0 is read as omitted: the engine substitutes TD1 + the analysis TSTEP",
+            "A TD2 of 0 starts the decay at TD1 under RSpice's own rules, as QSPICE and LTspice run it; the ngspice dialect substitutes TD1 + the analysis TSTEP",
         ));
     }
     for (field, label) in [("tau1", "TAU1"), ("tau2", "TAU2")] {
@@ -917,18 +923,18 @@ mod tests {
         );
     }
 
-    /// The sheet's own TD1 default is zero, so this advisory is what a freshly
-    /// placed EXP source says about itself.
+    /// The sheet's own TD1 default is zero, and a zero TD1 starts the rise at
+    /// time zero as its label says: TD1's default is 0 in the ngspice manual
+    /// (§4.1.3), the Xyce Reference Guide and LTspice alike, so a freshly placed
+    /// EXP source earns no advisory about its delay.
     #[test]
-    fn a_zero_exp_delay_is_advised_as_omitted() {
+    fn a_zero_exp_delay_starts_the_rise_at_time_zero() {
         let findings = findings_for(
             ComponentType::VoltageSourceExp,
             &[("td1", "0"), ("tau1", "1u"), ("td2", "5u"), ("tau2", "1u")],
         );
         assert!(
-            advisories(&findings)
-                .iter()
-                .any(|finding| finding.field == "td1" && finding.message.contains("TSTEP")),
+            !findings.iter().any(|finding| finding.field == "td1"),
             "{findings:?}"
         );
     }
