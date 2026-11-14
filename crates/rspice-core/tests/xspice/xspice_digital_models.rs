@@ -5,36 +5,24 @@ use rspice_core::analysis::transient::{EventOnlyNetKind, EventTraceSurface};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, ParamType, PortConnection, XspiceInstance, clear_registered_data_files,
-    register_data_file,
+    CodeModelRegistry, ParamType, PortConnection, XspiceInstance, register_data_file,
+    unregister_data_file,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use crate::toggle_peer::{
     ProcessExchangeLog, ProcessFactoryGuard, TOGGLE_PEER_DECK, assert_toggle_peer_matches_ngspice,
 };
 
-static DATA_FILE_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+/// Unregisters one virtual data file when the test ends. Every XSPICE test shares this
+/// executable's registry, so a test removes only the file it registered.
+struct RegisteredDataFile(&'static str);
 
-struct DataFileRegistryGuard {
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl DataFileRegistryGuard {
-    fn new() -> Self {
-        let lock = DATA_FILE_REGISTRY_LOCK
-            .lock()
-            .expect("lock XSPICE data-file registry test guard");
-        clear_registered_data_files().expect("clear XSPICE data-file registry");
-        Self { _lock: lock }
-    }
-}
-
-impl Drop for DataFileRegistryGuard {
+impl Drop for RegisteredDataFile {
     fn drop(&mut self) {
-        let _ = clear_registered_data_files();
+        let _ = unregister_data_file(self.0);
     }
 }
 
@@ -1515,7 +1503,7 @@ fn run_temp_deck(
 
 #[test]
 fn d_source_reads_registered_virtual_data_file_and_invalidates_cache_on_replace() {
-    let _guard = DataFileRegistryGuard::new();
+    let _file = RegisteredDataFile("virtual://d_source/stim");
 
     let deck = "\
 * d_source virtual data file

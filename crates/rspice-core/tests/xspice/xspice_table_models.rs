@@ -3,33 +3,19 @@
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, PortConnection, XspiceInstance, clear_registered_data_files,
-    register_data_file,
+    CodeModelRegistry, PortConnection, XspiceInstance, register_data_file, unregister_data_file,
 };
 use rspice_core::{Complex64, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
 
-static DATA_FILE_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+/// Unregisters one virtual data file when the test ends. Every XSPICE test shares this
+/// executable's registry, so a test removes only the file it registered.
+struct RegisteredDataFile(&'static str);
 
-struct DataFileRegistryGuard {
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl DataFileRegistryGuard {
-    fn new() -> Self {
-        let lock = DATA_FILE_REGISTRY_LOCK
-            .lock()
-            .expect("lock XSPICE data-file registry test guard");
-        clear_registered_data_files().expect("clear XSPICE data-file registry");
-        Self { _lock: lock }
-    }
-}
-
-impl Drop for DataFileRegistryGuard {
+impl Drop for RegisteredDataFile {
     fn drop(&mut self) {
-        let _ = clear_registered_data_files();
+        let _ = unregister_data_file(self.0);
     }
 }
 
@@ -200,7 +186,7 @@ fn quadratic_table2d_with_axes(xs: &[i32], ys: &[i32]) -> String {
 
 #[test]
 fn table2d_reads_registered_virtual_data_file() {
-    let _guard = DataFileRegistryGuard::new();
+    let _file = RegisteredDataFile("virtual://table/simple");
     register_data_file(
         "virtual://table/simple",
         "\
