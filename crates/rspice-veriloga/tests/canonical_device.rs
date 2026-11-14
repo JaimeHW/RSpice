@@ -8907,7 +8907,9 @@ instance.validate_parameters().unwrap();
 /// in time, `$abstime`, or a variable the next evaluation reads back after
 /// the body assigned it. A variable an event body writes but the body
 /// recomputes before every read is not history, nor is one only the initial
-/// step sets from parameters, which harmonic balance evaluates once. A `ddt` that is not the
+/// step sets from parameters, which harmonic balance evaluates once, nor one
+/// assigned under every parameter test that guards its reads, however many
+/// merges decide it. A `ddt` that is not the
 /// derivative of a contributed charge, and every `idt`, is a site harmonic
 /// balance carries as an unknown of its own, listed in site order; one only a
 /// bias-dependent branch reads is still evaluated on every sample.
@@ -8996,6 +8998,22 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
             "d = V(p,n)*ddt(V(p,n)); if (V(p,n) > 0) I(p,n) <+ d;",
             None,
             "Derivative",
+        ),
+        // Assigned under one parameter test and read under a narrower one,
+        // through ten clips of the parameter, each a merge of the one before.
+        (
+            13,
+            "parameter real a = 2; real a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, m;",
+            "a1 = a; if (a1 < 0) a1 = 0; \
+             a2 = a1; if (a2 < 0) a2 = 0; a3 = a2; if (a3 < 0) a3 = 0; \
+             a4 = a3; if (a4 < 0) a4 = 0; a5 = a4; if (a5 < 0) a5 = 0; \
+             a6 = a5; if (a6 < 0) a6 = 0; a7 = a6; if (a7 < 0) a7 = 0; \
+             a8 = a7; if (a8 < 0) a8 = 0; a9 = a8; if (a9 < 0) a9 = 0; \
+             a10 = a9; if (a10 < 0) a10 = 0; \
+             if (a10 > 0) m = exp(V(p,n)); \
+             if (a10 > 1) I(p,n) <+ 1e-3*m; else I(p,n) <+ V(p,n);",
+            None,
+            "",
         ),
     ] {
         let source = format!(

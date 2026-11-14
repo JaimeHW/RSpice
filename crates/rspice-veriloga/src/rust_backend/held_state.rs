@@ -460,42 +460,61 @@ impl<'a> HeldStateProof<'a> {
 
     /// Alternate between the instance-static values and the reach formulas
     /// their conditions give, until no further merge is proved static.
+    ///
+    /// Each merge proved static can make the next one's arguments static, so
+    /// a chain of them (PSP 103's `LGSOURCE_i` is `CLIP_LOW` of `LGS_i`, a
+    /// merge of `jww`, itself a merge of `WE` and `JW_i`) is proved one link
+    /// a pass. A merge is proved on reach formulas that over-approximate the
+    /// paths, which is sound, so a pass proves every link it can on the
+    /// reach it starts with before the newly static conditions refine it.
+    /// Every pass that goes on proves a merge, so the passes end.
     fn solve(&mut self) -> Proved<()> {
-        for _ in 0..8 {
+        loop {
             self.mark_instance_static();
             self.truth.clear();
             self.compared.clear();
             self.compute_reach()?;
             self.consistent = self.consistency()?;
-            let mut proved = Vec::new();
-            for (&merge, incoming) in &self.merges {
-                if !self.static_merges.contains(&merge)
-                    && incoming
-                        .iter()
-                        .all(|&(_, arg)| self.instance_static[usize::from(arg)])
-                {
-                    proved.push(merge);
-                }
-            }
-            proved.sort_unstable();
             let mut grew = false;
-            for merge in proved {
-                if self.selection_is_fixed(merge, true)? {
-                    let selection = self.merges[&merge]
-                        .iter()
-                        .map(|&(edge, arg)| (self.edge_reach[edge], arg))
-                        .filter(|&(reach, _)| reach != FALSE)
-                        .collect();
-                    self.selections.insert(merge, selection);
-                    self.static_merges.insert(merge);
-                    grew = true;
-                }
+            while self.prove_static_merges()? {
+                grew = true;
+                self.mark_instance_static();
             }
             if !grew {
                 return Ok(());
             }
         }
-        Ok(())
+    }
+
+    /// Prove static, on the present reach formulas, each merge whose
+    /// arguments are all instance-static and whose selection σ fixes;
+    /// whether any was.
+    fn prove_static_merges(&mut self) -> Proved<bool> {
+        let mut proved = Vec::new();
+        for (&merge, incoming) in &self.merges {
+            if !self.static_merges.contains(&merge)
+                && incoming
+                    .iter()
+                    .all(|&(_, arg)| self.instance_static[usize::from(arg)])
+            {
+                proved.push(merge);
+            }
+        }
+        proved.sort_unstable();
+        let mut grew = false;
+        for merge in proved {
+            if self.selection_is_fixed(merge, true)? {
+                let selection = self.merges[&merge]
+                    .iter()
+                    .map(|&(edge, arg)| (self.edge_reach[edge], arg))
+                    .filter(|&(reach, _)| reach != FALSE)
+                    .collect();
+                self.selections.insert(merge, selection);
+                self.static_merges.insert(merge);
+                grew = true;
+            }
+        }
+        Ok(grew)
     }
 
     /// Whether every pair of edges into `merge` that pass different values

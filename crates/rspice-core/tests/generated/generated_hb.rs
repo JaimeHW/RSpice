@@ -558,6 +558,23 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 psp102eva\n",
             "d",
         ),
+        // Gear's rule for every PSP 103 build, chosen before the first
+        // comparison: a start from rest gives the charges an inconsistent
+        // derivative, which it damps in a few steps, as for PSP 102 above.
+        #[cfg(feature = "veriloga-model-psp103va")]
+        (
+            "MOSFET (PSP 103)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 psp103va\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp103tva")]
+        (
+            "self-heating MOSFET (PSP 103)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 t psp103tva\n.options method=gear\n",
+            "d",
+        ),
         #[cfg(feature = "veriloga-model-psp104va")]
         (
             "MOSFET (PSP 104)",
@@ -596,6 +613,13 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
             "non-quasi-static MOSFET (PSP 102, electrical)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
                  M1 d g 0 0 nq\n.model nq PSPNQS102EVA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs103va")]
+        (
+            "non-quasi-static MOSFET (PSP 103)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS103VA SWNQS=3\n.options method=gear\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-pspnqs104va")]
@@ -781,8 +805,8 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 /// A generated model whose generator could not prove its residual
 /// `F(x) + dQ(x)/dt` is refused before solving, by instance and module, with
 /// the generator's reason: a variable read before the body assigns it on a
-/// path its parameters do not rule out (PSP 103, BSIM-CMG 107). So is one
-/// whose harmonics no settled transient has confirmed, with what is missing
+/// path its parameters do not rule out (BSIM-CMG 107). So is one whose
+/// harmonics no settled transient has confirmed, with what is missing
 /// (BSIM-SOI 4.6.1 and e2aff994).
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
@@ -800,15 +824,6 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
 /// ends with.
 fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     vec![
-        #[cfg(feature = "veriloga-model-psp103va")]
-        (
-            "XM d d 0 0 psp103va",
-            "XM",
-            "psp103va",
-            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
-             path their parameters do not rule out, so they keep their values from the last \
-             accepted time point, which no harmonic-balance spectrum carries",
-        ),
         #[cfg(feature = "veriloga-model-bsimcmg107")]
         (
             "XM d d 0 0 bsimcmg107",
@@ -831,24 +846,6 @@ fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static s
             "XM",
             "bsimsoi_va",
             "harmonic balance and the transient disagree on the fundamental by a factor of 9",
-        ),
-        #[cfg(feature = "veriloga-model-psp103tva")]
-        (
-            "XM d d 0 0 t psp103tva",
-            "XM",
-            "psp103tva",
-            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
-             path their parameters do not rule out, so they keep their values from the last \
-             accepted time point, which no harmonic-balance spectrum carries",
-        ),
-        #[cfg(feature = "veriloga-model-pspnqs103va")]
-        (
-            "XM d d 0 0 pspnqs103va",
-            "XM",
-            "pspnqs103va",
-            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
-             path their parameters do not rule out, so they keep their values from the last \
-             accepted time point, which no harmonic-balance spectrum carries",
         ),
     ]
 }
