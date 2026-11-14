@@ -182,7 +182,8 @@ fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths()
             .iter()
             .map(|point| point.value_code)
             .collect::<Vec<_>>(),
-        [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 12]
+        // A high-impedance strength is written `z` whatever its level, as ngspice does.
+        [0, 0, 12, 0, 1, 1, 12, 1, 2, 2, 12, 2, 12]
     );
     assert_eq!(digital_traces[0].points.len(), points.len());
     for (retained, (time, _)) in digital_traces[0].points.iter().zip(&points) {
