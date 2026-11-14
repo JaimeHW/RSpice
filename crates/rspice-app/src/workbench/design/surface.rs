@@ -1,7 +1,7 @@
 //! Hierarchical design document surface.
 
 mod layout_editor;
-mod netlist_first;
+pub(crate) mod netlist_first;
 mod tool_options;
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};

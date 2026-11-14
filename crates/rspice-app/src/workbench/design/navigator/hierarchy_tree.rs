@@ -891,7 +891,7 @@ pub(super) fn occurrence_band_count(
 }
 
 /// The Occurrences group: the design root and everything unfolded below it.
-pub(super) fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let query = normalized(cx.wb.navigator_filter());
     let Some(projection) = resolved_projection(ui, cx.model, DesignNavigatorSection::Occurrences)
     else {
@@ -1135,7 +1135,7 @@ fn reveal_canvas_selection(model: &Model, tree: &mut NavigatorTreeState) {
 /// onto a blank schematic belonging to no cell. Ascending to the shared prefix
 /// and descending only the rest is what keeps a click on a sibling from
 /// re-entering every level it already stands on.
-pub(super) fn open_occurrence(
+pub(crate) fn open_occurrence(
     design: &mut DesignState,
     model: &mut Model,
     wb: &mut WorkbenchSession,

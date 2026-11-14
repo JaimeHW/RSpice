@@ -405,7 +405,7 @@ const SHELF_ENTRY_FIELD: char = '\u{1f}';
 /// a personal pin outlives the session, the project, and — for a part whose
 /// library is currently detached — this build's ability to draw it at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ShelfEntry {
+pub(crate) enum ShelfEntry {
     Primitive(ComponentType),
     /// A palette row that places a primitive with a symbol skin and model,
     /// by its label.
@@ -456,7 +456,7 @@ impl ShelfEntry {
     /// A primitive is spelled with its own serde name — the same spelling
     /// every saved project already uses for that type — so the pin set and
     /// the document agree on one vocabulary.
-    pub(super) fn storage_key(&self) -> String {
+    pub(crate) fn storage_key(&self) -> String {
         match self {
             Self::Primitive(kind) => {
                 let name = match serde_json::to_value(kind) {
@@ -535,7 +535,7 @@ pub(super) fn is_pinned(model: &Model, entry: &ShelfEntry) -> bool {
 /// muscle memory that is the whole reason to have it. The first call also
 /// materializes the shipped default into the reader's own set, which is what
 /// makes that default stop applying.
-pub(super) fn toggle_pin(model: &mut Model, entry: &ShelfEntry) {
+pub(crate) fn toggle_pin(model: &mut Model, entry: &ShelfEntry) {
     let key = entry.storage_key();
     let mut keys = pinned_keys(model);
     if let Some(at) = keys.iter().position(|held| *held == key) {
@@ -549,7 +549,7 @@ pub(super) fn toggle_pin(model: &mut Model, entry: &ShelfEntry) {
 }
 
 /// Record one placement at the front of the history, deduplicated.
-pub(super) fn record_placement(model: &mut Model, entry: &ShelfEntry) {
+pub(crate) fn record_placement(model: &mut Model, entry: &ShelfEntry) {
     let key = entry.storage_key();
     let mut shelf = model.preferences.component_shelf();
     shelf.recent.retain(|held| *held != key);
@@ -1857,7 +1857,7 @@ pub(super) fn cell_candidates(model: &Model) -> Vec<CellCandidate> {
     library_cell_placement_candidates(&model.library_manager, &model.workspace)
 }
 
-pub(super) fn arm_primitive(
+pub(crate) fn arm_primitive(
     cx: &mut Cx<'_, DesignFeature>,
     kind: ComponentType,
     ctx: &egui::Context,

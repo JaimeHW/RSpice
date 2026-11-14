@@ -45,13 +45,13 @@ use crate::workbench::docks::navigator::{
 use crate::workbench::state::{ConsolePage, Workspace};
 
 mod find_matches;
-mod hierarchy_tree;
-mod shelf;
+pub(crate) mod hierarchy_tree;
+pub(crate) mod shelf;
 pub(crate) mod stimulus;
-pub(in crate::workbench) mod symbol;
+pub(crate) mod symbol;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 const PANEL_TABS_PADDING_X: f32 = 8.0;
 /// Clearance between the location line and the sheet scope beneath it, so the
@@ -422,7 +422,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
     desired.map(|width| width * scale)
 }
 
-fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let enter_rows = navigator_search(ui, cx.wb);
     let (occurrence, master, can_ascend) = navigator_path(&cx.model.workspace);
     let t = Tokens::get(ui.ctx());
@@ -604,7 +604,7 @@ fn net_is_in_scope(model: &Model, scope: SheetScope, net: &DesignNet) -> bool {
         .any(|id| sheet_visibility::object_is_in_scope(model, scope, id))
 }
 
-fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(cx.wb.navigator_filter());
     // The rail lists the nets the configured design has. When that design
@@ -1331,7 +1331,7 @@ fn rf_port_tooltip(
 /// or find it was the one rail whose rows answered to the pointer alone. The
 /// menu is offered only on the rows of the occurrence being edited, exactly as
 /// the hierarchy tree offers it only where its commands can act.
-fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(cx.wb.navigator_filter());
     let sources = whole_design_sources(cx.model)

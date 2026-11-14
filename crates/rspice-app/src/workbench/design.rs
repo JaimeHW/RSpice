@@ -7,7 +7,7 @@ pub(crate) mod commands;
 pub(crate) mod inspector;
 pub(crate) mod navigator;
 mod routed;
-pub(in crate::workbench) mod surface;
+pub(crate) mod surface;
 pub(crate) mod toolbar;
 
 use egui::Context;

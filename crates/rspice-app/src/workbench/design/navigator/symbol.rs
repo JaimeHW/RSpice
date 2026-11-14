@@ -22,7 +22,7 @@ use crate::workbench::slots::DesignState;
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let ports = active_symbol_ports(cx.model);
     // A document that will not load says why. The navigator must not invent
     // a structure for one it cannot read.

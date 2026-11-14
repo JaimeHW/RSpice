@@ -186,7 +186,7 @@ impl RSpiceApp {
 
     /// Carry out `command` the way pressing its key does.
     #[cfg(test)]
-    pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
+    pub(crate) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         self.execute_command_key(command.key());
     }
 }

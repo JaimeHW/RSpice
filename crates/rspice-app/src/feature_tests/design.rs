@@ -5,6 +5,9 @@
 mod inline_instance;
 mod inspector;
 mod inspector_veriloga_modules;
+mod navigator;
+mod netlist_first;
+mod shelf;
 mod stimulus_browser;
 mod stimulus_surface;
 mod symbol_inspector;
