@@ -66,14 +66,18 @@ License: stated per release, in that release's own license file.
   (SHA-256
   `245fdafcc9e0c7c65a38e187963b5b6c9cb6602180a43ef635e3428b6c416ea8`), and
   vendored unmodified: six modules (plain, binned and local, each with an NQS
-  variant) and their include files. The intellectual-property notice,
-  disclaimer and license are in `IP_NOTICE_DISCLAIMER_LICENSE` and
-  `IP_ACKNOWLEDGMENT`, copyright NXP Semiconductors, Delft University of
-  Technology and Arizona State University. Xyce 7.10 registers `PSP102VA` as
-  M LEVEL=102 from a copy that adds `M` and the binning labels `LMIN`/`LMAX`/
-  `WMIN`/`WMAX` to the unbinned module; that copy is not used here. The
-  authors' reference results for this release are published beside it as
-  `psp_VA_and_CMC_ref_data.tar.gz` and are not vendored.
+  variant) and their include files. One build-time patch beside it,
+  `vacode_102.5.0.patch`, initialises `mig` to `1.0e-40` as PSP 103.4.0 does
+  (PSP103_module.include:2652), because 102.5.0 divides by `mig` and by `sf`
+  in accumulation (`xg <= 0`); outputs are identical wherever 102.5.0 is
+  finite. The intellectual-property notice, disclaimer and license are in
+  `IP_NOTICE_DISCLAIMER_LICENSE` and `IP_ACKNOWLEDGMENT`, copyright NXP
+  Semiconductors, Delft University of Technology and Arizona State University.
+  Xyce 7.10 registers `PSP102VA` as M LEVEL=102 from a copy that adds `M` and
+  the binning labels `LMIN`/`LMAX`/`WMIN`/`WMAX` to the unbinned module; that
+  copy is not used here. The authors' reference results for this release are
+  published beside it as `psp_VA_and_CMC_ref_data.tar.gz` and are not
+  vendored.
 
 - `BSIMCMG107.0.0_20130712`, `BSIMCMG108.0.0_20140822` and
   `BSIMCMG110.0.0_20160101`: BSIM-CMG 107.0.0 (July 2013), 108.0.0 (August

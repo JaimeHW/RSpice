@@ -164,7 +164,8 @@ pub fn paramset_overload(module: &str) -> Option<(&str, usize)> {
 pub use parser::Parser;
 pub use preprocessor::{
     FileSystemSourceProvider, PreprocessedDependency, PreprocessedInclude, Preprocessor,
-    PreprocessorError, SourceDocument, SourceDocumentOrigin, SourceProvider, SourceProviderLimits,
+    PreprocessorError, ReleasePatchError, SourceDocument, SourceDocumentOrigin, SourceProvider,
+    SourceProviderLimits, patch_shipped_source,
 };
 pub use runtime_report::{
     BackendQualificationError, CompileDiagnostic, CompileDiagnosticPhase,

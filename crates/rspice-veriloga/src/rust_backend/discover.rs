@@ -22,7 +22,7 @@ use super::RustBackendError;
 use crate::{Preprocessor, preprocessor::MacroDef};
 
 pub const VERILOGA_DISCOVERY_SKIP_MARKER: &str = ".rspice-veriloga-skip";
-pub const VERILOGA_COMPILE_PROFILE_FILE_NAME: &str = ".rspice-veriloga-profile";
+pub use crate::preprocessor::VERILOGA_COMPILE_PROFILE_FILE_NAME;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerilogACompileProfile {

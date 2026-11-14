@@ -315,6 +315,45 @@ fn every_builtin_evaluates_finitely_at_its_probe_points() {
 /// node test reads the pattern as the whole truth about which equations can
 /// reach a node, so an entry outside it would be an equation the test cannot
 /// see.
+/// PSP 102.5.0 leaves `mig` at zero in accumulation and divides by it, which
+/// its release patch corrects (`models/veriloga/cmc/vacode_102.5.0.patch`).
+/// PSPNQS102EVA's third probe point found it; this holds every PSP 102 build
+/// to the fix, each with its gate nodes 1.4 V below its bulk nodes, beyond the
+/// default `VFB` of -1 V.
+#[test]
+fn every_psp102_build_is_finite_in_accumulation() {
+    let builds = builtins::builtin_names()
+        .iter()
+        .filter(|name| name.starts_with("PSP") && name.contains("102"));
+    for &model_name in builds {
+        let descriptor = builtins::descriptor(model_name).expect("a built-in has a descriptor");
+        let mut harness = GoldenHarness::new(model_name, &[]).expect("the harness instantiates it");
+        let names = descriptor
+            .terminals
+            .iter()
+            .map(|terminal| terminal.name)
+            .chain(descriptor.internal_node_names.iter().copied());
+        let mut point = vec![0.0; harness.size()];
+        for (unknown, name) in point.iter_mut().zip(names) {
+            match name.as_bytes().first() {
+                Some(b'G') => *unknown = -0.55,
+                Some(b'B') => *unknown = 0.85,
+                _ => {}
+            }
+        }
+        let record = harness
+            .evaluate(&point)
+            .unwrap_or_else(|error| panic!("{model_name}: {error}"));
+        let finite = record
+            .jacobian
+            .iter()
+            .chain(record.rhs.iter())
+            .chain(record.capacitance.iter())
+            .all(|value| value.is_finite());
+        assert!(finite, "{model_name} is not finite in accumulation");
+    }
+}
+
 #[test]
 fn every_builtin_writes_only_inside_its_stamp_pattern() {
     use std::collections::BTreeSet;

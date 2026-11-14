@@ -15,7 +15,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod admission;
+mod release_patch;
 pub use admission::{BoundedFileSystemSourceProvider, SourceResource, SourceResourceLimit};
+pub use release_patch::{
+    ReleasePatchError, VERILOGA_COMPILE_PROFILE_FILE_NAME, patch_shipped_source,
+};
 
 /// `__rspice_library (name);`, written ahead of each file of a unit a library
 /// map arranged: the file's modules are cells of library `name`.
@@ -123,6 +127,7 @@ impl FileSystemSourceProvider {
             .try_reserve(capacity)
             .map_err(|error| io_error(std::io::Error::other(error)))?;
         file.read_to_string(&mut source).map_err(io_error)?;
+        let source = release_patch::patch_shipped_file(&canonical, source)?;
         Ok(SourceDocument::provided(canonical, source))
     }
 }

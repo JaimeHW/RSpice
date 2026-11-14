@@ -1,5 +1,6 @@
 //! Embed the built-in Verilog-A model sources: the text the Library page shows
-//! read-only and a copy of a model starts from.
+//! read-only and a copy of a model starts from, with the release patches that
+//! correct them.
 
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -49,7 +50,9 @@ fn collect_sources(folder: &Path, found: &mut Vec<PathBuf>) {
         } else if path
             .extension()
             .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| matches!(extension, "va" | "include" | "inc" | "vams" | "h"))
+            .is_some_and(|extension| {
+                matches!(extension, "va" | "include" | "inc" | "vams" | "h" | "patch")
+            })
         {
             found.push(path);
         }

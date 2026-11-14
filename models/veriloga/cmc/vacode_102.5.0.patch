@@ -1,0 +1,14 @@
+PSP 102.5.0 leaves mig at zero outside its `xg > 0` branch, then divides by mig
+and by sf = 1e6 * CGeff * mig, so every build is not finite in accumulation.
+This is PSP 103.4.0's own initialisation (PSP103_module.include:2652).
+--- a/PSP102_module.include
++++ b/PSP102_module.include
+@@ -2588,7 +2588,7 @@
+             // 4.2.20 Noise variable calculation
+             Sfl        =  0.0;
+             mid        =  0.0;
+-            mig        =  0.0;
++            mig        =  1.0e-40;
+             migid      =  0.0;
+             c_igid     =  0.0;
+             CGeff      =  COX_qm * eta_p;

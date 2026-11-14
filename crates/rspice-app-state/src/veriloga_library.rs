@@ -697,9 +697,18 @@ pub fn builtin_veriloga_model(registry_name: &str) -> Option<&'static BuiltinVer
         .find(|model| model.registry_name == registry_name)
 }
 
-/// The embedded file at `path` relative to the model tree.
+/// The embedded file at `path` relative to the model tree, as the tree ships
+/// it: with the release patch beside a directory above it applied.
 #[must_use]
-pub fn builtin_veriloga_source(path: &str) -> Option<&'static str> {
+pub fn builtin_veriloga_source(path: &str) -> Option<String> {
+    let text = embedded_file(path)?;
+    let read = |file: &str| Ok(embedded_file(file).map(str::to_owned));
+    let shipped = rspice_veriloga::patch_shipped_source(path, text, read)
+        .unwrap_or_else(|error| panic!("the embedded model tree is the shipped one: {error}"));
+    Some(shipped.into_owned())
+}
+
+fn embedded_file(path: &str) -> Option<&'static str> {
     VERILOGA_SOURCES
         .binary_search_by_key(&path, |(file, _)| *file)
         .ok()
@@ -721,14 +730,14 @@ pub struct BuiltinVerilogASource {
 pub fn read_builtin_veriloga_model(model: &BuiltinVerilogAModel) -> BuiltinVerilogASource {
     let (folder, root) = model.root.rsplit_once('/').unwrap_or(("", model.root));
     let text = builtin_veriloga_source(model.root).unwrap_or_default();
-    let mut files = BTreeMap::from([(root.to_owned(), text.to_owned())]);
+    let mut files = BTreeMap::from([(root.to_owned(), text)]);
     let read = |logical: &str| {
         let path = if folder.is_empty() {
             logical.to_owned()
         } else {
             format!("{folder}/{logical}")
         };
-        builtin_veriloga_source(&normalized_path(&path)).map(str::to_owned)
+        builtin_veriloga_source(&normalized_path(&path))
     };
     let closure = resolve_veriloga_import(root, &mut files, &read);
     BuiltinVerilogASource {
@@ -809,6 +818,13 @@ mod tests {
     }
 
     /// A copy needs the whole closure and the module the row says it declares.
+    #[test]
+    fn a_release_reads_as_its_patch_ships_it() {
+        let module = builtin_veriloga_source("cmc/vacode_102.5.0/PSP102_module.include")
+            .expect("PSP 102.5.0 is embedded");
+        assert!(module.contains("mig        =  1.0e-40;"));
+    }
+
     #[test]
     fn every_model_reaches_all_its_includes_and_declares_its_module() {
         for model in BUILTIN_VERILOGA_MODELS {

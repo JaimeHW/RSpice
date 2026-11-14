@@ -138,6 +138,7 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
         let source = String::from_utf8(bytes).map_err(|error| {
             io_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
         })?;
+        let source = super::release_patch::patch_shipped_file(&path, source)?;
         self.admitted
             .borrow_mut()
             .insert(path.clone(), source.len());
