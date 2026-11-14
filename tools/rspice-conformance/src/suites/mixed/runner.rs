@@ -827,7 +827,7 @@ fn deck_ac_band(deck: &Path) -> Option<[f64; 2]> {
     let stop = values.next()?;
     let start = values.next()?;
     (start > 0.0 && stop > start)
-        .then(|| [std::f64::consts::TAU * start, std::f64::consts::TAU * stop])
+        .then_some([std::f64::consts::TAU * start, std::f64::consts::TAU * stop])
 }
 
 /// `quantity` with its points moved onto the frequencies RSpice solved, for an
