@@ -432,13 +432,23 @@ jobs:
           if-no-files-found: error
 
   mixed-corpus:
-    name: Mixed-signal reference corpus (${{ matrix.route }})
-    runs-on: ubuntu-latest
+    name: Mixed-signal reference corpus (${{ matrix.route }}${{ matrix.os == 'ubuntu-24.04-arm' && ', Linux ARM64' || '' }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         route: [interp, native, worker]
+        os: [ubuntu-latest]
+        # The interpreter and the AArch64 JIT again on Linux ARM64, held to
+        # the same outcomes.tsv rows as x64: each cell must reach the outcome
+        # x64 records, within the cell's own tolerance. The worker's wasm does
+        # not depend on the host, so its leg stays on x64.
+        include:
+          - route: interp
+            os: ubuntu-24.04-arm
+          - route: native
+            os: ubuntu-24.04-arm
     env:
       CARGO_BUILD_JOBS: "1"
       # The route is the build; the test refuses a binary built as the other.
@@ -454,7 +464,7 @@ jobs:
           ${{ matrix.route == 'worker' && '--target wasm32-unknown-unknown' || '' }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: mixed-corpus-${{ matrix.route }}
+          key: mixed-corpus-${{ matrix.route }}${{ matrix.os == 'ubuntu-24.04-arm' && '-arm64' || '' }}
       # The shipped browser worker image and its bindings, where the
       # application's simulation-worker.js loads them. Built as ci.yml builds
       # the production image, with the generated compact-model catalog: C5's
