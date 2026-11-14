@@ -1,9 +1,16 @@
-//! The inspector's account of a Verilog-A module instance: the parameter rows
-//! its compile declares, its multiplicity and temperature, a value the module
-//! no longer declares, and the identity it states instead of model-library
-//! rows.
+//! A Verilog-A module instance's inspector drawn through a whole application: the
+//! temperature row and the title that names what it instantiates.
 
-use super::*;
+use crate::state::{
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
+    PortDirection, View, ViewType,
+};
+use crate::workbench::RSpiceApp;
+use crate::workbench::design::inspector::component::{
+    TEMPERATURE_PARAM, component_title_kind, inline_parameter_contract,
+    supports_instance_temperature,
+};
+use std::collections::HashMap;
 
 /// A compiled module parameter, as a clean compile states it.
 pub(crate) fn module_parameter(

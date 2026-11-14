@@ -55,7 +55,7 @@ pub(super) fn containing_occurrence_path(model: &Model) -> String {
 
 /// What a component is, for its title: a built-in's catalog name, a generated
 /// module's name, a cell instance's cell, else its device kind.
-pub(super) fn component_title_kind(component: &Component) -> String {
+pub(crate) fn component_title_kind(component: &Component) -> String {
     let binding = component.library_cell.as_ref();
     if let Some(descriptor) = binding
         .filter(|binding| binding.is_builtin_xspice())
@@ -953,7 +953,7 @@ pub(crate) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 /// A built-in takes it when its compiled contract names it. An instance of a
 /// Verilog-A view never does: a module reads `$temperature`, and takes `temp`
 /// only as a parameter it declares, which its own typed row then offers.
-pub(super) fn supports_instance_temperature(model: &Model, component: &Component) -> bool {
+pub(crate) fn supports_instance_temperature(model: &Model, component: &Component) -> bool {
     if model.instantiates_veriloga_view(component) {
         return false;
     }

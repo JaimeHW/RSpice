@@ -1,157 +1,12 @@
-//! Rendered inspector edits preserve drafts, reference ownership, and history.
+//! Inline instance edits drawn through a whole application: drafts, quoted neighbours,
+//! rejected fields, stale authority, and the functional and gate presets.
 
-use super::*;
+use crate::state::ComponentType;
 use crate::workbench::RSpiceApp;
-
-pub(crate) struct Editor {
-    ctx: egui::Context,
-    pub(crate) app: RSpiceApp,
-    pub(crate) id: u64,
-    controls: HashMap<String, egui::Rect>,
-}
-
-impl Editor {
-    pub(crate) fn new() -> Self {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.activate(Workspace::Design);
-        let id = app
-            .state
-            .model
-            .schematic
-            .add_component(ComponentType::VoltageSource, crate::state::Point::origin());
-        app.state.model.schematic.clear_undo_history();
-        app.state.model.schematic.session.is_dirty = false;
-        Self {
-            ctx,
-            app,
-            id,
-            controls: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn pass(&mut self, events: Vec<egui::Event>) {
-        let output = self.ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(360.0, 260.0),
-                )),
-                events,
-                ..Default::default()
-            },
-            |ctx| {
-                self.app.handle_shortcuts(ctx);
-                let component = self
-                    .app
-                    .state
-                    .model
-                    .schematic
-                    .document()
-                    .components
-                    .iter()
-                    .find(|component| component.id == self.id)
-                    .unwrap()
-                    .clone();
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    edit_row_with_hint(
-                        ui,
-                        &mut self.app.design_cx(),
-                        &component,
-                        InlineEditField::Instance,
-                        "Instance",
-                        "",
-                        PropertyRowCaption::default(),
-                    );
-                    edit_row_with_hint(
-                        ui,
-                        &mut self.app.design_cx(),
-                        &component,
-                        InlineEditField::Value,
-                        "Value",
-                        "",
-                        PropertyRowCaption::default(),
-                    );
-                    edit_row_with_hint(
-                        ui,
-                        &mut self.app.design_cx(),
-                        &component,
-                        InlineEditField::Parameter("note".to_owned()),
-                        "Note",
-                        "",
-                        PropertyRowCaption::default(),
-                    );
-                    edit_row_with_hint(
-                        ui,
-                        &mut self.app.design_cx(),
-                        &component,
-                        InlineEditField::Parameters,
-                        "Parameters",
-                        "",
-                        PropertyRowCaption::default(),
-                    );
-                });
-            },
-        );
-        if let Some(update) = output.platform_output.accesskit_update {
-            for (_, node) in update.nodes {
-                if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
-                    self.controls.insert(
-                        label.to_owned(),
-                        egui::Rect::from_min_max(
-                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-                        ),
-                    );
-                }
-            }
-        }
-    }
-
-    pub(crate) fn click(&mut self, label: &str) {
-        let pos = self.controls[label].center();
-        self.pass(vec![
-            egui::Event::PointerMoved(pos),
-            egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            },
-        ]);
-        self.pass(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-    }
-
-    pub(crate) fn replace(&mut self, text: &str) {
-        self.pass(vec![
-            key(egui::Key::A, egui::Modifiers::COMMAND),
-            egui::Event::Text(text.to_owned()),
-        ]);
-    }
-
-    pub(crate) fn edit(&mut self, label: &str, text: &str) {
-        self.pass(Vec::new());
-        self.click(label);
-        self.replace(text);
-    }
-}
-
-pub(crate) fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
-    egui::Event::Key {
-        key,
-        physical_key: Some(key),
-        pressed: true,
-        repeat: false,
-        modifiers,
-    }
-}
+use crate::workbench::design::inspector::inline_instance::*;
+use crate::workbench::design_system::PropertyRowCaption;
+use crate::workbench::state::{InlineEditField, Workspace};
+use std::collections::HashMap;
 
 #[test]
 fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate_source() {
@@ -494,4 +349,154 @@ fn choosing_a_gates_input_count_inline_redraws_its_pins() {
         )
         .is_err()
     );
+}
+
+pub(crate) struct Editor {
+    ctx: egui::Context,
+    pub(crate) app: RSpiceApp,
+    pub(crate) id: u64,
+    controls: HashMap<String, egui::Rect>,
+}
+
+impl Editor {
+    pub(crate) fn new() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        let id = app
+            .state
+            .model
+            .schematic
+            .add_component(ComponentType::VoltageSource, crate::state::Point::origin());
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
+        Self {
+            ctx,
+            app,
+            id,
+            controls: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn pass(&mut self, events: Vec<egui::Event>) {
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(360.0, 260.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                self.app.handle_shortcuts(ctx);
+                let component = self
+                    .app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .find(|component| component.id == self.id)
+                    .unwrap()
+                    .clone();
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app.design_cx(),
+                        &component,
+                        InlineEditField::Instance,
+                        "Instance",
+                        "",
+                        PropertyRowCaption::default(),
+                    );
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app.design_cx(),
+                        &component,
+                        InlineEditField::Value,
+                        "Value",
+                        "",
+                        PropertyRowCaption::default(),
+                    );
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app.design_cx(),
+                        &component,
+                        InlineEditField::Parameter("note".to_owned()),
+                        "Note",
+                        "",
+                        PropertyRowCaption::default(),
+                    );
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app.design_cx(),
+                        &component,
+                        InlineEditField::Parameters,
+                        "Parameters",
+                        "",
+                        PropertyRowCaption::default(),
+                    );
+                });
+            },
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            for (_, node) in update.nodes {
+                if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
+                    self.controls.insert(
+                        label.to_owned(),
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    pub(crate) fn click(&mut self, label: &str) {
+        let pos = self.controls[label].center();
+        self.pass(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        self.pass(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+    }
+
+    pub(crate) fn replace(&mut self, text: &str) {
+        self.pass(vec![
+            key(egui::Key::A, egui::Modifiers::COMMAND),
+            egui::Event::Text(text.to_owned()),
+        ]);
+    }
+
+    pub(crate) fn edit(&mut self, label: &str, text: &str) {
+        self.pass(Vec::new());
+        self.click(label);
+        self.replace(text);
+    }
+}
+
+pub(crate) fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
 }

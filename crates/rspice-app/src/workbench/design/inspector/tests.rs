@@ -6,7 +6,6 @@
 //! design contract.
 
 mod off_sheet_connectors;
-pub(crate) mod veriloga_modules;
 
 use super::*;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};

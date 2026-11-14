@@ -1,160 +1,16 @@
-//! Rendered symbol fields preserve undo grouping and reject stale document or selection targets.
+//! The symbol inspector's fields drawn through a whole application: undo grouping and
+//! stale document or selection targets.
 
-use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
     ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::design::inspector::symbol::*;
+use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorRequest};
+use rspice_schematic_editor::symbol_editor::interaction::SymbolEditCapabilities;
 use rspice_ui_kit::panels::panel_body;
 use std::collections::HashMap;
-
-pub(crate) struct Editor {
-    ctx: egui::Context,
-    pub(crate) app: RSpiceApp,
-    controls: HashMap<String, egui::Rect>,
-}
-
-impl Editor {
-    pub(crate) fn new() -> Self {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut app = RSpiceApp::test_instance();
-        let state = &mut app.state;
-        let mut library = Library::new("work");
-        let mut cell = Cell::new("amp");
-        cell.add_view(View::new("schematic", ViewType::Schematic));
-        cell.add_view(View::new("symbol", ViewType::Symbol));
-        library.add_cell(cell);
-        state.model.library_manager.add_library(library);
-        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-        let document = SymbolDocument {
-            body: vec![
-                SymbolShape::Circle {
-                    center: Point::origin(),
-                    radius: 10,
-                },
-                SymbolShape::Circle {
-                    center: Point::new(100, 0),
-                    radius: 20,
-                },
-            ],
-            ..Default::default()
-        };
-        state
-            .store_active_symbol_editor_bundle(
-                &document,
-                &SymbolEditorMetadata::for_document(&document),
-            )
-            .unwrap();
-        state.design.symbol.editor.select_shape(0);
-        Self {
-            ctx,
-            app,
-            controls: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
-        let source = crate::workbench::app::symbol_editor_request_source(
-            &self.app.state.model,
-            &self.app.state.workbench,
-        );
-        rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source(
-            &mut self.app.state.design.symbol.editor,
-            source,
-        );
-        let mut request = None;
-        let output = self.ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(360.0, 800.0),
-                )),
-                events,
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    panel_body(ui, |ui| {
-                        let document = self.app.state.model.load_active_symbol_document().unwrap();
-                        let metadata = crate::workbench::app::load_active_symbol_editor_metadata(
-                            &self.app.state.model,
-                            &document,
-                        )
-                        .unwrap();
-                        request = Some(inspector::show(
-                            ui,
-                            crate::workbench::app::symbol_editor_request_source(
-                                &self.app.state.model,
-                                &self.app.state.workbench,
-                            ),
-                            document,
-                            metadata,
-                            &[],
-                            &self.app.state.design.symbol.editor,
-                            SymbolEditCapabilities {
-                                edit: !self.app.state.model.schematic_edit_read_only(),
-                            },
-                        ));
-                    });
-                });
-            },
-        );
-        if let Some(update) = output.platform_output.accesskit_update {
-            for (_, node) in update.nodes {
-                if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
-                    self.controls.insert(
-                        label.to_owned(),
-                        egui::Rect::from_min_max(
-                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-                        ),
-                    );
-                }
-            }
-        }
-        request.unwrap()
-    }
-
-    fn pass(&mut self, events: Vec<egui::Event>) {
-        let request = self.frame(events);
-        apply_request(&mut self.app.design_cx(), request);
-    }
-
-    fn click(&mut self, label: &str) {
-        let pos = self.controls[label].center();
-        self.pass(vec![
-            egui::Event::PointerMoved(pos),
-            egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            },
-        ]);
-        self.pass(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-    }
-
-    fn replace(&mut self, text: &str) {
-        self.pass(vec![
-            egui::Event::Key {
-                key: egui::Key::A,
-                physical_key: Some(egui::Key::A),
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::COMMAND,
-            },
-            egui::Event::Text(text.to_owned()),
-        ]);
-    }
-}
 
 #[test]
 fn symbol_field_typing_survives_passive_window_projection() {
@@ -431,4 +287,151 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
             .unwrap(),
         after
     );
+}
+
+pub(crate) struct Editor {
+    ctx: egui::Context,
+    pub(crate) app: RSpiceApp,
+    controls: HashMap<String, egui::Rect>,
+}
+
+impl Editor {
+    pub(crate) fn new() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        let state = &mut app.state;
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        state.model.library_manager.add_library(library);
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+        let document = SymbolDocument {
+            body: vec![
+                SymbolShape::Circle {
+                    center: Point::origin(),
+                    radius: 10,
+                },
+                SymbolShape::Circle {
+                    center: Point::new(100, 0),
+                    radius: 20,
+                },
+            ],
+            ..Default::default()
+        };
+        state
+            .store_active_symbol_editor_bundle(
+                &document,
+                &SymbolEditorMetadata::for_document(&document),
+            )
+            .unwrap();
+        state.design.symbol.editor.select_shape(0);
+        Self {
+            ctx,
+            app,
+            controls: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
+        let source = crate::workbench::app::symbol_editor_request_source(
+            &self.app.state.model,
+            &self.app.state.workbench,
+        );
+        rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source(
+            &mut self.app.state.design.symbol.editor,
+            source,
+        );
+        let mut request = None;
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(360.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    panel_body(ui, |ui| {
+                        let document = self.app.state.model.load_active_symbol_document().unwrap();
+                        let metadata = crate::workbench::app::load_active_symbol_editor_metadata(
+                            &self.app.state.model,
+                            &document,
+                        )
+                        .unwrap();
+                        request = Some(inspector::show(
+                            ui,
+                            crate::workbench::app::symbol_editor_request_source(
+                                &self.app.state.model,
+                                &self.app.state.workbench,
+                            ),
+                            document,
+                            metadata,
+                            &[],
+                            &self.app.state.design.symbol.editor,
+                            SymbolEditCapabilities {
+                                edit: !self.app.state.model.schematic_edit_read_only(),
+                            },
+                        ));
+                    });
+                });
+            },
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            for (_, node) in update.nodes {
+                if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
+                    self.controls.insert(
+                        label.to_owned(),
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        ),
+                    );
+                }
+            }
+        }
+        request.unwrap()
+    }
+
+    fn pass(&mut self, events: Vec<egui::Event>) {
+        let request = self.frame(events);
+        apply_request(&mut self.app.design_cx(), request);
+    }
+
+    fn click(&mut self, label: &str) {
+        let pos = self.controls[label].center();
+        self.pass(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        self.pass(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+    }
+
+    fn replace(&mut self, text: &str) {
+        self.pass(vec![
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            },
+            egui::Event::Text(text.to_owned()),
+        ]);
+    }
 }

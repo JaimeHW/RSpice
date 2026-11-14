@@ -1,9 +1,9 @@
 //! The inline instance editor drawn through a whole application: the fields it
 //! offers and what committing them does.
 
+use crate::feature_tests::design::inline_instance_drawn::{Editor, key};
 use crate::state::CellViewRef;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::inspector::inline_instance::tests::{Editor, key};
 use crate::workbench::state::{InlineEditField, Workspace};
 
 #[test]

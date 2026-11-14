@@ -1,5 +1,8 @@
 //! The inspector's Verilog-A module cards drawn through a whole application.
 
+use crate::feature_tests::design::inspector_veriloga_modules_drawn::{
+    app_with_compiled_veriloga_instance, app_with_owned_veriloga_instance, module_parameter,
+};
 use crate::state::{CellViewRef, Component, ComponentType, Point};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::component::{
@@ -8,9 +11,6 @@ use crate::workbench::design::inspector::component::{
 };
 use crate::workbench::design::inspector::inline_instance::{begin_edit, field_value, update_edit};
 use crate::workbench::design::inspector::model_evidence::component_model_evidence;
-use crate::workbench::design::inspector::tests::veriloga_modules::{
-    app_with_compiled_veriloga_instance, app_with_owned_veriloga_instance, module_parameter,
-};
 use crate::workbench::design::inspector::tests::*;
 use crate::workbench::design_system::Problem;
 use crate::workbench::state::InlineEditField;

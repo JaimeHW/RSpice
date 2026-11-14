@@ -82,6 +82,3 @@ pub(crate) fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolI
     }
     cx.state.symbol.editor.inspector = request.session;
 }
-
-#[cfg(test)]
-pub(crate) mod tests;

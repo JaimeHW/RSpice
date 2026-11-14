@@ -12,9 +12,6 @@ use crate::workbench::framework::requests::StageComponentTuning;
 use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
-#[cfg(test)]
-pub(crate) mod tests;
-
 pub(crate) fn field_value(component: &Component, field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => component.name.clone(),
@@ -65,7 +62,7 @@ pub(super) fn field_rejection(
     prepare_field_edit(design, model, wb, component, field, candidate).err()
 }
 
-fn prepare_field_edit(
+pub(crate) fn prepare_field_edit(
     design: &DesignState,
     model: &Model,
     wb: &WorkbenchSession,
@@ -446,7 +443,7 @@ pub(super) fn edit_row(
 /// A parameter whose sheet states its unit or what it is passes them as
 /// `caption`: the unit sits inside the field's trailing edge and the
 /// description on the label's hover, editable or not.
-pub(super) fn edit_row_with_hint(
+pub(crate) fn edit_row_with_hint(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
