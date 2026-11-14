@@ -2180,9 +2180,9 @@ fn a_defparam_on_a_root_parameter_takes_precedence_over_its_instance_value() {
         .compile_runtime(source, Some("top"))
         .expect("the module compiles");
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &initial.canonical_ir,
-            &[("T", 2.0)],
+            &[("T", rspice_veriloga::ScalarParameterValue::Real(2.0))],
             &rspice_veriloga::NoPipelineControl,
         )
         .expect("the instance value is accepted");

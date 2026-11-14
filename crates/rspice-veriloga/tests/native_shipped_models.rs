@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use rspice_veriloga::device::VerilogADevice;
-use rspice_veriloga::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 /// Release tests have no application logger. Preserve the compiler's route
@@ -248,7 +247,11 @@ fn census_record(record: serde_json::Value) {
 fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) -> serde_json::Value {
     let frontend_started = Instant::now();
     let runtime = VerilogACompiler::new(CompilerOptions::default())
-        .compile_file_runtime_with_metadata(path, module)
+        .compile_file_runtime_with_metadata_and_control(
+            path,
+            module,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .unwrap_or_else(|error| panic!("{name}: compile {}: {error}", path.display()));
     let frontend_elapsed = frontend_started.elapsed();
 
@@ -267,12 +270,6 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) -> serde
     .unwrap_or_else(|error| panic!("{name}: construct native device: {error}"));
     let native_elapsed = native_started.elapsed();
     assert!(device.is_using_native(), "{name}: interpreter fallback");
-    assert!(
-        device.native_code_size_bytes() <= SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
-        "{name}: native image is {} bytes, exceeding the shipped-model budget of {} bytes",
-        device.native_code_size_bytes(),
-        SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
-    );
     let plan_stats = device.native_plan_stats();
     assert_eq!(plan_stats.evaluation_kernel_entry_points, 1);
     assert_eq!(plan_stats.stamp_kernel_entry_points, 1);

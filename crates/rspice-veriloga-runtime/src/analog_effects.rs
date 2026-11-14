@@ -266,6 +266,7 @@ impl AnalogEffectJournal {
         })
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_limits(limits: AnalogEffectLimits) -> Self {
         Self {
             limits,
@@ -341,6 +342,7 @@ impl AnalogEffectJournal {
 
     /// Publish the latest candidate after every device has passed acceptance
     /// validation. No messages are printed and no process exits in this method.
+    #[cfg(test)]
     pub fn accept_candidate(&mut self) -> Result<(), AnalogEffectError> {
         self.validate_candidate()?;
         self.apply_validated_acceptance();

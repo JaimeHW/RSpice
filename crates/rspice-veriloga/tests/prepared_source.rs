@@ -508,7 +508,11 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
         ..CompilerOptions::default()
     });
     let from_file = compiler
-        .compile_file_module_with_metadata(&root, None)
+        .compile_file_module_with_metadata_and_control(
+            &root,
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .unwrap();
     let from_provider = compiler
         .compile_provider_module_with_metadata_and_control(
@@ -917,7 +921,11 @@ fn a_replay_places_analog_reads_of_discrete_values_where_they_were_written() {
         .canonical_ir;
     assert_eq!(replay.hir.discrete_reads, original.hir.discrete_reads);
     let specialized = compiler
-        .specialize_mixed_runtime(&original, &[("G", 2.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &original,
+            &[("G", rspice_veriloga::ScalarParameterValue::Real(2.0))],
+            &NoPipelineControl,
+        )
         .unwrap()
         .canonical_ir;
     assert_eq!(specialized.hir.discrete_reads, original.hir.discrete_reads);

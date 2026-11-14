@@ -32,7 +32,7 @@
 //! Besides `compile`, which returns the bytecode model, [`VerilogACompiler`]
 //! has three families of entry point:
 //! `compile_canonical_ir*` for the canonical artifact alone, `compile_runtime`
-//! / `compile_file_runtime_with_metadata` for both artifacts from a single
+//! / `compile_file_runtime_with_metadata_and_control` for both artifacts from a single
 //! parse, and `compile_virtual_runtime*` for sealed [`VirtualSourceBundle`]s
 //! that never touch the file system.
 //!
@@ -533,7 +533,7 @@ impl VerilogACompiler {
     /// own several records. It runs correctly, but its slot indices are not
     /// the ones a checkpoint written by the engine uses, and it is not
     /// interchangeable with a model from [`Self::compile_runtime`] or
-    /// [`Self::compile_file_runtime_with_metadata`]. Use one of those for
+    /// [`Self::compile_file_runtime_with_metadata_and_control`]. Use one of those for
     /// anything a simulation will resume, cache, or check point.
     pub fn compile(&self, source: &str) -> CompileResult<CompiledModel> {
         self.compile_module(source, None)
@@ -810,21 +810,6 @@ impl VerilogACompiler {
             None,
             None,
         )
-    }
-
-    /// Elaborate one mixed instance from its authenticated source, applying
-    /// numeric overrides before ranges, hierarchy, and digital constants fold.
-    pub fn specialize_mixed_runtime(
-        &self,
-        artifact: &canonical_ir::CanonicalIrArtifact,
-        parameters: &[(&str, f64)],
-        control: &dyn PipelineControl,
-    ) -> CompileResult<RuntimeCompileReport> {
-        let parameters: Vec<_> = parameters
-            .iter()
-            .map(|&(name, value)| (name, ScalarParameterValue::Real(value)))
-            .collect();
-        self.specialize_mixed_runtime_typed(artifact, &parameters, control)
     }
 
     /// Specialize scalar parameters without routing integral values through
@@ -1987,17 +1972,6 @@ impl VerilogACompiler {
         })
     }
 
-    /// Compile one module of a source file from disk with preprocessing
-    /// and dependency metadata. See [`Self::compile_module`] for the
-    /// module selection rules.
-    pub fn compile_file_module_with_metadata(
-        &self,
-        path: &std::path::Path,
-        module_name: Option<&str>,
-    ) -> CompileResult<CompiledFile> {
-        self.compile_file_module_with_metadata_and_control(path, module_name, &NoPipelineControl)
-    }
-
     /// Cancellable, progress-observable file compilation.
     pub fn compile_file_module_with_metadata_and_control(
         &self,
@@ -2197,20 +2171,6 @@ impl VerilogACompiler {
             dependencies,
             metrics: measurements.finish(),
         })
-    }
-
-    /// Compile one module of a source file from disk to both runtime artifacts
-    /// with preprocessing and dependency metadata.
-    ///
-    /// This API preprocesses, parses, and analyzes the file once, then emits the
-    /// compiled model and canonical IR artifact from the same selected module.
-    /// See [`Self::compile_module`] for the module selection rules.
-    pub fn compile_file_runtime_with_metadata(
-        &self,
-        path: &std::path::Path,
-        module_name: Option<&str>,
-    ) -> CompileResult<CompiledRuntimeFile> {
-        self.compile_file_runtime_with_metadata_and_control(path, module_name, &NoPipelineControl)
     }
 
     /// Cancellable, progress-observable file compilation of both runtime

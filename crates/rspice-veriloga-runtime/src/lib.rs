@@ -322,18 +322,6 @@ pub struct GeneratedVerilogAInstanceCheckpoint {
     pub terminal_currents: Vec<Value>,
 }
 
-/// Which unknown a lane of a packed derivative array belongs to.
-///
-/// A packed array is sized to the whole device, so a model with more lanes than
-/// any one equation uses carries `Unused` entries rather than resizing per
-/// equation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneratedStampLane {
-    Node(usize),
-    Branch(usize),
-    Unused,
-}
-
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
@@ -1897,7 +1885,6 @@ pub struct GeneratedStamper<'a> {
     /// deliberately ignored while their external endpoint is still recorded.
     terminal_currents: Option<&'a mut [Value]>,
     voltages: &'a [Value],
-    num_nodes: usize,
     /// A non-finite value reached the Jacobian.
     ///
     /// Accumulated rather than raised: an early exit would leave the rest of
@@ -1944,7 +1931,6 @@ impl<'a> GeneratedStamper<'a> {
         matrix: &'a mut StaticMatrix,
         rhs: &'a mut [Value],
         voltages: &'a [Value],
-        num_nodes: usize,
         cache: &'a GeneratedStaticStampCache,
     ) -> Self {
         Self {
@@ -1953,7 +1939,6 @@ impl<'a> GeneratedStamper<'a> {
             rhs: Some(rhs),
             terminal_currents: None,
             voltages,
-            num_nodes,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
         }
@@ -1972,7 +1957,6 @@ impl<'a> GeneratedStamper<'a> {
         matrix: &'a mut StaticMatrix,
         rhs: &'a mut [Value],
         voltages: &'a [Value],
-        num_nodes: usize,
         cache: &'a GeneratedStaticStampCache,
         terminal_currents: &'a mut [Value],
     ) -> Self {
@@ -1982,7 +1966,6 @@ impl<'a> GeneratedStamper<'a> {
             rhs: Some(rhs),
             terminal_currents: Some(terminal_currents),
             voltages,
-            num_nodes,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
         }
@@ -1992,7 +1975,6 @@ impl<'a> GeneratedStamper<'a> {
     pub fn new_ac_real_with_static_cache(
         matrix: &'a mut ComplexMatrix,
         voltages: &'a [Value],
-        num_nodes: usize,
         cache: &'a GeneratedStaticStampCache,
     ) -> Self {
         Self {
@@ -2001,7 +1983,6 @@ impl<'a> GeneratedStamper<'a> {
             rhs: None,
             terminal_currents: None,
             voltages,
-            num_nodes,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
         }
@@ -2153,18 +2134,11 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     /// Keep an allocated but inactive potential-source unknown nonsingular
-    /// without coupling it to either endpoint. The unit diagonal constrains the
-    /// unused branch current to zero. It is intentionally not scaled by device
-    /// multiplicity: this is a solver identity row, not a physical contribution.
-    #[inline]
-    pub fn stamp_inactive_potential_branch(&mut self, branch_ordinal: usize) {
-        if let Some(branch) = self.branch_matrix_index(branch_ordinal) {
-            self.add_real(branch, branch, 1.0);
-        }
-    }
-
-    /// Local-index counterpart of [`Self::stamp_inactive_potential_branch`]
-    /// for generated devices linked through a static stamp cache.
+    /// without coupling it to either endpoint, by local index, for generated
+    /// devices linked through a static stamp cache. The unit diagonal
+    /// constrains the unused branch current to zero. It is intentionally not
+    /// scaled by device multiplicity: this is a solver identity row, not a
+    /// physical contribution.
     #[inline]
     pub fn stamp_inactive_potential_branch_local(&mut self, branch_index: usize) {
         if let Some(branch_axis) = self.branch_axis_local(branch_index) {
@@ -2257,15 +2231,6 @@ impl<'a> GeneratedStamper<'a> {
             .and_then(|axis| self.axis_matrix_index_local(axis))
             .and_then(|index| self.voltages.get(index).copied())
             .unwrap_or(0.0)
-    }
-
-    #[inline]
-    fn branch_matrix_index(&self, branch_ordinal: usize) -> Option<usize> {
-        if branch_ordinal > 0 {
-            Some(self.num_nodes + branch_ordinal - 1)
-        } else {
-            None
-        }
     }
 
     #[inline]
@@ -2389,24 +2354,6 @@ impl<'a> GeneratedStamper<'a> {
         let width = cache.axis_count();
         let slots_ready = width != 0 && cache.slots.len() == width * width;
         self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, value);
-    }
-
-    #[inline]
-    fn add_real(&mut self, row: usize, col: usize, value: Value) {
-        self.observe_matrix_value(value);
-        if value == 0.0 {
-            return;
-        }
-        match &mut self.matrix {
-            GeneratedMatrixTarget::Static { matrix } => {
-                if let Some(index) = self.cache.slot_for_matrix_indices(row, col) {
-                    matrix.stamp_direct(index, value);
-                } else {
-                    matrix.add(row, col, value);
-                }
-            }
-            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
-        }
     }
 }
 
@@ -4089,39 +4036,18 @@ mod fixed_lane_tests {
 
     #[test]
     fn inactive_potential_branch_pins_exact_unit_diagonal() {
-        for cached in [false, true] {
-            let mut matrix =
-                StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("one-entry branch matrix");
-            let mut stamp_rhs = [0.0];
-            let voltages = [17.0];
-            let mut cache = GeneratedStaticStampCache::default();
-            cache.link(&matrix, &[], &[1], 0);
-            if cached {
-                let mut stamper = GeneratedStamper::new_with_static_cache(
-                    &mut matrix,
-                    &mut stamp_rhs,
-                    &voltages,
-                    0,
-                    &cache,
-                );
-                stamper.stamp_inactive_potential_branch_local(0);
-            } else {
-                // An unlinked cache has no slots, so the stamp takes the
-                // matrix-index fallback.
-                let unlinked = GeneratedStaticStampCache::default();
-                let mut stamper = GeneratedStamper::new_with_static_cache(
-                    &mut matrix,
-                    &mut stamp_rhs,
-                    &voltages,
-                    0,
-                    &unlinked,
-                );
-                stamper.stamp_inactive_potential_branch(1);
-            }
-            let solution = matrix.solve(&[2.5]).expect("unit diagonal solves");
-            assert_eq!(solution, vec![2.5], "cached={cached}");
-            assert_eq!(stamp_rhs, [0.0], "cached={cached}");
-        }
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("one-entry branch matrix");
+        let mut stamp_rhs = [0.0];
+        let voltages = [17.0];
+        let mut cache = GeneratedStaticStampCache::default();
+        cache.link(&matrix, &[], &[1], 0);
+        let mut stamper =
+            GeneratedStamper::new_with_static_cache(&mut matrix, &mut stamp_rhs, &voltages, &cache);
+        stamper.stamp_inactive_potential_branch_local(0);
+        let solution = matrix.solve(&[2.5]).expect("unit diagonal solves");
+        assert_eq!(solution, vec![2.5]);
+        assert_eq!(stamp_rhs, [0.0]);
     }
 
     #[test]
@@ -4146,7 +4072,6 @@ mod fixed_lane_tests {
                     &mut matrix,
                     &mut rhs,
                     &voltages,
-                    2,
                     &cache,
                     &mut currents,
                 );
@@ -4212,7 +4137,6 @@ mod fixed_lane_tests {
                 &mut matrix,
                 &mut rhs,
                 &voltages,
-                2,
                 &cache,
                 &mut currents,
             );

@@ -13,7 +13,7 @@ fn restore(plan: &CanonicalDigitalPlan, state: &DigitalResumeState) -> DigitalRe
     let plan = transport(plan);
     DigitalCheckpointReader::new(&plan, DigitalCheckpointLimits::default())
         .unwrap()
-        .restore_resume(&transport(&DigitalResumeCheckpoint::capture(state)))
+        .restore_thread_resume(&transport(&DigitalResumeCheckpoint::capture(state)), false)
         .unwrap()
 }
 
@@ -150,7 +150,7 @@ endmodule
         "rebuilding/observing a subscription must not execute its process"
     );
     let frame = reader
-        .restore_resume(&transport(&DigitalResumeCheckpoint::capture(&frame)))
+        .restore_thread_resume(&transport(&DigitalResumeCheckpoint::capture(&frame)), false)
         .unwrap();
     expect_finished(h.resume(0, &frame));
     assert_eq!(h.get("done"), "1");
@@ -257,7 +257,7 @@ fn checkpoint_rejects_corrupted_frames_planes_subscriptions_and_pending_updates(
         assert!(
             DigitalCheckpointReader::new(&h.plan, DigitalCheckpointLimits::default())
                 .unwrap()
-                .restore_resume(&image)
+                .restore_thread_resume(&image, false)
                 .is_err()
         );
     };

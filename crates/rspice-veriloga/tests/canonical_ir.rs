@@ -1345,7 +1345,11 @@ fn compiler_can_emit_file_runtime_artifacts_with_metadata() {
         .into_owned();
 
     let compiled = VerilogACompiler::default()
-        .compile_file_runtime_with_metadata(fixture.path(), None)
+        .compile_file_runtime_with_metadata_and_control(
+            fixture.path(),
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("compile runtime artifacts from file");
 
     assert_eq!(compiled.model.name.as_str(), "tiny_res");
@@ -1770,7 +1774,7 @@ endmodule
         .transpile(&artifact)
         .expect_err("generated Rust must fail closed for unsupported slew state");
 
-    assert!(error.is_unsupported());
+    assert!(error.kind == rspice_veriloga::rust_backend::RustBackendErrorKind::Unsupported);
     assert!(
         error.message.contains("rate-limited slew"),
         "error={error:?}"
@@ -1919,7 +1923,10 @@ endmodule
             .transpile(&artifact)
             .err()
             .unwrap_or_else(|| panic!("{name} must not be emitted by the direct Rust backend"));
-        assert!(error.is_unsupported(), "{name}: error={error:?}");
+        assert!(
+            error.kind == rspice_veriloga::rust_backend::RustBackendErrorKind::Unsupported,
+            "{name}: error={error:?}"
+        );
         assert!(
             error.message.contains(expected),
             "{name}: error={error:?} does not name `{expected}`"

@@ -184,7 +184,7 @@ use super::*;
 // Version 39 re-indexes the compiled model itself. The bytecode generator
 // numbered a module's analog-operator records once per *emission*; the compiler
 // now rewrites every slot index into the canonical per-*site* numbering before
-// the model leaves `compile_file_runtime_with_metadata`. A version-38 record
+// the model leaves `compile_file_runtime_with_metadata_and_control`. A version-38 record
 // holds a `CompiledModel` whose `DdtState`, `CrossState`, `LaplaceState` and
 // sibling instructions carry the emission numbers, and nothing in the record
 // says which numbering it is in. Deserializing one beside a runtime that
@@ -3908,7 +3908,11 @@ endmodule
         std::fs::write(source_path, source).expect("write temporary Verilog-A source");
 
         let runtime = rspice_veriloga::VerilogACompiler::default()
-            .compile_file_runtime_with_metadata(source_path, None)
+            .compile_file_runtime_with_metadata_and_control(
+                source_path,
+                None,
+                &rspice_veriloga::NoPipelineControl,
+            )
             .expect("compile runtime artifacts");
         let dependencies = fingerprint_paths(&runtime.dependencies).expect("fingerprint source");
         CachedVerilogAModel {
@@ -4013,7 +4017,11 @@ endmodule
             enable_ams: true,
             ..Default::default()
         })
-        .compile_file_runtime_with_metadata(&source, Some("stamp"))
+        .compile_file_runtime_with_metadata_and_control(
+            &source,
+            Some("stamp"),
+            &rspice_veriloga::NoPipelineControl,
+        )
         .unwrap();
         let plan = report.canonical_ir.digital.clone();
         assert!(plan.delays.is_empty() && !plan.delays.checks.is_empty());
@@ -4061,7 +4069,11 @@ endmodule
         );
         for key in &keys {
             let report = compiler
-                .compile_file_runtime_with_metadata(&source, key.selected_module.as_deref())
+                .compile_file_runtime_with_metadata_and_control(
+                    &source,
+                    key.selected_module.as_deref(),
+                    &rspice_veriloga::NoPipelineControl,
+                )
                 .unwrap();
             let entry = CachedVerilogAModel {
                 dependencies: fingerprint_paths(&report.dependencies).unwrap(),
@@ -4153,7 +4165,11 @@ endmodule
         for (key, deck) in keys.iter().zip(&decks) {
             let report =
                 rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options(deck))
-                    .compile_file_runtime_with_metadata(&source, None)
+                    .compile_file_runtime_with_metadata_and_control(
+                        &source,
+                        None,
+                        &rspice_veriloga::NoPipelineControl,
+                    )
                     .unwrap();
             let entry = CachedVerilogAModel {
                 dependencies: fingerprint_paths(&report.dependencies).unwrap(),

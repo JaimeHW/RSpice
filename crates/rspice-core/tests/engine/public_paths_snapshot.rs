@@ -1120,7 +1120,6 @@ use rspice_core::device::veriloga_builtins::GeneratedNoiseProcessVisitor as _;
 use rspice_core::device::veriloga_builtins::GeneratedNoiseTopologyError as _;
 use rspice_core::device::veriloga_builtins::GeneratedReactiveStamper as _;
 use rspice_core::device::veriloga_builtins::GeneratedSimulationParameters as _;
-use rspice_core::device::veriloga_builtins::GeneratedStampLane as _;
 use rspice_core::device::veriloga_builtins::GeneratedStamper as _;
 use rspice_core::device::veriloga_builtins::GeneratedStaticStampCache as _;
 use rspice_core::device::veriloga_builtins::GeneratedVerilogAAcceptedStateShapeIdentity as _;
@@ -1158,7 +1157,6 @@ use rspice_core::device::veriloga_builtins::integer::IntegerBinaryOperation as _
 use rspice_core::device::veriloga_builtins::integer::IntegerRuntimeError as _;
 use rspice_core::device::veriloga_builtins::integer::integer_arithmetic as _;
 use rspice_core::device::veriloga_builtins::integer::integer_binary as _;
-use rspice_core::device::veriloga_builtins::integer::integer_neg as _;
 use rspice_core::device::veriloga_builtins::integer::real_to_integer as _;
 use rspice_core::device::veriloga_builtins::integer::shift_count as _;
 use rspice_core::diagnostics::ConvergenceDiagnostic as _;

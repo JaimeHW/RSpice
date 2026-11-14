@@ -11,6 +11,8 @@ rust-version.workspace = true
 default = []
 serde = ["dep:serde"]
 faer-parallel = ["rspice-matrix/faer-parallel"]
+# Hidden helpers that only the dependents' unit tests call.
+test-support = []
 
 [dependencies]
 rspice-matrix.workspace = true

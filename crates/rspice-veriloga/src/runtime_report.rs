@@ -118,33 +118,6 @@ impl RuntimeQualificationOptions {
         wasm_jit: true,
         interpreter_fallback: InterpreterFallbackPolicy::Allow,
     };
-
-    /// Require portable generated Rust; never silently accept the interpreter.
-    pub const GENERATED_RUST_REQUIRED: Self = Self {
-        generated_rust: true,
-        native_x64_jit: false,
-        wasm_jit: false,
-        interpreter_fallback: InterpreterFallbackPolicy::Reject,
-    };
-
-    /// Require the native x86-64 JIT; never silently accept the interpreter.
-    pub const NATIVE_X64_REQUIRED: Self = Self {
-        generated_rust: false,
-        native_x64_jit: true,
-        wasm_jit: false,
-        interpreter_fallback: InterpreterFallbackPolicy::Reject,
-    };
-
-    /// Require the host-native JIT; never silently accept the interpreter.
-    ///
-    /// This architecture-neutral name is preferred for new callers.
-    pub const NATIVE_REQUIRED: Self = Self::NATIVE_X64_REQUIRED;
-
-    /// Require every requested backend to qualify.
-    pub const fn rejecting_interpreter_fallback(mut self) -> Self {
-        self.interpreter_fallback = InterpreterFallbackPolicy::Reject;
-        self
-    }
 }
 
 impl RuntimeCompileReport {
@@ -292,9 +265,9 @@ impl RuntimeCompileReport {
 
     /// Enforce the caller's optimized-backend fallback policy.
     ///
-    /// Qualification remains report-only by default. Release tooling can use a
-    /// `*_REQUIRED` option or [`RuntimeQualificationOptions::rejecting_interpreter_fallback`]
-    /// to make a rejected or unavailable requested backend a typed error.
+    /// Qualification remains report-only by default. Options whose
+    /// `interpreter_fallback` is [`InterpreterFallbackPolicy::Reject`] make a
+    /// rejected or unavailable requested backend a typed error.
     pub fn enforce_fallback_policy(
         &self,
         options: RuntimeQualificationOptions,

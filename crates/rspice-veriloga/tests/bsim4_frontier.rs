@@ -36,7 +36,11 @@ fn bsim4_compiles_end_to_end() {
     };
 
     let model = VerilogACompiler::default()
-        .compile_file_module_with_metadata(path.as_path(), None)
+        .compile_file_module_with_metadata_and_control(
+            path.as_path(),
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("BSIM4.8 must compile end to end")
         .model;
 

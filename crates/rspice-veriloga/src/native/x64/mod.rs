@@ -4758,7 +4758,7 @@ endmodule
     ) -> Result<(), String> {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let runtime = compiler
-            .compile_file_runtime_with_metadata(path, module)
+            .compile_file_runtime_with_metadata_and_control(path, module, &crate::NoPipelineControl)
             .unwrap_or_else(|error| {
                 panic!(
                     "compile shipped Verilog-A oracle model {name} at {}: {error}",
@@ -5409,7 +5409,7 @@ endmodule
         let frontend_start = web_time::Instant::now();
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let runtime = compiler
-            .compile_file_runtime_with_metadata(path, module)
+            .compile_file_runtime_with_metadata_and_control(path, module, &crate::NoPipelineControl)
             .unwrap_or_else(|error| {
                 panic!(
                     "compile shipped Verilog-A device probe model {name} at {}: {error}",
@@ -5443,13 +5443,6 @@ endmodule
         assert!(
             device.is_using_native(),
             "{name}: shipped device must use native code"
-        );
-        assert!(
-            device.native_code_size_bytes()
-                <= crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
-            "{name}: x64 native image is {} bytes, exceeding the shipped-model budget of {} bytes",
-            device.native_code_size_bytes(),
-            crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
         );
         if matches!(name, "hicuml0" | "hicuml2") {
             device

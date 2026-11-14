@@ -62,7 +62,7 @@ fn checkpoint_round_trip(
     let image: DigitalResumeCheckpoint = serde_json::from_value(image).unwrap();
     DigitalCheckpointReader::new(plan, DigitalCheckpointLimits::default())
         .unwrap()
-        .restore_resume(&image)
+        .restore_thread_resume(&image, false)
         .unwrap()
 }
 

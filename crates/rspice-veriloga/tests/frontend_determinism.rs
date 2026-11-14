@@ -199,7 +199,11 @@ fn shipped_modules_compile_to_one_program_each() {
                 options.undefines = candidate.compile_profile.undefines.clone();
                 let started = std::time::Instant::now();
                 let model = VerilogACompiler::new(options)
-                    .compile_file_module_with_metadata(&candidate.path, Some(module))
+                    .compile_file_module_with_metadata_and_control(
+                        &candidate.path,
+                        Some(module),
+                        &rspice_veriloga::NoPipelineControl,
+                    )
                     .map(|compiled| compiled.model)
                     .unwrap_or_else(|error| {
                         panic!("{module} round {round} failed to compile: {error}")

@@ -27,7 +27,11 @@ fn model_path(parts: &[&str]) -> PathBuf {
 fn r3_cmc_compiles_end_to_end() {
     let path = model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]);
     let model = VerilogACompiler::default()
-        .compile_file_module_with_metadata(&path, None)
+        .compile_file_module_with_metadata_and_control(
+            &path,
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("r3_cmc must compile")
         .model;
     eprintln!(
@@ -44,7 +48,11 @@ fn r3_cmc_compiles_end_to_end() {
 fn juncap200_compiles_end_to_end() {
     let path = model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]);
     let model = VerilogACompiler::default()
-        .compile_file_module_with_metadata(&path, None)
+        .compile_file_module_with_metadata_and_control(
+            &path,
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("JUNCAP200 must compile")
         .model;
     eprintln!(

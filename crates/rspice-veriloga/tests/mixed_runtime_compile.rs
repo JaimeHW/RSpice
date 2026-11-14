@@ -81,9 +81,9 @@ fn connection_closure_is_retained_validated_and_reused_for_specialization() {
         Some("ProbeQuantity")
     );
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &artifact,
-            &[("WIDTH", 4.0)],
+            &[("WIDTH", rspice_veriloga::ScalarParameterValue::Real(4.0))],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();
@@ -130,9 +130,9 @@ fn mixed_parameter_specialization_survives_serialization_and_changes_port_shape(
     let bytes = serde_json::to_vec(&runtime.canonical_ir).unwrap();
     let artifact = serde_json::from_slice(&bytes).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &artifact,
-            &[("WIDTH", 4.0)],
+            &[("WIDTH", rspice_veriloga::ScalarParameterValue::Real(4.0))],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();
@@ -150,9 +150,15 @@ fn mixed_parameter_specialization_survives_serialization_and_changes_port_shape(
     ] {
         assert!(
             compiler
-                .specialize_mixed_runtime(
+                .specialize_mixed_runtime_typed(
                     &artifact,
-                    &parameters,
+                    &parameters
+                        .iter()
+                        .map(|&(name, value)| (
+                            name,
+                            rspice_veriloga::ScalarParameterValue::Real(value)
+                        ))
+                        .collect::<Vec<_>>(),
                     &rspice_veriloga::NoPipelineControl
                 )
                 .is_err()

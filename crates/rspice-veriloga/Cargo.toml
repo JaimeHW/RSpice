@@ -50,6 +50,7 @@ libc = "0.2"
 cc = "1.2"
 
 [dev-dependencies]
+rspice-veriloga-runtime = { workspace = true, features = ["test-support"] }
 # Execution-level conformance tests run emitted secondary modules in an
 # independent WebAssembly engine. This is test-only and cannot inflate either
 # browser code image.

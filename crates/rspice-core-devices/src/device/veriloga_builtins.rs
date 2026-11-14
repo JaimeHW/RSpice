@@ -42,7 +42,7 @@ pub use rspice_veriloga_runtime::{
     GeneratedNoiseEvaluationRef, GeneratedNoiseInjection, GeneratedNoiseInjectionDescriptor,
     GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor,
     GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseTopologyError,
-    GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
+    GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStamper,
     GeneratedStaticStampCache, GeneratedVerilogAAcceptedStateShapeIdentity,
     GeneratedVerilogAEvaluationError, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAModelDescriptor, GeneratedVerilogAParameterBound,
@@ -2190,7 +2190,6 @@ impl BuiltinVerilogAInstance {
                 matrix,
                 rhs,
                 voltages,
-                num_nodes,
                 self.static_stamp_cache.as_ref(),
             );
             self.kind.stamp(&ctx, &mut stamper);
@@ -2209,7 +2208,6 @@ impl BuiltinVerilogAInstance {
                 matrix,
                 rhs,
                 voltages,
-                num_nodes,
                 self.static_stamp_cache.as_ref(),
                 currents,
             );
@@ -2460,7 +2458,6 @@ impl BuiltinVerilogAInstance {
         let mut stamper = GeneratedStamper::new_ac_real_with_static_cache(
             matrix,
             voltages,
-            num_nodes,
             self.static_stamp_cache.as_ref(),
         );
         // Small-signal real evaluation can execute final-step event bodies,

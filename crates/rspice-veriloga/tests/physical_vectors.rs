@@ -33,7 +33,11 @@ endmodule
     let compiler = VerilogACompiler::default();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(7.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -173,9 +177,12 @@ endmodule
     let compiler = compiler();
     let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &compiled.canonical_ir,
-            &[("BASE", 5.0), ("PICK", 6.0)],
+            &[
+                ("BASE", rspice_veriloga::ScalarParameterValue::Real(5.0)),
+                ("PICK", rspice_veriloga::ScalarParameterValue::Real(6.0)),
+            ],
             &NoPipelineControl,
         )
         .unwrap();
@@ -470,9 +477,9 @@ connectrules selected; connect sample {mode}; endconnectrules
         };
         check(&compiled.canonical_ir);
         let assigned = compiler
-            .specialize_mixed_runtime(
+            .specialize_mixed_runtime_typed(
                 &compiled.canonical_ir,
-                &[("BASE", -3.0)],
+                &[("BASE", rspice_veriloga::ScalarParameterValue::Real(-3.0))],
                 &NoPipelineControl,
             )
             .unwrap();
@@ -542,9 +549,12 @@ connectrules selected; connect drive; endconnectrules
         Some(false)
     );
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &compiled.canonical_ir,
-            &[("ROW", 2.0), ("COLUMN", -1.0)],
+            &[
+                ("ROW", rspice_veriloga::ScalarParameterValue::Real(2.0)),
+                ("COLUMN", rspice_veriloga::ScalarParameterValue::Real(-1.0)),
+            ],
             &NoPipelineControl,
         )
         .unwrap();
@@ -619,7 +629,11 @@ connectrules selected; connect bidirectional; endconnectrules
         Some(5.0)
     );
     let assigned = compiler
-        .specialize_mixed_runtime(&compiled.canonical_ir, &[("PICK", 4.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &compiled.canonical_ir,
+            &[("PICK", rspice_veriloga::ScalarParameterValue::Real(4.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     check(&assigned.canonical_ir, 0);
     let replayed = compiler
@@ -733,7 +747,11 @@ endmodule
         Some(2.0)
     );
     let assigned = compiler
-        .specialize_mixed_runtime(&compiled.canonical_ir, &[("K", 5.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &compiled.canonical_ir,
+            &[("K", rspice_veriloga::ScalarParameterValue::Real(5.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     assert_ne!(
         compiled.canonical_ir.digital.content_identity,
@@ -791,9 +809,13 @@ connectrules selected; connect sample split; endconnectrules
     assert_eq!(compiled.canonical_ir.digital.bit_aliases.len(), 3);
     for count in [1.0, 0.0] {
         let assigned = compiler
-            .specialize_mixed_runtime(
+            .specialize_mixed_runtime_typed(
                 &compiled.canonical_ir,
-                &[("BASE", 4.0), ("ROW", 2.0), ("COUNT", count)],
+                &[
+                    ("BASE", rspice_veriloga::ScalarParameterValue::Real(4.0)),
+                    ("ROW", rspice_veriloga::ScalarParameterValue::Real(2.0)),
+                    ("COUNT", rspice_veriloga::ScalarParameterValue::Real(count)),
+                ],
                 &NoPipelineControl,
             )
             .unwrap();
@@ -888,9 +910,13 @@ endmodule
     let compiler = compiler();
     let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &compiled.canonical_ir,
-            &[("BASE", 5.0), ("PICK", 6.0), ("FIRST", 8.0)],
+            &[
+                ("BASE", rspice_veriloga::ScalarParameterValue::Real(5.0)),
+                ("PICK", rspice_veriloga::ScalarParameterValue::Real(6.0)),
+                ("FIRST", rspice_veriloga::ScalarParameterValue::Real(8.0)),
+            ],
             &NoPipelineControl,
         )
         .unwrap();
@@ -1005,9 +1031,12 @@ endmodule
     };
     check(&compiled.canonical_ir);
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &compiled.canonical_ir,
-            &[("BASE", 8.0), ("PICK", 7.0)],
+            &[
+                ("BASE", rspice_veriloga::ScalarParameterValue::Real(8.0)),
+                ("PICK", rspice_veriloga::ScalarParameterValue::Real(7.0)),
+            ],
             &NoPipelineControl,
         )
         .unwrap();
@@ -1079,9 +1108,12 @@ endmodule
     };
     check(&compiled.canonical_ir, true);
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &compiled.canonical_ir,
-            &[("BASE", 8.0), ("PICK", 8.0)],
+            &[
+                ("BASE", rspice_veriloga::ScalarParameterValue::Real(8.0)),
+                ("PICK", rspice_veriloga::ScalarParameterValue::Real(8.0)),
+            ],
             &NoPipelineControl,
         )
         .unwrap();
@@ -1133,7 +1165,11 @@ endmodule
     let compiler = compiler();
     let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&compiled.canonical_ir, &[("BASE", 5.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &compiled.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(5.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     specialized.canonical_ir.validate().unwrap();
     let replay = compiler
@@ -1326,7 +1362,11 @@ endmodule
     };
     check(&artifact.canonical_ir, 3);
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 8.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(8.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     check(&specialized.canonical_ir, 8);
     let replay = compiler
@@ -1422,9 +1462,9 @@ endmodule
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     artifact.canonical_ir.validate().unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &artifact.canonical_ir,
-            &[("BASE", -5.0)],
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(-5.0))],
             &NoPipelineControl,
         )
         .unwrap();
@@ -1580,9 +1620,9 @@ endmodule
     };
     check(&artifact.canonical_ir);
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &artifact.canonical_ir,
-            &[("LEVEL", 4.25)],
+            &[("LEVEL", rspice_veriloga::ScalarParameterValue::Real(4.25))],
             &NoPipelineControl,
         )
         .unwrap();
@@ -2008,7 +2048,11 @@ fn inherited_disciplines_follow_generated_occurrences_defaults_and_replay() {
         .compile_runtime(INHERITED_DISCIPLINES, Some("top"))
         .unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("MODE", 1.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("MODE", rspice_veriloga::ScalarParameterValue::Real(1.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2150,7 +2194,11 @@ endmodule
     let compiler = VerilogACompiler::default();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(7.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2254,7 +2302,11 @@ endmodule
     let compiler = VerilogACompiler::default();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 4.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(4.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2366,7 +2418,11 @@ endmodule
     let compiler = compiler();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(7.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2419,7 +2475,11 @@ endmodule
     let compiler = VerilogACompiler::default();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("IDX", 2.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("IDX", rspice_veriloga::ScalarParameterValue::Real(2.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2539,7 +2599,11 @@ endmodule
     let compiler = compiler();
     let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(7.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     for report in [&artifact, &specialized] {
         report.canonical_ir.validate().unwrap();
@@ -2612,7 +2676,11 @@ endmodule
     let compiler = compiler();
     let artifact = compiler.compile_runtime(source, Some("tree")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&artifact.canonical_ir, &[("N", 1.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &artifact.canonical_ir,
+            &[("N", rspice_veriloga::ScalarParameterValue::Real(1.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     specialized.canonical_ir.validate().unwrap();
     let replay = compiler
@@ -2679,9 +2747,9 @@ connectrules selected; connect drive; endconnectrules
         .compile_runtime_with_connections("top", &configuration, &NoPipelineControl)
         .unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &configured.runtime.canonical_ir,
-            &[("G", 6.0)],
+            &[("G", rspice_veriloga::ScalarParameterValue::Real(6.0))],
             &NoPipelineControl,
         )
         .unwrap();
@@ -2758,9 +2826,9 @@ connectrules selected; connect drive #(.N(2),.GAIN(3)); endconnectrules
         .unwrap();
     artifact.runtime.canonical_ir.validate().unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &artifact.runtime.canonical_ir,
-            &[("BASE", 4.0)],
+            &[("BASE", rspice_veriloga::ScalarParameterValue::Real(4.0))],
             &NoPipelineControl,
         )
         .unwrap();

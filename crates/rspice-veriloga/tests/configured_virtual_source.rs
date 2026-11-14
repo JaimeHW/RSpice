@@ -81,9 +81,9 @@ fn selected_virtual_configuration_survives_transport_and_root_replay() {
     first.validate_integrity().unwrap();
 
     let assigned = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &first.runtime.canonical_ir,
-            &[("N", 2.0)],
+            &[("N", rspice_veriloga::ScalarParameterValue::Real(2.0))],
             &NoPipelineControl,
         )
         .unwrap();

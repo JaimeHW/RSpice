@@ -254,7 +254,11 @@ fn compile_one_shipped_veriloga_module_child() {
         compile_file_module_with_timings(&source, &module, &options)
     } else {
         VerilogACompiler::new(options)
-            .compile_file_module_with_metadata(&source, Some(&module))
+            .compile_file_module_with_metadata_and_control(
+                &source,
+                Some(&module),
+                &rspice_veriloga::NoPipelineControl,
+            )
             .map(|compiled| compiled.model)
     };
 

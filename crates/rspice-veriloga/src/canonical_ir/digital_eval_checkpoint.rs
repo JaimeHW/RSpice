@@ -427,14 +427,7 @@ impl<'a> DigitalCheckpointReader<'a> {
         Ok(value)
     }
 
-    pub fn restore_resume(
-        &mut self,
-        image: &DigitalResumeCheckpoint,
-    ) -> Result<DigitalResumeState> {
-        self.restore_thread_resume(image, false)
-    }
-
-    /// [`Self::restore_resume`] for a thread, `forked` when a `fork` started
+    /// Restore one thread's resume state; `forked` is set when a `fork` started
     /// it. A forked thread's outermost frame is the process or routine that
     /// forked it (IEEE 1364-2005 section 9.8.2), so it may run a routine with
     /// no caller below it; that routine must then contain a `fork`.

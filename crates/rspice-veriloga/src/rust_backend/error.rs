@@ -63,10 +63,6 @@ impl RustBackendError {
             message: error.to_string(),
         }
     }
-
-    pub fn is_unsupported(&self) -> bool {
-        self.kind == RustBackendErrorKind::Unsupported
-    }
 }
 
 impl fmt::Display for RustBackendError {
@@ -94,7 +90,7 @@ mod tests {
             message: "typed unsupported error with deliberately different wording".to_string(),
         };
 
-        assert!(error.is_unsupported());
+        assert_eq!(error.kind, RustBackendErrorKind::Unsupported);
     }
 
     #[test]
@@ -105,6 +101,6 @@ mod tests {
             "unsupported Verilog-A construct for Rust backend: misleading text",
         );
 
-        assert!(!error.is_unsupported());
+        assert_ne!(error.kind, RustBackendErrorKind::Unsupported);
     }
 }

@@ -159,7 +159,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// −16.71, `asmesd_dio` −16.92 and `EPFL_HEMT_10a` −16.96, three small modules
 /// with little procedural body to drop. The three `hisimhv` variants fall from 57 MiB to 12.3
 /// (`hisimhv_n5_va` 59,846,716 to 12,888,476, −78.46 per cent), which is what
-/// takes [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] from 60
+/// takes the shipped-model native size budget from 60
 /// MiB to 16, and `l_utsoi` −32.22 (7,414,136 to 5,025,336) — the module whose
 /// CFG plan was the estate's one size *and* time regression, and is now neither:
 /// a timing census read it at 0.644 of its postfix plan
@@ -187,7 +187,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// module without a loop moved a byte, and not one with a loop stayed put.
 /// The corpus went from 354,110,368 bytes to **354,171,040, plus 0.017 per
 /// cent**, and the three `hisimhv` variants stay under
-/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which was
+/// the shipped-model native size budget, which was
 /// then 60 MiB, with `hisimhv_n5_va` at 57.07 MiB.
 ///
 /// The per-module growth divides into two rates, and both are accounted for.
@@ -242,7 +242,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// three `hisimsoi_va` variants −60.3 each; the smallest are `r2_cmc` −2.71 and
 /// `r2_et_cmc` −3.14, two resistor models with almost no procedural body to
 /// re-root. The three `hisimhv` variants are back **under**
-/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] on this change
+/// the shipped-model native size budget on this change
 /// alone — 59,834,636 / 59,830,484 / 59,329,776 against 62,914,560 — and
 /// `hisimhv_n5_va` at 57.06 MiB is what now sets that budget. `l_utsoi` carries
 /// a second change on top: its eleven deferred contribution-current cones are
@@ -326,7 +326,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// 12,356,892, and its `_nqs` sibling likewise), the largest factor in the
 /// corpus; and the three `hisimhv` variants — 65,119,620, 71,142,388 and
 /// 71,138,396 bytes — were then **past**
-/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which stood
+/// the shipped-model native size budget, which stood
 /// at 60 MiB. `native_shipped_models` asserts that budget and cannot see it, because
 /// it fails earlier on `vbic13_4t` for an unrelated reason that reproduces on
 /// the pre-flip revision.

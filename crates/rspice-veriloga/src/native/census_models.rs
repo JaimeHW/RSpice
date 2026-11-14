@@ -218,7 +218,11 @@ impl Iterator for ShippedCensusModels {
         };
         let compiler = VerilogACompiler::new(options);
         let runtime = compiler
-            .compile_file_runtime_with_metadata(&pending.path, Some(&pending.module))
+            .compile_file_runtime_with_metadata_and_control(
+                &pending.path,
+                Some(&pending.module),
+                &crate::NoPipelineControl,
+            )
             .unwrap_or_else(|error| {
                 panic!(
                     "compile {} :: {}: {error}",

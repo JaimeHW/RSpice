@@ -9,6 +9,20 @@ use rspice_veriloga::{
     compile_diagnostics,
 };
 
+/// Portable generated Rust is required; the interpreter is refused.
+const GENERATED_RUST_REQUIRED: RuntimeQualificationOptions = RuntimeQualificationOptions {
+    generated_rust: true,
+    interpreter_fallback: rspice_veriloga::InterpreterFallbackPolicy::Reject,
+    ..RuntimeQualificationOptions::NONE
+};
+
+/// The host-native JIT is required; the interpreter is refused.
+const NATIVE_REQUIRED: RuntimeQualificationOptions = RuntimeQualificationOptions {
+    native_x64_jit: true,
+    interpreter_fallback: rspice_veriloga::InterpreterFallbackPolicy::Reject,
+    ..RuntimeQualificationOptions::NONE
+};
+
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
 
 const ZI_STATE_SOURCE: &str = r#"
@@ -96,9 +110,9 @@ fn runtime_noise_count_tracks_processes_and_checks_both_artifacts() {
                     )
                 )
             )),
+            interpreter_fallback: rspice_veriloga::InterpreterFallbackPolicy::Reject,
             ..RuntimeQualificationOptions::NONE
-        }
-        .rejecting_interpreter_fallback();
+        };
         let report = compiler()
             .compile_runtime_with_qualifications(&source, None, qualifications)
             .unwrap_or_else(|error| panic!("{body}: {error}"));
@@ -456,11 +470,7 @@ fn optional_backend_qualification_is_explicit() {
 #[test]
 fn required_generated_rust_never_silently_falls_back_to_the_interpreter() {
     let report = compiler()
-        .compile_runtime_with_qualifications(
-            SENSOR_BRIDGE_SOURCE,
-            None,
-            RuntimeQualificationOptions::GENERATED_RUST_REQUIRED,
-        )
+        .compile_runtime_with_qualifications(SENSOR_BRIDGE_SOURCE, None, GENERATED_RUST_REQUIRED)
         .expect("the portable direct Rust backend must qualify this model");
 
     assert!(report.targets.is_available(RuntimeTarget::GeneratedRust));
@@ -563,7 +573,7 @@ endmodule
             .unwrap_or_else(|error| panic!("{operator} report integrity failed: {error}"));
 
         let required = report
-            .enforce_fallback_policy(RuntimeQualificationOptions::GENERATED_RUST_REQUIRED)
+            .enforce_fallback_policy(GENERATED_RUST_REQUIRED)
             .expect_err("requiring rejected generated Rust must fail closed");
         assert_eq!(required.target, RuntimeTarget::GeneratedRust, "{operator}");
         assert_eq!(
@@ -587,7 +597,7 @@ endmodule
     assert!(report.targets.is_available(RuntimeTarget::GeneratedRust));
     assert!(report.generated_rust.is_some());
     report
-        .enforce_fallback_policy(RuntimeQualificationOptions::GENERATED_RUST_REQUIRED)
+        .enforce_fallback_policy(GENERATED_RUST_REQUIRED)
         .expect("required one-argument slew generated Rust remains available");
     report
         .validate_integrity()
@@ -596,11 +606,8 @@ endmodule
 
 #[test]
 fn required_native_backend_is_a_typed_fail_closed_contract() {
-    let result = compiler().compile_runtime_with_qualifications(
-        SENSOR_BRIDGE_SOURCE,
-        None,
-        RuntimeQualificationOptions::NATIVE_REQUIRED,
-    );
+    let result =
+        compiler().compile_runtime_with_qualifications(SENSOR_BRIDGE_SOURCE, None, NATIVE_REQUIRED);
 
     #[cfg(all(
         feature = "native",

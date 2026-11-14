@@ -58,6 +58,7 @@ impl WasmJitRuntimeSession {
         &self.context
     }
 
+    #[cfg(test)]
     pub fn context_mut(&mut self) -> &mut VmContext {
         &mut self.context
     }

@@ -442,9 +442,9 @@ fn a_specialized_module_keeps_the_places_of_its_included_sites() {
         .runtime;
     assert_eq!(placements(&original), placed_in_body());
     let mut specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &original.canonical_ir,
-            &[("k", 2.0)],
+            &[("k", rspice_veriloga::ScalarParameterValue::Real(2.0))],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();

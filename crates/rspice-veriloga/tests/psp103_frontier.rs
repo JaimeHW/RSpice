@@ -57,7 +57,11 @@ fn psp103_compiles_end_to_end() {
     };
 
     let model = VerilogACompiler::default()
-        .compile_file_module_with_metadata(&path, None)
+        .compile_file_module_with_metadata_and_control(
+            &path,
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("PSP 103.6 must compile")
         .model;
 

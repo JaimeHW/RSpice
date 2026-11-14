@@ -894,7 +894,11 @@ fn deck_reconfigures_registered_specializations_without_resetting_root_assignmen
         .compile_runtime_with_connections(Some("top"), &low, &NoPipelineControl)
         .unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(&original.canonical_ir, &[("N", 2.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("N", rspice_veriloga::ScalarParameterValue::Real(2.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
     let serialized = serde_json::to_vec(&specialized.canonical_ir).unwrap();
     let specialized_artifact = serde_json::from_slice(&serialized).unwrap();
@@ -975,9 +979,9 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
         serde_json::from_slice(&serde_json::to_vec(&original.runtime).unwrap()).unwrap();
     original.validate_integrity().unwrap();
     let runtime = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &original.runtime.canonical_ir,
-            &[("N", 2.0)],
+            &[("N", rspice_veriloga::ScalarParameterValue::Real(2.0))],
             &NoPipelineControl,
         )
         .unwrap();

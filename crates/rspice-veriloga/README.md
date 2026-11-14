@@ -83,7 +83,7 @@ comes from.
   available backends. Nothing is written to disk.
 - `compile_canonical_ir` / `compile_canonical_ir_module`: the canonical
   artifact alone, for a caller that only drives a JIT or the offline emitter.
-- `compile_file_runtime_with_metadata`: the same products from a path,
+- `compile_file_runtime_with_metadata_and_control`: the same products from a path,
   returning the include dependencies preprocessing discovered.
 - `compile_virtual_runtime`: the same products from a sealed
   `VirtualSourceBundle`, never touching the file system.
@@ -256,9 +256,8 @@ entirely: it selects pre-generated artifacts and does not link this compiler.
 
 Backend qualification is report-only by default, so an editor can show every
 target's readiness. Release tooling that must not fall back to the interpreter
-passes `RuntimeQualificationOptions::GENERATED_RUST_REQUIRED`,
-`RuntimeQualificationOptions::NATIVE_REQUIRED` or
-`rejecting_interpreter_fallback()`; an unavailable or refusing backend then
+sets `interpreter_fallback: InterpreterFallbackPolicy::Reject` on the
+requested backends; an unavailable or refusing backend then
 returns a typed `BackendQualification` error instead of running bytecode.
 
 A signed macOS executable that enables the hardened runtime must be signed

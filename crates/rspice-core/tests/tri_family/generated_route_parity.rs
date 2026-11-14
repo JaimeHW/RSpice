@@ -1978,7 +1978,7 @@ fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
         let mut matrix = StaticMatrix::from_triplets(3, 3, &entries).expect("dense 3x3");
         let mut rhs = [0.0; 3];
         let mut stamper =
-            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache);
+            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache);
         // Two contributions, the second always finite: an early exit would
         // lose the first observation or skip the second stamp.
         stamper.stamp_current_sparse_local::<1, 0>(
@@ -2007,7 +2007,7 @@ fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
         let mut matrix = StaticMatrix::from_triplets(3, 3, &entries).expect("dense 3x3");
         let mut rhs = [0.0; 3];
         let mut stamper =
-            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache);
+            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache);
         stamper.stamp_potential_sparse_local::<1, 0>(0, value, [0], [derivative], [], []);
         stamper.stamp_potential_sparse_local::<1, 0>(0, 3.0, [1], [4.0], [], []);
         let reported = stamper.non_finite_contribution();
@@ -2024,7 +2024,7 @@ fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
     // The AC-real stamper has no right-hand side, so it isolates the Jacobian.
     let mut matrix = ComplexMatrix::from_real_structure(&structure);
     let mut stamper =
-        GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, 2, &cache);
+        GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, &cache);
     stamper.stamp_current_sparse_local::<1, 0>(
         Some(0),
         Some(1),

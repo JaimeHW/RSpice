@@ -1158,6 +1158,7 @@ impl DelayBuffer {
     }
 
     /// Allocated sample slots, for solver memory accounting.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn allocation_capacity(&self) -> usize {
         self.samples.capacity() + self.left_limits.capacity() + self.event_orders.capacity()
     }

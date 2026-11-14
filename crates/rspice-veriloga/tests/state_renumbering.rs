@@ -43,7 +43,11 @@ fn compile_runtime_pair(source: &str, stem: &str) -> (CompiledModel, CanonicalIr
     let path = directory.join(format!("{stem}.va"));
     std::fs::write(&path, source).expect("write scratch source");
     let compiled = VerilogACompiler::new(CompilerOptions::default())
-        .compile_file_runtime_with_metadata(&path, None)
+        .compile_file_runtime_with_metadata_and_control(
+            &path,
+            None,
+            &rspice_veriloga::NoPipelineControl,
+        )
         .expect("runtime compilation succeeds");
     let _ = std::fs::remove_file(&path);
     (compiled.model, compiled.canonical_ir)

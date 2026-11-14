@@ -162,6 +162,7 @@ pub fn integer_arithmetic(
 }
 
 /// Apply signed-32-bit unary negation without host overflow behavior.
+#[cfg(test)]
 pub fn integer_neg(value: f64) -> Result<f64, IntegerRuntimeError> {
     real_to_integer(value).map(|value| f64::from(value.wrapping_neg()))
 }

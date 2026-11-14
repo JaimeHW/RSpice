@@ -57,12 +57,7 @@ fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
     instance.finalize_parameters().unwrap();
     instance.stamp(
         &ctx,
-        &mut GeneratedStamper::new_ac_real_with_static_cache(
-            &mut matrix,
-            &voltages,
-            nodes.len(),
-            &cache,
-        ),
+        &mut GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, &cache),
     );
     assert!(
         !ctx.evaluation_failed(),
@@ -171,12 +166,7 @@ fn generated_utsoi_nqs_capacitors_reference_global_ground() {
     instance.finalize_parameters().unwrap();
     instance.stamp(
         &ctx,
-        &mut GeneratedStamper::new_ac_real_with_static_cache(
-            &mut matrix,
-            &voltages,
-            nodes.len(),
-            &cache,
-        ),
+        &mut GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, &cache),
     );
     instance.stamp_reactive(
         &ctx,
@@ -243,13 +233,7 @@ fn generated_angelov_series_resistance_keeps_its_physical_current_column() {
         let mut rhs = vec![0.0; width];
         instance.stamp(
             &ctx,
-            &mut GeneratedStamper::new_with_static_cache(
-                &mut matrix,
-                &mut rhs,
-                &voltages,
-                nodes.len(),
-                &cache,
-            ),
+            &mut GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache),
         );
         assert!(
             !ctx.evaluation_failed(),
@@ -293,13 +277,8 @@ fn stamp_hicuml2(instance: &mut hicuml2::Instance, temperature: f64) -> (Vec<u64
     let mut cache = GeneratedStaticStampCache::default();
     cache.link(&matrix, &nodes, &branches, NODE_COUNT);
     let context = GeneratedEvalContext::new(&voltages, temperature, NODE_COUNT);
-    let mut stamper = GeneratedStamper::new_with_static_cache(
-        &mut matrix,
-        &mut rhs,
-        &voltages,
-        NODE_COUNT,
-        &cache,
-    );
+    let mut stamper =
+        GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache);
     instance.stamp(&context, &mut stamper);
 
     (
@@ -449,7 +428,7 @@ fn generated_cached_sparse_current_stamper_uses_static_axes() {
     let mut cache = GeneratedStaticStampCache::default();
     cache.link(&matrix, &nodes, &branches, 3);
 
-    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 3, &cache)
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache)
         .stamp_current_sparse_local::<2, 1>(
             Some(0),
             Some(1),
@@ -493,7 +472,7 @@ fn generated_cached_sparse_potential_stamper_uses_static_axes() {
     let mut cache = GeneratedStaticStampCache::default();
     cache.link(&matrix, &nodes, &branches, 2);
 
-    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache)
         .stamp_potential_sparse_local::<2, 1>(0, 7.0, [0, 1], [1.5, -0.25], [0], [2.0]);
 
     let n0 = matrix.get_index(2, 0).expect("n0 entry").0;
@@ -522,7 +501,7 @@ fn generated_cached_potential_branch_stamper_uses_static_axes() {
     let mut cache = GeneratedStaticStampCache::default();
     cache.link(&matrix, &nodes, &branches, 2);
 
-    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, &cache)
         .stamp_potential_branch_local(Some(0), Some(1), 0, 3.0);
 
     let p_branch = matrix.get_index(0, 2).expect("p branch entry").0;

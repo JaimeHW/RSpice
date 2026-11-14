@@ -53,7 +53,11 @@ fn required_generation_cannot_silently_fall_back() {
     let result = compiler().compile_runtime_with_qualifications(
         SOURCE,
         None,
-        RuntimeQualificationOptions::GENERATED_RUST_REQUIRED,
+        RuntimeQualificationOptions {
+            generated_rust: true,
+            interpreter_fallback: rspice_veriloga::InterpreterFallbackPolicy::Reject,
+            ..RuntimeQualificationOptions::NONE
+        },
     );
     if cfg!(feature = "rust-codegen") {
         assert!(result.unwrap().generated_rust.is_some());

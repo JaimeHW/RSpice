@@ -33,7 +33,7 @@
 //! Before W-F1b, twelve modules reported `moved > 0`: the generator's
 //! per-emission numbering and the canonical per-site numbering genuinely
 //! disagreed for them. The compiler now renumbers at
-//! `compile_file_runtime_with_metadata`, which is the entry this census's model
+//! `compile_file_runtime_with_metadata_and_control`, which is the entry this census's model
 //! provider reads, so the models arriving here are already in the per-site
 //! numbering and the mapping is the identity. A module reporting `moved > 0`
 //! means the renumbering did not reach it, and that is a failure rather than a

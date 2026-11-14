@@ -1840,8 +1840,11 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
         // The same source's runtime model, for the dependent parameter
         // defaults the canonical IR carries only as expressions.
         let runtime = match VerilogACompiler::new(shipped_options(candidate))
-            .compile_file_runtime_with_metadata(&candidate.path, Some(&module))
-        {
+            .compile_file_runtime_with_metadata_and_control(
+                &candidate.path,
+                Some(&module),
+                &rspice_veriloga::NoPipelineControl,
+            ) {
             Ok(runtime) => Arc::new(runtime.model),
             Err(error) => {
                 uncompiled += 1;
@@ -2252,7 +2255,11 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
         };
         let artifact = compiled.artifact;
         let Ok(runtime) = VerilogACompiler::new(shipped_options(candidate))
-            .compile_file_runtime_with_metadata(&candidate.path, Some(&module))
+            .compile_file_runtime_with_metadata_and_control(
+                &candidate.path,
+                Some(&module),
+                &rspice_veriloga::NoPipelineControl,
+            )
             .map(|runtime| Arc::new(runtime.model))
         else {
             continue;

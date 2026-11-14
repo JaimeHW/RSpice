@@ -173,7 +173,6 @@ pub const WASM_JIT_MEMORY_IMPORT: &str = "memory";
 pub const WASM_JIT_PROBE_EXPORT: &str = "rspice_wasm_jit_probe";
 
 pub(crate) const WASM_JIT_CONTRACT_SECTION: &str = "rspice.wasm-jit.contract";
-pub const WASM_JIT_PROBE_FRAME_BYTES: u64 = 16;
 const WASM_JIT_PROBE_OUTPUT_OFFSET: u64 = 8;
 
 /// A verified deterministic module ready for browser compilation.
@@ -1354,10 +1353,9 @@ fn binary_error(error: wasmparser::BinaryReaderError) -> WasmJitError {
 #[cfg(test)]
 mod tests {
     use super::{
-        WASM_JIT_ABI_VERSION, WASM_JIT_EMITTER_VERSION, WASM_JIT_PROBE_FRAME_BYTES,
-        WASM_JIT_PROBE_SIZE_BUDGET_BYTES, WasmJitExecutable, WasmJitExecutableEntry,
-        WasmJitValueRole, compile_model_value_module, emit_architecture_probe, qualify_model_plan,
-        verify_architecture_probe,
+        WASM_JIT_ABI_VERSION, WASM_JIT_EMITTER_VERSION, WASM_JIT_PROBE_SIZE_BUDGET_BYTES,
+        WasmJitExecutable, WasmJitExecutableEntry, WasmJitValueRole, compile_model_value_module,
+        emit_architecture_probe, qualify_model_plan, verify_architecture_probe,
     };
     use crate::{CompilerOptions, VerilogACompiler};
 
@@ -1370,7 +1368,6 @@ mod tests {
         assert_eq!(first.emitter_version(), WASM_JIT_EMITTER_VERSION);
         assert_eq!(first.digest().len(), 64);
         assert!(first.bytes().len() <= WASM_JIT_PROBE_SIZE_BUDGET_BYTES);
-        assert_eq!(WASM_JIT_PROBE_FRAME_BYTES, 16);
     }
 
     #[test]

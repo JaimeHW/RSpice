@@ -153,7 +153,11 @@ endmodule
         .compile_runtime_with_qualifications(
             source,
             Some("parent"),
-            RuntimeQualificationOptions::GENERATED_RUST_REQUIRED,
+            RuntimeQualificationOptions {
+                generated_rust: true,
+                interpreter_fallback: rspice_veriloga::InterpreterFallbackPolicy::Reject,
+                ..RuntimeQualificationOptions::NONE
+            },
         )
         .expect("runtime artifacts must agree on elaborated hierarchy");
     assert_eq!(report.abi.parameters.len(), 1);
@@ -828,9 +832,12 @@ endmodule
     });
     let initial = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &initial.canonical_ir,
-            &[("SELECT", 1.0), ("K", 5.0)],
+            &[
+                ("SELECT", rspice_veriloga::ScalarParameterValue::Real(1.0)),
+                ("K", rspice_veriloga::ScalarParameterValue::Real(5.0)),
+            ],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();
@@ -893,9 +900,12 @@ endmodule
     });
     let initial = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &initial.canonical_ir,
-            &[("WIDTH", 3.0), ("BASE", 5.0)],
+            &[
+                ("WIDTH", rspice_veriloga::ScalarParameterValue::Real(3.0)),
+                ("BASE", rspice_veriloga::ScalarParameterValue::Real(5.0)),
+            ],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();
@@ -984,7 +994,16 @@ endmodule
         vec![("RIGHT", 0.0)],
     ] {
         let error = compiler
-            .specialize_mixed_runtime(&initial.canonical_ir, &overrides, &NoPipelineControl)
+            .specialize_mixed_runtime_typed(
+                &initial.canonical_ir,
+                &overrides
+                    .iter()
+                    .map(|&(name, value)| {
+                        (name, rspice_veriloga::ScalarParameterValue::Real(value))
+                    })
+                    .collect::<Vec<_>>(),
+                &NoPipelineControl,
+            )
             .unwrap_err()
             .to_string();
         assert!(
@@ -1021,7 +1040,11 @@ endmodule
         )
         .unwrap();
     compiler
-        .specialize_mixed_runtime(&local.canonical_ir, &[("LEFT", 3.0)], &NoPipelineControl)
+        .specialize_mixed_runtime_typed(
+            &local.canonical_ir,
+            &[("LEFT", rspice_veriloga::ScalarParameterValue::Real(3.0))],
+            &NoPipelineControl,
+        )
         .unwrap();
 }
 
@@ -1101,9 +1124,12 @@ endmodule
     });
     let initial = compiler.compile_runtime(source, Some("top")).unwrap();
     let specialized = compiler
-        .specialize_mixed_runtime(
+        .specialize_mixed_runtime_typed(
             &initial.canonical_ir,
-            &[("SELECT", 1.0), ("K", 5.0)],
+            &[
+                ("SELECT", rspice_veriloga::ScalarParameterValue::Real(1.0)),
+                ("K", rspice_veriloga::ScalarParameterValue::Real(5.0)),
+            ],
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();

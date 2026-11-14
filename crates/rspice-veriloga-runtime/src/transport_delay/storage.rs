@@ -101,8 +101,8 @@ impl DelayBuffer {
             )
     }
 
-    /// Backing bytes requested by [`Self::try_clone`] or
-    /// [`Self::try_checkpoint`]. Copies retain records without spare capacity.
+    /// Backing bytes requested by [`Self::try_clone`] or a fallible
+    /// checkpoint. Copies retain records without spare capacity.
     pub fn copy_allocation_bytes(&self) -> usize {
         self.samples
             .len()
@@ -133,6 +133,7 @@ impl DelayBuffer {
 
     /// Capture accepted records with fallible allocation. As with
     /// [`Self::checkpoint`], a staged candidate is excluded.
+    #[cfg(test)]
     pub fn try_checkpoint(&self) -> Result<DelayCheckpoint, TryReserveError> {
         Ok(DelayCheckpoint {
             configuration: self.configuration,

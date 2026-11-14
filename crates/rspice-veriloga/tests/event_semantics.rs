@@ -446,7 +446,11 @@ fn generated_builtin_final_step_bodies_feed_no_equations() {
         let compiler = VerilogACompiler::new(options);
         for module in modules {
             let compiled = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module.as_str()))
+                .compile_file_runtime_with_metadata_and_control(
+                    &candidate.path,
+                    Some(module.as_str()),
+                    &rspice_veriloga::NoPipelineControl,
+                )
                 .expect("a shipped module compiles");
             let nodes: Vec<usize> = (1..=compiled.model.num_terminals).collect();
             let device = VerilogADevice::try_new_with_canonical_ir(
