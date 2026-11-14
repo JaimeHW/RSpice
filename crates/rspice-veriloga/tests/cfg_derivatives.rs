@@ -15,8 +15,8 @@ use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::hir::HirRegion;
 use rspice_veriloga::canonical_ir::mir::MirParameterSlot;
 use rspice_veriloga::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar, CfgValueKind,
-    ComplexStep, ValueId, differentiate, evaluate_cfg,
+    AdSeed, COMPLEX_STEP, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar,
+    CfgValueKind, ComplexStep, ValueId, differentiate, evaluate_cfg,
 };
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::rust_backend::{
@@ -74,6 +74,24 @@ const CORPUS_COMPLEX_TOLERANCE: f64 = 1.0e-9;
 /// fails. What this excludes is the perturbed evaluation overflowing, which
 /// reports as 1e197 and is not a statement about the chain rule at all.
 const ORACLE_DIVERGENCE_FACTOR: f64 = 1.0e12;
+
+/// A second complex step, read only for an entry the first reading fails.
+///
+/// Complex step is exact to rounding, but rounding is not nothing where a
+/// derivative is a small difference of large terms: the imaginary parts cancel
+/// as the chain rule's products do, and two evaluation orders keep different
+/// last bits. PSP 102.5's electrical build at the census's second drawn point is
+/// that entry. Equation 31 by node 6 reads -41.0097952091 at a step of 1e-200,
+/// -41.0097951590 at 1e-100 and -41.0097951796 at 1e-30, and the rule gives
+/// -41.0097951539: the oracle disagrees with itself by 1.2e-9, more than the
+/// tolerance, and the rule is 1.3e-10 from its second reading.
+///
+/// Both steps leave `h^2` far below rounding, so the two readings are equally
+/// exact and their difference measures the oracle's own rounding on that entry.
+/// A failing entry is allowed that difference beside the tolerance. A missing
+/// or wrong chain-rule term is orders above it, and an entry whose second
+/// reading has no standing keeps its failure.
+const SECOND_COMPLEX_STEP: f64 = 1.0e-100;
 
 /// Neither oracle here is seeded with [`AdSeed::LimiterCorrection`], and neither
 /// could be: the correction is a displacement Newton limiting chose, not a
@@ -779,7 +797,7 @@ fn complex_step_column(
     seed: AdSeed,
     residuals: &[ValueId],
 ) -> Vec<f64> {
-    complex_step_values(function, bias, seed, residuals)
+    complex_step_values(function, bias, seed, residuals, COMPLEX_STEP)
         .into_iter()
         .map(|value| value.derivative())
         .collect()
@@ -792,17 +810,18 @@ fn complex_step_values(
     bias: &BiasPoint,
     seed: AdSeed,
     residuals: &[ValueId],
+    step: f64,
 ) -> Vec<ComplexStep> {
     let mut inputs = complex_inputs(bias);
     match seed {
         AdSeed::NodePotential(node) => {
             let index = usize::from(node);
-            inputs.node_potentials[index] = ComplexStep::seed(bias.node_potentials[index]);
+            inputs.node_potentials[index] = ComplexStep::new(bias.node_potentials[index], step);
         }
         AdSeed::BranchUnknownFlow(unknown) => {
             let index = usize::from(unknown);
             inputs.branch_unknown_flows[index] =
-                ComplexStep::seed(bias.branch_unknown_flows[index]);
+                ComplexStep::new(bias.branch_unknown_flows[index], step);
         }
         AdSeed::NoiseProcess(_) => unreachable!("{NO_NOISE_LANE}"),
         AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
@@ -1746,6 +1765,7 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
                 &lanes,
                 &block,
                 COMPLEX_TOLERANCE,
+                None,
                 &mut violations,
             );
         }
@@ -1936,7 +1956,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             evaluated += 1;
             let columns: Vec<_> = lanes
                 .iter()
-                .map(|seed| complex_step_values(&rule, &bias, *seed, &cfg.residuals))
+                .map(|seed| complex_step_values(&rule, &bias, *seed, &cfg.residuals, COMPLEX_STEP))
                 .collect();
             let block: Vec<(Vec<f64>, Vec<f64>)> = (0..cfg.residuals.len())
                 .map(|equation| {
@@ -1965,11 +1985,27 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                     (stamped, exact)
                 })
                 .collect();
+            let mut second_reading = |lane: usize| -> Vec<f64> {
+                let step = SECOND_COMPLEX_STEP;
+                complex_step_values(&rule, &bias, lanes[lane], &cfg.residuals, step)
+                    .into_iter()
+                    .zip(&cfg.residuals)
+                    .map(|(perturbed, residual)| {
+                        let real = snapshot.value(*residual);
+                        if real.is_some_and(|real| oracle_drifts(real, perturbed.re)) {
+                            f64::NAN
+                        } else {
+                            perturbed.im / step
+                        }
+                    })
+                    .collect()
+            };
             model_entries += compare_block(
                 &format!("{key}: point {point}"),
                 &lanes,
                 &block,
                 CORPUS_COMPLEX_TOLERANCE,
+                Some(&mut second_reading),
                 &mut violations,
             );
         }
@@ -2174,11 +2210,15 @@ fn relative_source(root: &Path, path: &Path) -> String {
 /// evaluation orders. `bjt505_va` is the case that proved it: -3.6226e-31 by
 /// rule against -3.6206e-31 by complex step, a 5.6e-4 relative disagreement over
 /// an absolute difference of 2e-34, which no solve can observe.
+///
+/// `second_reading`, where given, reads one lane's column again at
+/// [`SECOND_COMPLEX_STEP`], and only for a lane with an entry that fails.
 fn compare_block(
     label: &str,
     lanes: &[AdSeed],
     rows: &[(Vec<f64>, Vec<f64>)],
     tolerance: f64,
+    mut second_reading: Option<&mut dyn FnMut(usize) -> Vec<f64>>,
     violations: &mut Vec<String>,
 ) -> usize {
     // Against the largest entry in the whole Jacobian, not the largest in the
@@ -2205,6 +2245,7 @@ fn compare_block(
     // rule 0 against an oracle of ordinary magnitude — still fails.
     let oracle_ceiling = scale * ORACLE_DIVERGENCE_FACTOR;
 
+    let mut second: Vec<Option<Vec<f64>>> = vec![None; lanes.len()];
     let mut compared = 0usize;
     for (equation, (stamped_row, exact_row)) in rows.iter().enumerate() {
         for (lane, seed) in lanes.iter().enumerate() {
@@ -2221,10 +2262,20 @@ fn compare_block(
             }
             let relative = (stamped - exact).abs() / magnitude;
             if relative > tolerance {
-                violations.push(format!(
-                    "{label}: d(equation {equation})/d({seed:?}) is {stamped} by rule and \
-                     {exact} by complex step ({relative:.3e})"
-                ));
+                let again = second_reading
+                    .as_mut()
+                    .map(|read| second[lane].get_or_insert_with(|| read(lane))[equation]);
+                // No second reading, or one without standing, allows nothing.
+                let spread = again.map_or(f64::NAN, |again| (again - exact).abs());
+                let within_spread =
+                    spread.is_finite() && (stamped - exact).abs() <= tolerance * magnitude + spread;
+                if !within_spread {
+                    violations.push(format!(
+                        "{label}: d(equation {equation})/d({seed:?}) is {stamped} by rule and \
+                         {exact} by complex step ({relative:.3e}; {} at the second step)",
+                        again.map_or_else(|| "not read".to_owned(), |again| again.to_string())
+                    ));
+                }
             }
             compared += 1;
         }
