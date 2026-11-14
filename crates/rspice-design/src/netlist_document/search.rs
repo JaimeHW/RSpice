@@ -102,6 +102,7 @@ pub enum FindError {
     ReplacementLimitExceeded { limit: usize },
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "scope")]
 pub enum ReplaceScope {
@@ -267,6 +268,7 @@ pub fn find_all_in_source_range_bounded_filter(
 /// Replace the next directional match or every source-order match. Literal
 /// replacements are inserted exactly. Regular-expression replacements use
 /// the regex crate's `$1`/`$name` capture expansion semantics.
+#[cfg(test)]
 pub fn replace_in_source(
     source: &str,
     query: &str,
@@ -384,6 +386,7 @@ fn validate_request(source: &str, query: &str, caret_byte: usize) -> Result<(), 
     Ok(())
 }
 
+#[cfg(test)]
 fn candidate_ranges(
     source: &str,
     query: &str,
@@ -454,6 +457,7 @@ fn build_regex(query: &str, match_case: bool) -> Result<regex::Regex, FindError>
         .map_err(|error| FindError::InvalidRegularExpression(error.to_string()))
 }
 
+#[cfg(test)]
 fn select_range(
     candidates: &[Range<usize>],
     caret_byte: usize,
@@ -474,6 +478,7 @@ fn select_range(
     }
 }
 
+#[cfg(test)]
 fn case_insensitive_ranges(source: &str, query: &str) -> Vec<Range<usize>> {
     case_insensitive_ranges_bounded(source, query, usize::MAX, false, &|_| true)
 }

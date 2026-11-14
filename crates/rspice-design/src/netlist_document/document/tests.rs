@@ -192,11 +192,6 @@ fn generated_refresh_never_overwrites_user_owned_source() {
         document.generated_artifact().unwrap().content_digest(),
         replacement_digest
     );
-    document
-        .return_to_generated(document.content_digest())
-        .expect("return generated");
-    assert_eq!(document.content_digest(), replacement_digest);
-    assert_eq!(document.ownership(), DocumentOwnership::Generated);
 }
 
 #[test]
@@ -653,14 +648,6 @@ fn dependency_graph_rejects_missing_ambiguous_and_cyclic_edges() {
 fn revision_and_identity_are_stable_and_noops_do_not_create_revisions() {
     let mut document = document();
     let id = document.id();
-    let initial_revision = document.revision();
-    let receipt = document
-        .return_to_generated(document.content_digest())
-        .expect("no-op return");
-    assert_eq!(receipt.previous_revision(), initial_revision);
-    assert_eq!(receipt.revision(), initial_revision);
-    assert_eq!(document.revision(), initial_revision);
-
     let receipt = document
         .make_editable(document.content_digest())
         .expect("transition");
@@ -769,47 +756,6 @@ fn generated_source_cannot_be_saved_or_edited_directly() {
             DocumentOwnership::Generated
         ))
     ));
-    assert!(matches!(
-        document.replace_editable_matches(
-            document.content_digest(),
-            "R1",
-            "R2",
-            FindOptions::default(),
-            ReplaceScope::All,
-        ),
-        Err(DocumentError::SourceIsNotEditable(
-            DocumentOwnership::Generated
-        ))
-    ));
-}
-
-#[test]
-fn editable_regex_replacement_is_one_atomic_source_transition() {
-    let mut document = document();
-    document
-        .make_editable(document.content_digest())
-        .expect("editable");
-    let before_revision = document.revision();
-    let before_digest = document.content_digest();
-    let (receipt, outcome) = document
-        .replace_editable_matches(
-            before_digest,
-            r"R(?P<number>\d+)",
-            "X${number}",
-            FindOptions {
-                regular_expression: true,
-                ..FindOptions::default()
-            },
-            ReplaceScope::All,
-        )
-        .expect("replace");
-    assert_eq!(outcome.replacement_count(), 1);
-    assert!(document.source().contains("X1 in 0 1k"));
-    assert_eq!(receipt.previous_revision(), before_revision);
-    assert_eq!(receipt.previous_digest(), before_digest);
-    assert_eq!(receipt.content_digest(), document.content_digest());
-    assert!(receipt.revision() > before_revision);
-    assert!(document.validation().is_none());
 }
 
 #[test]

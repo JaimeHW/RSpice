@@ -13,7 +13,7 @@ use uuid::Uuid;
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision, RevisionError};
 
 use super::outline::{IncludeDirective, IncludeKind, parse_include_directives};
-use super::search::{FindError, FindOptions, ReplaceOutcome, ReplaceScope, replace_in_source};
+use super::search::FindError;
 
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
@@ -1243,26 +1243,6 @@ impl NetlistDocument {
         Ok(self.finish_receipt(before))
     }
 
-    /// Apply literal or regular-expression replacement to an owned source.
-    /// Generated and un-promoted imported documents fail closed as read-only.
-    pub fn replace_editable_matches(
-        &mut self,
-        expected_digest: ContentDigest,
-        query: &str,
-        replacement: &str,
-        options: FindOptions,
-        scope: ReplaceScope,
-    ) -> Result<(TransitionReceipt, ReplaceOutcome), DocumentError> {
-        self.ensure_current(expected_digest)?;
-        if self.ownership != DocumentOwnership::Editable {
-            return Err(DocumentError::SourceIsNotEditable(self.ownership));
-        }
-        let outcome = replace_in_source(&self.source, query, replacement, options, scope)?;
-        let receipt =
-            self.replace_editable_source(expected_digest, outcome.source().as_bytes().to_vec())?;
-        Ok((receipt, outcome))
-    }
-
     pub fn import_source(
         &mut self,
         expected_digest: ContentDigest,
@@ -1290,36 +1270,6 @@ impl NetlistDocument {
         });
         self.provenance.last_saved = acknowledgement.clone();
         self.save_acknowledgement = acknowledgement;
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
-    pub fn return_to_generated(
-        &mut self,
-        expected_digest: ContentDigest,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        let generated_artifact = self
-            .generated_artifact
-            .as_ref()
-            .ok_or(DocumentError::GeneratedArtifactUnavailable)?
-            .clone();
-        if self.ownership == DocumentOwnership::Generated
-            && self.source == generated_artifact.source
-        {
-            return Ok(self.noop_receipt());
-        }
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        self.source.clone_from(&generated_artifact.source);
-        self.content_digest = generated_artifact.content_digest;
-        self.dependencies
-            .clone_from(&generated_artifact.dependencies);
-        self.provenance.generated = Some(generated_artifact.provenance);
-        self.ownership = DocumentOwnership::Generated;
-        self.save_acknowledgement = None;
-        self.validation = None;
-        self.rebuild_derived();
         self.revision = next_revision;
         Ok(self.finish_receipt(before))
     }
