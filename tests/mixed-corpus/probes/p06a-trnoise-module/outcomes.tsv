@@ -1,3 +1,4 @@
 # variant	analysis	route	outcome	detail
 base	trnoise	interp	pass	sigma.mixed (O6) std over 1901 samples: 2.291802e-2 in [2.140000e-2, 2.330000e-2]
 base	trnoise	native	pass	sigma.mixed (O6) std over 1901 samples: 2.291802e-2 in [2.140000e-2, 2.330000e-2]
+base	trnoise	worker	pass	sigma.mixed (O6) std over 1901 samples: 2.291802e-2 in [2.140000e-2, 2.330000e-2]
