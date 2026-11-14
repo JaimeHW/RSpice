@@ -554,13 +554,15 @@ pub struct XspiceEventValues {
     /// Resolved digital value of each event-driven node.
     pub digital_values: EventNodeMap<DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.
-    pub(crate) digital_drivers: XspiceDigitalDrivers,
+    #[doc(hidden)]
+    pub digital_drivers: XspiceDigitalDrivers,
     /// Last event time per digital node.
     pub digital_event_times: EventNodeMap<Value>,
     /// Resolved real-valued value of each event-driven node.
     pub real_values: EventNodeMap<Value>,
     /// Per-output real-valued drivers, summed onto real nodes.
-    pub(crate) real_drivers: XspiceRealDrivers,
+    #[doc(hidden)]
+    pub real_drivers: XspiceRealDrivers,
     /// Last event time per real-valued node.
     pub real_event_times: EventNodeMap<Value>,
 }

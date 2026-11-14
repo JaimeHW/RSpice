@@ -749,7 +749,8 @@ pub(crate) struct ContextOutputsImage(CopyOnWrite<HashMap<String, OutputValue>>)
 
 /// Serializable code-model context state captured in transient checkpoints.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CmContextCheckpoint {
+#[doc(hidden)]
+pub struct CmContextCheckpoint {
     pub time: Value,
     pub time_prev: Value,
     pub state: Vec<Value>,

@@ -160,14 +160,18 @@ impl AnalogThresholdBehavior {
 /// short is a curved signal the root goes on refining.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LocatedCrossing {
+#[doc(hidden)]
+pub struct LocatedCrossing {
     /// The crossing instant, in seconds.
-    pub(crate) time: Value,
+    #[doc(hidden)]
+    pub time: Value,
     /// The decision on the far side of the crossing.
-    pub(crate) state: DigitalState,
+    #[doc(hidden)]
+    pub state: DigitalState,
     /// The threshold crossed, in the units of the crossing function the
     /// converter compares.
-    pub(crate) threshold: Value,
+    #[doc(hidden)]
+    pub threshold: Value,
 }
 
 #[cfg(test)]

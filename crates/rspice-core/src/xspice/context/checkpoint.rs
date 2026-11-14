@@ -14,7 +14,8 @@ mod tests;
 type Named<T> = Vec<(String, T)>;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ContextCheckpointLimits {
+#[doc(hidden)]
+pub struct ContextCheckpointLimits {
     pub max_items: usize,
     pub max_name_bytes: usize,
 }

@@ -8,7 +8,8 @@ use super::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct InstanceCheckpointLimits {
+#[doc(hidden)]
+pub struct InstanceCheckpointLimits {
     pub context: ContextCheckpointLimits,
 }
 

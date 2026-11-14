@@ -25,7 +25,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 /// A value shared with its clones until one of them writes.
-pub(crate) struct CopyOnWrite<T>(Arc<T>);
+#[doc(hidden)]
+pub struct CopyOnWrite<T>(Arc<T>);
 
 impl<T> CopyOnWrite<T> {
     pub(crate) fn new(value: T) -> Self {

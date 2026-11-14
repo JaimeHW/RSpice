@@ -14,14 +14,16 @@ use super::{
 use crate::{Complex64, Value};
 
 #[cfg(any(feature = "veriloga", test))]
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 
 /// The non-scalar instance parameters a code model can be given. Each list is
 /// keyed by parameter name, and passing five of them positionally made a
 /// swapped pair a runtime type error inside the model instead of a compile
 /// error here.
 #[derive(Clone, Copy)]
-pub(crate) struct CodeModelVectorParams<'a> {
+#[doc(hidden)]
+pub struct CodeModelVectorParams<'a> {
     pub string_params: &'a [(String, String)],
     pub string_vector_params: &'a [(String, Vec<String>)],
     pub real_vector_params: &'a [(String, Vec<Value>)],
@@ -32,7 +34,8 @@ pub(crate) struct CodeModelVectorParams<'a> {
 /// and real port values, the times they last changed, and the total load each
 /// event node presents.
 #[derive(Clone, Copy)]
-pub(crate) struct XspiceEventInputs<'a> {
+#[doc(hidden)]
+pub struct XspiceEventInputs<'a> {
     pub digital_values: &'a super::EventNodeMap<DigitalValue>,
     pub digital_event_times: &'a super::EventNodeMap<Value>,
     pub event_total_loads: &'a super::EventLoads,
@@ -43,7 +46,8 @@ pub(crate) struct XspiceEventInputs<'a> {
 /// The analog output transitions an active wave has published so far, keyed
 /// by the output's terminal pair. Read by every later instance of the wave,
 /// so on the Newton path; nothing walks it in iteration order.
-pub(crate) type AnalogTransitionMap = rustc_hash::FxHashMap<(usize, usize), AnalogTransition>;
+#[doc(hidden)]
+pub type AnalogTransitionMap = rustc_hash::FxHashMap<(usize, usize), AnalogTransition>;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -727,7 +731,8 @@ impl DigitalPortConnection {
 /// drains them into separate touched-node lists, so a net number alone does
 /// not identify what changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EventInputKind {
+#[doc(hidden)]
+pub enum EventInputKind {
     /// Digital state and strength.
     Digital,
     /// Real-valued event.
@@ -949,7 +954,8 @@ struct DigitalDriverTaps {
 
 /// Who puts a failed evaluation's context back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EvaluationRecovery {
+#[doc(hidden)]
+pub enum EvaluationRecovery {
     /// The evaluation backs up the context before the model call and restores
     /// it if the model fails, so the instance is left as the failure found it.
     Instance,
@@ -979,7 +985,8 @@ pub(crate) enum EvaluationRecovery {
 /// `DerefMut` is deliberately not implemented: shared reads go through
 /// [`Deref`] unchanged, and every mutation site is spelled out.
 #[derive(Clone)]
-pub(crate) struct SharedXspiceInstance(Arc<XspiceInstance>);
+#[doc(hidden)]
+pub struct SharedXspiceInstance(Arc<XspiceInstance>);
 
 impl SharedXspiceInstance {
     /// Register an instance the circuit has just built.
@@ -1024,7 +1031,8 @@ impl std::fmt::Debug for SharedXspiceInstance {
 
 /// Serializable state for one XSPICE code-model instance.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct XspiceInstanceCheckpoint {
+#[doc(hidden)]
+pub struct XspiceInstanceCheckpoint {
     pub name: String,
     pub model: String,
     pub context: CmContextCheckpoint,

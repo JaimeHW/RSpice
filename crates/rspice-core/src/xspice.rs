@@ -112,7 +112,8 @@ pub fn is_auto_bridge_name(name: &str) -> bool {
 }
 
 // Re-export primary types
-pub(crate) use context::CmContextCheckpoint;
+#[doc(hidden)]
+pub use context::CmContextCheckpoint;
 pub use context::{
     AnalogTransition, AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase,
 };
@@ -140,9 +141,11 @@ pub use external::{
     set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
 };
 #[cfg(feature = "veriloga")]
-pub(crate) use instance::checkpoint as instance_checkpoint;
+#[doc(hidden)]
+pub use instance::checkpoint as instance_checkpoint;
 pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
-pub(crate) use instance::{
+#[doc(hidden)]
+pub use instance::{
     AnalogTransitionMap, CodeModelVectorParams, EvaluationRecovery, EventInputKind,
     SharedXspiceInstance, XspiceEventInputs, XspiceInstanceCheckpoint,
 };
@@ -153,7 +156,8 @@ pub use resource_transaction::{ResourceTransaction, TransactionalContextResource
 mod threshold;
 pub(crate) use threshold::AnalogBandLaw;
 #[cfg(feature = "veriloga")]
-pub(crate) use threshold::LocatedCrossing;
+#[doc(hidden)]
+pub use threshold::LocatedCrossing;
 pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
 
 pub use traits::{

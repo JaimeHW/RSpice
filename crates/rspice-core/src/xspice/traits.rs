@@ -678,7 +678,8 @@ pub struct PortNoiseCurrent {
     pub white: Value,
     /// Flicker corner (Hz).
     pub corner: Value,
-    pub(crate) spectrum: Option<crate::expr::CompiledExpr>,
+    #[doc(hidden)]
+    pub spectrum: Option<crate::expr::CompiledExpr>,
 }
 
 /// The main trait for XSPICE code models
