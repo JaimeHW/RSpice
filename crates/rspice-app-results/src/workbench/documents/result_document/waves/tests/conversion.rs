@@ -236,7 +236,7 @@ pub(super) fn texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect)> {
         match shape {
             egui::Shape::Text(text) => out.push((
                 text.galley.job.text.clone(),
-                egui::Rect::from_min_size(text.pos, text.galley.size()),
+                text.galley.rect.translate(text.pos.to_vec2()),
             )),
             egui::Shape::Vec(inner) => inner.iter().for_each(|shape| walk(shape, out)),
             _ => {}

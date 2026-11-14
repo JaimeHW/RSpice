@@ -381,6 +381,96 @@ fn both_strips_stand_on_one_ruler() {
     }
 }
 
+/// A transient of a saturating core: H(core) in A/m and B(core) in T, B
+/// lagging H, over two cycles.
+fn core_host() -> ResultsTestHost {
+    let time: Vec<f64> = (0..=800).map(|step| f64::from(step) * 2.5e-6).collect();
+    let h: Vec<f64> = time.iter().map(|t| 400.0 * (OMEGA * t).sin()).collect();
+    let b: Vec<f64> = time
+        .iter()
+        .map(|t| 1.2 * (2.6 * (OMEGA * t - 0.55).sin()).tanh())
+        .collect();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("H(core)", time.clone(), h, "#fff").with_unit("A/m"),
+            RetainedTrace::new("B(core)", time, b, "#fff").with_unit("T"),
+        ]),
+    );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("legacy provenance");
+    run.restore_lifecycle(crate::state::SimulationRunLifecycle::LegacyUnknown, 0.0)
+        .expect("legacy lifecycle");
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    state
+}
+
+/// The gutter is the sheet's whatever the abscissa. "H(core) · A/m" is too
+/// long for it, so its caption breaks at the unit, the quantity over the
+/// unit, whole; and every plot keeps one left edge, under the strip drawn
+/// against time and under the strip drawn against a signal, in this
+/// document and in one whose caption fits on a line.
+#[test]
+fn a_long_abscissa_breaks_its_caption_and_leaves_the_gutter_as_it_is() {
+    let ctx = theme_context();
+    let read = |state: &mut ResultsTestHost, caption: &str| {
+        let painted = painted_texts(&ctx, state);
+        assert!(
+            painted
+                .iter()
+                .all(|(text, _)| !["LIN", "LOG"].contains(&text.as_str())
+                    && !text.contains('\u{2026}')),
+            "no word states the linear default and no caption is cut: {painted:?}"
+        );
+        let rect = |wanted: &str| {
+            painted
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("a ruler's caption reads {wanted:?}: {painted:?}"))
+        };
+        // The time ruler's t = 0, on its caption's row, is held 2 px inside
+        // the plot's left edge.
+        let time = rect("TIME \u{b7} s");
+        let edge = painted
+            .iter()
+            .filter(|(text, rect)| text == "0" && (rect.center().y - time.center().y).abs() < 4.0)
+            .map(|(_, rect)| rect.left() - 2.0)
+            .next()
+            .unwrap_or_else(|| panic!("the time ruler reads 0 at its start: {painted:?}"));
+        // The gutter holds the captions alone: no scale chip left of the plot.
+        assert!(
+            painted
+                .iter()
+                .all(|(text, rect)| !text.starts_with("log") || rect.left() > edge),
+            "no scale chip in the gutter: {painted:?}"
+        );
+        (edge, time, rect(caption))
+    };
+    let mut short = lissajous_host();
+    open_strip(&mut short, "V", signal("V(a)"));
+    let (edge, time, one_line) = read(&mut short, "V(a) \u{b7} V");
+    let mut long = core_host();
+    open_strip(&mut long, "T", signal("H(core)"));
+    let (long_edge, long_time, two_lines) = read(&mut long, "H(core)\nA/m");
+    assert_eq!(edge, long_edge, "both documents keep one plot edge");
+    for caption in [one_line, long_time, two_lines] {
+        assert_eq!(
+            caption.right(),
+            time.right(),
+            "every caption ends on the gutter's rule"
+        );
+    }
+    assert!(
+        two_lines.height() > 1.8 * one_line.height(),
+        "the quantity stands over its unit: {two_lines:?} against {one_line:?}"
+    );
+    assert!(two_lines.left() >= 0.0, "{two_lines:?}");
+}
+
 /// The centre of the X scale chip in the header of the strip whose subtitle
 /// stands at `top`: the "log X" on that row.
 fn x_toggle(painted: &[(String, egui::Rect)], top: f32) -> Option<egui::Pos2> {
@@ -1350,7 +1440,7 @@ fn styled_texts(shapes: &[ClippedShape]) -> Vec<(String, egui::Rect, egui::FontI
                 if let Some(section) = text.galley.job.sections.first() {
                     out.push((
                         text.galley.job.text.clone(),
-                        egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        text.galley.rect.translate(text.pos.to_vec2()),
                         section.format.font_id.clone(),
                         section.format.color,
                     ));

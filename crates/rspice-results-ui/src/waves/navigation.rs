@@ -27,6 +27,8 @@ const SHARED_X_LANE_HEIGHT: f32 = 14.0;
 /// The gap between a ruler's gutter caption, or its overview's name, and the
 /// plot it stands under.
 const RULER_CAPTION_GAP: f32 = 8.0;
+/// The least space between a ruler's gutter caption and the strip's edge.
+const RULER_CAPTION_EDGE: f32 = 2.0;
 
 /// The narrowest viewport an overview-handle drag can produce, as a fraction
 /// of the full retained sweep. It is the reciprocal of the zoom ceiling, so
@@ -575,20 +577,40 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             painter.galley(egui::pos2(left, label_top), galley, c.text_dim);
         }
     }
+    // The gutter is the sheet's whatever the caption, so every plot keeps one
+    // left edge. A caption too long for it breaks at its unit, the quantity
+    // over the unit, and a quantity too long for a line wraps within it.
     let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    output.caption_rect = Some(painter.text(
-        egui::pos2(plot_left - RULER_CAPTION_GAP, label_top + font.size * 0.5),
-        egui::Align2::RIGHT_CENTER,
-        caption,
-        gutter_font.clone(),
-        c.text_faint,
-    ));
+    let ruler_font = gutter_font.clone();
+    let right = plot_left - RULER_CAPTION_GAP;
+    let column = (right - rect.left() - RULER_CAPTION_EDGE).max(1.0);
+    let one_line = painter.layout_no_wrap(caption.clone(), gutter_font.clone(), c.text_faint);
+    let caption_top = label_top + font.size * 0.5 - one_line.size().y * 0.5;
+    let caption_galley = if one_line.size().x <= column {
+        one_line
+    } else {
+        let row = one_line.size().y.max(1.0);
+        let text = caption.rsplit_once(" \u{b7} ").map_or_else(
+            || caption.clone(),
+            |(quantity, unit)| format!("{quantity}\n{unit}"),
+        );
+        let mut job = egui::text::LayoutJob::simple(text, gutter_font, c.text_faint, column);
+        job.halign = egui::Align::RIGHT;
+        job.wrap.break_anywhere = true;
+        job.wrap.max_rows = (((rect.bottom() - caption_top) / row).floor() as usize).max(1);
+        painter.layout_job(job)
+    };
+    // A left-aligned galley spans 0..width, a right-aligned one -width..0:
+    // either way its right end lands on the caption's edge.
+    let caption_at = egui::pos2(right - caption_galley.rect.max.x, caption_top);
+    output.caption_rect = Some(caption_galley.rect.translate(caption_at.to_vec2()));
+    painter.galley(caption_at, caption_galley, c.text_faint);
     if has_overview {
         painter.text(
             egui::pos2(plot_left - RULER_CAPTION_GAP, track.center().y),
             egui::Align2::RIGHT_CENTER,
             "FULL",
-            gutter_font,
+            ruler_font,
             c.text_faint,
         );
     }
