@@ -181,11 +181,8 @@ pub(super) fn expand_global_run_set_tasks(
             let (source_override, nominal_supply_voltage) = &prepared_sources[point_index];
             point_task.executable_netlist_override = source_override.clone();
             point_task.pvt_point = Some(
-                rspice_results::provenance::AnalysisResultPvtPoint::new(
-                    point.process.short_name(),
-                    point.voltage,
-                    point.temperature_celsius,
-                    point.corner_contract.as_ref().map(corner_contract_digest),
+                attributed_pvt_point(
+                    point,
                     point_is_nominal(
                         point,
                         *nominal_supply_voltage,

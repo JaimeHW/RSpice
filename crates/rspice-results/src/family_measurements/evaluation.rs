@@ -294,8 +294,11 @@ pub fn family_members<'a, W: AsRef<RetainedWaveform>>(
             .enumerate()
             .map(|(index, member)| FamilyMember {
                 index,
+                // A `.STEP` member keeps the name its family is drawn with,
+                // even where its point is also a PVT point.
                 label: member
                     .provenance()
+                    .filter(|provenance| provenance.family_member().is_none())
                     .and_then(|provenance| provenance.pvt_point())
                     .map_or_else(|| member.label.clone(), |point| point.label()),
                 source: MemberSource::Waveforms(&member.waveforms),

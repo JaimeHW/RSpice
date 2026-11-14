@@ -91,6 +91,47 @@ fn each_member_of_an_expanded_family_is_measured_on_its_own_waveforms() {
     close(statistics.max, 5.0);
 }
 
+/// A `.STEP TEMP` member is a PVT point too, but its row keeps the name its
+/// family is drawn with rather than the point's.
+#[test]
+fn a_step_member_that_is_also_a_pvt_point_keeps_its_family_name() {
+    use crate::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    let family: Vec<AnalysisResult> = expanded(&[(0.0, 2.0), (1.0, 3.0)])
+        .into_iter()
+        .enumerate()
+        .map(|(index, analysis)| {
+            let member = AnalysisResultFamilyMember::StepPoint {
+                index,
+                coordinate: vec![AnalysisResultStepCoordinate {
+                    name: "temp".to_owned(),
+                    value: 25.0 * index as f64,
+                }],
+            };
+            let label = member.titled("Transient");
+            let provenance = analysis
+                .provenance()
+                .cloned()
+                .expect("an expanded member is attributed")
+                .with_family_member(Some(member))
+                .expect("a valid member");
+            AnalysisResult { label, ..analysis }.with_provenance(provenance)
+        })
+        .collect();
+    let measured = measure(&family, "avg(V(out))");
+    let labels: Vec<&str> = measured
+        .members
+        .iter()
+        .map(|member| member.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Transient \u{00b7} temp = 0",
+            "Transient \u{00b7} temp = 25"
+        ]
+    );
+}
+
 #[test]
 fn the_standard_deviation_is_the_sample_one() {
     // The textbook set: population sigma 2, sample sigma sqrt(32 / 7).

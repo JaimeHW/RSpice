@@ -46,6 +46,12 @@ pub struct DeckFamilyMember {
     /// order: `("r", 2000.0)` for `.STEP PARAM r LIST 1k 2k`, every column
     /// of the row for a `.STEP DATA` table. Empty for a Monte Carlo trial.
     pub coordinate: Vec<(String, f64)>,
+    /// For a `.STEP` point whose only swept axis is the temperature, the
+    /// temperature it solves at. Such a point is a PVT point: the run's own
+    /// models and supply at one temperature, which a specification can be
+    /// scoped to. `None` for a point that also varies anything else, whose
+    /// condition no PVT point can name, and for a Monte Carlo trial.
+    pub pvt_temperature_celsius: Option<f64>,
 }
 
 /// Whether `deck` states a statistical function outside comments.
@@ -157,6 +163,7 @@ pub fn monte_carlo_members(
                 variation_source,
             },
             coordinate: Vec::new(),
+            pvt_temperature_celsius: None,
         })
         .collect())
 }
@@ -196,18 +203,28 @@ pub fn step_members(
                 ));
             }
             let mut values = Vec::new();
+            let mut temperature = None;
+            let mut varies_more_than_temperature = false;
             for (assignment, axis) in coordinate.assignments().iter().zip(plan.axes()) {
                 let swept = axis.step_target().is_some() || axis.values().len() > 1;
                 match assignment.value() {
                     RunAxisValue::Numeric(value) if swept => {
+                        if axis.kind() == AxisKind::Temperature {
+                            temperature = Some(*value);
+                        } else {
+                            varies_more_than_temperature = true;
+                        }
                         values.push((axis_label(assignment), *value));
                     }
                     RunAxisValue::Numeric(_) => {}
-                    RunAxisValue::DataRow(bindings) => values.extend(
-                        bindings
-                            .iter()
-                            .map(|binding| (binding.name().to_owned(), binding.value())),
-                    ),
+                    RunAxisValue::DataRow(bindings) => {
+                        varies_more_than_temperature = true;
+                        values.extend(
+                            bindings
+                                .iter()
+                                .map(|binding| (binding.name().to_owned(), binding.value())),
+                        );
+                    }
                     RunAxisValue::AlterVariant { label, .. } => {
                         return Err(format!(
                             "point {index} is the .ALTER variant {label}, which a family member cannot solve"
@@ -218,6 +235,7 @@ pub fn step_members(
             Ok(DeckFamilyMember {
                 member: FamilyMember::StepPoint { index },
                 coordinate: values,
+                pvt_temperature_celsius: temperature.filter(|_| !varies_more_than_temperature),
             })
         })
         .collect()

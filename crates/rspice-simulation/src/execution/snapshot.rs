@@ -62,9 +62,9 @@ pub use derived_identity::PSS_SPECTRUM_ROLE;
 use derived_identity::{global_run_set_point_role, operating_point_run_point_role};
 use participation::{expand_global_run_set_tasks, run_set_point_task_label};
 use pvt_preparation::{
-    expand_pvt_point_tasks, materialize_spec_run_environment_source, operating_point_config,
-    operating_point_spec, point_is_nominal, prepare_pvt_point_source,
-    validate_retained_operating_point_contract,
+    attributed_pvt_point, expand_pvt_point_tasks, materialize_spec_run_environment_source,
+    operating_point_config, operating_point_spec, point_is_nominal, prepare_pvt_point_source,
+    temperature_point, validate_retained_operating_point_contract,
 };
 pub use run_receipt::result_source_domain;
 
@@ -502,6 +502,33 @@ impl PreparedTask {
     ) {
         self.label = member.titled(&self.label);
         self.family_member = Some(member);
+    }
+
+    /// Attribute this family member to the PVT point it solves. A `.STEP`
+    /// point that varies only the temperature is the point a temperature step
+    /// expands to, so it is attributed exactly as that point is: the run's
+    /// reference process, no supply axis, its own temperature, and nominal
+    /// only at the run's reference temperature.
+    pub(crate) fn attribute_temperature_member(
+        &mut self,
+        temperature_celsius: f64,
+        reference_process: ProcessCorner,
+        reference_temperature_celsius: f64,
+    ) -> Result<(), PreparationError> {
+        let point = temperature_point(reference_process, temperature_celsius);
+        let nominal = point_is_nominal(
+            &point,
+            None,
+            reference_process,
+            reference_temperature_celsius,
+        );
+        self.pvt_point = Some(attributed_pvt_point(&point, nominal).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("{} cannot be attributed: {error}", self.label),
+            )
+        })?);
+        Ok(())
     }
 
     fn payload_digest(&self) -> ContentDigest {
@@ -2064,6 +2091,18 @@ fn derive_pvt_points(
     let mut expanded = Vec::new();
     let mut found_explicit_axis = false;
     for prepared in tasks {
+        // A `.STEP` family member that varies only the temperature arrives
+        // attributed to it, and that temperature is a point of the run's PVT
+        // set exactly as a temperature step's would be.
+        if let (Some(_), Some(point)) = (&prepared.family_member, &prepared.pvt_point) {
+            found_explicit_axis = true;
+            ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
+            expanded.push(temperature_point(
+                reference_process,
+                point.temperature_celsius(),
+            ));
+            continue;
+        }
         let task = prepared.queued_analysis();
         match &task.spec {
             AnalysisSpec::Corner => {
@@ -2122,18 +2161,11 @@ fn derive_pvt_points(
                         temp.temperatures_c.len(),
                         max_pvt_points,
                     )?;
-                    expanded.extend(temp.temperatures_c.iter().copied().map(
-                        |temperature_celsius| PreparedPvtPoint {
-                            process: reference_process,
-                            voltage: None,
-                            supply_source_names: Vec::new(),
-                            temperature_celsius,
-                            parameter_overrides: Vec::new(),
-                            source_overrides: Vec::new(),
-                            corner_contract: None,
-                            run_set_point_key: None,
-                        },
-                    ));
+                    expanded.extend(
+                        temp.temperatures_c
+                            .iter()
+                            .map(|temperature| temperature_point(reference_process, *temperature)),
+                    );
                 }
             }
             _ => {}

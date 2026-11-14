@@ -155,16 +155,7 @@ pub(super) fn expand_temperature_run_point_tasks(
 
     let mut points = Vec::with_capacity(contract.temperatures_c.len());
     for temperature_celsius in contract.temperatures_c.iter().copied() {
-        let pvt = PreparedPvtPoint {
-            process: reference_process,
-            voltage: None,
-            supply_source_names: Vec::new(),
-            temperature_celsius,
-            parameter_overrides: Vec::new(),
-            source_overrides: Vec::new(),
-            run_set_point_key: None,
-            corner_contract: None,
-        };
+        let pvt = temperature_point(reference_process, temperature_celsius);
         // A temperature point binds no process, so no corner's Verilog-A.
         let (deck, nominal_supply_voltage) =
             prepare_pvt_point_source(executable_netlist, &pvt, &CornerVerilogARuntimes::default())?;
@@ -253,19 +244,8 @@ fn mint_declared_point_tasks(
             "{identity_namespace}/{index}/{count}/{}",
             point.identity.as_str()
         )));
-        task.pvt_point = Some(
-            rspice_results::provenance::AnalysisResultPvtPoint::new(
-                point.pvt.process.short_name(),
-                point.pvt.voltage,
-                point.pvt.temperature_celsius,
-                point
-                    .pvt
-                    .corner_contract
-                    .as_ref()
-                    .map(corner_contract_digest),
-                point.is_nominal,
-            )
-            .map_err(|error| {
+        task.pvt_point = Some(attributed_pvt_point(&point.pvt, point.is_nominal).map_err(
+            |error| {
                 PreparationError::new(
                     PreparationStage::AnalysisPlan,
                     format!(
@@ -273,8 +253,8 @@ fn mint_declared_point_tasks(
                         index + 1
                     ),
                 )
-            })?,
-        );
+            },
+        )?);
         task.label = format!("{} \u{00b7} {}", declaration.label, point.label);
         task.declared_point = Some(DeclaredRunPoint::new(
             base_mode.clone(),

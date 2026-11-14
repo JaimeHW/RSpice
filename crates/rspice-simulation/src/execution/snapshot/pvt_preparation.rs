@@ -30,6 +30,42 @@ pub(super) fn point_is_nominal(
     }
 }
 
+/// The point a condition that varies only the temperature is: the run's
+/// reference process at that temperature, with no supply axis and nothing to
+/// materialize. A temperature step's point and a `.STEP TEMP` family member
+/// are both this point, so both are attributed the same way.
+pub(super) fn temperature_point(
+    reference_process: ProcessCorner,
+    temperature_celsius: f64,
+) -> PreparedPvtPoint {
+    PreparedPvtPoint {
+        process: reference_process,
+        voltage: None,
+        supply_source_names: Vec::new(),
+        temperature_celsius,
+        parameter_overrides: Vec::new(),
+        source_overrides: Vec::new(),
+        corner_contract: None,
+        run_set_point_key: None,
+    }
+}
+
+/// The attribution a point's results carry: the process, supply and
+/// temperature it was solved at, the corner contract that bound its models,
+/// and whether it is the run's reference point.
+pub(super) fn attributed_pvt_point(
+    point: &PreparedPvtPoint,
+    nominal: bool,
+) -> Result<rspice_results::provenance::AnalysisResultPvtPoint, String> {
+    rspice_results::provenance::AnalysisResultPvtPoint::new(
+        point.process.short_name(),
+        point.voltage,
+        point.temperature_celsius,
+        point.corner_contract.as_ref().map(corner_contract_digest),
+        nominal,
+    )
+}
+
 /// Expand every task that is declared over the run set's PVT points into one
 /// prepared task per point.
 ///
@@ -251,11 +287,8 @@ pub(super) fn expand_pvt_point_tasks(
                 supply_source_names: point.supply_source_names.clone(),
             };
             point_task.pvt_point = Some(
-                rspice_results::provenance::AnalysisResultPvtPoint::new(
-                    point.process.short_name(),
-                    point.voltage,
-                    point.temperature_celsius,
-                    point.corner_contract.as_ref().map(corner_contract_digest),
+                attributed_pvt_point(
+                    point,
                     point_is_nominal(
                         point,
                         nominal_supply_voltage,

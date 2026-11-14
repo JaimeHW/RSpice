@@ -268,6 +268,44 @@ fn a_temperature_step_keeps_one_forward_curve_per_temperature() {
     }
 }
 
+/// A temperature point is a PVT point as well as a member of the family: the
+/// run's reference process, no supply axis, its own temperature, and nominal
+/// only at the run's reference temperature (27 °C), as a temperature step's
+/// point is. The family stays as it is drawn, one curve named per temperature.
+#[test]
+fn a_temperature_point_is_nominal_only_at_the_reference_temperature() {
+    let run = super::super::test_execution::run_manual_batch(DIODE_TEMPERATURES);
+    let curves = members(&run, AnalysisType::DcSweep, 3);
+    for (curve, (temp, nominal)) in
+        curves
+            .iter()
+            .zip([(-40.0, false), (27.0, true), (125.0, false)])
+    {
+        assert_eq!(coordinate(curve), [("temp".to_owned(), temp)]);
+        let point = curve
+            .provenance()
+            .and_then(|provenance| provenance.pvt_point())
+            .unwrap_or_else(|| panic!("{} is attributed to no PVT point", curve.label));
+        assert_eq!(point.temperature_celsius(), temp, "{}", curve.label);
+        assert_eq!(point.is_nominal(), nominal, "{}", curve.label);
+        assert_eq!(point.process(), "TT", "{}", curve.label);
+        assert_eq!(point.supply_voltage(), None, "{}", curve.label);
+        assert_eq!(point.corner_contract(), None, "{}", curve.label);
+    }
+
+    // Off the reference temperature, no point is the nominal one.
+    let run = super::super::test_execution::run_manual_batch(
+        &DIODE_TEMPERATURES.replace("list -40 27 125", "list 0 50"),
+    );
+    let curves = members(&run, AnalysisType::DcSweep, 2);
+    assert!(curves.iter().all(|curve| {
+        curve
+            .provenance()
+            .and_then(|provenance| provenance.pvt_point())
+            .is_some_and(|point| !point.is_nominal())
+    }));
+}
+
 #[test]
 fn nested_steps_are_the_cross_product_of_their_points() {
     let deck = NMOS_FAMILY

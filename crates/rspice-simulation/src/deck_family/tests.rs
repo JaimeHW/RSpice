@@ -56,3 +56,39 @@ fn points_carry_the_value_each_swept_axis_takes() {
     let resolved = member_parameters(&Engine::new(Default::default()), &netlist, &members).unwrap();
     assert_eq!(resolved[2]["r"], 3e3);
 }
+
+/// Only a point whose one swept axis is the temperature names a PVT point. A
+/// temperature crossed with a parameter, by a nested `.STEP` or by a `.TEMP`
+/// list beside a `.STEP PARAM`, is a condition no PVT point can name.
+#[test]
+fn only_a_point_that_varies_only_the_temperature_names_a_pvt_temperature() {
+    let temperatures = |deck: &str| {
+        step_members(&parsed(deck), &ResourceLimits::default())
+            .unwrap()
+            .into_iter()
+            .map(|member| member.pvt_temperature_celsius)
+            .collect::<Vec<_>>()
+    };
+    let base = "pvt\n.param r=1k\nV1 a 0 1\nR1 a 0 {r}\n.tran 1n 10n\n";
+    assert_eq!(
+        temperatures(&format!("{base}.step temp list 27 125\n.end\n")),
+        [Some(27.0), Some(125.0)]
+    );
+    assert_eq!(
+        temperatures(&format!(
+            "{base}.step temp list 27 125\n.step param r list 1k 2k\n.end\n"
+        )),
+        [None; 4]
+    );
+    assert_eq!(
+        temperatures(&format!(
+            "{base}.temp 27 125\n.step param r list 1k 2k\n.end\n"
+        )),
+        [None; 4]
+    );
+    assert_eq!(
+        temperatures(&format!("{base}.temp 50\n.step param r list 1k 2k\n.end\n")),
+        [None; 2],
+        "one stated temperature sweeps nothing, and the points vary r"
+    );
+}

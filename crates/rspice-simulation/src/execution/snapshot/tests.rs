@@ -1485,6 +1485,61 @@ fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
     assert_eq!(snapshot.pvt_points[1].temperature_celsius, 125.0);
 }
 
+/// A `.STEP` member that varies only the temperature is a point of the run's
+/// PVT set, as a temperature step's point is: the run counts it, and its task
+/// keeps the attribution it arrived with, nominal only at the reference.
+#[test]
+fn a_temperature_family_member_is_a_point_of_the_pvt_set() {
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    let mut family = parts();
+    family.tasks = [27.0, 125.0]
+        .into_iter()
+        .enumerate()
+        .map(|(index, temperature)| {
+            let mut task = prepared(&format!("tran-{index}"), "Transient", transient_task());
+            task.set_family_member(AnalysisResultFamilyMember::StepPoint {
+                index,
+                coordinate: vec![AnalysisResultStepCoordinate {
+                    name: "temp".to_owned(),
+                    value: temperature,
+                }],
+            });
+            task.attribute_temperature_member(temperature, ProcessCorner::TT, 27.0)
+                .expect("a finite temperature is attributable");
+            task
+        })
+        .collect();
+
+    let snapshot = PreparedRunSnapshot::new(family).expect("family snapshot");
+    assert_eq!(snapshot.metadata().pvt_point_count, 2);
+    let temperatures: Vec<f64> = snapshot
+        .pvt_points
+        .iter()
+        .map(|point| point.temperature_celsius)
+        .collect();
+    assert_eq!(temperatures, [27.0, 125.0]);
+    let attributed: Vec<_> = snapshot
+        .tasks
+        .iter()
+        .map(|task| {
+            task.pvt_point().map(|point| {
+                (
+                    point.process().to_owned(),
+                    point.temperature_celsius(),
+                    point.is_nominal(),
+                )
+            })
+        })
+        .collect();
+    assert_eq!(
+        attributed,
+        [
+            Some(("TT".to_owned(), 27.0, true)),
+            Some(("TT".to_owned(), 125.0, false))
+        ]
+    );
+}
+
 #[test]
 fn pvt_point_set_is_ordered_and_deduplicated_across_tasks() {
     let mut swept = parts();

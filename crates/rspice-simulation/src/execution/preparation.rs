@@ -35,6 +35,7 @@ use crate::project_veriloga::preparation::{
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_vocabulary::canonical::content_digest;
+use rspice_vocabulary::product::ProcessCorner;
 use std::path::Path;
 
 pub struct RunPreparationInputs<'a, R, A> {
@@ -879,7 +880,12 @@ pub fn build_prepared_manual_deck<R, A>(
         inputs.technology.project.revision(),
         queued_tasks,
     )?;
-    attach_family_members(&mut tasks, &expanded)?;
+    attach_family_members(
+        &mut tasks,
+        &expanded,
+        inputs.analysis.sim_setup.reference_pvt.process,
+        inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
+    )?;
     reject_deferred_corner_model_sources(
         tasks.iter().map(PreparedTask::queued_analysis),
         &expanded,
@@ -959,9 +965,17 @@ pub fn build_prepared_manual_deck<R, A>(
 /// Record on each analysis that solves one trial or point of the deck's
 /// `.MC` study or `.STEP` sweep which member it solves, with the value each
 /// swept axis takes at a point, and name the task after it.
+///
+/// A point that varies only the temperature is also a PVT point, attributed
+/// against the run's reference process and temperature, so a specification
+/// scoped to the nominal point or to a corner reads it as it reads a
+/// temperature step's point. A point that varies anything else is attributed
+/// to no PVT point: its condition is not one a PVT point can name.
 fn attach_family_members(
     tasks: &mut [PreparedTask],
     expanded: &str,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
 ) -> Result<(), PreparationError> {
     use crate::execution_options::FamilyMember;
     use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
@@ -984,6 +998,7 @@ fn attach_family_members(
         Vec::new()
     };
     for task in tasks {
+        let mut pvt_temperature_celsius = None;
         let record = match member_of(task) {
             None => continue,
             Some(FamilyMember::MonteCarloTrial { index, .. }) => {
@@ -993,6 +1008,7 @@ fn attach_family_members(
                 let point = points
                     .get(index)
                     .ok_or_else(|| refused(format!("the sweep has no point {index}")))?;
+                pvt_temperature_celsius = point.pvt_temperature_celsius;
                 AnalysisResultFamilyMember::StepPoint {
                     index,
                     coordinate: point
@@ -1007,6 +1023,13 @@ fn attach_family_members(
             }
         };
         task.set_family_member(record);
+        if let Some(temperature_celsius) = pvt_temperature_celsius {
+            task.attribute_temperature_member(
+                temperature_celsius,
+                reference_process,
+                reference_temperature_celsius,
+            )?;
+        }
     }
     Ok(())
 }

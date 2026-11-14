@@ -2186,14 +2186,86 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
     assert_eq!(reference_process.retained_measurements, 2);
 
     // The per-point results are additional evidence, not a replacement for the
-    // parametric family: the same run still carries the axis a plot draws.
-    let Some(crate::state::AnalysisResultFamilyMetadata::Parametric { sweep_values, .. }) = run
+    // family a plot draws: they are its members, one transient per
+    // temperature, each named for the temperature it was solved at.
+    let family: Vec<String> = run
         .analyses
         .iter()
-        .find(|analysis| analysis.analysis_type == AnalysisType::Parametric)
-        .and_then(|analysis| analysis.family_metadata.as_ref())
-    else {
-        panic!("the temperature declaration still produces its plotting family");
-    };
-    assert_eq!(sweep_values, &vec![27.0, 125.0]);
+        .filter_map(|analysis| analysis.provenance.as_ref()?.family_member())
+        .map(rspice_results::provenance::AnalysisResultFamilyMember::label)
+        .collect();
+    assert_eq!(family, ["temp = 27", "temp = 125"]);
+}
+
+/// A temperature crossed with a parameter is not a PVT point: the members
+/// are the family's, named for both values, and none is attributed to a
+/// point. A limit scoped to the nominal point or to a corner therefore has no
+/// evidence rather than an arbitrary member's, and an unscoped limit is the
+/// worst of every member.
+#[test]
+fn a_temperature_crossed_with_a_parameter_answers_no_point_scoped_specification() {
+    let deck = "temperature by resistor\n\
+         .param r=1k\n\
+         VDD vdd 0 DC 1.8\n\
+         R1 vdd out {r} TC1=0.01\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .tran 1n 100n\n\
+         .step temp list 27 125\n\
+         .step param r list 1k 2k\n\
+         .meas tran vout FIND V(out) AT=100n\n\
+         .end\n";
+    let run = crate::simulation::controller::test_execution::run_manual_batch(deck);
+
+    let members: Vec<_> = run
+        .analyses
+        .iter()
+        .filter_map(|analysis| {
+            let provenance = analysis.provenance.as_ref()?;
+            Some((provenance.family_member()?.label(), provenance.pvt_point()))
+        })
+        .collect();
+    assert_eq!(
+        members
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "temp = 27, r = 1 k",
+            "temp = 125, r = 1 k",
+            "temp = 27, r = 2 k",
+            "temp = 125, r = 2 k"
+        ]
+    );
+    assert!(
+        members.iter().all(|(_, point)| point.is_none()),
+        "a point that varies r is not a PVT point: {members:?}"
+    );
+
+    for scope in [
+        crate::state::SpecPointScope::Nominal,
+        crate::state::SpecPointScope::SelectedCorners {
+            corners: vec!["TT".to_owned()],
+        },
+    ] {
+        assert_eq!(
+            measurement_in_output_dataset(&run, &scoped("vout", Some(0.85), scope.clone())),
+            None,
+            "{scope:?} reads no member: none of them is attributed to a point"
+        );
+    }
+
+    // The hottest point with the larger upper leg: 1.8 V across 3.96 k over 1 k.
+    let everywhere = measurement_in_output_dataset(
+        &run,
+        &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
+    )
+    .expect("an unscoped limit reads every member");
+    assert_eq!(everywhere.retained_measurements, 4);
+    assert!(!everywhere.is_complete_coverage());
+    assert!(
+        (everywhere.value - 1.8 / 4.96).abs() < 1.0e-3,
+        "the worst member, got {}",
+        everywhere.value
+    );
 }
