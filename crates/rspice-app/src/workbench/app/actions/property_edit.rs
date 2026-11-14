@@ -530,15 +530,9 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
     )
 }
 
-/// Single authority for the schematic Object properties command. Availability
-/// requires a live target that the matching editor can actually open.
-#[cfg(test)]
-pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
-    selected_object_properties_available_in(&state.design.property_registry, &state.model)
-}
-
-/// [`selected_object_properties_available`] over the property schema and the
-/// model.
+/// Single authority for the schematic Object properties command, over the
+/// property schema and the model. Availability requires a live target that the
+/// matching editor can actually open.
 pub(crate) fn selected_object_properties_available_in(
     registry: &PropertyEditorSchema,
     model: &Model,
@@ -776,17 +770,10 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
 }
 
 /// Open the canonical properties workflow for the one selected editable
-/// schematic object. Component instances retain their schema-driven editor;
-/// buses, taps, and wire-resolved named nets use the topology-aware generic
-/// transaction specified by the workbench mockup.
-#[cfg(test)]
-pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
-    let mut parts = state.design.property_form_parts();
-    open_selected_object_properties_in(&mut parts, &mut state.model, &mut state.workbench)
-}
-
-/// [`open_selected_object_properties`] over the forms, the model and the
-/// session.
+/// schematic object, over the forms, the model and the session. Component
+/// instances retain their schema-driven editor; buses, taps, and wire-resolved
+/// named nets use the topology-aware generic transaction specified by the
+/// workbench mockup.
 pub(crate) fn open_selected_object_properties_in(
     parts: &mut PropertyFormParts<'_>,
     model: &mut Model,
@@ -1244,7 +1231,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus(41);
-        assert!(open_selected_object_properties(&mut state));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -1264,7 +1255,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus_tap(42);
-        assert!(open_selected_object_properties(&mut state));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -1295,7 +1290,11 @@ mod tests {
             .selection
             .select_only_net_label(label.id);
 
-        assert!(open_selected_object_properties(&mut state));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -1335,8 +1334,15 @@ mod tests {
             .selection
             .select_only_wire(71);
 
-        assert!(selected_object_properties_available(&state));
-        assert!(open_selected_object_properties(&mut state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -1358,8 +1364,15 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .clear();
-        assert!(!selected_object_properties_available(&state));
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
     }
 
     #[test]
@@ -1382,8 +1395,15 @@ mod tests {
             .selection
             .select_only_component(73);
 
-        assert!(selected_object_properties_available(&state));
-        assert!(open_selected_object_properties(&mut state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(state.design.tabbed_property_dialog.open);
         assert!(!state.design.object_properties.open);
         assert_eq!(
@@ -1416,7 +1436,11 @@ mod tests {
             .selection
             .select_only_design_note(note.id);
 
-        assert!(open_selected_object_properties(&mut state));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -1450,7 +1474,11 @@ mod tests {
             .select_only_bus(1);
         state.model.schematic.session.read_only = true;
 
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(!state.design.object_properties.open);
     }
 
@@ -1470,8 +1498,15 @@ mod tests {
             .select_only_probe(74);
         state.model.schematic.session.read_only = true;
 
-        assert!(selected_object_properties_available(&state));
-        assert!(open_selected_object_properties(&mut state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(state.workbench.inspector_visible);
         assert_eq!(
             state.workbench.drawer,
@@ -1491,7 +1526,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus(9001);
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(!state.design.object_properties.open);
 
         state
@@ -1501,7 +1540,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus_tap(9002);
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(!state.design.object_properties.open);
 
         state
@@ -1511,7 +1554,11 @@ mod tests {
             .editor
             .selection
             .select_only_net_label(9003);
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(!state.design.object_properties.open);
 
         state
@@ -1521,7 +1568,11 @@ mod tests {
             .editor
             .selection
             .select_only_design_note(9004);
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(!state.design.object_properties.open);
     }
 
@@ -1548,7 +1599,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus(1);
-        assert!(open_selected_object_properties(&mut state));
+        assert!(open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
 
         state
             .model
@@ -1557,7 +1612,11 @@ mod tests {
             .editor
             .selection
             .select_only_bus(999);
-        assert!(!open_selected_object_properties(&mut state));
+        assert!(!open_selected_object_properties_in(
+            &mut state.design.property_form_parts(),
+            &mut state.model,
+            &mut state.workbench,
+        ));
         assert!(matches!(
             state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(ref draft)) if draft.original.id == 1
@@ -1587,7 +1646,10 @@ mod tests {
             .selection
             .select_only_component(44);
 
-        assert!(selected_object_properties_available(&state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
         open_property_editor(&mut state, 44);
 
         assert!(state.design.tabbed_property_dialog.open);
@@ -1655,7 +1717,10 @@ mod tests {
             .selection
             .select_only_component(9);
 
-        assert!(selected_object_properties_available(&state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
         open_property_editor(&mut state, 9);
         assert!(state.design.tabbed_property_dialog.open);
 
@@ -1776,7 +1841,10 @@ mod tests {
             .editor
             .selection
             .select_only_component(2);
-        assert!(selected_object_properties_available(&state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
         open_property_editor(&mut state, 2);
         assert!(state.design.tabbed_property_dialog.open);
         let legacy_sheet = state
@@ -1811,7 +1879,10 @@ mod tests {
             .editor
             .selection
             .select_only_component(3);
-        assert!(selected_object_properties_available(&state));
+        assert!(selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model
+        ));
         open_property_editor(&mut state, 3);
         assert!(state.design.tabbed_property_dialog.open);
         let review_sheet = state
