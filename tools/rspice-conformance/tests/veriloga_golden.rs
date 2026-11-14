@@ -634,13 +634,39 @@ const GMIN_RAISED: f64 = 1.0e-6;
 /// cannot see the solver's value; the `gmin` its parameter list carries is a
 /// model parameter of its own and answers to the card, not to homotopy.
 ///
+/// The seventeen models added since are inert for the same two reasons. PSP
+/// 102.5.0 (`vacode_102.5.0`, all six builds), PSP 103.4.0
+/// (`PSP103p4_vacode`, all three), Mextram 504.12.1 (`vacode_504.12.1`, all
+/// four) and BSIM-CMG 107.0.0, 108.0.0 and 110.0.0 call `$simparam` nowhere;
+/// PSP first reads it in 104.1.0 (`PSP104_module.include:331`). BSIM-CMG
+/// 111.2.1 reads it (`bsimcmg_body.include:36`) only to add `V(e, si) * gmin`
+/// under `if (BULKMOD != 0)` (`bsimcmg_body.include:2822`), and `BULKMOD`
+/// defaults to 0 (`bsimcmg_parameters.include:87`).
+///
 /// Checked in both directions, and scoped to models this build contains.
 const GMIN_INERT: &[&str] = &[
     "EPFL_HEMT_10a",
     "JUNCAP200",
+    "PSP102BVA",
+    "PSP102EVA",
+    "PSP102VA",
+    "PSP103TVA",
+    "PSP103VA",
+    "PSPNQS102BVA",
+    "PSPNQS102EVA",
+    "PSPNQS102VA",
+    "PSPNQS103VA",
     "angelov",
     "angelov_gan",
     "asmhemt",
+    "bjt504tva",
+    "bjt504va",
+    "bjtd504tva",
+    "bjtd504va",
+    "bsimcmg107",
+    "bsimcmg108",
+    "bsimcmg110",
+    "bsimcmg111",
     "bsimcmg_va",
     "bsimsoi_va",
     "ekv3_rf",
