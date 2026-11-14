@@ -88,26 +88,17 @@ pub(in crate::workbench) fn veriloga_tools(
 
 /// The generated deck, in the Netlist workspace: what the design this module
 /// is placed in netlists to.
-fn generated_netlist_tool(
+fn generated_netlist_tool<H: WorkbenchHost<Session = AppState>>(
     ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost<Session = AppState>,
+    app: &mut H,
     layout: LayoutSpec,
 ) {
     let label = app
         .workbench()
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
-    // The overflow row and the button take the reader to the same place.
-    let show_generated_deck: fn(&mut AppState) = |state| {
-        crate::workbench::documents::netlist_document::show_generated_deck(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.code_workspace.page,
-            &mut state.workbench,
-        );
-    };
     if !take_projected_tool_slot(ui, layout) {
-        let action = overflow::OverflowAction::Run(show_generated_deck);
+        let action = overflow::OverflowAction::<H>::Run(&GeneratedDeck);
         let (icon, selected) = (WorkbenchIcon::Netlist, false);
         overflow::set_aside(
             ui,
@@ -141,6 +132,27 @@ fn generated_netlist_tool(
     if response.clicked() {
         show_generated_deck(app.session_mut());
     }
+}
+
+/// The generated deck's row in More tools. The row and the button take the
+/// reader to the same place.
+struct GeneratedDeck;
+
+impl<H: WorkbenchHost<Session = AppState>> overflow::OverflowRun<H> for GeneratedDeck {
+    fn run(&self, app: &mut H) {
+        show_generated_deck(app.session_mut());
+    }
+}
+
+/// Take the reader to the generated deck: its page in the Netlist workspace,
+/// with the generated primary in front.
+fn show_generated_deck(state: &mut AppState) {
+    crate::workbench::documents::netlist_document::show_generated_deck(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.code_workspace.page,
+        &mut state.workbench,
+    );
 }
 
 /// Format the source the editor is showing.

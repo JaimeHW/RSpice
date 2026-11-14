@@ -21,6 +21,7 @@ use crate::state::{CellViewRef, Component, LibraryManager, ProjectSourceRegistry
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::localization::MessageId;
 use crate::workbench::state::workbench_session::WorkbenchSession;
 use rspice_app_runs::simulation::{NetlistShown, ProjectCompileReceipt};
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -969,6 +970,10 @@ pub type ToolbarQuestion<F> = fn(&Reads<'_, F>) -> bool;
 /// How a control draws itself in the slot the toolbar took for it.
 pub type ToolbarControlShow<F> = fn(&mut Cx<'_, F>, &mut egui::Ui, LayoutSpec);
 
+/// What a toolbar action that is not a command carries out, in the
+/// feature's context.
+pub type ToolbarRun<F> = fn(&mut Cx<'_, F>);
+
 /// One entry of a feature's context toolbar. The toolbar lays the entries
 /// out in order, takes a slot of a narrow row for each, and folds what gets
 /// none into More tools.
@@ -981,6 +986,9 @@ pub enum ToolbarEntry<F: Feature> {
     Separator,
     /// A control the feature draws itself, in one slot of the row.
     Control(ToolbarControl<F>),
+    /// A tool the feature draws itself that is not a command, which More
+    /// tools still lists when the row has no slot left.
+    Action(ToolbarAction<F>),
     /// Entries the toolbar shows only while `F`'s state holds, such as the
     /// in-place symbol's way back; they take no slot otherwise.
     Only(ToolbarQuestion<F>, &'static [ToolbarEntry<F>]),
@@ -1007,6 +1015,21 @@ pub struct ToolbarControl<F: Feature> {
     /// What More tools lists in the control's place when the row has no
     /// slot left; `None` leaves the control out of a narrow row.
     pub overflow: Option<ToolbarIcon<F>>,
+}
+
+/// A tool a feature draws itself that is not a command, such as opening the
+/// generated deck. It takes one slot of the row like a control; when the row
+/// has none left, More tools lists it as a row that carries it out in the
+/// feature's context, always available.
+pub struct ToolbarAction<F: Feature> {
+    /// Draw the tool in the slot the toolbar took for it.
+    pub show: ToolbarControlShow<F>,
+    /// The row's icon in More tools.
+    pub icon: WorkbenchIcon,
+    /// The row's label in More tools, in the session's text locale.
+    pub label: MessageId,
+    /// What the row carries out when it is taken.
+    pub run: ToolbarRun<F>,
 }
 
 /// Everything one feature registered, built once.

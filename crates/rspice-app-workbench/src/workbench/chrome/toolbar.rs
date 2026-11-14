@@ -10,7 +10,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
-    Feature, ToolbarControlShow, ToolbarEntry, ToolbarIcon, ToolbarQuestion, ToolbarTool,
+    Feature, ToolbarAction, ToolbarControlShow, ToolbarEntry, ToolbarIcon, ToolbarQuestion,
+    ToolbarRun, ToolbarTool,
 };
 use crate::workbench::framework::host::{Point, ToolbarScope, ToolbarSlot};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
@@ -100,7 +101,7 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
                         // The workspace's tools, and behind More tools
                         // whatever a narrow row has no slot for (U-11).
                         ui.horizontal_centered(|ui| {
-                            overflow::reset::<H::Session>(ui);
+                            overflow::reset::<H>(ui);
                             workspace_tools(ui, app, layout);
                             overflow::more_tools(ui, app, layout);
                         });
@@ -467,18 +468,33 @@ pub fn feature_tools(
     }
 }
 
+/// The host lends a feature's context to a toolbar action of the feature's
+/// that More tools carries out, as it lends it to a control's draw.
+pub trait LendsToolbarRun<F: Feature> {
+    fn carry_out(&mut self, run: ToolbarRun<F>);
+}
+
+/// A feature's toolbar action, set aside, is carried out in the feature's
+/// context as the host lends it.
+impl<H: LendsToolbarRun<F>, F: Feature> overflow::OverflowRun<H> for ToolbarAction<F> {
+    fn run(&self, app: &mut H) {
+        app.carry_out(self.run);
+    }
+}
+
 /// Draw the toolbar `entries` a feature registered, in order: a tool as a
 /// labelled command, an icon as an icon command, a separator between
-/// groups, a control in the slot the toolbar takes for it, and the entries
-/// of an `Only` while its question holds.
+/// groups, a control or an action in the slot the toolbar takes for it,
+/// and the entries of an `Only` while its question holds. An action the row
+/// has no slot for is set aside as the entry itself.
 ///
 /// `ask` answers a question over the feature's reads (an icon's press, an
 /// `Only`'s condition) as the host lends them; `control` lends the
-/// feature's context to a control's draw.
-pub fn feature_toolbar<H: WorkbenchHost, F: Feature>(
+/// feature's context to a control's or an action's draw.
+pub fn feature_toolbar<H: WorkbenchHost + LendsToolbarRun<F>, F: Feature>(
     ui: &mut egui::Ui,
     app: &mut H,
-    entries: &[ToolbarEntry<F>],
+    entries: &'static [ToolbarEntry<F>],
     layout: LayoutSpec,
     ask: fn(&H, ToolbarQuestion<F>) -> bool,
     control: fn(&mut H, &mut egui::Ui, ToolbarControlShow<F>, LayoutSpec),
@@ -500,8 +516,16 @@ pub fn feature_toolbar<H: WorkbenchHost, F: Feature>(
                     let presentation = icon_presentation(app, icon, ask);
                     overflow::set_aside(
                         ui,
-                        overflow::OverflowTool::command(app, icon.key, presentation),
+                        overflow::OverflowTool::command(&*app, icon.key, presentation),
                     );
+                }
+            }
+            ToolbarEntry::Action(action) => {
+                if take_projected_tool_slot(ui, layout) {
+                    control(app, ui, action.show, layout);
+                } else {
+                    let label = app.workbench().messages().text(action.label);
+                    overflow::set_aside(ui, action_overflow::<H, F>(action, label));
                 }
             }
             ToolbarEntry::Only(holds, nested) => {
@@ -510,6 +534,20 @@ pub fn feature_toolbar<H: WorkbenchHost, F: Feature>(
                 }
             }
         }
+    }
+}
+
+/// What More tools lists in an action's place: its icon and `label`, as a
+/// row that carries the action out in the feature's context.
+fn action_overflow<H: LendsToolbarRun<F>, F: Feature>(
+    action: &'static ToolbarAction<F>,
+    label: String,
+) -> overflow::OverflowTool<H> {
+    overflow::OverflowTool {
+        action: overflow::OverflowAction::Run(action),
+        icon: action.icon,
+        label,
+        selected: false,
     }
 }
 
@@ -559,7 +597,7 @@ fn toolbar_command(
     if !has_slot {
         overflow::set_aside(
             ui,
-            overflow::OverflowTool::command(app, command, presentation),
+            overflow::OverflowTool::command(&*app, command, presentation),
         );
         return;
     }
@@ -695,4 +733,72 @@ pub fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
 
 pub fn explicit_label_width(label: &str) -> f32 {
     (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 224.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::pdk_config::PdkConfig;
+    use crate::workbench::app_state::Model;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::framework::feature::{Cx, FeatureRegistry, NoHandles};
+    use crate::workbench::localization::MessageId;
+    use crate::workbench::state::WorkbenchSession;
+
+    /// A feature whose one action counts how often it was carried out.
+    struct Counter;
+
+    impl Feature for Counter {
+        type State = u32;
+        type Session = WorkbenchSession;
+        type Handles = NoHandles;
+
+        fn register(_registry: &mut FeatureRegistry<Self>) {}
+    }
+
+    impl LendsToolbarRun<Counter> for FeatureHarness<Counter> {
+        fn carry_out(&mut self, run: ToolbarRun<Counter>) {
+            run(&mut self.cx());
+        }
+    }
+
+    fn count(cx: &mut Cx<'_, Counter>) {
+        *cx.state += 1;
+    }
+
+    static COUNT: ToolbarAction<Counter> = ToolbarAction {
+        show: |_, _, _| {},
+        icon: WorkbenchIcon::Netlist,
+        label: MessageId::CodeGeneratedNetlist,
+        run: count,
+    };
+
+    /// An action the row has no slot for is listed with its own icon and
+    /// label, never as the armed tool, and taking the row carries the action
+    /// out in the feature's context, as the host lends it, each time. The
+    /// row holds the registered entry itself, not a copy of it.
+    #[test]
+    fn an_action_set_aside_is_carried_out_in_the_features_context() {
+        let mut harness = FeatureHarness::<Counter>::with_model(
+            Model::session_start(PdkConfig::default(), None, |_| Err(Vec::new())),
+            WorkbenchSession::default(),
+        );
+        let tool: overflow::OverflowTool<FeatureHarness<Counter>> =
+            action_overflow(&COUNT, "Generated netlist".to_owned());
+        assert_eq!(tool.icon, WorkbenchIcon::Netlist);
+        assert_eq!(tool.label, "Generated netlist");
+        assert!(!tool.selected);
+
+        let overflow::OverflowAction::Run(carry_out) = tool.action else {
+            panic!("an action is set aside as a row that runs it, not as a command");
+        };
+        assert!(std::ptr::addr_eq(carry_out, &COUNT));
+        carry_out.run(&mut harness);
+        assert_eq!(harness.state, 1);
+        let overflow::OverflowAction::Run(carry_out) = tool.clone().action else {
+            unreachable!();
+        };
+        carry_out.run(&mut harness);
+        assert_eq!(harness.state, 2);
+    }
 }

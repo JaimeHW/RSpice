@@ -18,16 +18,16 @@ use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 
-/// A tool the row had no slot for this frame, run over the session `S`.
-pub struct OverflowTool<S> {
-    pub action: OverflowAction<S>,
+/// A tool the row had no slot for this frame, run over the host `H`.
+pub struct OverflowTool<H: 'static> {
+    pub action: OverflowAction<H>,
     pub icon: WorkbenchIcon,
     pub label: String,
     pub selected: bool,
 }
 
-// By hand: a derive would ask the session itself to be `Clone`.
-impl<S> Clone for OverflowTool<S> {
+// By hand: a derive would ask the host itself to be `Clone`.
+impl<H: 'static> Clone for OverflowTool<H> {
     fn clone(&self) -> Self {
         Self {
             action: self.action,
@@ -38,32 +38,36 @@ impl<S> Clone for OverflowTool<S> {
     }
 }
 
-pub enum OverflowAction<S> {
+pub enum OverflowAction<H: 'static> {
     /// A command, with the way the row draws it.
     Command(CommandKey, ToolbarCommandPresentation),
     /// A toolbar action that is not a command, such as opening the
-    /// generated deck. Always available.
-    Run(fn(&mut S)),
+    /// generated deck, carried out over the host. Always available.
+    Run(&'static (dyn OverflowRun<H> + Sync)),
 }
 
-// By hand: a derive would ask the session itself to be `Clone` and `Copy`.
-impl<S> Clone for OverflowAction<S> {
+// By hand: a derive would ask the host itself to be `Clone` and `Copy`.
+impl<H: 'static> Clone for OverflowAction<H> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<S> Copy for OverflowAction<S> {}
+impl<H: 'static> Copy for OverflowAction<H> {}
 
-impl<S> OverflowTool<S> {
-    pub fn command<H>(
+/// What a row that is not a command carries out over the host `H`. The row
+/// holds it by a `'static` reference: a feature's toolbar action is the
+/// entry it registered, so setting one aside builds nothing.
+pub trait OverflowRun<H> {
+    fn run(&self, app: &mut H);
+}
+
+impl<H: WorkbenchHost> OverflowTool<H> {
+    pub fn command(
         host: &H,
         command: CommandKey,
         presentation: ToolbarCommandPresentation,
-    ) -> Self
-    where
-        H: WorkbenchHost<Session = S>,
-    {
+    ) -> Self {
         let (icon, label, selected) = match presentation {
             ToolbarCommandPresentation::Icon {
                 icon,
@@ -92,15 +96,15 @@ fn overflow_id() -> egui::Id {
     egui::Id::new("workbench.context_toolbar.overflow_tools")
 }
 
-/// Start a frame's toolbar with nothing set aside for the session `S`.
-pub fn reset<S: 'static>(ui: &egui::Ui) {
-    ui.data_mut(|data| data.remove::<Vec<OverflowTool<S>>>(overflow_id()));
+/// Start a frame's toolbar with nothing set aside for the host `H`.
+pub fn reset<H: 'static>(ui: &egui::Ui) {
+    ui.data_mut(|data| data.remove::<Vec<OverflowTool<H>>>(overflow_id()));
 }
 
 /// Set aside a tool the row had no slot for.
-pub fn set_aside<S: 'static>(ui: &egui::Ui, tool: OverflowTool<S>) {
+pub fn set_aside<H: 'static>(ui: &egui::Ui, tool: OverflowTool<H>) {
     ui.data_mut(|data| {
-        data.get_temp_mut_or_default::<Vec<OverflowTool<S>>>(overflow_id())
+        data.get_temp_mut_or_default::<Vec<OverflowTool<H>>>(overflow_id())
             .push(tool);
     });
 }
@@ -109,7 +113,7 @@ pub fn set_aside<S: 'static>(ui: &egui::Ui, tool: OverflowTool<S>) {
 /// frame, the one tool itself when it set one aside, nothing otherwise.
 pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: LayoutSpec) {
     let tools = ui
-        .data_mut(|data| data.remove_temp::<Vec<OverflowTool<H::Session>>>(overflow_id()))
+        .data_mut(|data| data.remove_temp::<Vec<OverflowTool<H>>>(overflow_id()))
         .unwrap_or_default();
     let size = super::toolbar_icon_button_size(layout);
     if let [tool] = &tools[..] {
@@ -121,7 +125,7 @@ pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: Layo
             }
             OverflowAction::Run(run) => {
                 if icon_button(ui, tool.icon, &tool.label, tool.selected, size).clicked() {
-                    run(app.session_mut());
+                    run.run(app);
                 }
             }
         }
@@ -147,7 +151,7 @@ pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: Layo
                     OverflowAction::Command(command, _) => {
                         app.execute(command);
                     }
-                    OverflowAction::Run(run) => run(app.session_mut()),
+                    OverflowAction::Run(run) => run.run(app),
                 }
                 crate::workbench::app_state::session::shortcuts::return_engineering_canvas_focus(
                     ui.ctx(),
@@ -163,7 +167,7 @@ pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: Layo
 fn tool_row<H: WorkbenchHost>(
     ui: &mut egui::Ui,
     app: &H,
-    tool: &OverflowTool<H::Session>,
+    tool: &OverflowTool<H>,
     height: f32,
 ) -> bool {
     let t = Tokens::get(ui.ctx());

@@ -4,11 +4,23 @@
 use crate::state::Tool;
 use crate::ui::panels::WorkbenchIcon;
 use crate::ui::tokens::Tokens;
+use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::toolbar::overflow::*;
 use crate::workbench::layout::LayoutSpec;
-use crate::workbench::{AppState, RSpiceApp};
 use egui::{Event, Key, Pos2, Stroke};
 use egui::{Rect, Vec2};
+
+/// A row of More tools that arms a schematic tool.
+struct Arm(Tool);
+
+impl OverflowRun<RSpiceApp> for Arm {
+    fn run(&self, app: &mut RSpiceApp) {
+        app.state.model.schematic.session.editor.tool = self.0;
+    }
+}
+
+static DRAW_WIRE: Arm = Arm(Tool::Wire);
+static PLACE_PROBE: Arm = Arm(Tool::Probe);
 
 /// The toolbar's last slot with two tools set aside, driven by real frames
 /// and read back through the AccessKit tree.
@@ -79,23 +91,15 @@ impl Strip {
                 ..Default::default()
             },
             |ui| {
-                reset::<AppState>(ui);
-                for (label, icon, run) in [
-                    (
-                        "Draw wire",
-                        WorkbenchIcon::Wire,
-                        (|state: &mut AppState| {
-                            state.model.schematic.session.editor.tool = Tool::Wire;
-                        }) as fn(&mut AppState),
-                    ),
-                    ("Place probe", WorkbenchIcon::Probe, |state| {
-                        state.model.schematic.session.editor.tool = Tool::Probe;
-                    }),
+                reset::<RSpiceApp>(ui);
+                for (label, icon, arm) in [
+                    ("Draw wire", WorkbenchIcon::Wire, &DRAW_WIRE),
+                    ("Place probe", WorkbenchIcon::Probe, &PLACE_PROBE),
                 ] {
                     set_aside(
                         ui,
                         OverflowTool {
-                            action: OverflowAction::Run(run),
+                            action: OverflowAction::Run(arm),
                             icon,
                             label: label.to_owned(),
                             selected: false,

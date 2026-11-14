@@ -544,6 +544,14 @@ pub(super) fn show_toolbar<F: Registered>(
     }
 }
 
+/// A toolbar action of `F`'s that More tools carries out runs in `F`'s
+/// context, as its controls draw in it.
+impl<F: Registered> crate::workbench::chrome::toolbar::LendsToolbarRun<F> for RSpiceApp {
+    fn carry_out(&mut self, run: crate::workbench::framework::feature::ToolbarRun<F>) {
+        run(&mut cx::<F>(self));
+    }
+}
+
 /// Commit what `F`'s inspector section holds typed and not yet committed.
 /// The caller answers what that raised straight after.
 pub(super) fn commit_inspector<F: Registered>(app: &mut RSpiceApp, ctx: &egui::Context) {
