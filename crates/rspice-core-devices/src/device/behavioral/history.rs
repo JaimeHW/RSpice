@@ -90,7 +90,7 @@ impl BehavioralSources {
                 integral.time = time;
             }
         }
-        self.restore_accepted_history(Some(&history), time)
+        self.restore_accepted_history(&history, time)
     }
 
     #[doc(hidden)]
@@ -107,16 +107,9 @@ impl BehavioralSources {
     #[doc(hidden)]
     pub fn validate_accepted_history(
         &self,
-        history: Option<&[BehavioralAcceptedState]>,
+        history: &[BehavioralAcceptedState],
         time: Value,
     ) -> Result<(), String> {
-        let Some(history) = history else {
-            return if self.stateful_vms().next().is_some() {
-                Err("legacy transient checkpoint does not contain behavioral SDT history; re-run the transient from t=0".into())
-            } else {
-                Ok(())
-            };
-        };
         if self.stateful_vms().count() != history.len() {
             return Err("behavioral SDT checkpoint source count does not match the circuit".into());
         }
@@ -142,13 +135,10 @@ impl BehavioralSources {
     #[doc(hidden)]
     pub fn restore_accepted_history(
         &mut self,
-        history: Option<&[BehavioralAcceptedState]>,
+        history: &[BehavioralAcceptedState],
         time: Value,
     ) -> Result<(), String> {
         self.validate_accepted_history(history, time)?;
-        let Some(history) = history else {
-            return Ok(());
-        };
         let mut states = history.iter();
         for source in &mut self.voltage_sources {
             if source.program.sdt_count != 0 {

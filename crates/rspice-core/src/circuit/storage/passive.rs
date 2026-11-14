@@ -1838,15 +1838,6 @@ impl Capacitors {
         self.value_expressions.iter().any(Option::is_some)
     }
 
-    /// Whether any value expression carries accepted integration state in
-    /// addition to the capacitor's physical charge history.
-    pub(crate) fn has_stateful_value_expressions(&self) -> bool {
-        self.value_expressions
-            .iter()
-            .flatten()
-            .any(|expression| expression.program.sdt_count != 0)
-    }
-
     /// Link all stamps to a StaticMatrix for O(1) access
     pub fn link_indices(
         &mut self,

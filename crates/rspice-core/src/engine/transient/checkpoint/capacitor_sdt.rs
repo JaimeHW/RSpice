@@ -22,17 +22,7 @@ pub(super) fn capture(circuit: &CircuitData) -> Vec<State> {
         .collect()
 }
 
-pub(super) fn validate_target(
-    circuit: &CircuitData,
-    states: Option<&[State]>,
-) -> Result<(), String> {
-    let Some(states) = states else {
-        return if circuit.capacitors.has_stateful_value_expressions() {
-            Err("legacy transient checkpoint does not contain capacitor SDT history; re-run the transient from t=0".into())
-        } else {
-            Ok(())
-        };
-    };
+pub(super) fn validate_target(circuit: &CircuitData, states: &[State]) -> Result<(), String> {
     let expressions = || {
         circuit
             .capacitors
@@ -56,10 +46,7 @@ pub(super) fn validate_target(
 }
 
 /// The whole target layout is validated before any checkpoint state is injected.
-pub(super) fn restore(circuit: &mut CircuitData, states: Option<&[State]>) {
-    let Some(states) = states else {
-        return;
-    };
+pub(super) fn restore(circuit: &mut CircuitData, states: &[State]) {
     for (expression, state) in circuit
         .capacitors
         .value_expressions
@@ -74,15 +61,11 @@ pub(super) fn restore(circuit: &mut CircuitData, states: Option<&[State]>) {
 
 pub(super) fn write(
     out: &mut String,
-    states: Option<&[State]>,
+    states: &[State],
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
-    out.push_str(&format!(
-        "capacitor_sdt_state_available {}\ncapacitor_sdt_states {}\n",
-        u8::from(states.is_some()),
-        states.map_or(0, <[_]>::len)
-    ));
-    for (index, state) in states.unwrap_or_default().iter().enumerate() {
+    out.push_str(&format!("capacitor_sdt_states {}\n", states.len()));
+    for (index, state) in states.iter().enumerate() {
         poll_checkpoint_abort(abort, index)?;
         out.push_str(&format!(
             "capacitor_sdt_state {} {}\n",
@@ -103,19 +86,11 @@ pub(super) fn write(
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
-) -> Result<Option<Vec<State>>, String> {
-    let available = match lines.next().ok_or("missing capacitor SDT availability")? {
-        "capacitor_sdt_state_available 0" => false,
-        "capacitor_sdt_state_available 1" => true,
-        _ => return Err("invalid capacitor SDT availability".into()),
-    };
+) -> Result<Vec<State>, String> {
     let count = parse_count_header(
         lines.next().ok_or("missing capacitor SDT count")?,
         "capacitor_sdt_states",
     )?;
-    if !available && count != 0 {
-        return Err("unavailable capacitor SDT history cannot contain states".into());
-    }
     let mut states = allocate_checkpoint_rows(lines, count, "capacitor SDT states", budget)?;
     for _ in 0..count {
         let mut fields = lines
@@ -161,15 +136,14 @@ pub(super) fn read(
         }
         states.push(State { name, integrals });
     }
-    Ok(available.then_some(states))
+    Ok(states)
 }
 
 pub(super) fn validate(
-    states: Option<&[State]>,
+    states: &[State],
     time: Value,
     budget: &mut Option<&mut CheckpointParseBudget>,
 ) -> Result<(), String> {
-    let states = states.unwrap_or_default();
     let mut names = match budget.as_deref_mut() {
         Some(budget) => {
             allocate_checkpoint_capacity(states.len(), "capacitor SDT validation names", budget)?

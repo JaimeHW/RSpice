@@ -186,7 +186,7 @@ pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge, connect_rule_parameter};
 #[cfg(feature = "veriloga")]
-pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac, is_connect_converter};
+pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac};
 #[cfg(feature = "veriloga")]
 pub(crate) use connect_real::{ConnectE2r, ConnectR2e, ConnectRbidir};
 

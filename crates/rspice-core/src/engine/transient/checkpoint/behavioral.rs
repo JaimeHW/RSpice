@@ -5,15 +5,11 @@ use crate::expr::AcceptedSdtState;
 
 pub(super) fn write(
     out: &mut String,
-    states: Option<&[BehavioralAcceptedState]>,
+    states: &[BehavioralAcceptedState],
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
-    out.push_str(&format!(
-        "behavioral_state_available {}\nbehavioral_states {}\n",
-        u8::from(states.is_some()),
-        states.map_or(0, <[_]>::len)
-    ));
-    for (index, state) in states.unwrap_or_default().iter().enumerate() {
+    out.push_str(&format!("behavioral_states {}\n", states.len()));
+    for (index, state) in states.iter().enumerate() {
         poll_checkpoint_abort(abort, index)?;
         out.push_str(&format!(
             "behavioral_state {} {} {}\n",
@@ -35,22 +31,11 @@ pub(super) fn write(
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
-) -> Result<Option<Vec<BehavioralAcceptedState>>, String> {
-    let available = match lines
-        .next()
-        .ok_or("missing behavioral state availability")?
-    {
-        "behavioral_state_available 0" => false,
-        "behavioral_state_available 1" => true,
-        _ => return Err("invalid behavioral state availability".into()),
-    };
+) -> Result<Vec<BehavioralAcceptedState>, String> {
     let count = parse_count_header(
         lines.next().ok_or("missing behavioral state count")?,
         "behavioral_states",
     )?;
-    if !available && count != 0 {
-        return Err("unavailable behavioral history cannot contain states".into());
-    }
     let mut states = allocate_checkpoint_rows(lines, count, "behavioral states", budget)?;
     for _ in 0..count {
         let mut fields = lines
@@ -104,15 +89,14 @@ pub(super) fn read(
             integrals,
         });
     }
-    Ok(available.then_some(states))
+    Ok(states)
 }
 
 pub(super) fn validate(
-    states: Option<&[BehavioralAcceptedState]>,
+    states: &[BehavioralAcceptedState],
     time: Value,
     budget: &mut Option<&mut CheckpointParseBudget>,
 ) -> Result<(), String> {
-    let states = states.unwrap_or_default();
     let mut names = match budget.as_deref_mut() {
         Some(budget) => {
             allocate_checkpoint_capacity(states.len(), "behavioral validation names", budget)?

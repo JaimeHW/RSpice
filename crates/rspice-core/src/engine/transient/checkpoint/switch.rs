@@ -32,15 +32,8 @@ fn switch_count(circuit: &CircuitData) -> usize {
 /// state is injected.
 pub(super) fn validate_target(
     circuit: &CircuitData,
-    states: Option<&[AcceptedSwitchCheckpoint]>,
+    states: &[AcceptedSwitchCheckpoint],
 ) -> Result<(), String> {
-    let Some(states) = states else {
-        return if switch_count(circuit) == 0 {
-            Ok(())
-        } else {
-            Err("legacy transient checkpoint does not contain accepted switch state; re-run the transient from t=0".into())
-        };
-    };
     if states.len() != switch_count(circuit) {
         return Err(format!(
             "checkpoint switch state shape mismatch: captured {}, circuit has {}",
@@ -61,12 +54,9 @@ pub(super) fn validate_target(
 /// Inject the validated rows.
 pub(super) fn restore(
     circuit: &mut CircuitData,
-    states: Option<&[AcceptedSwitchCheckpoint]>,
+    states: &[AcceptedSwitchCheckpoint],
 ) -> Result<(), String> {
     validate_target(circuit, states)?;
-    let Some(states) = states else {
-        return Ok(());
-    };
     let (voltage, current) = states.split_at(circuit.vswitches.len());
     for (switch, state) in circuit.vswitches.iter_mut().zip(voltage) {
         switch.restore_accepted_checkpoint(state)?;
@@ -77,29 +67,24 @@ pub(super) fn restore(
     Ok(())
 }
 
-pub(super) fn validate(states: Option<&[AcceptedSwitchCheckpoint]>) -> Result<(), String> {
+pub(super) fn validate(states: &[AcceptedSwitchCheckpoint]) -> Result<(), String> {
     states
-        .unwrap_or_default()
         .iter()
         .try_for_each(AcceptedSwitchCheckpoint::validate_numeric_state)
 }
 
 /// Values a parsed image retains, for the checkpoint memory budget.
-pub(super) fn retained_values(states: Option<&[AcceptedSwitchCheckpoint]>) -> usize {
-    states.map_or(0, |states| states.len().saturating_mul(6))
+pub(super) fn retained_values(states: &[AcceptedSwitchCheckpoint]) -> usize {
+    states.len().saturating_mul(6)
 }
 
 pub(super) fn write(
     out: &mut String,
-    states: Option<&[AcceptedSwitchCheckpoint]>,
+    states: &[AcceptedSwitchCheckpoint],
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
-    out.push_str(&format!(
-        "accepted_switch_state_available {}\naccepted_switch_states {}\n",
-        u8::from(states.is_some()),
-        states.map_or(0, <[_]>::len)
-    ));
-    for (index, state) in states.unwrap_or_default().iter().enumerate() {
+    out.push_str(&format!("accepted_switch_states {}\n", states.len()));
+    for (index, state) in states.iter().enumerate() {
         poll_checkpoint_abort(abort, index)?;
         out.push_str("accepted_switch_state ");
         out.push_str(state.kind.tag());
@@ -121,19 +106,11 @@ pub(super) fn write(
 pub(super) fn read(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
-) -> Result<Option<Vec<AcceptedSwitchCheckpoint>>, String> {
-    let available = match lines.next().ok_or("missing accepted switch availability")? {
-        "accepted_switch_state_available 0" => false,
-        "accepted_switch_state_available 1" => true,
-        _ => return Err("invalid accepted switch availability".into()),
-    };
+) -> Result<Vec<AcceptedSwitchCheckpoint>, String> {
     let count = parse_count_header(
         lines.next().ok_or("missing accepted switch state count")?,
         "accepted_switch_states",
     )?;
-    if !available && count != 0 {
-        return Err("unavailable accepted switch state cannot contain rows".into());
-    }
     let mut states = allocate_checkpoint_rows(lines, count, "accepted switch states", budget)?;
     for row in 0..count {
         let mut fields = lines
@@ -178,5 +155,5 @@ pub(super) fn read(
         state.validate_numeric_state()?;
         states.push(state);
     }
-    Ok(available.then_some(states))
+    Ok(states)
 }

@@ -529,23 +529,20 @@ pub struct TransientCheckpoint {
     /// restart seam rather than granting each segment a fresh allowance.
     dynamic_tline_breakpoints_added: usize,
     /// Completions of zero-duration edges still ahead of `time`, and the edge
-    /// being crossed (see `edge.rs`). Empty in files older than format 60,
-    /// whose producers never asked for one.
+    /// being crossed (see `edge.rs`).
     edge_completions: EdgeCompletionSchedule,
     /// The other breakpoints the code models asked for that are still ahead
-    /// of `time`, ascending (see `requested.rs`). `None` in files older than
-    /// format 61, which did not record them.
-    requested_breakpoints: Option<Vec<Value>>,
+    /// of `time`, ascending (see `requested.rs`).
+    requested_breakpoints: Vec<Value>,
     /// The file each `d_vcd` stimulus replays and the digest of the bytes it
-    /// read (see `vcd.rs`). Empty in files older than format 62.
+    /// read (see `vcd.rs`).
     vcd_files: Vec<vcd::ReplayedFile>,
     /// The run of floor landings in progress at `time` (see
-    /// `floor_march.rs`). `None` in files older than format 63, which did not
-    /// record it.
-    floor_grid: Option<super::FloorLandingGrid>,
+    /// `floor_march.rs`).
+    floor_grid: super::FloorLandingGrid,
     /// The row the run published at `time` where it did not come from
-    /// `solution`, the restart state (see `published_row.rs`). `None` in
-    /// files older than format 64.
+    /// `solution`, the restart state (see `published_row.rs`). `None` where
+    /// the published row is the restart state.
     published_row: Option<PublishedRow>,
 
     cap_v_prev: Vec<Value>,
@@ -568,10 +565,9 @@ pub struct TransientCheckpoint {
     xyce_memristor_resistance_stores: Vec<Value>,
     xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
-    /// Absent in files older than format 59, which never recorded it.
-    switch_states: Option<Vec<crate::device::AcceptedSwitchCheckpoint>>,
-    behavioral_states: Option<Vec<BehavioralAcceptedState>>,
-    capacitor_sdt_states: Option<Vec<capacitor_sdt::State>>,
+    switch_states: Vec<crate::device::AcceptedSwitchCheckpoint>,
+    behavioral_states: Vec<BehavioralAcceptedState>,
+    capacitor_sdt_states: Vec<capacitor_sdt::State>,
     accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
     accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
@@ -5387,12 +5383,12 @@ impl TransientCheckpoint {
                 return Err("mixed runtime image conflicts with legacy XSPICE state".into());
             }
         }
-        behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
-        capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
-        switch::validate(self.switch_states.as_deref())?;
+        behavioral::validate(&self.behavioral_states, self.time, &mut budget)?;
+        capacitor_sdt::validate(&self.capacitor_sdt_states, self.time, &mut budget)?;
+        switch::validate(&self.switch_states)?;
         edge::validate(&self.edge_completions, self.time)?;
-        requested::validate(self.requested_breakpoints.as_deref(), self.time)?;
-        floor_march::validate(self.floor_grid.as_ref(), self.time)?;
+        requested::validate(&self.requested_breakpoints, self.time)?;
+        floor_march::validate(&self.floor_grid, self.time)?;
         published_row::validate(self.published_row.as_ref())?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
@@ -6377,9 +6373,9 @@ impl TransientCheckpoint {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             edge_completions: edge::capture(edge_completions, time),
-            requested_breakpoints: Some(requested::capture(requested_breakpoints, time)),
+            requested_breakpoints: requested::capture(requested_breakpoints, time),
             vcd_files: vcd::capture(circuit),
-            floor_grid: Some(floor_grid),
+            floor_grid,
             published_row: None,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
@@ -6403,9 +6399,9 @@ impl TransientCheckpoint {
             xyce_team_resistance_noise_states: circuit
                 .capture_xyce_team_resistance_noise_checkpoints(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
-            switch_states: Some(switch::capture(circuit)),
-            behavioral_states: Some(circuit.behavioral_sources.accepted_history()),
-            capacitor_sdt_states: Some(capacitor_sdt::capture(circuit)),
+            switch_states: switch::capture(circuit),
+            behavioral_states: circuit.behavioral_sources.accepted_history(),
+            capacitor_sdt_states: capacitor_sdt::capture(circuit),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
             accepted_junction_history,
@@ -6605,8 +6601,8 @@ impl TransientCheckpoint {
         // later vector-length mismatch may only be a consequence of it.
         circuit
             .behavioral_sources
-            .validate_accepted_history(self.behavioral_states.as_deref(), self.time)?;
-        capacitor_sdt::validate_target(circuit, self.capacitor_sdt_states.as_deref())?;
+            .validate_accepted_history(&self.behavioral_states, self.time)?;
+        capacitor_sdt::validate_target(circuit, &self.capacitor_sdt_states)?;
         #[cfg(feature = "veriloga")]
         let restored_mixed = self
             .mixed_runtime_image
@@ -6816,9 +6812,7 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
-        switch::validate_target(circuit, self.switch_states.as_deref())?;
-        requested::validate_target(circuit, self.requested_breakpoints.as_deref())?;
-        floor_march::validate_target(circuit, self.floor_grid.as_ref())?;
+        switch::validate_target(circuit, &self.switch_states)?;
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -6892,11 +6886,11 @@ impl TransientCheckpoint {
             binding.resistance_store = resistance;
         }
         circuit.restore_generic_switch_transient_store_snapshots(&self.generic_switch_stores);
-        switch::restore(circuit, self.switch_states.as_deref())?;
+        switch::restore(circuit, &self.switch_states)?;
         circuit
             .behavioral_sources
-            .restore_accepted_history(self.behavioral_states.as_deref(), self.time)?;
-        capacitor_sdt::restore(circuit, self.capacitor_sdt_states.as_deref());
+            .restore_accepted_history(&self.behavioral_states, self.time)?;
+        capacitor_sdt::restore(circuit, &self.capacitor_sdt_states);
         if self.mixed_runtime_image.is_none() {
             circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         }
@@ -7314,16 +7308,14 @@ impl TransientCheckpoint {
 
     /// The other breakpoints the code models asked for that are still ahead
     /// of the checkpoint, which a resumed run reinstates in its breakpoint
-    /// schedule before it takes a step. Empty for a file older than format 61,
-    /// which resumes only a circuit without a connect-rule converter.
+    /// schedule before it takes a step.
     pub(crate) fn requested_breakpoints(&self) -> &[Value] {
-        self.requested_breakpoints.as_deref().unwrap_or_default()
+        &self.requested_breakpoints
     }
 
-    /// The run of floor landings in progress at the checkpoint, or a fresh
-    /// grid for an image too old to say.
+    /// The run of floor landings in progress at the checkpoint.
     pub(super) fn floor_landing_grid(&self) -> super::FloorLandingGrid {
-        self.floor_grid.unwrap_or_default()
+        self.floor_grid
     }
 
     /// The row the run published at the checkpoint time where it did not come
@@ -7408,22 +7400,14 @@ impl TransientCheckpoint {
                     .saturating_mul(9),
             )
             .saturating_add(self.generic_switch_stores.len().saturating_mul(4))
-            .saturating_add(
-                self.behavioral_states
-                    .as_deref()
-                    .unwrap_or_default()
-                    .iter()
-                    .fold(1usize, |words, state| {
-                        words
-                            .saturating_add(7)
-                            .saturating_add(state.name.len().div_ceil(8))
-                            .saturating_add(state.integrals.len().saturating_mul(3))
-                    }),
-            )
+            .saturating_add(self.behavioral_states.iter().fold(1usize, |words, state| {
+                words
+                    .saturating_add(7)
+                    .saturating_add(state.name.len().div_ceil(8))
+                    .saturating_add(state.integrals.len().saturating_mul(3))
+            }))
             .saturating_add(
                 self.capacitor_sdt_states
-                    .as_deref()
-                    .unwrap_or_default()
                     .iter()
                     .fold(1usize, |words, state| {
                         words
@@ -7621,13 +7605,11 @@ impl TransientCheckpoint {
         if let Some(image) = &self.mixed_runtime_image {
             count = count.saturating_add(image.retained_values());
         }
-        count = count.saturating_add(switch::retained_values(self.switch_states.as_deref()));
+        count = count.saturating_add(switch::retained_values(&self.switch_states));
         count = count.saturating_add(edge::retained_values(&self.edge_completions));
-        count = count.saturating_add(requested::retained_values(
-            self.requested_breakpoints.as_deref(),
-        ));
+        count = count.saturating_add(requested::retained_values(&self.requested_breakpoints));
         count = count.saturating_add(vcd::retained_values(&self.vcd_files));
-        count = count.saturating_add(floor_march::retained_values(self.floor_grid.as_ref()));
+        count = count.saturating_add(floor_march::retained_values(&self.floor_grid));
         count = count.saturating_add(published_row::retained_values(self.published_row.as_ref()));
         for instance in &self.xspice_instance_states {
             count = count
@@ -7889,8 +7871,8 @@ impl TransientCheckpoint {
                 store[0], store[1], store[2], store[3]
             ));
         }
-        behavioral::write(&mut out, self.behavioral_states.as_deref(), abort)?;
-        capacitor_sdt::write(&mut out, self.capacitor_sdt_states.as_deref(), abort)?;
+        behavioral::write(&mut out, &self.behavioral_states, abort)?;
+        capacitor_sdt::write(&mut out, &self.capacitor_sdt_states, abort)?;
         out.push_str(&format!(
             "accepted_nonlinear_state_available {}\n",
             u8::from(self.accepted_nonlinear_state_available)
@@ -8406,11 +8388,11 @@ impl TransientCheckpoint {
         #[cfg(not(feature = "veriloga"))]
         out.push_str("runtime_veriloga_states 0\n");
         mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
-        switch::write(&mut out, self.switch_states.as_deref(), abort)?;
+        switch::write(&mut out, &self.switch_states, abort)?;
         edge::write(&mut out, &self.edge_completions, abort)?;
-        requested::write(&mut out, self.requested_breakpoints.as_deref(), abort)?;
+        requested::write(&mut out, &self.requested_breakpoints, abort)?;
         vcd::write(&mut out, &self.vcd_files, abort)?;
-        floor_march::write(&mut out, self.floor_grid.as_ref());
+        floor_march::write(&mut out, &self.floor_grid);
         published_row::write(&mut out, self.published_row.as_ref(), abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
@@ -10997,8 +10979,7 @@ mod tests {
     }
 
     /// A checkpoint on a zero-duration edge carries the edge's completion and
-    /// the crossing bit for bit; a file from before the section reads as one
-    /// whose run asked for none; and a completion that is not ahead of the
+    /// the crossing bit for bit, and a completion that is not ahead of the
     /// checkpoint, or a resume step that is not a step, is refused.
     #[test]
     fn pending_edge_completions_round_trip() {
@@ -11043,11 +11024,9 @@ mod tests {
     }
 
     /// The run of floor landings in progress round-trips bit for bit, idle
-    /// or mid-march; a file from before the format reads as unknown, which
-    /// resumes on a fresh grid as such a file always did; and a march that
-    /// describes no run of landings is refused.
+    /// or mid-march, and a march that describes no run of landings is refused.
     #[test]
-    fn the_floor_march_round_trips_and_reads_unknown() {
+    fn the_floor_march_round_trips() {
         let mut checkpoint = sample();
         let time = checkpoint.time;
         let floor = 1.0e-17;
@@ -11061,22 +11040,12 @@ mod tests {
             }),
         };
         for grid in [super::super::FloorLandingGrid::default(), marching] {
-            checkpoint.floor_grid = Some(grid);
+            checkpoint.floor_grid = grid;
             let text = checkpoint.to_text();
             let restored = TransientCheckpoint::from_text(&text).unwrap();
             assert_eq!(restored, checkpoint);
             assert_eq!(restored.floor_landing_grid(), grid);
         }
-
-        let mut unknown = checkpoint.clone();
-        unknown.floor_grid = None;
-        let restored = TransientCheckpoint::from_text(&unknown.to_text()).unwrap();
-        assert_eq!(restored.floor_grid, None);
-        assert_eq!(
-            restored.floor_landing_grid(),
-            super::super::FloorLandingGrid::default()
-        );
-        assert!(restored.to_text().contains("\nfloor_march unknown\n"));
 
         for march in [
             super::super::FloorMarch {
@@ -11098,15 +11067,14 @@ mod tests {
             },
         ] {
             let mut invalid = checkpoint.clone();
-            invalid.floor_grid = Some(super::super::FloorLandingGrid { march: Some(march) });
+            invalid.floor_grid = super::super::FloorLandingGrid { march: Some(march) };
             assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
         }
     }
 
-    /// A published row round-trips bit for bit; a file from before the
-    /// section reads with none and resumes publishing the restart state; and
-    /// a row that is out of order, not finite or names a device with a space
-    /// is refused.
+    /// A published row round-trips bit for bit; a checkpoint whose published
+    /// row is its restart state writes none; and a row that is out of order,
+    /// not finite or names a device with a space is refused.
     #[test]
     fn the_published_row_round_trips() {
         let checkpoint = sample();
@@ -11135,8 +11103,8 @@ mod tests {
     }
 
     /// The files the `d_vcd` stimuli replay round-trip, a path with a space,
-    /// a quote and a backslash included; a file from before the section reads
-    /// with none; and a row whose digest is not BLAKE3 hex is refused.
+    /// a quote and a backslash included, and a row whose digest is not BLAKE3
+    /// hex is refused.
     #[test]
     fn replayed_vcd_files_round_trip() {
         let mut checkpoint = sample();
@@ -11171,15 +11139,14 @@ mod tests {
         assert!(TransientCheckpoint::from_text(&corrupt).is_err());
     }
 
-    /// The breakpoints the code models asked for round-trip bit for bit; a
-    /// file from before the section reads as one that did not record them,
-    /// and so does a current file that says so; and a request that is not
-    /// ahead of the checkpoint, or out of order, is refused.
+    /// The breakpoints the code models asked for round-trip bit for bit, and
+    /// a request that is not ahead of the checkpoint, or out of order, is
+    /// refused.
     #[test]
-    fn pending_model_breakpoints_round_trip_and_read_unknown() {
+    fn pending_model_breakpoints_round_trip() {
         let mut checkpoint = sample();
         let deadline = checkpoint.time + 3.0e-11;
-        checkpoint.requested_breakpoints = Some(vec![deadline, 1.0 / 3.0 * 1.0e-5]);
+        checkpoint.requested_breakpoints = vec![deadline, 1.0 / 3.0 * 1.0e-5];
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
             TransientCheckpointEncoding::Packed,
@@ -11195,13 +11162,6 @@ mod tests {
             vec![deadline, 3.0e-6]
         );
 
-        let mut unknown = checkpoint.clone();
-        unknown.requested_breakpoints = None;
-        assert_eq!(
-            TransientCheckpoint::from_text(&unknown.to_text()).unwrap(),
-            unknown
-        );
-
         for requests in [
             vec![checkpoint.time],
             vec![3.0e-6, deadline],
@@ -11209,7 +11169,7 @@ mod tests {
             vec![Value::INFINITY],
         ] {
             let mut invalid = checkpoint.clone();
-            invalid.requested_breakpoints = Some(requests);
+            invalid.requested_breakpoints = requests;
             assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
         }
     }
@@ -11298,10 +11258,10 @@ mod tests {
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
             edge_completions: EdgeCompletionSchedule::default(),
-            requested_breakpoints: Some(Vec::new()),
+            requested_breakpoints: Vec::new(),
             vcd_files: Vec::new(),
             published_row: None,
-            floor_grid: Some(super::super::FloorLandingGrid::default()),
+            floor_grid: super::super::FloorLandingGrid::default(),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -11329,7 +11289,7 @@ mod tests {
             xyce_memristor_resistance_stores: Vec::new(),
             xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
-            switch_states: Some(vec![
+            switch_states: vec![
                 crate::device::AcceptedSwitchCheckpoint {
                     instance_name: "scheck".to_string(),
                     kind: crate::device::SwitchCheckpointKind::Voltage,
@@ -11342,9 +11302,9 @@ mod tests {
                     values: [10.0, 1.0e12, 3.5e-4, 0.625],
                     codes: [2, 1, 0, 1, 0, 1, 2, 1, 1, 2, 0, 1],
                 },
-            ]),
-            behavioral_states: Some(Vec::new()),
-            capacitor_sdt_states: Some(Vec::new()),
+            ],
+            behavioral_states: Vec::new(),
+            capacitor_sdt_states: Vec::new(),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
                 jfets: Vec::new(),
