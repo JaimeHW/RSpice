@@ -533,7 +533,7 @@ fn stale(message: &str) -> RenameValidation {
     ))
 }
 
-fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bool, String> {
+pub(crate) fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bool, String> {
     let content = &model.workspace.content;
     let catalog = content
         .design_management
