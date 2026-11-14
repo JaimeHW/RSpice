@@ -493,7 +493,13 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
     let view = app.state.model.workspace.content.active_view.clone();
-    let view_type = app.state.model.workspace.content.active_view_type();
+    let view_type = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view_type()
+        .expect("the result app has its testbench open");
     app.state
         .model
         .workspace
@@ -546,7 +552,13 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
 fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
     let mut app = result_app_with_current_out_map(false);
     let view = app.state.model.workspace.content.active_view.clone();
-    let view_type = app.state.model.workspace.content.active_view_type();
+    let view_type = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view_type()
+        .expect("the result app has its testbench open");
     let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
     app.state.model.workspace.open_as_root(parent, view_type);
     app.state

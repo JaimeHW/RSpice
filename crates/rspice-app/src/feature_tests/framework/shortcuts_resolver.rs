@@ -47,7 +47,7 @@ fn snapshot(events: &[Event], non_canvas_focus: bool) -> ShortcutInputSnapshot {
 fn design(canvas_focus: bool) -> ShortcutEnvironment {
     ShortcutEnvironment {
         workspace: Workspace::Design,
-        active_view: ViewType::Schematic,
+        active_view: Some(ViewType::Schematic),
         canvas_focus,
         source_editor_focus: false,
     }
@@ -56,7 +56,7 @@ fn design(canvas_focus: bool) -> ShortcutEnvironment {
 fn results() -> ShortcutEnvironment {
     ShortcutEnvironment {
         workspace: Workspace::Results,
-        active_view: ViewType::Schematic,
+        active_view: Some(ViewType::Schematic),
         canvas_focus: false,
         source_editor_focus: false,
     }
@@ -65,7 +65,7 @@ fn results() -> ShortcutEnvironment {
 fn models_symbol(canvas_focus: bool) -> ShortcutEnvironment {
     ShortcutEnvironment {
         workspace: Workspace::Models,
-        active_view: ViewType::Symbol,
+        active_view: Some(ViewType::Symbol),
         canvas_focus,
         source_editor_focus: false,
     }
@@ -74,7 +74,7 @@ fn models_symbol(canvas_focus: bool) -> ShortcutEnvironment {
 fn verification() -> ShortcutEnvironment {
     ShortcutEnvironment {
         workspace: Workspace::Verify,
-        active_view: ViewType::Schematic,
+        active_view: Some(ViewType::Schematic),
         canvas_focus: false,
         source_editor_focus: false,
     }
@@ -84,7 +84,7 @@ fn verification() -> ShortcutEnvironment {
 fn focused_source_editor() -> ShortcutEnvironment {
     ShortcutEnvironment {
         workspace: Workspace::Design,
-        active_view: ViewType::VerilogA,
+        active_view: Some(ViewType::VerilogA),
         canvas_focus: false,
         source_editor_focus: true,
     }

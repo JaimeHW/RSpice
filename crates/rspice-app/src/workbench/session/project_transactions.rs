@@ -365,7 +365,7 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
     match state.model.workspace.content.active_view_type() {
-        ViewType::Schematic | ViewType::Testbench => {
+        Some(ViewType::Schematic | ViewType::Testbench) => {
             state.sync_active_schematic_to_workspace();
         }
         _ => {

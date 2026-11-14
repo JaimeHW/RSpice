@@ -72,7 +72,7 @@ impl Model {
         !self.schematic_edit_read_only()
             && matches!(
                 self.workspace.content.active_view_type(),
-                crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
             )
     }
 

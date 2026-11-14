@@ -23,14 +23,15 @@ pub(in crate::workbench) fn show_surface(cx: &mut Cx<'_, DesignFeature>, ui: &mu
     let view_type = cx.model.workspace.content.active_view_type();
     let content_rect = show_document(ui, cx, view_type);
     cx.state.touch_strip_canvas =
-        matches!(view_type, ViewType::Schematic | ViewType::Testbench).then_some(content_rect);
+        matches!(view_type, Some(ViewType::Schematic | ViewType::Testbench))
+            .then_some(content_rect);
 }
 
 /// The document in front, in the design feature's context: its banners and
 /// the armed tool's options, the page its view draws, then the crumb of
 /// where it sits in the hierarchy. A Verilog-A view's page is code's, drawn
 /// after; the area the page fills is returned.
-fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: ViewType) -> Rect {
+fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: Option<ViewType>) -> Rect {
     if cx.model.active_view_read_only() {
         read_only_banner(ui);
     }
@@ -38,6 +39,10 @@ fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: ViewTyp
     tool_options::show(ui, cx.model, cx.state);
     let content_rect = ui.available_rect_before_wrap();
     let symbols = cx.handles.symbols;
+    let Some(view_type) = view_type else {
+        no_open_document(ui, cx.model);
+        return content_rect;
+    };
     match view_type {
         ViewType::Schematic | ViewType::Testbench => {
             crate::schematic::view::render_schematic_view(ui, &mut canvas_frame_in(cx), symbols);
@@ -570,6 +575,20 @@ fn source_reference_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
         },
         &format!("{} view", view_type.caption()),
         &description,
+    );
+}
+
+/// The page while the active view is no open document: nothing is drawn as
+/// if it were one.
+fn no_open_document(ui: &mut Ui, model: &Model) {
+    empty_state(
+        ui,
+        super::super::design_system::WorkbenchIcon::File,
+        "No open document",
+        &format!(
+            "{} is not open. Open it from the Library.",
+            model.workspace.content.active_display_path()
+        ),
     );
 }
 

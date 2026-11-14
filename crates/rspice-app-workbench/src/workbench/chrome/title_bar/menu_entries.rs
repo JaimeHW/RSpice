@@ -143,7 +143,7 @@ fn design_view_is(
     view_type: crate::state::ViewType,
 ) -> bool {
     workbench.workspace == crate::workbench::state::Workspace::Design
-        && model.workspace.content.active_view_type() == view_type
+        && model.workspace.content.active_view_type() == Some(view_type)
 }
 
 impl MenuEntry {

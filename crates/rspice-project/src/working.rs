@@ -55,7 +55,7 @@ impl ProjectWorkingSet<'_> {
         let mut workspace = self.workspace.clone();
         if matches!(
             workspace.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         ) {
             let key = workspace.active_key();
             workspace

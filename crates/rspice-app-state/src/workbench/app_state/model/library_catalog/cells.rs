@@ -30,15 +30,14 @@ fn is_schematic_like(view_type: ViewType) -> bool {
 }
 
 impl Model {
-    /// The type of the view `reference` names, or a schematic where the
-    /// catalog has no such view.
-    pub fn cell_view_type(&self, reference: &CellViewRef) -> ViewType {
+    /// The type of the view `reference` names, or `None` where the catalog
+    /// has no such view.
+    pub fn cell_view_type(&self, reference: &CellViewRef) -> Option<ViewType> {
         self.library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
             .map(|view| view.view_type)
-            .unwrap_or(ViewType::Schematic)
     }
 
     /// Take a deleted cell out of every workspace collection that named it.
@@ -162,7 +161,11 @@ impl Model {
                 })
                 .unwrap_or_else(|| self.create_fallback_schematic_cell())
         };
-        let fallback_type = self.cell_view_type(&fallback);
+        // Every survivor above is a view the catalog holds; the only other
+        // fallback is the schematic cell the prune has just made.
+        let fallback_type = self
+            .cell_view_type(&fallback)
+            .unwrap_or(ViewType::Schematic);
 
         if !self
             .workspace
@@ -750,5 +753,40 @@ impl Model {
         }
         self.workspace.content.project_sources = candidate;
         self.workspace.content.project_sources_dirty = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::pdk_config::PdkConfig;
+    use crate::state::{Cell, Library};
+
+    /// A view's type is the catalog's, and a view the catalog does not hold
+    /// has none: it is not taken for a schematic.
+    #[test]
+    fn a_view_the_catalog_does_not_hold_has_no_type() {
+        let mut model = Model::session_start(
+            PdkConfig::default(),
+            None,
+            crate::workbench::workspace::restore_model_library_manager,
+        );
+        let mut library = Library::new("catalog_test");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        model.library_manager.add_library(library);
+
+        assert_eq!(
+            model.cell_view_type(&CellViewRef::new("catalog_test", "amp", "symbol")),
+            Some(ViewType::Symbol)
+        );
+        for missing in [
+            CellViewRef::new("catalog_test", "amp", "schematic"),
+            CellViewRef::new("catalog_test", "gone", "symbol"),
+            CellViewRef::new("gone", "amp", "symbol"),
+        ] {
+            assert_eq!(model.cell_view_type(&missing), None, "{missing:?}");
+        }
     }
 }

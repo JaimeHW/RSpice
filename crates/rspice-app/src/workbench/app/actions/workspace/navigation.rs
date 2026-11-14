@@ -42,6 +42,9 @@ pub(crate) struct NavigationParts<'a> {
 }
 
 impl NavigationParts<'_> {
+    /// Open `reference` in front. A view the library does not hold is
+    /// refused on the status bar: no document is made up for a view that is
+    /// gone.
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
         if self.model.workspace.content.active_view != reference {
             if !commit_pending_inspector_edit(self.model, self.wb) {
@@ -56,9 +59,12 @@ impl NavigationParts<'_> {
                 .activate(WorkspaceDocumentId::CellView(reference));
             return;
         }
+        let Some(view_type) = self.model.cell_view_type(&reference) else {
+            self.wb.prompt(view_not_in_library(&reference));
+            return;
+        };
         *self.canvas_hover = None;
         *self.canvas_view_center = None;
-        let view_type = self.model.cell_view_type(&reference);
         self.model
             .workspace
             .activate_view(reference.clone(), view_type);
@@ -123,11 +129,14 @@ impl NavigationParts<'_> {
         }
         self.restore.drag.cancel_schematic_drag(self.model);
         sync_active_schematic(self.model, self.wb);
+        let Some(view_type) = self.model.cell_view_type(&reference) else {
+            self.wb.prompt(view_not_in_library(&reference));
+            return;
+        };
         let carried = self.leave_occurrence_net_highlight(match &instance {
             Some(name) => NetCarry::Descend(name.clone()),
             None => NetCarry::Nothing,
         });
-        let view_type = self.model.cell_view_type(&reference);
         match instance {
             Some(name) => self
                 .model
@@ -359,7 +368,7 @@ impl NavigationParts<'_> {
         //
         // With no findings, or none current, the command is disabled, so a press
         // that reaches here anyway says nothing.
-        if self.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if self.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
             cycle_active_symbol_pin_finding(self, step);
             return;
         }
@@ -448,6 +457,14 @@ impl NavigationParts<'_> {
         let facts = self.runs.slot_facts(self.restore.visibility.review_markers);
         self.model.refresh_active_design_check_projection(facts);
     }
+}
+
+/// Why `reference` cannot be opened: the library does not hold it.
+fn view_not_in_library(reference: &CellViewRef) -> String {
+    format!(
+        "{} is not in the library, so it cannot be opened.",
+        reference.display_path()
+    )
 }
 
 /// One finding the tour can visit: what it is called, how bad it is, where it

@@ -448,7 +448,7 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
         && matches!(
             reads.model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
 }
 

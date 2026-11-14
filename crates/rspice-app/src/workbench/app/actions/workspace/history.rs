@@ -259,7 +259,7 @@ fn project_sequence(model: &Model, direction: HistoryDirection) -> Option<UndoSe
 /// answer `None` rather than a position that would sort as the oldest
 /// record in the session.
 fn document_sequence(model: &Model, direction: HistoryDirection) -> Option<UndoSequence> {
-    if model.workspace.content.active_view_type() == ViewType::Symbol {
+    if model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
         return None;
     }
     match direction {
@@ -313,7 +313,7 @@ fn take_document_history_step(
     parts: &mut HistoryStepParts<'_>,
     direction: HistoryDirection,
 ) -> bool {
-    if parts.model.workspace.content.active_view_type() == ViewType::Symbol {
+    if parts.model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
         let stepped = match direction {
             HistoryDirection::Undo => {
                 undo_active_symbol_document(parts.design.restore.symbol, parts.model)

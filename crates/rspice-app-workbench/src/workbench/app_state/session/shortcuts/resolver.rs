@@ -20,7 +20,9 @@ use super::input_snapshot::ShortcutKeyPress;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShortcutEnvironment {
     pub workspace: Workspace,
-    pub active_view: ViewType,
+    /// The type of the document in front, `None` while no open document
+    /// is the active view.
+    pub active_view: Option<ViewType>,
     pub canvas_focus: bool,
     /// The source editor the page shows as its document holds keyboard
     /// focus. Its line and fold keys act only then.
@@ -485,10 +487,10 @@ fn context_is_active(context: ShortcutContext, environment: ShortcutEnvironment)
         ShortcutContext::EditContext => {
             environment.workspace == Workspace::Results
                 || match environment.active_view {
-                    ViewType::Schematic | ViewType::Testbench => {
+                    Some(ViewType::Schematic | ViewType::Testbench) => {
                         environment.workspace == Workspace::Design
                     }
-                    ViewType::Symbol => {
+                    Some(ViewType::Symbol) => {
                         matches!(environment.workspace, Workspace::Design | Workspace::Models)
                     }
                     _ => false,
@@ -498,12 +500,12 @@ fn context_is_active(context: ShortcutContext, environment: ShortcutEnvironment)
             environment.workspace == Workspace::Design
                 && matches!(
                     environment.active_view,
-                    ViewType::Schematic | ViewType::Testbench
+                    Some(ViewType::Schematic | ViewType::Testbench)
                 )
         }
         ShortcutContext::SymbolCanvas => {
             matches!(environment.workspace, Workspace::Design | Workspace::Models)
-                && environment.active_view == ViewType::Symbol
+                && environment.active_view == Some(ViewType::Symbol)
         }
         ShortcutContext::DesignWorkspace => environment.workspace == Workspace::Design,
         ShortcutContext::SimulationWorkspace => environment.workspace == Workspace::Simulate,

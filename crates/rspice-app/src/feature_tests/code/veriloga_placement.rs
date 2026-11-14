@@ -46,7 +46,7 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
     app.state.workbench.activate(Workspace::Design);
     assert_eq!(
         app.state.model.workspace.content.active_view_type(),
-        ViewType::Schematic,
+        Some(ViewType::Schematic),
         "the form is opened from a schematic"
     );
     open_new_veriloga_device_form_in(&app.state.model, &mut app.state.code.new_veriloga_device);

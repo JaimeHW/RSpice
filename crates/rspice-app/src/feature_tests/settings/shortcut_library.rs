@@ -84,7 +84,7 @@ fn type_stroke(
             CommandPlatform::Desktop,
             ShortcutEnvironment {
                 workspace: crate::workbench::state::Workspace::Design,
-                active_view: crate::state::ViewType::Schematic,
+                active_view: Some(crate::state::ViewType::Schematic),
                 canvas_focus: false,
                 source_editor_focus: false,
             },

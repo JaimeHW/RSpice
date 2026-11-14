@@ -111,7 +111,7 @@ pub(crate) fn selected_symbol_in_place_target(
 ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
     if !matches!(
         model.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
+        Some(ViewType::Schematic | ViewType::Testbench)
     ) {
         return Err(SymbolInPlaceRefusal::NotSchematic);
     }

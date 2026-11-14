@@ -70,7 +70,7 @@ pub fn open_new_veriloga_device_form_in(model: &Model, form: &mut NewVerilogADev
         .unwrap_or_default();
     let origin = matches!(
         model.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
+        Some(ViewType::Schematic | ViewType::Testbench)
     )
     .then(|| active.clone());
     *form = NewVerilogADeviceFormState {

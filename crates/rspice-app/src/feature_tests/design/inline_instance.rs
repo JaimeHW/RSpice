@@ -102,6 +102,19 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             .content
             .active_schematic_reference();
         let other = CellViewRef::new(&original.library, "other", "schematic");
+        let mut other_cell = crate::state::Cell::new("other");
+        other_cell.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        editor
+            .app
+            .state
+            .model
+            .library_manager
+            .edit_library(&original.library)
+            .expect("the project library")
+            .add_cell(other_cell);
         let mut other_schematic = crate::state::SchematicState::default();
         other_schematic
             .document_mut_for_test()

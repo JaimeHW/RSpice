@@ -314,7 +314,7 @@ fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
 /// so the edit can be corrected. A symbol's inspector holds no inline edit.
 pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, DesignFeature>) {
     cx.state.inspector_holds_failed_edit = None;
-    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+    if cx.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         return;
     }
     let Some(session) = cx.wb.inline_edit.session() else {

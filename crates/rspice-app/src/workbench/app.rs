@@ -715,7 +715,7 @@ impl RSpiceApp {
         }
         if matches!(
             self.state.model.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         ) {
             self.state
                 .model

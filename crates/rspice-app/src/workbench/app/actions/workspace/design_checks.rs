@@ -46,7 +46,7 @@ pub(crate) fn check_active_cellview(
 ) -> Result<DrcResult, String> {
     if !matches!(
         model.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
+        Some(ViewType::Schematic | ViewType::Testbench)
     ) {
         return Err("only a schematic or a testbench has design rules to check".to_owned());
     }

@@ -36,7 +36,7 @@ pub fn open_drawing_sheet_overflow_review(open: &mut bool, model: &Model) -> boo
     if *open
         || !matches!(
             model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
     {
         return false;

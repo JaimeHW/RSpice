@@ -174,7 +174,7 @@ fn schematic_editor_open(workbench: &WorkbenchSession, model: &Model) -> bool {
     workbench.workspace == Workspace::Design
         && matches!(
             model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
 }
 

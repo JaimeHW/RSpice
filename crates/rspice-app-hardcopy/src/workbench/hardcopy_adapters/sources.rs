@@ -168,8 +168,8 @@ pub fn enumerate_retained_hardcopy_sources(
     if matches!(
         reads.workbench.documents.active(Workspace::Design),
         Some(WorkspaceDocumentId::CellView(reference)) if reference == &reads.model.workspace.content.active_view
-    ) {
-        let view_type = reads.model.workspace.content.active_view_type();
+    ) && let Some(view_type) = reads.model.workspace.content.active_view_type()
+    {
         let active_key = reads.model.workspace.content.active_key();
         let design_source_key = format!("project:{}:cell-view:{active_key}", project_id.as_uuid());
         let supported = matches!(
@@ -436,7 +436,7 @@ pub fn prepare_retained_hardcopy_resolution(
     );
     if matches!(
         reads.model.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
+        Some(ViewType::Schematic | ViewType::Testbench)
     ) {
         let active_key = reads.model.workspace.content.active_key();
         let catalog = reads
@@ -463,7 +463,13 @@ pub fn prepare_retained_hardcopy_resolution(
     }
     if source_key == design_key {
         let identity = active_cell_view_identity(reads)?;
-        return match reads.model.workspace.content.active_view_type() {
+        let Some(view_type) = reads.model.workspace.content.active_view_type() else {
+            return Err(HardcopySourceError::UnsupportedDocument(format!(
+                "{} is not an open document",
+                reads.model.workspace.content.active_display_path()
+            )));
+        };
+        return match view_type {
             ViewType::Schematic | ViewType::Testbench => {
                 let active_key = reads.model.workspace.content.active_key();
                 let catalog = reads
@@ -723,7 +729,7 @@ pub fn active_app_hardcopy_source_available(
                     if reference == &model.workspace.content.active_view
             ) && matches!(
                 model.workspace.content.active_view_type(),
-                ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
+                Some(ViewType::Schematic | ViewType::Testbench | ViewType::Symbol)
             )
         }
         SurfaceId::Results => match workbench.documents.active(Workspace::Results) {

@@ -70,10 +70,36 @@ fn create_symbol_on_a_new_project_opens_the_symbol_editor() {
     );
     let content = &replay.app.state.model.workspace.content;
     assert_eq!(content.active_view, symbol);
-    assert_eq!(content.active_view_type(), ViewType::Symbol);
+    assert_eq!(content.active_view_type(), Some(ViewType::Symbol));
     assert_eq!(
         canvases(&controls),
         (true, false),
         "the symbol editor is drawn in place of the schematic canvas"
+    );
+}
+
+/// Opening a view the library does not hold is refused on the status bar;
+/// no schematic document is made up for it.
+#[test]
+fn a_view_the_library_does_not_hold_is_refused_not_opened_as_a_schematic() {
+    let mut replay = new_project();
+    let top = replay.app.state.model.workspace.content.active_view.clone();
+    let gone = CellViewRef::new(&top.library, &top.cell, "symbol");
+
+    replay.app.state.open_workspace_view(gone.clone());
+
+    let content = &replay.app.state.model.workspace.content;
+    assert_eq!(content.active_view, top);
+    assert!(content.open_views.iter().all(|open| open.reference != gone));
+    assert!(!content.schematic_buffers.contains_key(&gone.key()));
+    assert_eq!(catalog_type(&replay.app, &gone), None);
+    assert!(
+        replay
+            .app
+            .state
+            .prompt_text()
+            .is_some_and(|prompt| prompt.contains("is not in the library")),
+        "{:?}",
+        replay.app.state.prompt_text()
     );
 }

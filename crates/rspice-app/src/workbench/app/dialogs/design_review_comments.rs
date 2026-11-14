@@ -157,7 +157,7 @@ pub(crate) fn open_design_review_comments(
     if !platform.project_lifecycle.is_open()
         || !matches!(
             model.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         )
     {
         return;

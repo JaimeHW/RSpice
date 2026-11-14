@@ -927,7 +927,7 @@ fn each_pass_of_the_surface_says_afresh_where_the_touch_strip_goes() {
     let mut app = RSpiceApp::test_instance();
     assert_eq!(
         app.state.model.workspace.content.active_view_type(),
-        ViewType::Schematic
+        Some(ViewType::Schematic)
     );
     let stale = Rect::from_min_size(pos2(-50.0, -50.0), vec2(10.0, 10.0));
     app.state.design.touch_strip_canvas = Some(stale);

@@ -271,7 +271,7 @@ pub(crate) fn open_connectivity_manager(
     }
     if !matches!(
         model.workspace.content.active_view_type(),
-        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
     ) {
         workbench.prompt("Connectivity and bus manager needs a schematic or testbench view.");
         return;

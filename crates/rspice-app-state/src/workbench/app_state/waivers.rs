@@ -275,7 +275,7 @@ impl Model {
     fn active_schematic_view(&self) -> Option<CellViewRef> {
         matches!(
             self.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
         .then(|| self.workspace.content.active_view.clone())
     }
@@ -348,7 +348,7 @@ impl Model {
                 .into_iter()
                 .map(|(cell_view, document)| (cell_view.key(), document.waivers.clone()))
                 .collect(),
-            symbol: (self.workspace.content.active_view_type() == ViewType::Symbol)
+            symbol: (self.workspace.content.active_view_type() == Some(ViewType::Symbol))
                 .then(|| self.load_active_symbol_document().ok())
                 .flatten()
                 .map(|document| document.waivers),
@@ -386,7 +386,7 @@ impl Model {
             .key()
             .eq_ignore_ascii_case(&key);
         let editable = match self.workspace.content.active_view_type() {
-            ViewType::Schematic | ViewType::Testbench | ViewType::Symbol if active => true,
+            Some(ViewType::Schematic | ViewType::Testbench | ViewType::Symbol) if active => true,
             _ => self
                 .workspace
                 .content
@@ -419,10 +419,10 @@ impl Model {
             .key()
             .eq_ignore_ascii_case(&key);
         match self.workspace.content.active_view_type() {
-            ViewType::Schematic | ViewType::Testbench if active => {
+            Some(ViewType::Schematic | ViewType::Testbench) if active => {
                 edit.apply_to_schematic(&mut self.schematic)?;
             }
-            ViewType::Symbol if active => return Ok(Some(edit)),
+            Some(ViewType::Symbol) if active => return Ok(Some(edit)),
             _ => {
                 let held = self
                     .workspace

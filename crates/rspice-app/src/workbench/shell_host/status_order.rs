@@ -478,7 +478,7 @@ mod tests {
         app.state.workbench.activate(Workspace::Design);
         assert_eq!(
             app.state.model.workspace.content.active_view_type(),
-            crate::state::ViewType::VerilogA
+            Some(crate::state::ViewType::VerilogA)
         );
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);

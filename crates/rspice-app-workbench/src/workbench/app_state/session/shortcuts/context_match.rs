@@ -30,10 +30,10 @@ impl ShortcutContextMatch for ShortcutContext {
             Self::EditContext => {
                 workbench.workspace == Workspace::Results
                     || match model.workspace.content.active_view_type() {
-                        ViewType::Schematic | ViewType::Testbench => {
+                        Some(ViewType::Schematic | ViewType::Testbench) => {
                             workbench.workspace == Workspace::Design
                         }
-                        ViewType::Symbol => {
+                        Some(ViewType::Symbol) => {
                             matches!(workbench.workspace, Workspace::Design | Workspace::Models)
                         }
                         _ => false,
@@ -43,12 +43,12 @@ impl ShortcutContextMatch for ShortcutContext {
                 workbench.workspace == Workspace::Design
                     && matches!(
                         model.workspace.content.active_view_type(),
-                        ViewType::Schematic | ViewType::Testbench
+                        Some(ViewType::Schematic | ViewType::Testbench)
                     )
             }
             Self::SymbolCanvas => {
                 matches!(workbench.workspace, Workspace::Design | Workspace::Models)
-                    && model.workspace.content.active_view_type() == ViewType::Symbol
+                    && model.workspace.content.active_view_type() == Some(ViewType::Symbol)
             }
             Self::DesignWorkspace => workbench.workspace == Workspace::Design,
             Self::SimulationWorkspace => workbench.workspace == Workspace::Simulate,

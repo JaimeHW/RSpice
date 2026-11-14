@@ -1268,7 +1268,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
                     runtime_command_platform(&ctx),
                     ShortcutEnvironment {
                         workspace: crate::workbench::state::Workspace::Design,
-                        active_view: crate::state::ViewType::Schematic,
+                        active_view: Some(crate::state::ViewType::Schematic),
                         canvas_focus: false,
                         source_editor_focus: false,
                     },
@@ -1370,7 +1370,7 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
         engineering_canvas_has_focus(
             &harness.ctx,
             crate::workbench::state::Workspace::Design,
-            crate::state::ViewType::Schematic,
+            Some(crate::state::ViewType::Schematic),
         ),
         "the canvas the finding led to holds the keyboard",
     );

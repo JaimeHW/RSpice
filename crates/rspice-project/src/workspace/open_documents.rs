@@ -12,16 +12,17 @@ impl ProjectWorkspace {
         self.active_view.display_path()
     }
 
-    pub fn active_view_type(&self) -> ViewType {
+    /// The type of the active document, or `None` while no open document is
+    /// the active view: nothing is open there to have a type.
+    pub fn active_view_type(&self) -> Option<ViewType> {
         self.open_views
             .iter()
             .find(|open| open.reference == self.active_view)
             .map(|open| open.view_type)
-            .unwrap_or(ViewType::Schematic)
     }
 
     pub fn active_schematic_reference(&self) -> CellViewRef {
-        if self.active_view_type() == ViewType::Symbol {
+        if self.active_view_type() == Some(ViewType::Symbol) {
             return CellViewRef::new(
                 &self.active_view.library,
                 &self.active_view.cell,
@@ -240,5 +241,34 @@ impl ProjectWorkspace {
         {
             open.dirty = dirty;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The active document's type is the open document's, and nothing when
+    /// no open document is the active view: no type is made up for it.
+    #[test]
+    fn the_active_view_type_is_the_open_documents_and_none_without_one() {
+        let mut workspace = ProjectWorkspace::default();
+        assert_eq!(workspace.active_view_type(), Some(ViewType::Schematic));
+
+        let symbol = CellViewRef::new("work", "amp", "symbol");
+        workspace
+            .open_views
+            .push(OpenCellView::new(symbol.clone(), ViewType::Symbol));
+        workspace.active_view = symbol;
+        assert_eq!(workspace.active_view_type(), Some(ViewType::Symbol));
+        assert_eq!(
+            workspace.active_schematic_reference(),
+            CellViewRef::new("work", "amp", DEFAULT_SCHEMATIC_VIEW)
+        );
+
+        let gone = CellViewRef::new("work", "amp", "gone");
+        workspace.active_view = gone.clone();
+        assert_eq!(workspace.active_view_type(), None);
+        assert_eq!(workspace.active_schematic_reference(), gone);
     }
 }

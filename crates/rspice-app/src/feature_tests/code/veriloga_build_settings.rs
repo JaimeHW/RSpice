@@ -286,7 +286,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
     open_in_design(&mut app.state, &schematic);
     assert_eq!(
         app.state.model.workspace.content.active_view_type(),
-        crate::state::ViewType::Schematic
+        Some(crate::state::ViewType::Schematic)
     );
     assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
 

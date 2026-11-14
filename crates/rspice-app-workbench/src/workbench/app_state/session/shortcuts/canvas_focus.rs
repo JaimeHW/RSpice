@@ -56,7 +56,12 @@ pub fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context) {
 /// testbench, or symbol canvas. Pointer activation explicitly transfers focus
 /// from any prior text/control owner to the engineering canvas, and so does a
 /// request a surface made by sending the reader here.
-pub fn report_engineering_canvas_focus(response: &Response, view_type: ViewType) {
+pub fn report_engineering_canvas_focus(response: &Response, view_type: Option<ViewType>) {
+    // A canvas drawn while no open document is the active view has no
+    // view whose keys it could take.
+    let Some(view_type) = view_type else {
+        return;
+    };
     let now = response.ctx.cumulative_pass_nr();
     // The canvas drawn in the pass that asked is the one the reader is leaving:
     // the route is applied after it. The request is answered from the next
@@ -139,7 +144,7 @@ pub fn escape_owner_was_let_go(ctx: &egui::Context) -> bool {
 pub fn engineering_canvas_has_focus(
     ctx: &egui::Context,
     workspace: Workspace,
-    active_view: ViewType,
+    active_view: Option<ViewType>,
 ) -> bool {
     engineering_canvas(ctx, workspace, active_view)
         .is_some_and(|canvas| ctx.memory(|memory| memory.focused() == Some(canvas)))
@@ -149,18 +154,18 @@ pub fn engineering_canvas_has_focus(
 pub fn engineering_canvas(
     ctx: &egui::Context,
     workspace: Workspace,
-    active_view: ViewType,
+    active_view: Option<ViewType>,
 ) -> Option<Id> {
     if !matches!(workspace, Workspace::Design | Workspace::Models)
         || !matches!(
             active_view,
-            ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
+            Some(ViewType::Schematic | ViewType::Testbench | ViewType::Symbol)
         )
     {
         return None;
     }
     ctx.data(|data| data.get_temp::<CanvasFocusRecord>(Id::new(CANVAS_FOCUS_RECORD_ID)))
-        .filter(|record| record.view_type == active_view)
+        .filter(|record| Some(record.view_type) == active_view)
         .map(|record| record.response_id)
 }
 
@@ -186,29 +191,29 @@ mod tests {
         assert!(engineering_canvas_has_focus(
             &ctx,
             Workspace::Design,
-            ViewType::Schematic
+            Some(ViewType::Schematic)
         ));
         assert!(!engineering_canvas_has_focus(
             &ctx,
             Workspace::Design,
-            ViewType::Symbol
+            Some(ViewType::Symbol)
         ));
         assert!(!engineering_canvas_has_focus(
             &ctx,
             Workspace::Models,
-            ViewType::Symbol
+            Some(ViewType::Symbol)
         ));
         assert!(!engineering_canvas_has_focus(
             &ctx,
             Workspace::Results,
-            ViewType::Schematic
+            Some(ViewType::Schematic)
         ));
 
         ctx.memory_mut(|memory| memory.request_focus(Id::new("field")));
         assert!(!engineering_canvas_has_focus(
             &ctx,
             Workspace::Design,
-            ViewType::Schematic
+            Some(ViewType::Schematic)
         ));
     }
 
@@ -230,7 +235,7 @@ mod tests {
                     // accessibility-pointer-shim: test-only stand-in for an
                     // engineering canvas, which publishes its own semantics.
                     let response = ui.interact(rect, canvas, egui::Sense::click());
-                    report_engineering_canvas_focus(&response, ViewType::Schematic);
+                    report_engineering_canvas_focus(&response, Some(ViewType::Schematic));
                 }
             });
         };

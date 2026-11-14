@@ -254,7 +254,7 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 /// with its source.
 pub fn veriloga_build_settings_available(model: &Model, platform: &PlatformState) -> bool {
     platform.project_lifecycle.is_open()
-        && model.workspace.content.active_view_type() == ViewType::VerilogA
+        && model.workspace.content.active_view_type() == Some(ViewType::VerilogA)
         && model
             .workspace
             .active_source_bundle(ProjectSourceLanguage::VerilogA)

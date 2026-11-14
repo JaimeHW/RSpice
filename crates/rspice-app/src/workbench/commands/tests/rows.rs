@@ -533,7 +533,7 @@ const TIED_PAIRS: [(CommandKey, CommandKey); 2] = [
 fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
     let environment = ShortcutEnvironment {
         workspace: Workspace::Design,
-        active_view: crate::state::ViewType::Schematic,
+        active_view: Some(crate::state::ViewType::Schematic),
         canvas_focus: false,
         source_editor_focus: true,
     };

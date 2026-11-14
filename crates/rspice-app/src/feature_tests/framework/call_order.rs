@@ -955,7 +955,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
              features::show_navigator::<CodeFeature>(app, ui);\
              app.after_contribution();\
              }",
-            "== ViewType::VerilogA =>\
+            "== Some(ViewType::VerilogA) =>\
              {\
              features::show_navigator::<CodeFeature>(app, ui);\
              app.after_contribution();\
@@ -965,7 +965,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace inspector",
         &[
-            "== crate::state::ViewType::VerilogA =>\
+            "== Some(crate::state::ViewType::VerilogA) =>\
          {\
          features::show_inspector::<CodeFeature>(app, ui);\
          }",

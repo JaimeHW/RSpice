@@ -110,7 +110,7 @@ pub(crate) fn resolve_veriloga_compile(
 ) -> Option<CodeCommandContext> {
     if model.safe_mode.project_read_only()
         || !platform.project_lifecycle.is_open()
-        || model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
+        || model.workspace.content.active_view_type() != Some(crate::state::ViewType::VerilogA)
         || code.veriloga.pending.is_some()
     {
         return None;
@@ -142,7 +142,7 @@ pub(crate) fn veriloga_compile_refusal(
         "the project is open read-only"
     } else if !platform.project_lifecycle.is_open() {
         "no project is open"
-    } else if model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA {
+    } else if model.workspace.content.active_view_type() != Some(crate::state::ViewType::VerilogA) {
         "open a Verilog-A cell view in Design"
     } else if code.veriloga.pending.is_some() {
         "a Verilog-A compile is already running"

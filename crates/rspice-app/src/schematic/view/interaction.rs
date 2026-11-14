@@ -1471,7 +1471,7 @@ fn report_probe_outcome(state: &mut CanvasParts<'_>, display: &str, outcome: Pro
 fn probe_edit_identity_is_current(state: &CanvasParts<'_>) -> Result<(), String> {
     if !matches!(
         state.model.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
+        Some(ViewType::Schematic | ViewType::Testbench)
     ) {
         return Err("the active cell/view is not a schematic document".to_owned());
     }

@@ -174,7 +174,8 @@ pub(crate) fn project_active_symbol_session(
         symbol.in_place = None;
     }
     let source = symbol_editor_request_source(model, wb);
-    let is_symbol = model.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
+    let is_symbol =
+        model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol);
     let open_views = &model.workspace.content.open_views;
     let retained = &mut model.workspace.session.symbol_sessions;
     let still_open = |previous: &SymbolRequestSource| {
@@ -848,7 +849,7 @@ fn publish_active_symbol_pin_check_result(
     facts: SlotFacts,
     result: &rspice_design::drc::DrcResult,
 ) -> Result<(), String> {
-    if model.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
+    if model.workspace.content.active_view_type() != Some(crate::state::ViewType::Symbol) {
         return Err("symbol pin findings can only be published from a symbol view".to_owned());
     }
     let subject = model.workspace.content.active_view.clone();

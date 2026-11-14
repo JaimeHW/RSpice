@@ -1421,7 +1421,7 @@ pub(crate) fn action_availability(
         ContextAction::ZoomBox => (
             matches!(
                 state.model.workspace.content.active_view_type(),
-                ViewType::Schematic | ViewType::Testbench
+                Some(ViewType::Schematic | ViewType::Testbench)
             ),
             "The zoom box frames a schematic or testbench canvas",
         ),
@@ -1507,14 +1507,14 @@ pub(crate) fn action_availability(
             writable
                 && matches!(
                     state.model.workspace.content.active_view_type(),
-                    ViewType::Schematic | ViewType::Testbench
+                    Some(ViewType::Schematic | ViewType::Testbench)
                 ),
             "Sheet properties require a writable schematic or testbench",
         ),
         ContextAction::FitContent => (
             matches!(
                 state.model.workspace.content.active_view_type(),
-                ViewType::Schematic | ViewType::Testbench
+                Some(ViewType::Schematic | ViewType::Testbench)
             ),
             "Fit is available on a schematic or testbench canvas",
         ),

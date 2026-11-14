@@ -208,7 +208,11 @@ impl ProjectWorkspace {
     }
 
     pub fn save_active_schematic(&mut self, schematic: &SchematicState) {
-        if !is_schematic_like(self.content.active_view_type()) {
+        if !self
+            .content
+            .active_view_type()
+            .is_some_and(is_schematic_like)
+        {
             return;
         }
         let key = self.content.active_key();
@@ -365,13 +369,27 @@ impl super::WorkspaceSession {
             content.active_view.view = DEFAULT_SCHEMATIC_VIEW.to_string();
         }
 
-        let active_view_type = content
+        let recorded_type = content
             .open_views
             .iter()
             .find(|open| open.reference == content.active_view)
             .map(|open| open.view_type)
-            .or_else(|| library_view_type(libraries, &content.active_view))
-            .unwrap_or(ViewType::Schematic);
+            .or_else(|| library_view_type(libraries, &content.active_view));
+        let active_view_type = match recorded_type {
+            Some(view_type) => view_type,
+            // A view neither the tabs nor the library record is not made up
+            // under its own name: the session falls back to the project's
+            // top schematic, which is the view a new project is seeded with
+            // below.
+            None => {
+                content.active_view = CellViewRef::new(
+                    &content.project.root_library,
+                    &content.project.top_cell,
+                    DEFAULT_SCHEMATIC_VIEW,
+                );
+                library_view_type(libraries, &content.active_view).unwrap_or(ViewType::Schematic)
+            }
+        };
 
         ensure_cell_view(
             libraries,
@@ -381,7 +399,11 @@ impl super::WorkspaceSession {
             active_view_type,
         );
 
-        if content.open_views.is_empty() {
+        if !content
+            .open_views
+            .iter()
+            .any(|open| open.reference == content.active_view)
+        {
             content.open_views.push(OpenCellView::new(
                 content.active_view.clone(),
                 active_view_type,

@@ -387,7 +387,7 @@ impl Model {
     ) -> Result<(), String> {
         if !matches!(
             self.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         ) {
             return Err(
                 "schematic design-check results can only be published from a schematic or testbench"
@@ -608,7 +608,7 @@ impl Model {
     pub fn active_design_check_status(&self, facts: SlotFacts) -> DesignCheckStatus<'_> {
         if !matches!(
             self.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         ) {
             return DesignCheckStatus::NotRun;
         }
@@ -624,7 +624,7 @@ impl Model {
     pub fn clear_active_design_check(&mut self, facts: SlotFacts) {
         if !matches!(
             self.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         ) {
             self.refresh_active_design_check_projection(facts);
             return;
@@ -723,7 +723,7 @@ impl Model {
     pub fn refresh_active_design_check_projection(&mut self, facts: SlotFacts) {
         if !matches!(
             self.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         ) {
             self.design_checks.drc_checked_version = 0;
             self.design_checks.drc_results = None;

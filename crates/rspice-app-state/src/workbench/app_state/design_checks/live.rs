@@ -58,7 +58,7 @@ impl Model {
         let drawing = (self.project_open.is_open()
             && matches!(
                 self.workspace.content.active_view_type(),
-                ViewType::Schematic | ViewType::Testbench
+                Some(ViewType::Schematic | ViewType::Testbench)
             ))
         .then(|| {
             let subject = self.workspace.content.active_schematic_reference();

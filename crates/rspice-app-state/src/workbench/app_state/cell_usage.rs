@@ -38,7 +38,7 @@ impl Model {
         let content = &self.workspace.content;
         let live = matches!(
             content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
         .then(|| content.active_schematic_reference());
         let mut uses = Vec::new();

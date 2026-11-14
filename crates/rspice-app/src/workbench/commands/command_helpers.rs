@@ -138,14 +138,15 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
     matches!(
         app.state.workbench.workspace,
         Workspace::Design | Workspace::Models
-    ) && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+    ) && app.state.model.workspace.content.active_view_type()
+        == Some(crate::state::ViewType::Symbol)
 }
 
 pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(
             app.state.model.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         )
 }
 

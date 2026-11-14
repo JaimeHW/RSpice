@@ -158,7 +158,7 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
 /// Models workspace.
 pub(super) fn symbol_editor(workspace: Workspace, model: &Model) -> bool {
     matches!(workspace, Workspace::Design | Workspace::Models)
-        && model.workspace.content.active_view_type() == ViewType::Symbol
+        && model.workspace.content.active_view_type() == Some(ViewType::Symbol)
 }
 
 /// Whether a schematic or testbench is in front in the Design workspace.
@@ -166,7 +166,7 @@ fn schematic_editor(workspace: Workspace, model: &Model) -> bool {
     workspace == Workspace::Design
         && matches!(
             model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
+            Some(ViewType::Schematic | ViewType::Testbench)
         )
 }
 
@@ -430,7 +430,7 @@ fn deselect_all(cx: &mut Cx<'_, DesignFeature>) {
 /// gives the netlist page's find to code before it routes the command.
 fn finds_in_design(reads: &Reads<'_, DesignFeature>) -> bool {
     reads.wb.workspace != Workspace::Design
-        || reads.model.workspace.content.active_view_type() != ViewType::VerilogA
+        || reads.model.workspace.content.active_view_type() != Some(ViewType::VerilogA)
 }
 
 /// Bring the Navigator forward on the Design workspace and focus its search

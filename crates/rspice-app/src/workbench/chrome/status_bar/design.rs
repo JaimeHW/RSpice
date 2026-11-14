@@ -26,11 +26,11 @@ pub(in crate::workbench) fn design_engineering_context(
     let view_type = model.workspace.content.active_view_type();
     canvas_hover.map_or_else(
         || match view_type {
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench) => {
                 empty_schematic_cursor_summary(model)
             }
-            crate::state::ViewType::Layout => "x — · y — layout".to_owned(),
-            crate::state::ViewType::Symbol => {
+            Some(crate::state::ViewType::Layout) => "x — · y — layout".to_owned(),
+            Some(crate::state::ViewType::Symbol) => {
                 format!(
                     "x — · y — · grid {}",
                     model.schematic.document().grid_size.max(1)
@@ -39,10 +39,10 @@ pub(in crate::workbench) fn design_engineering_context(
             _ => String::new(),
         },
         |(x, y)| match view_type {
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench) => {
                 schematic_cursor_summary(model, x, y)
             }
-            crate::state::ViewType::Layout => {
+            Some(crate::state::ViewType::Layout) => {
                 // The open layout's own database unit is the one its
                 // coordinates count in.
                 let content = &model.workspace.content;
@@ -62,7 +62,7 @@ pub(in crate::workbench) fn design_engineering_context(
                         },
                     )
             }
-            crate::state::ViewType::Symbol => format!(
+            Some(crate::state::ViewType::Symbol) => format!(
                 "x {x:.0} · y {y:.0} · grid {}",
                 model.schematic.document().grid_size.max(1)
             ),
@@ -129,7 +129,7 @@ pub(in crate::workbench) fn zoom_factor(
     wb: &WorkbenchSession,
 ) -> f64 {
     if wb.workspace == Workspace::Design
-        && model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+        && model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol)
     {
         f64::from(symbol.editor.zoom)
     } else {

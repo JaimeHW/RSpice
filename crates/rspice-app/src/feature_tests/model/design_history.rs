@@ -219,7 +219,15 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
         .workspace
         .insert_schematic_editor(target.key(), child.clone());
     state.model.schematic = child.clone();
+    // The child opens as a tab of its own, as Create hierarchy opens it.
+    let open_views_before = state.model.workspace.content.open_views.clone();
     state.model.workspace.content.active_view = target.clone();
+    state
+        .model
+        .workspace
+        .content
+        .open_views
+        .push(OpenCellView::new(target.clone(), ViewType::Schematic));
     let open_views_after = state.model.workspace.content.open_views.clone();
     let hierarchy_stack_after = state.model.workspace.content.hierarchy_stack.clone();
     let hierarchy_instances_after = state.model.workspace.content.hierarchy_instances.clone();
@@ -233,7 +241,7 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
             after_parent,
             child,
             target_cell: cell,
-            open_views_before: state.model.workspace.content.open_views.clone(),
+            open_views_before,
             hierarchy_stack_before: state.model.workspace.content.hierarchy_stack.clone(),
             hierarchy_instances_before: state.model.workspace.content.hierarchy_instances.clone(),
             open_views_after,

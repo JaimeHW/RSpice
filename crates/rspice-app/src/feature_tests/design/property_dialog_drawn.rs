@@ -554,8 +554,23 @@ fn returning_to_the_same_view_cannot_reauthorize_an_old_dialog() {
         .unwrap()
         .document_epoch;
     let original_view = state.model.workspace.content.active_view.clone();
+    let mut detour = crate::state::Cell::new("detour");
+    detour.add_view(crate::state::View::new(
+        "schematic",
+        crate::state::ViewType::Schematic,
+    ));
+    state
+        .model
+        .library_manager
+        .edit_library(&original_view.library)
+        .expect("the project library")
+        .add_cell(detour);
 
-    state.open_workspace_view(CellViewRef::new("work", "detour", "schematic"));
+    state.open_workspace_view(CellViewRef::new(
+        &original_view.library,
+        "detour",
+        "schematic",
+    ));
     state.open_workspace_view(original_view.clone());
 
     assert_eq!(state.model.workspace.content.active_view, original_view);

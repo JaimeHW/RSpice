@@ -345,7 +345,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     state.open_workspace_view(amp_symbol.clone());
     assert_eq!(
         state.model.workspace.content.active_view_type(),
-        ViewType::Symbol
+        Some(ViewType::Symbol)
     );
 
     state.open_workspace_view(top_schematic);

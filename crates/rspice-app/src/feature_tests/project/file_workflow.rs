@@ -184,7 +184,7 @@ fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {
     state.open_workspace_view(symbol_reference);
     assert_eq!(
         state.model.workspace.content.active_view_type(),
-        ViewType::Symbol
+        Some(ViewType::Symbol)
     );
     schematic_reference
 }

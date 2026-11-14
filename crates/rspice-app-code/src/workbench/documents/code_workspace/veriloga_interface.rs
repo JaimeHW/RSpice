@@ -142,9 +142,9 @@ pub fn refresh_symbol_standing(
     state: &mut VerilogAWorkbenchState,
     libraries: &LibraryManager,
     active: &CellViewRef,
-    active_type: ViewType,
+    active_type: Option<ViewType>,
 ) {
-    if active_type != ViewType::VerilogA {
+    if active_type != Some(ViewType::VerilogA) {
         if state.symbol_standing.measured.is_some() {
             state.symbol_standing = VerilogASymbolStanding::default();
         }

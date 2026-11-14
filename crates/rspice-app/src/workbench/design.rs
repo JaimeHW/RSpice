@@ -138,7 +138,7 @@ impl Feature for DesignFeature {
 /// Draw the inspector of the design document in front: a symbol's
 /// selection, or a schematic's.
 fn show_inspector(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui) {
-    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+    if cx.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         inspector::symbol::show(ui, cx);
     } else {
         inspector::show(ui, cx);
@@ -155,7 +155,7 @@ fn commit_pending_inspector_section(cx: &mut Cx<'_, DesignFeature>, _: &egui::Co
 /// Draw the navigator of the design document in front: a symbol's pins,
 /// body and label anchors, or a schematic's hierarchy and shelf.
 fn show_navigator(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui) {
-    if cx.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+    if cx.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         navigator::symbol::show(ui, cx);
     } else {
         navigator::show(ui, cx);
@@ -1060,7 +1060,7 @@ fn schematic_editor(reads: &Reads<'_, DesignFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
         && matches!(
             reads.model.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         )
 }
 

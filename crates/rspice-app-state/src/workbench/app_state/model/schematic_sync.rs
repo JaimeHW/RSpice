@@ -52,7 +52,12 @@ impl Model {
     #[must_use]
     pub fn sync_active_schematic_to_workspace(&mut self) -> Option<String> {
         let mut prompt = None;
-        if is_schematic_like(self.workspace.content.active_view_type()) {
+        if self
+            .workspace
+            .content
+            .active_view_type()
+            .is_some_and(is_schematic_like)
+        {
             let active = self.workspace.content.active_schematic_reference();
             if self.schematic.has_pending_operation() {
                 // Window projection may retain a live gesture in a runtime
@@ -71,7 +76,12 @@ impl Model {
             self.workspace.save_active_schematic(&self.schematic);
         }
         self.retry_annotation_restoration();
-        if is_schematic_like(self.workspace.content.active_view_type()) {
+        if self
+            .workspace
+            .content
+            .active_view_type()
+            .is_some_and(is_schematic_like)
+        {
             self.sync_generated_symbol_view();
         }
         prompt

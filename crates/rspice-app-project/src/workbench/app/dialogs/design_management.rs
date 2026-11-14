@@ -497,7 +497,7 @@ fn open_design_management_dialog_state(
     }
     if !matches!(
         model.workspace.content.active_view_type(),
-        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
     ) {
         wb.prompt("Design Management needs a schematic or testbench view.");
         return;

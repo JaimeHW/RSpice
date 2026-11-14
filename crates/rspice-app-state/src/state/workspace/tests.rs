@@ -1529,7 +1529,7 @@ fn symbol_active_view_does_not_allocate_schematic_buffer() {
 
     workspace.ensure_library_model(&mut libraries);
 
-    assert_eq!(workspace.content.active_view_type(), ViewType::Symbol);
+    assert_eq!(workspace.content.active_view_type(), Some(ViewType::Symbol));
     assert!(
         !workspace
             .content
@@ -2431,4 +2431,46 @@ fn technology_binding_fixture() -> ProjectTechnologyBinding {
         "pdk_package": null,
     }))
     .expect("technology binding fixture")
+}
+
+/// A session whose active view neither its tabs nor its library record
+/// falls back to the project's top schematic; no schematic is made up under
+/// the missing view's name.
+#[test]
+fn an_active_view_nothing_records_falls_back_to_the_top_schematic() {
+    let gone = CellViewRef::new("work", "ota_5t", "symbol");
+    let mut workspace = ProjectWorkspace::default();
+    workspace.content.active_view = gone.clone();
+    let mut libraries = LibraryManager::default();
+    let mut library = Library::new("work");
+    library.add_cell(Cell::new("ota_5t"));
+    libraries.add_library(library);
+
+    workspace.ensure_library_model(&mut libraries);
+
+    let top = CellViewRef::new(
+        &workspace.content.project.root_library,
+        &workspace.content.project.top_cell,
+        "schematic",
+    );
+    assert_eq!(workspace.content.active_view, top);
+    assert_eq!(
+        workspace.content.active_view_type(),
+        Some(ViewType::Schematic)
+    );
+    assert!(
+        libraries
+            .get_library("work")
+            .and_then(|library| library.get_cell("ota_5t"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .is_none(),
+        "nothing is made up under the missing view's name"
+    );
+    assert!(
+        !workspace
+            .content
+            .schematic_buffers
+            .contains_key(&gone.key()),
+        "the missing view is given no schematic buffer"
+    );
 }

@@ -90,10 +90,10 @@ pub(in crate::workbench) fn docs_url(topic: Option<DocsTopic>) -> String {
 
 /// What a workspace's pages are for. Design is about schematic entry, or
 /// about Verilog-A while it shows a Verilog-A view.
-const fn workspace_topic(workspace: Workspace, view: ViewType) -> DocsTopic {
+const fn workspace_topic(workspace: Workspace, view: Option<ViewType>) -> DocsTopic {
     match workspace {
         Workspace::Project => DocsTopic::GettingStarted,
-        Workspace::Design if matches!(view, ViewType::VerilogA) => DocsTopic::VerilogA,
+        Workspace::Design if matches!(view, Some(ViewType::VerilogA)) => DocsTopic::VerilogA,
         Workspace::Design => DocsTopic::SchematicEntry,
         Workspace::Simulate | Workspace::Stimulus => DocsTopic::SimulationSetup,
         Workspace::Results => DocsTopic::Results,
@@ -314,11 +314,13 @@ mod tests {
             "the table lists every workspace"
         );
         for (workspace, topic) in expected {
-            assert_eq!(workspace_topic(workspace, ViewType::Schematic), topic);
-            assert!(DocsTopic::ALL.contains(&workspace_topic(workspace, ViewType::Schematic)));
+            assert_eq!(workspace_topic(workspace, Some(ViewType::Schematic)), topic);
+            assert!(
+                DocsTopic::ALL.contains(&workspace_topic(workspace, Some(ViewType::Schematic)))
+            );
         }
         assert_eq!(
-            workspace_topic(Workspace::Design, ViewType::VerilogA),
+            workspace_topic(Workspace::Design, Some(ViewType::VerilogA)),
             DocsTopic::VerilogA
         );
     }

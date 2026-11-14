@@ -435,7 +435,7 @@ impl Fixture {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 app.handle_shortcuts(ui.ctx());
                 *canvas = ui.available_rect_before_wrap();
-                if app.state.model.workspace.content.active_view_type() == ViewType::Symbol {
+                if app.state.model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
                     crate::schematic::symbol_editor::show(
                         ui,
                         &mut crate::schematic::view::canvas_frame(&mut app.state),

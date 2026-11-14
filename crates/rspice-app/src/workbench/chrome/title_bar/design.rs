@@ -10,6 +10,8 @@ pub(in crate::workbench) fn design_title_cell(model: &Model) -> String {
         content.active_view.cell,
         content
             .active_view_type()
-            .caption_for(&content.active_view.view)
+            .map_or(content.active_view.view.as_str(), |view_type| {
+                view_type.caption_for(&content.active_view.view)
+            })
     )
 }

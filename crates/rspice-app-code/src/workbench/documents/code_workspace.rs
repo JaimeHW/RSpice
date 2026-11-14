@@ -222,7 +222,7 @@ pub(crate) fn design_hosts_veriloga(
     workspace: &crate::state::ProjectWorkspace,
 ) -> bool {
     shown == crate::workbench::state::Workspace::Design
-        && workspace.content.active_view_type() == crate::state::ViewType::VerilogA
+        && workspace.content.active_view_type() == Some(crate::state::ViewType::VerilogA)
 }
 
 /// The source language of the code document commands, dialogs, and labels act

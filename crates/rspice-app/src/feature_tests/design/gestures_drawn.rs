@@ -825,7 +825,7 @@ impl Fixture {
                 app.handle_shortcuts(ui.ctx());
                 *origin = ui.available_rect_before_wrap().min;
                 if app.state.model.workspace.content.active_view_type()
-                    == crate::state::ViewType::Symbol
+                    == Some(crate::state::ViewType::Symbol)
                 {
                     crate::schematic::symbol_editor::show(
                         ui,

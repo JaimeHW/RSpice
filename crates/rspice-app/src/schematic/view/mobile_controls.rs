@@ -101,7 +101,7 @@ pub(crate) fn execute_action(
         || cx.wb.current_route().surface_id() != SurfaceId::Design
         || !matches!(
             cx.model.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         )
         || canvas_application_modal_open_in(cx)
         || !action_enabled(cx, request.action)

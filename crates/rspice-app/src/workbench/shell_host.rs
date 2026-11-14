@@ -179,7 +179,7 @@ impl Host for RSpiceApp {
                         use crate::workbench::design::DesignFeature;
 
                         let verilog_a = app.state.model.workspace.content.active_view_type()
-                            == ViewType::VerilogA;
+                            == Some(ViewType::VerilogA);
                         features::show_surface::<DesignFeature>(app, ui);
                         if verilog_a {
                             let application_modal = app.state.application_modal_open();
@@ -292,7 +292,7 @@ impl Host for RSpiceApp {
                     }
                     Workspace::Design
                         if app.state.model.workspace.content.active_view_type()
-                            == ViewType::VerilogA =>
+                            == Some(ViewType::VerilogA) =>
                     {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
@@ -345,7 +345,7 @@ impl Host for RSpiceApp {
                     // to, not for a schematic selection it does not have.
                     Workspace::Design
                         if app.state.model.workspace.content.active_view_type()
-                            == crate::state::ViewType::VerilogA =>
+                            == Some(crate::state::ViewType::VerilogA) =>
                     {
                         features::show_inspector::<CodeFeature>(app, ui);
                     }
@@ -437,7 +437,7 @@ impl Host for RSpiceApp {
                         Workspace::Project => project_tools(ui, app, layout),
                         Workspace::Design
                             if app.state.model.workspace.content.active_view_type()
-                                == ViewType::Symbol =>
+                                == Some(ViewType::Symbol) =>
                         {
                             features::show_toolbar::<DesignFeature>(
                                 app,
@@ -449,7 +449,7 @@ impl Host for RSpiceApp {
                         }
                         Workspace::Design
                             if app.state.model.workspace.content.active_view_type()
-                                == ViewType::VerilogA =>
+                                == Some(ViewType::VerilogA) =>
                         {
                             veriloga_tools(ui, app, layout);
                         }
