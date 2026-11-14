@@ -554,6 +554,22 @@ fn request_future_breakpoint(ctx: &mut CmContext, time: Value) {
     }
 }
 
+/// Ask to be evaluated at `time` without restarting the analog solution
+/// there: the oscillator's own instants, its wake-up ahead of a transition
+/// and the transition it has scheduled, are no step of any analog value it
+/// produces. Ngspice's `d_osc` and `d_pwm` ask for these with
+/// `cm_event_queue` and `cm_analog_set_temp_bkpt`
+/// (icm/digital/d_osc/cfunc.mod:175-222, d_pwm/cfunc.mod:186-233), neither
+/// of which restarts.
+fn request_future_landing(ctx: &mut CmContext, time: Value) {
+    if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+        return;
+    }
+    if time.is_finite() && ctx.is_ahead(time) {
+        ctx.request_temporary_breakpoint(time);
+    }
+}
+
 fn nco_param_min(ctx: &CmContext, name: &str, default: Value, min: Value) -> CmResult<Value> {
     let value = ctx.param_or(name, default);
     if !value.is_finite() || value < min {
@@ -623,7 +639,7 @@ fn evaluate_digital_oscillator(
         .map(|(last_time, _)| last_time)
         .unwrap_or_else(|| ctx.state(OSC_LAST_TIME));
     if ctx.is_ahead(last_time) {
-        request_future_breakpoint(ctx, last_time);
+        request_future_landing(ctx, last_time);
         return Ok(());
     }
 
@@ -644,7 +660,7 @@ fn evaluate_digital_oscillator(
 
     let threshold = last_time + FACTOR1 * interval;
     if ctx.is_ahead(threshold) {
-        request_future_breakpoint(ctx, last_time + FACTOR2 * interval);
+        request_future_landing(ctx, last_time + FACTOR2 * interval);
         return Ok(());
     }
 
@@ -664,7 +680,7 @@ fn evaluate_digital_oscillator(
     } else {
         period * duty_cycle
     };
-    request_future_breakpoint(ctx, transition_time + FACTOR2 * next_interval);
+    request_future_landing(ctx, transition_time + FACTOR2 * next_interval);
     Ok(())
 }
 
@@ -1012,6 +1028,7 @@ mod tests {
         assert_eq!(osc.int_state(OSC_INITIALIZED), 0);
         assert!(osc.take_pending_events().is_empty());
         assert!(osc.take_requested_breakpoints().is_empty());
+        assert!(osc.take_requested_landings().is_empty());
 
         let mut pwm = CmContext::new();
         pwm.analysis = AnalysisType::Transient;
@@ -1040,6 +1057,7 @@ mod tests {
         assert_eq!(pwm.int_state(OSC_INITIALIZED), 0);
         assert!(pwm.take_pending_events().is_empty());
         assert!(pwm.take_requested_breakpoints().is_empty());
+        assert!(pwm.take_requested_landings().is_empty());
     }
 
     #[test]
@@ -1424,7 +1442,7 @@ mod tests {
         evaluate_digital_oscillator(&mut ctx, "d_osc", 1.0e-6, 0.5)
             .expect("initial oscillator evaluation");
         let _ = ctx.take_pending_events();
-        let _ = ctx.take_requested_breakpoints();
+        let _ = ctx.take_requested_landings();
         assert_eq!(ctx.int_state(OSC_LAST_STATE), 0);
         assert_eq!(ctx.state(OSC_LAST_TIME), 0.0);
 
@@ -1440,7 +1458,7 @@ mod tests {
             "rollbackable oscillator probe should expose the trial transition, got {events:?}"
         );
         assert!(
-            ctx.take_requested_breakpoints().is_empty(),
+            ctx.take_requested_breakpoints().is_empty() && ctx.take_requested_landings().is_empty(),
             "rollbackable oscillator probes must not leave future transition breakpoints behind"
         );
         assert_eq!(

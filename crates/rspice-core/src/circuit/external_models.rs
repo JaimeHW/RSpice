@@ -2191,24 +2191,34 @@ impl CircuitData {
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 
-    /// Drain absolute transient breakpoint requests emitted by XSPICE models.
+    /// Drain absolute transient breakpoint requests emitted by XSPICE models,
+    /// the temporary ones after the others.
     #[cfg(test)]
     pub(crate) fn take_xspice_requested_breakpoints(&mut self) -> Vec<Value> {
         let mut breakpoints = Vec::new();
-        self.drain_xspice_requested_breakpoints(|time| breakpoints.push(time), |_| {});
+        let mut landings = Vec::new();
+        self.drain_xspice_requested_breakpoints(
+            |time| breakpoints.push(time),
+            |_| {},
+            |time| landings.push(time),
+        );
+        breakpoints.extend(landings);
         breakpoints
     }
 
     /// Drain XSPICE breakpoint requests directly into a caller-provided sink,
     /// and the ones among them that complete a zero-duration edge into
-    /// `edge_completion` as well.
-    pub(crate) fn drain_xspice_requested_breakpoints<F, G>(
+    /// `edge_completion` as well. The temporary requests, the instants to land
+    /// on without restarting, go to `landing` alone.
+    pub(crate) fn drain_xspice_requested_breakpoints<F, G, H>(
         &mut self,
         mut sink: F,
         mut edge_completion: G,
+        mut landing: H,
     ) where
         F: FnMut(Value),
         G: FnMut(Value),
+        H: FnMut(Value),
     {
         for instance in &mut self.xspice_instances {
             // Asking first keeps the sweep off the copy-on-write path for
@@ -2223,6 +2233,9 @@ impl CircuitData {
             }
             for time in instance.drain_requested_breakpoints() {
                 sink(time);
+            }
+            for time in instance.drain_requested_landings() {
+                landing(time);
             }
         }
     }

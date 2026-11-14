@@ -4499,6 +4499,7 @@ impl Engine {
                 dynamic_tline_breakpoints_added,
                 edge_completions: &breakpoints.edge_completion_schedule(accepted_time),
                 requested_breakpoints: &breakpoints.model_request_schedule(accepted_time),
+                requested_landings: &breakpoints.model_landing_schedule(accepted_time),
                 floor_grid,
             },
             AcceptedTransientRuntime {
@@ -4865,6 +4866,7 @@ impl Engine {
                         edge_completions:
                             &crate::numerics::integration::EdgeCompletionSchedule::default(),
                         requested_breakpoints: &[],
+                        requested_landings: &[],
                         floor_grid: FloorLandingGrid::default(),
                     },
                     AcceptedTransientRuntime {
@@ -5529,6 +5531,7 @@ impl Engine {
         if let Some(checkpoint) = resume {
             breakpoints.restore_edge_completion_schedule(checkpoint.edge_completions(), tstop);
             breakpoints.restore_model_requests(checkpoint.requested_breakpoints(), tstop);
+            breakpoints.restore_model_landings(checkpoint.requested_landings(), tstop);
         }
         let configured_initial_step = self
             .config
@@ -12309,6 +12312,13 @@ impl Engine {
                     t = snapped;
                 }
             }
+            // A landing only (`BreakpointManager::replace_landings`) is no
+            // discontinuity of the analog solution, so it restarts nothing:
+            // the step leaving it is the controller's.
+            if hit_breakpoint && !landed_device_event && breakpoints.lands_without_restart(t) {
+                hit_breakpoint = false;
+                breakpoints.mark_landing_solved(t);
+            }
             raise_floor_to_accepted_clock!();
             bjt::arrival::validate_clock(has_exact_transient_history, step_time, t)?;
             let method_after_step = current_integration_method(&trapgear);
@@ -13397,6 +13407,7 @@ impl Engine {
                         dynamic_tline_breakpoints_added,
                         edge_completions: &breakpoints.edge_completion_schedule(t),
                         requested_breakpoints: &breakpoints.model_request_schedule(t),
+                        requested_landings: &breakpoints.model_landing_schedule(t),
                         floor_grid: veriloga_floor_grid,
                     },
                     AcceptedTransientRuntime {

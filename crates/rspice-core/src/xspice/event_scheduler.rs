@@ -1764,8 +1764,8 @@ impl EventScheduler {
     }
 
     /// The identity behind an interned id, for a host naming its own drivers
-    /// in a diagnostic.
-    #[cfg(feature = "veriloga")]
+    /// in a diagnostic, or the transient asking which net the next event
+    /// writes.
     pub(crate) fn target(&self, id: TargetId) -> &EventTarget {
         self.queues.target(id)
     }

@@ -143,7 +143,7 @@ fn checkpoint_operation_result<T>(
 }
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 64;
+const FORMAT_VERSION: u32 = 65;
 
 /// Canonical text header. One owner, so the writer, the parser, and the
 /// format-version gate below cannot drift apart.
@@ -234,6 +234,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
     pub dynamic_tline_breakpoints_added: usize,
     pub edge_completions: &'a EdgeCompletionSchedule,
     pub requested_breakpoints: &'a [Value],
+    pub requested_landings: &'a [Value],
     pub floor_grid: super::FloorLandingGrid,
 }
 
@@ -524,6 +525,9 @@ pub struct TransientCheckpoint {
     /// The other breakpoints the code models asked for that are still ahead
     /// of `time`, ascending (see `requested.rs`).
     requested_breakpoints: Vec<Value>,
+    /// The temporary breakpoints the code models asked for that are still
+    /// ahead of `time`, ascending (see `requested.rs`).
+    requested_landings: Vec<Value>,
     /// The file each `d_vcd` stimulus replays and the digest of the bytes it
     /// read (see `vcd.rs`).
     vcd_files: Vec<vcd::ReplayedFile>,
@@ -5345,7 +5349,12 @@ impl TransientCheckpoint {
         capacitor_sdt::validate(&self.capacitor_sdt_states, self.time, &mut budget)?;
         switch::validate(&self.switch_states)?;
         edge::validate(&self.edge_completions, self.time)?;
-        requested::validate(&self.requested_breakpoints, self.time)?;
+        requested::validate(
+            requested::BREAKPOINTS,
+            &self.requested_breakpoints,
+            self.time,
+        )?;
+        requested::validate(requested::LANDINGS, &self.requested_landings, self.time)?;
         floor_march::validate(&self.floor_grid, self.time)?;
         published_row::validate(self.published_row.as_ref())?;
         if !self.time.is_finite() || self.time < 0.0 {
@@ -6092,6 +6101,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
+                requested_landings: &[],
                 floor_grid: super::FloorLandingGrid::default(),
             },
             AcceptedTransientRuntime {
@@ -6137,6 +6147,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            requested_landings,
             floor_grid,
         } = integration;
         let CheckpointState {
@@ -6277,6 +6288,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions: edge::capture(edge_completions, time),
             requested_breakpoints: requested::capture(requested_breakpoints, time),
+            requested_landings: requested::capture(requested_landings, time),
             vcd_files: vcd::capture(circuit),
             floor_grid,
             published_row: None,
@@ -6348,6 +6360,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            requested_landings,
             floor_grid,
         } = integration;
         let CheckpointState {
@@ -6382,6 +6395,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added,
                 edge_completions,
                 requested_breakpoints,
+                requested_landings,
                 floor_grid,
             },
             AcceptedTransientRuntime {
@@ -7116,6 +7130,13 @@ impl TransientCheckpoint {
         &self.requested_breakpoints
     }
 
+    /// The temporary breakpoints the code models asked for that are still
+    /// ahead of the checkpoint, which a resumed run lands on without
+    /// restarting.
+    pub(crate) fn requested_landings(&self) -> &[Value] {
+        &self.requested_landings
+    }
+
     /// The run of floor landings in progress at the checkpoint.
     pub(super) fn floor_landing_grid(&self) -> super::FloorLandingGrid {
         self.floor_grid
@@ -7411,6 +7432,7 @@ impl TransientCheckpoint {
         count = count.saturating_add(switch::retained_values(&self.switch_states));
         count = count.saturating_add(edge::retained_values(&self.edge_completions));
         count = count.saturating_add(requested::retained_values(&self.requested_breakpoints));
+        count = count.saturating_add(requested::retained_values(&self.requested_landings));
         count = count.saturating_add(vcd::retained_values(&self.vcd_files));
         count = count.saturating_add(floor_march::retained_values(&self.floor_grid));
         count = count.saturating_add(published_row::retained_values(self.published_row.as_ref()));
@@ -8150,7 +8172,18 @@ impl TransientCheckpoint {
         mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
         switch::write(&mut out, &self.switch_states, abort)?;
         edge::write(&mut out, &self.edge_completions, abort)?;
-        requested::write(&mut out, &self.requested_breakpoints, abort)?;
+        requested::write(
+            &mut out,
+            requested::BREAKPOINTS,
+            &self.requested_breakpoints,
+            abort,
+        )?;
+        requested::write(
+            &mut out,
+            requested::LANDINGS,
+            &self.requested_landings,
+            abort,
+        )?;
         vcd::write(&mut out, &self.vcd_files, abort)?;
         floor_march::write(&mut out, &self.floor_grid);
         published_row::write(&mut out, self.published_row.as_ref(), abort)?;
@@ -8571,7 +8604,8 @@ impl TransientCheckpoint {
         let mixed_runtime_image = mixed::read(lines, budget)?;
         let switch_states = switch::read(lines, budget)?;
         let edge_completions = edge::read(lines, budget)?;
-        let requested_breakpoints = requested::read(lines, budget)?;
+        let requested_breakpoints = requested::read(lines, requested::BREAKPOINTS, budget)?;
+        let requested_landings = requested::read(lines, requested::LANDINGS, budget)?;
         let vcd_files = vcd::read(lines, budget)?;
         let floor_grid = floor_march::read(lines)?;
         let published_row = published_row::read(lines, budget)?;
@@ -8605,6 +8639,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            requested_landings,
             vcd_files,
             floor_grid,
             published_row,
@@ -10642,14 +10677,15 @@ mod tests {
         assert!(TransientCheckpoint::from_text(&corrupt).is_err());
     }
 
-    /// The breakpoints the code models asked for round-trip bit for bit, and
-    /// a request that is not ahead of the checkpoint, or out of order, is
-    /// refused.
+    /// The breakpoints the code models asked for, the temporary ones apart,
+    /// round-trip bit for bit, and a request that is not ahead of the
+    /// checkpoint, or out of order, is refused.
     #[test]
     fn pending_model_breakpoints_round_trip() {
         let mut checkpoint = sample();
         let deadline = checkpoint.time + 3.0e-11;
         checkpoint.requested_breakpoints = vec![deadline, 1.0 / 3.0 * 1.0e-5];
+        checkpoint.requested_landings = vec![deadline + 1.0e-12, 0.7e-5];
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
             TransientCheckpointEncoding::Packed,
@@ -10672,7 +10708,10 @@ mod tests {
             vec![Value::INFINITY],
         ] {
             let mut invalid = checkpoint.clone();
-            invalid.requested_breakpoints = requests;
+            invalid.requested_breakpoints = requests.clone();
+            assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+            let mut invalid = checkpoint.clone();
+            invalid.requested_landings = requests;
             assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
         }
     }
@@ -10762,6 +10801,7 @@ mod tests {
             dynamic_tline_breakpoints_added: 3,
             edge_completions: EdgeCompletionSchedule::default(),
             requested_breakpoints: Vec::new(),
+            requested_landings: Vec::new(),
             vcd_files: Vec::new(),
             published_row: None,
             floor_grid: super::super::FloorLandingGrid::default(),
@@ -12903,6 +12943,7 @@ mod tests {
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
+                requested_landings: &[],
                 floor_grid: super::super::FloorLandingGrid::default(),
             },
             AcceptedTransientRuntime {

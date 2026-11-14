@@ -219,6 +219,19 @@ impl XspiceEventDispatch {
         &self.analog_stamp_instances
     }
 
+    /// Whether an event on `node` reaches an instance that drives an analog
+    /// output, read as a digital or a real net alike.
+    pub(crate) fn event_reaches_analog_output(&self, node: NodeId) -> bool {
+        [EventInputKind::Digital, EventInputKind::Real]
+            .into_iter()
+            .flat_map(|kind| self.fanout(kind, node))
+            .any(|reader| {
+                self.continuous_output_instances
+                    .binary_search(reader)
+                    .is_ok()
+            })
+    }
+
     #[inline]
     fn fanout(&self, kind: EventInputKind, node: NodeId) -> &[u32] {
         let fanout = match kind {
@@ -307,6 +320,29 @@ impl CircuitData {
     /// which are the only two things the map depends on.
     pub(crate) fn invalidate_xspice_event_dispatch(&mut self) {
         self.scheduler.xspice_event_dispatch = None;
+    }
+
+    /// Whether the next code-model activation is a landing only
+    /// ([`crate::numerics::integration::BreakpointManager::replace_landings`]):
+    /// the circuit runs no HDL, and the net the earliest event writes reaches
+    /// no instance that drives an analog output. Evaluating the readers there
+    /// changes no analog equation, so there is nothing to restart; the step
+    /// after it is the one the controller proposes, as ngspice runs an event
+    /// that reaches no analog breakpoint between its timepoints.
+    pub(crate) fn next_xspice_activation_is_landing(&mut self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if !self.mixed_signal_hosts.is_empty() || self.scheduler.mixed_digital_coordinator.is_some()
+        {
+            return false;
+        }
+        let Some(node) = self.scheduler.xspice_event_queue.next_event_node() else {
+            return false;
+        };
+        self.ensure_xspice_event_dispatch();
+        self.scheduler
+            .xspice_event_dispatch
+            .as_ref()
+            .is_some_and(|dispatch| !dispatch.event_reaches_analog_output(node))
     }
 
     /// Build the sensitivity map if it is not cached, so that later code can

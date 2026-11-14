@@ -5316,8 +5316,9 @@ fn rc_after_ramp_edges(time: f64) -> f64 {
 }
 
 /// Accepted points, and the worst departure of v(out) from
-/// [`rc_after_ramp_edges`], of a 20 us run of `drive` into 1 kOhm and 1 pF.
-fn ramp_edges_into_rc(prefix: &str, stimulus: &str, drive: &str) -> (usize, f64) {
+/// [`rc_after_ramp_edges`] `delay` later, of a 20 us run of `drive` into
+/// 1 kOhm and 1 pF.
+fn ramp_edges_into_rc(prefix: &str, stimulus: &str, drive: &str, delay: f64) -> (usize, f64) {
     let result = run_temp_deck(
         prefix,
         stimulus,
@@ -5331,7 +5332,7 @@ fn ramp_edges_into_rc(prefix: &str, stimulus: &str, drive: &str) -> (usize, f64)
         .time
         .iter()
         .zip(out)
-        .map(|(&time, &value)| (value - rc_after_ramp_edges(time)).abs())
+        .map(|(&time, &value)| (value - rc_after_ramp_edges(time - delay)).abs())
         .fold(0.0, f64::max);
     (result.time.len(), worst)
 }
@@ -5354,6 +5355,7 @@ fn a_code_model_edge_into_a_capacitor_takes_the_steps_of_the_same_pulse_edge() {
         "rspice-ramp-edge-twin",
         "",
         "vd dd 0 pulse(0 1 500n 1n 1n 499n 1u)\n",
+        0.0,
     );
     let stimulus: String = (0..=40)
         .map(|edge| format!("{:e} {}s\n", edge as f64 * 500.0e-9, edge % 2))
@@ -5378,6 +5380,7 @@ fn a_code_model_edge_into_a_capacitor_takes_the_steps_of_the_same_pulse_edge() {
             &format!("rspice-ramp-edge-{name}"),
             stimulus,
             &format!("{driver}{bridge}"),
+            0.0,
         );
         assert!(
             points as f64 <= 1.2 * twin_points as f64,
@@ -5388,6 +5391,63 @@ fn a_code_model_edge_into_a_capacitor_takes_the_steps_of_the_same_pulse_edge() {
             worst <= twin_worst + 1.0e-3,
             "{name} into 1 pF departs from the closed form by {worst:e} V, the PULSE twin by \
              {twin_worst:e} V"
+        );
+    }
+}
+
+/// A lookup table behind an oscillator is stepped like the same edges from a
+/// PULSE source, one nanosecond later.
+///
+/// The oscillator's own instants, the wake-up ahead of each transition and
+/// the transition itself, are no step of any analog value here: the table
+/// reads the oscillator, and only the table's output, a nanosecond on,
+/// reaches the bridge. Each was a restart all the same, so the bridge's edge
+/// a nanosecond later restarted again from the tenth of a step the first
+/// restart left: over 2 ms `d_lut` and `d_genlut` took 127,988 points, 1.42
+/// times the PULSE twin's 89,992, where ngspice-46 takes 1.17 times its own
+/// (102,294 against 87,192). Ngspice lands on those instants without
+/// restarting (`cm_event_queue`, `cm_analog_set_temp_bkpt`), and so does this
+/// engine now.
+#[test]
+fn a_lookup_table_behind_an_oscillator_takes_the_steps_of_the_same_pulse_edge() {
+    let (twin_points, twin_worst) = ramp_edges_into_rc(
+        "rspice-table-edge-twin",
+        "",
+        "vd dd 0 pulse(0 1 500n 1n 1n 499n 1u)\n",
+        0.0,
+    );
+    let oscillator = "vc cntl 0 0.5\naosc cntl dosc osc1\n\
+                      .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 \
+                      init_phase=0 rise_delay=1e-10 fall_delay=1e-10)\n";
+    let bridge = "abr [d] [dd] dac1\n\
+                  .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n";
+    for (name, table) in [
+        (
+            "d_lut",
+            "alut [dosc] d lut1\n\
+             .model lut1 d_lut(rise_delay=1e-9 fall_delay=1e-9 table_values=\"01\")\n",
+        ),
+        (
+            "d_genlut",
+            "aglut [dosc] [d] glut1\n\
+             .model glut1 d_genlut(rise_delay=[1e-9] fall_delay=[1e-9] table_values=\"01\")\n",
+        ),
+    ] {
+        let (points, worst) = ramp_edges_into_rc(
+            &format!("rspice-table-edge-{name}"),
+            "",
+            &format!("{oscillator}{table}{bridge}"),
+            1.0e-9,
+        );
+        assert!(
+            points as f64 <= 1.2 * twin_points as f64,
+            "{name} behind d_osc into 1 pF took {points} points, more than 1.2 times the \
+             {twin_points} of the same edges from a PULSE source"
+        );
+        assert!(
+            worst <= twin_worst + 1.0e-3,
+            "{name} behind d_osc into 1 pF departs from the closed form by {worst:e} V, the \
+             PULSE twin by {twin_worst:e} V"
         );
     }
 }

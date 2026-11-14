@@ -307,9 +307,12 @@ impl Engine {
     /// now ask for.
     ///
     /// Include HDL and code-model queues in adaptive step limiting and history
-    /// restarts. The stepper separately retains the exact earliest HDL/shared
-    /// XSPICE event target: this manager's coalescing tolerance must not move
-    /// an activation or consume a nearby, distinct timer.
+    /// restarts. An activation that reaches no analog output, and a code
+    /// model's temporary request, are landings without a restart
+    /// ([`BreakpointManager::replace_landings`]). The stepper separately
+    /// retains the exact earliest HDL/shared XSPICE event target: this
+    /// manager's coalescing tolerance must not move an activation or consume a
+    /// nearby, distinct timer.
     /// A circuit with no mixed module contributes no additional HDL events.
     ///
     /// `read_step_completions` asks each mixed module for the completion of a
@@ -331,6 +334,7 @@ impl Engine {
     ) -> Result<(), crate::engine::SimulationError> {
         let key = circuit.breakpoint_request_key(accepted_time);
         let mut runtime_breakpoints = Vec::new();
+        let mut landings = Vec::new();
         // Each lane's own next activation, not the earliest of the two: this
         // list carries both so that neither is hidden behind the other, and it
         // is where an uncoupled code-model queue reaches the stepper at all.
@@ -341,7 +345,11 @@ impl Engine {
             && event_time >= 0.0
             && event_time <= tstop
         {
-            runtime_breakpoints.push(event_time);
+            if circuit.next_xspice_activation_is_landing() {
+                landings.push(event_time);
+            } else {
+                runtime_breakpoints.push(event_time);
+            }
         }
         if let Some(event_time) = circuit
             .next_hdl_activation()?
@@ -356,6 +364,7 @@ impl Engine {
         // Every request, the ones past the stop time included: a checkpoint
         // taken here carries those still ahead of it.
         let mut model_requests = Vec::new();
+        let mut model_landings = Vec::new();
         circuit.drain_xspice_requested_breakpoints(
             |time| {
                 let time = key(time);
@@ -365,6 +374,13 @@ impl Engine {
                 }
             },
             |time| edge_completions.push(key(time)),
+            |time| {
+                let time = key(time);
+                model_landings.push(time);
+                if time.is_finite() && time >= 0.0 && time <= tstop {
+                    landings.push(time);
+                }
+            },
         );
         // A discrete value a mixed module's analog block read at its left
         // limit completes its step as a D/A edge does.
@@ -382,6 +398,8 @@ impl Engine {
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
         breakpoints.replace_edge_completions(edge_completions);
         breakpoints.replace_model_requests(model_requests);
+        breakpoints.replace_model_landings(model_landings);
+        breakpoints.replace_landings(landings);
         Ok(())
     }
 

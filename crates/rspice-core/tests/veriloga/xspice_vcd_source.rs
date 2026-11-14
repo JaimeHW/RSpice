@@ -499,7 +499,7 @@ mod mixed {
             .to_bytes(TransientCheckpointEncoding::Unpacked)
             .expect("serializes");
         let text = String::from_utf8(saved.clone()).expect("canonical text");
-        assert!(text.starts_with("RSPICE-CHECKPOINT 64\n"));
+        assert!(text.starts_with("RSPICE-CHECKPOINT 65\n"));
         let bound: Vec<&str> = text
             .lines()
             .filter(|line| line.starts_with("vcd_file"))

@@ -209,11 +209,17 @@ pub struct BreakpointManager {
     /// those past the run's stop time included
     /// ([`Self::replace_model_requests`]).
     model_requests: Vec<Value>,
+    /// Every temporary breakpoint the code models asked for at the last
+    /// accepted point ([`Self::replace_model_landings`]).
+    model_landings: Vec<Value>,
     /// The edge the stepper is crossing, from its landing to its completion.
     edge_crossing: Option<EdgeCrossing>,
     /// The permanent breakpoints a behavioral expression's own clock produced
     /// ([`Self::extend_expression_clocks`]).
     expression_clocks: BTreeSet<BreakpointTimeKey>,
+    /// The runtime breakpoints that are landings only: instants the stepper
+    /// lands on without restarting ([`Self::replace_landings`]).
+    landings: BTreeSet<BreakpointTimeKey>,
 }
 
 /// An edge between its landing and its completion.
@@ -262,6 +268,7 @@ impl BreakpointManager {
         Self {
             breakpoints: Vec::new(),
             runtime_breakpoints: BTreeSet::new(),
+            landings: BTreeSet::new(),
             current_index: 0,
             just_passed_breakpoint: false,
             saved_delta_before_breakpoint: None,
@@ -275,6 +282,7 @@ impl BreakpointManager {
             },
             edge_completions: BTreeSet::new(),
             model_requests: Vec::new(),
+            model_landings: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
         }
@@ -296,6 +304,7 @@ impl BreakpointManager {
         Self {
             breakpoints: Vec::new(),
             runtime_breakpoints: BTreeSet::new(),
+            landings: BTreeSet::new(),
             current_index: 0,
             just_passed_breakpoint: false,
             saved_delta_before_breakpoint: None,
@@ -305,6 +314,7 @@ impl BreakpointManager {
             tolerance: self.tolerance,
             edge_completions: BTreeSet::new(),
             model_requests: Vec::new(),
+            model_landings: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
         }
@@ -444,6 +454,7 @@ impl BreakpointManager {
         I: IntoIterator<Item = Value>,
     {
         self.runtime_breakpoints.clear();
+        self.landings.clear();
         for time in times {
             if !time.is_finite() || time < 0.0 {
                 continue;
@@ -463,6 +474,79 @@ impl BreakpointManager {
                 self.inclusive_tolerance,
             );
         }
+    }
+
+    /// Add the instants the stepper lands on without restarting, after the
+    /// runtime schedule ([`Self::replace_runtime_breakpoints`]) is in place.
+    ///
+    /// A landing is an instant something must be evaluated at that is no
+    /// discontinuity of the analog solution: an event whose readers drive no
+    /// analog output. The step is cut to land on it as on any breakpoint, and
+    /// the step after it is the controller's, not a restart: no order or
+    /// history reset, no tenth of the interrupted step. This is ngspice's
+    /// temporary breakpoint (`cm_analog_set_temp_bkpt`; dctran.c:550-560 cuts
+    /// the step to it and leaves its size to truncation), where a permanent
+    /// one (`cm_analog_set_perm_bkpt`) also takes a tenth of the step
+    /// (dctran.c:487-506). Ngspice drops to first order after either
+    /// (dctran.c:481-483), since an XSPICE output may step at a temporary
+    /// breakpoint; nothing steps at a landing, so the order is kept. An
+    /// instant that is also a permanent or restarting runtime breakpoint is
+    /// that breakpoint.
+    pub fn replace_landings<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        self.landings.clear();
+        for time in times {
+            if !time.is_finite()
+                || time < 0.0
+                || self.permanent_breakpoint_within_tolerance(time).is_some()
+                || self.runtime_breakpoint_within_tolerance(time).is_some()
+            {
+                continue;
+            }
+            Self::insert_runtime_unique(
+                &mut self.runtime_breakpoints,
+                time,
+                self.tolerance,
+                self.inclusive_tolerance,
+            );
+            Self::insert_runtime_unique(
+                &mut self.landings,
+                time,
+                self.tolerance,
+                self.inclusive_tolerance,
+            );
+        }
+    }
+
+    /// Whether `time` is a landing only ([`Self::replace_landings`]).
+    pub fn lands_without_restart(&self, time: Value) -> bool {
+        if !time.is_finite() || self.permanent_breakpoint_within_tolerance(time).is_some() {
+            return false;
+        }
+        let key = BreakpointTimeKey(time);
+        let near = |breakpoint: &BreakpointTimeKey| {
+            Self::difference_within_tolerance(
+                (time - breakpoint.0).abs(),
+                self.tolerance,
+                self.inclusive_tolerance,
+            )
+        };
+        self.landings.range(..=key).next_back().is_some_and(near)
+            || self
+                .landings
+                .range((Excluded(key), Unbounded))
+                .next()
+                .is_some_and(near)
+    }
+
+    /// Leave the landing at `time` behind without restarting: it is solved,
+    /// and the step cut to reach it is not remembered as one a breakpoint
+    /// interrupted.
+    pub fn mark_landing_solved(&mut self, time: Value) {
+        self.remove_runtime_through(time);
+        self.saved_delta_before_breakpoint = None;
     }
 
     /// Replace the set of runtime breakpoints that complete a zero-duration
@@ -703,6 +787,63 @@ impl BreakpointManager {
                 );
             }
             self.model_requests.push(time);
+        }
+    }
+
+    /// Replace the temporary breakpoints the code models asked for at the
+    /// accepted point, kept for a checkpoint as [`Self::replace_model_requests`]
+    /// keeps the others. [`Self::replace_landings`] schedules them.
+    #[doc(hidden)]
+    pub fn replace_model_landings<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        self.model_landings.clear();
+        self.model_landings.extend(
+            times
+                .into_iter()
+                .filter(|time| time.is_finite() && *time >= 0.0),
+        );
+    }
+
+    /// The model-requested temporary breakpoints still ahead of the accepted
+    /// point `time`, for a checkpoint taken there.
+    #[doc(hidden)]
+    pub fn model_landing_schedule(&self, time: Value) -> Vec<Value> {
+        self.model_landings
+            .iter()
+            .copied()
+            .filter(|request| *request > time)
+            .collect()
+    }
+
+    /// Reinstate a checkpoint's model-requested temporary breakpoints when a
+    /// run resumes, after [`Self::restore_model_requests`]: each at or before
+    /// `stop` is a landing again unless it is also a breakpoint that restarts.
+    #[doc(hidden)]
+    pub fn restore_model_landings(&mut self, times: &[Value], stop: Value) {
+        for &time in times {
+            if !time.is_finite() || time < 0.0 {
+                continue;
+            }
+            if time <= stop
+                && self.permanent_breakpoint_within_tolerance(time).is_none()
+                && self.runtime_breakpoint_within_tolerance(time).is_none()
+            {
+                Self::insert_runtime_unique(
+                    &mut self.runtime_breakpoints,
+                    time,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                );
+                Self::insert_runtime_unique(
+                    &mut self.landings,
+                    time,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                );
+            }
+            self.model_landings.push(time);
         }
     }
 
@@ -1071,8 +1212,10 @@ impl BreakpointManager {
     pub fn reset(&mut self) {
         self.current_index = 0;
         self.runtime_breakpoints.clear();
+        self.landings.clear();
         self.edge_completions.clear();
         self.model_requests.clear();
+        self.model_landings.clear();
         self.edge_crossing = None;
         self.just_passed_breakpoint = false;
     }
@@ -1104,6 +1247,13 @@ impl BreakpointManager {
             retained.pop_first();
         }
         self.runtime_breakpoints = retained;
+        while self
+            .landings
+            .first()
+            .is_some_and(|landing| landing.0 <= cutoff)
+        {
+            self.landings.pop_first();
+        }
     }
 }
 

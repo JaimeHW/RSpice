@@ -345,6 +345,13 @@ impl XspiceEventScheduler {
             .map(|(at, instance)| (instance, at.seconds()))
     }
 
+    /// The circuit net the earliest pending event writes.
+    pub(crate) fn next_event_node(&self) -> Option<usize> {
+        self.inner
+            .next_instant_target()
+            .map(|(_, target)| self.inner.target(target).node_id)
+    }
+
     /// Whether an event is pending at or before the given time.
     #[doc(hidden)]
     pub fn has_event_at_or_before(&self, time: Value) -> bool {

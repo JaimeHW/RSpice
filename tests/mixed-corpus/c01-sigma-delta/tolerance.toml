@@ -50,11 +50,11 @@ analysis = "tran"
 variants = ["xs", "vams"]
 kind = "events"
 nets = ["dv"]
-lattice = { t0 = 1.02e-7, period = 2e-7 }
+lattice = { t0 = 1.04e-7, period = 2e-7 }
 oracle = "O6"
 expect = "c01::lattice"
-edge_abs = 2.5e-9
-why = "clock ramp 2 ns + clk_delay 1 ns exact: dv moves only at 0.1 µs + 1 ns + 1 ns + k·200 ns"
+edge_abs = 1e-9
+why = "dv moves only at 0.1 µs + 1 ns (the clock's 2 ns ramp at its 0.5 threshold) + 1 ns (adc_bridge rise_delay) + 2 ns (d_dff clk_delay + rise_delay; vams: dq <= #2) + k·200 ns. vams dates the clock at its crossing (every edge on the lattice); xs samples it at the first accepted point past the crossing, as ngspice's adc_bridge does, which put every edge 0.35 ns late in ngspice-46 at its 1 ns maximum step and up to 0.5 ns late here. Was t0 = 102 ns with 2.5 ns, which left out the 2 ns of delays and so allowed 0.5 ns of lateness"
 
 [[q]]
 id = "opdiff"

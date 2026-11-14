@@ -102,7 +102,12 @@ const TSTEP: f64 = 100.0e-12;
 /// against: wide enough that a benign shift of a few evaluations does not fail
 /// a build, and nowhere near wide enough to absorb a lost narrowing, which
 /// arrives as a multiple rather than a margin.
-const MAX_INSTANCE_EVALUATIONS: u64 = 13_900;
+///
+/// Lowered from 13,900 to 8,000 when an event no analog output reads stopped
+/// restarting the stepper: a gate's event that only other gates read is
+/// landed on without a restart, the run takes 1,449 points instead of 2,126,
+/// and the count read 7,776 after it.
+const MAX_INSTANCE_EVALUATIONS: u64 = 8_000;
 
 /// Ceiling on deep copies of an instance cell over the whole run.
 ///
@@ -136,7 +141,10 @@ const MAX_INSTANCE_EVALUATIONS: u64 = 13_900;
 /// uniquely owned, so the guard saves nothing *on this deck*. It is a real
 /// guard on decks with a different capture rhythm, but do not read a green
 /// build here as evidence that it is still in place.
-const MAX_INSTANCE_DEEP_COPIES: u64 = 6_700;
+///
+/// Lowered from 6,700 to 4,850 with [`MAX_INSTANCE_EVALUATIONS`], by the same
+/// 677 fewer accepted points: the count read 4,697 after it.
+const MAX_INSTANCE_DEEP_COPIES: u64 = 4_850;
 
 /// Ceiling on deep copies of the event world — the six resolved-value maps
 /// plus the scheduler — over the whole run.

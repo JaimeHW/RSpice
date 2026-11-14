@@ -672,6 +672,9 @@ pub struct CmContext {
     /// The requests in `requested_breakpoints` that complete a zero-duration
     /// edge ([`Self::request_edge_completion`]).
     requested_edge_completions: Vec<Value>,
+    /// Absolute transient times a code model asked the stepper to land on
+    /// without restarting ([`Self::request_temporary_breakpoint`]).
+    requested_landings: Vec<Value>,
 
     //-------------------------------------------------------------------------
     // Matrix Stamping
@@ -824,6 +827,7 @@ impl CmContext {
             pending_real_events: Vec::new(),
             inertial_outputs: CopyOnWrite::default(),
             requested_breakpoints: Vec::new(),
+            requested_landings: Vec::new(),
             requested_edge_completions: Vec::new(),
             stamps: Vec::new(),
             rhs: Vec::new(),
@@ -2445,6 +2449,23 @@ impl CmContext {
         }
     }
 
+    /// Request that the transient stepper land on an absolute time without
+    /// restarting integration there.
+    ///
+    /// For an instant a model must be evaluated at that is no discontinuity
+    /// of its analog outputs: a wake-up ahead of a transition it will
+    /// schedule, or the instant of a digital output its readers turn into no
+    /// analog step. The step is cut to land on it and the step after it is
+    /// the controller's. The request holds for the next step only, as
+    /// [`Self::request_breakpoint`]'s does. This is ngspice's
+    /// `cm_analog_set_temp_bkpt`, where [`Self::request_breakpoint`] is its
+    /// `cm_analog_set_perm_bkpt`.
+    pub fn request_temporary_breakpoint(&mut self, time: Value) {
+        if time.is_finite() && time >= 0.0 {
+            self.requested_landings.push(time);
+        }
+    }
+
     /// Request the breakpoint at which an edge with no transition time
     /// completes.
     ///
@@ -2469,10 +2490,16 @@ impl CmContext {
         std::mem::take(&mut self.requested_breakpoints)
     }
 
-    /// Whether any absolute breakpoint request is queued.
+    /// Drain pending temporary breakpoint requests.
+    #[cfg(test)]
+    pub fn take_requested_landings(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.requested_landings)
+    }
+
+    /// Whether any absolute breakpoint request, temporary or not, is queued.
     #[inline]
     pub(crate) fn has_requested_breakpoints(&self) -> bool {
-        !self.requested_breakpoints.is_empty()
+        !self.requested_breakpoints.is_empty() || !self.requested_landings.is_empty()
     }
 
     /// Drain pending breakpoint requests while preserving the queue allocation.
@@ -2486,6 +2513,12 @@ impl CmContext {
     /// beside [`Self::drain_requested_breakpoints`], never instead of it.
     pub(crate) fn drain_requested_edge_completions(&mut self) -> Drain<'_, Value> {
         self.requested_edge_completions.drain(..)
+    }
+
+    /// Drain pending temporary breakpoint requests
+    /// ([`Self::request_temporary_breakpoint`]).
+    pub(crate) fn drain_requested_landings(&mut self) -> Drain<'_, Value> {
+        self.requested_landings.drain(..)
     }
 
     //-------------------------------------------------------------------------
@@ -2877,6 +2910,12 @@ impl CmContext {
                 self.requested_breakpoints.len()
             ));
         }
+        if !self.requested_landings.is_empty() {
+            parts.push(format!(
+                "{} requested temporary breakpoint(s)",
+                self.requested_landings.len()
+            ));
+        }
 
         (!parts.is_empty()).then(|| parts.join(", "))
     }
@@ -3154,6 +3193,7 @@ impl CmContext {
             && self.pending_real_events.len() == before.pending_real_events.len()
             && self.requested_breakpoints == before.requested_breakpoints
             && self.requested_edge_completions == before.requested_edge_completions
+            && self.requested_landings == before.requested_landings
             && self.stamps == before.stamps
             && self.rhs == before.rhs
             && self.static_stamps == before.static_stamps
