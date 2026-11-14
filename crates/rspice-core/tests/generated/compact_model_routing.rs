@@ -1080,6 +1080,8 @@ fn every_shipped_model_binds_or_is_refused_by_its_name_and_feature() {
                     rspice_core::SimulationError::Elaboration(refusal)
                         if refusal.kind == rspice_core::ElaborationErrorKind::UnknownModule
                             && refusal.instance.as_deref() == Some("X1")
+                            // The X line, which is how a user finds it.
+                            && refusal.span.as_ref().map(|span| span.line) == Some(3)
                 );
                 let message = error.to_string();
                 if !typed

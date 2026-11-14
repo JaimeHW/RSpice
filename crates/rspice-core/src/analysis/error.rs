@@ -371,10 +371,12 @@ impl std::fmt::Display for ElaborationErrorKind {
 /// except where it merely repeated the subject.
 ///
 /// `span` is present when the engine genuinely knows where to point, which
-/// includes original Verilog-A compiler locations — a parsed [`crate::netlist::Element`]
-/// carries no line, so an instance-side refusal reports `None` rather than
-/// inventing one. Line `0` in a source span means "this file", the same
-/// convention the output projection already uses.
+/// includes original Verilog-A compiler locations. An instance-side refusal
+/// with no narrower place names the card that wrote the instance, which the
+/// flattener files for every instance it leaves to the builder; an instance
+/// it has no card for reports `None` rather than inventing one. Line `0` in a
+/// source span means "this file", the same convention the output projection
+/// already uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElaborationError {
     /// Deck name of the instance being bound, when one instance owns the
@@ -421,9 +423,8 @@ impl ElaborationError {
 
     /// Point at where the offending construct was authored.
     ///
-    /// An instance-side refusal does not call this and reports no span: a
-    /// parsed [`crate::netlist::Element`] carries no source location, so the
-    /// engine would have to invent one.
+    /// An instance-side refusal need not call this: elaboration points one
+    /// that names no place at the card that wrote the instance.
     #[must_use]
     pub fn at(mut self, span: NetlistSourceLocation) -> Self {
         self.span = Some(span);

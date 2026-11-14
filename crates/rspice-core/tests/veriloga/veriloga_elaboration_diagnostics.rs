@@ -382,6 +382,53 @@ fn the_wrong_number_of_nets_is_port_count_on_both_routes() {
     assert_eq!(mixed_error.module.as_deref(), Some("mdiv"));
 }
 
+/// An instance refusal names the card that wrote the instance, which is how
+/// a user finds it: the X line of the deck, or the X line in the body of the
+/// subcircuit that holds an expanded instance.
+#[test]
+fn an_instance_refusal_names_the_card_that_wrote_the_instance() {
+    let analog = ModelFile::new("analog_card_line", ANALOG_RESISTOR);
+    let top = elaboration_error(&format!(
+        "* three nets on a two-terminal master\n\
+         v1 a 0 1\n\
+         r1 a 0 1k\n\
+         x1 a 0 b ares\n\
+         .va \"{}\" ares\n\
+         .op\n\
+         .end\n",
+        analog.deck_path()
+    ));
+    assert_eq!(top.kind, ElaborationErrorKind::PortCount);
+    assert_eq!(top.span.as_ref().map(|span| span.line), Some(4), "{top}");
+
+    let nested = elaboration_error(&format!(
+        "* the same card in a subcircuit body\n\
+         .subckt wrap p\n\
+         r1 p 0 1k\n\
+         xbad p 0 b ares\n\
+         .ends\n\
+         v1 a 0 1\n\
+         xw a wrap\n\
+         .va \"{}\" ares\n\
+         .op\n\
+         .end\n",
+        analog.deck_path()
+    ));
+    assert_eq!(nested.kind, ElaborationErrorKind::PortCount);
+    assert!(
+        nested
+            .instance
+            .as_deref()
+            .is_some_and(|instance| instance.to_ascii_lowercase().ends_with("xbad")),
+        "{nested}"
+    );
+    assert_eq!(
+        nested.span.as_ref().map(|span| span.line),
+        Some(4),
+        "{nested}"
+    );
+}
+
 /// An `inout` port declared a variable is a language error of the module
 /// (IEEE 1364-2005 section 12.3.3), so the compiler refuses it before any
 /// X-card could try to bridge it.

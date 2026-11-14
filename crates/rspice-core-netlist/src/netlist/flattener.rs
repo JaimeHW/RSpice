@@ -166,6 +166,11 @@ pub struct FlattenedNetlist {
     /// Per-instance startup provenance with concrete qualified nodes.
     pub scoped_startup_directives: Vec<StartupDirectiveRecord>,
     pub xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
+    /// Where each instance hierarchy expansion leaves to the builder (a
+    /// Verilog-A module, a generated or shipped compact model) was written,
+    /// keyed by its flattened name in upper case, so a refusal raised while
+    /// binding it can name the card that wrote it.
+    pub external_instance_origins: HashMap<String, NetlistSourceLocation>,
 }
 
 /// Scope-derived parameter hint for one flattened XSPICE digital node.
@@ -292,6 +297,9 @@ struct FlattenScope<'a> {
     /// The flattened netlist's card origins, which locate an expansion
     /// error at the card that raised it.
     origins: &'a HashMap<String, NetlistSourceLocation>,
+    /// The subcircuit whose body holds the card being flattened, as
+    /// `origins` files it; `None` for the root deck.
+    holder: Option<&'a str>,
 }
 
 #[derive(Clone, Copy)]
@@ -400,6 +408,8 @@ pub struct Flattener<'a> {
     scoped_startup_directives: Vec<StartupDirectiveRecord>,
     /// Digital XSPICE nodes with the effective scope-local VCC value.
     xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
+    /// See [`FlattenedNetlist::external_instance_origins`].
+    external_instance_origins: HashMap<String, NetlistSourceLocation>,
     /// Scope parameter used for digital auto-bridge voltage levels.
     xspice_auto_bridge_digital_param_name: String,
     /// Directory of the parsed deck, used to resolve scoped XSPICE file params.
@@ -491,6 +501,7 @@ impl<'a> Flattener<'a> {
             startup_directives: Vec::new(),
             scoped_startup_directives: Vec::new(),
             xspice_auto_bridge_node_hints: Vec::new(),
+            external_instance_origins: HashMap::new(),
             xspice_auto_bridge_digital_param_name: "vcc".to_string(),
             source_base_dir: None,
             flattened_element_names: HashSet::new(),
@@ -640,6 +651,7 @@ impl<'a> Flattener<'a> {
         self.startup_directives = netlist.startup_directives.clone();
         self.scoped_startup_directives.clear();
         self.xspice_auto_bridge_node_hints.clear();
+        self.external_instance_origins.clear();
         self.flattened_element_names.clear();
         self.flattened_element_names.reserve(netlist.elements.len());
         self.expanded_instance_paths.clear();
@@ -692,6 +704,7 @@ impl<'a> Flattener<'a> {
                     scope: &global_scope,
                     depth: 0,
                     origins: &netlist.element_origins,
+                    holder: None,
                 },
                 &mut flat_elements,
                 abort,
@@ -741,6 +754,7 @@ impl<'a> Flattener<'a> {
             scope,
             depth,
             origins,
+            holder,
         } = scope;
         ensure_parse_not_aborted(abort)?;
         ResourceLimitError::ensure(ResourceKind::HierarchyDepth, depth, self.config.max_depth)
@@ -851,6 +865,7 @@ impl<'a> Flattener<'a> {
                             scope,
                             depth,
                             origins,
+                            holder,
                         },
                         output,
                         abort,
@@ -876,6 +891,12 @@ impl<'a> Flattener<'a> {
                             prefix,
                             abort,
                         )?;
+                    }
+                    if let Some(origin) =
+                        origins.get(&super::element_origin_key(holder, &element.name))
+                    {
+                        self.external_instance_origins
+                            .insert(new_element.name.to_ascii_uppercase(), origin.clone());
                     }
                     self.push_flattened_element(output, new_element)?;
                 } else {
@@ -1364,6 +1385,7 @@ impl<'a> Flattener<'a> {
             scope: caller_scope,
             depth,
             origins,
+            holder: _,
         } = scope;
         ensure_parse_not_aborted(abort)?;
         // Look up subcircuit definition
@@ -1579,6 +1601,7 @@ impl<'a> Flattener<'a> {
                         scope: &param_scope,
                         depth: depth + 1,
                         origins,
+                        holder: Some(&subckt.name),
                     },
                     output,
                     abort,
@@ -5834,6 +5857,7 @@ pub fn flatten_netlist_with_parameter_direction(
             scoped_node_sets: flattener.scoped_node_sets,
             scoped_startup_directives: flattener.scoped_startup_directives,
             xspice_auto_bridge_node_hints: flattener.xspice_auto_bridge_node_hints,
+            external_instance_origins: flattener.external_instance_origins,
         },
         flattener.parameter_direction,
     ))

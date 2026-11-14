@@ -137,6 +137,29 @@ struct VerilogAModelBinding {
 /// other by adding a process must not see the same mistake reported in a
 /// different vocabulary.
 #[cfg(feature = "veriloga")]
+/// Point an elaboration refusal of an instance at the card that wrote it,
+/// when the site that raised it knew no narrower place: the element the
+/// flattener hands the builder carries no line, so the flattener files the
+/// card of each instance it leaves to the builder in `cards`.
+fn at_instance_card(
+    error: SimulationError,
+    cards: &HashMap<String, crate::netlist::NetlistSourceLocation>,
+) -> SimulationError {
+    match error {
+        SimulationError::Elaboration(mut refusal) if refusal.span.is_none() => {
+            if let Some(card) = refusal
+                .instance
+                .as_deref()
+                .and_then(|instance| cards.get(&instance.to_ascii_uppercase()))
+            {
+                refusal.span = Some(card.clone());
+            }
+            SimulationError::Elaboration(refusal)
+        }
+        other => other,
+    }
+}
+
 fn refuse_veriloga_instance(
     instance: &str,
     module: &str,
@@ -6220,6 +6243,9 @@ impl Engine {
     /// instead: set only when the deck names no node 0, has a voltage source
     /// to take one from, and nothing in the circuit just built references
     /// node 0.
+    ///
+    /// A refusal of an instance the flattener left to the builder names the
+    /// card that wrote that instance, unless its site knew a narrower place.
     fn elaborate_circuit(
         &self,
         netlist: &Netlist,
@@ -6229,6 +6255,33 @@ impl Engine {
         // Whether `netlist` already carries the SPICE leaves of its HDL
         // designs as cards (`hdl_spice_leaves`).
         leaves_built: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
+        let mut instance_cards = HashMap::new();
+        self.elaborate_circuit_unlocated(
+            netlist,
+            default_ports,
+            transient_stop_time,
+            reference,
+            leaves_built,
+            &mut instance_cards,
+            abort,
+        )
+        .map_err(|error| at_instance_card(error, &instance_cards))
+    }
+
+    /// [`Self::elaborate_circuit`] without locating its instance refusals.
+    /// `instance_cards` receives, once the deck is flattened, where each
+    /// instance left to the builder was written.
+    #[allow(clippy::too_many_arguments)]
+    fn elaborate_circuit_unlocated(
+        &self,
+        netlist: &Netlist,
+        default_ports: &[crate::analysis::s_param::Port],
+        transient_stop_time: Option<Value>,
+        reference: Option<&str>,
+        leaves_built: bool,
+        instance_cards: &mut HashMap<String, crate::netlist::NetlistSourceLocation>,
         abort: &dyn AbortSignal,
     ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
         self.ensure_valid_configuration()?;
@@ -6363,6 +6416,7 @@ impl Engine {
             }
         })?;
         circuit.parameter_direction = parameter_direction;
+        *instance_cards = flattened.external_instance_origins;
         let mut flat_elements = flattened.elements;
         let requires_statistical_materialization =
             !netlist.spectre_statistics.variations.is_empty();
