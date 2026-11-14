@@ -164,7 +164,7 @@ pub struct DeckPlanMaterializer<'a> {
     step_plan: Option<StepPlan<'a>>,
 }
 
-impl DeckPlanMaterializer<'_> {
+impl<'a> DeckPlanMaterializer<'a> {
     pub fn coordinates(&self) -> &[RunCoordinate] {
         &self.coordinates
     }
@@ -192,11 +192,15 @@ impl DeckPlanMaterializer<'_> {
     /// Re-elaborate one coordinate without constructing a circuit or allocating
     /// a solver matrix. Validators use this to inspect every concrete deck under
     /// the same parameter, temperature, DATA and statistical replay rules.
+    ///
+    /// A coordinate that changes nothing in the base deck borrows it rather
+    /// than copying every card.
     pub fn materialize_netlist_with_abort(
         &self,
         run_index: usize,
         abort: &dyn AbortSignal,
-    ) -> Result<Netlist, MaterializedRunError> {
+    ) -> Result<std::borrow::Cow<'a, Netlist>, MaterializedRunError> {
+        use std::borrow::Cow;
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
         }
@@ -225,13 +229,15 @@ impl DeckPlanMaterializer<'_> {
                         coordinate: coordinate.stable_id(),
                     }));
                 }
-                self.engine
-                    .materialize_step_run_with_abort(step_plan, run_index, abort)
-                    .map_err(materialization_simulation_error)?
-                    .into_parts()
-                    .1
+                Cow::Owned(
+                    self.engine
+                        .materialize_step_run_with_abort(step_plan, run_index, abort)
+                        .map_err(materialization_simulation_error)?
+                        .into_parts()
+                        .1,
+                )
             }
-            None => self.base_netlist.clone(),
+            None => Cow::Borrowed(self.base_netlist),
         };
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
@@ -245,18 +251,31 @@ impl DeckPlanMaterializer<'_> {
         if !netlist.spectre_statistics.variations.is_empty()
             && netlist.spectre_statistical_coordinate.is_none()
         {
-            netlist.spectre_statistical_coordinate =
-                Some(self.spectre_statistical_coordinate(coordinate, &netlist)?);
+            let statistical = self.spectre_statistical_coordinate(coordinate, &netlist)?;
+            netlist.to_mut().spectre_statistical_coordinate = Some(statistical);
         }
 
         // A concrete run must never feed its meta-analysis cards back into an
         // executor. Post-processing cards such as FOUR remain on the netlist.
-        netlist.retain_analyses(|_, analysis| {
-            !matches!(
+        let is_meta = |analysis: &AnalysisCommand| {
+            matches!(
                 analysis,
                 AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
             )
-        });
+        };
+        // Retaining also drops a small-signal state whose card index is out
+        // of range, so a borrowed deck is kept only when neither occurs.
+        let analysis_count = netlist.analyses.len();
+        if netlist.analyses.iter().any(is_meta)
+            || netlist
+                .small_signal_states
+                .iter()
+                .any(|request| request.analysis_index >= analysis_count)
+        {
+            netlist
+                .to_mut()
+                .retain_analyses(|_, analysis| !is_meta(analysis));
+        }
         Ok(netlist)
     }
 
@@ -275,7 +294,9 @@ impl DeckPlanMaterializer<'_> {
         run_index: usize,
         abort: &dyn AbortSignal,
     ) -> Result<MaterializedRun, MaterializedRunError> {
-        let netlist = self.materialize_netlist_with_abort(run_index, abort)?;
+        let netlist = self
+            .materialize_netlist_with_abort(run_index, abort)?
+            .into_owned();
         let coordinate = self.coordinate_at(run_index)?.clone();
         let mut configured_count = 0usize;
         for analysis in &netlist.analyses {
