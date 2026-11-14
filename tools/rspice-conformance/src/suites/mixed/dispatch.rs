@@ -37,7 +37,11 @@
 //! With a worker directory, the case prepares and authorizes its deck here,
 //! as the browser application's main thread does (for a host that starts no
 //! `d_process` program), and runs each task in the browser worker under Node
-//! ([`worker_host`]), one task at a time as the browser's one worker does.
+//! ([`worker_host`]), one task at a time as the browser's one worker does. A
+//! family's independent members run side by side, as on the other routes,
+//! each in a worker of its own: a worker answers a task the same whichever
+//! task it ran before, and eight Monte Carlo trials one after another in one
+//! worker would hold a case for most of an hour.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -306,16 +310,16 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         Ok(dispatch) => dispatch,
         Err(error) => return result.failed(harness_error(error)),
     };
-    let mut worker = match request.worker.map(worker_host::WorkerHost::start) {
-        None => None,
-        Some(Ok(worker)) => Some(worker),
+    // The workers standing idle; a worker runs one task at a time.
+    let mut workers = match request.worker.map(worker_host::WorkerHost::start) {
+        None => Vec::new(),
+        Some(Ok(worker)) => vec![worker],
         Some(Err(error)) => return result.failed(harness_error(error)),
     };
     // A family's members are independent tasks and run side by side, as
     // the engine's own Monte Carlo runs its trials; a dependent task starts
     // once every producer it binds has finished. Results keep task order.
-    // The browser's one worker runs one task at a time.
-    let concurrency = if family.kind.is_empty() || worker.is_some() {
+    let concurrency = if family.kind.is_empty() {
         1
     } else {
         std::thread::available_parallelism().map_or(1, usize::from)
@@ -361,15 +365,16 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                     return fail(&mut active, result, harness_error(error.to_string()));
                 }
             };
-            let runner = match worker.as_mut() {
-                Some(worker) => {
-                    let run = worker.run(resolved, &abort);
-                    for line in &run.log {
-                        if result.warnings.len() < 64 {
-                            result.warnings.push(line.clone());
-                        }
-                    }
-                    TaskRun::Worker(Some(run))
+            let runner = match request.worker {
+                Some(web_dir) => {
+                    let worker = match workers.pop() {
+                        Some(worker) => worker,
+                        None => match worker_host::WorkerHost::start(web_dir) {
+                            Ok(worker) => worker,
+                            Err(error) => return fail(&mut active, result, harness_error(error)),
+                        },
+                    };
+                    TaskRun::Worker(worker_host::WorkerTask::start(worker, resolved, abort))
                 }
                 None => {
                     let mut runner = rspice_simulation::runner::SimulationRunner::new();
@@ -406,6 +411,14 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                 continue;
             };
             let mut done = active.swap_remove(index);
+            if let TaskRun::Worker(task) = &mut done.runner {
+                for line in task.take_log() {
+                    if result.warnings.len() < 64 {
+                        result.warnings.push(line);
+                    }
+                }
+                workers.extend(task.take_worker());
+            }
             let simulated = match outcome {
                 Ok(simulated) => simulated,
                 Err(rspice_simulation::error::SimulationError::Aborted) if abort.is_aborted() => {
@@ -452,29 +465,24 @@ struct ActiveTask {
     producer: rspice_simulation::execution_artifact::PreparedArtifactProducer,
 }
 
-/// A task running on this process's runner, or one the worker has run.
+/// A task running on this process's runner, or in a worker.
 enum TaskRun {
     Native(rspice_simulation::runner::SimulationRunner),
-    Worker(Option<worker_host::WorkerRun>),
+    Worker(worker_host::WorkerTask),
 }
 
 impl TaskRun {
     fn abort(&mut self) {
-        if let Self::Native(runner) = self {
-            runner.abort();
+        match self {
+            Self::Native(runner) => runner.abort(),
+            Self::Worker(task) => task.abort(),
         }
     }
 
     fn poll_result(&mut self) -> Option<Result<SimulationResult, SimulationError>> {
         match self {
             Self::Native(runner) => runner.poll_result(),
-            Self::Worker(run) => {
-                let run = run.as_mut()?;
-                Some(std::mem::replace(
-                    &mut run.outcome,
-                    Err(SimulationError::Aborted),
-                ))
-            }
+            Self::Worker(task) => task.poll_result(),
         }
     }
 
@@ -492,7 +500,7 @@ impl TaskRun {
     fn take_task_transient_checkpoints(&mut self) -> Vec<std::sync::Arc<[u8]>> {
         match self {
             Self::Native(runner) => runner.take_task_transient_checkpoints(),
-            Self::Worker(run) => run.take().map(|run| run.checkpoints).unwrap_or_default(),
+            Self::Worker(task) => task.take_checkpoints(),
         }
     }
 }

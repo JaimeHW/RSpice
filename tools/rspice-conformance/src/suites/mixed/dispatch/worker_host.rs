@@ -16,7 +16,9 @@ use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
@@ -52,10 +54,98 @@ impl Frame {
 
 /// What one task's run in the worker gave: its result, the transient states
 /// it streamed, and its engine log lines.
-pub(super) struct WorkerRun {
-    pub outcome: Result<SimulationResult, SimulationError>,
-    pub checkpoints: Vec<Arc<[u8]>>,
-    pub log: Vec<String>,
+struct WorkerRun {
+    outcome: Result<SimulationResult, SimulationError>,
+    checkpoints: Vec<Arc<[u8]>>,
+    log: Vec<String>,
+}
+
+/// One task running in its worker on a thread of its own, so that a case can
+/// run several side by side, each in a worker of its own.
+pub(super) struct WorkerTask {
+    thread: Option<JoinHandle<(WorkerHost, WorkerRun)>>,
+    cancelled: Arc<AtomicBool>,
+    worker: Option<WorkerHost>,
+    run: Option<WorkerRun>,
+}
+
+impl WorkerTask {
+    /// Run `dispatch` in `worker` until it answers, `deadline` passes or the
+    /// task is aborted.
+    pub(super) fn start(
+        mut worker: WorkerHost,
+        dispatch: ResolvedTaskDispatch,
+        deadline: impl AbortSignal + 'static,
+    ) -> Self {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let abort = TaskAbort {
+            deadline,
+            cancelled: Arc::clone(&cancelled),
+        };
+        let thread = std::thread::spawn(move || {
+            let run = worker.run(dispatch, &abort);
+            (worker, run)
+        });
+        Self {
+            thread: Some(thread),
+            cancelled,
+            worker: None,
+            run: None,
+        }
+    }
+
+    /// Stop the task; its worker is told to stop and the run ends `Aborted`.
+    pub(super) fn abort(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    /// The task's result, once its worker has answered.
+    pub(super) fn poll_result(&mut self) -> Option<Result<SimulationResult, SimulationError>> {
+        if !self.thread.as_ref()?.is_finished() {
+            return None;
+        }
+        let (worker, mut run) = match self.thread.take()?.join() {
+            Ok(finished) => finished,
+            Err(panic) => std::panic::resume_unwind(panic),
+        };
+        let outcome = std::mem::replace(&mut run.outcome, Err(SimulationError::Aborted));
+        self.worker = Some(worker);
+        self.run = Some(run);
+        Some(outcome)
+    }
+
+    /// The transient states the finished task streamed.
+    pub(super) fn take_checkpoints(&mut self) -> Vec<Arc<[u8]>> {
+        self.run
+            .as_mut()
+            .map(|run| std::mem::take(&mut run.checkpoints))
+            .unwrap_or_default()
+    }
+
+    /// The finished task's engine log lines.
+    pub(super) fn take_log(&mut self) -> Vec<String> {
+        self.run
+            .as_mut()
+            .map(|run| std::mem::take(&mut run.log))
+            .unwrap_or_default()
+    }
+
+    /// The finished task's worker, ready for another task.
+    pub(super) fn take_worker(&mut self) -> Option<WorkerHost> {
+        self.worker.take()
+    }
+}
+
+/// A task's stop: the case's deadline, or the case abandoning the task.
+struct TaskAbort<A> {
+    deadline: A,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl<A: AbortSignal> AbortSignal for TaskAbort<A> {
+    fn is_aborted(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed) || self.deadline.is_aborted()
+    }
 }
 
 /// The worker, up and ready, for one case's tasks in turn.
@@ -143,11 +233,7 @@ impl WorkerHost {
 
     /// Run one task in the worker until it answers or `abort` fires; on
     /// abort the host is told to stop and the run ends `Aborted`.
-    pub(super) fn run(
-        &mut self,
-        dispatch: ResolvedTaskDispatch,
-        abort: &dyn AbortSignal,
-    ) -> WorkerRun {
+    fn run(&mut self, dispatch: ResolvedTaskDispatch, abort: &dyn AbortSignal) -> WorkerRun {
         self.next_id += 1;
         let id = self.next_id;
         let mut run = WorkerRun {
