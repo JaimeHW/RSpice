@@ -125,3 +125,87 @@ fn an_hdl_call_routes_to_the_one_project_bundle_that_holds_its_file() {
         "two cell views hold the file"
     );
 }
+
+/// Corpus design C12, variant fail, run as a manual deck through the prepared
+/// route the app takes: the testbench flags codes 1 to 15 with `$error` at
+/// line 40, 99 us into each 100 us slot, and ends on `$finish`. The Problems
+/// page lists exactly those fifteen records, each with the scope, line, time
+/// and text the CLI prints for the same deck; the run completes with its
+/// results kept and its checks fail. The deck's `.hdl` file is a file on
+/// disk no editor of the app holds, so no row offers a jump.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn corpus_c12_fail_files_one_row_per_testbench_error_as_the_cli_prints_them() {
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c12-ldo-tb/deck/fail.tran.cir");
+    let deck = std::fs::read_to_string(&path).expect("read the corpus deck");
+    let export_io = MockExportWorkflowIo::default();
+    let mut state = RunTestHost::default();
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(deck);
+    state.model.workspace.content.netlist_source_path = Some(path);
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("the corpus deck prepares");
+    state.model.simulation.execution.trigger_simulation = true;
+    controller.update(&mut state, &export_io);
+    let run_sequence = controller.current_run_id.expect("the batch has a run");
+    while controller.has_active_batch() {
+        test_execution::wait_until_finished_unpolled(&controller.runner);
+        controller.poll_completion(&mut state, &export_io);
+    }
+
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    assert_eq!(
+        run.lifecycle,
+        crate::state::SimulationRunLifecycle::Completed
+    );
+    assert!(run.analyses.iter().all(|analysis| analysis.success));
+    assert_eq!(
+        run.check_verdict(),
+        Some(rspice_results::analysis_result::CheckVerdict::Failed)
+    );
+    let rows = state.model.diagnostics.published_run_records(run_sequence);
+    let checks: Vec<_> = rows
+        .iter()
+        .filter(|record| record.canonical.code.starts_with("HDL-"))
+        .collect();
+    assert_eq!(checks.len(), 15, "one row per $error: {rows:#?}");
+    for (code, record) in (1..=15).zip(&checks) {
+        assert_eq!(record.canonical.code.as_ref(), "HDL-ERROR");
+        assert_eq!(record.level, DiagnosticLevel::Error);
+        assert_eq!(record.subject.object, "xtb");
+        let line = record.subject.source_line.as_deref().unwrap_or_default();
+        assert!(line.ends_with("tb_ldo_fail.vams:40"), "{line}");
+        let time = format!(
+            "{}s",
+            crate::quantity::engineering::format_engineering_display_with(
+                f64::from(100 * code + 99) * 1e-6,
+                crate::quantity::engineering::EngineeringPrecision::Adaptive,
+            )
+        );
+        assert!(
+            record
+                .message
+                .starts_with(&format!("$error at t = {time}: code {code}: step ")),
+            "{}",
+            record.message
+        );
+        assert!(
+            record.message.ends_with(" V is outside [5 mV, 7 mV]"),
+            "{}",
+            record.message
+        );
+        assert_eq!(
+            record.route, None,
+            "a manual deck's .hdl file has no editor"
+        );
+    }
+}
