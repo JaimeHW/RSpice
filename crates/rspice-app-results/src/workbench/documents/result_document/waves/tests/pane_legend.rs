@@ -102,13 +102,15 @@ fn click(
 }
 
 /// The `analog()` staircase is a plain number, and its pane names no unit:
-/// the axis goes unmarked, and the header draws no tag with nothing on it.
+/// its axis goes unmarked while the volts axis states its unit, and no
+/// control is drawn with nothing on it.
 #[test]
 fn a_plain_numbers_pane_draws_no_blank_control() {
     let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
     add_expression(&mut state, key, "analog(D(code))");
     let ctx = theme_context();
-    let controls = controls(&settled(&ctx, &mut state));
+    let output = settled(&ctx, &mut state);
+    let controls = controls(&output);
     let blank: Vec<_> = controls
         .iter()
         .filter(|(role, label, _)| {
@@ -116,10 +118,8 @@ fn a_plain_numbers_pane_draws_no_blank_control() {
         })
         .collect();
     assert!(
-        controls
-            .iter()
-            .any(|(_, label, _)| label.as_deref() == Some("V")),
-        "the volts pane keeps its tag: {controls:?}"
+        text(&output, "V").is_some(),
+        "the volts pane's axis keeps its unit"
     );
     assert!(blank.is_empty(), "a button says nothing: {blank:?}");
 }

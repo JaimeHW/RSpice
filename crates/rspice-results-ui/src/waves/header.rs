@@ -1,4 +1,4 @@
-//! Waveform pane legend, unit tag, visibility controls and Y-axis actions.
+//! Waveform pane legend, visibility controls and Y-axis actions.
 
 use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
@@ -8,8 +8,8 @@ use rspice_results::visualization_document::Abscissa;
 use rspice_ui_kit::{
     icons::Icon,
     plot::{paint_trace_swatch, sample::sample_at_with_shape},
-    theme::{self, FontWeight},
-    tokens::{self, Tokens},
+    theme,
+    tokens::Tokens,
     widgets::{IconButton, chip},
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -59,10 +59,6 @@ pub struct PaneHeader {
     pub log_y: bool,
     pub log_y_available: bool,
     pub cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
-    /// The strip gutter's name column, when the strip has lanes: the unit
-    /// tag takes exactly that width, so the legend starts on the edge the
-    /// lane names end on.
-    pub name_width: Option<f32>,
     /// The strip's expressions on this pane, drawn ones first.
     pub expressions: Vec<PaneExpression>,
     /// Whether the pane draws anything. A pane with nothing to draw is its
@@ -176,8 +172,6 @@ fn trace_belongs_to_pane(
 pub struct UnitPaneHeaderResponse {
     pub autoscale_y: bool,
     pub toggle_log_y: bool,
-    /// The name column's new width, while the reader drags its edge here.
-    pub resize_name: Option<f32>,
     /// The expression, by its place in the strip's list, whose entry was
     /// hidden or shown.
     pub toggle_expression: Option<usize>,
@@ -187,50 +181,36 @@ pub struct UnitPaneHeaderResponse {
     pub abscissa: Option<Abscissa>,
 }
 
-/// The three regions of a pane header, across its row.
+/// The two regions of a pane header, across its row.
 struct PaneHeaderRegions {
-    unit: egui::Rect,
     legend: egui::Rect,
     actions: egui::Rect,
 }
 
 /// Where those regions sit.
 ///
-/// Arithmetic rather than inline layout because the trailing edge is the
-/// whole point: this row and the strip header above it are two rows of chrome
-/// in one card, and this row used to run its log toggle into the pane edge
-/// while the row above it stopped [`HEADER_PADDING_X`] short. A function can
-/// be asserted about without standing up a strip, a host and a projection.
-fn header_regions(rect: egui::Rect, unit_width: f32, action_width: f32) -> PaneHeaderRegions {
-    // The unit tag's own inset is its floor as well as its start: a pane
-    // narrower than the inset handed the tag a rectangle whose right edge was
-    // left of its left one, which clips to nothing and reads as a widget that
+/// Arithmetic rather than inline layout because the edges are the whole
+/// point: this row and the strip header above it are two rows of chrome in
+/// one card, and both start and stop [`HEADER_PADDING_X`] in from the pane's
+/// edges. This row used to run its log toggle into the pane edge while the
+/// row above it stopped short. A function can be asserted about without
+/// standing up a strip, a host and a projection.
+fn header_regions(rect: egui::Rect, action_width: f32) -> PaneHeaderRegions {
+    // The inset is a floor as well as a start: a pane narrower than its two
+    // insets must not hand a region a rectangle whose right edge is left of
+    // its left one, which clips to nothing and reads as a widget that
     // vanished rather than one that had no room.
-    let unit_left = rect.left() + 5.0;
-    let unit = egui::Rect::from_min_max(
-        egui::pos2(unit_left, rect.top() + 1.5),
-        egui::pos2(
-            (rect.left() + unit_width).min(rect.right()).max(unit_left),
-            rect.bottom() - 1.5,
-        ),
-    );
-    let actions_right = (rect.right() - HEADER_PADDING_X).max(unit.right());
+    let left = (rect.left() + HEADER_PADDING_X).min(rect.right());
+    let actions_right = (rect.right() - HEADER_PADDING_X).max(left);
     let actions = egui::Rect::from_min_max(
-        egui::pos2((actions_right - action_width).max(unit.right()), rect.top()),
+        egui::pos2((actions_right - action_width).max(left), rect.top()),
         egui::pos2(actions_right, rect.bottom()),
     );
     let legend = egui::Rect::from_min_max(
-        egui::pos2(unit.right() + 3.0, rect.top()),
-        egui::pos2(
-            (actions.left() - 3.0).max(unit.right() + 3.0),
-            rect.bottom(),
-        ),
+        egui::pos2(left, rect.top()),
+        egui::pos2((actions.left() - 3.0).max(left), rect.bottom()),
     );
-    PaneHeaderRegions {
-        unit,
-        legend,
-        actions,
-    }
+    PaneHeaderRegions { legend, actions }
 }
 
 /// Draw the legend using design-aware names while keeping source identities intact.
@@ -249,7 +229,6 @@ pub fn show_header(
         log_y,
         log_y_available,
         cursor_a: cursor_a_value,
-        name_width,
         expressions,
         plotted,
         abscissa,
@@ -257,17 +236,26 @@ pub fn show_header(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = height.clamp(0.0, WAVE_PANE_HEADER_HEIGHT);
-    // The row's own background opens the pane's context menu, which is where
-    // the pane is drawn against another signal; the chips over it keep their
-    // own clicks and menus.
-    let (rect, background) = ui.allocate_exact_size(
+    // The band is the pane's as much as its plot is: a click anywhere on it
+    // that no control of the row takes makes the pane the active one, as a
+    // click on the plot does, and its context menu is where the pane is
+    // drawn against another signal. The row's own controls are laid out over
+    // it and take their clicks first.
+    let (rect, band) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
-        if abscissa.is_some() {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
+        egui::Sense::click(),
     );
+    band.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            true,
+            active,
+            format!("{} pane", pane_name(pane)),
+        )
+    });
+    if band.clicked() || band.secondary_clicked() {
+        host.activate_pane();
+    }
     ui.painter().rect_filled(rect, 0.0, c.bg_panel);
     ui.painter().hline(
         rect.x_range(),
@@ -285,52 +273,15 @@ pub fn show_header(
         Some(Abscissa::Signal { name }) => Some(name.as_str()),
         _ => None,
     };
-    // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
-    // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
-    // An expression whose unit cannot be stated has a pane of its own and
-    // says so, with the reason, rather than show a unit it does not have. A
-    // plain number's pane has no unit to name: its axis goes unmarked, as a
-    // unitless axis does in ViVA and ADS, and the tag is left out rather than
-    // drawn as a control with nothing on it.
-    let unit_chip = if pane.unlabeled {
-        Some("no unit")
-    } else {
-        Some(pane.unit).filter(|unit| !unit.is_empty())
-    };
-    let unit_hover = if pane.unlabeled {
-        let reason = model
-            .expression_panes
-            .iter()
-            .filter(|expression| pane.expressions.contains(&expression.slot))
-            .find_map(|expression| expression.unknown.as_deref())
-            .unwrap_or("its unit cannot be stated");
-        format!("No unit: {reason}, so this expression has an axis of its own")
-    } else {
-        format!("{} unit-scoped Y axis", pane.unit)
-    };
-    let unit_label_width = unit_chip.map(|unit_chip| {
-        ui.fonts_mut(|fonts| {
-            fonts
-                .layout_no_wrap(
-                    unit_chip.to_owned(),
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text,
-                )
-                .size()
-                .x
-        })
-    });
-    // With lanes the tag column is the gutter's name column whatever it
-    // holds, so the legend starts on the edge the lane names end on.
-    let unit_width = name_width
-        .unwrap_or_else(|| unit_label_width.map_or(0.0, |width| (width + 28.0).max(46.0)));
+    // The pane's unit is its Y axis' caption, not a tag repeated here: the
+    // row starts with the legend.
     let mut output = UnitPaneHeaderResponse::default();
     // The right-hand controls are laid out first and take the width they
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
     let actions_width_id = egui::Id::new(("pane-actions-width", model.analysis_key));
     let action_width = if plotted {
-        let space = header_regions(rect, unit_width, f32::INFINITY).actions;
+        let space = header_regions(rect, f32::INFINITY).actions;
         let drawn = ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(space)
@@ -371,27 +322,9 @@ pub fn show_header(
             .unwrap_or(0.0)
     };
     let PaneHeaderRegions {
-        unit: unit_rect,
         legend: legend_rect,
         ..
-    } = header_regions(rect, unit_width, action_width);
-
-    let mut unit_response = None;
-    if let Some(unit_chip) = unit_chip {
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(unit_rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| {
-                ui.set_clip_rect(unit_rect);
-                let response = chip(ui, unit_chip, active).on_hover_text(unit_hover);
-                if response.clicked() {
-                    host.activate_pane();
-                }
-                unit_response = Some(response);
-            },
-        );
-    }
+    } = header_regions(rect, action_width);
 
     let mut traces: Vec<&StripTrace> = model
         .traces
@@ -468,7 +401,7 @@ pub fn show_header(
                     }
                 })
                 .response
-                .on_hover_text(format!("Hidden traces of the {} pane", pane.unit));
+                .on_hover_text(format!("Hidden traces of the {} pane", pane_name(pane)));
             },
         );
         entries_right = drawn.response.rect.left() - 3.0;
@@ -501,35 +434,35 @@ pub fn show_header(
                 .on_hover_text(format!(
                     "{} more plotted in the {} pane",
                     overflow.len(),
-                    pane.unit
+                    pane_name(pane)
                 ));
             }
         },
     );
-
-    output.resize_name = name_width.and_then(|width| {
-        super::logic::name_column_grip(
-            ui,
-            rect,
-            width,
-            ui.id()
-                .with(("pane-name-grip", model.analysis_key, pane.unit)),
-        )
-    });
     if let Some(menu) = abscissa.as_ref() {
         let draft_id = ui
             .id()
             .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
-        for response in std::iter::once(&background).chain(unit_response.as_ref()) {
-            if let Some(chosen) = egui::Popup::context_menu(response)
-                .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
-                .and_then(|inner| inner.inner)
-            {
-                output.abscissa = Some(chosen);
-            }
+        if let Some(chosen) = egui::Popup::context_menu(&band)
+            .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
+            .and_then(|inner| inner.inner)
+        {
+            output.abscissa = Some(chosen);
         }
     }
     output
+}
+
+/// How the row names its pane to a reader: by its unit, or as the pane of an
+/// expression whose unit cannot be stated, or of plain numbers.
+fn pane_name<'a>(pane: &UnitPane<'a>) -> &'a str {
+    if pane.unlabeled {
+        "no-unit"
+    } else if pane.unit.is_empty() {
+        "unitless"
+    } else {
+        pane.unit
+    }
 }
 
 /// One plotted trace's legend chip, measured before it is laid out so the
@@ -869,7 +802,13 @@ mod tests {
     #[test]
     fn the_pane_header_trails_on_the_strip_header_s_own_inset() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 28.0), egui::vec2(900.0, 25.0));
-        let regions = header_regions(rect, 46.0, 58.0);
+        let regions = header_regions(rect, 58.0);
+        assert!(
+            (regions.legend.left() - rect.left() - HEADER_PADDING_X).abs() < f32::EPSILON,
+            "the legend starts at {}, not {} in from the pane edge",
+            regions.legend.left(),
+            HEADER_PADDING_X
+        );
         assert!(
             (rect.right() - regions.actions.right() - HEADER_PADDING_X).abs() < f32::EPSILON,
             "actions end at {}, not {} from the pane edge",
@@ -883,17 +822,17 @@ mod tests {
         );
     }
 
-    /// A pane too narrow for all three regions gives up the legend, never the
-    /// unit tag, and never hands anything a negative rectangle.
+    /// A pane too narrow for both regions gives up the legend, and never
+    /// hands anything a negative rectangle.
     #[test]
     fn a_narrow_pane_header_collapses_without_inverting_a_region() {
         for width in [0.0_f32, 12.0, 46.0, 60.0, 120.0] {
             let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 25.0));
-            let regions = header_regions(rect, 46.0, 58.0);
-            for region in [regions.unit, regions.legend, regions.actions] {
+            let regions = header_regions(rect, 58.0);
+            for region in [regions.legend, regions.actions] {
                 assert!(region.width() >= 0.0, "{width}: inverted {region:?}");
             }
-            assert!(regions.actions.left() >= regions.unit.right());
+            assert!(regions.actions.left() >= regions.legend.right());
         }
     }
 }

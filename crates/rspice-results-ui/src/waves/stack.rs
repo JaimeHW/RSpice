@@ -1221,7 +1221,6 @@ fn show_xy_strip(
         log_y,
         log_y_available,
         cursor_a,
-        name_width: (gutter.name > 0.0).then_some(gutter.name),
         expressions: pane_expressions(host, model, pane, &exprs, cursor_a, &t),
         plotted: auto_y.is_some(),
         abscissa: options
@@ -1235,9 +1234,6 @@ fn show_xy_strip(
         .inner;
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
-    if let Some(width) = header.resize_name {
-        host.session_mut().lane_name_width = Some(clamp_name_width(width));
-    }
     if let Some(abscissa) = header.abscissa {
         repoint_xy_strip(host.session_mut(), index, abscissa);
         return false;
@@ -1458,7 +1454,6 @@ fn show_unit_pane(
         log_y,
         log_y_available,
         cursor_a,
-        name_width: (gutter.name > 0.0).then_some(gutter.name),
         expressions: pane_expressions(host, model, pane, exprs, cursor_a, &t),
         plotted,
         abscissa: options
@@ -1468,9 +1463,6 @@ fn show_unit_pane(
     let header = host.pane_header(ui, model, pane, ordinal, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
-    if let Some(width) = header.resize_name {
-        host.session_mut().lane_name_width = Some(clamp_name_width(width));
-    }
     if let Some(abscissa) = header.abscissa {
         open_xy_strip(ui.ctx(), host.session_mut(), model, pane.unit, abscissa);
     }
@@ -1559,7 +1551,13 @@ fn show_unit_pane(
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
-    if response.response.hovered()
+    // A pane becomes the active one when the reader acts on it: a click, a
+    // drag, a cursor placed. Pointing at it is not acting on it, and a pane
+    // that took the instrument's actions as the pointer crossed it handed
+    // them to whichever pane lay between the reader's pane and the toolbar.
+    if response.response.clicked()
+        || response.response.secondary_clicked()
+        || response.response.drag_started()
         || response.response.dragged()
         || response.clicked_x.is_some()
         || response.horizontal_cursor.is_some()

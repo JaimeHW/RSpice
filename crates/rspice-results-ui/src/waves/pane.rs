@@ -398,6 +398,58 @@ pub(crate) fn paint_family_bands(
 /// the member to be highlighted.
 const HIGHLIGHT_REACH: f32 = 8.0;
 
+/// What the Y axis of a pane whose unit cannot be stated says in its place.
+const NO_UNIT: &str = "no unit";
+
+/// The row above a pane's tick column, where its unit is stated: an
+/// expression whose unit cannot be stated says so there, while a plain
+/// number's axis goes unmarked.
+fn y_caption_row(pane: &UnitPane) -> plot::YCaptionRow {
+    plot::YCaptionRow {
+        without_unit: pane.unlabeled.then(|| NO_UNIT.to_owned()),
+    }
+}
+
+/// The steps a tall pane's linear Y ladder aims for.
+const DENSEST_Y_LADDER: usize = 6;
+
+/// The densest linear Y ladder, [`DENSEST_Y_LADDER`] steps at most, whose
+/// every label the pane has room to draw `pitch` apart. A pane too short even
+/// for the sparsest keeps those of its ticks that can be labelled, so it
+/// never draws a grid line it cannot say the value of.
+fn labelled_y_axis(plot_height: f32, pitch: f32, axis_with: impl Fn(usize) -> Axis) -> Axis {
+    const SPARSEST: usize = 2;
+    let apart = |axis: &Axis, lower: f64, upper: f64| {
+        ((upper - lower).abs() / (axis.max - axis.min)) as f32 * plot_height
+    };
+    let fits = |axis: &Axis| {
+        axis.ticks
+            .windows(2)
+            .all(|pair| apart(axis, pair[0].0, pair[1].0) >= pitch)
+    };
+    if let Some(axis) = (SPARSEST..=DENSEST_Y_LADDER)
+        .rev()
+        .map(&axis_with)
+        .find(fits)
+    {
+        return axis;
+    }
+    let mut axis = axis_with(SPARSEST);
+    let mut kept: Option<f64> = None;
+    let ticks = std::mem::take(&mut axis.ticks)
+        .into_iter()
+        .filter(|(value, _)| {
+            let keep = kept.is_none_or(|last| apart(&axis, last, *value) >= pitch);
+            if keep {
+                kept = Some(*value);
+            }
+            keep
+        })
+        .collect();
+    axis.ticks = ticks;
+    axis
+}
+
 /// Display inputs resolved by the host for one unit-scoped pane.
 pub struct PanePlot<'a> {
     pub x_range: (f64, f64),
@@ -449,42 +501,67 @@ pub fn show_plot<'a>(
         .unwrap_or((auto_y0, auto_y1));
 
     let x_axis = model_x_axis(model, x0, x1, quantity_policy);
-    let y_axis = if log_y {
-        Axis::log_decades(y0, y1, pane.axis_unit())
-    } else if pane.axis_unit() == "°" && input.y_view.is_none() {
+    let lattice = !log_y && pane.axis_unit() == "°" && input.y_view.is_none();
+    if lattice {
         // An unzoomed degree pane keeps the 45° lattice a Bode phase
         // reading expects; arbitrary zoom depths fall back to plain linear
         // ticks, which stay legible where the lattice would crowd.
         y0 = (y0 / 45.0).floor() * 45.0;
         y1 = (y1 / 45.0).ceil() * 45.0;
-        // Continuous phase does not stay inside one turn: an unwrapped loop
-        // response walks thousands of degrees, and 45° steps across it are
-        // thousands of labels stacked into an unreadable band — and thousands
-        // of galleys laid out every frame. The lattice thins by whole 45°
-        // multiples so what is left still falls on the values a phase reading
-        // is taken at.
-        let steps = ((y1 - y0) / 45.0).round().max(0.0) as usize;
-        let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1);
-        let ticks: Vec<f64> = (0..=steps)
-            .step_by(stride)
-            .map(|index| 45.0f64.mul_add(index as f64, y0))
-            .collect();
-        Axis::with_ticks(y0, y1, "°", &ticks)
-    } else {
-        Axis::linear(y0, y1, pane.axis_unit())
-    };
-    let y_axis = if pane.axis_unit() == "rad" {
-        match quantity_policy.angle_display {
-            rspice_vocabulary::quantity::AngleDisplay::Degrees => {
-                y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
+    }
+    let y_axis_with = |density: usize| {
+        let y_axis = if log_y {
+            Axis::log_decades(y0, y1, pane.axis_unit())
+        } else if lattice {
+            // Continuous phase does not stay inside one turn: an unwrapped
+            // loop response walks thousands of degrees, and 45° steps across
+            // it are thousands of labels stacked into an unreadable band —
+            // and thousands of galleys laid out every frame. The lattice
+            // thins by whole 45° multiples so what is left still falls on the
+            // values a phase reading is taken at.
+            // A shorter pane halves the lattice again for each step of
+            // density it gives up.
+            let steps = ((y1 - y0) / 45.0).round().max(0.0) as usize;
+            let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1)
+                << DENSEST_Y_LADDER.saturating_sub(density);
+            let ticks: Vec<f64> = (0..=steps)
+                .step_by(stride)
+                .map(|index| 45.0f64.mul_add(index as f64, y0))
+                .collect();
+            Axis::with_ticks(y0, y1, "°", &ticks)
+        } else {
+            Axis::linear_with(y0, y1, pane.axis_unit(), density)
+        };
+        if pane.axis_unit() == "rad" {
+            match quantity_policy.angle_display {
+                rspice_vocabulary::quantity::AngleDisplay::Degrees => {
+                    y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
+                }
+                rspice_vocabulary::quantity::AngleDisplay::Radians => y_axis,
             }
-            rspice_vocabulary::quantity::AngleDisplay::Radians => y_axis,
+        } else if pane.axis_unit() == "°" {
+            let (scale, offset, unit) = quantity_policy.degree_axis_transform();
+            y_axis.with_display_transform(scale, offset, unit)
+        } else {
+            y_axis
         }
-    } else if pane.axis_unit() == "°" {
-        let (scale, offset, unit) = quantity_policy.degree_axis_transform();
-        y_axis.with_display_transform(scale, offset, unit)
+    };
+    // The Y ladder is as dense as the pane has room to label: a short pane
+    // carries fewer ticks, each labelled, rather than the tall pane's six
+    // with every other label dropped where they would collide. A decade
+    // ladder has one density.
+    let densest = y_axis_with(DENSEST_Y_LADDER);
+    let y_axis = if log_y {
+        densest
     } else {
-        y_axis
+        let plot_height = plot::plot_rect(
+            ui,
+            &PlotSpec::new(Axis::linear(0.0, 1.0, ""), model.x_scale, densest)
+                .without_x_axis_chrome()
+                .with_y_caption_row(y_caption_row(pane)),
+        )
+        .height();
+        labelled_y_axis(plot_height, plot::y_tick_pitch(ui), y_axis_with)
     };
     // The scale the pane is actually drawn on. Every hit test below maps
     // through it rather than assuming a linear ordinate, because "nearest"
@@ -517,6 +594,7 @@ pub fn show_plot<'a>(
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
+        .with_y_caption_row(y_caption_row(pane))
         .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
     if !detail.is_empty() {
         spec = spec.accessible_detail(&detail);
@@ -844,6 +922,26 @@ pub fn show_plot<'a>(
     };
 
     let response = plot::show(ui, &spec, cache, input.cursors.as_ref(), Some(&readout));
+    if pane.unlabeled
+        && let Some(caption) = response.y_caption
+    {
+        // The axis says it has no unit; why is the expression's to say.
+        let reason = model
+            .expression_panes
+            .iter()
+            .filter(|expression| pane.expressions.contains(&expression.slot))
+            .find_map(|expression| expression.unknown.as_deref())
+            .unwrap_or("its unit cannot be stated");
+        let explained = ui.interact(
+            caption,
+            response.response.id.with("no-unit-caption"),
+            egui::Sense::hover(),
+        );
+        explained.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, NO_UNIT));
+        explained.on_hover_text(format!(
+            "No unit: {reason}, so this expression has an axis of its own"
+        ));
+    }
     let nearest_trace = response
         .clicked_x
         .filter(|_| input.find_nearest)

@@ -38,12 +38,14 @@ fn add(state: &mut ResultsTestHost, text: &str) {
 }
 
 /// Draw the waves view twice, as the app does: the first frame evaluates the
-/// expressions, the second routes them with what evaluation found.
-fn draw(state: &mut ResultsTestHost) -> Vec<String> {
+/// expressions, the second routes them with what evaluation found. Returns
+/// the second frame's accessible labels and painted text.
+fn draw(state: &mut ResultsTestHost) -> (Vec<String>, Vec<String>) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut labels = Vec::new();
+    let mut painted = Vec::new();
     for _ in 0..2 {
         let output = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -57,12 +59,16 @@ fn draw(state: &mut ResultsTestHost) -> Vec<String> {
                 update
                     .nodes
                     .iter()
-                    .filter_map(|(_, node)| node.label().map(str::to_owned))
+                    .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
                     .collect()
             })
             .unwrap_or_default();
+        painted = super::conversion::texts(&output.shapes)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
     }
-    labels
+    (labels, painted)
 }
 
 /// Each pane's unit, its signal traces and its expression slots.
@@ -98,7 +104,7 @@ fn each_expression_is_drawn_on_the_axis_of_its_own_unit() {
     ] {
         add(&mut state, text);
     }
-    let labels = draw(&mut state);
+    let (labels, painted) = draw(&mut state);
     assert_eq!(
         panes(&mut state),
         [
@@ -111,11 +117,14 @@ fn each_expression_is_drawn_on_the_axis_of_its_own_unit() {
             (String::new(), true, vec![3]),
         ]
     );
+    // Each pane states its unit as its Y axis' caption; the one whose unit
+    // cannot be stated says so there, and its reason is on the caption.
     assert!(
-        labels.iter().any(|label| label == "no unit"),
-        "the unlabeled pane says it has no unit: {labels:?}"
+        painted.iter().any(|text| text == "no unit")
+            && labels.iter().any(|label| label == "no unit"),
+        "the unlabeled pane says it has no unit: {painted:?} {labels:?}"
     );
-    assert!(labels.iter().any(|label| label == "W"), "{labels:?}");
+    assert!(painted.iter().any(|text| text == "W"), "{painted:?}");
 }
 
 #[test]
