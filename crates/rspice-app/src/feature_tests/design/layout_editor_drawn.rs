@@ -2,9 +2,30 @@
 
 use crate::state::CellViewRef;
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::surface::layout_editor::tests::render;
 use crate::workbench::design::surface::layout_editor::*;
 use egui::{Pos2, Rect, Vec2};
+
+/// One frame of the layout editor over a whole application's canvas, at
+/// `size`.
+fn render(app: &mut RSpiceApp, size: Vec2) -> egui::FullOutput {
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    context.enable_accesskit();
+    context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |context| {
+            egui::CentralPanel::default().show(context, |ui| {
+                show(
+                    ui,
+                    &mut crate::schematic::view::canvas_frame(&mut app.state),
+                );
+            });
+        },
+    )
+}
 
 fn app_with_layout() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

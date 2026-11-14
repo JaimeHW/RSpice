@@ -874,29 +874,8 @@ fn rgba(value: [u8; 4]) -> Color32 {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::workbench::RSpiceApp;
-
-    pub(crate) fn render(app: &mut RSpiceApp, size: Vec2) -> egui::FullOutput {
-        let context = egui::Context::default();
-        crate::ui::Theme::default().apply(&context);
-        context.enable_accesskit();
-        context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
-                ..Default::default()
-            },
-            |context| {
-                egui::CentralPanel::default().show(context, |ui| {
-                    show(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
-                    );
-                });
-            },
-        )
-    }
 
     #[test]
     fn screen_and_integral_dbu_transforms_round_trip() {
