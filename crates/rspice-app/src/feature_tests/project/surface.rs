@@ -5,7 +5,10 @@
 use egui::{Color32, Modifiers, Rect, Ui, pos2};
 
 use crate::ui::tokens::Tokens;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::host::{Host, Point};
+use crate::workbench::lifecycle::project_lifecycle::begin_project_replacement;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
@@ -188,6 +191,45 @@ fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
         .filter_map(|(_, node)| node.label().map(str::to_owned))
         .collect::<Vec<_>>();
     assert_eq!(panels, ["Project Configuration"]);
+}
+
+/// The chip reads the Configurations command's availability from the
+/// snapshot its chrome is lent with: the dispatcher's real answer for the
+/// command, so it runs with an open project and not while a project
+/// operation runs or with no project open.
+#[test]
+fn the_configuration_chip_reads_the_commands_availability_through_the_snapshot() {
+    fn runs(app: &mut RSpiceApp) -> bool {
+        features::cx_with_foreign_answers::<ProjectFeature>(app, |_| true)
+            .foreign_availability(ids::CONFIGURATION_SETS)
+            .is_available()
+    }
+    let mut app = RSpiceApp::test_instance();
+    assert!(runs(&mut app), "an open project runs it");
+    begin_project_replacement(&mut app.state).expect("a project replacement starts");
+    assert!(!runs(&mut app), "a project operation holds it");
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.close_project_session();
+    assert!(!runs(&mut app), "no open project, so it cannot run");
+}
+
+/// While a project operation runs, a click on the chip leaves the page
+/// where it was.
+#[test]
+fn the_configuration_chip_is_held_while_a_project_operation_runs() {
+    let (ctx, mut app, _) = settled_on(ProjectPage::Library);
+    begin_project_replacement(&mut app.state).expect("a project replacement starts");
+    let settled = project_frame(&ctx, &mut app, Vec::new());
+
+    click_announced(
+        &ctx,
+        &mut app,
+        settled,
+        "Configuration used for runs: Default",
+    );
+
+    assert_eq!(app.state.project.project_page, ProjectPage::Library);
 }
 
 /// The detail under the Library browser shows the view a click in the

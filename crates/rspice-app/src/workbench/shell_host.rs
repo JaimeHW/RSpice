@@ -137,7 +137,10 @@ impl Host for RSpiceApp {
                                 // every band the moment it is drawn anywhere
                                 // else, which is where these pages get reviewed.
                                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                                project::chrome(&mut features::cx(app), ui);
+                                project::chrome(
+                                    &mut features::cx_with_foreign_answers(app, |_| true),
+                                    ui,
+                                );
                                 app.after_contribution();
                                 self::project::page(ui, app);
                                 app.after_contribution();

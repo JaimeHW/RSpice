@@ -31,7 +31,6 @@ use crate::ui::widgets::{
 use crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::lifecycle::project_lifecycle::operation_in_progress;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 
@@ -480,10 +479,13 @@ fn project_health_chips(
     .clicked()
     {
         // The Configurations command, carried out where the chip is drawn so
-        // the band's action after it reads the page it opens. Of the steps
-        // every command passes through, only its two guards act on it: it is
-        // held while a project operation runs, and needs an open project.
-        if !operation_in_progress(cx.platform) && cx.platform.project_lifecycle.is_open() {
+        // the band's action after it reads the page it opens, when the
+        // dispatcher's answer for it, taken as the chrome was lent, says it
+        // can run.
+        if cx
+            .foreign_availability(ids::CONFIGURATION_SETS)
+            .is_available()
+        {
             show_configuration_page_in(cx.platform, cx.wb, &mut cx.state.project_page);
         }
     }
