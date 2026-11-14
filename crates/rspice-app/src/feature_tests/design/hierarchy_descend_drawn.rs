@@ -1,7 +1,7 @@
 //! Descending into a hierarchy block, drawn through a whole application.
 
+use crate::feature_tests::design::hierarchy_descend::hierarchy_state;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hierarchy::descend::tests::hierarchy_state;
 use crate::workbench::app::dialogs::hierarchy::descend::*;
 use egui::Context;
 
