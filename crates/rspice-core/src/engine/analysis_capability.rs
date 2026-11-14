@@ -1117,14 +1117,16 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
     (
         "bsimsoi__e2aff994",
         "its harmonics have not been checked against a settled transient: on a common-source \
-         stage its transient is still drifting after 24 periods, and harmonic balance and a \
+         stage its floating body's charging slows only as 1/t, so after 384 periods its \
+         fundamental still moves by 1.4e-4 of itself each period, and harmonic balance and a \
          quasi-static sweep disagree on the fundamental by 12%",
     ),
     (
         "bsimsoi_va",
         "its harmonics have not been checked against a settled transient: on a common-source \
-         stage its floating body is still charging after 24 periods, and harmonic balance and \
-         the transient disagree on the fundamental by a factor of 9",
+         stage its floating body's charging slows only as 1/t, so after 384 periods its \
+         fundamental still moves by 1.7e-4 of itself each period, and harmonic balance and the \
+         transient disagree on the fundamental by a factor of 9",
     ),
 ];
 
