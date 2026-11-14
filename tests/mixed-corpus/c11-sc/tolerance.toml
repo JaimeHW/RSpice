@@ -16,6 +16,19 @@ expect = "c11::rec"
 abs = 5e-5
 why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; Ron·C ≈ 1 ns ≪ the 460 ns phases, input tracking lag ≤ 13 uV"
 
+# The d_process toggle peer clocked by ph1: one exchange per ph1 rise.
+[[q]]
+id = "proc"
+analysis = "tran"
+variants = ["proc"]
+kind = "events"
+nets = ["d"]
+window = [0.0, 2e-5]
+oracle = "O6"
+expect = "c11::proc"
+edge_abs = 1e-12
+why = "the peer answers each ph1 rise (20 ns + k us) with the complement of its last answer, taken clk_delay = 1 ns later; a replayed or repeated exchange would flip the sequence"
+
 # The design's transient FFT, on the deck's 300 us: the 10 kHz amplitude of
 # v(out) over [100 us, 300 us] (two input periods, coherent; the recursion's
 # start has decayed by 0.9^100), Hann.

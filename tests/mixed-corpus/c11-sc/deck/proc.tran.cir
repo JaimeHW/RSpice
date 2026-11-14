@@ -1,0 +1,14 @@
+* C11 switched-capacitor filter, variant proc, tran
+.hdl "../net/nonov_clk.v"
+.include ../net/sc.cir
+vin in 0 dc 0.5 sin(0.5 0.2 10k) ac 1
+* A d_process peer clocked by the module's ph1 and reading its ph2 shares
+* both nets with the module, so each exchange is made first in a coupled
+* trial the circuit rolls back, then replayed from the process's journal at
+* the acceptance. The peer is the corpus binary's toggle (`peer toggle`),
+* which the runner finds on PATH: it flips its output bit on every exchange.
+aproc [ph2] ph1 null [d] proc1
+.model proc1 d_process(process_file="rspice-mixed-corpus" process_params=["peer" "toggle"]
++ clk_delay=1e-9 reset_delay=1e-9)
+.tran 2n 20u
+.end

@@ -8,15 +8,25 @@
 //! at the ph1 fall of the same period. The operating point holds both
 //! capacitors at the input's 0.5 V (both switches open, ROFF to the input).
 
+use std::collections::BTreeMap;
+
 use num_complex::Complex64;
 
 use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
+use crate::suites::mixed::events::Trace;
 use crate::suites::mixed::measure::Measured;
 
-pub const REGISTRY: Registry = &[("rec", rec), ("pac", pac), ("fft", fft), ("pn", pn)];
+pub const REGISTRY: Registry = &[
+    ("rec", rec),
+    ("pac", pac),
+    ("fft", fft),
+    ("pn", pn),
+    ("proc", proc),
+];
 
 const PERIOD: f64 = 1e-6;
+const PH1_RISE: f64 = 20e-9;
 const PH1_FALL: f64 = 480e-9;
 const PH2_RISE: f64 = 520e-9;
 const PH2_FALL: f64 = 980e-9;
@@ -24,6 +34,36 @@ const SHARE: f64 = 1e-12 / (1e-12 + 9e-12);
 const INPUT_OFFSET: f64 = 0.5;
 const INPUT_AMPLITUDE: f64 = 0.2;
 const INPUT_FREQUENCY: f64 = 10e3;
+
+/// Variant `proc`: the `d_process` toggle peer, clocked by ph1, answers every
+/// ph1 rise with the complement of its last answer (1 first), and `d` takes
+/// each answer `clk_delay` = 1 ns later. Before the first rise `d` is the
+/// unknown, high-impedance value the code model starts its outputs at.
+fn proc(context: &Context<'_>) -> Result<Expected, String> {
+    const CLK_DELAY: f64 = 1e-9;
+    let [start, stop] = context
+        .quantity
+        .measure
+        .window
+        .ok_or("c11::proc needs the quantity's window")?;
+    let mut trace: Trace = Vec::new();
+    if start <= 0.0 {
+        trace.push((0.0, "z".to_owned()));
+    }
+    for edge in 0u32.. {
+        let time = f64::from(edge) * PERIOD + PH1_RISE + CLK_DELAY;
+        if time > stop {
+            break;
+        }
+        if time >= start {
+            trace.push((time, if edge % 2 == 0 { "1" } else { "0" }.to_owned()));
+        }
+    }
+    Ok(Expected::Measured(Measured::Events(BTreeMap::from([(
+        "d".to_owned(),
+        trace,
+    )]))))
+}
 
 fn input(time: f64) -> f64 {
     INPUT_OFFSET + INPUT_AMPLITUDE * (2.0 * std::f64::consts::PI * INPUT_FREQUENCY * time).sin()

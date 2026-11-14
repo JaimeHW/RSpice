@@ -6,6 +6,7 @@
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
 //! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4|O8 [--design C1] [--update] [--jobs N]
 //! rspice-mixed-corpus probe a|b|c [--record] [--jobs N]
+//! rspice-mixed-corpus peer toggle
 //! ```
 //!
 //! The route is the build: `--features veriloga-native` is the native route.
@@ -17,7 +18,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rspice_conformance::suites::mixed::{Route, design::Design, dispatch, runner};
+use rspice_conformance::suites::mixed::{Route, design::Design, dispatch, peer, runner};
 
 #[derive(Parser)]
 #[command(
@@ -80,6 +81,8 @@ enum Commands {
         #[arg(long, value_parser = job_count)]
         jobs: Option<usize>,
     },
+    /// Serve a corpus deck's `d_process` peer on stdin and stdout.
+    Peer { name: String },
 }
 
 /// `--jobs`: a positive count.
@@ -103,6 +106,10 @@ fn main() -> ExitCode {
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Peer { name } => {
+            peer::serve(&name)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Case {
             design_dir,
             variant,

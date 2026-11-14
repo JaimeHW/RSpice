@@ -59,6 +59,7 @@ pub mod events;
 pub mod measure;
 pub mod oracle;
 pub mod outcomes;
+pub mod peer;
 pub mod probes;
 pub mod runner;
 

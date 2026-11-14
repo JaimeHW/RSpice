@@ -446,6 +446,14 @@ fn work_file(work: &Path, design: &Design, variant: &str, analysis: &str, o5: bo
     ))
 }
 
+/// `PATH` with the directory of `program` first, so a case child finds this
+/// binary by name (see [`super::peer`]).
+fn path_with_dir_of(program: &Path) -> Option<std::ffi::OsString> {
+    let dir = std::path::absolute(program).ok()?.parent()?.to_path_buf();
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&rest))).ok()
+}
+
 /// Spawn the case child (or the external producer) and wait for its result.
 fn run_child(
     options: &RunOptions,
@@ -470,6 +478,10 @@ fn run_child(
         _ => {
             let mut command = Command::new(&options.bin);
             command.arg("case");
+            // A deck's `d_process` names this binary as its peer program.
+            if let Some(path) = path_with_dir_of(&options.bin) {
+                command.env("PATH", path);
+            }
             command
         }
     };
