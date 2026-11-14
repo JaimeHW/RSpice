@@ -1,16 +1,15 @@
-//! The library cellview manager through the whole application: both pages at
-//! every supported width, the symbol form's actions on the selected symbol,
-//! and a press on the manager drawn in the frame it was clicked in.
+//! The library cellview manager through the whole application: the symbol
+//! form's actions on the selected symbol answered by the shell, and a press
+//! on the manager answered in the frame it was clicked in. The manager's own
+//! drawing is tested with it, in the project feature.
 
 use egui::{Modifiers, Rect, vec2};
 
 use crate::state::{Cell, CellViewRef, Library, View, ViewType};
-use crate::workbench::features;
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
 use crate::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
-use crate::workbench::surfaces::library_cellview_manager::{resolve_symbol_reference, show};
 use crate::workbench::{RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 fn app_with_typed_symbol() -> RSpiceApp {
@@ -29,89 +28,6 @@ fn app_with_typed_symbol() -> RSpiceApp {
         .select_view("authoring", "amp", "symbol");
     app.state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
     app
-}
-
-fn render(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(app)));
-        },
-    )
-}
-
-fn access_nodes(output: &egui::FullOutput) -> Vec<&egui::accesskit::Node> {
-    output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .expect("accessibility tree")
-        .nodes
-        .iter()
-        .map(|(_, node)| node)
-        .collect()
-}
-
-#[test]
-fn specialist_renders_both_pages_at_desktop_tablet_and_phone_widths() {
-    for page in LibraryCellviewPage::ALL {
-        for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
-            let mut app = app_with_typed_symbol();
-            app.state.project.library_cellview_page = page;
-            let output = render(&mut app, size);
-            assert!(
-                !output.shapes.is_empty(),
-                "{} did not render at {}x{}",
-                page.label(),
-                size.x,
-                size.y
-            );
-        }
-    }
-}
-
-#[test]
-fn symbol_page_exposes_live_preview_terminal_form_and_actions() {
-    let mut app = app_with_typed_symbol();
-    let output = render(&mut app, vec2(1280.0, 900.0));
-    let nodes = access_nodes(&output);
-    for label in [
-        "Authored symbol preview",
-        "Terminal contract",
-        "Component form and inheritance",
-        "Open symbol editor",
-        "Edit component form\u{2026}",
-        "Create symbol\u{2026}",
-        "Import symbol\u{2026}",
-    ] {
-        assert!(
-            nodes.iter().any(|node| node.label() == Some(label)),
-            "missing accessible node {label}"
-        );
-    }
-    assert!(
-        output.shapes.len() > 20,
-        "the live symbol projection is empty"
-    );
-}
-
-#[test]
-fn exact_selected_symbol_wins_over_an_unrelated_active_document() {
-    let app = app_with_typed_symbol();
-    assert_ne!(
-        app.state.model.workspace.content.active_view,
-        CellViewRef::new("authoring", "amp", "symbol")
-    );
-    assert_eq!(
-        resolve_symbol_reference(&app.state.model),
-        Some(CellViewRef::new("authoring", "amp", "symbol"))
-    );
 }
 
 #[test]
@@ -265,65 +181,5 @@ fn open_symbol_editor_lands_in_design_in_the_frame_that_pressed_it() {
     assert_ne!(
         app.state.workbench.current_route().surface_id(),
         SurfaceId::LibraryCellviewManager
-    );
-}
-
-#[test]
-fn legacy_symbol_discloses_missing_contract_and_disables_form_editing() {
-    let mut app = RSpiceApp::test_instance();
-    let mut library = Library::new("legacy");
-    let mut cell = Cell::new("amp");
-    cell.add_view(View::new("symbol", ViewType::Symbol));
-    library.add_cell(cell);
-    app.state.model.library_manager.add_library(library);
-    app.state
-        .model
-        .library_manager
-        .select_view("legacy", "amp", "symbol");
-    app.state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
-
-    let output = render(&mut app, vec2(1100.0, 760.0));
-    let nodes = access_nodes(&output);
-    assert!(
-        nodes
-            .iter()
-            .any(|node| node.label() == Some("Typed contract required"))
-    );
-    assert!(
-        nodes.iter().any(|node| {
-            node.label() == Some("Edit component form\u{2026}") && node.is_disabled()
-        })
-    );
-}
-
-#[test]
-fn safe_mode_disables_every_symbol_mutation_but_keeps_editor_handoff() {
-    let mut app = app_with_typed_symbol();
-    app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
-            open_project_read_only: true,
-            ..crate::state::write_policy::LocalSafeModeOptions::default()
-        },
-        "{}".to_owned(),
-    );
-
-    let output = render(&mut app, vec2(1100.0, 760.0));
-    let nodes = access_nodes(&output);
-    for label in [
-        "Edit component form\u{2026}",
-        "Create symbol\u{2026}",
-        "Import symbol\u{2026}",
-    ] {
-        assert!(
-            nodes
-                .iter()
-                .any(|node| node.label() == Some(label) && node.is_disabled()),
-            "{label} remained enabled in safe mode"
-        );
-    }
-    assert!(
-        nodes
-            .iter()
-            .any(|node| { node.label() == Some("Open symbol editor") && !node.is_disabled() })
     );
 }

@@ -1125,13 +1125,17 @@ fn section_card(ui: &mut Ui, title: &str, description: &str, add_body: impl FnOn
 pub mod tests {
     use super::*;
     #[cfg(test)]
-    use crate::state::PortSpec;
+    use crate::state::{Cell, Library, PortSpec, View};
     use crate::state::{
         GeneratedSymbolViews, ParameterInheritance, SymbolElectricalType, SymbolGraphicTemplate,
         SymbolIdentity, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
         SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract,
     };
+    #[cfg(test)]
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    #[cfg(test)]
+    use crate::workbench::project::tests::harness;
 
     pub fn typed_symbol() -> ModelBoundSymbolDefinition {
         let pins = vec![
@@ -1226,6 +1230,173 @@ pub mod tests {
                     },
                 ],
             }
+        );
+    }
+
+    /// The project feature over a session holding one library, `authoring`,
+    /// whose `amp` cell's typed symbol view is selected, with the Symbol &
+    /// form page in front.
+    #[cfg(test)]
+    fn harness_with_typed_symbol() -> FeatureHarness<ProjectFeature> {
+        let mut harness = harness();
+        let definition = typed_symbol();
+        let mut view = View::new("symbol", ViewType::Symbol);
+        crate::state::store_model_bound_symbol(&definition, &mut view)
+            .expect("typed symbol stores");
+        let mut cell = Cell::new("amp");
+        cell.add_view(view);
+        let mut library = Library::new("authoring");
+        library.add_cell(cell);
+        harness.model.library_manager.add_library(library);
+        harness
+            .model
+            .library_manager
+            .select_view("authoring", "amp", "symbol");
+        harness.state.library_cellview_page = LibraryCellviewPage::SymbolForm;
+        harness
+    }
+
+    /// One frame of the manager alone, in the feature's context, at `size`.
+    #[cfg(test)]
+    fn render(harness: &mut FeatureHarness<ProjectFeature>, size: Vec2) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut harness.cx()));
+            },
+        )
+    }
+
+    #[cfg(test)]
+    fn access_nodes(output: &egui::FullOutput) -> Vec<&egui::accesskit::Node> {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accessibility tree")
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect()
+    }
+
+    #[test]
+    fn specialist_renders_both_pages_at_desktop_tablet_and_phone_widths() {
+        for page in LibraryCellviewPage::ALL {
+            for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
+                let mut harness = harness_with_typed_symbol();
+                harness.state.library_cellview_page = page;
+                let output = render(&mut harness, size);
+                assert!(
+                    !output.shapes.is_empty(),
+                    "{} did not render at {}x{}",
+                    page.label(),
+                    size.x,
+                    size.y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn symbol_page_exposes_live_preview_terminal_form_and_actions() {
+        let mut harness = harness_with_typed_symbol();
+        let output = render(&mut harness, vec2(1280.0, 900.0));
+        let nodes = access_nodes(&output);
+        for label in [
+            "Authored symbol preview",
+            "Terminal contract",
+            "Component form and inheritance",
+            "Open symbol editor",
+            "Edit component form\u{2026}",
+            "Create symbol\u{2026}",
+            "Import symbol\u{2026}",
+        ] {
+            assert!(
+                nodes.iter().any(|node| node.label() == Some(label)),
+                "missing accessible node {label}"
+            );
+        }
+        assert!(
+            output.shapes.len() > 20,
+            "the live symbol projection is empty"
+        );
+    }
+
+    #[test]
+    fn exact_selected_symbol_wins_over_an_unrelated_active_document() {
+        let harness = harness_with_typed_symbol();
+        assert_ne!(
+            harness.model.workspace.content.active_view,
+            CellViewRef::new("authoring", "amp", "symbol")
+        );
+        assert_eq!(
+            resolve_symbol_reference(&harness.model),
+            Some(CellViewRef::new("authoring", "amp", "symbol"))
+        );
+    }
+
+    #[test]
+    fn legacy_symbol_discloses_missing_contract_and_disables_form_editing() {
+        let mut harness = harness();
+        let mut library = Library::new("legacy");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        harness.model.library_manager.add_library(library);
+        harness
+            .model
+            .library_manager
+            .select_view("legacy", "amp", "symbol");
+        harness.state.library_cellview_page = LibraryCellviewPage::SymbolForm;
+
+        let output = render(&mut harness, vec2(1100.0, 760.0));
+        let nodes = access_nodes(&output);
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.label() == Some("Typed contract required"))
+        );
+        assert!(nodes.iter().any(|node| {
+            node.label() == Some("Edit component form\u{2026}") && node.is_disabled()
+        }));
+    }
+
+    #[test]
+    fn safe_mode_disables_every_symbol_mutation_but_keeps_editor_handoff() {
+        let mut harness = harness_with_typed_symbol();
+        harness.model.safe_mode.activate(
+            crate::state::write_policy::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..crate::state::write_policy::LocalSafeModeOptions::default()
+            },
+            "{}".to_owned(),
+        );
+
+        let output = render(&mut harness, vec2(1100.0, 760.0));
+        let nodes = access_nodes(&output);
+        for label in [
+            "Edit component form\u{2026}",
+            "Create symbol\u{2026}",
+            "Import symbol\u{2026}",
+        ] {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node.label() == Some(label) && node.is_disabled()),
+                "{label} remained enabled in safe mode"
+            );
+        }
+        assert!(
+            nodes
+                .iter()
+                .any(|node| { node.label() == Some("Open symbol editor") && !node.is_disabled() })
         );
     }
 }
