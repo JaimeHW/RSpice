@@ -1,5 +1,7 @@
 //! Existing preparation checks over sealed runtimes and executable source.
 
+use std::path::PathBuf;
+
 use super::*;
 use crate::netlist_preparation::validated_executable_hierarchy;
 
@@ -186,30 +188,90 @@ fn process_deck(program: &str) -> String {
 fn a_d_process_program_named_absolutely_passes_where_programs_start() {
     let program = std::env::temp_dir().join("toggle");
     let program = program.to_string_lossy();
-    reject_deferred_external_sources_on(&process_deck(&program), &Default::default(), true)
+    reject_deferred_external_sources_on(&process_deck(&program), &Default::default(), true, None)
         .unwrap_or_else(|error| {
             panic!("an absolute program is started as the CLI starts it: {error}")
         });
-    let error =
-        reject_deferred_external_sources_on(&process_deck("toggle"), &Default::default(), true)
-            .expect_err("a relative program no deck directory resolved is refused");
+    let error = reject_deferred_external_sources_on(
+        &process_deck("peers/toggle"),
+        &Default::default(),
+        true,
+        None,
+    )
+    .expect_err("a relative program no deck directory resolved is refused");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
     assert!(
         error
             .message()
-            .contains("'toggle' is named relative to no deck directory")
+            .contains("'peers/toggle' is named relative to no deck directory")
             && error.message().contains("line 2"),
         "{error}"
     );
+}
+
+/// A directory holding one program, `name`, for a search path.
+fn search_path_holding(name: &str) -> PathBuf {
+    let directory =
+        std::env::temp_dir().join(format!("rspice-search-path-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(name), "").unwrap();
+    directory
+}
+
+#[test]
+fn a_bare_d_process_program_on_the_search_path_passes_and_one_found_nowhere_is_refused() {
+    let directory = search_path_holding("rspice-peer");
+    let search_path = std::env::join_paths([std::env::temp_dir(), directory.clone()]).unwrap();
+    reject_deferred_external_sources_on(
+        &process_deck("rspice-peer"),
+        &Default::default(),
+        true,
+        Some(&search_path),
+    )
+    .unwrap_or_else(|error| panic!("a bare program on PATH starts from there: {error}"));
+    let error = reject_deferred_external_sources_on(
+        &process_deck("rspice-absent-peer"),
+        &Default::default(),
+        true,
+        Some(&search_path),
+    )
+    .expect_err("a bare program found nowhere is refused");
+    assert_eq!(error.stage(), PreparationStage::SourceChecks);
+    assert!(
+        error.message().contains(
+            "no file beside the deck and no directory on PATH holds the program \
+             'rspice-absent-peer'"
+        ) && error.message().contains("line 2"),
+        "{error}"
+    );
+    // A FIFO pair names files, never a program to look up.
+    let error = reject_deferred_external_sources_on(
+        &process_deck("rspice-peer|"),
+        &Default::default(),
+        true,
+        Some(&search_path),
+    )
+    .expect_err("a FIFO pair no deck directory resolved is refused");
+    assert!(
+        error
+            .message()
+            .contains("named relative to no deck directory"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 #[test]
 fn a_host_that_cannot_start_programs_refuses_each_d_process_instance_by_name() {
     let program = std::env::temp_dir().join("toggle");
     let program = program.to_string_lossy();
-    let error =
-        reject_deferred_external_sources_on(&process_deck(&program), &Default::default(), false)
-            .expect_err("a browser run cannot start a program");
+    let error = reject_deferred_external_sources_on(
+        &process_deck(&program),
+        &Default::default(),
+        false,
+        None,
+    )
+    .expect_err("a browser run cannot start a program");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
     let message = error.message();
     assert!(
@@ -225,7 +287,7 @@ fn a_host_that_cannot_start_programs_refuses_each_d_process_instance_by_name() {
 fn a_d_process_model_no_instance_names_starts_nothing() {
     let deck = "deck\n.model peer d_process (process_file = \"toggle\")\n.end\n";
     for starts_programs in [true, false] {
-        reject_deferred_external_sources_on(deck, &Default::default(), starts_programs)
+        reject_deferred_external_sources_on(deck, &Default::default(), starts_programs, None)
             .unwrap_or_else(|error| panic!("an unused model starts nothing: {error}"));
     }
 }

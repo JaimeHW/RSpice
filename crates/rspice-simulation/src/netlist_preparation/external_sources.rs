@@ -152,13 +152,17 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
         netlist,
         project_runtimes,
         process_programs::STARTS_PROGRAMS,
+        std::env::var_os("PATH").as_deref(),
     )
 }
 
+/// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
+/// starts programs or not, looking a bare program name up on `search_path`.
 fn reject_deferred_external_sources_on(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     starts_programs: bool,
+    search_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), PreparationError> {
     let records = executable_logical_lines(netlist);
     for (line_number, logical_line) in &records {
@@ -177,7 +181,13 @@ fn reject_deferred_external_sources_on(
                 continue;
             }
             if reason == PROCESS_PROGRAM {
-                admit_process_programs(&records, line_number, logical_line, starts_programs)?;
+                admit_process_programs(
+                    &records,
+                    line_number,
+                    logical_line,
+                    starts_programs,
+                    search_path,
+                )?;
                 continue;
             }
             return Err(PreparationError::new(
@@ -193,14 +203,16 @@ fn reject_deferred_external_sources_on(
 }
 
 /// Admit a record's `d_process` programs when this host starts each where
-/// the CLI starts it, by an absolute path; otherwise refuse, naming the
-/// instances when the host cannot start programs at all. A model no
-/// instance names starts nothing and passes.
+/// the CLI starts it: by an absolute path, or by a bare name `search_path`
+/// finds. Otherwise refuse, naming the program, or naming the instances when
+/// the host cannot start programs at all. A model no instance names starts
+/// nothing and passes.
 fn admit_process_programs(
     records: &[(usize, String)],
     line_number: usize,
     record: &str,
     starts_programs: bool,
+    search_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), PreparationError> {
     let instances = process_programs::process_instances(records, record);
     if instances.is_empty() {
@@ -224,11 +236,19 @@ fn admit_process_programs(
             ),
         ));
     }
-    match programs
-        .iter()
-        .find(|program| !process_programs::names_its_program_absolutely(program))
-    {
+    match programs.iter().find(|program| {
+        !process_programs::names_its_program_absolutely(program)
+            && process_programs::program_on_path(program, search_path).is_none()
+    }) {
         None => Ok(()),
+        Some(program) if process_programs::is_bare_program(program) => Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!(
+                "Executable netlist contains an unsealed external dependency ({PROCESS_PROGRAM}) at \
+                 line {line_number}: {record}; no file beside the deck and no directory on PATH \
+                 holds the program '{program}'"
+            ),
+        )),
         Some(program) => Err(PreparationError::new(
             PreparationStage::SourceChecks,
             format!(

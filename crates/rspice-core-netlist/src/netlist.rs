@@ -3225,6 +3225,14 @@ fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Pat
 /// resolves it: a relative path joins the directory, keeping a `d_process`
 /// program's `|`/`||` pipe suffix; an absolute path, a URL, an empty value,
 /// or a parameter that names no file is returned as written.
+///
+/// A `d_process` program named bare, with no directory separator, joins the
+/// directory only when a file of that name stands there. Otherwise it is
+/// returned as written, and the program is looked up on `PATH` when it
+/// starts, as `execvp(3)` and ngspice's Windows build (`_spawnvp`,
+/// `d_process/cfunc.mod:569`) find it. ngspice's POSIX build calls `execv`
+/// (`cfunc.mod:327`), which reads a bare name from the working directory
+/// and never searches `PATH`.
 pub fn normalize_model_string_path_value(
     name: &str,
     value: &str,
@@ -3244,6 +3252,13 @@ pub fn normalize_model_string_path_value(
 
     let candidate = Path::new(path_value);
     if candidate.is_absolute() {
+        return value.to_string();
+    }
+    if suffix.is_empty()
+        && name.eq_ignore_ascii_case("process_file")
+        && !path_value.contains(['/', '\\'])
+        && !base_dir.join(candidate).is_file()
+    {
         return value.to_string();
     }
 
@@ -8148,6 +8163,39 @@ mod tests {
                 "unexpected value for {name}"
             );
         }
+    }
+
+    #[test]
+    fn a_bare_process_program_joins_the_deck_directory_only_when_it_stands_there() {
+        let base = std::env::temp_dir().join(format!("rspice-bare-program-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("beside"), "").unwrap();
+        let joined = |name: &str| base.join(name).to_string_lossy().into_owned();
+        // A file beside the deck shadows any program of that name on PATH.
+        assert_eq!(
+            normalize_model_string_path_value("process_file", "beside", Some(&base)),
+            joined("beside")
+        );
+        // A bare name nothing beside the deck answers to starts from PATH.
+        assert_eq!(
+            normalize_model_string_path_value("PROCESS_FILE", "python3", Some(&base)),
+            "python3"
+        );
+        // A path with a separator, and a FIFO pair, stay deck-relative.
+        assert_eq!(
+            normalize_model_string_path_value("process_file", "peers/toggle", Some(&base)),
+            joined("peers/toggle")
+        );
+        assert_eq!(
+            normalize_model_string_path_value("process_file", "pipe|", Some(&base)),
+            format!("{}|", joined("pipe"))
+        );
+        // The rule is the program's alone; other file parameters still join.
+        assert_eq!(
+            normalize_model_string_path_value("FXPDATA", "python3", Some(&base)),
+            joined("python3")
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

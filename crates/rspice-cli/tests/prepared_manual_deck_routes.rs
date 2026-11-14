@@ -359,31 +359,65 @@ const TOGGLE_PEER: &str = "#!/bin/sh\nhead -c 3\nq=0\nwhile :; do\n  \
                            q=$((1 - q))\n  if [ $q -eq 1 ]; then printf '\\001'; \
                            else printf '\\000'; fi\ndone\n";
 
-/// A `d_process` names its program relative to the deck: both routes start
-/// it from the deck's directory and give the same events and voltages.
+/// A peer of the same protocol that answers every packet with 0: it never
+/// toggles, so a run shows which of the two peers it started.
 #[cfg(unix)]
-#[test]
-fn a_d_process_program_beside_the_deck_gives_the_clis_numbers() {
+const QUIET_PEER: &str = "#!/bin/sh\nhead -c 3\nwhile :; do\n  \
+                          n=$(head -c 9 | wc -c)\n  [ $n -eq 9 ] || exit 0\n  \
+                          printf '\\000'\ndone\n";
+
+#[cfg(unix)]
+fn write_peer(dir: &Path, name: &str, script: &str) {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = test_dir("prepared-process");
-    write(&dir, "toggle", TOGGLE_PEER);
-    std::fs::set_permissions(dir.join("toggle"), std::fs::Permissions::from_mode(0o755))
+    write(dir, name, script);
+    std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o755))
         .expect("make the peer executable");
-    write(
-        &dir,
-        "deck.cir",
+}
+
+/// A deck whose `d_process` starts `program`: a 1 MHz clock clocks it, and
+/// its output drives an RC load.
+#[cfg(unix)]
+fn process_deck(program: &str) -> String {
+    format!(
         "d_process toggle peer\nvc cntl 0 0.5\naosc cntl dosc osc1\n\
          .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 \
          rise_delay=1e-10 fall_delay=1e-10)\n\
          aproc [dosc] dosc null [d] proc1\n\
-         .model proc1 d_process(process_file=\"toggle\" clk_delay=1e-9 reset_delay=1e-9)\n\
+         .model proc1 d_process(process_file=\"{program}\" clk_delay=1e-9 reset_delay=1e-9)\n\
          abr [d] [dd] dac1\n\
          .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
-         r1 dd out 1k\nc1 out 0 1p\n.tran 10n 5u 0 100n\n.end\n",
-    );
-    let events = assert_same_transient(&dir.join("deck.cir"), "d");
-    // One toggle a clock delay after each rising edge of the 1 MHz clock.
+         r1 dd out 1k\nc1 out 0 1p\n.tran 10n 5u 0 100n\n.end\n"
+    )
+}
+
+/// The directory this test process puts first on its `PATH`, holding the
+/// toggle peer as `rspice-path-toggle` and the quiet peer as
+/// `rspice-path-shadowed`. The CLI child inherits the variable, and the
+/// prepared route's solve starts its program from this process.
+#[cfg(unix)]
+fn peers_on_path() {
+    static ON_PATH: std::sync::OnceLock<common::TestDirectory> = std::sync::OnceLock::new();
+    ON_PATH.get_or_init(|| {
+        let dir = test_dir("prepared-process-path");
+        write_peer(&dir, "rspice-path-toggle", TOGGLE_PEER);
+        write_peer(&dir, "rspice-path-shadowed", QUIET_PEER);
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let path = std::env::join_paths(
+            std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path)),
+        )
+        .expect("a PATH");
+        // SAFETY: the standard library takes its environment lock for every
+        // read it makes, including a spawn's, and nothing in this test binary
+        // reads the environment outside it.
+        unsafe { std::env::set_var("PATH", path) };
+        dir
+    });
+}
+
+/// One toggle a clock delay after each rising edge of the 1 MHz clock.
+#[cfg(unix)]
+fn assert_toggles(events: &[(f64, String)]) {
     let toggles: Vec<_> = events.iter().skip(1).collect();
     assert_eq!(toggles.len(), 5, "{events:?}");
     for (edge, (time, state)) in toggles.iter().enumerate() {
@@ -395,4 +429,38 @@ fn a_d_process_program_beside_the_deck_gives_the_clis_numbers() {
             "{events:?}"
         );
     }
+}
+
+/// A `d_process` names a bare program that stands beside no deck: both
+/// routes look it up on `PATH` and give the same events and voltages.
+#[cfg(unix)]
+#[test]
+fn a_bare_d_process_program_on_path_gives_the_clis_numbers() {
+    peers_on_path();
+    let dir = test_dir("prepared-process-bare");
+    write(&dir, "deck.cir", &process_deck("rspice-path-toggle"));
+    assert_toggles(&assert_same_transient(&dir.join("deck.cir"), "d"));
+}
+
+/// A file beside the deck shadows the program of the same name on `PATH`,
+/// on both routes: the toggle peer beside it runs, not the quiet one.
+#[cfg(unix)]
+#[test]
+fn a_d_process_program_beside_the_deck_shadows_one_on_path() {
+    peers_on_path();
+    let dir = test_dir("prepared-process-shadow");
+    write_peer(&dir, "rspice-path-shadowed", TOGGLE_PEER);
+    write(&dir, "deck.cir", &process_deck("rspice-path-shadowed"));
+    assert_toggles(&assert_same_transient(&dir.join("deck.cir"), "d"));
+}
+
+/// A `d_process` names its program relative to the deck: both routes start
+/// it from the deck's directory and give the same events and voltages.
+#[cfg(unix)]
+#[test]
+fn a_d_process_program_beside_the_deck_gives_the_clis_numbers() {
+    let dir = test_dir("prepared-process");
+    write_peer(&dir, "toggle", TOGGLE_PEER);
+    write(&dir, "deck.cir", &process_deck("toggle"));
+    assert_toggles(&assert_same_transient(&dir.join("deck.cir"), "d"));
 }

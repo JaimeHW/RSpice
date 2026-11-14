@@ -2,8 +2,14 @@ use std::path::PathBuf;
 
 use super::*;
 
+/// A deck directory holding the programs `toggle` and `counter`.
 fn deck_dir() -> PathBuf {
-    std::env::temp_dir().join("decks")
+    let directory = std::env::temp_dir().join(format!("rspice-decks-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    for name in ["toggle", "counter"] {
+        std::fs::write(directory.join(name), "").unwrap();
+    }
+    directory
 }
 
 fn resolved(source: &str) -> String {
@@ -61,6 +67,40 @@ fn an_instance_override_is_resolved_and_other_records_are_kept() {
 }
 
 #[test]
+fn a_bare_program_no_file_beside_the_deck_answers_to_is_kept_for_path() {
+    let source = "deck\n.model p1 d_process(process_file=\"rspice-mixed-corpus\")\n\
+                  .model p2 d_process process_file=toggle\n.end\n";
+    let expected = format!(
+        "deck\n.model p1 d_process(process_file=\"rspice-mixed-corpus\")\n\
+         .model p2 d_process process_file={}\n.end\n",
+        program("toggle")
+    );
+    assert_eq!(resolved(source), expected);
+}
+
+#[test]
+fn a_bare_program_is_found_on_the_search_path_and_nowhere_else() {
+    let directory = std::env::temp_dir().join(format!("rspice-path-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("peer"), "").unwrap();
+    let search_path = std::env::join_paths([deck_dir(), directory.clone()]).unwrap();
+    assert_eq!(
+        program_on_path("peer", Some(&search_path)),
+        Some(directory.join("peer"))
+    );
+    // The first directory holding it wins.
+    assert_eq!(
+        program_on_path("toggle", Some(&search_path)),
+        Some(deck_dir().join("toggle"))
+    );
+    assert_eq!(program_on_path("absent", Some(&search_path)), None);
+    assert_eq!(program_on_path("peer", None), None);
+    // A path or a FIFO pair is never looked up.
+    assert_eq!(program_on_path("sub/peer", Some(&search_path)), None);
+    assert_eq!(program_on_path("peer|", Some(&search_path)), None);
+}
+
+#[test]
 fn without_a_deck_directory_the_source_is_kept() {
     let source = "deck\n.model p d_process process_file=toggle\n.end\n";
     assert_eq!(resolve_process_programs(source.to_owned(), None), source);
@@ -68,7 +108,9 @@ fn without_a_deck_directory_the_source_is_kept() {
 
 #[test]
 fn a_program_path_with_spaces_stays_one_value() {
-    let dir = std::env::temp_dir().join("my decks");
+    let dir = std::env::temp_dir().join(format!("my decks {}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("toggle"), "").unwrap();
     let source = "deck\n.model p d_process process_file=toggle\n.end\n";
     let expected = format!(
         "deck\n.model p d_process process_file=\"{}\"\n.end\n",

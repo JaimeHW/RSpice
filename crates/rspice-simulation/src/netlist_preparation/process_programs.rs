@@ -4,10 +4,14 @@
 //! the root deck's directory when that path is relative. A prepared run is
 //! solved without a source path, so preparation writes each relative program
 //! path into the executable deck as that directory resolves it, and the solve
-//! starts the program the CLI starts. A host that cannot start a program, as
-//! the browser's worker cannot, refuses each instance by name before solving.
+//! starts the program the CLI starts. A program named bare, with no
+//! directory separator, is resolved there only when a file of that name
+//! stands beside the deck; otherwise the solve looks it up on `PATH`, on
+//! both routes. A host that cannot start a program, as the browser's worker
+//! cannot, refuses each instance by name before solving.
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 use rspice_core::config::ExpressionDialect;
 use rspice_core::netlist::{normalize_model_string_path_value, strip_spice_inline_comment};
@@ -211,6 +215,31 @@ pub(crate) fn names_its_program_absolutely(program: &str) -> bool {
         .or_else(|| program.strip_suffix('|'))
         .unwrap_or(program);
     base.trim().is_empty() || Path::new(base).is_absolute()
+}
+
+/// Whether `program` is a bare program name, with no directory and no FIFO
+/// suffix: the one form a solve looks up on `PATH` when no file beside the
+/// deck answers to it.
+pub(crate) fn is_bare_program(program: &str) -> bool {
+    !program.trim().is_empty() && !program.ends_with('|') && !program.contains(['/', '\\'])
+}
+
+/// The file a bare `program` starts from when it is looked up on `PATH`:
+/// the first directory there holding it, as `execvp(3)` searches. Windows,
+/// as `std::process::Command` does, also tries the name with `.exe`.
+pub(crate) fn program_on_path(program: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
+    if !is_bare_program(program) {
+        return None;
+    }
+    std::env::split_paths(search_path?).find_map(|directory| {
+        let candidate = directory.join(program);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        let executable = candidate.with_extension("exe");
+        (cfg!(windows) && Path::new(program).extension().is_none() && executable.is_file())
+            .then_some(executable)
+    })
 }
 
 /// The model a code-model instance record names: its last word that is
