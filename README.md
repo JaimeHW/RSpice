@@ -125,7 +125,65 @@ How each analysis is requested from a deck or from `rspice run`:
 `.STEP`, `.TEMP` and `--corners` multiply the analyses a deck requests rather
 than adding one of their own. Whether an analysis may run on a given circuit
 is decided before any solver work, and a refusal names the analysis, the
-instance and the reason.
+instance and the reason. The decision is one table in the engine, indexed by
+analysis and by the families of instances the circuit holds:
+
+<!-- support table: written from engine::capability_cell by crates/rspice-core/tests/engine/capability_support_table.rs -->
+
+| Analysis | SPICE device | XSPICE analog code model | XSPICE event-driven code model | Verilog-A instance | Generated Verilog-A instance | Mixed Verilog-AMS instance | Real-valued event net |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Operating point | yes | yes | yes | yes | yes | yes | yes |
+| DC sweep | yes | yes | yes | yes | yes | yes | yes |
+| AC analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| Noise analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| Transfer function | if (1) | yes | yes | yes | yes | yes | yes |
+| S-parameter analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| STB analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| Pole-zero analysis | if (1) | if (2) | yes | if (3) | yes | if (3) | yes |
+| Sensitivity analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| Distortion analysis | if (1) | yes | yes | yes | yes | yes | yes |
+| Transient analysis | yes | yes | yes | yes | yes | yes | yes |
+| Transient noise | if (4) | yes | yes | if (5) | if (5) | if (5) | yes |
+| Fourier analysis | yes | yes | yes | yes | yes | yes | yes |
+| FFT analysis | yes | yes | yes | yes | yes | yes | yes |
+| Parameter sweep | yes | yes | yes | yes | yes | yes | yes |
+| PSS analysis | if (6) | if (6) | no (a) | if (7) | if (8) | no (a) | no (a) |
+| Harmonic-balance analysis | if (6) | if (6) | no (a) | if (9) | if (10) | no (a) | no (a) |
+| PAC analysis | if (6) | if (6) | no (a) | if (11) | if (12) | no (a) | no (a) |
+| Pnoise analysis | if (6) | if (6) | no (a) | if (13) | if (14) | no (a) | no (a) |
+| PXF analysis | if (6) | if (6) | no (a) | if (11) | if (12) | no (a) | no (a) |
+| PSTB analysis | if (6) | if (6) | no (a) | no (b) | no (c) | no (a) | no (a) |
+| Envelope analysis | if (15) | if (15) | no (a) | no (d) | no (c) | no (a) | no (a) |
+| Quasi-periodic analysis | if (15) | if (15) | no (a) | no (e) | no (f) | no (a) | no (a) |
+
+A restricted cell runs the instances its condition admits and refuses the others by name:
+
+- (1) every native device model whose charge and small-signal equations this build implements
+- (2) every instance whose dynamic state exports a complete rational G + sC descriptor
+- (3) every Verilog-A analog body without absdelay, zi_* or idtmod, whose ddt, idt and laplace_* operators become explicit G + sC descriptor states
+- (4) every native noise mechanism the transient-noise render plan can render: white, flicker and tabulated sources, without burst noise, BSIM4 tnoiMod=2 correlated thermal noise or a noise-only private row
+- (5) every Verilog-A noise process whose shaping is rational: white, flicker and tabulated noise, and noise shaped through ddt, idt or laplace_* with bias-independent filter dynamics, without absdelay, zi_* or idtmod on its path
+- (6) every instance whose declared periodic contracts admit it
+- (7) every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, with no voltage contribution, no `ddt` it does not contribute as a charge, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points; its charges are integrated over the period from the node voltages the period starts at
+- (8) every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution that stores flux (an inductance) at its parameters; its charges are integrated over the period from the state the period starts at, with the nodes its own voltage contributions tie taken as one
+- (9) every Verilog-A module whose analog body is memoryless equations, `ddt` (of a charge it contributes, or carried as an unknown of its own), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, `absdelay` by a fixed delay, and `$abstime` read periodically over the analysis period, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_* or variable kept between time points
+- (10) every generated compact model whose harmonics a settled-transient fixture confirmed and whose generator proved its residual memoryless equations plus `ddt` (of a charge it contributes, or carried as an unknown of its own) and `idt` with an initial condition that fixes its DC output: no idtmod, cross, above, timer, last_crossing or $abstime in its equations, no `ddt` or `idt` a bias-dependent condition switches, and no variable the next evaluation reads back after the body assigned it
+- (11) on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; on a shooting (PSS) carrier, every one both shooting and harmonic balance admit
+- (12) every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier
+- (13) every Verilog-A module periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit
+- (14) every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit
+- (15) every instance whose declared envelope and periodic contracts admit it
+
+A refused cell refuses on the family's first instance:
+
+- (a) `analysis.mixed_signal.discrete_state`: a periodic steady state with a running discrete state has no formulation yet: the digital half's event queue, process resumptions and drivers are not part of a period map; a transient runs the circuit with its digital half live, and transient noise (.TRAN with NOISEFMAX) gives its noise
+- (b) `analysis.periodic.veriloga`: Verilog-A integration state is not part of a period map
+- (c) `analysis.periodic.veriloga`: generated Verilog-A integration state
+- (d) `analysis.periodic.veriloga`: Verilog-A integration state is not part of an envelope
+- (e) `analysis.periodic.veriloga`: runtime Verilog-A devices without exact HB charge/noise capability metadata
+- (f) `analysis.periodic.veriloga`: generated Verilog-A compact-model equations
+
+<!-- end of support table -->
 
 ## Devices
 

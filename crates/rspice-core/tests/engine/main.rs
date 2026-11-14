@@ -4,6 +4,7 @@
 mod family_src;
 
 mod ascii_numeric_precision;
+mod capability_support_table;
 mod current_output_units;
 mod decoder_robustness;
 mod determinism;

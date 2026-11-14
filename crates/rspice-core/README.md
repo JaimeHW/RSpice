@@ -103,8 +103,9 @@ indexed by analysis and by instance family: native SPICE, XSPICE analog and
 event models, runtime and generated Verilog-A, mixed Verilog-AMS, and
 real-number nets. Every analysis
 consults it before solver work, and a refused cell names the analysis, the
-instance, its module and the reason. Generated compact models, for example,
-are refused by every periodic analysis.
+instance, its module and the reason. The root README's
+[support table](../../README.md#analyses) is written from it, and a test
+fails when the two differ.
 
 ### Periodic analysis cards
 
