@@ -284,7 +284,7 @@ const fn review_marker_label(value: SchematicReviewMarkerVisibility) -> &'static
 pub(crate) mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
     pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -296,15 +296,15 @@ pub(crate) mod tests {
         );
     }
 
-    fn capture_visibility_recovery(state: &AppState) -> SchematicVisibilityRecovery {
+    fn capture_visibility_recovery(state: &DesignTestHost) -> SchematicVisibilityRecovery {
         state.design.capture_visibility_recovery(&state.model)
     }
 
-    fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
+    fn restore_visibility_recovery(state: &mut DesignTestHost) -> Result<(), String> {
         state.design.restore_visibility_recovery(&mut state.model)
     }
 
-    fn publish_visibility_policy(state: &mut AppState, policy: SchematicVisibilityPolicy) {
+    fn publish_visibility_policy(state: &mut DesignTestHost, policy: SchematicVisibilityPolicy) {
         state
             .design
             .publish_visibility_policy(&mut state.model, policy);
@@ -341,7 +341,7 @@ pub(crate) mod tests {
 
     #[test]
     fn applying_visibility_changes_only_session_owned_runtime_state() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let design_before = serde_json::to_value(&state.model.schematic)
             .expect("serialize project-owned schematic");
         let topology_before = state.model.schematic.topology_version();
@@ -385,7 +385,7 @@ pub(crate) mod tests {
 
     #[test]
     fn visibility_recovery_restores_policy_routing_highlight_and_selection() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let selected = state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::origin(),
