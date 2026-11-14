@@ -583,30 +583,30 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
 fn generated_models_reach_the_settled_transients_steady_state() {
     let mut failures = Vec::new();
     for (family, circuit, node) in settled_fixtures() {
-        let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
-        let netlist = Netlist::parse(&deck).expect("parse");
-        let hb = match engine().run_hb(
-            &netlist,
-            HbConfig::new(F0)
-                .with_harmonics(HARMONICS)
-                .with_tolerance(1e-9),
-        ) {
-            Ok(result) => spectrum(&result, node),
-            Err(error) => {
-                failures.push(format!("{family}: harmonic balance must run: {error}"));
-                continue;
-            }
-        };
-        compare_with_settled_transient(
-            &netlist,
-            family,
-            node,
-            "harmonic balance",
-            &hb,
-            &mut failures,
-        );
+        check_fixture(family, circuit, node, &mut failures);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Run one fixture through harmonic balance and compare its spectrum with
+/// the settled transient's, under the allowance
+/// [`generated_models_reach_the_settled_transients_steady_state`] states.
+fn check_fixture(family: &str, circuit: &str, node: &str, failures: &mut Vec<String>) {
+    let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let hb = match engine().run_hb(
+        &netlist,
+        HbConfig::new(F0)
+            .with_harmonics(HARMONICS)
+            .with_tolerance(1e-9),
+    ) {
+        Ok(result) => spectrum(&result, node),
+        Err(error) => {
+            failures.push(format!("{family}: harmonic balance must run: {error}"));
+            return;
+        }
+    };
+    compare_with_settled_transient(&netlist, family, node, "harmonic balance", &hb, failures);
 }
 
 /// Compare `periodic`, a steady-state spectrum of V(`node`), with the
@@ -742,9 +742,20 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 /// (BSIM-SOI 4.6.1 and e2aff994).
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
-    use rspice_core::identity::AnalysisKind;
-    use rspice_core::{SimulationError, UnsupportedCapabilityError};
-    let cases: Vec<(&str, &str, &str, &str)> = vec![
+    let failures: Vec<String> = refused_models()
+        .into_iter()
+        .filter_map(|(card, instance, module, reason)| {
+            check_refusal(card, instance, module, reason)
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Every model harmonic balance refuses: a card that instantiates it from
+/// the driven node `d`, its instance and module, and the reason its refusal
+/// ends with.
+fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    vec![
         #[cfg(feature = "veriloga-model-psp103va")]
         (
             "XM d d 0 0 psp103va",
@@ -777,44 +788,102 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "bsimsoi_va",
             "harmonic balance and the transient disagree on the fundamental by a factor of 9",
         ),
-    ];
-    for (card, instance, module, reason) in cases {
-        let deck =
-            format!("* refused generated model\nV1 in 0 SIN(0 1 1meg)\nR1 in d 1k\n{card}\n.end\n");
-        let netlist = Netlist::parse(&deck).expect("parse");
-        let error = engine()
-            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(2))
-            .map(drop)
-            .expect_err("HB must refuse the model");
-        let SimulationError::UnsupportedCapability(refusal) = &error else {
-            panic!("{module}: expected a capability refusal, got {error}");
-        };
-        let UnsupportedCapabilityError {
-            capability,
-            analysis_kind,
-            instance: refused_instance,
-            module: refused_module,
-            detail,
-            ..
-        } = refusal.as_ref();
-        assert_eq!(*capability, "analysis.hb.veriloga_operator", "{error}");
-        assert_eq!(
-            *analysis_kind,
-            Some(AnalysisKind::HarmonicBalance),
-            "{error}"
-        );
-        assert_eq!(refused_instance.as_deref(), Some(instance), "{error}");
-        assert!(
-            refused_module
-                .as_deref()
-                .is_some_and(|name| name.eq_ignore_ascii_case(module)),
-            "{error}"
-        );
-        assert!(
-            detail.contains("harmonic-balance analysis") && detail.ends_with(reason),
-            "{module}: the refusal must name the analysis and its reason: {detail}"
-        );
+        #[cfg(feature = "veriloga-model-psp103tva")]
+        (
+            "XM d d 0 0 t psp103tva",
+            "XM",
+            "psp103tva",
+            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
+             path their parameters do not rule out, so they keep their values from the last \
+             accepted time point, which no harmonic-balance spectrum carries",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs103va")]
+        (
+            "XM d d 0 0 pspnqs103va",
+            "XM",
+            "pspnqs103va",
+            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
+             path their parameters do not rule out, so they keep their values from the last \
+             accepted time point, which no harmonic-balance spectrum carries",
+        ),
+    ]
+}
+
+/// Run harmonic balance on `card` driven through a resistor; what is wrong
+/// unless it refuses `instance` of `module` before solving, naming the
+/// analysis and ending with `reason`.
+fn check_refusal(card: &str, instance: &str, module: &str, reason: &str) -> Option<String> {
+    use rspice_core::identity::AnalysisKind;
+    use rspice_core::{SimulationError, UnsupportedCapabilityError};
+    let deck =
+        format!("* refused generated model\nV1 in 0 SIN(0 1 1meg)\nR1 in d 1k\n{card}\n.end\n");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let error = match engine().run_hb(&netlist, HbConfig::new(F0).with_harmonics(2)) {
+        Ok(_) => return Some(format!("{module}: harmonic balance must refuse it")),
+        Err(error) => error,
+    };
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        return Some(format!(
+            "{module}: expected a capability refusal, got {error}"
+        ));
+    };
+    let UnsupportedCapabilityError {
+        capability,
+        analysis_kind,
+        instance: refused_instance,
+        module: refused_module,
+        detail,
+        ..
+    } = refusal.as_ref();
+    let named = *capability == "analysis.hb.veriloga_operator"
+        && *analysis_kind == Some(AnalysisKind::HarmonicBalance)
+        && refused_instance.as_deref() == Some(instance)
+        && refused_module
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(module))
+        && detail.contains("harmonic-balance analysis")
+        && detail.ends_with(reason);
+    (!named).then(|| {
+        format!(
+            "{module}: the refusal must name the analysis, instance, module and reason: {error}"
+        )
+    })
+}
+
+/// Every shipped model this build compiles, walked by name: an admitted one
+/// must reach its fixture's settled transient, a refused one must give its
+/// named reason, and one with neither a fixture nor a named refusal fails,
+/// so a model the generator newly admits cannot go unchecked. A fixture or
+/// refusal names its model as a word of its deck. It needs every model
+/// feature, which only the nightly builds, so ordinary runs skip it.
+#[test]
+#[ignore = "nightly: needs every model feature"]
+fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
+    use rspice_core::device::veriloga_builtins::builtins;
+    let names_model = |deck: &str, name: &str| {
+        deck.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .any(|word| word.eq_ignore_ascii_case(name))
+    };
+    let fixtures = settled_fixtures();
+    let refused = refused_models();
+    let mut failures = Vec::new();
+    for &name in builtins::builtin_names() {
+        if let Some(&(card, instance, module, reason)) =
+            refused.iter().find(|(card, ..)| names_model(card, name))
+        {
+            failures.extend(check_refusal(card, instance, module, reason));
+        } else if let Some(&(family, circuit, node)) = fixtures
+            .iter()
+            .find(|(_, circuit, _)| names_model(circuit, name))
+        {
+            check_fixture(family, circuit, node, &mut failures);
+        } else {
+            failures.push(format!(
+                "{name}: harmonic balance admits it, but it has no settled-transient fixture"
+            ));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Shooting refuses the generated models harmonic balance refuses, before

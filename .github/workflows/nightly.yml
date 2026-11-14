@@ -320,6 +320,39 @@ jobs:
           path: target/veriloga-stamp-qualification.json
           if-no-files-found: error
 
+  generated-hb-models:
+    name: Every shipped model through harmonic balance (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Every shipped model, walked by name: one harmonic balance admits must
+    # reach its fixture's settled transient, one it refuses must give its
+    # named reason, and an admitted model with no fixture fails, so a model
+    # the generator newly admits cannot go unchecked. It needs every model
+    # feature, so ordinary cargo test ignores it. Measured locally at four
+    # build jobs: the release build about 25 minutes cold, the walk under
+    # six. The build runs as its own command, and the job runs
+    # beside the corpus gates so they keep their time.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: generated-hb-models
+          cache-on-failure: true
+      - name: Build the walk over every shipped model
+        id: build
+        run: >-
+          cargo test --locked --release -p rspice-core --features veriloga,veriloga-builtins
+          --test generated --no-run
+      - name: Every shipped model through harmonic balance
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-core --features veriloga,veriloga-builtins
+          --test generated every_shipped_model_reaches_its_fixture_or_names_its_refusal -- --ignored
+
   mixed-determinism:
     name: Mixed-deck determinism (serial vs parallel)
     runs-on: ubuntu-latest
