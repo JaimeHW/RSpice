@@ -557,7 +557,11 @@ use super::*;
 // decodes in parallel. The compiler build is part of the file name too, so
 // from here on a compiler change no longer needs a bump of this constant to
 // keep its records apart.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 182;
+//
+// Version 183 records where the module wrote each analog operator with state,
+// which harmonic balance reads to name the source line of an operator it
+// refuses or cannot carry. An earlier record carries no operator origins.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 183;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_RECORD_EXTENSION: &str = "record";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -1022,6 +1022,7 @@ impl VerilogACompiler {
         Self::locate_analog_tasks(
             &mut model,
             &executable,
+            &canonical_ir,
             source_package,
             preprocessed,
             source_map,
@@ -1089,10 +1090,13 @@ impl VerilogACompiler {
     /// one, else by counting the compiled text's lines.
     ///
     /// Contributions are located the same way, with their text, so a run-time
-    /// refusal of one can say which line of the model it was.
+    /// refusal of one can say which line of the model it was, and so is every
+    /// analog operator with state, by the record it owns, so an analysis that
+    /// cannot carry one can say where it was written.
     fn locate_analog_tasks(
         model: &mut CompiledModel,
         executable: &semantic::AnalyzedModule,
+        canonical_ir: &canonical_ir::CanonicalIrArtifact,
         source_package: &str,
         source: &str,
         source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
@@ -1142,6 +1146,46 @@ impl VerilogACompiler {
             })
             .collect();
         model.locate_contributions(contributions);
+        let base_name = |file: SmolStr| -> SmolStr {
+            std::path::Path::new(file.as_str())
+                .file_name()
+                .map_or(file.clone(), |name| name.to_string_lossy().as_ref().into())
+        };
+        let hir = &canonical_ir.hir;
+        let expression = |id: canonical_ir::ExprId| {
+            hir.expressions
+                .get(id.index() as usize)
+                .filter(|expression| expression.id == id)
+                .or_else(|| {
+                    hir.expressions
+                        .iter()
+                        .find(|expression| expression.id == id)
+                })
+        };
+        let operators = canonical_ir::state::CanonicalStateLayout::from_hir(hir)
+            .sites()
+            .iter()
+            .filter_map(|site| {
+                let written = expression(site.operator)?;
+                let name = match &written.kind {
+                    canonical_ir::HirExprKind::SystemFunction { name, .. }
+                    | canonical_ir::HirExprKind::Call { name, .. } => name,
+                    _ => return None,
+                };
+                let location = locate(written.span).map(|(file, line)| (base_name(file), line));
+                Some(codegen::AnalogOperatorOrigin {
+                    operator: name
+                        .strip_prefix('$')
+                        .unwrap_or(name)
+                        .to_ascii_lowercase()
+                        .into(),
+                    family: site.kind.name().into(),
+                    slot: site.slot,
+                    location,
+                })
+            })
+            .collect();
+        model.locate_analog_operators(operators);
     }
 
     /// It runs for every runtime, not only the JIT: the VM and the JIT read the
@@ -2472,6 +2516,7 @@ impl VerilogACompiler {
         Self::locate_analog_tasks(
             &mut model,
             &executable,
+            &canonical_ir,
             &prepared.source_package,
             &prepared.source,
             Some(&prepared.source_map),

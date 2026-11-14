@@ -4624,6 +4624,23 @@ impl VerilogADevice {
         self.model.requires_nodeset_phase
     }
 
+    /// Where the operator owning slot `slot` of state family `family` (a
+    /// canonical operator name: `idt`, `laplace`, `absdelay`, ...) was
+    /// written.
+    pub fn analog_operator_origin(
+        &self,
+        family: &str,
+        slot: usize,
+    ) -> Option<&crate::codegen::AnalogOperatorOrigin> {
+        self.model.analog_operator_origin(family, slot)
+    }
+
+    /// Every analog operator with state the compile recorded, by family and
+    /// slot.
+    pub fn analog_operator_origins(&self) -> &[crate::codegen::AnalogOperatorOrigin] {
+        self.model.analog_operator_origins()
+    }
+
     /// The compiled module's identity, available before analysis initialization.
     pub fn model_name(&self) -> &str {
         &self.model.name

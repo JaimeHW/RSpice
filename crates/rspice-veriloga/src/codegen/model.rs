@@ -134,6 +134,11 @@ pub struct CompiledModel {
     /// Empty when the compile had no source text to locate them in.
     #[serde(default)]
     pub contribution_sources: Vec<SmolStr>,
+    /// Where each analog operator with state was written, by the record it
+    /// owns, for a refusal that has to name one. Empty when the compile had
+    /// no source text to locate them in.
+    #[serde(default)]
+    pub analog_operator_origins: Vec<AnalogOperatorOrigin>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
@@ -646,6 +651,32 @@ const fn default_true() -> bool {
     true
 }
 
+/// Where one analog operator with state was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalogOperatorOrigin {
+    /// The operator as the module wrote it, lowercase and without a `$`:
+    /// `idt`, `laplace_nd`, `last_crossing`, ...
+    pub operator: SmolStr,
+    /// The canonical name of the state family that owns its record (`idt`,
+    /// `laplace`, `absdelay`, `cross`, ...).
+    pub family: SmolStr,
+    /// The record's slot within that family, as the operator's instructions
+    /// address it.
+    pub slot: u32,
+    /// The file's name, without its directory, and the one-based line,
+    /// when the compile had the source text to locate the call in.
+    pub location: Option<(SmolStr, u32)>,
+}
+
+impl AnalogOperatorOrigin {
+    /// `file:line`, when the compile located the call.
+    pub fn location(&self) -> Option<String> {
+        self.location
+            .as_ref()
+            .map(|(file, line)| format!("{file}:{line}"))
+    }
+}
+
 /// Stamp program for a contribution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StampProgram {
@@ -1088,6 +1119,33 @@ impl CompiledModel {
         }
     }
 
+    /// Record where each analog operator with state was written.
+    pub(crate) fn locate_analog_operators(&mut self, mut origins: Vec<AnalogOperatorOrigin>) {
+        origins.sort_by(|left, right| {
+            (left.family.as_str(), left.slot).cmp(&(right.family.as_str(), right.slot))
+        });
+        origins.dedup_by(|left, right| left.family == right.family && left.slot == right.slot);
+        self.analog_operator_origins = origins;
+    }
+
+    /// Every located analog operator with state, by family and slot.
+    pub fn analog_operator_origins(&self) -> &[AnalogOperatorOrigin] {
+        &self.analog_operator_origins
+    }
+
+    /// Where the operator owning slot `slot` of state family `family` (a
+    /// canonical operator name: `idt`, `laplace`, `absdelay`, ...) was
+    /// written, when the compile knew.
+    pub fn analog_operator_origin(
+        &self,
+        family: &str,
+        slot: usize,
+    ) -> Option<&AnalogOperatorOrigin> {
+        self.analog_operator_origins
+            .iter()
+            .find(|origin| origin.family == family && origin.slot as usize == slot)
+    }
+
     /// Where the task call at `site` was written, when the compile knew.
     pub fn analog_task_origin(&self, site: u32) -> Option<&crate::analog_tasks::AnalogTaskOrigin> {
         self.analog_task_origins
@@ -1136,6 +1194,17 @@ impl CompiledModel {
     /// processes and system calls. A call `original` did not place keeps
     /// the place it has.
     pub fn locate_analog_tasks_as(&mut self, original: &Self) {
+        // Operator records are numbered per site in the module's text, so a
+        // specialization's record sits where the original's of the same
+        // operator was written.
+        for origin in &mut self.analog_operator_origins {
+            if let Some(placed) = original
+                .analog_operator_origin(&origin.family, origin.slot as usize)
+                .filter(|placed| placed.operator == origin.operator)
+            {
+                origin.location = placed.location.clone();
+            }
+        }
         let placed: std::collections::HashMap<_, _> = original
             .analog_task_spans()
             .into_iter()

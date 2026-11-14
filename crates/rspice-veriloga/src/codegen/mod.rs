@@ -21,8 +21,8 @@ pub(crate) mod state_slots;
 
 pub use lookup_table::TableRangeError;
 pub use model::{
-    AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator, ColumnAxis,
-    CompiledBranchSource, CompiledModel, CompiledNoiseInjection, CompiledNoiseSource,
+    AnalogOperatorOrigin, AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator,
+    ColumnAxis, CompiledBranchSource, CompiledModel, CompiledNoiseInjection, CompiledNoiseSource,
     CompiledParameter, CompiledZiFilterDefinition, CompiledZiPolynomial, Instruction,
     JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, TableControl,
     TableExtrapolation, TableInterpolation, ZiPolynomialLayout, ZiRuntimeLayout,
