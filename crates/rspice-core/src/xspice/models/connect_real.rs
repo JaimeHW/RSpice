@@ -218,8 +218,10 @@ fn conductance_output(name: &str) -> PortSpec {
 /// asymmetric edges: a voltage output with its own branch, where the
 /// Thevenin form drives a one-element conductance output.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectR2e {
-    pub(crate) ideal: bool,
+#[doc(hidden)]
+pub struct ConnectR2e {
+    #[doc(hidden)]
+    pub ideal: bool,
 }
 
 impl CodeModel for ConnectR2e {
@@ -389,7 +391,8 @@ fn sample_parameters() -> Vec<ParamSpec> {
 
 /// The electrical-to-real converter.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectE2r;
+#[doc(hidden)]
+pub struct ConnectE2r;
 
 impl CodeModel for ConnectE2r {
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
@@ -460,7 +463,8 @@ const RBIDIR_SAMPLE: usize = RAMP_STATES + 1;
 /// which is finite because the node has other sources. A driver cannot
 /// release a real net, so the drive half stays active.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectRbidir;
+#[doc(hidden)]
+pub struct ConnectRbidir;
 
 impl ConnectRbidir {
     /// Whether the port's own drivers drive its net, and since when.

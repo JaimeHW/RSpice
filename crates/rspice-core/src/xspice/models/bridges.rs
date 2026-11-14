@@ -18,7 +18,8 @@ pub(super) fn held_converter_descriptor() -> CmResult<XspiceSmallSignalDescripto
 /// The connect-rule parameter that means what the stock bridges' parameter
 /// `stock` means, as the connect-rule converters' module docs tabulate it;
 /// `None` for a parameter only XSPICE has.
-pub(crate) fn connect_rule_parameter(stock: &str) -> Option<&'static str> {
+#[doc(hidden)]
+pub fn connect_rule_parameter(stock: &str) -> Option<&'static str> {
     Some(match stock {
         "in_low" => "vtlo",
         "in_high" => "vthi",
@@ -1524,7 +1525,8 @@ impl CodeModel for DacBridge {
 /// The XSPICE auto-bridge's supply-tracking A/D converter: `adc_bridge`'s law,
 /// with `in_low`/`in_high` fractions of the voltage its `sup` port reads.
 #[derive(Debug, Default)]
-pub(crate) struct TrackingAdcBridge;
+#[doc(hidden)]
+pub struct TrackingAdcBridge;
 
 impl CodeModel for TrackingAdcBridge {
     fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
@@ -1584,7 +1586,8 @@ impl CodeModel for TrackingAdcBridge {
 /// ideal source and ramp, with `out_low`/`out_high`/`out_undef` fractions of
 /// the voltage its `sup` port reads.
 #[derive(Debug, Default)]
-pub(crate) struct TrackingDacBridge;
+#[doc(hidden)]
+pub struct TrackingDacBridge;
 
 impl CodeModel for TrackingDacBridge {
     fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {

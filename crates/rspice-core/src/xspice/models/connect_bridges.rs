@@ -604,8 +604,10 @@ fn located_power(
 ///
 /// `tracking` is the live-supply form, with a `sup` port.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectAdc {
-    pub(crate) tracking: bool,
+#[doc(hidden)]
+pub struct ConnectAdc {
+    #[doc(hidden)]
+    pub tracking: bool,
 }
 
 const ADC_SLOTS: AdcSlots = AdcSlots {
@@ -1260,8 +1262,10 @@ fn conductance_output(ports: &mut [PortSpec], name: &str) {
 ///
 /// `tracking` is the live-supply form, with a `sup` port.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectDac {
-    pub(crate) tracking: bool,
+#[doc(hidden)]
+pub struct ConnectDac {
+    #[doc(hidden)]
+    pub tracking: bool,
 }
 
 const DAC_SLOTS: DacSlots = DacSlots {
@@ -1369,8 +1373,10 @@ impl CodeModel for ConnectDac {
 ///
 /// `tracking` is the live-supply form, with a `sup` port both halves read.
 #[derive(Debug, Default)]
-pub(crate) struct ConnectBidi {
-    pub(crate) tracking: bool,
+#[doc(hidden)]
+pub struct ConnectBidi {
+    #[doc(hidden)]
+    pub tracking: bool,
 }
 
 const BIDI_DAC_SLOTS: DacSlots = DacSlots {

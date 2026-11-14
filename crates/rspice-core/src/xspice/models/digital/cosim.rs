@@ -56,7 +56,8 @@ const COSIM_QUEUE_SIZE_MIN: i64 = 1;
 /// first evaluation failing to start a runtime. An embedding installs a
 /// provider with `set_digital_cosim_runtime_factory`; a deck runs the Verilog
 /// natively instead.
-pub(crate) fn unhosted_cosim_refusal(string_params: &[(String, String)]) -> Option<String> {
+#[doc(hidden)]
+pub fn unhosted_cosim_refusal(string_params: &[(String, String)]) -> Option<String> {
     if digital_cosim_runtime_installed() {
         return None;
     }

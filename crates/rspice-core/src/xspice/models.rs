@@ -184,11 +184,14 @@ pub use analog::{
 #[cfg(feature = "veriloga")]
 pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
-pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge, connect_rule_parameter};
+#[doc(hidden)]
+pub use bridges::{TrackingAdcBridge, TrackingDacBridge, connect_rule_parameter};
 #[cfg(feature = "veriloga")]
-pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac};
+#[doc(hidden)]
+pub use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac};
 #[cfg(feature = "veriloga")]
-pub(crate) use connect_real::{ConnectE2r, ConnectR2e, ConnectRbidir};
+#[doc(hidden)]
+pub use connect_real::{ConnectE2r, ConnectR2e, ConnectRbidir};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,
@@ -203,9 +206,12 @@ pub use digital::{
     NumericallyControlledOscillator, SrFlipFlop, SrLatch, TFlipFlop,
 };
 
+pub(crate) use digital::DigitalVcdSource;
 pub(crate) use digital::PspiceDigitalStimulus;
-pub(crate) use digital::unhosted_cosim_refusal;
-pub(crate) use digital::{DigitalVcdSource, vcd_source_digest, vcd_source_file};
+#[doc(hidden)]
+pub use digital::unhosted_cosim_refusal;
+#[doc(hidden)]
+pub use digital::{vcd_source_digest, vcd_source_file};
 
 pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};
 

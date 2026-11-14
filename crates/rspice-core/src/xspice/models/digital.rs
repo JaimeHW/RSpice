@@ -19,7 +19,8 @@ mod sources;
 mod vcd_source;
 
 pub use cosim::DigitalCosim;
-pub(crate) use cosim::unhosted_cosim_refusal;
+#[doc(hidden)]
+pub use cosim::unhosted_cosim_refusal;
 pub use gates::{
     DigitalAnd, DigitalBuffer, DigitalInverter, DigitalNand, DigitalNor, DigitalOpenCollector,
     DigitalOpenEmitter, DigitalOr, DigitalPulldown, DigitalPullup, DigitalTristate, DigitalXnor,
@@ -34,7 +35,9 @@ pub use sequential::{
     DFlipFlop, DLatch, DigitalFrequencyDivider, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,
 };
 pub use sources::{DigitalSource, DigitalStateMachine};
-pub(crate) use vcd_source::{DigitalVcdSource, vcd_source_digest, vcd_source_file};
+pub(crate) use vcd_source::DigitalVcdSource;
+#[doc(hidden)]
+pub use vcd_source::{vcd_source_digest, vcd_source_file};
 
 /// The latest input event on any element of `ports` that the clock has
 /// reached ([`CmContext::is_due`]): the event an output responding to those

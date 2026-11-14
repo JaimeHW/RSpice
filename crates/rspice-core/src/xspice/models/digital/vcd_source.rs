@@ -656,7 +656,8 @@ impl CodeModel for DigitalVcdSource {
 
 /// The file a `d_vcd` instance replays and the BLAKE3 digest of the bytes it
 /// read, for a transient checkpoint to bind.
-pub(crate) fn vcd_source_file(instance: &XspiceInstance) -> Option<(String, blake3::Hash)> {
+#[doc(hidden)]
+pub fn vcd_source_file(instance: &XspiceInstance) -> Option<(String, blake3::Hash)> {
     if !instance.model_name().eq_ignore_ascii_case(MODEL_NAME) {
         return None;
     }
@@ -672,7 +673,8 @@ pub(crate) fn vcd_source_file(instance: &XspiceInstance) -> Option<(String, blak
 }
 
 /// The BLAKE3 digest of the file at `path` now, read as `d_vcd` reads it.
-pub(crate) fn vcd_source_digest(path: &str) -> Result<blake3::Hash, String> {
+#[doc(hidden)]
+pub fn vcd_source_digest(path: &str) -> Result<blake3::Hash, String> {
     data_file::read_to_string_limited(path, usize::MAX)
         .map(|contents| blake3::hash(contents.as_bytes()))
 }
