@@ -208,7 +208,7 @@ pub(crate) fn worker_response_from_request(request: WorkerRequest) -> WorkerResp
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 thread_local! {
     static ACTIVE_WORKER_PROGRESS_ID: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
-    static PENDING_WASM_JIT_REQUEST: std::cell::RefCell<Option<(u32, WorkerRequest)>> = const { std::cell::RefCell::new(None) };
+    static PENDING_WASM_JIT_REQUEST: std::cell::RefCell<Option<PendingWasmJitRequest>> = const { std::cell::RefCell::new(None) };
     static NEXT_WASM_JIT_DISPATCH_TOKEN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
@@ -506,6 +506,55 @@ fn run_decoded_worker_request(
     worker_response_transport_value(response)
 }
 
+/// A decoded request waiting for its dispatch, with every sealed Verilog-A
+/// runtime that could not qualify for the browser JIT. The browser runs a
+/// Verilog-A device on the JIT alone, so one such runtime means the run is
+/// refused before the solver starts.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+struct PendingWasmJitRequest {
+    token: u32,
+    request: WorkerRequest,
+    unqualified: Vec<UnqualifiedRuntime>,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+struct UnqualifiedRuntime {
+    alias: String,
+    source: String,
+    reason: String,
+}
+
+/// The refusal a run gets when a Verilog-A runtime it needs cannot run in the
+/// browser: it names each module, the source it was sealed from and why.
+#[cfg(any(all(target_arch = "wasm32", feature = "browser-worker"), test))]
+pub(super) fn browser_jit_refusal<'a>(
+    unqualified: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>,
+) -> Option<SimulationError> {
+    let mut first_module = None;
+    let mut detail = String::new();
+    for (alias, source, reason) in unqualified {
+        if !detail.is_empty() {
+            detail.push_str("; ");
+        }
+        detail.push_str(&format!(
+            "Verilog-A module '{alias}' ({source}) cannot run in the browser: {reason}"
+        ));
+        first_module.get_or_insert_with(|| alias.to_string());
+    }
+    let module = first_module?;
+    Some(SimulationError::from(
+        rspice_core::SimulationError::UnsupportedCapability(Box::new(
+            rspice_core::UnsupportedCapabilityError::new(BROWSER_JIT_CAPABILITY, detail)
+                .for_module(module),
+        )),
+    ))
+}
+
+/// The capability a browser run lacks when a Verilog-A runtime cannot be
+/// compiled for the browser JIT.
+#[cfg(any(all(target_arch = "wasm32", feature = "browser-worker"), test))]
+pub(super) const BROWSER_JIT_CAPABILITY: &str = "veriloga.browser_jit";
+
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -538,34 +587,53 @@ pub fn prepare_wasm_jit_request_value(
         artifacts: Vec::with_capacity(request.project_veriloga_runtimes.device_runtimes().len()),
         errors: Vec::new(),
     };
+    let mut unqualified = Vec::new();
     for runtime in request.project_veriloga_runtimes.device_runtimes() {
         match runtime.compile_wasm_jit_artifact() {
             Ok(artifact) => preparation.artifacts.push(
                 crate::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(&artifact),
             ),
-            Err(error) => preparation.errors.push(format!(
-                "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
-                runtime.netlist_alias()
-            )),
+            Err(error) => {
+                preparation.errors.push(format!(
+                    "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
+                    runtime.netlist_alias()
+                ));
+                unqualified.push(UnqualifiedRuntime {
+                    alias: runtime.netlist_alias().to_string(),
+                    source: runtime.source_key().to_string(),
+                    reason: error,
+                });
+            }
         }
     }
     let value = serde_wasm_bindgen::to_value(&preparation)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
     PENDING_WASM_JIT_REQUEST.with(|pending| {
-        *pending.borrow_mut() = Some((dispatch_token, request));
+        *pending.borrow_mut() = Some(PendingWasmJitRequest {
+            token: dispatch_token,
+            request,
+            unqualified,
+        });
     });
     Ok(value)
 }
 
 /// Consume exactly the request decoded by `prepare_wasm_jit_request_value`.
 /// This avoids a second copy of every transferred numerical dependency.
+///
+/// A request whose Verilog-A runtimes did not all qualify for the browser JIT
+/// is answered with the refusal naming them, and the solver never starts.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn run_prepared_wasm_jit_request_value(
     dispatch_token: u32,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    let request = PENDING_WASM_JIT_REQUEST.with(|pending| {
+    let pending = PENDING_WASM_JIT_REQUEST.with(|pending| {
         let mut pending = pending.borrow_mut();
-        let Some((expected_token, _)) = pending.as_ref() else {
+        let Some(PendingWasmJitRequest {
+            token: expected_token,
+            ..
+        }) = pending.as_ref()
+        else {
             return Err(wasm_bindgen::JsValue::from_str(
                 "no prepared browser simulation request is pending",
             ));
@@ -577,10 +645,22 @@ pub fn run_prepared_wasm_jit_request_value(
         }
         Ok(pending
             .take()
-            .expect("validated prepared request must remain present")
-            .1)
+            .expect("validated prepared request must remain present"))
     })?;
-    run_decoded_worker_request(request)
+    let refusal = browser_jit_refusal(pending.unqualified.iter().map(|runtime| {
+        (
+            runtime.alias.as_str(),
+            runtime.source.as_str(),
+            runtime.reason.as_str(),
+        )
+    }));
+    match refusal {
+        Some(refusal) => worker_response_transport_value(WorkerResponse::from_result_for_transfer(
+            pending.request.id,
+            Err(refusal),
+        )),
+        None => run_decoded_worker_request(pending.request),
+    }
 }
 
 /// Discard a prepared request only when the caller presents its exact token.
@@ -593,7 +673,11 @@ pub fn cancel_prepared_wasm_jit_request_value(
 ) -> Result<(), wasm_bindgen::JsValue> {
     PENDING_WASM_JIT_REQUEST.with(|pending| {
         let mut pending = pending.borrow_mut();
-        let Some((expected_token, _)) = pending.as_ref() else {
+        let Some(PendingWasmJitRequest {
+            token: expected_token,
+            ..
+        }) = pending.as_ref()
+        else {
             return Err(wasm_bindgen::JsValue::from_str(
                 "no prepared browser simulation request is pending",
             ));

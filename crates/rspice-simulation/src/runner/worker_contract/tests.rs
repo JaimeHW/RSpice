@@ -332,6 +332,44 @@ fn a_capability_refusal_stays_typed_through_the_worker_contract() {
     assert_eq!(SimulationError::from(service), expected);
 }
 
+#[test]
+fn a_runtime_the_browser_jit_cannot_take_is_refused_by_module_file_and_reason() {
+    assert_eq!(browser_jit_refusal(std::iter::empty()), None);
+    let refusal = browser_jit_refusal([
+        ("ramp", "va/ramp.va", "unsupported operator ddx"),
+        ("gain", "va/gain.va", "too many locals"),
+    ])
+    .expect("an unqualified runtime refuses the run");
+    let SimulationError::UnsupportedCapability {
+        capability,
+        analysis_kind,
+        instance,
+        module,
+        message,
+    } = &refusal
+    else {
+        panic!("a typed capability refusal, got {refusal:?}");
+    };
+    assert_eq!(capability, BROWSER_JIT_CAPABILITY);
+    assert_eq!(*analysis_kind, None);
+    assert_eq!(*instance, None);
+    assert_eq!(module.as_deref(), Some("ramp"));
+    assert_eq!(
+        message,
+        "unsupported capability [veriloga.browser_jit]: Verilog-A module 'ramp' (va/ramp.va) \
+         cannot run in the browser: unsupported operator ddx; Verilog-A module 'gain' \
+         (va/gain.va) cannot run in the browser: too many locals"
+    );
+
+    // The worker answers with it as its outcome, and the host reads back
+    // the same typed refusal.
+    let response = WorkerResponse::from_result_for_transfer(7, Err(refusal.clone()));
+    let transport = WorkerResponseTransport::from_response(response).expect("transport");
+    let decoded = transport.into_response().expect("decodes");
+    validate_worker_response_id(7, &decoded).expect("same request");
+    assert_eq!(decoded.into_result().err(), Some(refusal));
+}
+
 pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
     let config = rspice_core::analysis::PssConfig::new(1.0)
         .with_harmonics(4)
