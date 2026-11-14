@@ -169,6 +169,12 @@ impl DerivedSeries {
         note_samples(values.len());
         let index = std::sync::Arc::new(ExtremaIndex::build(values));
         self.extrema.insert(key, std::sync::Arc::clone(&index));
+        // The pass that built the summary read the whole-record range too,
+        // and a reader of `range_or` under the same key (the shared X axis'
+        // overview) need not make another.
+        self.ranges
+            .entry(key)
+            .or_insert_with(|| index.whole().range());
         index
     }
 
