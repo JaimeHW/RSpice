@@ -28,7 +28,7 @@ mx	sens	native	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.58
 mx	sens	worker	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
 mx	pz	interp	pass	pz (O5) pole |a−e|=0.000e0 allowed 2.478e2 at e=-247803169.5444901+0i; pending 1
 mx	pz	native	pass	pz (O5) pole |a−e|=0.000e0 allowed 2.478e2 at e=-247803169.5444901+0i; pending 1
-mx	pz	worker	wrong	pz (O5) zero |a−e|=2.408e0 allowed 5.972e-1 at e=67359.71047949363+593421.3270254448i
+mx	pz	worker	pass	pz (O5) H(jω) Δ=5.153e-5 dB, -2.045e-3° allowed 8.7e-4 dB, 5.7e-3° at ω=5.9723e5 rad/s; 209 points over 1e5..1e9 rad/s; pending 1
 mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
 mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
 mx	tran	worker	pass	trim (O5-O1) [0] |a−e|=4.094e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
