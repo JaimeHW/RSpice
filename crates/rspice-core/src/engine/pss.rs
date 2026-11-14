@@ -33,6 +33,7 @@ use crate::circuit::CircuitData;
 use crate::engine::periodic_capability;
 use crate::engine::transient::{BreakpointWindow, CheckpointState};
 use crate::engine::transient::{netlist_checkpoint_identity, simulation_checkpoint_identity};
+use crate::identity::AnalysisKind;
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
 use crate::numerics::integration::{
@@ -530,6 +531,35 @@ impl PssDenseLu {
                 value -= self.lu[row * self.n + column] * entry;
             }
             solution[row] = value / self.lu[row * self.n + row];
+        }
+        solution
+    }
+
+    /// Solve `Aᵀ·x = rhs` with the same factor: `PA = LU` gives
+    /// `Aᵀ = Uᵀ·Lᵀ·P`, so `Uᵀ` forward, `Lᵀ` back, and the row swaps undone
+    /// in reverse order.
+    pub(in crate::engine) fn solve_transposed(&self, rhs: &[Value]) -> Vec<Value> {
+        debug_assert_eq!(rhs.len(), self.n);
+        let n = self.n;
+        let mut solution = rhs.to_vec();
+        for row in 0..n {
+            let mut value = solution[row];
+            for (k, &entry) in solution.iter().enumerate().take(row) {
+                value -= self.lu[k * n + row] * entry;
+            }
+            solution[row] = value / self.lu[row * n + row];
+        }
+        for row in (0..n).rev() {
+            let mut value = solution[row];
+            for (k, &entry) in solution.iter().enumerate().skip(row + 1) {
+                value -= self.lu[k * n + row] * entry;
+            }
+            solution[row] = value;
+        }
+        for k in (0..n).rev() {
+            if self.pivots[k] != k {
+                solution.swap(k, self.pivots[k]);
+            }
         }
         solution
     }
@@ -1457,19 +1487,40 @@ impl PssOperatingPoint {
         Ok(())
     }
 
+    /// Authenticate a native-shooting orbit for `analysis` to consume; an
+    /// orbit event shooting solved is refused by name, with the instance that
+    /// put the circuit on the event carrier.
     pub(in crate::engine) fn authenticate_for_reuse(
         &self,
         netlist: &Netlist,
         simulation_config: &super::SimulationConfig,
         pss_config: &PssConfig,
+        analysis: AnalysisKind,
     ) -> Result<(), SimulationError> {
         if self.is_event_orbit() {
-            return Err(UnsupportedCapabilityError::new(
+            let name = match analysis {
+                AnalysisKind::Pstb => "PSTB",
+                AnalysisKind::PNoise => "oscillator PNOISE",
+                AnalysisKind::Pxf => "PXF",
+                AnalysisKind::Psp => "PSP",
+                _ => "PAC",
+            };
+            let refusal = UnsupportedCapabilityError::new(
                 super::pss_event::EVENT_CARRIER,
-                "the periodic steady state was solved by event shooting; PAC and PXF run on its \
-                 orbit, and PNOISE and PSTB linearize only an orbit native shooting solved",
+                format!(
+                    "the periodic steady state was solved by event shooting; PAC, PXF and \
+                     driven PNOISE run on its orbit, and {name} linearizes only an orbit native \
+                     shooting solved"
+                ),
             )
-            .into());
+            .for_analysis_kind(analysis);
+            return Err(
+                match super::pss_event::event_instance(netlist, simulation_config) {
+                    Some(instance) => refusal.for_instance(instance),
+                    None => refusal,
+                }
+                .into(),
+            );
         }
         self.authenticate_producer(netlist, simulation_config, pss_config)
     }

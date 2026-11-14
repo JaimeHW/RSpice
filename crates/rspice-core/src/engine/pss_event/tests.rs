@@ -1,7 +1,7 @@
 use crate::abort_signal::NoAbort;
 use crate::analysis::PssConfig;
 use crate::analysis::pss::PssResult;
-use crate::{Engine, Netlist, SimulationConfig, Value};
+use crate::{Complex64, Engine, Netlist, SimulationConfig, Value};
 
 fn waveform<'a>(result: &'a PssResult, node: &str) -> &'a [Value] {
     let index = result
@@ -493,4 +493,121 @@ fn a_gain_an_initial_step_sets_is_carried_by_event_shooting_alone() {
         (peak - expected).abs() <= 1.0e-3 * expected,
         "peak {peak} against {expected}"
     );
+}
+
+/// One-sided PNOISE of `point` at v(out): sampled at `phase` degrees, or the
+/// time-averaged sideband zero.
+fn event_pnoise(
+    netlist: &Netlist,
+    point: &crate::engine::PssOperatingPoint,
+    offsets: &[Value],
+    phase: Option<Value>,
+) -> crate::engine::PnoiseAnalysisResult {
+    let sampling =
+        phase.map(|phase_degrees| crate::engine::PeriodicNoiseSampling::Phase { phase_degrees });
+    let request = crate::engine::PeriodicNoiseRequest {
+        sampling: sampling.as_ref(),
+        offsets,
+        output_node: "out",
+        output_ref: None,
+        input_source: None,
+        max_sideband: 7,
+        sidebands: crate::engine::PeriodicNoiseSidebands::default(),
+    };
+    Engine::new(SimulationConfig::default())
+        .run_pnoise_from_pss_request_with_abort(netlist, &request, point, &NoAbort)
+        .expect("PNOISE runs on the event orbit")
+}
+
+const BOLTZMANN_KELVIN: Value = 1.380_649e-23 * 300.15;
+
+/// An RC whose resistor is a switch held closed is a time-invariant filter
+/// the event carrier takes: its output is an Ornstein-Uhlenbeck process of
+/// variance kT/C. Time-averaged, its noise is 4kT·R/(1 + (ωτ)²); sampled
+/// once a period, the samples are AR(1) with pole e^{−T/τ}, whose one-sided
+/// spectrum on [0, f₀/2] is 2T·(kT/C)·(1 − a²)/|1 − a·e^{−jωT}|². Every
+/// sideband folds into the sampled spectrum; a window of them would not.
+#[test]
+fn event_pnoise_of_a_held_switch_rc_is_the_ornstein_uhlenbeck_closed_form() {
+    let netlist = Netlist::parse(
+        "held switch rc\n\
+         vdrv in 0 dc 0 sin(0 0.1 1meg)\n\
+         vctl ctl 0 dc 1.8\n\
+         s1 in out ctl 0 swc\n\
+         c1 out 0 1n\n\
+         .model swc sw vt=0.9 vh=0.1 ron=1k roff=1e12\n\
+         .end\n",
+    )
+    .expect("the deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_pss_operating_point_with_abort(&netlist, PssConfig::new(1.0e6), &NoAbort)
+        .expect("event shooting solves the held RC");
+    assert!(point.is_event_orbit(), "a switch circuit is event-shot");
+    let (period, tau): (Value, Value) = (1.0e-6, 1.0e3 * 1.0e-9);
+    let offsets = [1.0e3, 1.0e5, 4.0e5];
+    let averaged = event_pnoise(&netlist, &point, &offsets, None);
+    let sampled = event_pnoise(&netlist, &point, &offsets, Some(90.0));
+    let pole = (-period / tau).exp();
+    for (index, &frequency) in offsets.iter().enumerate() {
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        let expected_averaged = 4.0 * BOLTZMANN_KELVIN * 1.0e3 / (1.0 + (omega * tau).powi(2));
+        let expected_sampled = 2.0 * period * BOLTZMANN_KELVIN / 1.0e-9 * (1.0 - pole * pole)
+            / (Complex64::new(1.0, 0.0) - Complex64::from_polar(pole, -omega * period)).norm_sqr();
+        let (a, s) = (averaged.output_noise[index], sampled.output_noise[index]);
+        eprintln!(
+            "held RC at {frequency:e} Hz: averaged {a:e} against {expected_averaged:e}, \
+             sampled {s:e} against {expected_sampled:e}"
+        );
+        assert!(
+            (a / expected_averaged - 1.0).abs() <= 1.0e-2,
+            "averaged {a:e}"
+        );
+        assert!(
+            (s / expected_sampled - 1.0).abs() <= 1.0e-2,
+            "sampled {s:e}"
+        );
+    }
+    assert_eq!(
+        averaged.contributors.len(),
+        1,
+        "{:?}",
+        averaged.contributors
+    );
+}
+
+/// The C11 analog-clock twin's sampled output noise is the kT/C of its
+/// charge sharing: the samples C2 holds after S2 opens are AR(1),
+/// y_k = 0.9·y_{k−1} + e_k, with innovation variance 0.19·kT/C2, so the
+/// one-sided spectrum of the sample sequence is
+/// S_y(f) = 2T·0.19·(kT/C2)/|1 − 0.9·e^{−j2πfT}|² (design-p7 §5.1). The
+/// sample is read at 990 ns, in the hold; 0.556 ns before S2 opens the output
+/// still carries the C1–C2 differential noise of the closed switch, which
+/// adds a nearly white part the AR(1) form leaves out.
+#[test]
+fn event_pnoise_samples_the_switched_capacitor_kt_over_c() {
+    let netlist = Netlist::parse(SC_PULSE).expect("the filter parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(1.0e6).with_tstab(10.0e-6),
+            &NoAbort,
+        )
+        .expect("event shooting solves the switched-capacitor orbit");
+    let offsets = [100.0, 1.0e4, 1.0e5, 4.99e5];
+    let noise = event_pnoise(&netlist, &point, &offsets, Some(356.4));
+    let period = 1.0e-6;
+    for (index, &frequency) in offsets.iter().enumerate() {
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        let expected = 2.0 * period * 0.19 * BOLTZMANN_KELVIN
+            / 9.0e-12
+            / (Complex64::new(1.0, 0.0) - Complex64::from_polar(0.9, -omega * period)).norm_sqr();
+        let actual = noise.output_noise[index];
+        eprintln!("C11 sampled at {frequency:e} Hz: {actual:e} against {expected:e}");
+        assert!(
+            (actual / expected - 1.0).abs() <= 0.01,
+            "{actual:e} against {expected:e}"
+        );
+    }
+    let evidence = noise.sampling.as_ref().expect("sampling evidence");
+    assert!((evidence.output.phase_degrees - 356.4).abs() < 1.0e-9);
 }

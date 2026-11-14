@@ -38,6 +38,10 @@ impl Engine {
         output: PeriodicAcOutput,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedPeriodicAc, SimulationError> {
+        let reuse_kind = match output {
+            PeriodicAcOutput::NodeSpectra => crate::identity::AnalysisKind::Pac,
+            PeriodicAcOutput::PortScattering => crate::identity::AnalysisKind::Psp,
+        };
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -123,7 +127,7 @@ impl Engine {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
         if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+            point.authenticate_for_reuse(netlist, &self.config, point.config(), reuse_kind)?;
         }
 
         let built = self.build_circuit_with_rf_ports(netlist, &[], abort)?;
@@ -278,7 +282,7 @@ impl Engine {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
         if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+            point.authenticate_for_reuse(netlist, &self.config, point.config(), reuse_kind)?;
         }
 
         let solve_operating_point = operating_point.is_none();

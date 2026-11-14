@@ -602,6 +602,13 @@ impl Engine {
         operating_point: Option<PnoiseOperatingPoint<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        // An orbit event shooting solved has no spectral projection; its
+        // noise is folded on the orbit itself, in the time domain.
+        if let Some(PnoiseOperatingPoint::Shooting(point)) = &operating_point
+            && point.is_event_orbit()
+        {
+            return self.run_event_pnoise(netlist, request, point, abort);
+        }
         let PeriodicNoiseRequest {
             sampling,
             offsets,
@@ -660,9 +667,9 @@ impl Engine {
         if let Some(sampling) = sampling {
             sampling.validate().map_err(SimulationError::Circuit)?;
             if output_sideband != 0
-                || offsets
-                    .iter()
-                    .any(|offset| *offset > fundamental_freq * 0.5)
+                || offsets.iter().any(|offset| {
+                    crate::analysis::pnoise::offset_exceeds_sampled_band(*offset, fundamental_freq)
+                })
             {
                 return Err(SimulationError::Circuit("sampled PNOISE requires output sideband zero and offsets no higher than half the carrier frequency".into()));
             }
@@ -704,7 +711,12 @@ impl Engine {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
         if let Some(PnoiseOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+            point.authenticate_for_reuse(
+                netlist,
+                &self.config,
+                point.config(),
+                crate::identity::AnalysisKind::PNoise,
+            )?;
         }
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
@@ -860,7 +872,12 @@ impl Engine {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
         if let Some(PnoiseOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+            point.authenticate_for_reuse(
+                netlist,
+                &self.config,
+                point.config(),
+                crate::identity::AnalysisKind::PNoise,
+            )?;
         }
 
         let solve_operating_point = operating_point.is_none();

@@ -32,6 +32,7 @@
 
 use super::basis::CoordinateUnit;
 use super::newton::Orbit;
+use super::pnoise::{NoiseCatalog, PointNoise};
 use super::{DISCRETE_ITERATIONS, EVENT_CARRIER, MESH_REFINEMENTS, boundary};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pac::{PacConfig, PacResult};
@@ -45,16 +46,39 @@ use crate::identity::AnalysisKind;
 use crate::solver::{ComplexMatrix, StaticMatrix};
 use crate::{CircuitData, Complex64, Netlist, Value};
 
-const SMALL_SIGNAL_MESH_UNCERTIFIED: &str = "analysis.periodic.small_signal_mesh_uncertified";
+pub(super) const SMALL_SIGNAL_MESH_UNCERTIFIED: &str =
+    "analysis.periodic.small_signal_mesh_uncertified";
 
 fn refusal(token: &'static str, detail: String) -> SimulationError {
-    UnsupportedCapabilityError::new(token, detail)
-        .for_analysis_kind(AnalysisKind::Pac)
-        .into()
+    small_signal_refusal(AnalysisKind::Pac, token, detail, None)
 }
 
 fn carrier_refusal(detail: String) -> SimulationError {
     refusal(EVENT_CARRIER, detail)
+}
+
+/// A small-signal analysis's refusal on an event orbit, naming the analysis
+/// and, where one is in the way, the instance.
+pub(super) fn small_signal_refusal(
+    analysis: AnalysisKind,
+    token: &'static str,
+    detail: String,
+    instance: Option<&str>,
+) -> SimulationError {
+    let error = UnsupportedCapabilityError::new(token, detail).for_analysis_kind(analysis);
+    match instance {
+        Some(instance) => error.for_instance(instance.to_owned()),
+        None => error,
+    }
+    .into()
+}
+
+/// The name a refusal gives `analysis`.
+fn analysis_name(analysis: AnalysisKind) -> &'static str {
+    match analysis {
+        AnalysisKind::PNoise => "PNOISE",
+        _ => "PAC",
+    }
 }
 
 /// The small-signal operator at one accepted point of the period.
@@ -66,30 +90,35 @@ struct Operator {
     c: Vec<Value>,
     /// Every voltage and then current switch's state.
     switches: Vec<u64>,
+    /// Every device noise source at this point, when the period collects
+    /// them.
+    noise: Vec<PointNoise>,
 }
 
 /// One step of the linearized period.
-struct Step {
-    a: PssDenseLu,
+pub(super) struct Step {
+    pub(super) a: PssDenseLu,
     /// `B`, row-major.
-    b: Vec<Value>,
+    pub(super) b: Vec<Value>,
     /// Each row's `θ`: the weight of the input at the step's end.
-    theta: Vec<Value>,
+    pub(super) theta: Vec<Value>,
     /// The switches that change in this step.
-    changes: Vec<usize>,
+    pub(super) changes: Vec<usize>,
 }
 
 /// The linearized period of an event orbit.
-struct LinearPeriod {
-    n: usize,
-    period: Value,
+pub(super) struct LinearPeriod {
+    pub(super) n: usize,
+    pub(super) period: Value,
     /// Every accepted point's absolute time from the start of the period
     /// that holds the boundary.
-    phases: Vec<Value>,
-    steps: Vec<Step>,
+    pub(super) phases: Vec<Value>,
+    pub(super) steps: Vec<Step>,
     /// `M`, row-major.
-    monodromy: Vec<Value>,
-    excitation: Vec<Value>,
+    pub(super) monodromy: Vec<Value>,
+    pub(super) excitation: Vec<Value>,
+    /// Every accepted point's device noise sources, when collected.
+    pub(super) noise: Vec<Vec<PointNoise>>,
 }
 
 /// One input frequency's periodic response.
@@ -140,33 +169,51 @@ impl Engine {
         }
         let circuit = &prepared.image.circuit;
         #[cfg(feature = "veriloga")]
-        if !circuit.veriloga_devices().is_empty() {
-            return Err(carrier_refusal(
-                "PAC on an event orbit linearizes switches and the native devices between \
-                 their changes; a runtime Verilog-A module's operator around its events is \
-                 not formed"
-                    .to_string(),
+        if let Some(device) = circuit.veriloga_devices().iter().next() {
+            let instance = device.name.to_string();
+            return Err(small_signal_refusal(
+                AnalysisKind::Pac,
+                EVENT_CARRIER,
+                format!(
+                    "PAC on an event orbit linearizes switches and the native devices between \
+                     their changes; the operator of Verilog-A instance '{instance}' around its \
+                     events is not formed"
+                ),
+                Some(&instance),
             ));
         }
-        let excitation = input_excitation(circuit, &input_name)?;
+        let excitation = input_excitation(circuit, &input_name, "PAC")?;
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
         let num_nodes = circuit.num_nodes();
-        let output = output_selection(&config, netlist, &node_names)?;
+        let output = output_selection(
+            config.output_node.as_deref(),
+            config.output_ref.as_deref(),
+            netlist,
+            &node_names,
+            "PAC",
+        )?;
         let structure = self.build_matrix(circuit)?;
         let orbit = prepared.orbit(netlist, pss_config, abort);
         let z = operating_point.shooting_state();
-        let (start, mesh) = reproduce_boundary(&orbit, &prepared.image, z, &prepared.mesh)?;
+        let (start, mesh) = reproduce_boundary(
+            &orbit,
+            &prepared.image,
+            z,
+            &prepared.mesh,
+            AnalysisKind::Pac,
+        )?;
         let reltol = config.reltol;
         let abstol = prepared.mesh_tolerance.1;
         let probes = probe_frequencies(&frequencies);
         let mut coarse_mesh = boundary::bisect(&mesh, start.time);
-        let mut coarse = orbit.linear_period(&start, z, &coarse_mesh, &structure, &excitation)?;
+        let mut coarse =
+            orbit.linear_period(&start, z, &coarse_mesh, &structure, &excitation, None)?;
         let mut refinements = 1;
         let fine = loop {
             refinements += 1;
             let fine_mesh = boundary::bisect(&coarse_mesh, start.time);
-            let fine = orbit.linear_period(&start, z, &fine_mesh, &structure, &excitation)?;
+            let fine = orbit.linear_period(&start, z, &fine_mesh, &structure, &excitation, None)?;
             let worst = probes
                 .iter()
                 .map(|&frequency| {
@@ -298,7 +345,11 @@ impl Engine {
 /// The unit small-signal excitation of the named independent source: one
 /// volt on a voltage source's branch equation, one ampere from a current
 /// source's positive terminal to its negative.
-fn input_excitation(circuit: &CircuitData, name: &str) -> Result<Vec<Value>, SimulationError> {
+pub(super) fn input_excitation(
+    circuit: &CircuitData,
+    name: &str,
+    analysis: &str,
+) -> Result<Vec<Value>, SimulationError> {
     let name = name.trim();
     let mut excitation = vec![0.0; circuit.matrix_size()];
     if let Some(index) = circuit
@@ -312,7 +363,7 @@ fn input_excitation(circuit: &CircuitData, name: &str) -> Result<Vec<Value>, Sim
             .checked_sub(1)
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "PAC input voltage source '{name}' has no equation row"
+                    "{analysis} input voltage source '{name}' has no equation row"
                 ))
             })?;
         excitation[row] = 1.0;
@@ -337,17 +388,19 @@ fn input_excitation(circuit: &CircuitData, name: &str) -> Result<Vec<Value>, Sim
         return Ok(excitation);
     }
     Err(SimulationError::Circuit(format!(
-        "PAC input source '{name}' not found among independent sources"
+        "{analysis} input source '{name}' not found among independent sources"
     )))
 }
 
-/// The conversion matrix's output node and reference, as unknown indices.
-fn output_selection(
-    config: &PacConfig,
+/// The output node and its reference, as unknown indices.
+pub(super) fn output_selection(
+    output: Option<&str>,
+    reference: Option<&str>,
     netlist: &Netlist,
     node_names: &[String],
+    analysis: &str,
 ) -> Result<Option<(usize, Option<usize>)>, SimulationError> {
-    let Some(name) = config.output_node.as_deref() else {
+    let Some(name) = output.map(str::trim) else {
         return Ok(None);
     };
     let find = |name: &str| {
@@ -356,17 +409,17 @@ fn output_selection(
             .position(|node| node.eq_ignore_ascii_case(name))
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "PAC output node '{name}' not found in circuit nodes"
+                    "{analysis} output node '{name}' not found in circuit nodes"
                 ))
             })
     };
     if netlist.ground_policy().is_ground(name) {
-        return Err(SimulationError::Circuit(
-            "PAC output node cannot be ground".to_owned(),
-        ));
+        return Err(SimulationError::Circuit(format!(
+            "{analysis} output node cannot be ground"
+        )));
     }
     let output = find(name)?;
-    let reference = match config.output_ref.as_deref().map(str::trim) {
+    let reference = match reference.map(str::trim) {
         Some(reference)
             if !reference.is_empty() && !netlist.ground_policy().is_ground(reference) =>
         {
@@ -375,16 +428,16 @@ fn output_selection(
         _ => None,
     };
     if reference == Some(output) {
-        return Err(SimulationError::Circuit(
-            "PAC output node and reference node must be different".to_owned(),
-        ));
+        return Err(SimulationError::Circuit(format!(
+            "{analysis} output node and reference node must be different"
+        )));
     }
     Ok(Some((output, reference)))
 }
 
 /// The sweep's endpoints and its geometric middle, where the bisected mesh
 /// is compared.
-fn probe_frequencies(frequencies: &[Value]) -> Vec<Value> {
+pub(super) fn probe_frequencies(frequencies: &[Value]) -> Vec<Value> {
     let mut probes = vec![frequencies[0]];
     if frequencies.len() > 2 {
         probes.push(frequencies[frequencies.len() / 2]);
@@ -420,12 +473,14 @@ fn deviation(
 /// The boundary image with the retained coordinates written in, and its
 /// mesh, after checking that one period from it closes; the discrete state is
 /// carried a period on while it does not come back.
-fn reproduce_boundary(
+pub(super) fn reproduce_boundary(
     orbit: &Orbit<'_>,
     image: &CapturedTransientState,
     z: &[Value],
     mesh: &[Value],
+    analysis: AnalysisKind,
 ) -> Result<(CapturedTransientState, Vec<Value>), SimulationError> {
+    let name = analysis_name(analysis);
     let mut image = image.clone();
     let mut mesh = mesh.to_vec();
     let period = orbit.config.period();
@@ -445,23 +500,32 @@ fn reproduce_boundary(
                 }
             }
             if worst.0 > 1.0 {
-                return Err(carrier_refusal(format!(
-                    "PAC cannot reproduce the event orbit: from its retained coordinates \
-                     {} misses its start after one period by {:.3e} times the transient \
-                     tolerance",
-                    orbit.basis.name(worst.1),
-                    worst.0
-                )));
+                return Err(small_signal_refusal(
+                    analysis,
+                    EVENT_CARRIER,
+                    format!(
+                        "{name} cannot reproduce the event orbit: from its retained coordinates \
+                         {} misses its start after one period by {:.3e} times the transient \
+                         tolerance",
+                        orbit.basis.name(worst.1),
+                        worst.0
+                    ),
+                    None,
+                ));
             }
             return Ok((orbit.basis.write(&image, z)?, mesh));
         }
         image = traversal.end;
         mesh = boundary::shifted(&mesh, period);
     }
-    Err(carrier_refusal(
-        "PAC cannot reproduce the event orbit: its discrete state does not come back at the \
-         reproduced boundary"
-            .to_string(),
+    Err(small_signal_refusal(
+        analysis,
+        EVENT_CARRIER,
+        format!(
+            "{name} cannot reproduce the event orbit: its discrete state does not come back at \
+             the reproduced boundary"
+        ),
+        None,
     ))
 }
 
@@ -473,6 +537,7 @@ fn operator(
     structure: &StaticMatrix,
     matrix: &mut ComplexMatrix,
     omega: Value,
+    noise: Option<&NoiseCatalog>,
 ) -> Result<Operator, SimulationError> {
     let mut circuit = circuit.clone();
     circuit.link_indices(structure);
@@ -505,25 +570,37 @@ fn operator(
         .map(|switch| switch.state() as u64)
         .chain(circuit.iswitches.iter().map(|switch| switch.state() as u64))
         .collect();
+    let noise = match noise {
+        Some(catalog) => catalog.collect(&circuit, solution)?,
+        None => Vec::new(),
+    };
     Ok(Operator {
         time,
         g,
         c,
         switches,
+        noise,
     })
 }
 
 impl Orbit<'_> {
     /// One period from `image` with `z` written over `mesh`, linearized at
-    /// every accepted point.
-    fn linear_period(
+    /// every accepted point, with every device noise source read there when
+    /// `noise` asks for them.
+    pub(super) fn linear_period(
         &self,
         image: &CapturedTransientState,
         z: &[Value],
         mesh: &[Value],
         structure: &StaticMatrix,
         excitation: &[Value],
+        noise: Option<&NoiseCatalog>,
     ) -> Result<LinearPeriod, SimulationError> {
+        let analysis = if noise.is_some() {
+            AnalysisKind::PNoise
+        } else {
+            AnalysisKind::Pac
+        };
         let start = self.basis.write(image, z)?;
         let mut matrix = ComplexMatrix::from_real_structure(structure);
         let first = operator(
@@ -533,6 +610,7 @@ impl Orbit<'_> {
             structure,
             &mut matrix,
             1.0,
+            noise,
         )?;
         // A stamp that is not `G + jωC` cannot be split at one frequency.
         let doubled = operator(
@@ -542,6 +620,7 @@ impl Orbit<'_> {
             structure,
             &mut matrix,
             2.0,
+            None,
         )?;
         let scale = first
             .g
@@ -555,16 +634,21 @@ impl Orbit<'_> {
             .chain(first.c.iter().zip(&doubled.c))
             .any(|(a, b)| (a - b).abs() > 1.0e-9 * a.abs().max(b.abs()).max(1.0e-12 * scale))
         {
-            return Err(carrier_refusal(
-                "PAC on an event orbit splits the small-signal operator into G + jωC, and a \
-                 device in this circuit stamps a response that is not linear in frequency"
-                    .to_string(),
+            return Err(small_signal_refusal(
+                analysis,
+                EVENT_CARRIER,
+                format!(
+                    "{} on an event orbit splits the small-signal operator into G + jωC, and a \
+                     device in this circuit stamps a response that is not linear in frequency",
+                    analysis_name(analysis)
+                ),
+                None,
             ));
         }
         let operators = std::cell::RefCell::new(vec![first]);
         let observer = |time: Value, circuit: &CircuitData, solution: &[Value]| {
             let mut matrix = ComplexMatrix::from_real_structure(structure);
-            let point = operator(time, circuit, solution, structure, &mut matrix, 1.0)?;
+            let point = operator(time, circuit, solution, structure, &mut matrix, 1.0, noise)?;
             let mut operators = operators.borrow_mut();
             // The segment offers its start, and an instant it accepts twice
             // keeps its later state, which the next step starts from.
@@ -589,17 +673,17 @@ impl Orbit<'_> {
         let end = operators.last().map_or(t0, |point| point.time);
         if (end - t0 - period).abs() > 1.0e-9 * period {
             return Err(SimulationError::Circuit(format!(
-                "PAC's linearized period ends at {end:.9e} s, not one period after its \
+                "the linearized period ends at {end:.9e} s, not one period after its \
                  boundary at {t0:.9e} s"
             )));
         }
-        LinearPeriod::new(&operators, excitation.to_vec(), period, t0)
+        LinearPeriod::new(operators, excitation.to_vec(), period, t0)
     }
 }
 
 impl LinearPeriod {
     fn new(
-        operators: &[Operator],
+        mut operators: Vec<Operator>,
         excitation: Vec<Value>,
         period: Value,
         t0: Value,
@@ -613,7 +697,7 @@ impl LinearPeriod {
             let h = after.time - before.time;
             if h <= 0.0 {
                 return Err(SimulationError::Circuit(format!(
-                    "PAC's linearized period has a step of {h:e} s at {:.9e} s",
+                    "the linearized period has a step of {h:e} s at {:.9e} s",
                     after.time
                 )));
             }
@@ -649,7 +733,7 @@ impl LinearPeriod {
                 .collect();
             let a = PssDenseLu::factor(&a).ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "PAC's linearized step at {:.9e} s is singular",
+                    "the linearized step at {:.9e} s is singular",
                     after.time
                 ))
             })?;
@@ -660,6 +744,10 @@ impl LinearPeriod {
                 changes,
             });
         }
+        let noise = operators
+            .iter_mut()
+            .map(|point| std::mem::take(&mut point.noise))
+            .collect();
         let mut period_map = Self {
             n,
             period,
@@ -667,6 +755,7 @@ impl LinearPeriod {
             steps,
             monodromy: vec![0.0; n * n],
             excitation,
+            noise,
         };
         let mut monodromy = vec![0.0; n * n];
         for col in 0..n {
@@ -848,12 +937,18 @@ impl LinearPeriod {
                                 .map(|s| s.name.clone())
                         })
                         .unwrap_or_default();
-                    return Err(carrier_refusal(format!(
-                        "PAC on the event orbit refuses switch '{name}': its control carries \
-                         {value:.3e} of small signal where it changes at {:.6e} s, so its \
-                         crossing moves with the input and the impulse that adds is not formed",
-                        self.phases[point].rem_euclid(self.period)
-                    )));
+                    return Err(small_signal_refusal(
+                        AnalysisKind::Pac,
+                        EVENT_CARRIER,
+                        format!(
+                            "PAC on the event orbit refuses switch '{name}': its control \
+                             carries {value:.3e} of small signal where it changes at {:.6e} s, \
+                             so its crossing moves with the input and the impulse that adds is \
+                             not formed",
+                            self.phases[point].rem_euclid(self.period)
+                        ),
+                        Some(&name),
+                    ));
                 }
             }
         }
@@ -875,7 +970,10 @@ fn multiply(matrix: &[Value], x: &[Value], n: usize) -> Vec<Value> {
 
 /// Gaussian elimination with partial pivoting on a small dense complex
 /// system; `None` when it is singular.
-fn solve_complex(system: &mut [Vec<Complex64>], mut rhs: Vec<Complex64>) -> Option<Vec<Complex64>> {
+pub(super) fn solve_complex(
+    system: &mut [Vec<Complex64>],
+    mut rhs: Vec<Complex64>,
+) -> Option<Vec<Complex64>> {
     let n = rhs.len();
     let scale = system
         .iter()

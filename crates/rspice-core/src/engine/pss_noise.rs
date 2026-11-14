@@ -465,7 +465,12 @@ impl Engine {
         config
             .validate()
             .map_err(|error| SimulationError::Circuit(format!("Invalid PSS config: {error}")))?;
-        operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
+        operating_point.authenticate_for_reuse(
+            netlist,
+            &self.config,
+            &config,
+            crate::identity::AnalysisKind::PNoise,
+        )?;
 
         let (period, mut circuit, mut matrix, x0) = {
             let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
@@ -481,7 +486,12 @@ impl Engine {
             Self::ensure_pss_noise_delay_supported(&circuit)?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
-            operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
+            operating_point.authenticate_for_reuse(
+                netlist,
+                &self.config,
+                &config,
+                crate::identity::AnalysisKind::PNoise,
+            )?;
             let mut circuit = super::pss::PssCircuit::new_with_abort(
                 circuit,
                 self.config.resource_limits,

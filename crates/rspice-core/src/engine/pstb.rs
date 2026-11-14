@@ -203,6 +203,7 @@ impl Engine {
             netlist,
             &engine.config,
             operating_point.config(),
+            crate::identity::AnalysisKind::Pstb,
         )?;
 
         for (index, coordinate) in basis.iter().enumerate() {

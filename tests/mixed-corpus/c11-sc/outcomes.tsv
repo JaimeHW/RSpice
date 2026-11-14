@@ -23,6 +23,6 @@ pulse	pac	worker	fail	simulation: simulation: Invalid configuration: PSS error: 
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
-pulse	pnoise	interp	fail	simulation: simulation: Invalid configuration: exact retained-state PNOISE: Circuit error: sampled PNOISE requires output sideband zero and offsets no higher than half the carrier frequency
-pulse	pnoise	native	fail	simulation: simulation: Invalid configuration: exact retained-state PNOISE: Circuit error: sampled PNOISE requires output sideband zero and offsets no higher than half the carrier frequency
+pulse	pnoise	interp	pass	pn_band (O6) [0] |a−e|=8.364e-13 allowed 9.174e-12 (a=4.578603e-10, e=4.586968e-10)
+pulse	pnoise	native	pass	pn_band (O6) [0] |a−e|=8.364e-13 allowed 9.174e-12 (a=4.578603e-10, e=4.586968e-10)
 pulse	pnoise	worker	fail	simulation: simulation: Invalid configuration: PSS error: Circuit error: PSS state evolution is unavailable because the circuit contains switch hysteresis state; the shooting period map requires a complete accepted-state adapter for every device

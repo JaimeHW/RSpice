@@ -26,6 +26,14 @@ pub struct PeriodicNoiseSamplingEvidence {
     pub nominal_delay_seconds: Option<Value>,
 }
 
+/// Whether a sampled PNOISE offset lies above the sample sequence's band,
+/// [0, f₀/2]. A sweep that ends on f₀/2 reaches it by repeated
+/// multiplication and can land a few ulps past it; such an endpoint is the
+/// band edge, whose spectrum the sampled sequence has.
+pub(crate) fn offset_exceeds_sampled_band(offset: Value, carrier_frequency_hz: Value) -> bool {
+    offset > 0.5 * carrier_frequency_hz * (1.0 + 1.0e-9)
+}
+
 impl PeriodicNoiseSamplingEvidence {
     /// Check the retained geometry before accepting a serialized observation.
     pub fn validate(&self) -> Result<(), String> {

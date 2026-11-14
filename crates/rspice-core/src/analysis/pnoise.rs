@@ -17,6 +17,7 @@ mod result;
 pub use result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
 
 mod sampled;
+pub(crate) use sampled::offset_exceeds_sampled_band;
 pub use sampled::{
     PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSamplePoint, PeriodicNoiseSampling,
     PeriodicNoiseSamplingEvidence,

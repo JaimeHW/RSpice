@@ -23,12 +23,14 @@
 //! - [`certify`]: the mesh, linearization and event-margin checks an orbit
 //!   passes before it is published.
 //! - [`pac`]: PAC, and PXF through it, on the orbit in the time domain.
+//! - [`pnoise`]: PNOISE on the orbit, by the transposed recurrence.
 
 mod basis;
 mod boundary;
 mod certify;
 mod newton;
 mod pac;
+mod pnoise;
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pss::{PeriodicWaveform, PssResult};
@@ -203,6 +205,31 @@ impl Refusal {
         };
         Self::refusal(DISCRETE_STATE_NOT_PERIODIC, detail)
     }
+}
+
+/// The instance that put `netlist` on the event carrier: its first switch, or
+/// its first runtime Verilog-A instance. Read only to name a refusal.
+pub(in crate::engine) fn event_instance(
+    netlist: &Netlist,
+    config: &crate::engine::SimulationConfig,
+) -> Option<String> {
+    let circuit = Engine::new(config.clone())
+        .build_circuit_with_abort(netlist, &crate::abort_signal::NoAbort)
+        .ok()?;
+    let switch = circuit
+        .vswitches
+        .first()
+        .map(|switch| switch.name.clone())
+        .or_else(|| circuit.iswitches.first().map(|switch| switch.name.clone()));
+    #[cfg(feature = "veriloga")]
+    let switch = switch.or_else(|| {
+        circuit
+            .veriloga_devices()
+            .iter()
+            .next()
+            .map(|device| device.name.to_string())
+    });
+    switch
 }
 
 /// Whether native shooting refuses this circuit only for state event
