@@ -543,8 +543,9 @@ Q1 cx bx 0 0 qmod
 
     /// The periodic analyses answer from the declared capability table:
     /// MEXTRAM scales a `ddt` by a bias-dependent quantity, so its generator
-    /// could not prove its residual F(x) + dQ(x)/dt and harmonic balance
-    /// refuses it with that reason instead of linearizing something else.
+    /// could not prove its residual F(x) + dQ(x)/dt, and harmonic balance and
+    /// the shooting PSS both refuse it with that reason instead of
+    /// integrating something else.
     #[test]
     fn the_periodic_analyses_refuse_a_generated_compact_model_by_capability() {
         let netlist = netlist();
@@ -567,11 +568,11 @@ Q1 cx bx 0 0 qmod
                     .with_tolerance(1.0e-6),
                 &rspice_core::NoAbort,
             )
-            .expect_err("a generated compact model's integration state is not captured")
+            .expect_err("MEXTRAM's residual is not F(x) + dQ(x)/dt")
             .to_string();
         assert!(
-            pss.contains("generated Verilog-A integration state"),
-            "the PSS period map must name the uncaptured state: {pss}"
+            pss.contains("it scales a `ddt` by a quantity that varies with bias"),
+            "the shooting PSS must name the generator's reason: {pss}"
         );
     }
 }

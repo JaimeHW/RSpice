@@ -4213,10 +4213,6 @@ impl Engine {
         Ok(None)
     }
 
-    /// Certify the physical F/Q equations for either a Newton proposal or
-    /// an exactly projected forced solution. Limiter companions cannot serve
-    /// as the acceptance residual.
-    #[allow(clippy::too_many_arguments)]
     /// Scale a Newton update so no electrical node a generated model reaches
     /// moves by more than [`GENERATED_STEP_LIMIT`], as the transient and
     /// harmonic balance limit them: a compact model's exponentials overflow
@@ -4236,6 +4232,10 @@ impl Engine {
         }
     }
 
+    /// Certify the physical F/Q equations for either a Newton proposal or
+    /// an exactly projected forced solution. Limiter companions cannot serve
+    /// as the acceptance residual.
+    #[allow(clippy::too_many_arguments)]
     fn pss_check_physical_candidate(
         &self,
         circuit: &mut PssCircuit,
