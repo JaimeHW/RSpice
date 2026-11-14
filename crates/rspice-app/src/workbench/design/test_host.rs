@@ -10,6 +10,7 @@ use rspice_app_state::workbench::workspace::restore_session_model_library_manage
 
 use crate::properties::PropertyEditorSchema;
 use crate::state::pdk_config::PdkConfig;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app_state::Model;
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
@@ -47,6 +48,14 @@ impl Default for DesignTestHost {
             model,
             workbench: Box::default(),
         }
+    }
+}
+
+impl DesignTestHost {
+    /// `AppState::sync_active_schematic_to_workspace`, the same one line:
+    /// [`sync_active_schematic`] over the model and the session.
+    pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
+        sync_active_schematic(&mut self.model, &mut self.workbench);
     }
 }
 

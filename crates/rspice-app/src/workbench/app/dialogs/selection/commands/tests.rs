@@ -10,9 +10,9 @@ use super::*;
 use super::floating::schematic_paste_anchor;
 use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, SchematicProbe, Wire};
 use crate::workbench::app::copy_active_schematic_selection;
-use crate::workbench::app_state::AppState;
+use crate::workbench::design::test_host::DesignTestHost;
 
-fn last_prompt(state: &AppState) -> String {
+fn last_prompt(state: &DesignTestHost) -> String {
     state
         .workbench
         .prompt
@@ -26,8 +26,8 @@ fn probe(id: u64, position: Point, reference: &str, expression: Option<&str>) ->
     SchematicProbe::new(id, position, reference, expression.map(ToOwned::to_owned)).expect("probe")
 }
 
-fn state_with_two_resistors() -> AppState {
-    let mut state = AppState::default();
+fn state_with_two_resistors() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -89,7 +89,7 @@ fn delete_removes_the_selection_immediately_as_one_undo_entry() {
 
 #[test]
 fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -136,7 +136,7 @@ fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
 
 #[test]
 fn a_stale_wire_handle_deletes_nothing_and_says_so() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -516,7 +516,7 @@ fn duplicate_honours_the_persisted_external_net_preference() {
 
 #[test]
 fn select_all_takes_every_class_the_filter_admits_including_annotations() {
-    let mut base = AppState::default();
+    let mut base = DesignTestHost::default();
     base.model
         .schematic
         .document_mut_for_test()
@@ -640,7 +640,7 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
 
 #[test]
 fn select_all_says_when_the_filter_admits_nothing() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -675,16 +675,17 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     // reaching one anyway is answered by nothing at all.
     let logged = state.model.log_buffer.len();
     for command in [
-        (|state: &mut AppState| delete_schematic_selection(&mut state.model, &mut state.workbench))
-            as fn(&mut AppState) -> bool,
-        |state: &mut AppState| {
+        (|state: &mut DesignTestHost| {
+            delete_schematic_selection(&mut state.model, &mut state.workbench)
+        }) as fn(&mut DesignTestHost) -> bool,
+        |state: &mut DesignTestHost| {
             cut_schematic_selection(
                 &mut state.design.schematic_clipboard,
                 &mut state.model,
                 &mut state.workbench,
             )
         },
-        |state: &mut AppState| {
+        |state: &mut DesignTestHost| {
             duplicate_schematic_selection(
                 state.design.floating_copy_parts(),
                 &mut state.model,
@@ -713,16 +714,17 @@ fn an_empty_selection_refuses_with_one_plain_line() {
     let mut state = state_with_two_resistors();
 
     for command in [
-        (|state: &mut AppState| delete_schematic_selection(&mut state.model, &mut state.workbench))
-            as fn(&mut AppState) -> bool,
-        |state: &mut AppState| {
+        (|state: &mut DesignTestHost| {
+            delete_schematic_selection(&mut state.model, &mut state.workbench)
+        }) as fn(&mut DesignTestHost) -> bool,
+        |state: &mut DesignTestHost| {
             cut_schematic_selection(
                 &mut state.design.schematic_clipboard,
                 &mut state.model,
                 &mut state.workbench,
             )
         },
-        |state: &mut AppState| {
+        |state: &mut DesignTestHost| {
             duplicate_schematic_selection(
                 state.design.floating_copy_parts(),
                 &mut state.model,
