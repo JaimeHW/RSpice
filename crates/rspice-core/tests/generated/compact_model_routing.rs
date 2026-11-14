@@ -542,20 +542,30 @@ Q1 cx bx 0 0 qmod
     }
 
     /// The periodic analyses answer from the declared capability table:
-    /// MEXTRAM scales a `ddt` by a bias-dependent quantity, so its generator
-    /// could not prove its residual F(x) + dQ(x)/dt, and harmonic balance and
-    /// the shooting PSS both refuse it with that reason instead of
-    /// integrating something else.
+    /// harmonic balance carries the `ddt` MEXTRAM scales by a bias-dependent
+    /// quantity as an unknown of its own and solves the routed transistor at
+    /// its authored nodes, while the shooting PSS, whose period map no settled
+    /// transient has confirmed on such a residual, refuses it by that reason.
     #[test]
-    fn the_periodic_analyses_refuse_a_generated_compact_model_by_capability() {
+    fn the_periodic_analyses_answer_a_generated_compact_model_by_capability() {
         let netlist = netlist();
         let hb = engine()
             .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
-            .expect_err("MEXTRAM's residual is not F(x) + dQ(x)/dt")
-            .to_string();
+            .unwrap_or_else(|error| panic!("harmonic balance solves MEXTRAM: {error}"));
+        let output = hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|voltage| voltage.node_name.eq_ignore_ascii_case("CX"))
+            .expect("harmonic balance must retain the authored output node");
         assert!(
-            hb.contains("it scales a `ddt` by a quantity that varies with bias"),
-            "harmonic balance must name the generator's reason: {hb}"
+            output
+                .coefficients
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+                && output.coefficients[1].norm() > 0.0,
+            "the output carries the drive's fundamental: {:?}",
+            output.coefficients
         );
 
         let pss = engine()
