@@ -18,27 +18,30 @@ use rspice_schematic_editor::symbol_editor::session::{
     SymbolClipboard, SymbolSelection, SymbolTool,
 };
 
-/// The request that finishes the symbol canvas's open polyline, once the
-/// canvas is bound to the document in front. With fewer than two points, or
-/// on a read-only symbol, the polyline is let go and there is none.
-pub(crate) fn pending_symbol_polyline_request(
+/// The request that places the text typed into the text tool's entry, once
+/// the canvas is bound to the document in front; `None` with no draft, or on
+/// a read-only symbol, which lets the draft go.
+pub(crate) fn symbol_text_request(
     symbol: &mut SymbolUiState,
     model: &Model,
     wb: &mut WorkbenchSession,
 ) -> Option<SymbolEditRequest> {
-    // A command can arrive after navigation and before the new canvas has rendered.
+    // A key can arrive after navigation and before the new canvas has rendered.
     let source = symbol_editor_request_source(model, wb);
     bind_canvas_source(&mut symbol.editor, source);
-    if symbol.editor.pending_polyline.len() < 2 || deny_read_only_edit(model, wb) {
-        symbol.editor.pending_polyline.clear();
+    let draft = symbol.editor.text_draft.clone()?;
+    if deny_read_only_edit(model, wb) {
+        symbol.editor.text_draft = None;
         return None;
     }
-    let points = symbol.editor.pending_polyline.clone();
     Some(symbol_edit_request(
         symbol,
         model,
         wb,
-        SymbolEditAction::FinishPolyline { points },
+        SymbolEditAction::PlaceText {
+            anchor: draft.anchor,
+            text: draft.text,
+        },
     ))
 }
 
@@ -258,8 +261,8 @@ fn apply_current_symbol_edit_request(
     {
         return;
     }
-    if let SymbolEditAction::FinishPolyline { points } = &request.action
-        && points != &symbol.editor.pending_polyline
+    if let SymbolEditAction::PlaceText { anchor, .. } = &request.action
+        && symbol.editor.text_draft.as_ref().map(|draft| draft.anchor) != Some(*anchor)
     {
         return;
     }
@@ -273,7 +276,7 @@ fn apply_current_symbol_edit_request(
             return;
         }
     };
-    // Completing a line historically stores only geometry. Do not materialize editor metadata.
+    // Placing text stores only geometry. Do not materialize editor metadata.
     let mut metadata = if request.action.document_only() {
         None
     } else {

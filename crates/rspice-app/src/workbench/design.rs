@@ -483,9 +483,21 @@ impl CommandSet for DesignCommand {
                 Ok(_) => Some("select one instance"),
                 Err(refusal) => Some(refusal.reason()),
             },
-            Self::ExitSymbolInPlace => (!routed::symbol_editor(reads.wb.workspace, reads.model)
-                || in_place_session(&reads.state.symbol.in_place, reads.model).is_none())
-            .then_some("no symbol is being edited in place"),
+            Self::ExitSymbolInPlace => {
+                if !routed::symbol_editor(reads.wb.workspace, reads.model)
+                    || in_place_session(&reads.state.symbol.in_place, reads.model).is_none()
+                {
+                    Some("no symbol is being edited in place")
+                } else {
+                    // Return finishes the line being drawn first.
+                    reads
+                        .state
+                        .symbol
+                        .editor
+                        .has_draft()
+                        .then_some("a shape is being drawn")
+                }
+            }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
                 Some("the active schematic is read-only")

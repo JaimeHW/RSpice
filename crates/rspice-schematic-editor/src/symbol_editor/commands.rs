@@ -7,7 +7,8 @@ use super::session::{
     rotate_point_cw_about, rotate_shape_ccw_about, rotate_shape_cw_about,
 };
 use rspice_design::symbol::{
-    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape,
+    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign,
+    SymbolTextSize,
 };
 use rspice_design_model::{Point, symbol_pin::SymbolPinSide};
 
@@ -36,14 +37,16 @@ pub enum SymbolEditAction {
     },
     Transform(SymbolTransform),
     TransformPin(SymbolPinTransform),
-    FinishPolyline {
-        points: Vec<Point>,
+    /// Place the text typed into the text tool's entry at `anchor`.
+    PlaceText {
+        anchor: Point,
+        text: String,
     },
 }
 
 impl SymbolEditAction {
     pub fn document_only(&self) -> bool {
-        matches!(self, Self::FinishPolyline { .. })
+        matches!(self, Self::PlaceText { .. })
     }
 }
 
@@ -117,13 +120,15 @@ pub fn apply_edit(
         SymbolEditAction::TransformPin(transform) => {
             transform_pin(document, &selection, transform, &mut outcome)
         }
-        SymbolEditAction::FinishPolyline { points } => {
-            if points.len() >= 2 {
+        SymbolEditAction::PlaceText { anchor, text } => {
+            session.text_draft = None;
+            if !text.trim().is_empty() {
                 outcome.undo_before = Some(Box::new(document.clone()));
-                session.pending_polyline.clear();
-                document.body.push(SymbolShape::Polyline {
-                    points,
-                    closed: false,
+                document.body.push(SymbolShape::Text {
+                    anchor,
+                    text,
+                    size: SymbolTextSize::default(),
+                    align: SymbolTextAlign::default(),
                 });
                 if let Some(index) = document.body.len().checked_sub(1) {
                     session.select_shape(index);
@@ -135,39 +140,41 @@ pub fn apply_edit(
     outcome
 }
 
+/// Arm `tool`. Whatever the last tool had part drawn is let go.
 pub fn activate_tool(
     session: &mut SymbolEditorSession,
     tool: SymbolTool,
     document: Option<&SymbolDocument>,
 ) {
     session.tool = tool;
-    match tool {
-        SymbolTool::PlacePin => {
-            let next = document.and_then(|document| {
-                document
-                    .pins
-                    .iter()
-                    .find(|pin| pin.position.is_none())
-                    .map(|pin| pin.name.clone())
-            });
-            if let Some(pin) = next {
-                session.select_pin(pin);
-            } else {
-                session.clear_selection();
-            }
+    session.clear_draft();
+    if tool == SymbolTool::PlacePin {
+        let next = document.and_then(|document| {
+            document
+                .pins
+                .iter()
+                .find(|pin| pin.position.is_none())
+                .map(|pin| pin.name.clone())
+        });
+        if let Some(pin) = next {
+            session.select_pin(pin);
+        } else {
+            session.clear_selection();
         }
-        SymbolTool::Line | SymbolTool::Polygon => session.pending_polyline.clear(),
-        SymbolTool::Rectangle | SymbolTool::Circle | SymbolTool::Arc => session.shape_start = None,
-        SymbolTool::Select | SymbolTool::Text => {}
     }
 }
 
+/// Escape on the canvas: the shape being drawn is let go and its tool stays
+/// armed; with nothing part drawn, the tool is put down for Select.
 pub fn finish_cancel(session: &mut SymbolEditorSession) {
-    session.tool = SymbolTool::Select;
     session.clear_drag_state();
-    session.shape_start = None;
     session.marquee_start = None;
     session.marquee_current = None;
+    if session.has_draft() {
+        session.clear_draft();
+    } else {
+        session.tool = SymbolTool::Select;
+    }
 }
 
 pub fn clipboard_from_selection(

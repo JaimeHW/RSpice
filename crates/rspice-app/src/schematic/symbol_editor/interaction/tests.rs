@@ -7,7 +7,7 @@ use crate::state::{
 use crate::workbench::SymbolTool;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
-use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
+use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTextDraft};
 
 pub(crate) fn open_symbol() -> DesignTestHost {
     let mut state = DesignTestHost::default();
@@ -56,6 +56,13 @@ fn request(state: &DesignTestHost, input: SymbolCanvasInput) -> SymbolCanvasRequ
         viewport: viewport(),
         input,
     }
+}
+
+/// The circle tool with its center placed, so that a click anywhere off the
+/// center draws a circle: input that would edit the document if let through.
+fn arm_circle(state: &mut DesignTestHost) {
+    state.design.symbol.editor.tool = SymbolTool::Circle;
+    state.design.symbol.editor.shape_start = Some(Point::origin());
 }
 
 fn apply(state: &mut DesignTestHost, request: SymbolCanvasRequest) {
@@ -198,7 +205,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
 #[test]
 fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     let mut state = open_symbol();
-    state.design.symbol.editor.tool = SymbolTool::Text;
+    arm_circle(&mut state);
     let pending = request(
         &state,
         SymbolCanvasInput {
@@ -228,6 +235,7 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     bind_active_canvas(&mut canvas_parts(&mut state));
+    arm_circle(&mut state);
     apply(&mut state, pending);
     assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
@@ -238,12 +246,18 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
     let mut state = open_symbol();
     state.design.symbol.editor.pending_polyline = vec![Point::origin(), Point::new(10, 20)];
     state.design.symbol.editor.shape_start = Some(Point::origin());
+    state.design.symbol.editor.text_draft = Some(SymbolTextDraft {
+        anchor: Point::origin(),
+        text: "GAIN".to_owned(),
+        caret_placed: true,
+    });
     state.design.symbol.editor.marquee_start = Some(Point::origin());
     state.design.symbol.editor.dragging_origin = true;
     state.model.active_schematic_epoch += 1;
     bind_active_canvas(&mut canvas_parts(&mut state));
     assert!(state.design.symbol.editor.pending_polyline.is_empty());
     assert!(state.design.symbol.editor.shape_start.is_none());
+    assert!(state.design.symbol.editor.text_draft.is_none());
     assert!(state.design.symbol.editor.marquee_start.is_none());
     assert!(!state.design.symbol.editor.dragging_origin);
 
@@ -252,7 +266,7 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
         .workspace
         .content
         .set_active_read_only_reference(true);
-    state.design.symbol.editor.tool = SymbolTool::Text;
+    arm_circle(&mut state);
     let before = state.model.load_active_symbol_document().unwrap();
     let request = request(
         &state,

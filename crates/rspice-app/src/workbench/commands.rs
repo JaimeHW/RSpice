@@ -398,9 +398,9 @@ impl Command {
                         super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
                     );
                 } else if active_symbol_editor(app) {
-                    // The symbol canvas's one interaction in flight is an
-                    // open polyline; Escape keeps what has been drawn.
-                    app.state.finish_pending_symbol_polyline();
+                    // Escape lets go of the shape being drawn and keeps its
+                    // tool armed; with nothing part drawn it puts the tool
+                    // down.
                     rspice_schematic_editor::symbol_editor::commands::finish_cancel(
                         &mut app.state.design.symbol.editor,
                     );

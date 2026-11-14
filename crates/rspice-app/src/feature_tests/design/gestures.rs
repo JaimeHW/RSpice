@@ -165,9 +165,22 @@ fn symbol_draft_survives_passive_window_projection() {
             assert!(fixture.app.project_application_window(primary, layout));
             fixture.frame(vec![], true);
         }
-        fixture
-            .app
-            .execute_shortcut_command(crate::workbench::commands::vocabulary::Command::Cancel);
+        // Enter on the canvas finishes the line the projections kept. The
+        // canvas answers the request for the keyboard a pass later, after it
+        // has read that pass's input.
+        crate::workbench::app_state::request_engineering_canvas_focus(&fixture.ctx);
+        fixture.frame(vec![], true);
+        fixture.frame(vec![], true);
+        fixture.frame(
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: Some(egui::Key::Enter),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            true,
+        );
         let edited = fixture
             .app
             .state

@@ -3,15 +3,17 @@
 use egui::Pos2;
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::symbol::{
-    SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
-    SymbolShape, SymbolTextAlign, SymbolTextSize, pin_side_against_body,
+    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape,
+    pin_side_against_body,
 };
 use rspice_design_model::{
     Point, cell_view::CellViewRef, port::PortDirection, symbol_pin::SymbolPinSide,
 };
 use rspice_vocabulary::product::ProjectId;
 
-use super::session::{SymbolEditorSession, SymbolSelection, SymbolTool};
+use super::session::{
+    SymbolArcSweep, SymbolEditorSession, SymbolSelection, SymbolTextDraft, SymbolTool, bearing,
+};
 use super::{
     SymbolViewport, hit_label, hit_origin, hit_pin, hit_shape, snap_point, snap_to_terminal_grid,
 };
@@ -43,16 +45,21 @@ impl SymbolRequestSource {
     }
 }
 
-/// Only the pointer facts consumed by the symbol canvas; no global app access.
+/// Only the pointer and key facts consumed by the symbol canvas; no global
+/// app access.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SymbolCanvasInput {
     pub pointer: Pos2,
-    pub secondary_clicked: bool,
     pub drag_started: bool,
     pub dragged: bool,
     pub drag_stopped: bool,
     pub clicked: bool,
+    pub double_clicked: bool,
     pub extend_selection: bool,
+    /// Enter, while a line or polygon is being drawn: finish it.
+    pub finish: bool,
+    /// Backspace, while a shape is being drawn: take back its last point.
+    pub remove_last_point: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -76,20 +83,40 @@ pub fn canvas_request(
     let pressed_at = drag_started
         .then(|| response.ctx.input(|input| input.pointer.press_origin()))
         .flatten();
+    // The keys belong to the shape being drawn, and only while the canvas
+    // holds the keyboard; with nothing part drawn they are left to whatever
+    // else answers them.
+    let drafting = response.has_focus() && session.tool.draws() && session.has_draft();
+    let finish = drafting
+        && matches!(session.tool, SymbolTool::Line | SymbolTool::Polygon)
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let remove_last_point = drafting
+        && session.text_draft.is_none()
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
     let input = SymbolCanvasInput {
-        pointer: pressed_at.or_else(|| response.interact_pointer_pos())?,
-        secondary_clicked: response.secondary_clicked(),
+        pointer: pressed_at
+            .or_else(|| response.interact_pointer_pos())
+            .or_else(|| response.hover_pos())
+            .unwrap_or_else(|| response.rect.center()),
         drag_started,
         dragged: response.dragged_by(egui::PointerButton::Primary),
         drag_stopped: response.drag_stopped_by(egui::PointerButton::Primary),
         clicked: response.clicked_by(egui::PointerButton::Primary),
+        double_clicked: response.double_clicked_by(egui::PointerButton::Primary),
         extend_selection: response.ctx.input(|input| input.modifiers.shift),
+        finish,
+        remove_last_point,
     };
-    if !(input.secondary_clicked
-        || input.drag_started
+    if !(input.drag_started
         || input.dragged
         || input.drag_stopped
-        || input.clicked)
+        || input.clicked
+        || input.finish
+        || input.remove_last_point)
     {
         return None;
     }
@@ -112,8 +139,7 @@ pub fn bind_canvas_source(session: &mut SymbolEditorSession, source: SymbolReque
         session.clear_drag_state();
         session.marquee_start = None;
         session.marquee_current = None;
-        session.pending_polyline.clear();
-        session.shape_start = None;
+        session.clear_draft();
         session.save_dialog_open = false;
         session.save_revision_note.clear();
         session.save_error = None;
@@ -211,11 +237,8 @@ fn handle_canvas_interaction(
     // pin no parent schematic can reach.
     let terminal_point = snap_to_terminal_grid(raw_point);
 
-    if input.secondary_clicked
-        && matches!(edit.session.tool, SymbolTool::Line | SymbolTool::Polygon)
-        && finish_pending_polyline(edit, document)
-    {
-        return true;
+    if edit.session.tool.draws() {
+        return draw_with_tool(edit, document, input, body_point);
     }
 
     if input.drag_started {
@@ -387,11 +410,105 @@ fn handle_canvas_interaction(
             false
         }
         SymbolTool::PlacePin => place_selected_pin(edit, document, terminal_point),
-        SymbolTool::Line | SymbolTool::Polygon => add_polyline_point(edit, body_point),
-        SymbolTool::Rectangle => add_rectangle(edit, document, body_point),
-        SymbolTool::Circle => add_round_shape(edit, document, body_point, false),
-        SymbolTool::Arc => add_round_shape(edit, document, body_point, true),
-        SymbolTool::Text => add_text(edit, document, body_point),
+        // The drawing tools took the input above.
+        SymbolTool::Line
+        | SymbolTool::Polygon
+        | SymbolTool::Rectangle
+        | SymbolTool::Circle
+        | SymbolTool::Arc
+        | SymbolTool::Text => false,
+    }
+}
+
+/// Where a click would land this frame, snapped as the armed tool snaps, so
+/// the shape being drawn can be shown running to it. An arc being swept
+/// follows the pointer round its center.
+pub fn track_pointer(
+    session: &mut SymbolEditorSession,
+    viewport: SymbolViewport,
+    hover: Option<Pos2>,
+) {
+    session.pointer =
+        hover.map(|position| drawing_point(session, viewport.screen_to_world(position)));
+    if let (Some(center), Some(point), Some(sweep)) = (
+        session.shape_start,
+        session.pointer,
+        session.arc_sweep.as_mut(),
+    ) {
+        sweep.follow(center, point);
+    }
+}
+
+/// `raw` on the body grid, when the author snaps to it.
+fn drawing_point(session: &SymbolEditorSession, raw: Point) -> Point {
+    if session.snap_to_grid {
+        snap_point(raw, session.grid_spacing)
+    } else {
+        raw
+    }
+}
+
+/// One input to an armed drawing tool. A click places the shape's next
+/// point. A press-drag places one where it was pressed, when nothing is part
+/// drawn, and one where it is let go, so dragging draws a line segment, a
+/// rectangle or a circle by its radius. Nothing already drawn is picked up.
+fn draw_with_tool(
+    edit: &mut CanvasEdit<'_>,
+    document: &mut SymbolDocument,
+    input: SymbolCanvasInput,
+    point: Point,
+) -> bool {
+    let tool = edit.session.tool;
+    let polyline = matches!(tool, SymbolTool::Line | SymbolTool::Polygon);
+    if input.remove_last_point {
+        take_back_point(edit.session);
+        return false;
+    }
+    // The first click of a double-click placed the point; the second ends
+    // the line there rather than placing it again.
+    if input.finish || (polyline && input.double_clicked) {
+        return finish_pending_polyline(edit, document);
+    }
+    if input.drag_started {
+        edit.session.drawing_drag = !edit.session.has_draft();
+        return edit.session.drawing_drag && place_point(edit, document, point);
+    }
+    if input.drag_stopped {
+        let began_shape = std::mem::take(&mut edit.session.drawing_drag);
+        if tool == SymbolTool::Text {
+            return false;
+        }
+        let placed = place_point(edit, document, point);
+        if began_shape && tool == SymbolTool::Line {
+            return finish_pending_polyline(edit, document) || placed;
+        }
+        return placed;
+    }
+    input.clicked && place_point(edit, document, point)
+}
+
+/// Place the armed tool's next point at `point`; whether that completed a
+/// shape.
+fn place_point(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
+    match edit.session.tool {
+        SymbolTool::Line | SymbolTool::Polygon => add_polyline_point(edit, document, point),
+        SymbolTool::Rectangle => add_rectangle(edit, document, point),
+        SymbolTool::Circle => add_circle(edit, document, point),
+        SymbolTool::Arc => add_arc_point(edit, document, point),
+        SymbolTool::Text => open_text_draft(edit, point),
+        SymbolTool::Select | SymbolTool::PlacePin => false,
+    }
+}
+
+/// Backspace: the shape being drawn loses its last point.
+fn take_back_point(session: &mut SymbolEditorSession) {
+    match session.tool {
+        SymbolTool::Line | SymbolTool::Polygon => {
+            session.pending_polyline.pop();
+        }
+        SymbolTool::Arc if session.arc_sweep.is_some() => session.arc_sweep = None,
+        SymbolTool::Rectangle | SymbolTool::Circle | SymbolTool::Arc => session.shape_start = None,
+        SymbolTool::Text | SymbolTool::Select | SymbolTool::PlacePin => {}
     }
 }
 
@@ -549,16 +666,43 @@ fn place_selected_pin(
     false
 }
 
-fn add_polyline_point(edit: &mut CanvasEdit<'_>, point: Point) -> bool {
+/// The corners a polygon needs before it can close.
+const POLYGON_CORNERS: usize = 3;
+
+/// The line or polygon takes `point` as its next vertex. A point on the last
+/// one adds nothing, and a polygon's first corner clicked again closes it.
+fn add_polyline_point(
+    edit: &mut CanvasEdit<'_>,
+    document: &mut SymbolDocument,
+    point: Point,
+) -> bool {
     if edit.deny_read_only_edit() {
         return false;
+    }
+    let pending = &edit.session.pending_polyline;
+    if pending.last() == Some(&point) {
+        return false;
+    }
+    if edit.session.tool == SymbolTool::Polygon
+        && pending.len() >= POLYGON_CORNERS
+        && pending.first() == Some(&point)
+    {
+        return finish_pending_polyline(edit, document);
     }
     edit.session.pending_polyline.push(point);
     false
 }
 
+/// Put the line or polygon being drawn in the document. A polygon is always
+/// closed, so it waits for its third corner.
 fn finish_pending_polyline(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument) -> bool {
-    if edit.session.pending_polyline.len() < 2 {
+    let closed = edit.session.tool == SymbolTool::Polygon;
+    let needed = if closed { POLYGON_CORNERS } else { 2 };
+    let placed = edit.session.pending_polyline.len();
+    if placed < needed {
+        if closed && placed > 0 {
+            edit.outcome.refusal = Some("A polygon needs three corners.".to_owned());
+        }
         return false;
     }
     if edit.deny_read_only_edit() {
@@ -566,15 +710,15 @@ fn finish_pending_polyline(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocum
     }
     edit.record_undo(document);
     let points = std::mem::take(&mut edit.session.pending_polyline);
-    document.body.push(SymbolShape::Polyline {
-        points,
-        closed: matches!(edit.session.tool, SymbolTool::Polygon),
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        edit.session.select_shape(index);
-    }
-    edit.session.tool = SymbolTool::Select;
+    document.body.push(SymbolShape::Polyline { points, closed });
+    select_last_shape(edit.session, document);
     true
+}
+
+fn select_last_shape(session: &mut SymbolEditorSession, document: &SymbolDocument) {
+    if let Some(index) = document.body.len().checked_sub(1) {
+        session.select_shape(index);
+    }
 }
 
 /// The edge a dropped terminal belongs to.
@@ -615,88 +759,118 @@ fn pin_at<'a>(document: &'a SymbolDocument, name: &str, point: Point) -> Option<
         .map(|pin| pin.name.as_str())
 }
 
+/// The first click is a corner, the second the opposite one. A second
+/// corner level with the first in either direction would draw no area, so
+/// the rectangle waits for one that does.
 fn add_rectangle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
     if edit.deny_read_only_edit() {
         return false;
     }
-    let Some(start) = edit.session.shape_start.take() else {
+    let Some(start) = edit.session.shape_start else {
         edit.session.shape_start = Some(point);
         return false;
     };
-    if start == point {
-        edit.session.shape_start = Some(start);
+    if start.x == point.x || start.y == point.y {
         return false;
     }
+    edit.session.shape_start = None;
     edit.record_undo(document);
-    document.body.push(SymbolShape::Polyline {
+    document.body.push(rectangle_shape(start, point));
+    select_last_shape(edit.session, document);
+    true
+}
+
+/// The closed outline from `start` to the opposite corner `end`.
+pub fn rectangle_shape(start: Point, end: Point) -> SymbolShape {
+    SymbolShape::Polyline {
         points: vec![
             start,
-            Point::new(point.x, start.y),
-            point,
-            Point::new(start.x, point.y),
+            Point::new(end.x, start.y),
+            end,
+            Point::new(start.x, end.y),
         ],
         closed: true,
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        edit.session.select_shape(index);
     }
-    edit.session.tool = SymbolTool::Select;
-    true
 }
 
-fn add_text(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
+/// The radius of a circle about `center` through `point`, in whole units.
+pub fn radius_through(center: Point, point: Point) -> i32 {
+    center.distance_squared(point).isqrt()
+}
+
+/// The first click is the center, the second a point on the circle.
+fn add_circle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
     if edit.deny_read_only_edit() {
         return false;
     }
-    edit.record_undo(document);
-    document.body.push(SymbolShape::Text {
-        anchor: point,
-        text: "Text".to_owned(),
-        size: SymbolTextSize::default(),
-        align: SymbolTextAlign::default(),
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        edit.session.select_shape(index);
-    }
-    edit.session.tool = SymbolTool::Select;
-    true
-}
-
-fn add_round_shape(
-    edit: &mut CanvasEdit<'_>,
-    document: &mut SymbolDocument,
-    point: Point,
-    arc: bool,
-) -> bool {
-    if edit.deny_read_only_edit() {
-        return false;
-    }
-    if let Some(center) = edit.session.shape_start.take() {
-        edit.record_undo(document);
-        let radius = center
-            .distance_squared(point)
-            .isqrt()
-            .max(SYMBOL_TERMINAL_GRID);
-        let shape = if arc {
-            SymbolShape::Arc {
-                center,
-                radius,
-                start_degrees: 0,
-                sweep_degrees: 180,
-            }
-        } else {
-            SymbolShape::Circle { center, radius }
-        };
-        document.body.push(shape);
-        if let Some(index) = document.body.len().checked_sub(1) {
-            edit.session.select_shape(index);
-        }
-        edit.session.tool = SymbolTool::Select;
-        true
-    } else {
+    let Some(center) = edit.session.shape_start else {
         edit.session.shape_start = Some(point);
-        false
+        return false;
+    };
+    let radius = radius_through(center, point);
+    if radius < 1 {
+        return false;
     }
+    edit.session.shape_start = None;
+    edit.record_undo(document);
+    document.body.push(SymbolShape::Circle { center, radius });
+    select_last_shape(edit.session, document);
+    true
+}
+
+/// The arc is the center, then where it starts, then where it ends. It runs
+/// from the start the way the pointer turned to reach the end.
+fn add_arc_point(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
+    if edit.deny_read_only_edit() {
+        return false;
+    }
+    let Some(center) = edit.session.shape_start else {
+        edit.session.shape_start = Some(point);
+        return false;
+    };
+    let Some(mut sweep) = edit.session.arc_sweep else {
+        if point != center {
+            edit.session.arc_sweep = Some(SymbolArcSweep::new(center, point));
+        }
+        return false;
+    };
+    sweep.follow(center, point);
+    edit.session.arc_sweep = Some(sweep);
+    let Some(shape) = arc_shape(center, &sweep) else {
+        return false;
+    };
+    edit.session.shape_start = None;
+    edit.session.arc_sweep = None;
+    edit.record_undo(document);
+    document.body.push(shape);
+    select_last_shape(edit.session, document);
+    true
+}
+
+/// The arc about `center` that `sweep` has turned out, in whole units and
+/// degrees; `None` until it has turned at least a degree.
+pub fn arc_shape(center: Point, sweep: &SymbolArcSweep) -> Option<SymbolShape> {
+    let sweep_degrees = sweep.degrees.round() as i32;
+    (sweep_degrees != 0).then(|| SymbolShape::Arc {
+        center,
+        radius: radius_through(center, sweep.start),
+        start_degrees: bearing(center, sweep.start).round() as i32,
+        sweep_degrees,
+    })
+}
+
+/// Text starts as a draft at `point`, typed into an entry there; the host
+/// places it when the entry is committed.
+fn open_text_draft(edit: &mut CanvasEdit<'_>, point: Point) -> bool {
+    if edit.deny_read_only_edit() {
+        return false;
+    }
+    edit.session.text_draft = Some(SymbolTextDraft {
+        anchor: point,
+        text: String::new(),
+        caret_placed: false,
+    });
+    false
 }
 
 fn sync_legacy_attribute_anchor(

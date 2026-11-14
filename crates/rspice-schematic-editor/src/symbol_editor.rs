@@ -31,7 +31,7 @@ use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
 };
-use session::{SymbolEditorSession, SymbolGridSpacing};
+use session::{SymbolEditorSession, SymbolGridSpacing, SymbolTool};
 
 const PIN_HIT_RADIUS: f32 = 10.0;
 const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
@@ -213,6 +213,155 @@ pub fn draw_in_place(
     draw_pins(painter, viewport, document, ports, session);
     draw_labels(painter, viewport, editor, session, &t);
     draw_marquee(painter, viewport, session, &t);
+    draw_draft(painter, viewport, session, &t);
+}
+
+/// A shape being drawn is the selection colour held back a little, as a
+/// wire being routed is, so a committed selection still reads above it.
+const DRAFT_ALPHA: f32 = 0.85;
+/// The part of a draft that follows the pointer, against the points placed.
+const DRAFT_HINT: f32 = 0.6;
+/// A draft is drawn at the weight the shape will carry selected.
+const DRAFT_STROKE: f32 = 2.0;
+
+/// The shape the armed tool is drawing: what has been placed in full tone,
+/// what runs to the pointer in the hint tone, and a mark where a click would
+/// land.
+fn draw_draft(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    session: &SymbolEditorSession,
+    t: &Tokens,
+) {
+    if !session.tool.draws() {
+        return;
+    }
+    let placed = t.color.canvas_select.gamma_multiply(DRAFT_ALPHA);
+    let hint = placed.gamma_multiply(DRAFT_HINT);
+    let full = Stroke::new(DRAFT_STROKE, placed);
+    let following = Stroke::new(DRAFT_STROKE, hint);
+    let screen = |point: Point| viewport.world_to_screen(point);
+    let pointer = session.pointer;
+    match session.tool {
+        SymbolTool::Line | SymbolTool::Polygon => {
+            let points = &session.pending_polyline;
+            let mut route: Vec<Pos2> = points.iter().copied().map(screen).collect();
+            if let Some(pointer) = pointer.filter(|_| !points.is_empty()) {
+                route.push(screen(pointer));
+            }
+            // A polygon always closes, so its closing edge is shown too.
+            if session.tool == SymbolTool::Polygon
+                && route.len() > 2
+                && let Some(first) = route.first().copied()
+            {
+                route.push(first);
+            }
+            painter.add(Shape::line(route, following));
+            let committed: Vec<Pos2> = points.iter().copied().map(screen).collect();
+            painter.add(Shape::line(committed.clone(), full));
+            for point in committed {
+                painter.circle_filled(point, DRAFT_STROKE * 1.25, placed);
+            }
+        }
+        SymbolTool::Rectangle => {
+            if let Some(start) = session.shape_start {
+                if let Some(end) = pointer.filter(|end| end.x != start.x && end.y != start.y) {
+                    painter.add(Shape::closed_line(
+                        [
+                            start,
+                            Point::new(end.x, start.y),
+                            end,
+                            Point::new(start.x, end.y),
+                        ]
+                        .map(screen)
+                        .to_vec(),
+                        following,
+                    ));
+                }
+                painter.circle_filled(screen(start), DRAFT_STROKE * 1.25, placed);
+            }
+        }
+        SymbolTool::Circle => {
+            if let Some(center) = session.shape_start {
+                if let Some(radius) = pointer
+                    .map(|point| interaction::radius_through(center, point))
+                    .filter(|radius| *radius >= 1)
+                {
+                    painter.circle_stroke(screen(center), radius as f32 * viewport.zoom, following);
+                }
+                draw_center_mark(painter, screen(center), placed);
+            }
+        }
+        SymbolTool::Arc => {
+            if let Some(center) = session.shape_start {
+                match session.arc_sweep {
+                    None => {
+                        if let Some(pointer) = pointer {
+                            painter.line_segment([screen(center), screen(pointer)], following);
+                        }
+                    }
+                    Some(sweep) => {
+                        painter.line_segment([screen(center), screen(sweep.start)], full);
+                        if let Some(pointer) = pointer {
+                            painter.line_segment(
+                                [screen(center), screen(pointer)],
+                                Stroke::new(1.0, hint),
+                            );
+                        }
+                        if let Some(SymbolShape::Arc {
+                            radius,
+                            start_degrees,
+                            sweep_degrees,
+                            ..
+                        }) = interaction::arc_shape(center, &sweep)
+                        {
+                            let arc =
+                                SymbolCurve::of_arc(center, radius, start_degrees, sweep_degrees);
+                            painter.add(Shape::line(curve_points(viewport, &arc), following));
+                        }
+                        painter.circle_filled(screen(sweep.start), DRAFT_STROKE * 1.25, placed);
+                    }
+                }
+                draw_center_mark(painter, screen(center), placed);
+            }
+        }
+        SymbolTool::Text => {
+            if let Some(draft) = &session.text_draft {
+                let size = rspice_design::symbol::SymbolTextSize::default();
+                let align = SymbolTextAlign::default();
+                if !draft.text.is_empty() {
+                    painter.text(
+                        screen(draft.anchor),
+                        editor_text_align(viewport.placement, align),
+                        &draft.text,
+                        theme::mono(
+                            (size.height() as f32 * viewport.zoom).max(1.0),
+                            FontWeight::Regular,
+                        ),
+                        placed,
+                    );
+                }
+                painter.circle_filled(screen(draft.anchor), DRAFT_STROKE * 1.25, placed);
+            }
+        }
+        SymbolTool::Select | SymbolTool::PlacePin => {}
+    }
+    if let Some(pointer) = pointer {
+        draw_snap_mark(painter, screen(pointer), placed);
+    }
+}
+
+/// Where a click would land: the ring and cross the wire tool marks its
+/// acquisition point with.
+fn draw_snap_mark(painter: &egui::Painter, at: Pos2, color: Color32) {
+    painter.circle_stroke(at, 5.0, Stroke::new(1.25, color));
+    draw_center_mark(painter, at, color);
+}
+
+fn draw_center_mark(painter: &egui::Painter, at: Pos2, color: Color32) {
+    let stroke = Stroke::new(1.0, color);
+    painter.line_segment([at - vec2(2.5, 0.0), at + vec2(2.5, 0.0)], stroke);
+    painter.line_segment([at - vec2(0.0, 2.5), at + vec2(0.0, 2.5)], stroke);
 }
 
 fn draw_grid(

@@ -26,6 +26,69 @@ impl SymbolTool {
             SymbolTool::Text => "Text",
         }
     }
+
+    /// Whether the tool draws artwork. A drawing tool never selects or moves
+    /// what is already drawn.
+    pub fn draws(self) -> bool {
+        !matches!(self, SymbolTool::Select | SymbolTool::PlacePin)
+    }
+}
+
+/// The arc tool's second point, and how far the pointer has turned about the
+/// center since it was placed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SymbolArcSweep {
+    pub start: rspice_design_model::Point,
+    /// Degrees turned from `start`, clockwise positive on a screen whose y
+    /// runs down. It accumulates as the pointer moves, so the arc runs the way
+    /// the pointer went and past half a turn keeps its direction.
+    pub degrees: f64,
+    /// The pointer's bearing from the center when last seen.
+    bearing: f64,
+}
+
+impl SymbolArcSweep {
+    pub fn new(center: rspice_design_model::Point, start: rspice_design_model::Point) -> Self {
+        Self {
+            start,
+            degrees: 0.0,
+            bearing: bearing(center, start),
+        }
+    }
+
+    /// Follow the pointer to `point`. A point on the center has no bearing
+    /// and leaves the sweep as it was.
+    pub fn follow(
+        &mut self,
+        center: rspice_design_model::Point,
+        point: rspice_design_model::Point,
+    ) {
+        if point == center {
+            return;
+        }
+        let now = bearing(center, point);
+        let turned = (now - self.bearing + 540.0).rem_euclid(360.0) - 180.0;
+        self.degrees = (self.degrees + turned).clamp(-360.0, 360.0);
+        self.bearing = now;
+    }
+}
+
+/// The bearing of `point` from `center` in degrees from +x, clockwise on a
+/// screen whose y runs down: the convention an authored arc's angles use.
+pub fn bearing(center: rspice_design_model::Point, point: rspice_design_model::Point) -> f64 {
+    f64::from(point.y - center.y)
+        .atan2(f64::from(point.x - center.x))
+        .to_degrees()
+}
+
+/// Text being typed where the text tool was clicked. Nothing is in the
+/// document until Enter places it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolTextDraft {
+    pub anchor: rspice_design_model::Point,
+    pub text: String,
+    /// Whether the entry has taken the caret, which it does once, on opening.
+    pub caret_placed: bool,
 }
 
 /// Display lattice of the symbol canvas.
@@ -247,7 +310,15 @@ pub struct SymbolEditorSession {
     pub view_history: crate::view::navigation::ViewHistory<(f32, (f32, f32))>,
     pub needs_fit: bool,
     pub pending_polyline: Vec<rspice_design_model::Point>,
+    /// A rectangle's first corner, or a circle's or an arc's center.
     pub shape_start: Option<rspice_design_model::Point>,
+    pub arc_sweep: Option<SymbolArcSweep>,
+    pub text_draft: Option<SymbolTextDraft>,
+    /// Whether the press-drag in progress began the shape being drawn.
+    pub drawing_drag: bool,
+    /// Where a click would land on the canvas, snapped as the armed tool
+    /// snaps; `None` while the pointer is elsewhere.
+    pub pointer: Option<rspice_design_model::Point>,
     pub show_grid: bool,
     pub snap_to_grid: bool,
     pub grid_spacing: SymbolGridSpacing,
@@ -282,6 +353,10 @@ impl Default for SymbolEditorSession {
             needs_fit: true,
             pending_polyline: Vec::new(),
             shape_start: None,
+            arc_sweep: None,
+            text_draft: None,
+            drawing_drag: false,
+            pointer: None,
             show_grid: true,
             snap_to_grid: true,
             grid_spacing: SymbolGridSpacing::Ten,
@@ -342,6 +417,49 @@ impl SymbolEditorSession {
         self.dragging_origin = false;
         self.dragging_group = None;
         self.drag_undo_recorded = false;
+    }
+
+    /// Whether a shape or a text is part drawn.
+    pub fn has_draft(&self) -> bool {
+        !self.pending_polyline.is_empty()
+            || self.shape_start.is_some()
+            || self.arc_sweep.is_some()
+            || self.text_draft.is_some()
+    }
+
+    /// Let go of the shape or text being drawn. The document never held it.
+    pub fn clear_draft(&mut self) {
+        self.pending_polyline.clear();
+        self.shape_start = None;
+        self.arc_sweep = None;
+        self.text_draft = None;
+        self.drawing_drag = false;
+    }
+
+    /// What the armed drawing tool takes next, for the status bar.
+    pub fn next_step(&self) -> Option<&'static str> {
+        let placed = self.pending_polyline.len();
+        Some(match self.tool {
+            SymbolTool::Select | SymbolTool::PlacePin => return None,
+            SymbolTool::Line if placed == 0 => "Line: click the first point",
+            SymbolTool::Line => "Line: click the next point, Enter to finish",
+            SymbolTool::Polygon if placed == 0 => "Polygon: click the first corner",
+            SymbolTool::Polygon if placed < 3 => "Polygon: click the next corner",
+            SymbolTool::Polygon => "Polygon: click the next corner, Enter to close",
+            SymbolTool::Rectangle if self.shape_start.is_none() => {
+                "Rectangle: click a corner, or drag to the opposite one"
+            }
+            SymbolTool::Rectangle => "Rectangle: click the opposite corner",
+            SymbolTool::Circle if self.shape_start.is_none() => {
+                "Circle: click the center, or drag out the radius"
+            }
+            SymbolTool::Circle => "Circle: click a point on the circle",
+            SymbolTool::Arc if self.shape_start.is_none() => "Arc: click the center",
+            SymbolTool::Arc if self.arc_sweep.is_none() => "Arc: click where the arc starts",
+            SymbolTool::Arc => "Arc: click where the arc ends",
+            SymbolTool::Text if self.text_draft.is_none() => "Text: click where the text goes",
+            SymbolTool::Text => "Text: type it, Enter to place",
+        })
     }
 }
 
@@ -541,6 +659,48 @@ mod tests {
         assert!(over_the_run.shapes.contains(&0));
         assert!(clear_of_it.shapes.is_empty());
     }
+    /// The sweep follows the pointer's turning, so an arc taken past half a
+    /// turn keeps the direction it was drawn in, up to a whole turn.
+    #[test]
+    fn an_arc_sweep_accumulates_the_way_the_pointer_turned() {
+        let center = Point::origin();
+        let mut sweep = SymbolArcSweep::new(center, Point::new(10, 0));
+        for point in [
+            Point::new(0, 10),
+            Point::new(-10, 0),
+            Point::new(0, -10),
+            Point::new(10, -1),
+        ] {
+            sweep.follow(center, point);
+        }
+        assert!((sweep.degrees - 354.3).abs() < 0.1, "{}", sweep.degrees);
+        sweep.follow(center, Point::new(10, 1));
+        sweep.follow(center, Point::new(0, 10));
+        assert_eq!(sweep.degrees, 360.0, "never more than a whole turn");
+        sweep.follow(center, center);
+        assert_eq!(sweep.degrees, 360.0, "the center has no bearing");
+    }
+
+    /// The status bar's hint follows what the armed tool takes next.
+    #[test]
+    fn the_next_step_follows_the_shape_being_drawn() {
+        let mut session = SymbolEditorSession::default();
+        assert_eq!(session.next_step(), None);
+        session.tool = SymbolTool::Line;
+        assert_eq!(session.next_step(), Some("Line: click the first point"));
+        session.pending_polyline.push(Point::origin());
+        assert_eq!(
+            session.next_step(),
+            Some("Line: click the next point, Enter to finish")
+        );
+        session.tool = SymbolTool::Arc;
+        session.clear_draft();
+        session.shape_start = Some(Point::origin());
+        assert_eq!(session.next_step(), Some("Arc: click where the arc starts"));
+        session.arc_sweep = Some(SymbolArcSweep::new(Point::origin(), Point::new(10, 0)));
+        assert_eq!(session.next_step(), Some("Arc: click where the arc ends"));
+    }
+
     #[test]
     fn symbol_transforms_are_about_document_origin() {
         let origin = Point::new(10, 10);

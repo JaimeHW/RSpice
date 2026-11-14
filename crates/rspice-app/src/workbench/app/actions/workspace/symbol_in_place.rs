@@ -287,8 +287,7 @@ pub(crate) fn symbol_in_place_canvas_idle(symbol: &SymbolUiState, model: &Model)
     let editor = &symbol.editor;
     in_place_session(&symbol.in_place, model).is_some()
         && editor.tool == crate::workbench::SymbolTool::Select
-        && editor.pending_polyline.is_empty()
-        && editor.shape_start.is_none()
+        && !editor.has_draft()
         && editor.marquee_start.is_none()
         && editor.dragging_pin.is_none()
         && editor.dragging_shape.is_none()

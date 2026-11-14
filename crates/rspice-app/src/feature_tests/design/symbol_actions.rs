@@ -10,7 +10,9 @@ use crate::workbench::design::commands::DesignCommand;
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
 use rspice_schematic_editor::symbol_editor::commands::{SymbolEditAction, SymbolTransform};
 use rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source;
-use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTool};
+use rspice_schematic_editor::symbol_editor::session::{
+    SymbolSelection, SymbolTextDraft, SymbolTool,
+};
 
 fn metadata_encoding(state: &AppState) -> Option<String> {
     state
@@ -196,30 +198,62 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
 }
 
+/// Escape lets go of the shape being drawn and leaves its tool armed; a
+/// second Escape puts the tool down. The document never held the shape.
 #[test]
-fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stale_requests() {
+fn escape_lets_go_of_the_shape_being_drawn_then_puts_the_tool_down() {
+    let mut app = open_symbol();
+    let before = app.state.model.load_active_symbol_document().unwrap();
+    app.state.design.symbol.editor.tool = SymbolTool::Polygon;
+    app.state.design.symbol.editor.pending_polyline =
+        vec![Point::origin(), Point::new(10, 20), Point::new(20, 0)];
+
+    app.execute_shortcut_command(Command::Cancel);
+
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
+    assert!(app.state.design.symbol.editor.pending_polyline.is_empty());
+    assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Polygon);
+    assert!(!app.state.can_undo_active_symbol_document());
+
+    app.execute_shortcut_command(Command::Cancel);
+
+    assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Select);
+}
+
+/// Text typed into the text tool's entry is placed as one edit that stores
+/// only geometry; a request made before the view changed places nothing.
+#[test]
+fn placing_text_is_one_edit_and_a_stale_request_places_nothing() {
     let mut app = open_symbol();
     let before = app.state.model.load_active_symbol_document().unwrap();
     assert!(metadata_encoding(&app.state).is_none());
-    app.state.design.symbol.editor.tool = SymbolTool::Polygon;
-    let points = vec![Point::origin(), Point::new(10, 20), Point::new(20, 0)];
-    app.state.design.symbol.editor.pending_polyline = points.clone();
-    app.execute_shortcut_command(Command::Cancel);
+    let draft = || SymbolTextDraft {
+        anchor: Point::new(0, -30),
+        text: "GAIN".to_owned(),
+        caret_placed: true,
+    };
+    app.state.design.symbol.editor.tool = SymbolTool::Text;
+    app.state.design.symbol.editor.text_draft = Some(draft());
+
+    app.state.place_symbol_text();
+
+    let placed = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(
-        app.state
-            .model
-            .load_active_symbol_document()
-            .unwrap()
-            .body
-            .last(),
-        Some(&SymbolShape::Polyline {
-            points: points.clone(),
-            closed: false
+        placed.body.last(),
+        Some(&SymbolShape::Text {
+            anchor: Point::new(0, -30),
+            text: "GAIN".to_owned(),
+            size: Default::default(),
+            align: Default::default(),
         })
     );
+    assert_eq!(placed.body.len(), before.body.len() + 1);
     assert!(metadata_encoding(&app.state).is_none());
-    assert!(app.state.design.symbol.editor.pending_polyline.is_empty());
-    assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Select);
+    assert!(app.state.design.symbol.editor.text_draft.is_none());
+    assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Text);
     assert!(app.state.undo_active_symbol_document().unwrap());
     assert_eq!(
         app.state.model.load_active_symbol_document().unwrap(),
@@ -229,20 +263,21 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
     let source =
         crate::workbench::app::symbol_editor_request_source(&app.state.model, &app.state.workbench);
     bind_canvas_source(&mut app.state.design.symbol.editor, source);
-    app.state.design.symbol.editor.tool = SymbolTool::Polygon;
-    app.state.design.symbol.editor.pending_polyline = points.clone();
+    app.state.design.symbol.editor.text_draft = Some(draft());
     let pending = symbol_edit_request(
         &app.state.design.symbol,
         &app.state.model,
         &app.state.workbench,
-        SymbolEditAction::FinishPolyline {
-            points: points.clone(),
+        SymbolEditAction::PlaceText {
+            anchor: Point::new(0, -30),
+            text: "GAIN".to_owned(),
         },
     );
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+    app.state.design.symbol.editor.text_draft = Some(draft());
     let modal_open = app.state.application_modal_open();
     apply_symbol_edit_request(
         &mut app.state.design.symbol,
@@ -255,6 +290,5 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
         app.state.model.load_active_symbol_document().unwrap(),
         before
     );
-    assert_eq!(app.state.design.symbol.editor.pending_polyline, points);
     assert!(!app.state.can_undo_active_symbol_document());
 }

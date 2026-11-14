@@ -118,91 +118,96 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     // the canvas keeps the whole document area.
     let stage = ui.available_rect_before_wrap();
     let height = ui.available_height();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let canvas_size = vec2(ui.available_width().max(180.0), height);
-        let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-        let navigation = canvas.model.preferences.canvas_navigation();
-        // Edited in place, the canvas frames the parent sheet and the symbol
-        // stands where its instance does.
-        let in_place = in_place::frame(ui, &mut canvas.parts(), rect, &response);
-        let viewport = match &in_place {
-            Some(frame) => frame.symbol,
-            None => update_viewport(
-                ui,
-                &mut canvas.design.symbol.editor,
-                rect,
-                &document,
-                &response,
-                navigation,
-            ),
-        };
-        interaction::handle_canvas(
-            &mut canvas.parts(),
-            &mut document,
-            &mut editor,
-            viewport,
-            &response,
-        );
-        match &in_place {
-            Some(frame) => {
-                in_place::draw(
+    let viewport = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let canvas_size = vec2(ui.available_width().max(180.0), height);
+            let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
+            let navigation = canvas.model.preferences.canvas_navigation();
+            // Edited in place, the canvas frames the parent sheet and the symbol
+            // stands where its instance does.
+            let in_place = in_place::frame(ui, &mut canvas.parts(), rect, &response);
+            let viewport = match &in_place {
+                Some(frame) => frame.symbol,
+                None => update_viewport(
                     ui,
-                    &canvas.facts(),
-                    frame,
+                    &mut canvas.design.symbol.editor,
+                    rect,
+                    &document,
+                    &response,
+                    navigation,
+                ),
+            };
+            interaction::handle_canvas(
+                &mut canvas.parts(),
+                &mut document,
+                &mut editor,
+                viewport,
+                &response,
+            );
+            match &in_place {
+                Some(frame) => {
+                    in_place::draw(
+                        ui,
+                        &canvas.facts(),
+                        frame,
+                        &document,
+                        &editor,
+                        &ports,
+                        symbol_library,
+                    );
+                }
+                None => draw_canvas(
+                    ui,
+                    viewport,
                     &document,
                     &editor,
                     &ports,
-                    symbol_library,
-                );
-            }
-            None => draw_canvas(
-                ui,
-                viewport,
-                &document,
-                &editor,
-                &ports,
-                &canvas.design.symbol.editor,
-                &canvas.model.workspace.content.active_view,
-            ),
-        }
-        // Edited in place, the canvas is the parent sheet, and leaving with
-        // unsaved edits asks instead.
-        if in_place.is_none() {
-            surface::unsaved_changes_notice(ui, rect, dirty);
-        }
-        // The canvas takes keyboard focus on every press for its shortcuts, so
-        // only focus that Tab moved here shows the ring: a press never frames
-        // the drawing. Painted after the artwork so the ring is not drawn over.
-        if theme::focus_is_visible(ui.ctx(), &response) {
-            theme::paint_focus_ring(ui, &response, rect);
-        }
-        let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
-        let operating_system = ui.ctx().os();
-        response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Image,
-                ui.is_enabled(),
-                symbol_canvas_accessibility_label(
-                    &document,
-                    &canvas.facts(),
-                    canvas.model.active_view_read_only(),
-                    shortcut_platform,
-                    operating_system,
+                    &canvas.design.symbol.editor,
+                    &canvas.model.workspace.content.active_view,
                 ),
-            )
-        });
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(egui::accesskit::Role::Canvas);
-        });
-        crate::workbench::app_state::report_engineering_canvas_focus(
-            &response,
-            canvas.model.workspace.content.active_view_type(),
-        );
-    });
+            }
+            // Edited in place, the canvas is the parent sheet, and leaving with
+            // unsaved edits asks instead.
+            if in_place.is_none() {
+                surface::unsaved_changes_notice(ui, rect, dirty);
+            }
+            // The canvas takes keyboard focus on every press for its shortcuts, so
+            // only focus that Tab moved here shows the ring: a press never frames
+            // the drawing. Painted after the artwork so the ring is not drawn over.
+            if theme::focus_is_visible(ui.ctx(), &response) {
+                theme::paint_focus_ring(ui, &response, rect);
+            }
+            let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
+            let operating_system = ui.ctx().os();
+            response.widget_info(|| {
+                WidgetInfo::labeled(
+                    WidgetType::Image,
+                    ui.is_enabled(),
+                    symbol_canvas_accessibility_label(
+                        &document,
+                        &canvas.facts(),
+                        canvas.model.active_view_read_only(),
+                        shortcut_platform,
+                        operating_system,
+                    ),
+                )
+            });
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::Canvas);
+            });
+            crate::workbench::app_state::report_engineering_canvas_focus(
+                &response,
+                canvas.model.workspace.content.active_view_type(),
+            );
+            viewport
+        })
+        .inner;
     // No breadcrumb overlay: the document tab and the inspector's eyebrow
     // both name the view this canvas is drawing.
     surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
+    // After the canvas has taken the keyboard for the click that opened it.
+    interaction::show_text_entry(ui.ctx(), &mut canvas.parts(), viewport);
     show_save_symbol_dialog(
         ui.ctx(),
         &mut canvas.parts(),
