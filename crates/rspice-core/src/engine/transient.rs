@@ -5395,6 +5395,8 @@ impl Engine {
         // startup timestep to capture fast bias settling before transitioning
         // to larger steps.
         let has_bjts = !circuit.bjts.devices.is_empty();
+        let mixed_crossings_hold_estimator =
+            Self::mixed_crossings_hold_node_voltage_estimator(&circuit);
         let (_startup_div, min_div) = Self::startup_timestep_divisors(has_bjts);
         let tran_step_hint = netlist.analyses.iter().find_map(|analysis| match analysis {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
@@ -10973,8 +10975,8 @@ impl Engine {
                     &circuit,
                     mosfet_truncation_limit,
                 );
-            let defer_voltage_lte_to_ngspice_device_truncation =
-                Self::ngspice_device_truncation_covers_transient_lte(
+            let defer_voltage_lte_to_ngspice_device_truncation = !mixed_crossings_hold_estimator
+                && Self::ngspice_device_truncation_covers_transient_lte(
                     &circuit,
                     capacitor_truncation_limit,
                     inductor_truncation_limit,

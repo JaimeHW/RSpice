@@ -2848,6 +2848,36 @@ fn insert_non_ground_node(nodes: &mut BTreeSet<usize>, node: usize) {
     }
 }
 
+/// Whether a mixed module drives an analog node a device other than an
+/// inserted converter touches (`loaded`): through a code model that reads an
+/// event net the module drives and has a continuous output on that node, as
+/// the D/A converter elaboration puts on a module output does.
+#[cfg(feature = "veriloga")]
+fn mixed_module_drives_analog_load(circuit: &CircuitData, loaded: &BTreeSet<usize>) -> bool {
+    let driven: BTreeSet<usize> = circuit
+        .mixed_signal_hosts
+        .iter()
+        .flat_map(crate::xspice::verilog::MixedSignalHost::driven_event_nodes)
+        .collect();
+    if driven.is_empty() {
+        return false;
+    }
+    circuit.xspice_instances.iter().any(|instance| {
+        let mut reads_module = false;
+        instance.for_each_event_input_net(|_, node| reads_module |= driven.contains(&node));
+        if !reads_module || !instance.drives_continuous_outputs() {
+            return false;
+        }
+        let mut nodes = BTreeSet::new();
+        for index in 0..instance.ports().len() {
+            if let Some(connection) = instance.connection_at(index) {
+                collect_analog_connection_nodes(&mut nodes, connection);
+            }
+        }
+        nodes.iter().any(|node| loaded.contains(node))
+    })
+}
+
 fn collect_flat_analog_nodes(
     nodes: &mut BTreeSet<usize>,
     circuit: &CircuitData,
@@ -11223,13 +11253,32 @@ impl Engine {
         let mut physical_nodes = BTreeSet::new();
         if has_event_domain {
             collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
+            // The converters this build inserted on a mixed boundary, by the
+            // record it keeps of each.
+            let inserted: BTreeSet<String> = circuit
+                .converter_insertions
+                .iter()
+                .map(|record| record.instance.to_ascii_uppercase())
+                .collect();
+            let mut converter_nodes = BTreeSet::new();
             for instance in &circuit.xspice_instances {
+                let nodes = if inserted.contains(&instance.name.to_ascii_uppercase()) {
+                    &mut converter_nodes
+                } else {
+                    &mut physical_nodes
+                };
                 for index in 0..instance.ports().len() {
                     if let Some(connection) = instance.connection_at(index) {
-                        collect_analog_connection_nodes(&mut physical_nodes, connection);
+                        collect_analog_connection_nodes(nodes, connection);
                     }
                 }
             }
+            #[cfg(feature = "veriloga")]
+            {
+                circuit.mixed_module_drives_analog_load =
+                    mixed_module_drives_analog_load(&circuit, &physical_nodes);
+            }
+            physical_nodes.extend(converter_nodes);
             circuit.set_analog_touched_nodes(&physical_nodes);
         }
 

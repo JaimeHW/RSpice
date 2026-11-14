@@ -3060,6 +3060,17 @@ impl MixedSignalHost {
             || self.electrical_terminal_nodes().any(|node| node > 0)
     }
 
+    /// The event nets this module drives: its output and inout event ports.
+    pub(crate) fn driven_event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.event_ports
+            .iter()
+            .filter(|port| {
+                port.direction
+                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input
+            })
+            .map(|port| port.node)
+    }
+
     /// One endpoint per discrete port, excluding ground. Root-only detectors
     /// are observations of a physical node, not additional event endpoints.
     /// Count the linked port once, independently of its conversion machinery.

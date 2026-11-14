@@ -554,6 +554,12 @@ pub struct CircuitData {
     /// hand therefore claims no event-only net and its analog namespace
     /// keeps every row it has always kept.
     pub(crate) analog_touched_nodes: Option<Vec<bool>>,
+    /// Whether a mixed module drives an analog node another device touches,
+    /// through a code model that reads an event net the module drives, as
+    /// the D/A converter elaboration puts on a module output does. A netlist
+    /// build decides it, once its converters are in place.
+    #[cfg(feature = "veriloga")]
+    pub(crate) mixed_module_drives_analog_load: bool,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
     /// Number of private scalar DAE state variables appended after the public

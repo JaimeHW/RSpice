@@ -24,6 +24,8 @@ impl CircuitData {
             num_nodes: 0,
             net_kinds: NetKinds::default(),
             analog_touched_nodes: None,
+            #[cfg(feature = "veriloga")]
+            mixed_module_drives_analog_load: false,
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),

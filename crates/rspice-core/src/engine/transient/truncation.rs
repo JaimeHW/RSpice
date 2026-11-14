@@ -3364,23 +3364,34 @@ impl Engine {
     /// as in ngspice. A mixed module without code models is untouched.
     ///
     /// A module that meets the analog solution nowhere is left to the device
-    /// truncation as well: one whose every port is an event net a code model
-    /// shares reads and drives no node voltage. A `d_process` toggling a
-    /// `dac_bridge` beside a Verilog observer of its output took 232,985
-    /// points over 2 ms where the same deck without the observer took 84,009.
-    /// A module that reads a node voltage without dating a crossing stays:
-    /// C6's vams controller samples V(fb) on a timer, and left to the device
-    /// truncation its output again moved 5.13 mV from the ngspice run.
+    /// truncation as well: one whose ports are event nets it reads, or event
+    /// nets it drives that reach no node another device uses, moves no node
+    /// voltage another device sees. A `d_process`
+    /// toggling a `dac_bridge` beside a Verilog observer of its output took
+    /// 232,985 points over 2 ms where the same deck without the observer took
+    /// 84,009. A module that reads a node voltage without dating a crossing
+    /// stays: C6's vams controller samples V(fb) on a timer, and left to the
+    /// device truncation its output again moved 5.13 mV from the ngspice run.
+    /// So does one whose output drives a node another device reads through
+    /// the D/A converter elaboration puts on it
+    /// (`CircuitData::mixed_module_drives_analog_load`): C11's two-phase clock
+    /// drives its switch controls that way, and left to the device truncation
+    /// the value its switched capacitor holds moved from 1.08e-5 V to
+    /// 4.30e-5 V off the analytic recursion, of the 5e-5 V the corpus allows.
+    ///
+    /// The answer depends on the topology alone, so the transient loop asks
+    /// once per run.
     pub(super) fn mixed_crossings_hold_node_voltage_estimator(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         #[cfg(feature = "veriloga")]
         {
             circuit.has_xspice_devices()
-                && circuit
-                    .mixed_signal_hosts
-                    .iter()
-                    .any(crate::xspice::verilog::MixedSignalHost::meets_analog_solution)
+                && (circuit.mixed_module_drives_analog_load
+                    || circuit
+                        .mixed_signal_hosts
+                        .iter()
+                        .any(crate::xspice::verilog::MixedSignalHost::meets_analog_solution))
         }
         #[cfg(not(feature = "veriloga"))]
         {
@@ -3406,11 +3417,11 @@ impl Engine {
         // (see `inductor_ngspice_truncation_limit`), so those decks stay on
         // the generic estimator. So does a code model that can carry the
         // analog solution through state of its own (see
-        // `xspice_state_escapes_device_truncation`), and a mixed module that
-        // dates its crossings (see
+        // `xspice_state_escapes_device_truncation`). A mixed module that
+        // meets the analog solution keeps them there too; the transient loop
+        // asks that once per run (see
         // `mixed_crossings_hold_node_voltage_estimator`).
         if Self::xspice_state_escapes_device_truncation(circuit)
-            || Self::mixed_crossings_hold_node_voltage_estimator(circuit)
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.jiles_atherton_inductors.is_empty()
