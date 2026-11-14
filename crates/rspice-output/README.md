@@ -13,7 +13,7 @@ the bytes.
 ## What's in here
 
 - **Crate root**: `write_atomic` and `AtomicArtifactFile` for one file;
-  `stale_artifacts`; `AtomicArtifactError`, which names the failed phase and,
+  `AtomicArtifactError`, which names the failed phase and,
   for a commit, whether the destination is unchanged or already published
   with uncertain durability.
 - **`set`**: `AtomicArtifactSet` and `StagedArtifact`, several files published
@@ -55,8 +55,7 @@ the bytes.
 - `AtomicArtifactFile::prepare(destination)`, write, then `commit`, for a
   seekable or long-running write.
 - `AtomicArtifactSet::new`, `stage` each member, then `commit`.
-- `stale_artifacts(destination)`, whose results may belong to a live writer,
-  and `recover_stale_artifacts(directory)` for crash debris.
+- `recover_stale_artifacts(directory)` for crash debris.
 - `durable_file::observe_expected_content`, then
   `durable_file::compare_exchange_bytes`, for a save that must not overwrite a
   concurrent change.
@@ -74,7 +73,7 @@ cargo test -p rspice-output
 cargo test -p rspice-output --features durable-file
 ```
 
-`tests/transaction_properties.rs` drives the set transaction through every
+`src/transaction_properties.rs` drives the set transaction through every
 `ArtifactFaultPoint`; the second run adds the `durable_file` tests.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

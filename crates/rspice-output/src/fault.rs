@@ -146,6 +146,7 @@ impl ArtifactFault {
     ///
     /// The manifest member, when a set has one, is the last index.
     #[must_use]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn on_member(mut self, index: usize) -> Self {
         self.member = Some(index);
         self
@@ -153,6 +154,7 @@ impl ArtifactFault {
 
     /// Let the first `count` matching occurrences succeed before failing.
     #[must_use]
+    #[cfg(test)]
     pub const fn after_occurrences(mut self, count: usize) -> Self {
         self.skip = count;
         self

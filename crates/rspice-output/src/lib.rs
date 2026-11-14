@@ -27,9 +27,9 @@
 //! # Recovery
 //!
 //! Staging files left by a process crash contain [`STAGING_MARKER`], the
-//! destination file name, and the owning process id. [`stale_artifacts`]
-//! lists them for one destination and [`recover_stale_artifacts`] removes the
-//! ones whose owning process is gone during a controlled recovery pass.
+//! destination file name, and the owning process id. [`recover_stale_artifacts`]
+//! removes the ones whose owning process is gone during a controlled recovery
+//! pass.
 //! Predecessor snapshots taken by an interrupted [`AtomicArtifactSet`] commit
 //! carry [`PREDECESSOR_MARKER`] instead and are never removed automatically,
 //! because such a snapshot can be the last copy of a published result.
@@ -50,6 +50,8 @@ pub mod durable_file;
 pub mod fault;
 mod recovery;
 mod set;
+#[cfg(test)]
+mod transaction_properties;
 
 pub use recovery::{MAX_RECOVERY_ENTRIES, StagingRecovery, recover_stale_artifacts};
 pub use set::{
@@ -406,6 +408,7 @@ where
 ///
 /// A returned file may belong to an active writer. Callers must not infer
 /// staleness solely from its name.
+#[cfg(any(test, feature = "test-support"))]
 pub fn stale_artifacts(destination: &Path) -> io::Result<Vec<PathBuf>> {
     let destination_name = destination.file_name().ok_or_else(|| {
         io::Error::new(
@@ -515,6 +518,7 @@ fn sibling_prefix(destination_name: &OsStr, marker: &str) -> OsString {
     prefix
 }
 
+#[cfg(any(test, feature = "test-support"))]
 fn is_staging_name(candidate: &OsStr, destination_name: &OsStr) -> bool {
     candidate
         .as_encoded_bytes()

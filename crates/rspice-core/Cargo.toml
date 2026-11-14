@@ -614,6 +614,7 @@ rayon.workspace = true
 rspice-core-base = { workspace = true, default-features = false, features = ["test-support"] }
 rspice-core-netlist = { workspace = true, default-features = false, features = ["test-support"] }
 rspice-core-devices = { workspace = true, default-features = false, features = ["test-support"] }
+rspice-output = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 # Register the same public-core regressions with the workspace's WASM runner.

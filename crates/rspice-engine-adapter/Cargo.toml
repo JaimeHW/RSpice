@@ -19,6 +19,7 @@ uuid = { version = "1.0", default-features = false, features = ["serde", "std"] 
 
 [dev-dependencies]
 proptest.workspace = true
+rspice-output = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(not(windows))'.dependencies]
 # `termination` widens the handler past SIGINT to the SIGTERM a supervising

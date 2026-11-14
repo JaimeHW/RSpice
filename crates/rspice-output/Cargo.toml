@@ -8,6 +8,10 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
+# The fault-injection and staging-listing helpers only tests use, for this
+# crate's and dependent crates' tests. Enabled by dev-dependencies; never in a
+# shipping build.
+test-support = []
 durable-file = [
     "dep:sha2",
     "dep:uuid",

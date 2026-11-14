@@ -65,6 +65,7 @@ csv.workspace = true
 roxmltree = "0.21.1"
 # Verify that CLI artifacts retain their meaning in the application's reader.
 rspice-formats = { path = "../rspice-formats", version = "0.1.0", default-features = false, features = ["spice-raw", "hdf5"] }
+rspice-output = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

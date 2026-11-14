@@ -20,8 +20,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 
-use rspice_output::fault::{ArmedFaults, ArtifactFault, ArtifactFaultKind, ArtifactFaultPoint};
-use rspice_output::{
+use crate::fault::{ArmedFaults, ArtifactFault, ArtifactFaultKind, ArtifactFaultPoint};
+use crate::{
     AtomicArtifactError, AtomicArtifactSet, DestinationState, PREDECESSOR_MARKER, StagedArtifact,
     stale_artifacts, write_atomic,
 };
