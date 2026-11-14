@@ -15,11 +15,11 @@
 //! and the two that hand a row on to it.
 
 mod library_parts;
-pub(super) mod search;
+pub(crate) mod search;
 
 #[cfg(test)]
 pub(super) use library_parts::shelf_rows;
-pub(super) use library_parts::{LibraryPartAction, LibraryPartRow, library_part_rows};
+pub(crate) use library_parts::{LibraryPartAction, LibraryPartRow, library_part_rows};
 use library_parts::{apply_library_part_row, library_part_rank, library_parts_section};
 
 use std::collections::{BTreeMap, HashSet};
@@ -381,14 +381,14 @@ const DEFAULT_PINNED: [ComponentType; 3] = [
 /// under a quarter of a full-height dock and leaves the catalog's first band
 /// on screen without scrolling. A longer history is not more useful here: the
 /// catalog underneath is already searchable.
-pub(super) const RECENT_SHOWN: usize = 6;
+pub(crate) const RECENT_SHOWN: usize = 6;
 
 /// Recent entries kept.
 ///
 /// More than are painted, because a pinned entry is filtered out of the band
 /// rather than dropped from the history: unpinning must restore a full band,
 /// not a short one.
-pub(super) const RECENT_STORED: usize = 16;
+pub(crate) const RECENT_STORED: usize = 16;
 
 /// Field separator inside one stored shelf-entry key.
 ///
@@ -483,7 +483,7 @@ impl ShelfEntry {
 
     /// The entry one stored key names, or `None` when this build does not
     /// understand the key. The stored list keeps it either way.
-    pub(super) fn from_storage_key(key: &str) -> Option<Self> {
+    pub(crate) fn from_storage_key(key: &str) -> Option<Self> {
         let mut fields = key.split(SHELF_ENTRY_FIELD);
         let entry = match fields.next()? {
             "primitive" => Self::Primitive(
@@ -509,7 +509,7 @@ impl ShelfEntry {
 
 /// The pin set's stored keys, with the shipped default standing in for a
 /// profile that has never pinned anything.
-pub(super) fn pinned_keys(model: &Model) -> Vec<String> {
+pub(crate) fn pinned_keys(model: &Model) -> Vec<String> {
     model
         .preferences
         .component_shelf()
@@ -523,7 +523,7 @@ pub(super) fn pinned_keys(model: &Model) -> Vec<String> {
         })
 }
 
-pub(super) fn is_pinned(model: &Model, entry: &ShelfEntry) -> bool {
+pub(crate) fn is_pinned(model: &Model, entry: &ShelfEntry) -> bool {
     let key = entry.storage_key();
     pinned_keys(model).contains(&key)
 }
@@ -702,7 +702,7 @@ struct ShelfEntryRow {
 
 /// What clicking a resolved pinned or recent row does.
 #[derive(Clone)]
-pub(super) enum ShelfArm {
+pub(crate) enum ShelfArm {
     Primitive(ComponentType),
     Variant(&'static ComponentPaletteEntry),
     /// Held by stable id rather than by binding: a vector-port code model
@@ -1009,7 +1009,7 @@ fn apply_shelf_arm(cx: &mut Cx<'_, DesignFeature>, arm: ShelfArm, ctx: &egui::Co
 
 /// The built-in catalog: every functional group that has rows, each holding
 /// native primitives and code models side by side.
-pub(super) fn component_catalog(ui: &mut Ui, model: &mut Model) -> Option<ShelfArm> {
+pub(crate) fn component_catalog(ui: &mut Ui, model: &mut Model) -> Option<ShelfArm> {
     let mut armed = None;
     shelf_section_header(ui, "Built-in", Some(&catalog_row_count().to_string()));
     for category in ComponentCategory::ALL {
@@ -1257,7 +1257,7 @@ fn supply_shelf_glyph(entry: &SupplyPaletteEntry) -> ShelfGlyph {
 }
 
 /// Arm the Label tool to place one supply rail on every click.
-pub(super) fn arm_supply(
+pub(crate) fn arm_supply(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     entry: &SupplyPaletteEntry,
@@ -1313,7 +1313,7 @@ fn variant_armed(model: &Model, entry: &ComponentPaletteEntry) -> bool {
 }
 
 /// Arm the place tool with a variant row's card and skin.
-pub(super) fn arm_variant(
+pub(crate) fn arm_variant(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     entry: &ComponentPaletteEntry,
@@ -1547,7 +1547,7 @@ fn xspice_row(
 /// widths are chosen, so the click raises the placement dialog and arms
 /// nothing. Shared by the catalog row and the pinned/recent rows so both forks
 /// stay one decision.
-pub(super) fn place_builtin_xspice(
+pub(crate) fn place_builtin_xspice(
     design: &mut DesignState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -1853,7 +1853,7 @@ fn catalog_group_row(
 
 type CellCandidate = LibraryCellPlacementCandidate;
 
-pub(super) fn cell_candidates(model: &Model) -> Vec<CellCandidate> {
+pub(crate) fn cell_candidates(model: &Model) -> Vec<CellCandidate> {
     library_cell_placement_candidates(&model.library_manager, &model.workspace)
 }
 
@@ -1893,7 +1893,7 @@ fn finish_shelf_placement(wb: &mut WorkbenchSession, ctx: &egui::Context) {
 }
 
 /// The label a primitive's own shelf row carries.
-pub(super) fn primitive_label(kind: ComponentType) -> &'static str {
+pub(crate) fn primitive_label(kind: ComponentType) -> &'static str {
     component_palette()
         .iter()
         .flat_map(|section| section.entries)
@@ -1913,12 +1913,12 @@ pub(super) fn catalog_row_count() -> usize {
 const SHELF_HITS: usize = 200;
 
 /// One answer to a shelf query: the row it paints and where its click goes.
-pub(super) struct ShelfHit {
+pub(crate) struct ShelfHit {
     rank: MatchRank,
     glyph: ShelfGlyph,
-    pub(super) label: String,
+    pub(crate) label: String,
     meta: Option<String>,
-    pub(super) selected: bool,
+    pub(crate) selected: bool,
     arm: ShelfArm,
     /// The pinnable identity; a stimulus definition is project state and has
     /// none.
@@ -1945,7 +1945,7 @@ impl ShelfHit {
 }
 
 /// The answer Enter places: the best-ranked one that can be placed.
-pub(super) fn top_hit(hits: &[ShelfHit]) -> Option<&ShelfHit> {
+pub(crate) fn top_hit(hits: &[ShelfHit]) -> Option<&ShelfHit> {
     hits.iter().find(|hit| hit.refusal.is_none())
 }
 
@@ -1953,7 +1953,7 @@ pub(super) fn top_hit(hits: &[ShelfHit]) -> Option<&ShelfHit> {
 ///
 /// Rows of one rank keep catalog order: primitives, code models, generated
 /// Verilog-A, stimulus definitions, library parts, project cells.
-pub(super) fn shelf_hits(
+pub(crate) fn shelf_hits(
     model: &Model,
     query: &ShelfQuery,
     library_parts: &[LibraryPartRow],

@@ -72,7 +72,7 @@ const DEVICE_MASTER_HINT: &str =
 
 /// What the tree reads: one frozen projection, the project's sheet catalogs,
 /// and the filter the navigator is holding.
-pub(super) struct TreeSource<'a> {
+pub(crate) struct TreeSource<'a> {
     pub projection: &'a DesignProjection,
     pub sheets: &'a DesignManagementCatalog,
     /// The project's own libraries, asked only whether a master names a view
@@ -85,7 +85,7 @@ pub(super) struct TreeSource<'a> {
 
 /// How far one occurrence can be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum OccurrenceState {
+pub(crate) enum OccurrenceState {
     /// Bound, with nothing below it.
     Leaf,
     /// Bound, with children this frame did not build.
@@ -106,7 +106,7 @@ pub(super) enum OccurrenceState {
 
 impl OccurrenceState {
     /// Whether descending into this occurrence would land anywhere.
-    pub(super) const fn is_bound(self) -> bool {
+    pub(crate) const fn is_bound(self) -> bool {
         matches!(self, Self::Leaf | Self::Collapsed | Self::Expanded)
     }
 
@@ -125,7 +125,7 @@ impl OccurrenceState {
 }
 
 /// One occurrence, as the tree paints it.
-pub(super) struct OccurrenceRow {
+pub(crate) struct OccurrenceRow {
     pub path: InstancePath,
     /// The instance stepped through to reach it; the root cell at the top.
     pub label: String,
@@ -134,7 +134,7 @@ pub(super) struct OccurrenceRow {
 }
 
 /// One row of the occurrence tree, in paint order.
-pub(super) enum DesignTreeRow {
+pub(crate) enum DesignTreeRow {
     Occurrence(OccurrenceRow),
     /// One sheet of the occurrence above it, offered only where its cell view
     /// has more than one — a single-sheet cell view is its sheet.
@@ -161,7 +161,7 @@ impl DesignTreeRow {
 }
 
 /// The occurrence tree, from the design root down to whatever is unfolded.
-pub(super) fn occurrence_rows(
+pub(crate) fn occurrence_rows(
     source: &TreeSource<'_>,
     tree: &NavigatorTreeState,
 ) -> Vec<DesignTreeRow> {
@@ -353,7 +353,7 @@ fn placed_instances(projection: &DesignProjection, master: &CellViewRef) -> Vec<
 /// opened from. Offering to open the second kind hands the reader a blank
 /// schematic belonging to no cell, and re-roots every other rail onto it, so
 /// the rails ask this before they offer the gesture.
-pub(super) fn authored_view(libraries: &LibraryManager, reference: &CellViewRef) -> bool {
+pub(crate) fn authored_view(libraries: &LibraryManager, reference: &CellViewRef) -> bool {
     libraries
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -407,7 +407,7 @@ fn materialized<'a>(
 /// The sheets of one cell view, in page order, and only where there is more
 /// than one: a single-sheet cell view *is* its sheet, and a node offering to
 /// enter what is already on screen is a row that does nothing.
-pub(super) fn sheets_of(
+pub(crate) fn sheets_of(
     catalog: &DesignManagementCatalog,
     master: &CellViewRef,
 ) -> Vec<(SheetId, String)> {
@@ -426,14 +426,14 @@ pub(super) fn sheets_of(
 
 /// What the resolver recorded against a master that did not resolve: the
 /// condition in its own spelling, and why, where it said why.
-pub(super) struct MasterCondition {
+pub(crate) struct MasterCondition {
     pub label: &'static str,
     pub diagnostic: Option<String>,
 }
 
 /// One master row: a cell view the design names, how many occurrences reach
 /// it, and what became of it.
-pub(super) struct MasterRow {
+pub(crate) struct MasterRow {
     pub view: String,
     pub occurrences: usize,
     /// `None` while every occurrence of this master resolved.
@@ -462,7 +462,7 @@ pub(super) struct MasterRow {
 /// differ only in configured view order are one master here, and the first
 /// condition any of them recorded is the one the row states — a master that
 /// resolved somewhere and broke somewhere else is a broken master.
-pub(super) fn declared_masters(
+pub(crate) fn declared_masters(
     projection: &DesignProjection,
     query: &str,
 ) -> BTreeMap<String, BTreeMap<String, Vec<MasterRow>>> {
@@ -877,7 +877,7 @@ pub(super) fn masters_section(
 /// Under a filter the band answers the filter instead, the way the object
 /// rails do: the filter asks about the whole design and the walk has already
 /// unfolded everything that answered, so the rows are the answer.
-pub(super) fn occurrence_band_count(
+pub(crate) fn occurrence_band_count(
     projection: &DesignProjection,
     query: &str,
     rows: &[DesignTreeRow],

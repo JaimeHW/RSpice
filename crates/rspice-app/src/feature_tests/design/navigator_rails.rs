@@ -1,17 +1,18 @@
-//! What the whole-design rails claim about the objects a run will reach.
-//!
-//! These rails answer about the design rather than the sheet: the interface the
-//! deck declares, the ports an S-parameter matrix indexes, and every occurrence
-//! a run reaches a source through. Their shared claim is that document order is
-//! no order at all — a pin is numbered by `netlist_order`, a port by its
-//! `port=`, and a source is named by the path that reaches it — and that a name
-//! or number claimed twice is a hazard stated on both rows, in the warning tone
-//! rather than the faint one the counts use.
-//!
-//! The fixtures and frame-reading helpers live in the parent, because the
-//! hierarchy and keyboard cases share them.
+//! The navigator's object rails drawn through a whole application: ports, vector pins,
+//! excitations and RF ports, and the occurrences each rail answers about.
 
-use super::*;
+use crate::schematic::view::sheet_visibility::SheetScope;
+use crate::state::CellViewRef;
+use crate::state::ComponentType;
+use crate::state::InstancePath;
+use crate::state::PortDirection;
+use crate::state::SchematicState;
+use crate::ui::tokens::Tokens;
+use crate::workbench::RSpiceApp;
+use crate::workbench::design::navigator::hierarchy_tree;
+use crate::workbench::design::navigator::tests::*;
+use crate::workbench::design::navigator::*;
+use crate::workbench::state::Workspace;
 
 /// The ports rail lists the interface in the order the deck has it, and numbers
 /// every pin with the position it occupies there.
