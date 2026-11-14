@@ -93,6 +93,7 @@ fn per_trial_family_measurements_match_the_corpus_runner_on_c6() {
         analysis: ANALYSIS,
         o5: false,
         budget: Duration::from_secs(300),
+        worker: None,
     });
     assert_eq!(result.outcome, "completed", "{:?}", result.error);
     let trials = &result

@@ -22,6 +22,10 @@ use super::compare::Verdict;
 /// On since every runner carries a refusal's identity as typed fields.
 pub const REQUIRE_STRUCTURED_REFUSAL: bool = true;
 
+/// The error category of a case its route's harness could not hand to what
+/// the route tests; its display is the reason the `gap` row keeps.
+pub const HARNESS_GAP: &str = "harness-gap";
+
 /// The fixed analysis labels a refusal may use, per card kind.
 pub fn analysis_labels(kind: &str) -> &'static [&'static str] {
     match kind {
@@ -208,6 +212,12 @@ pub fn classify(
 }
 
 fn classify_error(error: &ErrorRecord, kind: &str, instances: &[String]) -> Classification {
+    if error.category == HARNESS_GAP {
+        return Classification::new(
+            Outcome::Gap,
+            format!("harness gap: {}", first_line(&error.display)),
+        );
+    }
     let refusal_category = matches!(error.category.as_str(), "capability" | "elaboration")
         || (error.category == "parse" && error.token.is_some());
     if !refusal_category {
@@ -381,6 +391,23 @@ mod tests {
             ..Default::default()
         });
         CaseEnd::Completed(Box::new(result))
+    }
+
+    #[test]
+    fn a_harness_gap_is_a_gap_with_its_reason() {
+        let result = CaseResult::new("worker", "simulation").failed(ErrorRecord {
+            category: HARNESS_GAP.into(),
+            detail: "module 'sk' holds an index the worker cannot read".into(),
+            display: "module 'sk' holds an index the worker cannot read".into(),
+            stage: Some("preparation".into()),
+            ..Default::default()
+        });
+        let class = classify(&CaseEnd::Completed(Box::new(result)), "tran", &[], &[]);
+        assert_eq!(class.outcome, Outcome::Gap);
+        assert_eq!(
+            class.detail,
+            "harness gap: module 'sk' holds an index the worker cannot read"
+        );
     }
 
     fn structured(kind: &str) -> CaseEnd {

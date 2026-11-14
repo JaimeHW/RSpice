@@ -159,6 +159,7 @@ fn mixed_op_decks_give_the_runners_numbers_on_the_prepared_manual_route() {
             analysis: "op",
             o5: false,
             budget: Duration::from_secs(300),
+            worker: None,
         };
         let runner = headless_case(&request, "op", &origin, &source);
         assert_eq!(

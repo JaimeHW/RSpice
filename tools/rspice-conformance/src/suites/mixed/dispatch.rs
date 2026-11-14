@@ -31,12 +31,20 @@
 //! uninterrupted transient with a checkpoint schedule plus one resume per
 //! checkpoint, each bound to the checkpoint that transient captured. The
 //! members' results are gathered into the case's one family observation.
+//!
+//! # The worker route
+//!
+//! With a worker directory, the case prepares and authorizes its deck here,
+//! as the browser application's main thread does (for a host that starts no
+//! `d_process` program), and runs each task in the browser worker under Node
+//! ([`worker_host`]), one task at a time as the browser's one worker does.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution::{
     HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest,
     PreparedRunAuthorization, prepare_headless_run,
@@ -66,13 +74,28 @@ pub struct CaseRequest<'a> {
     /// Run the held-digital O5 circuit with this deck's card instead.
     pub o5: bool,
     pub budget: Duration,
+    /// Run the tasks in the browser worker this directory serves: the
+    /// application's `simulation-worker.js` beside the worker image's
+    /// `pkg/`. The case is then the worker route's.
+    pub worker: Option<&'a Path>,
+}
+
+impl CaseRequest<'_> {
+    /// The route this case runs on.
+    pub fn route(&self) -> Route {
+        if self.worker.is_some() {
+            Route::Worker
+        } else {
+            Route::compiled()
+        }
+    }
 }
 
 /// Run one case to a result. Never panics on simulator failure; a panic is a
 /// crash the parent records from the missing file.
 pub fn run_case(request: &CaseRequest<'_>) -> CaseResult {
     let started = Instant::now();
-    let route = Route::compiled();
+    let route = request.route();
     let kind = analysis_kind(request.analysis).unwrap_or("unknown");
     let mut result = match compose(request) {
         Err(error) => CaseResult::new(route.token(), "none").failed(harness_error(error)),
@@ -236,7 +259,7 @@ fn hdl_refusal(refusal: &DeckHdlRefusal) -> ErrorRecord {
 }
 
 fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &str) -> CaseResult {
-    let route = Route::compiled();
+    let route = request.route();
     let mut result = CaseResult::new(route.token(), "simulation");
     let cards: Vec<String> = deck_cards(source)
         .into_iter()
@@ -269,6 +292,9 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
     };
     input.veriloga_runtimes = sealed.runtimes;
     input.included_hdl_lines = sealed.included;
+    if request.worker.is_some() {
+        input.starts_programs = false;
+    }
     let snapshot = match prepare_headless_run(input, &abort) {
         Ok(snapshot) => snapshot,
         Err(error) => return result.failed(preparation_error(error)),
@@ -280,10 +306,16 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         Ok(dispatch) => dispatch,
         Err(error) => return result.failed(harness_error(error)),
     };
+    let mut worker = match request.worker.map(worker_host::WorkerHost::start) {
+        None => None,
+        Some(Ok(worker)) => Some(worker),
+        Some(Err(error)) => return result.failed(harness_error(error)),
+    };
     // A family's members are independent tasks and run side by side, as
     // the engine's own Monte Carlo runs its trials; a dependent task starts
     // once every producer it binds has finished. Results keep task order.
-    let concurrency = if family.kind.is_empty() {
+    // The browser's one worker runs one task at a time.
+    let concurrency = if family.kind.is_empty() || worker.is_some() {
         1
     } else {
         std::thread::available_parallelism().map_or(1, usize::from)
@@ -329,10 +361,34 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                     return fail(&mut active, result, harness_error(error.to_string()));
                 }
             };
-            let mut runner = rspice_simulation::runner::SimulationRunner::new();
-            if let Err(error) = runner.start_prepared(resolved, false) {
-                return fail(&mut active, result, simulation_error(&error));
-            }
+            let runner = match worker.as_mut() {
+                Some(worker) => {
+                    let run = worker.run(resolved, &abort);
+                    if let Some(reason) = run.gap {
+                        let gap = ErrorRecord {
+                            category: super::classify::HARNESS_GAP.into(),
+                            detail: reason.clone(),
+                            display: reason,
+                            stage: Some("preparation".into()),
+                            ..Default::default()
+                        };
+                        return fail(&mut active, result, gap);
+                    }
+                    for line in &run.log {
+                        if result.warnings.len() < 64 {
+                            result.warnings.push(line.clone());
+                        }
+                    }
+                    TaskRun::Worker(Some(run))
+                }
+                None => {
+                    let mut runner = rspice_simulation::runner::SimulationRunner::new();
+                    if let Err(error) = runner.start_prepared(resolved, false) {
+                        return fail(&mut active, result, simulation_error(&error));
+                    }
+                    TaskRun::Native(runner)
+                }
+            };
             active.push(ActiveTask {
                 runner,
                 instance,
@@ -353,13 +409,13 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
             let Some(outcome) = active[index].runner.poll_result() else {
                 for line in active[index].runner.drain_engine_log() {
                     if result.warnings.len() < 64 {
-                        result.warnings.push(line.message);
+                        result.warnings.push(line);
                     }
                 }
                 index += 1;
                 continue;
             };
-            let done = active.swap_remove(index);
+            let mut done = active.swap_remove(index);
             let simulated = match outcome {
                 Ok(simulated) => simulated,
                 Err(rspice_simulation::error::SimulationError::Aborted) if abort.is_aborted() => {
@@ -400,10 +456,55 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
 
 /// A dispatched task and what it needs when it finishes.
 struct ActiveTask {
-    runner: rspice_simulation::runner::SimulationRunner,
+    runner: TaskRun,
     instance: AnalysisInstanceId,
     label: String,
     producer: rspice_simulation::execution_artifact::PreparedArtifactProducer,
+}
+
+/// A task running on this process's runner, or one the worker has run.
+enum TaskRun {
+    Native(rspice_simulation::runner::SimulationRunner),
+    Worker(Option<worker_host::WorkerRun>),
+}
+
+impl TaskRun {
+    fn abort(&mut self) {
+        if let Self::Native(runner) = self {
+            runner.abort();
+        }
+    }
+
+    fn poll_result(&mut self) -> Option<Result<SimulationResult, SimulationError>> {
+        match self {
+            Self::Native(runner) => runner.poll_result(),
+            Self::Worker(run) => {
+                let run = run.as_mut()?;
+                Some(std::mem::replace(
+                    &mut run.outcome,
+                    Err(SimulationError::Aborted),
+                ))
+            }
+        }
+    }
+
+    fn drain_engine_log(&mut self) -> Vec<String> {
+        match self {
+            Self::Native(runner) => runner
+                .drain_engine_log()
+                .into_iter()
+                .map(|line| line.message)
+                .collect(),
+            Self::Worker(_) => Vec::new(),
+        }
+    }
+
+    fn take_task_transient_checkpoints(&mut self) -> Vec<std::sync::Arc<[u8]>> {
+        match self {
+            Self::Native(runner) => runner.take_task_transient_checkpoints(),
+            Self::Worker(run) => run.take().map(|run| run.checkpoints).unwrap_or_default(),
+        }
+    }
 }
 
 /// Lower the deck's cards into the explicit task graph a study would carry.
@@ -962,6 +1063,22 @@ fn preparation_error(error: HeadlessPreparationError) -> ErrorRecord {
             display: "case budget spent".into(),
             ..Default::default()
         },
+        // A refusal the preparation names structurally: the capability, the
+        // instances needing it, and the deck line naming them.
+        HeadlessPreparationError::Preparation(error) if error.refusal().is_some() => {
+            let refusal = error.refusal().expect("a refusal");
+            ErrorRecord {
+                category: "parse".into(),
+                token: Some(refusal.capability.to_owned()),
+                token_form: Some("structured".into()),
+                instance: refusal.instances.first().cloned(),
+                location: error.line().map(|line| format!("line {line}")),
+                stage: Some("preparation".into()),
+                detail: error.message().to_owned(),
+                display: error.to_string(),
+                ..Default::default()
+            }
+        }
         HeadlessPreparationError::ResourceLimit(limit) => {
             let display = limit.to_string();
             ErrorRecord {
@@ -1276,6 +1393,7 @@ fn family_tasks(
 
 #[cfg(test)]
 mod prepared_route;
+mod worker_host;
 
 #[cfg(test)]
 mod tests {
@@ -1375,6 +1493,7 @@ mod tests {
             analysis: "tran",
             o5: false,
             budget: Duration::from_secs(60),
+            worker: None,
         };
         let origin = dir.path().join("deck").join("mx.tran.cir");
         let deck = |rule: &str| {

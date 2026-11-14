@@ -3,9 +3,11 @@
 //!
 //! `run` compares each observed outcome with its recorded row and fails on any
 //! difference — `regressed` when the cell got worse in the order
-//! pass > unverified > refused > fail > wrong, `stale` when it got better
-//! without being re-recorded. `run --record` rewrites the rows of the routes it
-//! ran from what it observed; the landing manager reviews that diff. The detail
+//! pass > unverified > refused > fail > wrong > gap, `stale` when it got
+//! better without being re-recorded. A `gap` row records no result: its
+//! route's harness could not run the cell, for the reason its detail gives.
+//! `run --record` rewrites the rows of the routes it ran from what it
+//! observed; the landing manager reviews that diff. The detail
 //! column is informational (it carries measured numbers that move in the last
 //! digit between machines) and is not compared; the paths it names are written
 //! relative to the design ([`normalize_paths`]) so a re-record on another
@@ -538,6 +540,16 @@ mod tests {
             ratchet(&[], &recorded)[0],
             Drift::Unrecorded { .. }
         ));
+    }
+
+    #[test]
+    fn a_gap_is_flagged_once_a_result_replaces_it_and_when_it_replaces_one() {
+        let gap = vec![row("ac", Route::Worker, Outcome::Gap)];
+        let wrong = vec![row("ac", Route::Worker, Outcome::Wrong)];
+        assert!(ratchet(&gap, &gap).is_empty());
+        assert!(matches!(ratchet(&gap, &wrong)[0], Drift::Stale { .. }));
+        assert!(matches!(ratchet(&wrong, &gap)[0], Drift::Regressed { .. }));
+        assert_eq!(parse(&render(&gap)).unwrap(), gap);
     }
 
     #[test]

@@ -114,7 +114,8 @@ impl std::fmt::Display for Route {
     }
 }
 
-/// The five outcomes of one cell, best first.
+/// The outcomes of one cell, best first, and the gap of a route that cannot
+/// run it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Outcome {
     Pass,
@@ -122,6 +123,11 @@ pub enum Outcome {
     Refused,
     Fail,
     Wrong,
+    /// The route's harness cannot hand the cell to what it tests, for the
+    /// reason its row gives: a statement about the harness, not a result.
+    /// Ranked last, so the ratchet flags the cell both when a result
+    /// replaces it (stale) and when it replaces a result (regressed).
+    Gap,
 }
 
 impl Outcome {
@@ -132,6 +138,7 @@ impl Outcome {
             Self::Refused => "refused",
             Self::Fail => "fail",
             Self::Wrong => "wrong",
+            Self::Gap => "gap",
         }
     }
 
@@ -142,19 +149,21 @@ impl Outcome {
             "refused" => Some(Self::Refused),
             "fail" => Some(Self::Fail),
             "wrong" => Some(Self::Wrong),
+            "gap" => Some(Self::Gap),
             _ => None,
         }
     }
 
-    /// Rank in the ratchet order pass > unverified > refused > fail > wrong;
-    /// higher is better.
+    /// Rank in the ratchet order pass > unverified > refused > fail > wrong >
+    /// gap; higher is better.
     pub const fn rank(self) -> u8 {
         match self {
-            Self::Pass => 4,
-            Self::Unverified => 3,
-            Self::Refused => 2,
-            Self::Fail => 1,
-            Self::Wrong => 0,
+            Self::Pass => 5,
+            Self::Unverified => 4,
+            Self::Refused => 3,
+            Self::Fail => 2,
+            Self::Wrong => 1,
+            Self::Gap => 0,
         }
     }
 }

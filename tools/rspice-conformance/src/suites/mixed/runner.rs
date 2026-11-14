@@ -33,6 +33,10 @@ pub struct RunOptions {
     pub extended: bool,
     /// An external producer replacing the `case` child (P4 routes).
     pub producer: Option<String>,
+    /// Run the cells in the browser worker this directory serves (the
+    /// application's `simulation-worker.js` beside the worker image's
+    /// `pkg/`): the worker route.
+    pub worker: Option<PathBuf>,
     /// This binary, for spawning `case` children.
     pub bin: PathBuf,
     /// Where children write their result files.
@@ -45,6 +49,15 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
+    /// The route these options run the cells on.
+    pub fn route(&self) -> Route {
+        if self.worker.is_some() {
+            Route::Worker
+        } else {
+            Route::compiled()
+        }
+    }
+
     pub fn jobs(&self) -> usize {
         if self.jobs == 0 {
             default_jobs()
@@ -269,7 +282,7 @@ fn run_cell(options: &RunOptions, design: &Design, task: &Task) -> CellReport {
     let budget = Duration::from_secs(task.timeout_s);
     let end = match missing_feature(design) {
         Some(feature) => CaseEnd::Completed(Box::new(
-            CaseResult::new(Route::compiled().token(), "none").failed(super::case::ErrorRecord {
+            CaseResult::new(options.route().token(), "none").failed(super::case::ErrorRecord {
                 category: "harness".into(),
                 code: Some("no-feature".into()),
                 detail: format!("this build lacks rspice-core feature {feature}"),
@@ -482,6 +495,10 @@ fn run_child(
             if let Some(path) = path_with_dir_of(&options.bin) {
                 command.env("PATH", path);
             }
+            // The held-digital O5 reference stays this build's.
+            if let (Some(worker), false) = (&options.worker, o5) {
+                command.arg("--worker").arg(worker);
+            }
             command
         }
     };
@@ -580,9 +597,9 @@ fn evaluate_cell(
     let (dispatch, route) = match end {
         CaseEnd::Completed(result) => (
             result.dispatch.clone(),
-            Route::from_token(&result.route).unwrap_or(Route::compiled()),
+            Route::from_token(&result.route).unwrap_or(options.route()),
         ),
-        _ => ("none".to_owned(), Route::compiled()),
+        _ => ("none".to_owned(), options.route()),
     };
     let mut verdicts = Vec::new();
     if let CaseEnd::Completed(result) = end
@@ -1365,6 +1382,7 @@ pub fn ledger_counts(rows: &[Row]) -> String {
                 (Outcome::Fail, 'F'),
                 (Outcome::Wrong, 'W'),
                 (Outcome::Unverified, 'U'),
+                (Outcome::Gap, 'G'),
             ] {
                 if let Some(count) = counts.get(&outcome) {
                     text.push_str(&format!(" {count}{letter}"));

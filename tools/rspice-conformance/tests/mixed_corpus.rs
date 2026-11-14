@@ -9,6 +9,11 @@
 //!
 //! The runner runs the cells concurrently at its default `--jobs`;
 //! `RSPICE_MIXED_JOBS=N` overrides it.
+//!
+//! `RSPICE_MIXED_ROUTE=worker` runs the cells in the browser worker under
+//! Node instead, from the directory `RSPICE_MIXED_WORKER` names (default
+//! `crates/rspice-app/web`, where the browser build generates the worker
+//! image's `pkg/` beside `simulation-worker.js`); either build serves it.
 
 use std::process::Command;
 use std::time::Instant;
@@ -18,7 +23,9 @@ use rspice_conformance::suites::mixed::Route;
 #[test]
 fn every_mixed_corpus_cell_matches_its_recorded_outcome() {
     let compiled = Route::compiled();
-    if let Ok(expected) = std::env::var("RSPICE_MIXED_ROUTE") {
+    let expected = std::env::var("RSPICE_MIXED_ROUTE").ok();
+    let worker = expected.as_deref() == Some(Route::Worker.token());
+    if let Some(expected) = expected.as_deref().filter(|_| !worker) {
         assert_eq!(
             expected,
             compiled.token(),
@@ -26,10 +33,16 @@ fn every_mixed_corpus_cell_matches_its_recorded_outcome() {
         );
     }
     let mut command = Command::new(env!("CARGO_BIN_EXE_rspice-mixed-corpus"));
-    command
-        .arg("run")
-        .arg("--expect-route")
-        .arg(compiled.token());
+    command.arg("run").arg("--expect-route");
+    if worker {
+        let web = std::env::var_os("RSPICE_MIXED_WORKER").map_or_else(
+            || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/rspice-app/web"),
+            std::path::PathBuf::from,
+        );
+        command.arg(Route::Worker.token()).arg("--worker").arg(web);
+    } else {
+        command.arg(compiled.token());
+    }
     if std::env::var("RSPICE_MIXED_EXTENDED").is_ok_and(|value| value == "1") {
         command.arg("--extended");
     }

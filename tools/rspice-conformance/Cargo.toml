@@ -25,12 +25,15 @@ default = ["circuit-suites", "verilog-digital", "mixed-corpus"]
 # Its cases execute through `rspice-simulation`'s headless preparation and
 # runner, the code the desktop app, the browser worker and `rspice study`
 # use, so the corpus measures the simulator a user gets rather than a private
-# copy of analysis dispatch. Optional so the oracle-harness-only build keeps
-# its small dependency tree.
+# copy of analysis dispatch. Its worker route encodes each request and reads
+# each answer with the browser's own transport (`rspice-simulation`'s
+# test-support `runner::worker_wire`). Optional so the oracle-harness-only
+# build keeps its small dependency tree.
 mixed-corpus = [
     "circuit-suites",
     "verilog-digital",
     "dep:rspice-simulation",
+    "rspice-simulation/test-support",
     "dep:rspice-simulation-contract",
     "dep:rspice-vocabulary",
     "dep:rspice-results",

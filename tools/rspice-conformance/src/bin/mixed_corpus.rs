@@ -2,14 +2,20 @@
 //!
 //! ```text
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
-//!                         [--producer "<cmd>"] [--expect-route interp|native] [--jobs N]
+//!                         [--producer "<cmd>"] [--worker <web-dir>]
+//!                         [--expect-route interp|native|worker] [--jobs N]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
+//!                          [--worker <web-dir>]
 //! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4|O8 [--design C1] [--update] [--jobs N]
 //! rspice-mixed-corpus probe a|b|c [--record] [--jobs N]
 //! rspice-mixed-corpus peer toggle
 //! ```
 //!
 //! The route is the build: `--features veriloga-native` is the native route.
+//! `--worker` runs the cells in the browser worker instead, under Node: the
+//! directory holds the application's `simulation-worker.js` beside the
+//! worker image's wasm-bindgen `pkg/`, as `crates/rspice-app/web` does once
+//! the browser build has generated it.
 //! `--jobs` is the most cells (or captures) running at once; the default is
 //! `runner::default_jobs()`.
 
@@ -47,6 +53,8 @@ enum Commands {
         #[arg(long)]
         producer: Option<String>,
         #[arg(long)]
+        worker: Option<PathBuf>,
+        #[arg(long)]
         expect_route: Option<String>,
         #[arg(long, value_parser = job_count)]
         jobs: Option<usize>,
@@ -61,6 +69,8 @@ enum Commands {
         budget_s: u64,
         #[arg(long)]
         o5: bool,
+        #[arg(long)]
+        worker: Option<PathBuf>,
     },
     /// Capture (or verify) checked-in oracle references.
     Capture {
@@ -117,6 +127,7 @@ fn run() -> Result<ExitCode, String> {
             out,
             budget_s,
             o5,
+            worker,
         } => {
             let design = Design::load(&design_dir)?;
             let result = dispatch::run_case(&dispatch::CaseRequest {
@@ -125,6 +136,7 @@ fn run() -> Result<ExitCode, String> {
                 analysis: &analysis,
                 o5,
                 budget: Duration::from_secs(budget_s),
+                worker: worker.as_deref(),
             });
             result.write(&out)?;
             Ok(ExitCode::SUCCESS)
@@ -136,10 +148,16 @@ fn run() -> Result<ExitCode, String> {
             record,
             extended,
             producer,
+            worker,
             expect_route,
             jobs,
         } => {
-            check_route(expect_route.as_deref())?;
+            let route = if worker.is_some() {
+                Route::Worker
+            } else {
+                Route::compiled()
+            };
+            check_route(expect_route.as_deref(), route)?;
             run_corpus(runner::RunOptions {
                 designs: design,
                 variant,
@@ -147,8 +165,9 @@ fn run() -> Result<ExitCode, String> {
                 record,
                 extended,
                 producer,
+                worker,
                 jobs: jobs.unwrap_or_default(),
-                ..options()?
+                ..options(route)?
             })
         }
         Commands::Probe {
@@ -168,7 +187,7 @@ fn run() -> Result<ExitCode, String> {
                 record,
                 extended: true,
                 jobs: jobs.unwrap_or_default(),
-                ..options()?
+                ..options(Route::compiled())?
             })
         }
         Commands::Capture {
@@ -195,30 +214,37 @@ fn run() -> Result<ExitCode, String> {
     }
 }
 
-fn check_route(expected: Option<&str>) -> Result<(), String> {
+fn check_route(expected: Option<&str>, route: Route) -> Result<(), String> {
     let Some(expected) = expected else {
         return Ok(());
     };
     let expected =
         Route::from_token(expected).ok_or_else(|| format!("unknown route {expected}"))?;
-    if expected != Route::compiled() {
+    if expected == Route::Worker && route != Route::Worker {
+        return Err(
+            "--expect-route worker but no --worker directory names the worker to run".to_owned(),
+        );
+    }
+    if route == Route::Worker && expected != Route::Worker {
         return Err(format!(
-            "--expect-route {expected} but this binary is the {} route; build with{} --features veriloga-native",
-            Route::compiled(),
+            "--expect-route {expected} but --worker makes this run the worker route"
+        ));
+    }
+    if expected != route {
+        return Err(format!(
+            "--expect-route {expected} but this run is the {route} route; build with{} --features veriloga-native",
             if expected == Route::Native { "" } else { "out" }
         ));
     }
     Ok(())
 }
 
-fn options() -> Result<runner::RunOptions, String> {
+fn options(route: Route) -> Result<runner::RunOptions, String> {
     let bin = std::env::current_exe().map_err(|error| error.to_string())?;
     let work = std::env::temp_dir().join(format!("rspice-mixed-corpus-{}", std::process::id()));
     // Per route: the two builds' cells take different times.
-    let timings = std::env::temp_dir().join(format!(
-        "rspice-mixed-corpus-timings-{}.tsv",
-        Route::compiled().token()
-    ));
+    let timings =
+        std::env::temp_dir().join(format!("rspice-mixed-corpus-timings-{}.tsv", route.token()));
     Ok(runner::RunOptions {
         bin,
         work,
