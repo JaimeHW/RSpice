@@ -59,7 +59,8 @@
 #[cfg(test)]
 mod analog_sample_tests;
 mod charge;
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 mod checks;
 mod coupled;
 mod delays;

@@ -637,13 +637,15 @@ impl CandidateLedger {
     /// [`Self::arm`], which ask about a named candidate rather than about
     /// whichever one is latched.
     #[cfg(test)]
-    pub(crate) fn carried_candidate(&self) -> Option<f64> {
+    #[doc(hidden)]
+    pub fn carried_candidate(&self) -> Option<f64> {
         self.carried_time
     }
 
     /// [`Self::carries`], for the pin that asserts the keying rule.
     #[cfg(test)]
-    pub(crate) fn carries_at(&self, time: f64, bridge: usize) -> bool {
+    #[doc(hidden)]
+    pub fn carries_at(&self, time: f64, bridge: usize) -> bool {
         self.carries(time, bridge)
     }
 }
@@ -3054,14 +3056,16 @@ impl MixedSignalHost {
     /// event net a code model shares: an electrical terminal its analog block
     /// reads or drives, or an A/D or D/A bridge of its own, the input root of
     /// a converter that feeds it among them ([`Self::add_converter_input_root`]).
-    pub(crate) fn meets_analog_solution(&self) -> bool {
+    #[doc(hidden)]
+    pub fn meets_analog_solution(&self) -> bool {
         !self.state.bridges.adc.is_empty()
             || !self.state.bridges.dac.is_empty()
             || self.electrical_terminal_nodes().any(|node| node > 0)
     }
 
     /// The event nets this module drives: its output and inout event ports.
-    pub(crate) fn driven_event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn driven_event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.event_ports
             .iter()
             .filter(|port| {
@@ -3612,7 +3616,8 @@ impl MixedSignalHost {
     /// candidate that crossing, and take it back from every other, before
     /// the converters are evaluated here; see
     /// [`crate::xspice::LocatedCrossing`].
-    pub(crate) fn hand_located_crossings(
+    #[doc(hidden)]
+    pub fn hand_located_crossings(
         &self,
         mut hand: impl FnMut(usize, &str, usize, usize, Option<crate::xspice::LocatedCrossing>),
     ) {
@@ -3799,7 +3804,8 @@ impl MixedSignalHost {
     /// Declare the default `absdelta` expression tolerance (see
     /// [`MixedDigitalCoordinator::set_absdelta_expression_tolerance`]) for the
     /// wheel this module runs on its own.
-    pub(crate) fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
+    #[doc(hidden)]
+    pub fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
         self.absdelta_expression_tolerance = tolerance;
         if let Some(standalone) = self.standalone.as_mut() {
             standalone.set_absdelta_expression_tolerance(tolerance);
@@ -6022,7 +6028,8 @@ impl MixedSignalHost {
     /// the publication order is `(crossing, host, bridge)` by law, so two
     /// records that agree bridge by bridge agree on the order as well.
     #[cfg(test)]
-    pub(crate) fn trial_boundary_record(&self) -> Vec<(bool, Option<f64>)> {
+    #[doc(hidden)]
+    pub fn trial_boundary_record(&self) -> Vec<(bool, Option<f64>)> {
         self.trial.as_ref().map_or_else(Vec::new, |trial| {
             trial
                 .vectors

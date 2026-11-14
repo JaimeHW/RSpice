@@ -69,12 +69,15 @@
 //!
 //! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 
-pub(crate) mod effects;
-pub(crate) mod host;
+#[doc(hidden)]
+pub mod effects;
+#[doc(hidden)]
+pub mod host;
 #[cfg(test)]
 mod linked_tests;
 mod mixed;
-pub(crate) mod store;
+#[doc(hidden)]
+pub mod store;
 #[cfg(test)]
 mod tests;
 
@@ -91,9 +94,12 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
-pub(crate) use mixed::checkpoint as participant_checkpoint;
-pub(crate) use mixed::coordinator_checkpoint;
-pub(crate) use mixed::{
+#[doc(hidden)]
+pub use mixed::checkpoint as participant_checkpoint;
+#[doc(hidden)]
+pub use mixed::coordinator_checkpoint;
+#[doc(hidden)]
+pub use mixed::{
     BoundaryBitSource, BoundaryBus, CandidateLedger, CoordinatorEquilibriumImage, DriveEdgeReport,
     HdlSignalSource, HdlVariable, HostEquilibriumImage, MixedDigitalCoordinator,
     PreparedMixedAcceptance, SharedTrialCursor, SignalWriters,
@@ -774,7 +780,8 @@ impl Default for HdlTestbenchOptions {
 }
 
 /// The compiler's spelling of a run's min:typ:max selection.
-pub(crate) fn compiler_delay_select(
+#[doc(hidden)]
+pub fn compiler_delay_select(
     select: crate::config::HdlDelaySelect,
 ) -> rspice_veriloga::canonical_ir::digital::DigitalDelaySelect {
     use crate::config::HdlDelaySelect;

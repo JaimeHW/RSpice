@@ -91,12 +91,15 @@ mod traces;
 pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;
-pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
-pub(crate) use strength::BitDrive;
+#[doc(hidden)]
+pub use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
+#[doc(hidden)]
+pub use strength::BitDrive;
 #[cfg(test)]
 mod real_alias_tests;
 mod real_bindings;
-pub(crate) use real_bindings::{ExternalNetChange, ExternalRealDriverId};
+#[doc(hidden)]
+pub use real_bindings::{ExternalNetChange, ExternalRealDriverId};
 use real_bindings::{ExternalReals, RealConnections};
 pub(crate) mod strength;
 use strength::{NetResolution, StrengthBit};

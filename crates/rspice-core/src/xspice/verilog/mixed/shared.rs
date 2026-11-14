@@ -938,7 +938,8 @@ impl MixedDigitalCoordinator {
     }
 
     #[cfg(test)]
-    pub(crate) fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.event_domains().map(|(node, _)| node)
     }
 
@@ -1151,7 +1152,8 @@ impl MixedDigitalCoordinator {
     /// solver resolves is a wiggle of the solution, not a change of direction.
     /// Zero — the default for a host no transient stepper drives — falls back
     /// to a few units in the last place of the expression's magnitude.
-    pub(crate) fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
+    #[doc(hidden)]
+    pub fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
         self.absdelta_expression_tolerance = if tolerance.is_finite() && tolerance > 0.0 {
             tolerance
         } else {
@@ -1398,7 +1400,8 @@ impl SharedTrialCursor {
     /// thing it governs — where the next group publishes — is inside the
     /// settle. What asks is the pin that compares two trial kinds' settles.
     #[cfg(test)]
-    pub(crate) fn published_tick(&self) -> u64 {
+    #[doc(hidden)]
+    pub fn published_tick(&self) -> u64 {
         self.published_tick
     }
 }

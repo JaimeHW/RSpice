@@ -164,7 +164,8 @@ impl DigitalActiveExchange<'_> {
         Ok(())
     }
     #[cfg(test)]
-    pub(crate) fn tick(&self) -> u64 {
+    #[doc(hidden)]
+    pub fn tick(&self) -> u64 {
         self.tick
     }
     #[doc(hidden)]
@@ -208,7 +209,8 @@ impl DigitalActiveExchange<'_> {
         })
     }
     #[cfg(test)]
-    pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
+    #[doc(hidden)]
+    pub fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
     }
     #[doc(hidden)]
@@ -216,7 +218,8 @@ impl DigitalActiveExchange<'_> {
         self.host.store.take_external_changes()
     }
     #[cfg(test)]
-    pub(crate) fn drive_many(
+    #[doc(hidden)]
+    pub fn drive_many(
         &mut self,
         drives: &[(ExternalBitDriverId, DigitalValue)],
     ) -> Result<(), DigitalRunError> {
@@ -400,7 +403,8 @@ impl DigitalHost {
     }
 
     #[cfg(test)]
-    pub(crate) fn attach_external_reals(
+    #[doc(hidden)]
+    pub fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
         drivers: &[(DigitalSignalId, EventTarget)],
