@@ -866,13 +866,10 @@ impl KluSolver {
         ws.l_ptr.push(0);
         ws.u_ptr.push(0);
 
-        // Scatter workspace split in two halves: pivoted rows live at
-        // their pivot position `k < n`, unpivoted rows at `n + original`,
-        // so a pivot position can never collide with an original index.
-        let x_len = n.checked_mul(2).ok_or_else(|| {
-            SolverError::InvalidCircuit("KLU factor workspace size overflow".to_string())
-        })?;
-        resize_fallible(&mut ws.x, x_len, 0.0)?;
+        // Dense scatter workspace indexed by original row, as SuiteSparse's
+        // X is: an elimination update addresses its row directly, and only
+        // the reach and the pivot bookkeeping consult `pinv`.
+        resize_fallible(&mut ws.x, n, 0.0)?;
         ws.x.fill(0.0);
         // DFS state: flag[row] == j+1 marks visitation in column j.
         resize_fallible(&mut ws.flag, n, 0)?;
@@ -918,11 +915,10 @@ impl KluSolver {
                 let scaled_value = values[idx] * self.row_scale[row];
                 input_col_max = input_col_max.max(scaled_value.abs());
                 if flag[row] == stamp {
-                    x[Self::x_slot(n, pinv, row)] += scaled_value;
+                    x[row] += scaled_value;
                     continue;
                 }
                 Self::dfs_reach(
-                    n,
                     row,
                     stamp,
                     flag,
@@ -934,7 +930,7 @@ impl KluSolver {
                     nonpivot_rows,
                     x,
                 );
-                x[Self::x_slot(n, pinv, row)] += scaled_value;
+                x[row] += scaled_value;
             }
 
             // Numeric left-looking elimination in topological order.
@@ -943,7 +939,8 @@ impl KluSolver {
             reserve_for(u_pos, topo.len().saturating_add(1))?;
             reserve_for(u_vals, topo.len().saturating_add(1))?;
             for &k in topo.iter().rev() {
-                let alpha = x[k];
+                let pivot_row_k = p_row[k] as usize;
+                let alpha = x[pivot_row_k];
                 if !alpha.is_finite() {
                     return Err(SolverError::Overflow);
                 }
@@ -952,15 +949,14 @@ impl KluSolver {
                 if alpha != 0.0 {
                     for li in l_ptr[k]..l_ptr[k + 1] {
                         let row = l_rows[li] as usize;
-                        let slot = Self::x_slot(n, pinv, row);
-                        let updated = x[slot] - alpha * l_vals[li];
+                        let updated = x[row] - alpha * l_vals[li];
                         if !updated.is_finite() {
                             return Err(SolverError::Overflow);
                         }
-                        x[slot] = updated;
+                        x[row] = updated;
                     }
                 }
-                x[k] = 0.0;
+                x[pivot_row_k] = 0.0;
             }
 
             // Pivot selection over the unpivoted rows: column maximum
@@ -983,7 +979,7 @@ impl KluSolver {
                 if current_block.is_some_and(|block| self.row_block[row] != block) {
                     continue;
                 }
-                let v = x[n + row].abs();
+                let v = x[row].abs();
                 if v > max_abs {
                     max_abs = v;
                     max_row = row;
@@ -1000,7 +996,7 @@ impl KluSolver {
             } else {
                 max_row
             };
-            let pivot_val = x[n + pivot_row];
+            let pivot_val = x[pivot_row];
             let pivot_abs = pivot_val.abs();
             if self.absolute_pivot_tolerance > 0.0
                 && pivot_abs / self.row_scale[pivot_row] < self.absolute_pivot_tolerance
@@ -1032,9 +1028,8 @@ impl KluSolver {
             // *symbolic* — a value that cancels at this factorization can
             // be nonzero at the next refactor, which replays these slots.
             for &row in nonpivot_rows.iter() {
-                let slot = n + row;
-                let v = x[slot];
-                x[slot] = 0.0;
+                let v = x[row];
+                x[row] = 0.0;
                 if !v.is_finite() {
                     return Err(SolverError::Overflow);
                 }
@@ -1110,20 +1105,10 @@ impl KluSolver {
         Ok(())
     }
 
-    /// Scatter slot for an original row during `factor`: pivoted rows
-    /// live at their pivot position (`< n`), unpivoted rows in the upper
-    /// half (`n + original`), so the two index spaces cannot collide.
-    #[inline]
-    fn x_slot(n: usize, pinv: &[usize], row: usize) -> usize {
-        let p = pinv[row];
-        if p == usize::MAX { n + row } else { p }
-    }
-
     /// Depth-first reach over L's columns, marking visited rows and
     /// recording pivoted reach in postorder.
     #[allow(clippy::too_many_arguments)]
     fn dfs_reach(
-        n: usize,
         start_row: usize,
         stamp: usize,
         flag: &mut [usize],
@@ -1143,7 +1128,7 @@ impl KluSolver {
             let k = pinv[row];
             if k == usize::MAX {
                 // Unpivoted row: a leaf of the reach.
-                x[n + row] = 0.0;
+                x[row] = 0.0;
                 nonpivot_rows.push(row);
                 dfs_stack.pop();
                 continue;
@@ -1162,7 +1147,7 @@ impl KluSolver {
                 }
             }
             if !advanced {
-                x[k] = 0.0;
+                x[row] = 0.0;
                 topo.push(k);
                 dfs_stack.pop();
             }
