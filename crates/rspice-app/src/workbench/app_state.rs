@@ -283,13 +283,10 @@ impl AppState {
         self.workbench.close_route_owned_transient(surface, label);
     }
 
-    /// The prompt on the status bar, if one is showing.
+    /// [`prompt_text`] for the session.
     #[cfg(test)]
     pub(crate) fn prompt_text(&self) -> Option<&str> {
-        self.workbench
-            .prompt
-            .as_ref()
-            .map(|prompt| prompt.text.as_str())
+        prompt_text(&self.workbench)
     }
 
     /// Whether a viewer is currently available for activation.
@@ -429,6 +426,12 @@ impl AppState {
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
         self.design.schematic_edit_in_progress(&self.model)
     }
+}
+
+/// The prompt on `workbench`'s status bar, if one is showing.
+#[cfg(test)]
+pub(crate) fn prompt_text(workbench: &crate::workbench::WorkbenchSession) -> Option<&str> {
+    workbench.prompt.as_ref().map(|prompt| prompt.text.as_str())
 }
 
 #[cfg(test)]
