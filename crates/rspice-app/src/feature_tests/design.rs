@@ -78,7 +78,7 @@ mod stimulus_placement;
 mod stimulus_surface;
 mod stimulus_surface_drawn;
 mod symbol_actions;
-mod symbol_actions_drawn;
+pub(super) mod symbol_actions_drawn;
 mod symbol_canvas_drafts;
 mod symbol_definition;
 mod symbol_drawing_drawn;

@@ -218,7 +218,11 @@ fn no_project_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusT
 /// Only a drawn view has coordinates to read out; a source or document view
 /// leaves the segment empty rather than filling it.
 fn design_context_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    let context = design_engineering_context(app.state.design.canvas_hover, &app.state.model);
+    let context = design_engineering_context(
+        app.state.design.canvas_hover,
+        &app.state.model,
+        &app.state.design.symbol,
+    );
     (!context.is_empty()).then(|| StatusText::label(context))
 }
 
@@ -237,6 +241,7 @@ fn selection_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusTe
         &app.state.model,
         &app.state.workbench,
         &app.state.platform,
+        &app.state.design.symbol,
     )))
 }
 

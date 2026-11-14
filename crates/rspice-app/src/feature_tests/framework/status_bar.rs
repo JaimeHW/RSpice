@@ -11,7 +11,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
-use crate::workbench::chrome::status_bar::design::{schematic_cursor_summary, selection_summary};
+use crate::workbench::chrome::status_bar::design::{
+    design_engineering_context, schematic_cursor_summary, selection_summary,
+};
 use crate::workbench::chrome::status_bar::results::{format_plot_zoom, results_view_summary};
 use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use crate::workbench::chrome::status_bar::*;
@@ -301,13 +303,60 @@ fn adjacent_result_segments_never_print_the_same_sentence() {
     app.state.open_project_session();
 
     let coordinates = results_view_summary(&app.state.model.simulation, None);
-    let selection = selection_summary(&app.state.model, &app.state.workbench, &app.state.platform);
+    let selection = selection_summary(
+        &app.state.model,
+        &app.state.workbench,
+        &app.state.platform,
+        &app.state.design.symbol,
+    );
     assert_ne!(
         coordinates, selection,
         "two segments cannot report the same fact in the same words"
     );
     assert_eq!(coordinates, "No plotted interval");
     assert_eq!(selection, "No result dataset selected");
+}
+
+/// In a symbol view the bar reads the symbol editor: what it has selected
+/// and the grid it snaps to, never the schematic's.
+#[test]
+fn a_symbol_view_reads_its_own_selection_and_grid() {
+    use crate::state::SymbolAttributeKind;
+    use rspice_schematic_editor::symbol_editor::session::SymbolGridSpacing;
+    let mut app = crate::feature_tests::design::symbol_actions_drawn::open_symbol();
+    let read = |app: &RSpiceApp| {
+        selection_summary(
+            &app.state.model,
+            &app.state.workbench,
+            &app.state.platform,
+            &app.state.design.symbol,
+        )
+    };
+    assert_eq!(read(&app), "No object selected");
+    app.state.design.symbol.editor.select_pin("IN");
+    assert_eq!(read(&app), "IN");
+    app.state.design.symbol.editor.select_shape(0);
+    assert_eq!(read(&app), "Circle");
+    app.state
+        .design
+        .symbol
+        .editor
+        .select_attribute(SymbolAttributeKind::Value);
+    assert_eq!(read(&app), "Value");
+    app.state
+        .design
+        .symbol
+        .editor
+        .selection
+        .shapes
+        .extend([0, 1]);
+    assert_eq!(read(&app), "3 items selected");
+
+    app.state.design.symbol.editor.grid_spacing = SymbolGridSpacing::Two;
+    let context =
+        |hover| design_engineering_context(hover, &app.state.model, &app.state.design.symbol);
+    assert_eq!(context(None), "x — · y — · grid 2");
+    assert_eq!(context(Some((12.0, -4.0))), "x 12 · y -4 · grid 2");
 }
 
 #[test]
