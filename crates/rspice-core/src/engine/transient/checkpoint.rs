@@ -560,6 +560,10 @@ pub struct TransientCheckpoint {
     lte_signal_local_reference: Vec<Value>,
     lte_reference_history_available: bool,
     lte_reference_mode: Option<TransientLteReference>,
+    /// Every code-model instance as `name(model)`. The mixed image identifies
+    /// its converters only by structural hash, so this is where an image
+    /// names them.
+    xspice_instances: Vec<String>,
     xspice_resume_blockers: Vec<String>,
     xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
     mixed_runtime_image: Option<mixed::Image>,
@@ -6168,6 +6172,11 @@ impl TransientCheckpoint {
                 tline_resume_blockers.join("; ")
             );
         }
+        let xspice_instances: Vec<String> = circuit
+            .xspice_instances
+            .iter()
+            .map(|instance| format!("{}({})", instance.name, instance.model_name()))
+            .collect();
         #[cfg(feature = "veriloga")]
         let mixed_runtime_image = circuit
             .has_mixed_signal_hosts()
@@ -6301,6 +6310,7 @@ impl TransientCheckpoint {
             lte_signal_local_reference,
             lte_reference_history_available: lte_estimator.is_some(),
             lte_reference_mode: lte_estimator.map(LteEstimator::reference_mode),
+            xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
             mixed_runtime_image,
@@ -7994,6 +8004,12 @@ impl TransientCheckpoint {
                 ));
             }
         }
+        out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
+        for (index, instance) in self.xspice_instances.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
+            out.push_str(instance);
+            out.push('\n');
+        }
         out.push_str(&format!(
             "xspice_blockers {}\n",
             self.xspice_resume_blockers.len()
@@ -8534,6 +8550,7 @@ impl TransientCheckpoint {
         mosfet::read(lines, budget, &mut accepted_junction_history)?;
         let tline_resume_blockers = read_nonempty_line_vector(lines, "tline_blockers", budget)?;
         let tline_states = read_tline_states(lines, budget)?;
+        let xspice_instances = read_nonempty_line_vector(lines, "xspice", budget)?;
         let xspice_resume_blockers = read_nonempty_line_vector(lines, "xspice_blockers", budget)?;
         let xspice_instance_states = read_xspice_instance_states(lines, budget)?;
         let generated_veriloga_instance_states = read_generated_veriloga_states(lines, budget)?;
@@ -8616,6 +8633,7 @@ impl TransientCheckpoint {
             lte_signal_local_reference,
             lte_reference_history_available: lte_reference_mode.is_some(),
             lte_reference_mode,
+            xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
             mixed_runtime_image,
@@ -10850,6 +10868,7 @@ mod tests {
             lte_signal_local_reference: Vec::new(),
             lte_reference_history_available: true,
             lte_reference_mode: Some(TransientLteReference::SignalGlobal),
+            xspice_instances: Vec::new(),
             xspice_resume_blockers: Vec::new(),
             xspice_instance_states: Vec::new(),
             mixed_runtime_image: None,
@@ -14179,6 +14198,7 @@ mod tests {
     #[test]
     fn xspice_blockers_round_trip() {
         let mut original = sample();
+        original.xspice_instances = vec!["a1(gain)".to_string()];
         original.xspice_resume_blockers = vec!["a1(gain): model owns pending state".to_string()];
         let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
         assert_eq!(original, restored);
@@ -14187,6 +14207,7 @@ mod tests {
     #[test]
     fn xspice_instance_states_round_trip() {
         let mut original = sample();
+        original.xspice_instances = vec!["a1(int)".to_string()];
         original.xspice_instance_states = vec![XspiceInstanceCheckpoint {
             name: "a1".to_string(),
             model: "int".to_string(),
@@ -14406,9 +14427,9 @@ mod tests {
             .expect_err("oversized integer vectors must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
-        let text = format!("xspice_blockers {count}\n");
+        let text = format!("xspice {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_nonempty_line_vector(&mut lines, "xspice_blockers", &mut budget)
+        let err = read_nonempty_line_vector(&mut lines, "xspice", &mut budget)
             .expect_err("oversized string sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
