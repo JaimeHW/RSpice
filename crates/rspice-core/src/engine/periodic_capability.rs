@@ -355,8 +355,8 @@ const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body without `absd
 /// other operator that keeps state, is carried as unknowns of its own.
 const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
      F(x) + dQ(x)/dt, with every other `ddt` and every `idt`, `laplace_*` and `absdelay` \
-     carried as an unknown of its own, no `$abstime`, no event operator and no variable kept \
-     between time points";
+     carried as an unknown of its own, `$abstime` read periodically, no event operator and \
+     no variable kept between time points";
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \

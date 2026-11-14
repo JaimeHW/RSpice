@@ -392,7 +392,7 @@ const fn hb_admissible_veriloga() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every Verilog-A module whose analog body is memoryless equations, `ddt` (of a charge it contributes, or carried as an unknown of its own), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, and `absdelay` by a fixed delay, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, $abstime or variable kept between time points",
+        condition: "every Verilog-A module whose analog body is memoryless equations, `ddt` (of a charge it contributes, or carried as an unknown of its own), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, `absdelay` by a fixed delay, and `$abstime` read periodically over the analysis period, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_* or variable kept between time points",
         evidence: HB_VERILOGA_EVIDENCE,
     }
 }
@@ -802,9 +802,9 @@ fn hb_operator_reason(operator: &str) -> Option<&'static str> {
             "whose integral wraps at its modulus, which is state outside the waveform's spectrum"
         }
         "zi_*" => "a sampled-data filter whose discrete state the spectrum does not carry",
-        "$abstime" => {
-            "and its time-varying equations cannot be certified periodic over the analysis period"
-        }
+        // Each sample reads its own instant; the sampler refuses a read that
+        // is not periodic over the analysis period before solving.
+        "$abstime" => return None,
         _ => {
             "whose state lies outside the F(x) + dQ(x)/dt residual harmonic balance evaluates \
              at its collocation samples"

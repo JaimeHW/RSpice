@@ -642,7 +642,7 @@ impl HbSolver {
             if selected.is_some_and(|rows| !device.rows().iter().any(|&row| rows[row])) {
                 continue;
             }
-            device.stamp_periodic_fq(solution, f, q)?;
+            device.stamp_periodic_fq(solution, time, f, q)?;
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "Verilog-A device '{}' produced invalid physical F/Q entries",

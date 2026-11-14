@@ -34,14 +34,19 @@
 //! charge the module contributes (one scaled by a quantity that varies with
 //! bias, a nested one, one that steers a branch, one a branch-current read
 //! sees, or one whose charge it cannot recover). Each becomes two periodic
-//! unknowns of its own, its input `u` and its output `y`. The module's residual is sampled with every output held at
-//! the solver's `y` (see [`rspice_veriloga::vm::PeriodicOperatorRecord`]), the
-//! input row holds `u - x(v, y) = 0` for the input `x` the module computes,
+//! unknowns of its own, its input `u` and its output `y`. The module's
+//! residual is sampled with every output held at the solver's `y` (see
+//! [`rspice_veriloga::vm::PeriodicOperatorRecord`]), the input row holds
+//! `u - x(v, y) = 0` for the input `x` the module computes,
 //! and a [`super::ExactPeriodicNetwork::VerilogAOperator`] holds
 //! `Y - T(jω) U = 0` at every harmonic: `1/(jω)` for `idt`, whose DC output
 //! its initial condition fixes instead, `H(jω)` for a Laplace filter,
 //! `e^{-jωτ}` for a delay and `jω` for a `ddt`. The other `ddt` sites keep
 //! the charge path above.
+//!
+//! A module that reads `$abstime` is evaluated at each sample's own instant.
+//! Before solving, both probes' stamps at four instants of the period must
+//! equal their stamps one period later, or the module is refused by name.
 //!
 //! The Jacobian stays exact. One evaluation with every output tangent zero
 //! gives the partials with the outputs held, and the difference of an
@@ -109,6 +114,9 @@ pub(super) struct HbVerilogADevice {
     equation_rows: Vec<usize>,
     /// Operator sites carried as unknowns of their own, in frame order.
     operators: Vec<HbOperatorPorts>,
+    /// Whether the module reads `$abstime`, which each sample then sets to
+    /// its own instant.
+    reads_time: bool,
 }
 
 /// A probe's Jacobian entries: zero-based row, column and value.
@@ -146,6 +154,7 @@ impl HbVerilogADevice {
         let companion = IntegrationCoefficients::backward_euler(interval)
             .map_err(|error| failure("charge-probe setup", &error))?;
         let sites = device.periodic_operator_sites();
+        let reads_time = device.analog_operator_inventory().contains(&"$abstime");
         if sites.len() != ports.len() {
             return Err(HbError::InvalidCircuit(format!(
                 "Verilog-A device '{name}' has {} operator sites and {} periodic port pairs",
@@ -220,8 +229,12 @@ impl HbVerilogADevice {
             rows,
             equation_rows,
             operators: Vec::new(),
+            reads_time,
         };
         let networks = device.try_bind_operators(&sites, ports, unknowns)?;
+        if reads_time {
+            device.check_periodic_time(unknowns, fundamental_hz.recip())?;
+        }
         Ok((device, networks))
     }
 
@@ -411,14 +424,78 @@ impl HbVerilogADevice {
         Ok((residual, matrix))
     }
 
-    /// Stamp `F` and `Q - Q_ref` at one collocation sample, with their
-    /// Jacobians, in the sampler's `-F` residual convention.
+    /// Refuse a module whose equations read `$abstime` other than
+    /// periodically over `period`: at each quarter of the period, both
+    /// probes' stamps at the zero state must be the same one period later.
+    /// A ramp in time differs; a tone of the analysis's frequency does not.
+    fn check_periodic_time(&mut self, unknowns: usize, period: Value) -> Result<(), HbError> {
+        let zero = vec![0.0; unknowns];
+        let mut stamps = |time: Value| -> Result<Vec<Value>, HbError> {
+            let mut values = Vec::new();
+            for probe in [&mut self.static_probe, &mut self.charge_probe] {
+                probe.try_set_time(time).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "Verilog-A device '{}' cannot be evaluated at t = {time:e} s: {error}",
+                        probe.name
+                    ))
+                })?;
+                let (residual, jacobian) = Self::probe(probe, &zero)?;
+                values.extend(residual);
+                values.extend(summed(&jacobian).into_values());
+            }
+            Ok(values)
+        };
+        // One scale over every instant: at an instant where every entry
+        // vanishes, what is left is rounding, not the module's equations.
+        let mut pairs = Vec::with_capacity(4);
+        for quarter in 0..4 {
+            let time = Value::from(quarter) * period / 4.0;
+            pairs.push((time, stamps(time)?, stamps(time + period)?));
+        }
+        let scale = pairs
+            .iter()
+            .flat_map(|(_, now, later)| now.iter().chain(later))
+            .map(|value| value.abs())
+            .fold(0.0, Value::max);
+        for (time, now, later) in &pairs {
+            let differs = now.len() != later.len()
+                || now
+                    .iter()
+                    .zip(later)
+                    .any(|(a, b)| (a - b).abs() > 1.0e-9 * scale + Value::MIN_POSITIVE);
+            if differs {
+                return Err(HbError::InvalidCircuit(format!(
+                    "harmonic balance cannot sample Verilog-A device '{}' (module '{}'): it \
+                     reads `$abstime`, and its equations at t = {time:e} s and one period of \
+                     the analysis later differ, so they are not periodic over the analysis \
+                     period",
+                    self.name(),
+                    self.static_probe.model_name()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Stamp `F` and `Q - Q_ref` at one collocation sample at `time`, with
+    /// their Jacobians, in the sampler's `-F` residual convention.
     pub(super) fn stamp_periodic_fq(
         &mut self,
         solution: &[Value],
+        time: Value,
         f: &mut NativeStamp,
         q: &mut NativeStamp,
     ) -> Result<(), HbError> {
+        if self.reads_time {
+            for probe in [&mut self.static_probe, &mut self.charge_probe] {
+                probe.try_set_time(time).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "Verilog-A device '{}' cannot be evaluated at t = {time:e} s: {error}",
+                        probe.name
+                    ))
+                })?;
+            }
+        }
         let outputs: Vec<Value> = self
             .operators
             .iter()

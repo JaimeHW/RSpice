@@ -268,11 +268,6 @@ fn harmonic_balance_refuses_each_operator_family_by_name() {
             "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{0.0, 1.0e-6});",
             true,
         ),
-        (
-            "$abstime",
-            "I(out) <+ 1.0e-3 * sin(6.283185307e6 * $abstime);",
-            false,
-        ),
     ] {
         let module = "va_hb_refused";
         let name = format!(
@@ -550,6 +545,47 @@ fn an_idt_with_an_initial_condition_integrates_one_tone() {
             Complex64::new(0.25, 0.0),
             Complex64::new(-1.0e6 / omega, 0.0),
         ],
+    );
+}
+
+/// `$abstime` reads each sample's instant. A tone at the analysis's own
+/// frequency, scaled by the drive, gives its closed-form harmonics to 1e-9:
+/// `(1 + sin(ωt)/2) sin(ωt) = 1/4 + sin(ωt) - cos(2ωt)/4`. A ramp, whose
+/// equations one period later differ, is refused before solving by module
+/// and by what it reads.
+#[test]
+fn abstime_reads_each_samples_instant_and_a_ramp_is_refused() {
+    let (model, deck) = operator_deck(
+        "abstime_tone",
+        "SIN(0 1 1meg)",
+        "(1.0 + 0.5 * V(in)) * sin(6.283185307179586e6 * $abstime)",
+    );
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    assert_spectrum(
+        "$abstime tone",
+        &node(&result, "out"),
+        &[
+            Complex64::new(0.25, 0.0),
+            Complex64::new(0.0, -1.0),
+            Complex64::new(-0.25, 0.0),
+        ],
+    );
+
+    let (model, deck) = operator_deck("abstime_ramp", "SIN(0 1 1meg)", "1.0e6 * $abstime");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let error = Engine::new(SimulationConfig::default())
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(2))
+        .map(drop)
+        .expect_err("HB must refuse a ramp in time");
+    let _ = std::fs::remove_file(model);
+    let message = error.to_string();
+    assert!(
+        message.contains("module 'va_hb_abstime_ramp'")
+            && message.contains("reads `$abstime`")
+            && message.contains("not periodic over the analysis period"),
+        "the refusal must name the module and what it reads: {message}"
     );
 }
 
