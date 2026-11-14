@@ -987,13 +987,6 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
          stage its floating body is still charging after 24 periods, and harmonic balance and \
          the transient disagree on the fundamental by a factor of 9",
     ),
-    (
-        "mvsg_cmc",
-        "its harmonics have not been checked against a settled transient: its thermal \
-         network's time constant (rth times cth, 2.5 ms by default) leaves a 1 MHz \
-         common-source stage's transient drifting after 24 periods, and harmonic balance's \
-         fundamental is 6% above the transient's",
-    ),
 ];
 
 /// Why shooting refuses a generated model with a source branch: its period

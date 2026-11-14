@@ -385,6 +385,17 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XH d g 0 0 t asmhemt\n",
             "d",
         ),
+        // MVSG's thermal network takes rth times cth, 2.5 ms by default, to
+        // settle, which no 24-period transient reaches. A 1 mK/W heat sink at
+        // its thermal node (RT) settles it in a tenth of a period and holds
+        // the device within a millikelvin of ambient.
+        #[cfg(feature = "veriloga-model-mvsg-cmc")]
+        (
+            "GaN HEMT (MVSG)",
+            "VDD vdd 0 10\nV1 in 0 SIN(-1 0.5 1meg)\nRG in g 1k\nRD vdd d 100\n\
+             XH d g 0 0 t mvsg_cmc\nRT t 0 1m\n",
+            "d",
+        ),
         #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
         (
             "SOI MOSFET (BSIM-SOI 4.7)",
@@ -568,7 +579,7 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 /// `F(x) + dQ(x)/dt` is refused before solving, by instance and module, with
 /// the generator's reason: a variable read back after the body assigned it
 /// (EKV 2.6, HICUM/L2). So is one whose harmonics no settled transient has
-/// confirmed, with what is missing (BSIM-SOI 4.6.1 and e2aff994, MVSG).
+/// confirmed, with what is missing (BSIM-SOI 4.6.1 and e2aff994).
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
@@ -603,13 +614,6 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "XM",
             "bsimsoi_va",
             "harmonic balance and the transient disagree on the fundamental by a factor of 9",
-        ),
-        #[cfg(feature = "veriloga-model-mvsg-cmc")]
-        (
-            "XH d d 0 0 t mvsg_cmc",
-            "XH",
-            "mvsg_cmc",
-            "its thermal network's time constant",
         ),
     ];
     for (card, instance, module, reason) in cases {
