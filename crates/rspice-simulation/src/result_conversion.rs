@@ -324,11 +324,11 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             } => {
                 let payload = (|| -> Result<AnalysisResultPayload, String> {
                     Ok(AnalysisResultPayload::Pstb {
-                        period_s: Some(period),
-                        fundamental_frequency_hz: Some(fundamental_frequency),
-                        stability_threshold: Some(stability_threshold),
-                        probe_instance: Some(probe_instance),
-                        detect_subharmonics: Some(detect_subharmonics),
+                        period_s: period,
+                        fundamental_frequency_hz: fundamental_frequency,
+                        stability_threshold,
+                        probe_instance,
+                        detect_subharmonics,
                         modes: modes
                             .into_iter()
                             .map(|mode| {
@@ -367,21 +367,17 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                             stability_classification,
                         )?,
                         min_stability_margin_db,
-                        max_multiplier_magnitude: Some(max_multiplier_magnitude),
-                        num_unstable: Some(
-                            u64::try_from(num_unstable)
-                                .map_err(|_| "PSTB unstable count does not fit durable storage")?,
-                        ),
+                        max_multiplier_magnitude,
+                        num_unstable: u64::try_from(num_unstable)
+                            .map_err(|_| "PSTB unstable count does not fit durable storage")?,
                         subharmonics: subharmonics
                             .into_iter()
                             .map(u64::try_from)
                             .collect::<Result<Vec<_>, _>>()
                             .map_err(|_| "PSTB subharmonic order does not fit durable storage")?,
-                        converged: Some(converged),
-                        iterations: Some(
-                            u64::try_from(iterations)
-                                .map_err(|_| "PSTB iteration count does not fit durable storage")?,
-                        ),
+                        converged,
+                        iterations: u64::try_from(iterations)
+                            .map_err(|_| "PSTB iteration count does not fit durable storage")?,
                     })
                 })();
                 let payload = match payload {

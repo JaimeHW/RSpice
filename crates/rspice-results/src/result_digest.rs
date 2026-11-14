@@ -54,12 +54,12 @@ const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ResultDigestEncoding {
-    V16 = 16,
+    V17 = 17,
 }
 
 impl ResultDigestEncoding {
     /// Encoding used for newly retained results and datasets.
-    pub const CURRENT: Self = Self::V16;
+    pub const CURRENT: Self = Self::V17;
 }
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
@@ -236,7 +236,7 @@ where
 
     fn result_data_writer(&self, version: ResultDigestEncoding) -> ResultDigestWriter {
         let domain = match version {
-            ResultDigestEncoding::V16 => "rspice.analysis-result-data/v16",
+            ResultDigestEncoding::V17 => "rspice.analysis-result-data/v17",
         };
         let mut writer = ResultDigestWriter::new(domain, version);
         writer.u8(analysis_type_tag(self.analysis_type));
@@ -563,7 +563,7 @@ where
     W: ExactSizeIterator<Item = &'a RetainedWaveform> + Clone,
 {
     let domain = match version {
-        ResultDigestEncoding::V16 => "rspice.simulation-dataset-data/v16",
+        ResultDigestEncoding::V17 => "rspice.simulation-dataset-data/v17",
     };
     let mut writer = ResultDigestWriter::new(domain, version);
     writer.sequence(analyses.len());
@@ -777,12 +777,10 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
             stability_verdict,
         } => {
             writer.u8(8);
-            writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
-            writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
-                writer.f64(*value)
-            });
-            writer.option(iterations.as_ref(), |writer, value| writer.u64(*value));
-            writer.option(residual_norm.as_ref(), |writer, value| writer.f64(*value));
+            writer.f64(*period_s);
+            writer.f64(*fundamental_frequency_hz);
+            writer.u64(*iterations);
+            writer.f64(*residual_norm);
             writer.sequence(multipliers.len());
             for multiplier in multipliers {
                 encode_complex_result_value(writer, multiplier.multiplier);
@@ -814,19 +812,11 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
             iterations,
         } => {
             writer.u8(9);
-            writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
-            writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
-                writer.f64(*value)
-            });
-            writer.option(stability_threshold.as_ref(), |writer, value| {
-                writer.f64(*value)
-            });
-            writer.option(probe_instance.as_deref(), |writer, value| {
-                writer.string(value)
-            });
-            writer.option(detect_subharmonics.as_ref(), |writer, value| {
-                writer.bool(*value)
-            });
+            writer.f64(*period_s);
+            writer.f64(*fundamental_frequency_hz);
+            writer.f64(*stability_threshold);
+            writer.string(probe_instance);
+            writer.bool(*detect_subharmonics);
             writer.sequence(modes.len());
             for mode in modes {
                 encode_complex_result_value(writer, mode.multiplier);
@@ -848,16 +838,14 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
             writer.option(min_stability_margin_db.as_ref(), |writer, value| {
                 writer.f64(*value)
             });
-            writer.option(max_multiplier_magnitude.as_ref(), |writer, value| {
-                writer.f64(*value)
-            });
-            writer.option(num_unstable.as_ref(), |writer, value| writer.u64(*value));
+            writer.f64(*max_multiplier_magnitude);
+            writer.u64(*num_unstable);
             writer.sequence(subharmonics.len());
             for order in subharmonics {
                 writer.u64(*order);
             }
-            writer.option(converged.as_ref(), |writer, value| writer.bool(*value));
-            writer.option(iterations.as_ref(), |writer, value| writer.u64(*value));
+            writer.bool(*converged);
+            writer.u64(*iterations);
         }
         AnalysisResultPayload::Sensitivity {
             output,

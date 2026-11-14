@@ -32,11 +32,11 @@ fn stable_pstb_payload() -> AnalysisResultPayload {
     };
     let exponent = num_complex::Complex64::from(multiplier).ln();
     AnalysisResultPayload::Pstb {
-        period_s: Some(1.0),
-        fundamental_frequency_hz: Some(1.0),
-        stability_threshold: Some(1.0),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
+        period_s: 1.0,
+        fundamental_frequency_hz: 1.0,
+        stability_threshold: 1.0,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: false,
         modes: vec![PstbFloquetModeEvidence {
             multiplier,
             exponent: ComplexResultValue {
@@ -56,21 +56,21 @@ fn stable_pstb_payload() -> AnalysisResultPayload {
         stability_verdict: FloquetStabilityVerdictEvidence::Stable,
         stability_classification: PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
-        max_multiplier_magnitude: Some(0.5),
-        num_unstable: Some(0),
+        max_multiplier_magnitude: 0.5,
+        num_unstable: 0,
         subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
+        converged: true,
+        iterations: 0,
     }
 }
 
 #[test]
 fn pss_floquet_payload_requires_core_authentic_complete_evidence() {
     let valid = AnalysisResultPayload::PssFloquet {
-        period_s: Some(2.0),
-        fundamental_frequency_hz: Some(0.5),
-        iterations: Some(4),
-        residual_norm: Some(1.0e-12),
+        period_s: 2.0,
+        fundamental_frequency_hz: 0.5,
+        iterations: 4,
+        residual_norm: 1.0e-12,
         multipliers: vec![PssFloquetMultiplierEvidence {
             multiplier: ComplexResultValue {
                 real: 0.5,
@@ -109,7 +109,7 @@ fn pstb_payload_recomputes_mode_flags_counts_metrics_and_classification() {
             let AnalysisResultPayload::Pstb { num_unstable, .. } = payload else {
                 unreachable!()
             };
-            *num_unstable = Some(1);
+            *num_unstable = 1;
         },
         |payload: &mut AnalysisResultPayload| {
             let AnalysisResultPayload::Pstb {
@@ -125,7 +125,7 @@ fn pstb_payload_recomputes_mode_flags_counts_metrics_and_classification() {
             let AnalysisResultPayload::Pstb { probe_instance, .. } = payload else {
                 unreachable!()
             };
-            *probe_instance = Some(" LPROBE".to_owned());
+            *probe_instance = " LPROBE".to_owned();
         },
     ];
     for mutate in mutations {
@@ -138,11 +138,11 @@ fn pstb_payload_recomputes_mode_flags_counts_metrics_and_classification() {
 #[test]
 fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
     let zero_order = AnalysisResultPayload::Pstb {
-        period_s: Some(1.0),
-        fundamental_frequency_hz: Some(1.0),
-        stability_threshold: Some(1.0),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
+        period_s: 1.0,
+        fundamental_frequency_hz: 1.0,
+        stability_threshold: 1.0,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: false,
         modes: Vec::new(),
         floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
         orbit_kind: FloquetOrbitKindEvidence::Driven,
@@ -150,11 +150,11 @@ fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
         stability_verdict: FloquetStabilityVerdictEvidence::Stable,
         stability_classification: PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: None,
-        max_multiplier_magnitude: Some(0.0),
-        num_unstable: Some(0),
+        max_multiplier_magnitude: 0.0,
+        num_unstable: 0,
         subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
+        converged: true,
+        iterations: 0,
     };
     assert!(zero_order.validate_for(AnalysisType::Pstb).is_ok());
     serde_json::to_string(&zero_order).expect("zero-order PSTB payload is strict-JSON safe");
@@ -165,11 +165,11 @@ fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
     };
     let exponent = num_complex::Complex64::from(multiplier).ln();
     let autonomous = AnalysisResultPayload::Pstb {
-        period_s: Some(1.0),
-        fundamental_frequency_hz: Some(1.0),
-        stability_threshold: Some(1.0),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
+        period_s: 1.0,
+        fundamental_frequency_hz: 1.0,
+        stability_threshold: 1.0,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: false,
         modes: vec![PstbFloquetModeEvidence {
             multiplier,
             exponent: ComplexResultValue {
@@ -189,11 +189,11 @@ fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
         stability_verdict: FloquetStabilityVerdictEvidence::Stable,
         stability_classification: PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: None,
-        max_multiplier_magnitude: Some(num_complex::Complex64::from(multiplier).norm()),
-        num_unstable: Some(0),
+        max_multiplier_magnitude: num_complex::Complex64::from(multiplier).norm(),
+        num_unstable: 0,
         subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
+        converged: true,
+        iterations: 0,
     };
     assert!(autonomous.validate_for(AnalysisType::Pstb).is_ok());
 }
@@ -246,10 +246,10 @@ fn durable_floquet_scalars_are_central_and_never_fabricate_a_stability_bool() {
 #[test]
 fn zero_order_pss_exposes_an_authenticated_zero_mode_count() {
     let payload = AnalysisResultPayload::PssFloquet {
-        period_s: Some(2.0),
-        fundamental_frequency_hz: Some(0.5),
-        iterations: Some(2),
-        residual_norm: Some(1.0e-12),
+        period_s: 2.0,
+        fundamental_frequency_hz: 0.5,
+        iterations: 2,
+        residual_norm: 1.0e-12,
         multipliers: Vec::new(),
         floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
         orbit_kind: FloquetOrbitKindEvidence::Driven,

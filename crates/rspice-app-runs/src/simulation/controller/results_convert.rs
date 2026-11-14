@@ -353,9 +353,9 @@ mod floquet_payload_conversion_tests {
             panic!("missing PSTB Floquet payload");
         };
         assert_eq!(modes.len(), 3);
-        assert_eq!(*stability_threshold, Some(1.0 + 1.0e-6));
-        assert_eq!(probe_instance.as_deref(), Some("LPROBE"));
-        assert_eq!(*detect_subharmonics, Some(false));
+        assert_eq!(*stability_threshold, 1.0 + 1.0e-6);
+        assert_eq!(probe_instance, "LPROBE");
+        assert!(!*detect_subharmonics);
     }
 
     #[test]

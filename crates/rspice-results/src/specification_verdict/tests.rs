@@ -117,10 +117,10 @@ fn native_scalar_units_convert_periodic_limits_without_changing_history() {
     let source = AnalysisInstanceId::new();
     let mut analysis = AnalysisResult::new(1, AnalysisType::Pss, "PSS", 0.0)
         .with_result_payload(AnalysisResultPayload::PssFloquet {
-            period_s: Some(2.0),
-            fundamental_frequency_hz: Some(0.5),
-            iterations: Some(2),
-            residual_norm: Some(1.0e-12),
+            period_s: 2.0,
+            fundamental_frequency_hz: 0.5,
+            iterations: 2,
+            residual_norm: 1.0e-12,
             multipliers: Vec::new(),
             floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
             orbit_kind: FloquetOrbitKindEvidence::Driven,

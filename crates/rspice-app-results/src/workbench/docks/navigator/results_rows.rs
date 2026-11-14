@@ -356,11 +356,8 @@ pub fn retained_result_artifacts(
                 ResultArtifactKind::Array,
                 modes.len(),
                 Some(format!(
-                    "{} modes{}{} · {} ({})",
+                    "{} modes, {num_unstable} unstable{} · {} ({})",
                     modes.len(),
-                    num_unstable
-                        .map(|count| format!(", {count} unstable"))
-                        .unwrap_or_default(),
                     floquet_orbit_navigator_label(*orbit_kind),
                     floquet_verdict_navigator_label(*stability_verdict),
                     pstb_classification_navigator_label(*stability_classification),

@@ -222,14 +222,10 @@ pub enum AnalysisResultPayload {
     /// such as the monodromy matrix and shooting state are intentionally not
     /// part of the project result contract.
     PssFloquet {
-        /// Required; validation refuses a payload without it.
-        period_s: Option<f64>,
-        /// Required; validation refuses a payload without it.
-        fundamental_frequency_hz: Option<f64>,
-        /// Required; validation refuses a payload without it.
-        iterations: Option<u64>,
-        /// Required; validation refuses a payload without it.
-        residual_norm: Option<f64>,
+        period_s: f64,
+        fundamental_frequency_hz: f64,
+        iterations: u64,
+        residual_norm: f64,
         multipliers: Vec<PssFloquetMultiplierEvidence>,
         floquet_evidence: FloquetSpectrumEvidence,
         orbit_kind: FloquetOrbitKindEvidence,
@@ -239,16 +235,14 @@ pub enum AnalysisResultPayload {
     /// Durable periodic-stability evidence. `modes` is the complete sorted
     /// spectrum; ordinary result waveforms remain presentation-only subsets.
     Pstb {
-        /// Required; validation refuses a payload without it.
-        period_s: Option<f64>,
-        /// Required; validation refuses a payload without it.
-        fundamental_frequency_hz: Option<f64>,
+        period_s: f64,
+        fundamental_frequency_hz: f64,
         /// Exact outer multiplier-magnitude boundary used by the producer.
-        stability_threshold: Option<f64>,
+        stability_threshold: f64,
         /// Canonical circuit identity whose eigenvector participation is stored.
-        probe_instance: Option<String>,
+        probe_instance: String,
         /// Whether root-of-unity classification was requested.
-        detect_subharmonics: Option<bool>,
+        detect_subharmonics: bool,
         modes: Vec<PstbFloquetModeEvidence>,
         floquet_evidence: FloquetSpectrumEvidence,
         orbit_kind: FloquetOrbitKindEvidence,
@@ -258,15 +252,12 @@ pub enum AnalysisResultPayload {
         /// None is a real current result when there is no applicable
         /// non-trivial mode; it is never represented by infinity.
         min_stability_margin_db: Option<f64>,
-        /// Required; validation refuses a payload without it.
-        max_multiplier_magnitude: Option<f64>,
-        /// Required; validation refuses a payload without it.
-        num_unstable: Option<u64>,
+        max_multiplier_magnitude: f64,
+        num_unstable: u64,
         subharmonics: Vec<u64>,
-        /// Required; validation refuses a payload without it.
-        converged: Option<bool>,
-        /// Required; validation refuses a payload without it.
-        iterations: Option<u64>,
+        /// Validation refuses a payload whose orbit did not converge.
+        converged: bool,
+        iterations: u64,
     },
     Sensitivity {
         output: String,
@@ -359,13 +350,13 @@ impl AnalysisResultPayload {
                 ..
             } => {
                 if native_scalar_name_matches(name, "pss_period", "pss.period") {
-                    *period_s
+                    Some(*period_s)
                 } else if native_scalar_name_matches(
                     name,
                     "pss_fundamental_frequency",
                     "pss.fundamental_frequency",
                 ) {
-                    *fundamental_frequency_hz
+                    Some(*fundamental_frequency_hz)
                 } else if native_scalar_name_matches(name, "pss_mode_count", "pss.mode_count")
                     && matches!(
                         floquet_evidence,
@@ -389,13 +380,13 @@ impl AnalysisResultPayload {
                 ..
             } => {
                 if native_scalar_name_matches(name, "pstb_period", "pstb.period") {
-                    *period_s
+                    Some(*period_s)
                 } else if native_scalar_name_matches(
                     name,
                     "pstb_fundamental_frequency",
                     "pstb.fundamental_frequency",
                 ) {
-                    *fundamental_frequency_hz
+                    Some(*fundamental_frequency_hz)
                 } else if native_scalar_name_matches(name, "pstb_mode_count", "pstb.mode_count")
                     && matches!(
                         floquet_evidence,
@@ -409,13 +400,13 @@ impl AnalysisResultPayload {
                     "pstb_unstable_mode_count",
                     "pstb.unstable_mode_count",
                 ) {
-                    num_unstable.map(|count| count as f64)
+                    Some(*num_unstable as f64)
                 } else if native_scalar_name_matches(
                     name,
                     "pstb_max_multiplier_magnitude",
                     "pstb.max_multiplier_magnitude",
                 ) {
-                    *max_multiplier_magnitude
+                    Some(*max_multiplier_magnitude)
                 } else if native_scalar_name_matches(
                     name,
                     "pstb_min_stability_margin_db",
@@ -458,18 +449,12 @@ impl AnalysisResultPayload {
     pub fn scalar_evidence_names(&self) -> Vec<String> {
         match self {
             Self::PssFloquet {
-                period_s,
-                fundamental_frequency_hz,
-                floquet_evidence,
-                ..
+                floquet_evidence, ..
             } => {
-                let mut names = Vec::with_capacity(3);
-                if period_s.is_some() {
-                    names.push("pss_period".to_owned());
-                }
-                if fundamental_frequency_hz.is_some() {
-                    names.push("pss_fundamental_frequency".to_owned());
-                }
+                let mut names = vec![
+                    "pss_period".to_owned(),
+                    "pss_fundamental_frequency".to_owned(),
+                ];
                 if matches!(
                     floquet_evidence,
                     FloquetSpectrumEvidence::NoDynamicModes
@@ -480,21 +465,14 @@ impl AnalysisResultPayload {
                 names
             }
             Self::Pstb {
-                period_s,
-                fundamental_frequency_hz,
                 floquet_evidence,
                 min_stability_margin_db,
-                max_multiplier_magnitude,
-                num_unstable,
                 ..
             } => {
-                let mut names = Vec::with_capacity(6);
-                if period_s.is_some() {
-                    names.push("pstb_period".to_owned());
-                }
-                if fundamental_frequency_hz.is_some() {
-                    names.push("pstb_fundamental_frequency".to_owned());
-                }
+                let mut names = vec![
+                    "pstb_period".to_owned(),
+                    "pstb_fundamental_frequency".to_owned(),
+                ];
                 if matches!(
                     floquet_evidence,
                     FloquetSpectrumEvidence::NoDynamicModes
@@ -502,12 +480,8 @@ impl AnalysisResultPayload {
                 ) {
                     names.push("pstb_mode_count".to_owned());
                 }
-                if num_unstable.is_some() {
-                    names.push("pstb_unstable_mode_count".to_owned());
-                }
-                if max_multiplier_magnitude.is_some() {
-                    names.push("pstb_max_multiplier_magnitude".to_owned());
-                }
+                names.push("pstb_unstable_mode_count".to_owned());
+                names.push("pstb_max_multiplier_magnitude".to_owned());
                 if min_stability_margin_db.is_some() {
                     names.push("pstb_min_stability_margin_db".to_owned());
                 }
@@ -720,7 +694,7 @@ impl AnalysisResultPayload {
             Self::PssFloquet {
                 period_s,
                 fundamental_frequency_hz,
-                iterations,
+                iterations: _,
                 residual_norm,
                 multipliers,
                 floquet_evidence,
@@ -736,7 +710,6 @@ impl AnalysisResultPayload {
                 PssFloquetRef {
                     period_s: *period_s,
                     fundamental_frequency_hz: *fundamental_frequency_hz,
-                    iterations: *iterations,
                     residual_norm: *residual_norm,
                     multipliers,
                     evidence: floquet_evidence,
@@ -763,7 +736,7 @@ impl AnalysisResultPayload {
                 num_unstable,
                 subharmonics,
                 converged,
-                iterations,
+                iterations: _,
             } => {
                 if analysis_type != AnalysisType::Pstb {
                     return Err(format!(
@@ -774,7 +747,7 @@ impl AnalysisResultPayload {
                     period_s: *period_s,
                     fundamental_frequency_hz: *fundamental_frequency_hz,
                     stability_threshold: *stability_threshold,
-                    probe_instance: probe_instance.as_deref(),
+                    probe_instance,
                     detect_subharmonics: *detect_subharmonics,
                     modes,
                     evidence: floquet_evidence,
@@ -787,7 +760,6 @@ impl AnalysisResultPayload {
                     num_unstable: *num_unstable,
                     subharmonics,
                     converged: *converged,
-                    iterations: *iterations,
                 }
                 .validate()?;
             }

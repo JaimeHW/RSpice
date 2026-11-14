@@ -87,13 +87,11 @@ pub(super) fn retain_pss_floquet_payload(
         return Err("PSS Floquet runtime contract is inconsistent".to_owned());
     }
     Ok(AnalysisResultPayload::PssFloquet {
-        period_s: Some(result.period),
-        fundamental_frequency_hz: Some(result.frequency),
-        iterations: Some(
-            u64::try_from(result.iterations)
-                .map_err(|_| "PSS iteration count does not fit durable storage")?,
-        ),
-        residual_norm: Some(result.residual_norm),
+        period_s: result.period,
+        fundamental_frequency_hz: result.frequency,
+        iterations: u64::try_from(result.iterations)
+            .map_err(|_| "PSS iteration count does not fit durable storage")?,
+        residual_norm: result.residual_norm,
         multipliers: result
             .floquet_multipliers
             .iter()

@@ -370,14 +370,14 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
         } => {
             let mut contents = periodic_csv_header();
             for (field, value, unit) in [
-                ("period_s", optional_f64_csv(*period_s), "s"),
+                ("period_s", format!("{period_s:.17e}"), "s"),
                 (
                     "fundamental_frequency_hz",
-                    optional_f64_csv(*fundamental_frequency_hz),
+                    format!("{fundamental_frequency_hz:.17e}"),
                     "Hz",
                 ),
-                ("iterations", optional_u64_csv(*iterations), "count"),
-                ("residual_norm", optional_f64_csv(*residual_norm), ""),
+                ("iterations", iterations.to_string(), "count"),
+                ("residual_norm", format!("{residual_norm:.17e}"), ""),
                 (
                     "retained_multiplier_count",
                     multipliers.len().to_string(),
@@ -462,27 +462,19 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
         } => {
             let mut contents = periodic_csv_header();
             for (field, value, unit) in [
-                ("period_s", optional_f64_csv(*period_s), "s"),
+                ("period_s", format!("{period_s:.17e}"), "s"),
                 (
                     "fundamental_frequency_hz",
-                    optional_f64_csv(*fundamental_frequency_hz),
+                    format!("{fundamental_frequency_hz:.17e}"),
                     "Hz",
                 ),
                 (
                     "stability_threshold",
-                    optional_f64_csv(*stability_threshold),
+                    format!("{stability_threshold:.17e}"),
                     "multiplier_magnitude",
                 ),
-                (
-                    "probe_instance",
-                    probe_instance.clone().unwrap_or_default(),
-                    "",
-                ),
-                (
-                    "detect_subharmonics",
-                    optional_bool_csv(*detect_subharmonics),
-                    "",
-                ),
+                ("probe_instance", probe_instance.clone(), ""),
+                ("detect_subharmonics", detect_subharmonics.to_string(), ""),
                 ("retained_mode_count", modes.len().to_string(), "count"),
                 (
                     "authenticated_complete_mode_count",
@@ -518,10 +510,10 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                 ),
                 (
                     "max_multiplier_magnitude",
-                    optional_f64_csv(*max_multiplier_magnitude),
+                    format!("{max_multiplier_magnitude:.17e}"),
                     "",
                 ),
-                ("num_unstable", optional_u64_csv(*num_unstable), "count"),
+                ("num_unstable", num_unstable.to_string(), "count"),
                 (
                     "subharmonics",
                     subharmonics
@@ -531,8 +523,8 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                         .join(";"),
                     "orders",
                 ),
-                ("converged", optional_bool_csv(*converged), ""),
-                ("iterations", optional_u64_csv(*iterations), "count"),
+                ("converged", converged.to_string(), ""),
+                ("iterations", iterations.to_string(), "count"),
             ] {
                 append_periodic_metadata_csv(&mut contents, field, &value, unit);
             }

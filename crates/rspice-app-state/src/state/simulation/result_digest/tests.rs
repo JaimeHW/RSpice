@@ -22,11 +22,11 @@ fn stable_pstb_result() -> AnalysisResult {
     };
     AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_result_payload(
         AnalysisResultPayload::Pstb {
-            period_s: Some(1.0),
-            fundamental_frequency_hz: Some(1.0),
-            stability_threshold: Some(1.0),
-            probe_instance: Some("LPROBE".to_owned()),
-            detect_subharmonics: Some(false),
+            period_s: 1.0,
+            fundamental_frequency_hz: 1.0,
+            stability_threshold: 1.0,
+            probe_instance: "LPROBE".to_owned(),
+            detect_subharmonics: false,
             modes: vec![PstbFloquetModeEvidence {
                 multiplier,
                 exponent: ComplexResultValue {
@@ -44,11 +44,11 @@ fn stable_pstb_result() -> AnalysisResult {
             stability_verdict: FloquetStabilityVerdictEvidence::Stable,
             stability_classification: PstbStabilityClassificationEvidence::Stable,
             min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
-            max_multiplier_magnitude: Some(0.5),
-            num_unstable: Some(0),
+            max_multiplier_magnitude: 0.5,
+            num_unstable: 0,
             subharmonics: Vec::new(),
-            converged: Some(true),
-            iterations: Some(0),
+            converged: true,
+            iterations: 0,
         },
     )
 }
@@ -57,10 +57,10 @@ fn stable_pstb_result() -> AnalysisResult {
 fn periodic_payload_fields_are_content_identity() {
     let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(
         AnalysisResultPayload::PssFloquet {
-            period_s: Some(1.0),
-            fundamental_frequency_hz: Some(1.0),
-            iterations: Some(2),
-            residual_norm: Some(1.0e-12),
+            period_s: 1.0,
+            fundamental_frequency_hz: 1.0,
+            iterations: 2,
+            residual_norm: 1.0e-12,
             multipliers: vec![PssFloquetMultiplierEvidence {
                 multiplier: ComplexResultValue {
                     real: 0.5,
@@ -107,18 +107,18 @@ fn periodic_payload_fields_are_content_identity() {
 
     assert_mutation_is_identity!(
         AnalysisResultPayload::Pstb { period_s, .. },
-        *period_s = Some(2.0)
+        *period_s = 2.0
     );
     assert_mutation_is_identity!(
         AnalysisResultPayload::Pstb {
             stability_threshold,
             ..
         },
-        *stability_threshold = Some(1.1)
+        *stability_threshold = 1.1
     );
     assert_mutation_is_identity!(
         AnalysisResultPayload::Pstb { probe_instance, .. },
-        *probe_instance = Some("LALT".to_owned())
+        *probe_instance = "LALT".to_owned()
     );
     assert_mutation_is_identity!(
         AnalysisResultPayload::Pstb { modes, .. },
@@ -140,7 +140,7 @@ fn periodic_payload_fields_are_content_identity() {
     );
     assert_mutation_is_identity!(
         AnalysisResultPayload::Pstb { iterations, .. },
-        *iterations = Some(1)
+        *iterations = 1
     );
 
     let mut first_run = SimulationRun::new(1);

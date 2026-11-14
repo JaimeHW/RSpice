@@ -797,10 +797,10 @@ fn csv_export_preserves_unavailable_sensitivity_without_fabricating_zero() {
 #[test]
 fn typed_csv_exports_every_pss_multiplier_and_its_certificate() {
     let payload = AnalysisResultPayload::PssFloquet {
-        period_s: Some(2.0),
-        fundamental_frequency_hz: Some(0.5),
-        iterations: Some(4),
-        residual_norm: Some(1.0e-12),
+        period_s: 2.0,
+        fundamental_frequency_hz: 0.5,
+        iterations: 4,
+        residual_norm: 1.0e-12,
         multipliers: vec![
             PssFloquetMultiplierEvidence {
                 multiplier: ComplexResultValue {
@@ -856,11 +856,11 @@ fn typed_csv_exports_complete_pstb_modes_and_all_stability_provenance() {
         imaginary: 0.0,
     };
     let payload = AnalysisResultPayload::Pstb {
-        period_s: Some(2.0),
-        fundamental_frequency_hz: Some(0.5),
-        stability_threshold: Some(1.0 + 1.0e-6),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
+        period_s: 2.0,
+        fundamental_frequency_hz: 0.5,
+        stability_threshold: 1.0 + 1.0e-6,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: false,
         modes: vec![
             PstbFloquetModeEvidence {
                 multiplier: first,
@@ -893,11 +893,11 @@ fn typed_csv_exports_complete_pstb_modes_and_all_stability_provenance() {
         stability_verdict: FloquetStabilityVerdictEvidence::Stable,
         stability_classification: PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: Some(-20.0 * first.real.log10()),
-        max_multiplier_magnitude: Some(first.real),
-        num_unstable: Some(0),
+        max_multiplier_magnitude: first.real,
+        num_unstable: 0,
         subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
+        converged: true,
+        iterations: 0,
     };
     let analysis = AnalysisResult::new(1, AnalysisType::Pstb, "PSTB")
         .with_waveforms(vec![waveform("bounded-display", vec![1.0], vec![0.5])])

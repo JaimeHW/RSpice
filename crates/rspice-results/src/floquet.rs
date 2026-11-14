@@ -144,10 +144,9 @@ pub struct PstbFloquetModeEvidence {
 
 /// Borrowed inputs for validating retained PSS Floquet evidence.
 pub(crate) struct PssFloquetRef<'a> {
-    pub period_s: Option<f64>,
-    pub fundamental_frequency_hz: Option<f64>,
-    pub iterations: Option<u64>,
-    pub residual_norm: Option<f64>,
+    pub period_s: f64,
+    pub fundamental_frequency_hz: f64,
+    pub residual_norm: f64,
     pub multipliers: &'a [PssFloquetMultiplierEvidence],
     pub evidence: &'a FloquetSpectrumEvidence,
     pub orbit_kind: FloquetOrbitKindEvidence,
@@ -159,8 +158,7 @@ impl PssFloquetRef<'_> {
     pub fn validate(self) -> Result<(), String> {
         let Self {
             period_s,
-            fundamental_frequency_hz,
-            iterations,
+            fundamental_frequency_hz: frequency_hz,
             residual_norm,
             multipliers,
             evidence,
@@ -168,14 +166,6 @@ impl PssFloquetRef<'_> {
             trivial_multiplier_index,
             verdict,
         } = self;
-        let (Some(period_s), Some(frequency_hz), Some(_), Some(residual_norm)) = (
-            period_s,
-            fundamental_frequency_hz,
-            iterations,
-            residual_norm,
-        ) else {
-            return Err("current PSS Floquet payload is missing global metrics".to_owned());
-        };
         if !period_s.is_finite()
             || period_s <= 0.0
             || !frequency_hz.is_finite()
@@ -229,11 +219,11 @@ impl PssFloquetRef<'_> {
 
 /// Borrowed inputs for validating complete PSTB spectrum evidence.
 pub(crate) struct PstbRef<'a> {
-    pub period_s: Option<f64>,
-    pub fundamental_frequency_hz: Option<f64>,
-    pub stability_threshold: Option<f64>,
-    pub probe_instance: Option<&'a str>,
-    pub detect_subharmonics: Option<bool>,
+    pub period_s: f64,
+    pub fundamental_frequency_hz: f64,
+    pub stability_threshold: f64,
+    pub probe_instance: &'a str,
+    pub detect_subharmonics: bool,
     pub modes: &'a [PstbFloquetModeEvidence],
     pub evidence: &'a FloquetSpectrumEvidence,
     pub orbit_kind: FloquetOrbitKindEvidence,
@@ -241,18 +231,17 @@ pub(crate) struct PstbRef<'a> {
     pub verdict: FloquetStabilityVerdictEvidence,
     pub classification: PstbStabilityClassificationEvidence,
     pub min_stability_margin_db: Option<f64>,
-    pub max_multiplier_magnitude: Option<f64>,
-    pub num_unstable: Option<u64>,
+    pub max_multiplier_magnitude: f64,
+    pub num_unstable: u64,
     pub subharmonics: &'a [u64],
-    pub converged: Option<bool>,
-    pub iterations: Option<u64>,
+    pub converged: bool,
 }
 
 impl PstbRef<'_> {
     pub fn validate(self) -> Result<(), String> {
         let Self {
             period_s,
-            fundamental_frequency_hz,
+            fundamental_frequency_hz: frequency_hz,
             stability_threshold,
             probe_instance,
             detect_subharmonics,
@@ -267,35 +256,10 @@ impl PstbRef<'_> {
             num_unstable,
             subharmonics,
             converged,
-            iterations,
         } = self;
-        let (
-            Some(period_s),
-            Some(frequency_hz),
-            Some(stability_threshold),
-            Some(probe_instance),
-            Some(detect_subharmonics),
-            Some(max_multiplier_magnitude),
-            Some(num_unstable),
-            Some(true),
-            Some(_),
-        ) = (
-            period_s,
-            fundamental_frequency_hz,
-            stability_threshold,
-            probe_instance,
-            detect_subharmonics,
-            max_multiplier_magnitude,
-            num_unstable,
-            converged,
-            iterations,
-        )
-        else {
-            return Err(
-                "current PSTB payload is missing provenance, convergence, or global metrics"
-                    .to_owned(),
-            );
-        };
+        if !converged {
+            return Err("PSTB payload is from an orbit that did not converge".to_owned());
+        }
         if !period_s.is_finite()
             || period_s <= 0.0
             || !frequency_hz.is_finite()

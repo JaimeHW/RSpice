@@ -108,11 +108,11 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
                 .unwrap(),
     };
     let payload = AnalysisResultPayload::Pstb {
-        period_s: Some(1.0),
-        fundamental_frequency_hz: Some(1.0),
-        stability_threshold: Some(1.0),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
+        period_s: 1.0,
+        fundamental_frequency_hz: 1.0,
+        stability_threshold: 1.0,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: false,
         modes: vec![rspice_results::floquet::PstbFloquetModeEvidence {
             multiplier: ComplexResultValue {
                 real: 0.5,
@@ -136,11 +136,11 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
         stability_classification:
             rspice_results::floquet::PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
-        max_multiplier_magnitude: Some(0.5),
-        num_unstable: Some(0),
+        max_multiplier_magnitude: 0.5,
+        num_unstable: 0,
         subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
+        converged: true,
+        iterations: 0,
     };
     let analysis: AnalysisResult = AnalysisResult::new(4, AnalysisType::Pstb, "PSTB", 0.0)
         .with_result_payload(payload.clone());

@@ -770,14 +770,14 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
             stability_verdict,
         } => {
             let mut metadata = vec![
-                periodic_metadata_row("Period", optional_exact_number(*period_s), "s"),
+                periodic_metadata_row("Period", exact_number(*period_s), "s"),
                 periodic_metadata_row(
                     "Fundamental frequency",
-                    optional_exact_number(*fundamental_frequency_hz),
+                    exact_number(*fundamental_frequency_hz),
                     "Hz",
                 ),
-                periodic_metadata_row("Iterations", optional_u64(*iterations), "count"),
-                periodic_metadata_row("Residual norm", optional_exact_number(*residual_norm), ""),
+                periodic_metadata_row("Iterations", iterations.to_string(), "count"),
+                periodic_metadata_row("Residual norm", exact_number(*residual_norm), ""),
                 periodic_metadata_row(
                     "Authenticated complete multiplier count",
                     authenticated_floquet_count(multipliers.len(), floquet_evidence),
@@ -857,27 +857,21 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
             iterations,
         } => {
             let mut metadata = vec![
-                periodic_metadata_row("Period", optional_exact_number(*period_s), "s"),
+                periodic_metadata_row("Period", exact_number(*period_s), "s"),
                 periodic_metadata_row(
                     "Fundamental frequency",
-                    optional_exact_number(*fundamental_frequency_hz),
+                    exact_number(*fundamental_frequency_hz),
                     "Hz",
                 ),
                 periodic_metadata_row(
                     "Stability threshold",
-                    optional_exact_number(*stability_threshold),
+                    exact_number(*stability_threshold),
                     "|lambda|",
                 ),
-                periodic_metadata_row(
-                    "Probe instance",
-                    probe_instance
-                        .clone()
-                        .unwrap_or_else(|| "legacy unknown".to_owned()),
-                    "",
-                ),
+                periodic_metadata_row("Probe instance", probe_instance.clone(), ""),
                 periodic_metadata_row(
                     "Subharmonic detection",
-                    optional_bool(*detect_subharmonics),
+                    detect_subharmonics.to_string(),
                     "",
                 ),
                 periodic_metadata_row(
@@ -917,10 +911,10 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 ),
                 periodic_metadata_row(
                     "Maximum multiplier magnitude",
-                    optional_exact_number(*max_multiplier_magnitude),
+                    exact_number(*max_multiplier_magnitude),
                     "",
                 ),
-                periodic_metadata_row("Unstable modes", optional_u64(*num_unstable), "count"),
+                periodic_metadata_row("Unstable modes", num_unstable.to_string(), "count"),
                 periodic_metadata_row(
                     "Subharmonic orders",
                     if subharmonics.is_empty() {
@@ -934,8 +928,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                     },
                     "",
                 ),
-                periodic_metadata_row("Converged", optional_bool(*converged), ""),
-                periodic_metadata_row("Iterations", optional_u64(*iterations), "count"),
+                periodic_metadata_row("Converged", converged.to_string(), ""),
+                periodic_metadata_row("Iterations", iterations.to_string(), "count"),
             ];
             append_floquet_certificate_rows(&mut metadata, floquet_evidence);
             Some(vec![
@@ -1057,10 +1051,6 @@ fn optional_exact_number(value: Option<f64>) -> String {
 }
 
 fn optional_u64(value: Option<u64>) -> String {
-    value.map_or_else(|| "legacy unknown".to_owned(), |value| value.to_string())
-}
-
-fn optional_bool(value: Option<bool>) -> String {
     value.map_or_else(|| "legacy unknown".to_owned(), |value| value.to_string())
 }
 

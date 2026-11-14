@@ -574,7 +574,7 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         } => format!(
             "{} / {} unstable / {} / {} ({})",
             floquet_manifest_count_label(modes.len(), floquet_evidence, "PSTB modes"),
-            num_unstable.map_or_else(|| "legacy unknown".to_owned(), |count| count.to_string()),
+            num_unstable,
             floquet_manifest_evidence_label(floquet_evidence),
             floquet_manifest_verdict_label(*stability_verdict),
             pstb_manifest_classification_label(*stability_classification),
@@ -1081,10 +1081,10 @@ mod tests {
         };
         let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS", 0.0).with_result_payload(
             AnalysisResultPayload::PssFloquet {
-                period_s: Some(1.0),
-                fundamental_frequency_hz: Some(1.0),
-                iterations: Some(1),
-                residual_norm: Some(0.0),
+                period_s: 1.0,
+                fundamental_frequency_hz: 1.0,
+                iterations: 1,
+                residual_norm: 0.0,
                 multipliers: Vec::new(),
                 floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
                 orbit_kind: FloquetOrbitKindEvidence::Driven,
@@ -1094,11 +1094,11 @@ mod tests {
         );
         let pstb = AnalysisResult::new(2, AnalysisType::Pstb, "PSTB", 0.0).with_result_payload(
             AnalysisResultPayload::Pstb {
-                period_s: Some(1.0),
-                fundamental_frequency_hz: Some(1.0),
-                stability_threshold: Some(1.0),
-                probe_instance: Some("LPROBE".to_owned()),
-                detect_subharmonics: Some(false),
+                period_s: 1.0,
+                fundamental_frequency_hz: 1.0,
+                stability_threshold: 1.0,
+                probe_instance: "LPROBE".to_owned(),
+                detect_subharmonics: false,
                 modes: Vec::new(),
                 floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
                 orbit_kind: FloquetOrbitKindEvidence::Driven,
@@ -1106,11 +1106,11 @@ mod tests {
                 stability_verdict: FloquetStabilityVerdictEvidence::Stable,
                 stability_classification: PstbStabilityClassificationEvidence::Stable,
                 min_stability_margin_db: None,
-                max_multiplier_magnitude: Some(0.0),
-                num_unstable: Some(0),
+                max_multiplier_magnitude: 0.0,
+                num_unstable: 0,
                 subharmonics: Vec::new(),
-                converged: Some(true),
-                iterations: Some(0),
+                converged: true,
+                iterations: 0,
             },
         );
 
