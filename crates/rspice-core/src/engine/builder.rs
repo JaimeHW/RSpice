@@ -483,6 +483,32 @@ fn stop_time_changes(circuit: &CircuitData) -> bool {
             .any(super::transient::noise::spec_contains_transient_random)
 }
 
+/// Records one elaboration's wall time into the run's phase timings when the
+/// elaboration ends, whichever way it ends.
+struct ElaborationTimer<'a> {
+    timings: &'a crate::config::PhaseTimings,
+    started: crate::time_compat::Instant,
+}
+
+impl<'a> ElaborationTimer<'a> {
+    fn start(timings: &'a crate::config::PhaseTimings) -> Self {
+        Self {
+            timings,
+            started: crate::time_compat::Instant::now(),
+        }
+    }
+}
+
+impl Drop for ElaborationTimer<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.started.elapsed();
+        self.timings.record(|record| {
+            record.elaboration += elapsed;
+            record.circuit_builds += 1;
+        });
+    }
+}
+
 #[inline]
 fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     if abort.is_aborted() {
@@ -6302,6 +6328,7 @@ impl Engine {
                 .as_deref()
                 .map(super::small_signal_state::TransientStateBias::transient_stop)
         });
+        let _elaboration_timer = self.phase_timings().map(ElaborationTimer::start);
         let (built, reference) = self.elaborate_circuit(
             netlist,
             default_ports,
@@ -6504,6 +6531,9 @@ impl Engine {
         };
 
         // Flatten subcircuit instances into top-level elements.
+        let flatten_started = self
+            .phase_timings()
+            .map(|_| crate::time_compat::Instant::now());
         let (flattened, parameter_direction) = flatten_netlist_with_parameter_direction(
             netlist,
             FlattenerConfig {
@@ -6526,6 +6556,10 @@ impl Engine {
                 None => refusal,
             }
         })?;
+        if let (Some(timings), Some(started)) = (self.phase_timings(), flatten_started) {
+            let elapsed = started.elapsed();
+            timings.record(|record| record.flatten += elapsed);
+        }
         circuit.parameter_direction = parameter_direction;
         *instance_cards = flattened.external_instance_origins;
         let mut flat_elements = flattened.elements;

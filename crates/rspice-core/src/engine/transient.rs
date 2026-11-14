@@ -4997,6 +4997,9 @@ impl Engine {
             self.build_matrix(&circuit)?
         };
         circuit.link_indices(&matrix);
+        if self.phase_timings().is_some() {
+            matrix.enable_phase_timing();
+        }
 
         let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
         let mut source_basis = crate::circuit::SourceTimeBasis {
@@ -5102,12 +5105,14 @@ impl Engine {
                     None,
                 )
             } else {
+                let operating_point_timer = self.operating_point_timer();
                 let initial = self.solve_transient_initial_solution(
                     netlist,
                     &mut circuit,
                     &mut matrix,
                     abort,
                 );
+                self.record_operating_point_time(operating_point_timer);
                 // A startup with no coupled t = 0 fixed point is refused as
                 // the operating point is; any other failure keeps the context
                 // the boundary adds to it.
@@ -7119,11 +7124,18 @@ impl Engine {
         #[cfg(test)]
         let failed_proof_stamp_serves_newton = failed_proof_stamp_serves_newton
             && !residual::RESTAMP_AFTER_FAILED_PROOF.load(std::sync::atomic::Ordering::Relaxed);
-        // Newton phase accounting is debug-only. In normal production runs
-        // every DiagnosticTimer below avoids the underlying clock query.
-        let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
+        // Newton phase accounting runs only for debug logging or requested
+        // phase timings. Otherwise every DiagnosticTimer below avoids the
+        // underlying clock query.
+        let phase_timings = self.phase_timings();
+        let diagnostic_timing_enabled =
+            log::log_enabled!(log::Level::Debug) || phase_timings.is_some();
+        // The operating point's solves were timed with it.
+        let _ = matrix.take_phase_times();
         let transient_wall_start = DiagnosticTimer::start(diagnostic_timing_enabled);
         let newton_iterations_at_start = self.convergence_quality().total_iterations;
+        let mut total_output_nanos: u128 = 0;
+        let mut total_device_evaluation_nanos: u128 = 0;
         let mut total_stamp_nanos: u128 = 0;
         let mut total_solve_nanos: u128 = 0;
         let mut total_trunc_nanos: u128 = 0;
@@ -9179,6 +9191,9 @@ impl Engine {
                 let iteration_delta_limit =
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+                if phase_timings.is_some() {
+                    circuit.arm_device_evaluation_clock();
+                }
                 let transient_system_context = residual::TransientSystemContext {
                     #[cfg(feature = "veriloga")]
                     abort,
@@ -9350,6 +9365,10 @@ impl Engine {
                 }
 
                 total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                if phase_timings.is_some() {
+                    total_device_evaluation_nanos +=
+                        circuit.disarm_device_evaluation_clock().as_nanos();
+                }
 
                 // Merit-gated Newton globalization: the freshly stamped
                 // system gives the true nonlinear residual at the current
@@ -12172,6 +12191,7 @@ impl Engine {
                             },
                         ),
                     };
+                    let output_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
                         row_circuit,
@@ -12195,6 +12215,7 @@ impl Engine {
                             },
                         )?,
                     );
+                    total_output_nanos += output_start.elapsed().as_nanos();
                     if left_limit.is_some() {
                         // The copy closed its step; the restart state closes it too.
                         circuit.accept_generic_switch_transient_step();
@@ -12921,6 +12942,7 @@ impl Engine {
                     },
                 ),
             };
+            let output_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             Self::backfill_initial_linear_capacitor_branch_currents(
                 &mut result,
                 row_circuit,
@@ -12943,6 +12965,7 @@ impl Engine {
                         integral_trace,
                     },
                 )?);
+            total_output_nanos += output_start.elapsed().as_nanos();
             if left_limit.is_some() {
                 // The copy closed its step; the restart state closes it too.
                 circuit.accept_generic_switch_transient_step();
@@ -13462,6 +13485,38 @@ impl Engine {
             total_postsolve_convergence_nanos as f64 * 1e-9,
             total_postsolve_residual_nanos as f64 * 1e-9,
         );
+        if let Some(timings) = phase_timings {
+            let linear = matrix.take_phase_times().unwrap_or_default();
+            let seconds = |nanos: u128| {
+                std::time::Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
+            };
+            let newton_iterations = self
+                .convergence_quality()
+                .total_iterations
+                .saturating_sub(newton_iterations_at_start);
+            timings.record(|record| {
+                record.transient_runs += 1;
+                record.transient_wall += transient_wall;
+                record.transient_device_evaluation += seconds(total_device_evaluation_nanos);
+                record.transient_matrix_assembly +=
+                    seconds(total_stamp_nanos.saturating_sub(total_device_evaluation_nanos));
+                record.transient_linear_solve += seconds(total_solve_nanos);
+                record.transient_factor += linear.factor;
+                record.transient_solve += linear.solve;
+                record.transient_certificate += linear.certificate;
+                record.transient_convergence_check +=
+                    seconds(total_postsolve_update_nanos + total_postsolve_convergence_nanos);
+                record.transient_residual_proof += seconds(total_postsolve_residual_nanos);
+                record.transient_truncation += seconds(total_trunc_nanos);
+                record.transient_output += seconds(total_output_nanos);
+                record.transient_accepted_steps += accepted_interval_count as u64;
+                record.transient_rejected_steps +=
+                    total_step_attempts.saturating_sub(accepted_interval_count) as u64;
+                record.transient_newton_iterations += newton_iterations as u64;
+                record.transient_factorizations += linear.factorizations;
+                record.transient_refactorizations += linear.refactorizations;
+            });
+        }
 
         if log::log_enabled!(log::Level::Debug)
             && let Some(node0_voltages) = result.voltages.first()

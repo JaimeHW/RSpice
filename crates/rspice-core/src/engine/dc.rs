@@ -1443,6 +1443,7 @@ impl Engine {
 
         let mut matrix = matrix;
 
+        let operating_point_timer = engine.operating_point_timer();
         let solution = engine.solve_dc_operating_point_with_startup_and_abort(
             netlist,
             &mut circuit,
@@ -1450,6 +1451,7 @@ impl Engine {
             startup,
             abort,
         );
+        engine.record_operating_point_time(operating_point_timer);
         // A loop through the mixed boundary with no consistent value is a
         // property of the deck, which no aid could have solved.
         #[cfg(feature = "veriloga")]

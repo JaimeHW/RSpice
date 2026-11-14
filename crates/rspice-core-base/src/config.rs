@@ -26,6 +26,9 @@ use crate::numerics::integration::{
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use thiserror::Error;
 
+mod phase_timings;
+pub use phase_timings::{PhaseTimingRecord, PhaseTimings};
+
 /// A violated invariant in [`SimulationConfig`].
 ///
 /// The fields are intentionally structured so service and language bindings
@@ -704,6 +707,9 @@ pub struct SimulationConfig {
     pub locked_time_step_sizes: Option<std::sync::Arc<Vec<Value>>>,
     /// The HDL half's run options and output receiver.
     pub hdl: HdlRunConfig,
+    /// Where the engine records phase timings (`rspice run --timings`).
+    /// `None`, the default, reads no clock for them.
+    pub phase_timings: Option<std::sync::Arc<PhaseTimings>>,
 }
 
 impl SimulationConfig {
@@ -1193,6 +1199,7 @@ impl Default for SimulationConfig {
             locked_time_grid: None,
             locked_time_step_sizes: None,
             hdl: HdlRunConfig::default(),
+            phase_timings: None,
         }
     }
 }

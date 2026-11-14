@@ -422,6 +422,42 @@ impl Engine {
         }
     }
 
+    /// The collector phase timings go to, when the frontend asked for them.
+    #[inline]
+    pub(crate) fn phase_timings(&self) -> Option<&crate::config::PhaseTimings> {
+        self.config.phase_timings.as_deref()
+    }
+
+    /// Start timing an operating-point solve when phase timings are on: the
+    /// clock and the Newton assemblies recorded so far.
+    pub(crate) fn operating_point_timer(&self) -> Option<(crate::time_compat::Instant, usize)> {
+        self.phase_timings().map(|_| {
+            (
+                crate::time_compat::Instant::now(),
+                self.convergence_quality().total_iterations,
+            )
+        })
+    }
+
+    /// Record the operating-point solve [`Self::operating_point_timer`] started.
+    pub(crate) fn record_operating_point_time(
+        &self,
+        timer: Option<(crate::time_compat::Instant, usize)>,
+    ) {
+        if let (Some(timings), Some((started, iterations_before))) = (self.phase_timings(), timer) {
+            let elapsed = started.elapsed();
+            let iterations = self
+                .convergence_quality()
+                .total_iterations
+                .saturating_sub(iterations_before);
+            timings.record(|record| {
+                record.operating_point += elapsed;
+                record.operating_points += 1;
+                record.operating_point_newton_iterations += iterations as u64;
+            });
+        }
+    }
+
     /// Return the construction-time configuration error, if any.
     ///
     /// This lets compatibility callers that use [`Self::new`] preflight an

@@ -152,6 +152,35 @@ impl CircuitData {
             noiseless_devices: std::collections::HashSet::new(),
             #[cfg(feature = "veriloga")]
             port_sensitivities: Vec::new(),
+            device_evaluation_clock: None,
+        }
+    }
+
+    /// Start summing device evaluation time into the clock.
+    #[inline]
+    pub(crate) fn arm_device_evaluation_clock(&mut self) {
+        self.device_evaluation_clock = Some(std::time::Duration::ZERO);
+    }
+
+    /// Stop summing, returning the device evaluation time since arming.
+    #[inline]
+    pub(crate) fn disarm_device_evaluation_clock(&mut self) -> std::time::Duration {
+        self.device_evaluation_clock.take().unwrap_or_default()
+    }
+
+    /// A clock reading for one device evaluation pass, taken only while the
+    /// clock is armed.
+    #[inline]
+    pub(crate) fn device_evaluation_started(&self) -> Option<crate::time_compat::Instant> {
+        self.device_evaluation_clock
+            .map(|_| crate::time_compat::Instant::now())
+    }
+
+    /// Add the pass [`Self::device_evaluation_started`] began to the clock.
+    #[inline]
+    pub(crate) fn add_device_evaluation(&mut self, started: Option<crate::time_compat::Instant>) {
+        if let (Some(started), Some(total)) = (started, self.device_evaluation_clock.as_mut()) {
+            *total += started.elapsed();
         }
     }
 

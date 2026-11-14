@@ -520,7 +520,9 @@ impl Engine {
     ) {
         debug_assert!(circuit.has_cacheable_diode_transient_base());
         if refresh_nonlinear {
+            let evaluation = circuit.device_evaluation_started();
             circuit.diodes.update_all(solution);
+            circuit.add_device_evaluation(evaluation);
         }
         circuit.diodes.stamp_charge_companions(
             matrix,
@@ -831,6 +833,7 @@ impl Engine {
         };
         let mut local_static_terms = Vec::new();
         let mut fused_static_terms = None;
+        let evaluation = circuit.device_evaluation_started();
         let fused_companion_terms =
             if refresh_nonlinear && !static_probe && companion_terms_cache.is_none() {
                 if let Some(terms) = companion_terms_out.take() {
@@ -862,6 +865,7 @@ impl Engine {
                 }
                 None
             };
+        circuit.add_device_evaluation(evaluation);
         let physical_cache_matches_probe =
             static_probe && circuit.mosfets.last_update_all_is_physical();
         let cached_terms_match_assembly = if static_probe {
@@ -1706,6 +1710,7 @@ impl Engine {
         circuit.refresh_jiles_atherton_inductances(solution);
         circuit.set_b3soi_operating_point_mode(false);
         circuit.set_xyce_memristor_operating_point_mode(false);
+        let evaluation = circuit.device_evaluation_started();
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             self.update_transient_nonlinear_devices(circuit, solution)?;
             if evaluation_mode
@@ -1722,6 +1727,7 @@ impl Engine {
             }
         }
         Self::refresh_jfet2_transient_linearizations(circuit, solution, dt, ctx.jfet_history);
+        circuit.add_device_evaluation(evaluation);
 
         circuit.capacitors.stamp_transient_branch_companions(
             matrix,

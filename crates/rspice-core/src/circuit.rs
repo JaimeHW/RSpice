@@ -899,6 +899,9 @@ pub struct CircuitData {
     /// modules' ports, for the converters the build inserts on those ports.
     #[cfg(feature = "veriloga")]
     pub(crate) port_sensitivities: Vec<PortSensitivity>,
+    /// Device evaluation time summed while a transient's phase timings arm
+    /// it around one Newton assembly; `None`, reading no clock, otherwise.
+    pub(crate) device_evaluation_clock: Option<std::time::Duration>,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.
