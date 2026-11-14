@@ -39,7 +39,7 @@ use pin_placement::place_pending_port;
 use pointer_target::pointer_target_with_filter;
 pub(super) use pointer_target::{PointerHit, PointerTarget, pointer_target};
 
-pub(super) fn handle_tool_interactions(
+pub(crate) fn handle_tool_interactions(
     ui: &Ui,
     response: &Response,
     state: &mut CanvasParts<'_>,

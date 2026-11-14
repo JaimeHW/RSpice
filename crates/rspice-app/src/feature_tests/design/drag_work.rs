@@ -1,6 +1,6 @@
 //! The work a part drag does on each frame of a large sheet, counted.
 //!
-//! The frame-cost probe ([`super::frame_cost`]) times the same drag against
+//! The frame-cost probe ([`crate::schematic::view::frame_cost`]) times the same drag against
 //! its budgets, by hand and in release, because a debug build's clock says
 //! nothing about a frame. This gate runs in every test run instead. It drives
 //! the drag through whole canvas frames with real pointer events and counts,
@@ -14,9 +14,9 @@
 use rspice_design::projection::{materialization_count, reset_materialization_count};
 use rspice_design_model::work_tally::{self, WorkTally};
 
-use super::AppState;
-use super::frame_cost::{COLUMNS, ROWS, scale_fixture_of};
+use crate::schematic::view::frame_cost::{COLUMNS, ROWS, scale_fixture_of};
 use crate::state::{Point, SchematicAnnotationVisibility};
+use crate::workbench::app_state::AppState;
 
 const SCREEN: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 /// Move frames per drag; each one moves the part a grid step further.
@@ -96,7 +96,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
     );
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let mut clock = 0.0;
     let mut frame = |state: &mut AppState, event: egui::Event| {
         clock += 1.0 / 60.0;
@@ -112,7 +112,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    super::render_schematic_view(
+                    crate::schematic::view::render_schematic_view(
                         ui,
                         &mut crate::schematic::view::canvas_frame(state),
                         symbols.as_ref(),

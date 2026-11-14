@@ -7,7 +7,6 @@ use crate::state::{ComponentType, Point, SchematicState};
 use crate::workbench::{RSpiceApp, features};
 use crate::workbench::{app::duplicate_schematic_selection_at, state::Workspace};
 use egui::{Event, Pos2, RawInput, TouchPhase, Vec2};
-use rspice_schematic_editor::view::navigation::ZoomRequest;
 
 /// A Design workspace under a finger: the canvas and the strip, drawn as the
 /// design surface draws them.
@@ -262,7 +261,7 @@ impl Finger {
 }
 
 /// The design feature's context, as the surface lends the strip it.
-fn strip_cx(app: &mut RSpiceApp) -> Cx<'_, DesignFeature> {
+pub(crate) fn strip_cx(app: &mut RSpiceApp) -> Cx<'_, DesignFeature> {
     features::surface_cx::<DesignFeature>(app, |_| true)
 }
 
@@ -392,69 +391,6 @@ fn cancel_is_live_only_while_an_operation_is() {
         "Cancel puts the wire tool down, as Esc does"
     );
     assert!(!operation_live(&canvas_facts(&finger.app.state)));
-}
-
-#[test]
-fn touch_requests_recheck_document_route_and_modal_state() {
-    for change in ["document", "route", "modal", "read-only", "none"] {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.activate(Workspace::Design);
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .needs_drawing_sheet_fit = false;
-        let request = MobileCanvasRequest {
-            source: super::super::requests::editor_request_source(&app.state),
-            action: MobileCanvasAction::Fit,
-        };
-        match change {
-            "document" => app.state.bump_active_schematic_epoch(),
-            "route" => app.state.workbench.activate(Workspace::Results),
-            "modal" => app.state.settings.preferences_open = true,
-            "read-only" => app.state.model.schematic.session.read_only = true,
-            "none" => {}
-            _ => unreachable!(),
-        }
-        execute_action(&Context::default(), &mut strip_cx(&mut app), request);
-        app.after_contribution();
-        assert_eq!(
-            app.state
-                .model
-                .schematic
-                .session
-                .editor
-                .needs_drawing_sheet_fit,
-            matches!(change, "none" | "read-only"),
-            "{change}"
-        );
-    }
-}
-
-/// The view buttons dispatch the same `Command` as every other surface,
-/// so a fit from the strip is the fit from the View menu and `F`.
-#[test]
-fn fit_executes_the_schematic_camera_command() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Design);
-    app.state.model.schematic.session.editor.zoom = 2.0;
-    app.state.model.schematic.session.editor.zoom_request = Some(ZoomRequest::By(1.2));
-    let request = MobileCanvasRequest {
-        source: super::super::requests::editor_request_source(&app.state),
-        action: MobileCanvasAction::Fit,
-    };
-    execute_action(&Context::default(), &mut strip_cx(&mut app), request);
-    app.after_contribution();
-    assert!(
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .needs_drawing_sheet_fit
-    );
-    assert!(!app.state.model.schematic.session.editor.needs_fit);
 }
 
 /// E-11, R-3: a finger dragged across a part that is not selected pans the

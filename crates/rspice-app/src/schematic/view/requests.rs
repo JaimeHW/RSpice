@@ -13,7 +13,7 @@ use rspice_schematic_editor::view::pointer_target::{
     PointerSelectionEffect, PointerTarget, select_pointer_target,
 };
 
-pub(super) use crate::workbench::app::schematic_editor_request_source as editor_request_source;
+pub(crate) use crate::workbench::app::schematic_editor_request_source as editor_request_source;
 
 /// Whether `target` is an instance the user can descend into. Picking one
 /// leaves a net highlight lit, so the descent (the descend key, the second

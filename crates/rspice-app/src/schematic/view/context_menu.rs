@@ -1941,4 +1941,4 @@ fn apply_context_request(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

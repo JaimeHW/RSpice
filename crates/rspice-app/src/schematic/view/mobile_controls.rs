@@ -91,7 +91,11 @@ const fn floating_transform(action: MobileCanvasAction) -> Option<PlacementTrans
     }
 }
 
-fn execute_action(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, request: MobileCanvasRequest) {
+pub(crate) fn execute_action(
+    ctx: &Context,
+    cx: &mut Cx<'_, DesignFeature>,
+    request: MobileCanvasRequest,
+) {
     if request.source != super::requests::editor_request_source(&canvas_facts_in(cx))
         || cx.wb.current_route().surface_id() != SurfaceId::Design
         || !matches!(
@@ -129,4 +133,4 @@ fn execute_action(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, request: Mobile
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests;
+pub(crate) mod tests;

@@ -13,8 +13,8 @@ use crate::state::{
 use super::AppState;
 
 /// Components per sheet, laid out as a lattice of this many columns.
-pub(super) const COLUMNS: usize = 40;
-pub(super) const ROWS: usize = 25;
+pub(crate) const COLUMNS: usize = 40;
+pub(crate) const ROWS: usize = 25;
 /// Lattice pitch in world units.
 const PITCH: i32 = 200;
 const ORIGIN: i32 = 400;
@@ -24,12 +24,12 @@ const MASTERS: [&str; 3] = ["amp", "buf", "bias"];
 const OPERATING_POINT_NODES: usize = 300;
 
 /// What the scale fixture holds, so a probe or a test can address it.
-pub(super) struct ScaleFixture {
-    pub(super) state: AppState,
+pub(crate) struct ScaleFixture {
+    pub(crate) state: AppState,
     /// Object ids of each sheet's components, in lattice order.
-    pub(super) components: [Vec<u64>; 2],
+    pub(crate) components: [Vec<u64>; 2],
     /// How many objects each sheet holds: components, wires and junctions.
-    pub(super) objects: [usize; 2],
+    pub(crate) objects: [usize; 2],
 }
 
 /// Everything one sheet draws, before the sheet catalog assigns it.
@@ -58,7 +58,7 @@ fn port(name: &str, direction: PortDirection) -> PortSpec {
     }
 }
 
-pub(super) fn master_ports() -> [PortSpec; 3] {
+pub(crate) fn master_ports() -> [PortSpec; 3] {
     [
         port("IN", PortDirection::In),
         port("OUT", PortDirection::Out),
@@ -70,7 +70,7 @@ pub(super) fn master_ports() -> [PortSpec; 3] {
 /// authored symbol the canvas resolves: `amp`, `buf` and `bias`, with `IN`
 /// at `(-w, 0)`, `OUT` at `(w, 0)` and `BIAS` at `(0, 40)`, where `w` is 40,
 /// 50 and 60.
-pub(super) fn master_library() -> Library {
+pub(crate) fn master_library() -> Library {
     let mut library = Library::new("work");
     for (ordinal, master) in MASTERS.iter().enumerate() {
         let mut cell = Cell::new(*master);
@@ -256,7 +256,7 @@ fn cross_probe_nets(sheets: &[SheetContent; 2]) -> HashMap<String, Vec<Point>> {
 /// every point as the netlister read it off the projected document, where the
 /// sheet at catalog index `k` lies `k * 1_000_000` along x, and the snapshot
 /// takes each point home to its sheet.
-pub(super) fn install_projected_run_geometry(
+pub(crate) fn install_projected_run_geometry(
     state: &mut AppState,
     nets: HashMap<String, Vec<Point>>,
 ) {
@@ -410,7 +410,7 @@ pub(super) fn scale_fixture() -> ScaleFixture {
 
 /// [`scale_fixture`] with each sheet's lattice `columns` by `rows`
 /// components rather than 40 by 25.
-pub(super) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
+pub(crate) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     let mut next_id = 1_u64;
     let sheets = [
         sheet_content(&mut next_id, 0, columns, rows),
