@@ -334,7 +334,8 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::ExportBillOfMaterials => {
             crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.workbench,
                 app.export_workflow_io.as_ref(),
             );
         }

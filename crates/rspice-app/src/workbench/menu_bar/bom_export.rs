@@ -1,10 +1,12 @@
 //! File ▸ Export ▸ Bill of materials: the purchased parts of the design
 //! below the open cellview, as CSV, one line per value and part number. A
 //! part inside a cell is counted once per occurrence, under its
-//! hierarchical reference (`X1/R3`).
+//! hierarchical reference (`X1/R3`). A refusal is prompted on the
+//! session's status bar; a failure is the model's to report.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::AppState;
+use crate::workbench::WorkbenchSession;
+use crate::workbench::app_state::Model;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_design::schematic::bom::{bom_csv, bom_lines};
@@ -12,35 +14,36 @@ use rspice_design::schematic::bom::{bom_csv, bom_lines};
 const FAILURE: &str = "Bill of materials export failed";
 
 pub(crate) fn action_export_bill_of_materials_with_io(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    let active = state.model.workspace.content.active_view.clone();
-    let projection = match state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &active,
-        &state.model.schematic,
-    ) {
-        Ok(projection) => projection,
-        Err(error) => {
-            state.report_failure(FAILURE, error.to_string());
-            return;
-        }
-    };
+    let active = model.workspace.content.active_view.clone();
+    let projection =
+        match model
+            .workspace
+            .design_projection(&model.library_manager, &active, &model.schematic)
+        {
+            Ok(projection) => projection,
+            Err(error) => {
+                model.report_failure(FAILURE, error.to_string());
+                return;
+            }
+        };
     let hierarchy =
-        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
-    let parts = hierarchy.bill_of_materials_parts(state.model.schematic.document(), &active);
+        HierarchySource::from_design_projection(model.library_manager.catalog(), &projection);
+    let parts = hierarchy.bill_of_materials_parts(model.schematic.document(), &active);
     let lines = bom_lines(
         parts
             .iter()
             .map(|(reference, component)| (reference.as_str(), *component)),
     );
     if lines.is_empty() {
-        state.prompt("This design has no purchased parts to list.");
+        wb.prompt("This design has no purchased parts to list.");
         return;
     }
     let csv = bom_csv(&lines);
-    let default_name = format!("{}-bom.csv", state.model.export_file_stem("circuit"));
+    let default_name = format!("{}-bom.csv", model.export_file_stem("circuit"));
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Bill of Materials",
         default_name: &default_name,
@@ -54,7 +57,7 @@ pub(crate) fn action_export_bill_of_materials_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &csv));
             match export {
                 Ok(()) => {
-                    state.record(
+                    model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
@@ -65,17 +68,18 @@ pub(crate) fn action_export_bill_of_materials_with_io(
                         ),
                     );
                 }
-                Err(error) => state.report_failure(FAILURE, error.to_string()),
+                Err(error) => model.report_failure(FAILURE, error.to_string()),
             }
         }
         Ok(None) => {}
-        Err(error) => state.report_failure(FAILURE, error.to_string()),
+        Err(error) => model.report_failure(FAILURE, error.to_string()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::pdk_config::PdkConfig;
     use crate::state::{ComponentType, Point};
     use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
     use std::cell::RefCell;
@@ -116,13 +120,21 @@ mod tests {
     /// it buys are listed, and the simulator's source is not.
     #[test]
     fn the_export_lists_the_purchased_parts_of_the_open_design() {
-        let mut app = crate::workbench::RSpiceApp::test_instance();
-        let schematic = &mut app.state.model.schematic;
-        schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
-        schematic.add_component(ComponentType::VoltageSource, Point::new(200, 0));
+        let mut model = Model::session_start(
+            PdkConfig::default(),
+            None,
+            rspice_app_state::workbench::workspace::restore_model_library_manager,
+        );
+        let mut wb = WorkbenchSession::default();
+        model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        model
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::new(200, 0));
         let io = CaptureIo::default();
 
-        action_export_bill_of_materials_with_io(&mut app.state, &io);
+        action_export_bill_of_materials_with_io(&mut model, &mut wb, &io);
 
         let csv = io.csv.borrow();
         assert_eq!(
