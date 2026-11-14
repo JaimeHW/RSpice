@@ -39,6 +39,12 @@ mod veriloga;
 pub(crate) enum HbOperatorTransfer {
     /// `idt`: `1/(jω)`, its DC output fixed by its initial condition.
     Integral,
+    /// `idt` whose initial condition depends on the circuit's unknowns:
+    /// `1/(jω)`, its DC row holding its input's mean at zero. A periodic
+    /// orbit has no start time for the initial condition to act at, so the
+    /// condition drops out and the rest of the circuit sets the output's DC
+    /// term.
+    MeanFreeIntegral,
     /// A rational `laplace_*` filter: `H(jω)`.
     #[cfg(feature = "veriloga")]
     Laplace(Box<rspice_veriloga::laplace::StateSpaceFilter>),

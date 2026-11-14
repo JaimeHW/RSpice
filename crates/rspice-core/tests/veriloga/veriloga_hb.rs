@@ -548,6 +548,33 @@ fn an_idt_with_an_initial_condition_integrates_one_tone() {
     );
 }
 
+/// An `idt` whose initial condition depends on the unknowns,
+/// `idt(w0 (V(in) - V(out)), V(in))` driving `V(out)`: a periodic orbit has
+/// no start time for the condition to act at, so harmonic balance holds the
+/// integrand's mean at zero and the loop sets the DC term. `V(out)` is the
+/// one-pole low-pass `w0 / (jω + w0)` of `0.5 + sin(ωt)`, to 1e-9.
+#[test]
+fn an_idt_whose_initial_condition_moves_with_the_orbit_holds_its_input_mean_at_zero() {
+    let (model, deck) = operator_deck(
+        "bias_dependent_integrator",
+        "SIN(0.5 1 1meg)",
+        "idt(1.0e6 * (V(in) - V(out)), V(in))",
+    );
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    let omega = std::f64::consts::TAU * F0;
+    let pole = Complex64::new(1.0e6, 0.0);
+    assert_spectrum(
+        "bias-dependent idt",
+        &node(&result, "out"),
+        &[
+            Complex64::new(0.5, 0.0),
+            Complex64::new(0.0, -1.0) * pole / (Complex64::new(0.0, omega) + pole),
+        ],
+    );
+}
+
 /// `$abstime` reads each sample's instant. A tone at the analysis's own
 /// frequency, scaled by the drive, gives its closed-form harmonics to 1e-9:
 /// `(1 + sin(ωt)/2) sin(ωt) = 1/4 + sin(ωt) - cos(2ωt)/4`. A ramp, whose

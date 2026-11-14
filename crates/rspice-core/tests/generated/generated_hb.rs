@@ -528,6 +528,39 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 t psp104tva\n",
             "d",
         ),
+        // PSP's NQS builds carry each collocation point's channel charge as
+        // an `idt` whose initial condition is the quasi-static charge at the
+        // present bias; harmonic balance holds each integrand's mean at zero
+        // instead (SWNQS=3 turns three of them on). Gear's rule, as for PSP
+        // 102 above.
+        #[cfg(feature = "veriloga-model-pspnqs102va")]
+        (
+            "non-quasi-static MOSFET (PSP 102)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS102VA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs102bva")]
+        (
+            "non-quasi-static MOSFET (PSP 102, binned)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS102BVA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs102eva")]
+        (
+            "non-quasi-static MOSFET (PSP 102, electrical)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS102EVA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs104va")]
+        (
+            "non-quasi-static MOSFET (PSP 104)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS104VA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
     ]
 }
 

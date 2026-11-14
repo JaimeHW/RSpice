@@ -221,6 +221,18 @@ impl ExactPeriodicNetwork {
                         "periodic Verilog-A operator '{name}' has a malformed coordinate pair"
                     )));
                 }
+                if omega == 0.0 && matches!(transfer, super::HbOperatorTransfer::MeanFreeIntegral) {
+                    if difference.is_some() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "periodic Verilog-A operator '{name}' cannot take a frequency \
+                             difference across its DC row"
+                        )));
+                    }
+                    // The DC row holds the input's mean at zero; the output's
+                    // DC term is the rest of the circuit's to set.
+                    add(*output, *input, Complex64::new(1.0, 0.0))?;
+                    return Ok(());
+                }
                 add(*output, *output, Complex64::new(constant, 0.0))?;
                 if let Some(coefficient) = operator_coefficient(transfer, omega, difference)
                     .map_err(|reason| {
@@ -368,7 +380,7 @@ fn operator_coefficient(
 ) -> Result<Option<Complex64>, String> {
     use super::HbOperatorTransfer as Transfer;
     Ok(Some(match transfer {
-        Transfer::Integral => match difference {
+        Transfer::Integral | Transfer::MeanFreeIntegral => match difference {
             None if omega == 0.0 => return Ok(None),
             None => Complex64::new(0.0, -omega.recip()),
             Some(delta) => {

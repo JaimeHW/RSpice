@@ -86,6 +86,9 @@ struct HbOperatorPorts {
     output: usize,
     /// An `idt`'s initial condition, or an `absdelay`'s delay.
     parameter: Option<Value>,
+    /// An `idt` whose initial condition depends on the circuit's unknowns:
+    /// its DC row holds its input's mean at zero instead.
+    mean_free: bool,
     /// The operator as a message names it.
     label: String,
 }
@@ -273,7 +276,12 @@ impl HbVerilogADevice {
                     "harmonic balance cannot carry {label} of Verilog-A device '{name}': {reason}"
                 ))
             };
-            if record.dependent_parameters[index] {
+            // An `idt` whose initial condition depends on the unknowns
+            // takes the periodic reading the generated route takes: its DC
+            // row holds its input's mean at zero.
+            let mean_free =
+                site.kind == PeriodicOperatorKind::Integral && record.dependent_parameters[index];
+            if record.dependent_parameters[index] && !mean_free {
                 return Err(refuse(match site.kind {
                     PeriodicOperatorKind::Delay => {
                         "its delay depends on the circuit's unknowns, so no fixed e^(-jwt) carries it"
@@ -284,6 +292,9 @@ impl HbVerilogADevice {
                 }));
             }
             let (parameter, transfer) = match site.kind {
+                PeriodicOperatorKind::Integral if mean_free => {
+                    (None, HbOperatorTransfer::MeanFreeIntegral)
+                }
                 PeriodicOperatorKind::Integral => {
                     let ic = record.initial_conditions[index]
                         .filter(|ic| ic.is_finite())
@@ -322,6 +333,7 @@ impl HbVerilogADevice {
                 input,
                 output,
                 parameter,
+                mean_free,
                 label,
             });
         }
@@ -566,7 +578,7 @@ impl HbVerilogADevice {
             }
         }
         for (index, ports) in self.operators.iter().enumerate() {
-            if record.dependent_parameters[index] {
+            if record.dependent_parameters[index] && !ports.mean_free {
                 return Err(fail(
                     &ports.label,
                     "its initial condition or delay changes over the period",
@@ -575,6 +587,7 @@ impl HbVerilogADevice {
             let input = record.inputs[index]
                 .ok_or_else(|| fail(&ports.label, "its input was not evaluated"))?;
             match ports.site.kind {
+                PeriodicOperatorKind::Integral if ports.mean_free => {}
                 PeriodicOperatorKind::Integral => {
                     let ic = record.initial_conditions[index];
                     if ic != ports.parameter {

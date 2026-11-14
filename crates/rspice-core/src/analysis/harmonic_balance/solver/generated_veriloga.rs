@@ -62,8 +62,18 @@ struct HbGeneratedOperator {
     /// Zero-based augmented row of the output `y`.
     output: usize,
     /// An `idt`'s initial condition, read at setup, which fixes its DC
-    /// output; `None` for a `ddt` or an `idt` the model does not evaluate.
+    /// output; `None` for a `ddt`, an `idt` the model does not evaluate, or
+    /// a mean-free one.
     initial_condition: Option<Value>,
+    /// An `idt` whose initial condition depends on the circuit's unknowns:
+    /// its DC row holds its input's mean at zero instead.
+    mean_free: bool,
+    /// The input row's divisor: the input's magnitude at the reference
+    /// evaluation, at least one. PSP's NQS charge rates run near 1e5 against
+    /// node voltages near a volt; unscaled, those rows swamp the Krylov
+    /// step's residual and a small harmonic's row misses its componentwise
+    /// certificate.
+    row_scale: Value,
 }
 
 /// Scratch the carried sites' rows are built in, sized once.
@@ -212,6 +222,8 @@ impl HbGeneratedDevice {
                 input,
                 output,
                 initial_condition: None,
+                mean_free: false,
+                row_scale: 1.0,
             })
             .collect();
         let mut stamped_rows = rows.clone();
@@ -307,6 +319,9 @@ impl HbGeneratedDevice {
             .map(|operator| {
                 let transfer = match operator.kind {
                     GeneratedPeriodicKind::Derivative => HbOperatorTransfer::Derivative,
+                    GeneratedPeriodicKind::Integral if operator.mean_free => {
+                        HbOperatorTransfer::MeanFreeIntegral
+                    }
                     GeneratedPeriodicKind::Integral => HbOperatorTransfer::Integral,
                 };
                 (operator.input, operator.output, transfer)
@@ -459,20 +474,39 @@ impl HbGeneratedDevice {
     }
 
     /// Keep each `idt`'s initial condition from the reference evaluation.
+    ///
+    /// LRM 2.4 section 4.5.4 gives an `idt` initial condition a meaning in
+    /// DC and at the start of a transient only. One that depends on the
+    /// circuit's unknowns (PSP's NQS charges, whose condition is the
+    /// quasi-static charge at the present bias) cannot fix a periodic DC
+    /// term, and a periodic orbit has no start time for it to act at: that
+    /// site's output DC term is left to the rest of the circuit, and its
+    /// DC row holds its input's mean at zero, the condition a bounded
+    /// periodic integral meets in any case. At a constant bias the input
+    /// vanishes exactly where the output takes the condition's value, so the
+    /// two readings agree on the operating point.
     fn read_initial_conditions(&mut self) {
         let Some(frame) = self.static_probe.periodic_frame() else {
             return;
         };
         for (site, operator) in self.operators.iter_mut().enumerate() {
+            let input = frame.input(site).abs();
+            operator.row_scale = if input.is_finite() {
+                input.max(1.0)
+            } else {
+                1.0
+            };
             if matches!(operator.kind, GeneratedPeriodicKind::Integral) {
-                operator.initial_condition =
-                    Some(frame.initial_condition(site)).filter(|ic| !ic.is_nan());
+                operator.mean_free = frame.initial_condition_is_dependent(site);
+                operator.initial_condition = Some(frame.initial_condition(site))
+                    .filter(|ic| !ic.is_nan() && !operator.mean_free);
             }
         }
     }
 
     /// Stamp an evaluated `idt`'s DC output, which its initial condition
-    /// fixes, refusing one whose initial condition the orbit moves.
+    /// fixes, refusing one whose initial condition the orbit moves. A
+    /// mean-free `idt` stamps nothing: its DC row is its input's mean.
     fn stamp_integral_dc(
         frame: &rspice_veriloga_runtime::GeneratedPeriodicFrame,
         site: usize,
@@ -480,7 +514,7 @@ impl HbGeneratedDevice {
         f: &mut NativeStamp,
     ) -> Result<(), &'static str> {
         let ic = frame.initial_condition(site);
-        if ic.is_nan() {
+        if ic.is_nan() || operator.mean_free {
             return Ok(());
         }
         if frame.initial_condition_is_dependent(site) {
@@ -619,8 +653,12 @@ impl HbGeneratedDevice {
                     input if input.is_finite() => input,
                     _ => return Err(refuse(site, operator.kind, "its input is not finite")),
                 };
-                f.stamp_rhs(operator.input + 1, input - solution[operator.input]);
-                f.stamp(operator.input + 1, operator.input + 1, 1.0);
+                let scale = operator.row_scale.recip();
+                f.stamp_rhs(
+                    operator.input + 1,
+                    (input - solution[operator.input]) * scale,
+                );
+                f.stamp(operator.input + 1, operator.input + 1, scale);
                 if matches!(operator.kind, GeneratedPeriodicKind::Integral) {
                     Self::stamp_integral_dc(frame, site, operator, f)
                         .map_err(|reason| refuse(site, operator.kind, reason))?;
@@ -630,7 +668,7 @@ impl HbGeneratedDevice {
                     if let Some(column) = self.static_probe.lane_unknown(lane, self.num_nodes)
                         && let Some(partial) = frame.input_partial(site, lane)
                     {
-                        f.stamp(operator.input + 1, column + 1, -partial);
+                        f.stamp(operator.input + 1, column + 1, -partial * scale);
                     }
                 }
             }
@@ -673,7 +711,11 @@ impl HbGeneratedDevice {
                     let held = self.scratch.held_partials[site * count + seeded].unwrap_or(0.0);
                     let difference = frame.input_partial(site, lane).unwrap_or(held) - held;
                     if difference != 0.0 {
-                        f.stamp(operator.input + 1, output + 1, -difference);
+                        f.stamp(
+                            operator.input + 1,
+                            output + 1,
+                            -difference / operator.row_scale,
+                        );
                     }
                 }
             }
