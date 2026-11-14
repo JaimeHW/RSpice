@@ -824,3 +824,117 @@ fn enforces_bundle_file_depth_and_expansion_bounds() {
         .expect_err("expanded-source limit must fail");
     assert!(error.to_string().contains("provider limit"), "{error}");
 }
+
+/// Several documents of a sealed bundle prepared as one compilation unit, as
+/// files on disk are (IEEE 1364-2005 clause 19): a macro and a `timescale`
+/// reach the next root, a module instantiates one of another root, a root's
+/// own `include` is read from the bundle, the unit says which root declared
+/// what, and a later root that inherits a `timescale` is warned about. The
+/// first root alone does not know the other's module, and a module two roots
+/// declare is refused naming both.
+#[test]
+fn bundle_documents_prepared_as_one_unit_share_directives_and_modules() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    });
+    let limits = VirtualCompileLimits::default();
+    let bundle = |extra: Option<(&str, &str)>| {
+        VirtualSourceBundle::new(
+            "rtl/defs.v",
+            [
+                VirtualSourceFile::new("rtl/defs.v", "`timescale 10ns/1ns\n`define LEVEL 1'b1\n"),
+                VirtualSourceFile::new(
+                    "lib/leaf.v",
+                    "`include \"leaf_body.vh\"\nmodule leaf(y); output y; reg y; `LEAF_BODY endmodule\n",
+                ),
+                VirtualSourceFile::new("lib/leaf_body.vh", "`define LEAF_BODY initial #1 y = `LEVEL;\n"),
+                VirtualSourceFile::new(
+                    "rtl/top.v",
+                    "`timescale 1ns/1ps\nmodule top(q); output q; wire q; leaf u1(.y(q)); endmodule\n",
+                ),
+            ]
+            .into_iter()
+            .chain(extra.map(|(path, source)| VirtualSourceFile::new(path, source))),
+        )
+        .unwrap()
+    };
+    let prepared = compiler
+        .prepare_virtual_unit_runtime_source(
+            &bundle(None),
+            &["rtl/defs.v", "lib/leaf.v", "rtl/top.v"],
+            limits,
+        )
+        .unwrap();
+    let declared: Vec<(String, Vec<&str>)> = prepared
+        .unit_files()
+        .iter()
+        .map(|file| {
+            (
+                file.path.to_string_lossy().into_owned(),
+                file.modules.iter().map(|module| module.as_str()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        [
+            ("rtl/defs.v".to_owned(), vec![]),
+            ("lib/leaf.v".to_owned(), vec!["leaf"]),
+            ("rtl/top.v".to_owned(), vec!["top"]),
+        ]
+    );
+    let inherited: Vec<_> = prepared
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-UNIT-TIMESCALE-INHERITED")
+        .collect();
+    assert_eq!(inherited.len(), 1, "only leaf.v inherits: {inherited:?}");
+    let paths: Vec<&str> = prepared
+        .dependency_closure()
+        .iter()
+        .filter(|document| document.origin == SourceDocumentOrigin::Provider)
+        .map(|document| document.logical_path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        ["rtl/defs.v", "lib/leaf.v", "lib/leaf_body.vh", "rtl/top.v"]
+    );
+    let compilation = prepared.compile_runtime("top").unwrap();
+    assert!(
+        compilation
+            .runtime
+            .canonical_ir
+            .digital
+            .has_executable_content()
+    );
+    compilation.validate_integrity().unwrap();
+
+    let alone = compiler
+        .prepare_virtual_unit_runtime_source(&bundle(None), &["rtl/defs.v", "rtl/top.v"], limits)
+        .and_then(|prepared| prepared.compile_runtime("top"));
+    assert!(alone.is_err(), "top's child is declared only in leaf.v");
+
+    let error = compiler
+        .prepare_virtual_unit_runtime_source(
+            &bundle(Some((
+                "rtl/twice.v",
+                "module leaf(y); output y; reg y; initial y = 1'b0; endmodule\n",
+            ))),
+            &["rtl/defs.v", "lib/leaf.v", "rtl/twice.v"],
+            limits,
+        )
+        .unwrap_err();
+    let CompileError::ModuleSelection(message) = &error.error else {
+        panic!("a module two roots declare is a module-selection refusal: {error}");
+    };
+    assert!(
+        message.contains("'leaf'") && message.contains("leaf.v") && message.contains("twice.v"),
+        "{message}"
+    );
+
+    let error = compiler
+        .prepare_virtual_unit_runtime_source(&bundle(None), &["rtl/top.v", "rtl/defs.v"], limits)
+        .unwrap_err();
+    assert!(error.to_string().contains("bundle's root"), "{error}");
+}

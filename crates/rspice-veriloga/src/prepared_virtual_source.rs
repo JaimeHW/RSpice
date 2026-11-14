@@ -65,6 +65,12 @@ impl PreparedVirtualSource {
         &self.include_graph
     }
 
+    /// The modules each root of a compilation unit declares, in root order;
+    /// empty for a source prepared from one root.
+    pub fn unit_files(&self) -> &[crate::UnitFile] {
+        self.prepared.unit_files()
+    }
+
     pub fn metrics(&self) -> &PipelineMetrics {
         self.prepared.metrics()
     }
@@ -275,6 +281,49 @@ impl VerilogACompiler {
         limits: VirtualCompileLimits,
         control: &dyn PipelineControl,
     ) -> Result<PreparedVirtualSource, VirtualRuntimeCompileFailure> {
+        self.prepare_virtual_roots(bundle, &[], limits, control)
+    }
+
+    /// Prepare several documents of a sealed bundle as one compilation unit,
+    /// the library `work` of IEEE 1364-2005 clause 19, as
+    /// [`Self::prepare_unit_runtime_source_with_diagnostics`] prepares files
+    /// on disk: `roots` are read in the order given, macros and `timescale`
+    /// carry from one into the next (sections 19.3 and 19.8), and a module of
+    /// any root may instantiate a module of another.
+    /// [`PreparedVirtualSource::unit_files`] says which root declared which
+    /// module. The first root is the bundle's root; a module two roots
+    /// declare is refused, naming both.
+    pub fn prepare_virtual_unit_runtime_source(
+        &self,
+        bundle: &VirtualSourceBundle,
+        roots: &[&str],
+        limits: VirtualCompileLimits,
+    ) -> Result<PreparedVirtualSource, VirtualRuntimeCompileFailure> {
+        let Some(first) = roots.first() else {
+            return Err(VirtualRuntimeCompileFailure::unmapped(
+                CompileError::io_error("a compilation unit needs at least one file"),
+            ));
+        };
+        if virtual_source::path_to_logical(std::path::Path::new(first)) != bundle.root_path() {
+            return Err(VirtualRuntimeCompileFailure::unmapped(
+                CompileError::io_error(format!(
+                    "the first file of a compilation unit, '{first}', is not its bundle's root '{}'",
+                    bundle.root_path()
+                )),
+            ));
+        }
+        self.prepare_virtual_roots(bundle, roots, limits, &NoPipelineControl)
+    }
+
+    /// Prepare `roots` of `bundle` as one unit; none prepares the bundle's
+    /// root alone.
+    fn prepare_virtual_roots(
+        &self,
+        bundle: &VirtualSourceBundle,
+        roots: &[&str],
+        limits: VirtualCompileLimits,
+        control: &dyn PipelineControl,
+    ) -> Result<PreparedVirtualSource, VirtualRuntimeCompileFailure> {
         let input_bytes = bundle.files().iter().fold(0usize, |total, file| {
             total.saturating_add(file.source.len())
         });
@@ -289,14 +338,38 @@ impl VerilogACompiler {
             .map_err(CompileError::from)
             .map_err(VirtualRuntimeCompileFailure::unmapped)?;
         let started = web_time::Instant::now();
-        let preprocessed = preprocessor
-            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
-            .map_err(|error| {
-                VirtualRuntimeCompileFailure::from_preprocessor(
-                    error,
-                    preprocessor.dependency_documents(),
+        let root_paths: Vec<&std::path::Path> =
+            roots.iter().copied().map(std::path::Path::new).collect();
+        let (preprocessed, unit_ranges) = if root_paths.is_empty() {
+            preprocessor
+                .preprocess_provider_root_mapped(
+                    &provider,
+                    std::path::Path::new(bundle.root_path()),
                 )
-            })?;
+                .map(|preprocessed| (preprocessed, Vec::new()))
+        } else {
+            preprocessor.preprocess_provider_roots_mapped(&provider, &root_paths, None)
+        }
+        .map_err(|error| {
+            VirtualRuntimeCompileFailure::from_preprocessor(
+                error,
+                preprocessor.dependency_documents(),
+            )
+        })?;
+        if let Some((message, _)) = (!root_paths.is_empty())
+            .then(|| {
+                crate::prepared_source::unit_duplicate_module(
+                    &root_paths,
+                    &unit_ranges,
+                    &preprocessed,
+                )
+            })
+            .flatten()
+        {
+            return Err(VirtualRuntimeCompileFailure::unmapped(
+                CompileError::ModuleSelection(message),
+            ));
+        }
         measurements.record(PipelinePhase::Preprocess, started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             crate::metrics::usize_to_u64(preprocessed.source.len());
@@ -334,10 +407,20 @@ impl VerilogACompiler {
                 content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
             })
             .collect();
+        let (unit_files, unit_warnings) = if root_paths.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            crate::prepared_source::unit_layout(
+                &root_paths,
+                &unit_ranges,
+                &preprocessed.source,
+                &analyzed,
+            )
+        };
         let diagnostics = crate::source_diagnostics::map_diagnostics_with_sources(
             crate::runtime_report::semantic_warning_diagnostics(
                 &preprocessed.source,
-                &analyzed.warnings,
+                &[unit_warnings.as_slice(), analyzed.warnings.as_slice()].concat(),
                 &preprocessed,
             ),
             &preprocessed,
@@ -363,7 +446,7 @@ impl VerilogACompiler {
                     },
                 ),
                 diagnostics,
-                unit_files: Vec::new(),
+                unit_files,
                 source_package: bundle.root_path().to_owned(),
                 source: preprocessed.source,
                 analyzed,
