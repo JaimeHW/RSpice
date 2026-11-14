@@ -52,6 +52,7 @@ mod netlist_first_drawn;
 mod object_properties_drawn;
 mod physical_layout_transactions;
 mod pin_port_placement_drawn;
+mod property_dialog_drawn;
 mod raster_review;
 mod rename;
 mod rename_transactions;
