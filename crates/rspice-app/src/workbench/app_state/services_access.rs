@@ -190,7 +190,7 @@ fn revert_cell_view(
     // A symbol in front is reverted as a symbol edit is made: the wires its
     // placed instances hold follow the pins back to where they were saved.
     let symbol = state.model.workspace.content.active_view == *reference
-        && state.model.workspace.content.active_view_type() == ViewType::Symbol;
+        && state.model.workspace.content.active_view_type() == Some(ViewType::Symbol);
     let reverted = if symbol {
         revert_active_symbol_with(&mut state.design.symbol, &mut state.model, |model| {
             project_lifecycle::revert_cell_view(model, baseline, reference)

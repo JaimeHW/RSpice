@@ -541,7 +541,7 @@ fn schematic_in_front(reads: &Reads<'_, ProjectFeature>) -> bool {
 /// Whether a symbol is the drawing in front.
 fn symbol_in_front(reads: &Reads<'_, ProjectFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
-        && reads.model.workspace.content.active_view_type() == ViewType::Symbol
+        && reads.model.workspace.content.active_view_type() == Some(ViewType::Symbol)
 }
 
 /// Whether the open project holds work a save would write, read as the
@@ -680,7 +680,7 @@ impl CommandSet for ProjectCommand {
             // there is the save itself.
             Self::CheckAndSave
                 if cx.wb.workspace == Workspace::Design
-                    && cx.model.workspace.content.active_view_type() == ViewType::Symbol =>
+                    && cx.model.workspace.content.active_view_type() == Some(ViewType::Symbol) =>
             {
                 cx.wb.outbox.push(ProjectFileAction::Save);
             }

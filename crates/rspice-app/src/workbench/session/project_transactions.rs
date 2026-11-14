@@ -909,7 +909,7 @@ impl AppState {
         // states what the save wrote. The checks are advice: whatever they
         // find, the save goes ahead.
         if self.workbench.workspace == Workspace::Design
-            && self.model.workspace.content.active_view_type() == ViewType::Symbol
+            && self.model.workspace.content.active_view_type() == Some(ViewType::Symbol)
         {
             let facts = self.slot_facts();
             run_active_symbol_pin_checks(&mut self.model, facts);

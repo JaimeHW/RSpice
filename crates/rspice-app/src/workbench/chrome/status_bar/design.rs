@@ -145,7 +145,7 @@ pub(crate) fn symbol_tool_hint(
     wb: &WorkbenchSession,
 ) -> Option<&'static str> {
     (wb.workspace == Workspace::Design
-        && model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+        && model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol)
         && !model.active_view_read_only())
     .then(|| symbol.editor.next_step())
     .flatten()
