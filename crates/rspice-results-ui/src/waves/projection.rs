@@ -343,7 +343,6 @@ fn append_projected_traces(
             kind,
             visible: visible
                 && family_visibility_key.is_none_or(|key| !hidden_family_traces.contains(&key)),
-            hidden_by_default: !visible,
             run_id,
             overlay: false,
             presentation_key,
@@ -835,7 +834,6 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     shape,
                     kind: *signal_kind,
                     visible: *signal_visible,
-                    hidden_by_default: !*signal_visible,
                     run_id: overlay_run.id,
                     overlay: true,
                     presentation_key: *presentation_key,

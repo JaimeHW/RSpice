@@ -127,10 +127,6 @@ pub struct StripTrace {
     pub shape: Arc<SweepShape>,
     pub kind: TraceKind,
     pub visible: bool,
-    /// Hidden only because the dataset does not plot it by default: the
-    /// reader has neither shown nor hidden it. A pane of such traces alone is
-    /// not drawn (see [`StripModel::unit_panes`]).
-    pub hidden_by_default: bool,
     /// The run this trace belongs to (cache-key discriminator).
     pub run_id: u64,
     /// Overlay traces come from a non-active run: same signal hue, reduced
@@ -451,12 +447,11 @@ impl StripModel {
 
     /// The strip's panes: retained signal identities grouped by unit, in the
     /// order the units first appear so a strip's layout is stable across
-    /// visibility changes. A pane with no visible trace remains as the exact
-    /// owner of its hidden signals so its Add signal control can restore one,
-    /// once the reader has hidden one of them or one of its expressions. A
-    /// pane of signals the dataset only hides by default, which nobody has
-    /// plotted, is not drawn, as a waveform viewer shows no strip for a
-    /// signal until it is plotted; those signals wait in the signal browser.
+    /// visibility changes. A pane draws something or is not there: one whose
+    /// signals and expressions are all hidden takes no row, as a waveform
+    /// viewer shows no strip for a signal until it is plotted. Its signals
+    /// wait in the data browser, whose tick brings the pane back, and its
+    /// expressions in the strip header's legend.
     ///
     /// Phase owns a stacked pane of its own — the mockup's Bode instrument
     /// reads magnitude over phase as two weighted panes sharing one X
@@ -464,9 +459,9 @@ impl StripModel {
     /// after the quantity panes so magnitude keeps the primary slot.
     pub fn unit_panes(&self) -> Vec<UnitPane<'_>> {
         let mut panes: Vec<UnitPane<'_>> = Vec::new();
-        // Whether each pane has something the reader plotted or hid: a pane of
-        // signals hidden only by the dataset's default is dropped at the end.
-        let mut chosen: Vec<bool> = Vec::new();
+        // Whether each pane draws anything: one that draws nothing is
+        // dropped at the end, once its hidden expressions have found it.
+        let mut drawn: Vec<bool> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
             let unit = self.trace_unit(trace);
             match panes.iter().position(|pane| pane.unit == unit) {
@@ -474,7 +469,7 @@ impl StripModel {
                     if trace.visible {
                         panes[ordinal].traces.push(index);
                     }
-                    chosen[ordinal] |= !trace.hidden_by_default;
+                    drawn[ordinal] |= trace.visible;
                 }
                 None => {
                     panes.push(UnitPane {
@@ -484,7 +479,7 @@ impl StripModel {
                         hidden_expressions: Vec::new(),
                         unlabeled: false,
                     });
-                    chosen.push(!trace.hidden_by_default);
+                    drawn.push(trace.visible);
                 }
             }
         }
@@ -497,7 +492,7 @@ impl StripModel {
         {
             let unit = self.lane_unit(lane);
             match panes.iter().position(|pane| pane.unit == unit) {
-                Some(ordinal) => chosen[ordinal] = true,
+                Some(ordinal) => drawn[ordinal] = true,
                 None => {
                     panes.push(UnitPane {
                         unit,
@@ -506,7 +501,7 @@ impl StripModel {
                         hidden_expressions: Vec::new(),
                         unlabeled: false,
                     });
-                    chosen.push(true);
+                    drawn.push(true);
                 }
             }
         }
@@ -532,7 +527,7 @@ impl StripModel {
             match owner(&panes, expression) {
                 Some(owner) => {
                     panes[owner].expressions.push(expression.slot);
-                    chosen[owner] = true;
+                    drawn[owner] = true;
                 }
                 None => {
                     panes.push(UnitPane {
@@ -542,20 +537,19 @@ impl StripModel {
                         hidden_expressions: Vec::new(),
                         unlabeled: expression.unknown.is_some(),
                     });
-                    chosen.push(true);
+                    drawn.push(true);
                 }
             }
         }
         for expression in self.expression_panes.iter().filter(|e| !e.visible) {
             if let Some(owner) = owner(&panes, expression) {
                 panes[owner].hidden_expressions.push(expression.slot);
-                chosen[owner] = true;
             }
         }
         let (quantity, phase): (Vec<_>, Vec<_>) = panes
             .into_iter()
-            .zip(chosen)
-            .filter_map(|(pane, chosen)| chosen.then_some(pane))
+            .zip(drawn)
+            .filter_map(|(pane, drawn)| drawn.then_some(pane))
             .partition(|pane| !matches!(pane.unit, "°" | "rad"));
         quantity.into_iter().chain(phase).collect()
     }

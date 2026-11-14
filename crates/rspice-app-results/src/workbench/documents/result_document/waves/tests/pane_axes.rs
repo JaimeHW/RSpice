@@ -622,6 +622,42 @@ fn a_bode_strip_names_each_trace_in_the_pane_that_draws_it() {
     }
 }
 
+/// A pane that draws nothing takes no row: with every voltage of the DC
+/// family hidden the strip is its current pane alone, and plotting V(D)
+/// from the data browser brings the voltage pane back, the two sharing the
+/// strip's height equally.
+#[test]
+fn a_pane_with_nothing_drawn_takes_no_row_until_a_signal_is_plotted() {
+    use crate::workbench::documents::result_document::browser_plot::set_result_signal_plotted;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    let ctx = context(crate::ui::Theme::default());
+    let mut state = nmos_output_family();
+    let output = settled(&ctx, &mut state, FRAME);
+    assert_eq!(plot_areas(&ctx, &output).len(), 1, "one pane row");
+    assert!(
+        controls(&output, "V pane").is_empty(),
+        "no header for the hidden voltages"
+    );
+    let key = {
+        let models = super::lanes::strip(&mut state);
+        let model = &models[0];
+        let trace = model
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name.starts_with("V(D)"))
+            .expect("the run keeps V(D)");
+        SourceWaveformPresentationKey::new(model.analysis_key, trace.source_waveform_name.clone())
+    };
+    set_result_signal_plotted(&mut state.results_parts(), &key, true);
+    let output = settled(&ctx, &mut state, FRAME);
+    let areas = plot_areas(&ctx, &output);
+    assert_eq!(areas.len(), 2, "V(D) brings its pane back");
+    assert!(
+        (areas[0].height() - areas[1].height()).abs() <= 1.0,
+        "equal heights: {areas:?}"
+    );
+}
+
 /// Every Y grid line carries its label, and the unit caption overlaps none
 /// of them, from a tall strip down to four panes in a short one.
 #[test]

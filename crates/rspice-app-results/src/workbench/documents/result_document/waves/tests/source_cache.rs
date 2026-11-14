@@ -280,16 +280,18 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         let generation = results.models.generation();
         assert_ne!(generation, previous_generation);
         previous_generation = generation;
-        let pane = hidden[0].unit_panes().remove(0);
-        let envelope = super::super::extent::family_envelopes(
+        // With every member hidden the pane takes no row and asks for no
+        // envelope.
+        let Some(pane) = hidden[0].unit_panes().into_iter().next() else {
+            assert!(hidden[0].traces.iter().all(|trace| !trace.visible));
+            continue;
+        };
+        super::super::extent::family_envelopes(
             &mut results.plans.envelopes,
             generation,
             &hidden[0],
             &pane,
         );
-        if hidden[0].traces.iter().all(|trace| !trace.visible) {
-            assert!(envelope.series().is_empty());
-        }
     }
 }
 

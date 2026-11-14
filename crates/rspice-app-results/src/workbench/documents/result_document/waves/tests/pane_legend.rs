@@ -159,7 +159,7 @@ fn an_expression_on_a_pane_of_its_own_is_named_in_it() {
 }
 
 /// An expression on a pane of signals hides from its entry's swatch as a
-/// signal does, then waits behind the pane's hidden control, and ticking it
+/// signal does, then waits in the pane's trace list, and ticking it
 /// there draws it again.
 #[test]
 fn an_expression_hides_and_shows_from_its_pane_legend() {
@@ -194,7 +194,7 @@ fn an_expression_hides_and_shows_from_its_pane_legend() {
         egui::PointerButton::Primary,
     );
     let menu = run(&ctx, &mut state, Vec::new());
-    let item = text(&menu, DOUBLE).expect("the hidden control lists the expression");
+    let item = text(&menu, DOUBLE).expect("the trace list lists the expression");
     click(
         &ctx,
         &mut state,
@@ -450,13 +450,12 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
 
 /// The C4 strip's currents, which the run keeps but does not plot and
 /// nobody has plotted, open no pane: the strip draws its volts and its
-/// staircase, and the currents wait in the signal browser. Once the reader
-/// has hidden one, the currents' pane is its header alone, the row that
-/// offers them, with no autoscale and no log toggle for an axis the pane
-/// does not draw, and its trace list leads the row, as nothing is named
-/// before it, where the volts pane's follows its entries.
+/// staircase, and the currents wait in the data browser. A current the
+/// reader plots opens the currents' pane, with its own trace list and axis
+/// controls, and hiding it again takes the pane away: a pane that draws
+/// nothing takes no row.
 #[test]
-fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
+fn a_pane_whose_signals_are_all_hidden_takes_no_row() {
     let (mut state, _) = sar_strip(BusRadix::Unsigned, false);
     let ctx = theme_context();
     let output = settled(&ctx, &mut state);
@@ -464,6 +463,13 @@ fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
         text(&output, "62 hidden").is_none() && text(&output, "45 hidden").is_some(),
         "no pane is drawn for currents nobody plotted"
     );
+    let axis_controls = |output: &FullOutput| {
+        controls(output)
+            .into_iter()
+            .filter(|(_, label, _)| label.as_deref() == Some("log Y"))
+            .count()
+    };
+    let before = axis_controls(&output);
     let (analysis, waveform) = {
         let models = super::lanes::strip(&mut state);
         let current = models[0]
@@ -474,32 +480,23 @@ fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
         (models[0].analysis_index(), current.waveform_index)
     };
     toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    let output = settled(&ctx, &mut state);
+    assert!(
+        text(&output, "61 hidden").is_some(),
+        "the plotted current's pane offers the other currents"
+    );
+    assert_eq!(
+        axis_controls(&output),
+        before + 1,
+        "and its own axis controls"
+    );
     toggle_visibility(&mut state.results_parts(), analysis, waveform);
     let output = settled(&ctx, &mut state);
-    let currents = text(&output, "62 hidden").expect("the currents' row offers them");
-    let volts = text(&output, "45 hidden").expect("the volts pane's row");
     assert!(
-        currents.left() < volts.left(),
-        "the currents' list leads its row and the volts' follows its entries: \
-         currents {currents:?}, volts {volts:?}"
+        text(&output, "61 hidden").is_none() && text(&output, "62 hidden").is_none(),
+        "hidden again, the current takes its pane away"
     );
-    let on_row = |row: egui::Rect, name: &str| {
-        controls(&output)
-            .into_iter()
-            .filter(|(_, label, rect)| {
-                label.as_deref() == Some(name)
-                    && rect.is_some_and(|rect| (rect.center().y - row.center().y).abs() < 6.0)
-            })
-            .count()
-    };
-    for name in ["log Y", "Fit Y to the traces in view"] {
-        assert_eq!(on_row(volts, name), 1, "the volts pane offers {name:?}");
-        assert_eq!(
-            on_row(currents, name),
-            0,
-            "the currents' row offers {name:?}"
-        );
-    }
+    assert_eq!(axis_controls(&output), before);
 }
 
 /// A pane whose plotted traces hold no finite value has nothing to draw

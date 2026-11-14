@@ -408,23 +408,32 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
     );
 }
 
-/// A pane whose signal the reader hid stays, as the owner of the signal it
-/// can show again.
+/// A pane whose only signal the reader hid takes no row, and showing the
+/// signal again brings the pane back.
 #[test]
-fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
+fn a_pane_whose_signal_the_reader_hid_returns_when_it_is_shown() {
     let mut state = marker_fixture();
+    let panes = |state: &mut ResultsTestHost| -> Vec<(String, usize)> {
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        models[0]
+            .unit_panes()
+            .iter()
+            .map(|pane| (pane.unit.to_owned(), pane.traces.len()))
+            .collect()
+    };
     toggle_visibility(&mut state.results_parts(), 0, 0);
-    let presentation = state.model.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        presentation.complex_number_display(),
-        &Tokens::default(),
+    assert!(
+        panes(&mut state).is_empty(),
+        "the hidden signal's pane takes no row"
     );
-    let panes = models[0].unit_panes();
-    assert_eq!(panes.len(), 1);
-    assert_eq!(panes[0].unit, "V");
-    assert!(panes[0].traces.is_empty());
+    toggle_visibility(&mut state.results_parts(), 0, 0);
+    assert_eq!(panes(&mut state), [("V".to_owned(), 1)]);
 }
 
 #[test]

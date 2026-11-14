@@ -630,19 +630,20 @@ fn pane_units(state: &mut ResultsTestHost) -> Vec<String> {
         .collect()
 }
 
-/// A pane whose traces the reader has hidden is its header row and nothing
-/// below it: the shared axis starts right under it, and no hint fills a pane
-/// height with a sentence.
+/// A pane whose traces the reader has hidden takes no row: no header, no
+/// plot and no hint filling a pane height with a sentence. Its signals wait
+/// in the data browser.
 #[test]
-fn a_pane_with_every_trace_hidden_is_its_header_alone() {
+fn a_pane_with_every_trace_hidden_takes_no_row() {
     let ctx = themed_context(crate::ui::Theme::default());
     let mut state = review_strip(false);
     // The reader plots one of the currents and hides it again from the
     // legend.
     let (analysis, waveform, ..) = first_current(&mut state);
     toggle_visibility(&mut state.results_parts(), analysis, waveform);
-    toggle_visibility(&mut state.results_parts(), analysis, waveform);
     assert_eq!(pane_units(&mut state), ["V", "A"]);
+    toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    assert_eq!(pane_units(&mut state), ["V"]);
     let output = settled(&ctx, &mut state);
     let found = texts(&output);
     assert!(
@@ -651,22 +652,13 @@ fn a_pane_with_every_trace_hidden_is_its_header_alone() {
             .any(|(text, _)| text.starts_with("No visible traces")),
         "a hidden pane states nothing in a pane-sized well"
     );
-    let header = found
-        .iter()
-        .filter(|(text, _)| text.ends_with(" hidden"))
-        .map(|(_, rect)| *rect)
-        .max_by(|a, b| a.top().total_cmp(&b.top()))
-        .expect("the hidden pane offers its traces in its header");
-    let axis = found
-        .iter()
-        .find(|(text, _)| text.starts_with("TIME"))
-        .map(|(_, rect)| *rect)
-        .expect("the shared axis labels itself");
-    assert!(
-        axis.top() - header.bottom() < rspice_results_ui::waves::header::WAVE_PANE_HEADER_HEIGHT,
-        "the axis follows the header: header ends at {}, axis starts at {}",
-        header.bottom(),
-        axis.top()
+    assert_eq!(
+        found
+            .iter()
+            .filter(|(text, _)| text.ends_with(" hidden"))
+            .count(),
+        1,
+        "only the voltage pane's row is drawn"
     );
 }
 
@@ -674,7 +666,7 @@ fn a_pane_with_every_trace_hidden_is_its_header_alone() {
 /// plotted, is not drawn: the review's currents open no "A" pane, as a
 /// waveform viewer shows no strip for a signal until it is plotted. Ticked in
 /// the signal browser, a current opens its pane; unticked there, it leaves
-/// none behind; hidden from its pane's legend, it keeps the pane's header.
+/// none behind; hidden from its pane's legend, it takes the pane with it.
 #[test]
 fn a_pane_only_the_default_hides_is_not_drawn() {
     use crate::workbench::documents::result_document::browser_plot::set_result_signal_plotted;
@@ -707,8 +699,8 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
     toggle_visibility(&mut state.results_parts(), analysis, waveform);
     assert_eq!(
         pane_units(&mut state),
-        ["V", "A"],
-        "hidden from its legend, the current keeps its pane's header"
+        ["V"],
+        "hidden from its legend, the current takes its pane with it"
     );
 
     // With nothing plotted at all, the strip says where signals are plotted
