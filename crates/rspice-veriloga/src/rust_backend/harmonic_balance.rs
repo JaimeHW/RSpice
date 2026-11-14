@@ -23,8 +23,14 @@
 //! whose candidate is its own leaf on every path is never assigned by the
 //! evaluated body: an initialization phase, which cannot read the circuit,
 //! sets it once. Either way the value is the same at every sample. A slot
-//! that is both read back and assigned by the body keeps history, and refuses.
+//! that is both read back and assigned by the body goes to the proof in
+//! `super::held_state`, which correlates the branches an instance's
+//! parameters fix: a slot assigned before every read those parameters allow,
+//! or set only at the initial step from parameters, holds no history, and
+//! harmonic balance evaluates its own initial step before it samples. Any
+//! other slot refuses, by name.
 
+use super::held_state::{HeldClass, HeldStateProof};
 use crate::canonical_ir::cfg::{CfgTerminator, CfgValueKind};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::charge::{ChargeSplitObstacle, block_parameter_arguments};
@@ -62,8 +68,9 @@ pub(super) fn harmonic_balance_refusal(
     if let Some((last, rest)) = retained.split_last() {
         return Some(if rest.is_empty() {
             format!(
-                "`{last}` is read before it is assigned, so it keeps its value from the last \
-                 accepted time point, which no harmonic-balance spectrum carries"
+                "`{last}` is read before it is assigned on a path its parameters do not rule \
+                 out, so it keeps its value from the last accepted time point, which no \
+                 harmonic-balance spectrum carries"
             )
         } else {
             let rest = rest
@@ -72,8 +79,9 @@ pub(super) fn harmonic_balance_refusal(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "{rest} and `{last}` are read before they are assigned, so they keep their values \
-                 from the last accepted time point, which no harmonic-balance spectrum carries"
+                "{rest} and `{last}` are read before they are assigned on a path their parameters \
+                 do not rule out, so they keep their values from the last accepted time point, \
+                 which no harmonic-balance spectrum carries"
             )
         });
     }
@@ -176,7 +184,8 @@ fn read_slots(kind: &CfgValueKind) -> std::ops::Range<usize> {
 }
 
 /// The variables, by the names their authors declared, that the residual
-/// reads back from an earlier evaluation and the body assigns.
+/// reads back from an earlier evaluation, the body assigns, and
+/// [`HeldStateProof`] cannot prove free of history.
 fn retained_variables(
     artifact: &CanonicalIrArtifact,
     cfg: &CfgModel,
@@ -201,12 +210,53 @@ fn retained_variables(
         .filter(|variable| variable.is_state)
         .map(|variable| variable.name.as_str())
         .collect();
+    let held: Vec<usize> = cfg
+        .event_state_candidates
+        .iter()
+        .enumerate()
+        .filter(|&(slot, &candidate)| {
+            read_back[slot] && assigned_by_the_body(function, slot, candidate, incoming)
+        })
+        .map(|(slot, _)| slot)
+        .collect();
+    if held.is_empty() {
+        return Vec::new();
+    }
+    let mut proof = HeldStateProof::new(function);
+    let roots: Vec<ValueId> = cfg
+        .residuals
+        .iter()
+        .copied()
+        .chain(cfg.activations.iter().flatten().copied())
+        .collect();
+    let leaves: Vec<Vec<ValueId>> = held
+        .iter()
+        .map(|&slot| {
+            function
+                .values
+                .iter()
+                .filter(|value| read_slots(&value.kind).contains(&slot))
+                .map(|value| value.id)
+                .collect()
+        })
+        .collect();
+    let every_leaf: Vec<ValueId> = leaves.iter().flatten().copied().collect();
+    if proof
+        .as_mut()
+        .and_then(|proof| proof.prepare(&every_leaf, &roots))
+        .is_none()
+    {
+        proof = None;
+    }
     let mut names = Vec::new();
-    for (slot, &candidate) in cfg.event_state_candidates.iter().enumerate() {
-        if !read_back[slot] || !assigned_by_the_body(function, slot, candidate, incoming) {
+    for (&slot, leaves) in held.iter().zip(&leaves) {
+        let class = proof.as_mut().map_or(HeldClass::History, |proof| {
+            proof.classify(leaves, &roots, cfg.event_state_candidates[slot])
+        });
+        let name = state_names.get(slot).copied().unwrap_or("<state>");
+        if class != HeldClass::History {
             continue;
         }
-        let name = state_names.get(slot).copied().unwrap_or("<state>");
         let name = name.split_once('[').map_or(name, |(base, _)| base);
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());

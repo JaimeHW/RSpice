@@ -35,6 +35,7 @@ mod error;
 mod expr;
 mod files;
 mod harmonic_balance;
+mod held_state;
 mod manifest;
 mod names;
 mod noise;

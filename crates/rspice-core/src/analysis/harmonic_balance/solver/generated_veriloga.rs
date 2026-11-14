@@ -271,28 +271,34 @@ impl HbGeneratedDevice {
             probe
                 .begin_analysis(GeneratedAnalysisKind::Tran, simparams, num_nodes)
                 .map_err(|error| failure("analysis setup", &error))?;
-            probe.set_analysis_step(false, false);
             probe.set_timepoint(0.0, interval, coefficients);
         }
+        // The analysis's initial step is evaluated and accepted once, so a
+        // variable the generator proved set only there, from parameters,
+        // holds at every sample the value it holds through a transient; the
+        // reference evaluation that follows is an ordinary one.
         let reference = vec![0.0; unknowns];
-        for probe in [&mut sampler.static_probe, &mut sampler.charge_probe] {
-            Self::probe(
-                probe,
-                &mut sampler.matrix,
-                ProbeBuffers {
-                    rhs: &mut sampler.rhs,
-                    residual: &mut sampler.static_residual,
-                    rows: &sampler.rows,
-                },
-                &reference,
-                num_nodes,
-                simparams,
-            )
-            .and_then(|()| {
-                probe
-                    .advance_state()
-                    .map_err(|error| failure("reference charge", &error))
-            })?;
+        for initial_step in [true, false] {
+            for probe in [&mut sampler.static_probe, &mut sampler.charge_probe] {
+                probe.set_analysis_step(initial_step, false);
+                Self::probe(
+                    probe,
+                    &mut sampler.matrix,
+                    ProbeBuffers {
+                        rhs: &mut sampler.rhs,
+                        residual: &mut sampler.static_residual,
+                        rows: &sampler.rows,
+                    },
+                    &reference,
+                    num_nodes,
+                    simparams,
+                )
+                .and_then(|()| {
+                    probe
+                        .advance_state()
+                        .map_err(|error| failure("reference charge", &error))
+                })?;
+            }
         }
         sampler.read_initial_conditions();
         let transfers = sampler

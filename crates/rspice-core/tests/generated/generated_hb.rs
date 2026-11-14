@@ -403,6 +403,124 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 0 b t bsimsoi__18c250bc\n",
             "d",
         ),
+        #[cfg(feature = "veriloga-model-vbic13")]
+        (
+            "bipolar transistor (VBIC 1.3)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 vbic13\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+        (
+            "self-heating bipolar transistor (VBIC 1.3 3T et)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 t vbic13_3t_et\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-vbic13-4t")]
+        (
+            "bipolar transistor with substrate (VBIC 1.3 4T)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 vbic13_4t\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-hicuml2va")]
+        (
+            "bipolar transistor (HICUM/L2)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 t hicuml2va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-juncap200")]
+        (
+            "junction diode (JUNCAP200)",
+            "V1 in 0 SIN(0.3 0.6 1meg)\nR1 in a 1k\nXD a 0 juncap200\n",
+            "a",
+        ),
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        (
+            "MOSFET (EKV 2.6)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 ekv_va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimbulk")]
+        (
+            "MOSFET (BSIM-BULK)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 t bsimbulk\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimcmg111")]
+        (
+            "FinFET (BSIM-CMG 111)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 t bsimcmg111\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimcmg-va")]
+        (
+            "FinFET (BSIM-CMG 112)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 t bsimcmg_va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+        (
+            "SOI MOSFET (HiSIM-SOI, four terminals)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 hisimsoi_va__242bc21d\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+        (
+            "SOI MOSFET (HiSIM-SOI, body contact)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 hisimsoi_va__38074d06\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+        (
+            "SOI MOSFET (HiSIM-SOI, body contact and thermal node)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 t hisimsoi_va__5be18005\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp102va")]
+        (
+            "MOSFET (PSP 102)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 psp102va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp102bva")]
+        (
+            "MOSFET (PSP 102, binned)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 psp102bva\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp102eva")]
+        (
+            "MOSFET (PSP 102, electrical)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 psp102eva\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp104va")]
+        (
+            "MOSFET (PSP 104)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 psp104va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-psp104tva")]
+        (
+            "self-heating MOSFET (PSP 104)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 t psp104tva\n",
+            "d",
+        ),
     ]
 }
 
@@ -578,29 +696,32 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 
 /// A generated model whose generator could not prove its residual
 /// `F(x) + dQ(x)/dt` is refused before solving, by instance and module, with
-/// the generator's reason: a variable read back after the body assigned it
-/// (EKV 2.6, HICUM/L2). So is one whose harmonics no settled transient has
-/// confirmed, with what is missing (BSIM-SOI 4.6.1 and e2aff994).
+/// the generator's reason: a variable read before the body assigns it on a
+/// path its parameters do not rule out (PSP 103, BSIM-CMG 107). So is one
+/// whose harmonics no settled transient has confirmed, with what is missing
+/// (BSIM-SOI 4.6.1 and e2aff994).
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
     use rspice_core::{SimulationError, UnsupportedCapabilityError};
     let cases: Vec<(&str, &str, &str, &str)> = vec![
-        #[cfg(feature = "veriloga-model-ekv-va")]
+        #[cfg(feature = "veriloga-model-psp103va")]
         (
-            "XE d 0 0 0 ekv_va",
-            "XE",
-            "ekv_va",
-            "`E0_Q_1` is read before it is assigned, so it keeps its value from the last \
+            "XM d d 0 0 psp103va",
+            "XM",
+            "psp103va",
+            "`idmult`, `vj`, `zinv`, `vjsrh` and `vav` are read before they are assigned on a \
+             path their parameters do not rule out, so they keep their values from the last \
              accepted time point, which no harmonic-balance spectrum carries",
         ),
-        #[cfg(feature = "veriloga-model-hicuml2va")]
+        #[cfg(feature = "veriloga-model-bsimcmg107")]
         (
-            "XQ d d 0 0 t hicuml2va",
-            "XQ",
-            "hicuml2va",
-            "`pterm` is read before it is assigned, so it keeps its value from the last \
-             accepted time point, which no harmonic-balance spectrum carries",
+            "XM d d 0 0 bsimcmg107",
+            "XM",
+            "bsimcmg107",
+            "`T3` is read before it is assigned on a path its parameters do not rule out, so it \
+             keeps its value from the last accepted time point, which no harmonic-balance \
+             spectrum carries",
         ),
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         (
@@ -666,13 +787,14 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
     use rspice_core::{SimulationError, UnsupportedCapabilityError};
     let cases: Vec<(&str, &str, &str, &str)> = vec![
-        #[cfg(feature = "veriloga-model-ekv-va")]
+        #[cfg(feature = "veriloga-model-bsimcmg107")]
         (
-            "XE d 0 0 0 ekv_va",
-            "XE",
-            "ekv_va",
-            "`E0_Q_1` is read before it is assigned, so it keeps its value from the last \
-             accepted time point, which no harmonic-balance spectrum carries",
+            "XM d d 0 0 bsimcmg107",
+            "XM",
+            "bsimcmg107",
+            "`T3` is read before it is assigned on a path its parameters do not rule out, so it \
+             keeps its value from the last accepted time point, which no harmonic-balance \
+             spectrum carries",
         ),
         #[cfg(feature = "veriloga-model-asmesd-dio")]
         ("XA d 0 asmesd_dio", "XA", "asmesd_dio", CARRIED_SITE),
