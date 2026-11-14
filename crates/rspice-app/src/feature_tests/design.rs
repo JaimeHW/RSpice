@@ -31,6 +31,7 @@ mod hierarchy_create;
 mod hierarchy_create_drawn;
 mod hierarchy_descend;
 mod hierarchy_descend_drawn;
+mod hierarchy_net_highlight;
 mod import_workflow;
 mod inline_instance;
 mod inline_instance_drawn;
