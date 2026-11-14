@@ -14,6 +14,9 @@ pub mod preparation;
 #[cfg(test)]
 mod qpss_artifact_tests;
 mod snapshot;
+mod source_lines;
+pub use source_lines::TaskSourceLocator;
+pub(crate) use source_lines::included_line_map;
 mod task_preparation;
 
 pub use crate::preparation::{PreparationError, PreparationStage};

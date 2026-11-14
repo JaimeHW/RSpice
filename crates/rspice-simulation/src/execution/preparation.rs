@@ -626,6 +626,12 @@ struct ExpandedManualDeck {
     deck_hdl_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     deck_hdl_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
     has_project_technology: bool,
+    /// The include expansion's line map and the text it maps, when the deck
+    /// included a file.
+    source_lines: Option<(
+        std::sync::Arc<rspice_core::netlist::ExpandedLineMap>,
+        String,
+    )>,
 }
 
 /// The cells the manual deck `manual` offers its project's HDL designs as
@@ -745,13 +751,19 @@ fn expand_manual_deck<R, A>(
     };
     // A source line an included file writes is sealed where the expansion
     // puts it, by the file and line that wrote it.
-    let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
+    let crate::netlist_preparation::dependencies::ExpandedManualDependencies {
+        expanded,
+        canonical_origin,
+        dependencies: sealed_source_dependencies,
+        source_lines,
+    } = expand_manual_dependencies(
         &sealed_hdl.source,
         origin,
         &inputs.include_search(),
         &sealed_models,
         &|location| sealed_hdl.included_line(location),
     )?;
+    let source_lines = source_lines.map(|lines| (lines, expanded.clone()));
     let crate::netlist_preparation::SealedDeckHdl {
         runtimes: deck_hdl_runtimes,
         dependencies: deck_hdl_dependencies,
@@ -784,6 +796,7 @@ fn expand_manual_deck<R, A>(
         deck_hdl_runtimes,
         deck_hdl_dependencies,
         has_project_technology,
+        source_lines,
     })
 }
 
@@ -804,6 +817,7 @@ pub fn build_prepared_manual_deck<R, A>(
         deck_hdl_runtimes,
         deck_hdl_dependencies,
         has_project_technology,
+        source_lines,
     } = expand_manual_deck(inputs, &manual, true)?;
     // A sealed Verilog-A source is a dependency like an include: the run
     // refuses to dispatch once the host no longer gives the bytes it sealed.
@@ -814,7 +828,24 @@ pub fn build_prepared_manual_deck<R, A>(
     // read from, control regions and all. Each is worded as the engine words
     // the parse warnings it also logs, "line 5: …", so a run can tell the
     // engine repeating one from news.
-    let parsed = rspice_core::Netlist::parse(&expanded).ok();
+    let parsed = match rspice_core::Netlist::parse(&expanded) {
+        Ok(parsed) => Some(parsed),
+        Err(error) => {
+            // A deck that included files is refused here, where the card
+            // that failed can still be named by the file and line that wrote
+            // it; the checks after this parse the expanded text and could
+            // name only its line.
+            if let Some(lines) = source_lines.as_ref().and_then(|(lines, expansion)| {
+                super::source_lines::aligned_line_map(lines, expansion, &expanded)
+            }) {
+                return Err(PreparationError::new(
+                    PreparationStage::SourceChecks,
+                    super::source_lines::located_parse_message(error.to_string(), &lines),
+                ));
+            }
+            None
+        }
+    };
     if let Some(parsed) = &parsed {
         reject_unresolved_models_in(parsed, has_project_technology)?;
     }
@@ -883,9 +914,21 @@ pub fn build_prepared_manual_deck<R, A>(
         &project_veriloga_runtimes,
     )
     .map_err(|error| {
+        // A card an included file wrote is named by that file and line, as
+        // a parse of the files names it.
+        let lines = source_lines.as_ref().and_then(|(lines, expansion)| {
+            super::source_lines::aligned_line_map(lines, expansion, &expanded)
+        });
+        let messages = error
+            .into_messages()
+            .into_iter()
+            .map(|message| match &lines {
+                Some(lines) => super::source_lines::located_parse_message(message, lines),
+                None => message,
+            });
         PreparationError::new(
             PreparationStage::SourceChecks,
-            error.into_messages().join("; "),
+            messages.collect::<Vec<_>>().join("; "),
         )
     })?;
     let source_digest = manual_executable_source_digest(&expanded);
@@ -973,6 +1016,10 @@ pub fn build_prepared_manual_deck<R, A>(
         cross_probe: None,
         touchstone_export,
         sealed_source_dependencies,
+    })
+    .map(|snapshot| match source_lines {
+        Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
+        None => snapshot,
     })
 }
 

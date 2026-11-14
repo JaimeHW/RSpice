@@ -367,6 +367,40 @@ impl SealedModelExecutionSources {
         Ok((expanded, processor.resolved_dependencies().to_vec()))
     }
 
+    /// [`Self::expand_root_dependencies`], with the file and line that wrote
+    /// each line of the expanded text.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn expand_root_dependencies_with_line_map(
+        &self,
+        root_path: &Path,
+        root_source: &str,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<
+        (
+            String,
+            rspice_core::netlist::ExpandedLineMap,
+            Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+        ),
+        String,
+    > {
+        let bundle = self.bundle_for_root(root_path, root_source)?;
+        let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(root_path, bundle);
+        let (expanded, lines) = processor
+            .expand_content_rewriting_with_line_map_and_abort(
+                root_source,
+                root_path,
+                &mut |_, _| None,
+                abort,
+            )
+            .map_err(|error| {
+                format!(
+                    "Could not expand authenticated dependencies for '{}': {error}",
+                    root_path.display()
+                )
+            })?;
+        Ok((expanded, lines, processor.resolved_dependencies().to_vec()))
+    }
+
     /// Freeze the exact model namespace for the nominal/reference run.
     ///
     /// An explicit per-library selection is authoritative for that library.

@@ -192,12 +192,16 @@ pub fn prepare_headless_run(
     let (origin, mut processor) = source_processor(input.origin, input.resolver)?;
     processor = processor.with_resource_limits(limits);
     let included = &input.included_hdl_lines;
-    let expanded = processor.expand_content_rewriting_with_abort(
+    let (expanded, source_lines) = processor.expand_content_rewriting_with_line_map_and_abort(
         input.source,
         &origin,
         &mut |location, _| crate::netlist_preparation::included_hdl_line(included, location),
         abort,
     )?;
+    // Kept with the text it maps, to read each task's reported locations
+    // back to the included files that wrote them.
+    let source_lines =
+        super::included_line_map(source_lines).map(|lines| (lines, expanded.clone()));
     let sealed_source_dependencies = processor.resolved_dependencies().to_vec();
     // A `d_process` program starts from the root deck's directory, as the
     // CLI starts it. A sealed bundle has no directory to start one from.
@@ -370,7 +374,10 @@ pub fn prepare_headless_run(
         &|_| {},
     )?;
     check_abort(abort)?;
-    Ok(snapshot)
+    Ok(match source_lines {
+        Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
+        None => snapshot,
+    })
 }
 
 fn source_processor(

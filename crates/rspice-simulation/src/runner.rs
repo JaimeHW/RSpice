@@ -139,6 +139,10 @@ pub struct SimulationRunner {
     /// Completed inline result waiting for the controller to poll it.
     pending_result: Option<Result<SimulationResult, SimulationError>>,
 
+    /// Reads the running task's reported locations back to the files that
+    /// wrote them, when its deck expanded included files.
+    source_locator: crate::execution::TaskSourceLocator,
+
     /// Browser worker state. Native builds use `thread_handle`.
     #[cfg(target_arch = "wasm32")]
     worker_handle: wasm_worker::WorkerHandle,
@@ -165,6 +169,7 @@ impl SimulationRunner {
             transient_states: Arc::default(),
             thread_handle: None,
             pending_result: None,
+            source_locator: Default::default(),
             #[cfg(target_arch = "wasm32")]
             worker_handle: wasm_worker::WorkerHandle::new(),
         }
@@ -377,7 +382,7 @@ impl SimulationRunner {
         if self.abort_flag.load(Ordering::SeqCst) {
             Err(SimulationError::Aborted)
         } else {
-            result
+            result.map_err(|error| self.source_locator.locate(error))
         }
     }
 
@@ -433,8 +438,11 @@ impl SimulationRunner {
         stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
         let transient_states = dispatch.transient_state_role();
+        let source_locator = dispatch.source_locator();
         let (request, input) = prepared_request(dispatch, stream_transient_samples);
-        self.start_request(request, input, transient_states)
+        self.start_request(request, input, transient_states)?;
+        self.source_locator = source_locator;
+        Ok(())
     }
 
     /// Start a simulation with the given configuration
@@ -481,6 +489,7 @@ impl SimulationRunner {
         }
 
         // Reset state
+        self.source_locator = Default::default();
         self.take_monte_carlo_checkpoint();
         self.take_transient_checkpoint();
         self.take_task_transient_checkpoints();

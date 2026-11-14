@@ -665,6 +665,9 @@ pub struct AuthorizedTaskDispatch {
     execution_limits: rspice_core::ResourceLimits,
     transient_state: Option<rspice_results::provenance::AnalysisResultTransientState>,
     bound_state_readers: Vec<bound_cards::BoundStateReader>,
+    /// Where each line of `executable_netlist` was written, as far as the
+    /// run's expansion map still describes it.
+    source_lines: Option<Arc<rspice_core::netlist::ExpandedLineMap>>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -870,6 +873,12 @@ impl ResolvedTaskDispatch {
             execution_limits: self.dispatch.execution_limits,
         }
     }
+
+    /// What reads this task's reported locations back to the files that
+    /// wrote them.
+    pub fn source_locator(&self) -> super::TaskSourceLocator {
+        super::TaskSourceLocator(self.dispatch.source_lines.clone())
+    }
 }
 
 /// What a resolved task hands the runner.
@@ -984,6 +993,10 @@ pub struct PreparedRunSnapshot {
     cross_probe: Option<CrossProbeSnapshot>,
     touchstone_export: TouchstoneExportPolicy,
     sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    /// The file and line that wrote each line of `executable_netlist`, when
+    /// it expanded included files; what every task's reported location is
+    /// read back through.
+    source_lines: Option<Arc<rspice_core::netlist::ExpandedLineMap>>,
 }
 
 impl std::fmt::Debug for PreparedRunSnapshot {
@@ -1033,6 +1046,20 @@ impl PreparedRunSnapshot {
             &rspice_core::NoAbort,
             &|_| {},
         )
+    }
+
+    /// This snapshot with the line map of the include expansion its deck was
+    /// derived from, `expanded`: the part that still describes the deck.
+    #[must_use]
+    pub(crate) fn with_source_lines(
+        mut self,
+        expanded: &str,
+        lines: Option<Arc<rspice_core::netlist::ExpandedLineMap>>,
+    ) -> Self {
+        self.source_lines = lines.and_then(|lines| {
+            super::source_lines::aligned_line_map(&lines, expanded, &self.executable_netlist)
+        });
+        self
     }
 
     /// Policy for validating materialized sources, including cards introduced
@@ -1691,6 +1718,7 @@ impl PreparedRunSnapshot {
             cross_probe: parts.cross_probe,
             touchstone_export: parts.touchstone_export,
             sealed_source_dependencies: parts.sealed_source_dependencies,
+            source_lines: None,
         };
 
         // Preflight/dispatch parity, enforced where every caller passes.
@@ -1784,7 +1812,11 @@ impl PreparedRunSnapshot {
         let hierarchy_map = self
             .receipt_hierarchy_map()
             .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
+        let source_lines = self.source_lines.as_ref();
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
+        let run_source_lines = source_lines.and_then(|lines| {
+            super::source_lines::aligned_line_map(lines, &executable_netlist, &executable_netlist)
+        });
         let default_touchstone_export = self.touchstone_export.clone();
         let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
         let measurement_references = self.measurement_references.clone();
@@ -1819,6 +1851,12 @@ impl PreparedRunSnapshot {
                     source_basis_digest: prepared
                         .source_basis_digest
                         .expect("prepared task has a source basis"),
+                    source_lines: match (&prepared.executable_netlist_override, source_lines) {
+                        (Some(deck), Some(lines)) => {
+                            super::source_lines::aligned_line_map(lines, &executable_netlist, deck)
+                        }
+                        _ => run_source_lines.clone(),
+                    },
                     executable_netlist: prepared
                         .executable_netlist_override
                         .map(Arc::<str>::from)

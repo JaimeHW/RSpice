@@ -25,6 +25,9 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::config::ExpressionDialect;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
+mod expanded_lines;
+pub use expanded_lines::ExpandedLineMap;
+
 /// One source-aware item in an include-expanded netlist.
 ///
 /// Source boundaries are out-of-band so they cannot collide with authored
@@ -1139,16 +1142,53 @@ impl IncludeProcessor {
         rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.expand_content_rewriting_into(content, current_path, rewrite, None, abort)
+    }
+
+    /// [`Self::expand_content_rewriting_with_abort`], with the file and line
+    /// that wrote each line of the expanded text.
+    pub fn expand_content_rewriting_with_line_map_and_abort(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(String, ExpandedLineMap), ParseWithAbortError> {
+        let mut lines = ExpandedLineMap::default();
+        let expanded = self.expand_content_rewriting_into(
+            content,
+            current_path,
+            rewrite,
+            Some(&mut lines),
+            abort,
+        )?;
+        Ok((expanded, lines))
+    }
+
+    fn expand_content_rewriting_into(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
+        mut lines: Option<&mut ExpandedLineMap>,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         self.resolved_dependencies.clear();
         let expanded = self.expand_content_mapped_with_abort(content, current_path, abort)?;
         let mut output = String::with_capacity(expanded.rendered_bytes);
         for item in &expanded.items {
             if let ExpandedSourceItem::Line { text, origin } = item {
-                match rewrite(origin, text) {
-                    Some(rewritten) => output.push_str(&rewritten),
-                    None => output.push_str(text),
-                }
+                let rewritten = rewrite(origin, text);
+                let text = rewritten.as_deref().unwrap_or(text);
+                output.push_str(text);
                 output.push('\n');
+                if let Some(lines) = lines.as_deref_mut() {
+                    // A line rewritten into several is written, every line
+                    // of it, where the line it replaces was.
+                    for _ in 0..text.matches('\n').count() + 1 {
+                        lines.push(origin);
+                    }
+                }
             }
         }
         Ok(output)

@@ -158,6 +158,10 @@ impl WorkerHost {
             log: Vec::new(),
             gap: None,
         };
+        // The worker reports locations on the expanded deck it solved; they
+        // are read back to the files that wrote them, as the application's
+        // runner reads them.
+        let locator = dispatch.source_locator();
         let request = match worker_wire_request(id, dispatch) {
             Ok(request) => request,
             Err(error) => {
@@ -250,6 +254,7 @@ impl WorkerHost {
                     run.outcome = match answer(&frame) {
                         Ok((protocol, metadata, buffers)) => {
                             worker_wire_result(id, protocol, metadata, buffers)
+                                .map_err(|error| locator.locate(error))
                         }
                         Err(message) => Err(SimulationError::InvalidConfig(message)),
                     };

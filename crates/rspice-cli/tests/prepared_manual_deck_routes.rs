@@ -21,6 +21,7 @@ use common::{passed, run_to_json, test_dir};
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::netlist::IncludeProcessor;
 use rspice_simulation::analysis_preparation::AnalysisInputs;
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution::preparation::{
     ManualSourceInputs, RunPreparationInputs, build_prepared_manual_deck,
 };
@@ -66,6 +67,30 @@ impl NetlistSourceHost for NoSchematicFiles {
 /// The deck at `origin` prepared as the Netlist & Script page prepares a
 /// saved deck, with no project around it, and run task by task.
 fn prepared_manual_run(origin: &Path) -> Vec<SimulationResult> {
+    run_tasks(prepared_manual_tasks(origin))
+}
+
+/// The tasks of the deck at `origin` prepared as the Netlist & Script page
+/// prepares a saved deck.
+fn prepared_manual_tasks(
+    origin: &Path,
+) -> VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch> {
+    let snapshot = prepared_manual_snapshot(origin)
+        .unwrap_or_else(|error| panic!("{} prepares: {error}", origin.display()));
+    let dispatch = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
+        .expect("the snapshot is authorized");
+    dispatch.into_tasks()
+}
+
+/// The deck at `origin` prepared as the Netlist & Script page prepares a
+/// saved deck, with no project around it.
+fn prepared_manual_snapshot(
+    origin: &Path,
+) -> Result<
+    rspice_simulation::execution::PreparedRunSnapshot,
+    rspice_simulation::execution::PreparationError,
+> {
     let source = std::fs::read_to_string(origin).expect("read the deck");
     let inputs: RunPreparationInputs<'_, (), ()> = RunPreparationInputs {
         analysis: AnalysisInputs {
@@ -101,7 +126,7 @@ fn prepared_manual_run(origin: &Path) -> Vec<SimulationResult> {
         compilation: None,
         design_checks: Default::default(),
     };
-    let snapshot = build_prepared_manual_deck(
+    build_prepared_manual_deck(
         &inputs,
         ManualSourceInputs {
             source: &source,
@@ -111,11 +136,6 @@ fn prepared_manual_run(origin: &Path) -> Vec<SimulationResult> {
             origin: Some(origin),
         },
     )
-    .unwrap_or_else(|error| panic!("{} prepares: {error}", origin.display()));
-    let dispatch = PreparedRunAuthorization::default()
-        .authorize_campaign_member(snapshot)
-        .expect("the snapshot is authorized");
-    run_tasks(dispatch.into_tasks())
 }
 
 /// The deck at `origin` prepared on the headless route the conformance
@@ -123,6 +143,11 @@ fn prepared_manual_run(origin: &Path) -> Vec<SimulationResult> {
 /// writes sealed where it stands, its one `.tran` card the task and the rest
 /// the circuit.
 fn headless_run(origin: &Path) -> Vec<SimulationResult> {
+    run_tasks(headless_tasks(origin))
+}
+
+/// The tasks of the deck at `origin` prepared on the headless route.
+fn headless_tasks(origin: &Path) -> VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch> {
     let source = std::fs::read_to_string(origin).expect("read the deck");
     let (cards, circuit): (Vec<&str>, Vec<&str>) = source
         .lines()
@@ -174,13 +199,20 @@ fn headless_run(origin: &Path) -> Vec<SimulationResult> {
     let dispatch = PreparedRunAuthorization::default()
         .authorize_campaign_member(snapshot)
         .expect("the snapshot is authorized");
-    run_tasks(dispatch.into_tasks())
+    dispatch.into_tasks()
 }
 
 /// Run dispatched tasks one by one, threading each producer's artifact.
 fn run_tasks(
-    mut pending: VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch>,
+    pending: VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch>,
 ) -> Vec<SimulationResult> {
+    try_run_tasks(pending).unwrap_or_else(|error| panic!("the task solves: {error}"))
+}
+
+/// [`run_tasks`], to the first task's error.
+fn try_run_tasks(
+    mut pending: VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch>,
+) -> Result<Vec<SimulationResult>, Box<SimulationError>> {
     let mut artifacts = HashMap::new();
     let mut runner = rspice_simulation::runner::SimulationRunner::new();
     let mut results = Vec::new();
@@ -200,7 +232,7 @@ fn run_tasks(
             runner.drain_engine_log();
             std::thread::sleep(Duration::from_millis(5));
         };
-        let simulated = outcome.unwrap_or_else(|error| panic!("the task solves: {error}"));
+        let simulated = outcome.map_err(Box::new)?;
         if let Some(artifact) = producer
             .capture(&simulated, &pending)
             .expect("the artifact is captured")
@@ -209,7 +241,7 @@ fn run_tasks(
         }
         results.push(simulated);
     }
-    results
+    Ok(results)
 }
 
 /// `rspice run <deck>` to a JSON result document.
@@ -439,6 +471,114 @@ fn source_lines_of_an_included_file_give_the_clis_numbers() {
         "q",
         headless_run,
     ));
+}
+
+/// A two-terminal resistor; an instance with three nodes is refused when
+/// the circuit elaborates, at the line that wrote the instance.
+const VRES: &str = "`include \"disciplines.vams\"\nmodule vres(p, n);\n  inout p, n;\n  \
+                    electrical p, n;\n  analog I(p, n) <+ V(p, n) / 1k;\nendmodule\n";
+
+/// A refusal of an instance an included file writes names that file and
+/// line on the prepared routes, as the CLI names it, one file deep and two.
+#[test]
+fn a_refusal_in_an_included_file_names_the_file_and_line_the_cli_names() {
+    let dir = test_dir("prepared-included-refusal");
+    write(&dir, "vres.va", VRES);
+    write(
+        &dir,
+        "sub/one.inc",
+        "* one file deep\nR1 a 0 1k\nX1 a 0 0 vres\n",
+    );
+    write(
+        &dir,
+        "sub/two.inc",
+        "* two files deep\nR2 a 0 1k\n.include \"deeper.inc\"\n",
+    );
+    write(&dir, "sub/deeper.inc", "* the instance\nX2 a 0 0 vres\n");
+    for (deck, include, file, line) in [
+        ("one.cir", "sub/one.inc", "sub/one.inc", 3),
+        ("two.cir", "sub/two.inc", "sub/deeper.inc", 2),
+    ] {
+        write(
+            &dir,
+            deck,
+            &format!(
+                "included refusal\n.hdl \"vres.va\"\nV1 a 0 1\n.include \"{include}\"\n\
+                 .tran 1n 2n\n.end\n"
+            ),
+        );
+        let origin = dir.join(deck);
+        let cli = common::run_rspice(&["run", origin.to_str().expect("a UTF-8 path")]);
+        assert!(
+            !cli.status.success(),
+            "{deck}: the CLI refuses the instance"
+        );
+        let cli = String::from_utf8_lossy(&cli.stderr);
+        let site = rspice_core::netlist::NetlistSourceLocation::in_file(
+            dir.join(file).canonicalize().expect("the included file"),
+            line,
+        )
+        .to_string();
+        assert!(cli.contains(&site), "{deck}: the CLI names {site}: {cli}");
+        for (route, tasks) in [
+            ("prepared", prepared_manual_tasks(&origin)),
+            ("headless", headless_tasks(&origin)),
+        ] {
+            let error = try_run_tasks(tasks).expect_err("the route refuses the instance");
+            let SimulationError::Elaboration { location, .. } = &*error else {
+                panic!("{deck} {route}: an elaboration refusal, got {error:?}");
+            };
+            assert_eq!(location.as_deref(), Some(site.as_str()), "{deck} {route}");
+            assert!(
+                cli.contains(&error.to_string()),
+                "{deck} {route}: the CLI said {cli}; the route said {error}"
+            );
+        }
+    }
+}
+
+/// A syntax error in an included file names that file and line on the
+/// prepared manual-deck route, as the CLI names it, one file deep and two.
+#[test]
+fn a_syntax_error_in_an_included_file_names_the_file_and_line_the_cli_names() {
+    let dir = test_dir("prepared-included-syntax");
+    write(
+        &dir,
+        "sub/one.inc",
+        "* one file deep\nR1 a 0 1k\nR2 a 0 zz=\n",
+    );
+    write(
+        &dir,
+        "sub/two.inc",
+        "* two files deep\nR3 a 0 1k\n.include \"deeper.inc\"\n",
+    );
+    write(&dir, "sub/deeper.inc", "* the card\nR4 a 0 zz=\n");
+    for (deck, include, file, line) in [
+        ("one.cir", "sub/one.inc", "sub/one.inc", 3),
+        ("two.cir", "sub/two.inc", "sub/deeper.inc", 2),
+    ] {
+        write(
+            &dir,
+            deck,
+            &format!("included syntax\nV1 a 0 1\n.include \"{include}\"\n.op\n.end\n"),
+        );
+        let origin = dir.join(deck);
+        let cli = common::run_rspice(&["run", origin.to_str().expect("a UTF-8 path")]);
+        assert!(!cli.status.success(), "{deck}: the CLI refuses the card");
+        let cli = String::from_utf8_lossy(&cli.stderr);
+        let site = rspice_core::netlist::NetlistSourceLocation::in_file(
+            dir.join(file).canonicalize().expect("the included file"),
+            line,
+        );
+        let said = format!("Syntax error at line {line}: {site}: ");
+        assert!(cli.contains(&said), "{deck}: the CLI says {said}: {cli}");
+        let error = prepared_manual_snapshot(&origin).expect_err("the route refuses the card");
+        let tail = cli[cli.find(&said).expect("found above")..].trim_end();
+        assert!(
+            error.message().contains(tail),
+            "{deck}: the CLI said {tail}; the route said {error}"
+        );
+    }
 }
 
 /// The toggle peer of the `d_process` protocol: it echoes the header, then

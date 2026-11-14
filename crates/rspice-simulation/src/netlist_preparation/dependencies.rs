@@ -166,26 +166,35 @@ pub fn execution_current_directory() -> Result<PathBuf, PreparationError> {
     }
 }
 
+/// A manual deck expanded through its include chain.
+pub struct ExpandedManualDependencies {
+    pub expanded: String,
+    /// The deck's own path as the host names it, when it has one.
+    pub canonical_origin: Option<String>,
+    pub dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    /// The file and line that wrote each expanded line, when the expansion
+    /// included a file.
+    pub source_lines: Option<std::sync::Arc<rspice_core::netlist::ExpandedLineMap>>,
+}
+
 /// Expand the manual deck `source` saved at `origin` through its include
 /// chain. `rewrite` names the line each written line becomes, by the file and
 /// line that wrote it: a sealed Verilog-A source line an included file
-/// writes.
+/// writes. The expansion's line map comes back when it included a file.
 pub fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
     include_search: &IncludeSearchChain,
     sealed_sources: &SealedModelExecutionSources,
     rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
-) -> Result<
-    (
-        String,
-        Option<String>,
-        Vec<rspice_core::netlist::ResolvedIncludeDependency>,
-    ),
-    PreparationError,
-> {
+) -> Result<ExpandedManualDependencies, PreparationError> {
     let Some(origin) = origin else {
-        return Ok((source.to_owned(), None, Vec::new()));
+        return Ok(ExpandedManualDependencies {
+            expanded: source.to_owned(),
+            canonical_origin: None,
+            dependencies: Vec::new(),
+            source_lines: None,
+        });
     };
     let absolute_origin = absolute_source_identity(origin)?;
 
@@ -195,18 +204,19 @@ pub fn expand_manual_dependencies(
         // carries its own edges; a host directory chain has nothing to add,
         // and nothing read from the host was sealed to rewrite.
         let _ = (include_search, rewrite);
-        let (expanded, dependencies) = sealed_sources
-            .expand_root_dependencies(
+        let (expanded, lines, dependencies) = sealed_sources
+            .expand_root_dependencies_with_line_map(
                 &absolute_origin,
                 source,
                 &rspice_core::abort_signal::NoAbort,
             )
             .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
-        Ok((
+        Ok(ExpandedManualDependencies {
             expanded,
-            Some(path_identity(&absolute_origin)),
+            canonical_origin: Some(path_identity(&absolute_origin)),
             dependencies,
-        ))
+            source_lines: crate::execution::included_line_map(lines),
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -214,20 +224,24 @@ pub fn expand_manual_dependencies(
         let _ = sealed_sources;
         let mut processor = IncludeProcessor::new(&absolute_origin);
         include_search.apply_to(&mut processor);
-        let expanded = processor
-            .expand_content_rewriting(source, &absolute_origin, &mut |location, _| {
-                rewrite(location)
-            })
+        let (expanded, lines) = processor
+            .expand_content_rewriting_with_line_map_and_abort(
+                source,
+                &absolute_origin,
+                &mut |location, _| rewrite(location),
+                &rspice_core::abort_signal::NoAbort,
+            )
             .map_err(|error| {
                 PreparationError::new(
                     PreparationStage::SourceChecks,
                     format!("Could not seal manual deck dependencies: {error}"),
                 )
             })?;
-        Ok((
+        Ok(ExpandedManualDependencies {
             expanded,
-            Some(path_identity(&absolute_origin)),
-            processor.resolved_dependencies().to_vec(),
-        ))
+            canonical_origin: Some(path_identity(&absolute_origin)),
+            dependencies: processor.resolved_dependencies().to_vec(),
+            source_lines: crate::execution::included_line_map(lines),
+        })
     }
 }
