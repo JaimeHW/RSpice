@@ -905,6 +905,22 @@ impl<'a> MatrixStamper for StaticMatrixStamper<'a> {
     }
 }
 
+/// The right-hand side half of [`StaticMatrixStamper`], for a residual that
+/// has already read its matrix.
+struct RhsStamper<'a> {
+    rhs: &'a mut [Value],
+}
+
+impl MatrixStamper for RhsStamper<'_> {
+    fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
+
+    fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+        if index > 0 && index <= self.rhs.len() {
+            self.rhs[index - 1] += value;
+        }
+    }
+}
+
 impl Default for CircuitData {
     fn default() -> Self {
         Self::new()

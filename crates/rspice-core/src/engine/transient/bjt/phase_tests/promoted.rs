@@ -392,6 +392,16 @@ fn one_promoted_pass_stamps_the_bits_of_the_newton_and_correction_passes() {
                             }
                         }
 
+                        // The static residual takes the correction stamp's
+                        // right-hand side alone, after its matrix is read.
+                        let mut full = correction.clone();
+                        let mut matrix = Engine::default().build_matrix(&circuit).unwrap();
+                        circuit.stamp_promoted_vbic_correction(&mut matrix, &mut full, &raw);
+                        let mut alone = correction.clone();
+                        circuit.stamp_promoted_vbic_correction_rhs(&mut alone, &raw);
+                        assert_ne!(bits(&full), bits(&correction), "{case}");
+                        assert_eq!(bits(&alone), bits(&full), "correction alone {case}");
+
                         let (mut one_rhs, mut one_correction) = (rhs.clone(), correction.clone());
                         Engine::stamp_promoted_bjt_loads_with_correction(
                             &mut one_matrix,

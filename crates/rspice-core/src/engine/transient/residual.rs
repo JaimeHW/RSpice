@@ -2751,7 +2751,9 @@ impl Engine {
                 probe
                     .correction_rhs_into(probe_rhs, solution, &mut correction)
                     .map_err(|error| SimulationError::Circuit(error.to_string()))?;
-                circuit.stamp_promoted_vbic_correction(probe, &mut correction, solution);
+                // The probe matrix has been read; only the promoted rows'
+                // right-hand side remains.
+                circuit.stamp_promoted_vbic_correction_rhs(&mut correction, solution);
                 // The correction is -(A*x-b); the history is A*x-b.
                 for value in &mut correction {
                     *value = -*value;

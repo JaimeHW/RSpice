@@ -1707,6 +1707,18 @@ impl CircuitData {
         }
     }
 
+    /// The right-hand side of [`Self::stamp_promoted_vbic_correction`]
+    /// alone, addition for addition, for a residual whose matrix has
+    /// already been read.
+    pub(crate) fn stamp_promoted_vbic_correction_rhs(&self, rhs: &mut [Value], anchor: &[Value]) {
+        let mut stamper = RhsStamper { rhs };
+        for bjt in &self.bjts.devices {
+            if bjt.mna_promoted() {
+                bjt.stamp_mna_correction(&mut stamper, anchor);
+            }
+        }
+    }
+
     fn try_stamp_nonlinear_with_mode(
         &mut self,
         matrix: &mut StaticMatrix,
