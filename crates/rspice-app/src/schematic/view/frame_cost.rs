@@ -10,6 +10,7 @@ use crate::state::{
     SymbolPin, SymbolShape, View, ViewType, Wire,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::design::test_host::DesignTestHost;
 
 use super::AppState;
 
@@ -279,8 +280,9 @@ pub(crate) fn install_projected_run_geometry(model: &mut Model, nets: HashMap<St
 /// sheet: one wire on each of two sheets at the same drawn coordinates, the
 /// first on net `VOUT` and the second on net `BIAS`, and a solved operating
 /// point naming both. `second_sheet_active` opens Sheet 2.
-pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
-    let mut state = super::sheet_visibility::two_sheet_state(&[1], &[2]);
+pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> DesignTestHost {
+    let mut state = DesignTestHost::default();
+    super::sheet_visibility::seed_two_sheets(&mut state.model, &[1], &[2]);
     let (start, end) = (Point::new(100, 0), Point::new(200, 0));
     let document = state.model.schematic.document_mut_for_test();
     document.wires.push(Wire::segment(1, start, end));

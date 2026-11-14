@@ -975,7 +975,7 @@ mod tests {
         OperatingPointValue, SimulationRun, ViewType, Wire,
     };
     use crate::workbench::app_state::AppState;
-    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
     use std::collections::HashMap;
 
     /// Two conductor groups with no wire between them, each carrying the same
@@ -1494,8 +1494,8 @@ mod tests {
     fn each_sheet_annotates_only_the_nets_it_draws() {
         use crate::schematic::view::frame_cost::two_sheet_operating_point;
 
-        let badges = |state: &AppState| {
-            operating_point_annotations(&crate::schematic::view::canvas_facts(state))
+        let badges = |state: &DesignTestHost| {
+            operating_point_annotations(&canvas_facts(state))
                 .into_iter()
                 .filter_map(|annotation| match annotation.subject {
                     BadgeSubject::Net { anchor, .. } => Some((anchor, annotation.key)),
@@ -1534,24 +1534,20 @@ mod tests {
         use crate::schematic::view::frame_cost::two_sheet_operating_point;
 
         let mut state = two_sheet_operating_point(false);
-        let held = |state: &AppState| {
+        let held = |state: &DesignTestHost| {
             let (dc_op, _, _) =
-                annotated_operating_point(&crate::schematic::view::canvas_facts(state))
-                    .expect("badges are shown");
+                annotated_operating_point(&canvas_facts(state)).expect("badges are shown");
             state
                 .model
                 .schematic
                 .session
                 .operating_point_badges
-                .current(voltage_badge_fingerprint(
-                    &crate::schematic::view::canvas_facts(state),
-                    &dc_op,
-                ))
+                .current(voltage_badge_fingerprint(&canvas_facts(state), &dc_op))
         };
         assert!(held(&state).is_none());
-        refresh_voltage_badges(&mut crate::schematic::view::canvas_parts(&mut state));
+        refresh_voltage_badges(&mut canvas_parts(&mut state));
         let first = held(&state).expect("a refresh holds the badges");
-        refresh_voltage_badges(&mut crate::schematic::view::canvas_parts(&mut state));
+        refresh_voltage_badges(&mut canvas_parts(&mut state));
         assert!(
             std::sync::Arc::ptr_eq(&first, &held(&state).expect("still held")),
             "a steady frame reads nothing again"
@@ -1564,14 +1560,14 @@ mod tests {
             .node_voltages[0]
             .value = 1.75;
         assert!(held(&state).is_none(), "a value replaced in place misses");
-        let painted = operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let painted = operating_point_annotations(&canvas_facts(&state));
         assert!(
             painted
                 .iter()
                 .any(|badge| badge.key == "vout" && text(badge).contains("1.75 V")),
             "{painted:?}"
         );
-        refresh_voltage_badges(&mut crate::schematic::view::canvas_parts(&mut state));
+        refresh_voltage_badges(&mut canvas_parts(&mut state));
         assert!(!std::sync::Arc::ptr_eq(
             &first,
             &held(&state).expect("held again")
@@ -1586,16 +1582,16 @@ mod tests {
             install_projected_run_geometry, two_sheet_operating_point,
         };
 
-        let fingerprint = |state: &AppState| {
+        let fingerprint = |state: &DesignTestHost| {
             let dc_op = state
                 .model
                 .simulation
                 .active_analysis()
                 .and_then(|analysis| analysis.dc_op.as_ref())
                 .expect("fixture dc op");
-            voltage_badge_fingerprint(&crate::schematic::view::canvas_facts(state), dc_op)
+            voltage_badge_fingerprint(&canvas_facts(state), dc_op)
         };
-        type Change = (&'static str, fn(&mut AppState));
+        type Change = (&'static str, fn(&mut DesignTestHost));
         let changes: [Change; 9] = [
             ("solved value", |state| {
                 state.model.simulation.retained.runs[0].analyses[0]
