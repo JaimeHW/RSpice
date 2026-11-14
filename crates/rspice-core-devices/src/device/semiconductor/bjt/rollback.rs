@@ -150,7 +150,7 @@ impl Bjt {
         image.mna_dissipation_drops = self.mna_dissipation_drops;
         image.mna_delay_branches = self.mna_delay_branches;
         image.mna_delay_thermal = self.mna_delay_thermal;
-        image.mna_charge_cache = self.mna_charge_cache.get();
+        image.mna_charge_cache = self.mna_charge_cache;
         image.mna_charge_cache_valid = self.mna_charge_cache_valid.get();
         state
             .thermal_variants
@@ -227,7 +227,7 @@ impl Bjt {
         self.mna_dissipation_drops = image.mna_dissipation_drops;
         self.mna_delay_branches = image.mna_delay_branches;
         self.mna_delay_thermal = image.mna_delay_thermal;
-        self.mna_charge_cache.set(image.mna_charge_cache);
+        self.mna_charge_cache = image.mna_charge_cache;
         self.mna_charge_cache_valid
             .set(image.mna_charge_cache_valid);
         *self.thermal_variant_cache.get_mut() = thermal_variants;

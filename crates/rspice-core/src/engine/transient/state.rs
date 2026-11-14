@@ -1484,7 +1484,8 @@ impl Engine {
         // internal nodes (ngspice NIintegrate discipline), evaluated
         // and linearized at the limited bias cached by the device
         // update for this Newton iterate.
-        let (branches, internal, external) = bjt.mna_charge_state();
+        let mut computed = None;
+        let (branches, internal, external) = bjt.mna_charge_state_in(&mut computed);
         if let Some(phase) = phase_trial {
             phase
                 .stamp_promoted(bjt, targets, xyce_one_step_order2)

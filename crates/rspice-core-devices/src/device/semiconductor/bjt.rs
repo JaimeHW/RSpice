@@ -1404,7 +1404,7 @@ pub struct Bjt {
     mna_delay_thermal: BjtCurrentBranch,
     /// Dynamic charge branches at the limited MNA bias, computed on demand
     /// for the transient companion and AC passes.
-    mna_charge_cache: Cell<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
+    mna_charge_cache: [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
     mna_charge_cache_valid: Cell<bool>,
     thermal_variant_cache: RefCell<Vec<(BjtThermalVariantKey, Box<Bjt>)>>,
 }
@@ -2327,7 +2327,7 @@ impl Bjt {
             mna_dissipation_drops: None,
             mna_delay_branches: [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT],
             mna_delay_thermal: BjtCurrentBranch::default(),
-            mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),
+            mna_charge_cache: [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT],
             mna_charge_cache_valid: Cell::new(false),
             thermal_variant_cache: RefCell::new(Vec::new()),
         }

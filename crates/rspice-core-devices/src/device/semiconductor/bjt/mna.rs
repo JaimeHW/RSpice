@@ -393,7 +393,7 @@ impl Bjt {
                 },
             );
         }
-        for branch in self.mna_charge_cache.get() {
+        for branch in self.mna_charge_cache {
             Self::checkpoint_push_charge_branch(&mut values, branch);
         }
         values.push(self.mna_rbi_current);
@@ -645,9 +645,8 @@ impl Bjt {
         });
         self.mna_delay_branches = [delay0, delay1, delay2, avalanche];
         self.mna_delay_thermal = thermal;
-        self.mna_charge_cache.set(std::array::from_fn(|_| {
-            Self::checkpoint_take_charge_branch(values, &mut cursor)
-        }));
+        self.mna_charge_cache =
+            std::array::from_fn(|_| Self::checkpoint_take_charge_branch(values, &mut cursor));
         self.mna_charge_cache_valid.set(flags[3] != 0.0);
         self.mna_rbi_current = values[cursor];
         cursor += 1;
@@ -1096,7 +1095,8 @@ impl Bjt {
     /// Internal state (including excess phase) at the current linearization
     /// point, in dynamic-state index order.
     #[inline]
-    pub(crate) fn mna_internal_state(&self) -> [Value; BJT_INTERNAL_STATE_DIM] {
+    #[doc(hidden)]
+    pub fn mna_internal_state(&self) -> [Value; BJT_INTERNAL_STATE_DIM] {
         [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
             self.vxf1, self.vxf2,
@@ -1491,9 +1491,8 @@ impl Bjt {
         let internal = self.mna_internal_state();
         let external = self.mna_external_state();
         if self.uses_legacy_gummel_poon() {
-            self.mna_charge_cache.set(
-                self.legacy_dynamic_charge_branches_from(external, internal, false, transport),
-            );
+            self.mna_charge_cache =
+                self.legacy_dynamic_charge_branches_from(external, internal, false, transport);
             self.mna_charge_cache_valid.set(true);
             self.mna_delay_branches = [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT];
             self.mna_delay_thermal = BjtCurrentBranch::default();
@@ -1501,7 +1500,7 @@ impl Bjt {
         }
         let (branches, inputs, d_itzf_d_vrth) =
             self.vbic_dynamic_charge_state_at_bias(external, internal, None);
-        self.mna_charge_cache.set(branches);
+        self.mna_charge_cache = branches;
         self.mna_charge_cache_valid.set(true);
 
         if self.td > 0.0 {
@@ -1530,14 +1529,31 @@ impl Bjt {
         [Value; BJT_INTERNAL_STATE_DIM],
         [Value; EXTERNAL_DIM],
     ) {
+        let mut computed = None;
+        let (branches, internal, external) = self.mna_charge_state_in(&mut computed);
+        (*branches, internal, external)
+    }
+
+    /// [`Self::mna_charge_state`], borrowing the branches the last
+    /// evaluation refreshed. Before any evaluation, or after one was
+    /// invalidated, they are computed at the held bias into `computed`.
+    #[doc(hidden)]
+    pub fn mna_charge_state_in<'a>(
+        &'a self,
+        computed: &'a mut Option<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
+    ) -> (
+        &'a [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
+        [Value; BJT_INTERNAL_STATE_DIM],
+        [Value; EXTERNAL_DIM],
+    ) {
         let internal = self.mna_internal_state();
         let external = self.mna_external_state();
-        if !self.mna_charge_cache_valid.get() {
-            let branches = self.dynamic_charge_branches_at_bias(external, internal);
-            self.mna_charge_cache.set(branches);
-            self.mna_charge_cache_valid.set(true);
-        }
-        (self.mna_charge_cache.get(), internal, external)
+        let branches = if self.mna_charge_cache_valid.get() {
+            &self.mna_charge_cache
+        } else {
+            &*computed.insert(self.dynamic_charge_branches_at_bias(external, internal))
+        };
+        (branches, internal, external)
     }
 
     #[doc(hidden)]
@@ -1575,15 +1591,37 @@ impl Bjt {
         [Value; BJT_INTERNAL_STATE_DIM],
         [Value; EXTERNAL_DIM],
     ) {
+        let mut computed = None;
+        let (branches, internal, external) =
+            self.mna_charge_state_at_solution_in(voltages, forward_limit, &mut computed);
+        (*branches, internal, external)
+    }
+
+    /// [`Self::mna_charge_state_at_solution_with_forward_limit`], borrowing
+    /// the branches the last evaluation refreshed when they are of this bias;
+    /// any others are computed into `computed`.
+    #[doc(hidden)]
+    pub fn mna_charge_state_at_solution_in<'a>(
+        &'a self,
+        voltages: &[Value],
+        forward_limit: bool,
+        computed: &'a mut Option<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
+    ) -> (
+        &'a [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
+        [Value; BJT_INTERNAL_STATE_DIM],
+        [Value; EXTERNAL_DIM],
+    ) {
         let external = self.external_terminal_voltages(voltages);
         let internal = self.mna_internal_state_at_solution(voltages);
         let branches = if forward_limit && self.uses_legacy_gummel_poon() {
-            self.legacy_dynamic_charge_branches_with_forward_limit(external, internal, true)
+            &*computed.insert(
+                self.legacy_dynamic_charge_branches_with_forward_limit(external, internal, true),
+            )
         } else if self.mna_charge_cache_is_at(external, internal) {
             // The last evaluation was of this very bias.
-            self.mna_charge_cache.get()
+            &self.mna_charge_cache
         } else {
-            self.dynamic_charge_branches_at_bias(external, internal)
+            &*computed.insert(self.dynamic_charge_branches_at_bias(external, internal))
         };
         (branches, internal, external)
     }
@@ -3735,7 +3773,7 @@ mod tests {
                 "{bias:?}"
             );
             assert_eq!(
-                format!("{:?}", bjt.mna_charge_cache.get()),
+                format!("{:?}", bjt.mna_charge_cache),
                 format!("{all:?}"),
                 "{bias:?}"
             );
@@ -4034,7 +4072,7 @@ mod tests {
             assert_eq!(kept_newton, own_newton, "{anchor:?}");
             assert_eq!(kept_correction, own_correction, "{anchor:?}");
             assert_eq!(
-                format!("{:?}", bjt.mna_charge_cache.get()),
+                format!("{:?}", bjt.mna_charge_cache),
                 format!(
                     "{:?}",
                     bjt.legacy_dynamic_charge_branches(

@@ -249,7 +249,7 @@ impl BjtPhaseTrial<'_> {
         targets: &mut super::charge_stamper::BjtLoadTargets<'_, N, C>,
         xyce_one_step_order2: bool,
     ) -> Result<(), String> {
-        let (_, internal, _) = bjt.mna_charge_state();
+        let internal = bjt.mna_internal_state();
         let mut correction = self.correction(bjt, &internal)?;
         let weight = if xyce_one_step_order2 {
             correction.current =
