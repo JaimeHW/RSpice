@@ -95,6 +95,7 @@ impl ProjectState {
         self.new_view_library = library.to_owned();
         self.new_view_cell = cell.to_owned();
         self.new_view_name = view_type.display_name().to_owned();
+        self.new_view_name_edited = false;
         self.new_view_type = view_type;
         self.new_view_creates_symbol = false;
         self.new_view_error = None;
@@ -250,7 +251,12 @@ impl ProjectFeature {
             .show(ctx, |rows| {
                 rows.value_mono("Library", &dialogs.new_view_library);
                 rows.value_mono("Cell", &dialogs.new_view_cell);
-                rows.text("View name", name_id, &mut dialogs.new_view_name, "");
+                if rows
+                    .text("View name", name_id, &mut dialogs.new_view_name, "")
+                    .changed()
+                {
+                    dialogs.new_view_name_edited = true;
+                }
                 if !creates_symbol
                     && rows.segmented_columns(
                         "Type",
@@ -260,6 +266,11 @@ impl ProjectFeature {
                     )
                 {
                     dialogs.new_view_type = CREATABLE_VIEW_TYPES[type_index];
+                    // The name the dialog offered follows the type until the
+                    // reader types one of their own.
+                    if !dialogs.new_view_name_edited {
+                        dialogs.new_view_name = dialogs.new_view_type.display_name().to_owned();
+                    }
                 }
                 Some(name_id)
             });
@@ -277,6 +288,7 @@ impl ProjectFeature {
         if should_close {
             cx.state.new_view_dialog = false;
             cx.state.new_view_name.clear();
+            cx.state.new_view_name_edited = false;
             cx.state.new_view_creates_symbol = false;
             cx.state.new_view_error = None;
         }

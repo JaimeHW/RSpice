@@ -3,7 +3,8 @@
 //! what the creation raised answered as the dialog step answers it, and the
 //! first commit of a generated symbol through the application's editor.
 
-use egui::Context;
+use egui::accesskit::Role;
+use egui::{Context, Key, Modifiers};
 
 use crate::state::{
     Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
@@ -19,6 +20,7 @@ use crate::workbench::project::library_dialogs::new_view::{
 use crate::workbench::{ChoicePreference, RSpiceApp};
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 
+use super::super::replay::Replay;
 use super::{in_front, published, shown, with_cx};
 
 /// Create the view the dialog names in the feature's context, with
@@ -831,4 +833,42 @@ fn a_created_view_ends_where_the_creation_carried_out_in_place_did() {
         assert_eq!(in_front(&handed), in_front(&in_place), "{view_type:?}");
         assert_eq!(in_front(&handed).1, view_type == ViewType::VerilogA);
     }
+}
+
+/// The name New view offers follows the type the reader picks until the
+/// reader types one of their own: picking Symbol on a cell that offered a
+/// testbench no longer makes a symbol called "testbench".
+#[test]
+fn the_offered_view_name_follows_the_type_until_the_reader_types_one() {
+    let mut replay = Replay::new();
+    let top = replay.app.state.model.workspace.content.active_view.clone();
+    let model = &replay.app.state.model;
+    replay
+        .app
+        .state
+        .project
+        .open_new_view_dialog(model, &top.library, &top.cell, None)
+        .expect("the open project's top cell takes a new view");
+    let offered = replay.app.state.project.new_view_type;
+    assert_ne!(offered, ViewType::Symbol, "the cell has a symbol already");
+    assert_eq!(
+        replay.app.state.project.new_view_name,
+        offered.display_name()
+    );
+
+    replay.click(view_type_label(ViewType::Symbol), Role::RadioButton);
+    assert_eq!(replay.app.state.project.new_view_type, ViewType::Symbol);
+    assert_eq!(replay.app.state.project.new_view_name, "symbol");
+
+    replay.click("View name", Role::TextInput);
+    replay.key(Key::A, Modifiers::COMMAND);
+    replay.type_text("sym_alt");
+    assert_eq!(replay.app.state.project.new_view_name, "sym_alt");
+
+    replay.click(view_type_label(ViewType::Layout), Role::RadioButton);
+    assert_eq!(replay.app.state.project.new_view_type, ViewType::Layout);
+    assert_eq!(
+        replay.app.state.project.new_view_name, "sym_alt",
+        "a name the reader typed stays when the type changes"
+    );
 }

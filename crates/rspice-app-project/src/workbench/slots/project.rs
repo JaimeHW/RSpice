@@ -57,6 +57,9 @@ pub struct ProjectState {
     pub new_view_cell: String,
     /// New View name input
     pub new_view_name: String,
+    /// Set the moment the reader edits the view name, after which the name
+    /// no longer follows the type.
+    pub new_view_name_edited: bool,
     /// New View type selection
     pub new_view_type: crate::state::ViewType,
     /// New View opened as Create symbol: titled for it, its type fixed.
