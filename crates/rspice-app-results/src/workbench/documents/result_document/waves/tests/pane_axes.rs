@@ -374,19 +374,218 @@ fn the_scale_toggles_of_a_strip_stand_in_one_column() {
     }
 }
 
+/// The light interface over the light canvas.
+fn light() -> crate::ui::Theme {
+    crate::ui::Theme {
+        mode: Mode::Light,
+        canvas_theme: EngineeringCanvasTheme::Light,
+        ..crate::ui::Theme::default()
+    }
+}
+
+/// Draw only the traces whose source waveform `keep` accepts, as a reader
+/// ticking and unticking them would.
+fn show_only(state: &mut ResultsTestHost, keep: impl Fn(&str) -> bool) {
+    let toggles: Vec<(usize, usize)> = {
+        let models = super::lanes::strip(state);
+        let model = &models[0];
+        model
+            .traces
+            .iter()
+            .filter(|trace| trace.visible != keep(&trace.source_waveform_name))
+            .map(|trace| (model.analysis_index(), trace.waveform_index))
+            .collect()
+    };
+    for (analysis, waveform) in toggles {
+        toggle_visibility(&mut state.results_parts(), analysis, waveform);
+    }
+}
+
+/// Whether the strip draws the trace of `name`.
+fn drawn(state: &mut ResultsTestHost, name: &str) -> bool {
+    super::lanes::strip(state)[0]
+        .traces
+        .iter()
+        .any(|trace| trace.source_waveform_name == name && trace.visible)
+}
+
+/// One volts pane with more to name than its row holds: three drawn
+/// signals whose hierarchical names each take the share of the row a name
+/// may, and ten the reader has hidden.
+fn crowded_pane() -> ResultsTestHost {
+    let time: Vec<f64> = (0..64).map(|index| f64::from(index) * 1.0e-6).collect();
+    let drawn = (0..3).map(|ordinal| {
+        format!("V(xtop.xcore.xstage{ordinal}.xbias.xmirror.output_node_of_the_cascode_{ordinal})")
+    });
+    let hidden = (0..10).map(|ordinal| format!("V(h{ordinal})"));
+    let mut state = transient(
+        drawn
+            .chain(hidden)
+            .enumerate()
+            .map(|(ordinal, name)| {
+                let values: Vec<f64> = time
+                    .iter()
+                    .map(|t| (ordinal as f64 + 1.0) * (t * 1.0e5).sin())
+                    .collect();
+                RetainedTrace::new(name, time.clone(), values, "#fff").with_unit("V")
+            })
+            .collect(),
+    );
+    show_only(&mut state, |name| !name.starts_with("V(h"));
+    state
+}
+
+/// Whatever a pane's row cannot name waits behind one control right after
+/// its last entry: "+1 · 10 hidden" for one drawn signal there is no room
+/// for and ten the reader hid, left of the strip's column of scale and
+/// window controls.
+#[test]
+fn the_trace_list_counts_what_the_row_cannot_name() {
+    let ctx = context(crate::ui::Theme::default());
+    let mut state = crowded_pane();
+    let output = settled(&ctx, &mut state, FRAME);
+    let list = control(&output, "+1 · 10 hidden");
+    let log = control(&output, "log Y");
+    let named: Vec<egui::Rect> = texts(&output)
+        .into_iter()
+        .filter(|(text, rect)| {
+            text.starts_with("V(xtop") && (rect.center().y - list.center().y).abs() < 4.0
+        })
+        .map(|(_, rect)| rect)
+        .collect();
+    assert_eq!(named.len(), 2, "two of the three drawn signals are named");
+    let last = named
+        .iter()
+        .map(|rect| rect.right())
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        list.left() > last && list.left() - last < 16.0,
+        "the list follows the last entry: entry ends at {last}, list {list:?}"
+    );
+    assert!(
+        log.left() - list.right() > 40.0,
+        "the list is the legend's, not the scale column's: list {list:?}, log Y {log:?}"
+    );
+}
+
+/// The legend's control, the scale chip and the fit icon are one family of
+/// header control: each lies inside the header band, and all three take one
+/// height on one centre line.
+#[test]
+fn every_header_control_shares_one_height_inside_the_band() {
+    for theme in [crate::ui::Theme::default(), light()] {
+        let ctx = context(theme);
+        let mut state = crowded_pane();
+        let output = settled(&ctx, &mut state, FRAME);
+        let band = control(&output, "V pane");
+        let header = [
+            control(&output, "+1 · 10 hidden"),
+            control(&output, "log Y"),
+            control(&output, "Fit Y to the traces in view"),
+        ];
+        for rect in header {
+            assert!(
+                band.expand(0.5).contains_rect(rect),
+                "{rect:?} lies inside the header band {band:?}"
+            );
+            assert!(
+                (rect.height() - header[1].height()).abs() <= 0.5
+                    && (rect.center().y - header[1].center().y).abs() <= 0.5,
+                "one height on one centre line: {header:?}"
+            );
+            assert!(
+                (rect.center().y - band.center().y).abs() <= 1.0,
+                "centred in the band: {rect:?} in {band:?}"
+            );
+        }
+        // The legend's entries stand on the same centre line.
+        for ordinal in 0..2 {
+            let swatch = control(
+                &output,
+                &format!(
+                    "Toggle V(xtop.xcore.xstage{ordinal}.xbias.xmirror.output_node_of_the_cascode_{ordinal}) visibility"
+                ),
+            );
+            assert!(
+                (swatch.center().y - band.center().y).abs() <= 1.0,
+                "the entry's swatch {swatch:?} is centred in the band {band:?}"
+            );
+        }
+    }
+}
+
+/// Ticking a hidden signal in the trace list draws it, and the list stays
+/// open for the next one, listing it among the drawn ones now.
+#[test]
+fn ticking_a_hidden_trace_in_the_list_draws_it() {
+    let ctx = context(crate::ui::Theme::default());
+    let mut state = crowded_pane();
+    let output = settled(&ctx, &mut state, FRAME);
+    click(
+        &ctx,
+        &mut state,
+        control(&output, "+1 · 10 hidden").center(),
+    );
+    let menu = settled(&ctx, &mut state, FRAME);
+    let names: Vec<egui::Rect> = (0..10)
+        .map(|ordinal| control(&menu, &format!("V(h{ordinal})")))
+        .collect();
+    assert!(
+        names.windows(2).all(|pair| pair[0].top() < pair[1].top()),
+        "the hidden signals are listed in legend order"
+    );
+    let drawn_first = control(
+        &menu,
+        "V(xtop.xcore.xstage2.xbias.xmirror.output_node_of_the_cascode_2)",
+    );
+    assert!(
+        drawn_first.bottom() <= names[0].top(),
+        "the drawn signals come first, the overflowed one by its whole name"
+    );
+    assert!(!drawn(&mut state, "V(h3)"));
+    click(&ctx, &mut state, names[3].center());
+    assert!(drawn(&mut state, "V(h3)"), "ticking it draws it");
+    let after = settled(&ctx, &mut state, FRAME);
+    assert!(
+        controls(&after, "V(h4)").len() == 1,
+        "the list stays open for the next one"
+    );
+    assert!(
+        !controls(&after, "+1 · 9 hidden").is_empty()
+            || !controls(&after, "+2 · 9 hidden").is_empty(),
+        "the list counts nine hidden now"
+    );
+}
+
+/// An NMOS output family from a nested DC sweep, `.dc VD 0 3 0.05 VG 1 3
+/// 0.5`, with only the drain current through the sense source drawn: five
+/// members of I(VSENSE) and every other vector hidden.
+fn nmos_output_family() -> ResultsTestHost {
+    let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(
+        "nmos output family\n\
+         VD d 0 DC 0\n\
+         VG g 0 DC 1\n\
+         VSENSE d dr DC 0\n\
+         M1 dr g 0 0 nch W=10u L=1u\n\
+         .model nch nmos (level=1 vto=0.7 kp=100u lambda=0.02)\n\
+         .dc VD 0 3 0.05 VG 1 3 0.5\n\
+         .end\n",
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    show_only(&mut state, |name| name.starts_with("I(VSENSE)"));
+    state
+}
+
 /// Every Y grid line carries its label, and the unit caption overlaps none
 /// of them, from a tall strip down to four panes in a short one.
 #[test]
 fn every_y_tick_is_labelled_and_the_caption_overlaps_none() {
     let units = ["V", "A", "W", "T"];
-    for theme in [
-        crate::ui::Theme::default(),
-        crate::ui::Theme {
-            mode: Mode::Light,
-            canvas_theme: EngineeringCanvasTheme::Light,
-            ..crate::ui::Theme::default()
-        },
-    ] {
+    for theme in [crate::ui::Theme::default(), light()] {
         let ctx = context(theme);
         for height in [760.0, 560.0, 440.0] {
             let size = egui::vec2(FRAME.x, height);
@@ -670,6 +869,7 @@ fn write_the_pane_pictures() {
         bh.results.results.session.active_wave_pane = Some(key);
         pictures.push(("bh-zoomed", bh));
         pictures.push(("bode", bode_family()));
+        pictures.push(("dc-family", nmos_output_family()));
         pictures.push(("three-pane", three()));
         for (picture, mut state) in pictures {
             let canvas = rspice_ui_kit::raster::render_themed(theme, FRAME, |ui, _| {

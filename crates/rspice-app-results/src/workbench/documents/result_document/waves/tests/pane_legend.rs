@@ -453,7 +453,8 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
 /// staircase, and the currents wait in the signal browser. Once the reader
 /// has hidden one, the currents' pane is its header alone, the row that
 /// offers them, with no autoscale and no log toggle for an axis the pane
-/// does not draw, its hidden control in one column with the volts pane's.
+/// does not draw, and its trace list leads the row, as nothing is named
+/// before it, where the volts pane's follows its entries.
 #[test]
 fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
     let (mut state, _) = sar_strip(BusRadix::Unsigned, false);
@@ -478,10 +479,9 @@ fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
     let currents = text(&output, "62 hidden").expect("the currents' row offers them");
     let volts = text(&output, "45 hidden").expect("the volts pane's row");
     assert!(
-        (currents.right() - volts.right()).abs() < 1.0,
-        "the hidden controls stand in one column: volts ends at {}, currents at {}",
-        volts.right(),
-        currents.right()
+        currents.left() < volts.left(),
+        "the currents' list leads its row and the volts' follows its entries: \
+         currents {currents:?}, volts {volts:?}"
     );
     let on_row = |row: egui::Rect, name: &str| {
         controls(&output)

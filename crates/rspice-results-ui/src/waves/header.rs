@@ -10,7 +10,7 @@ use rspice_ui_kit::{
     plot::{paint_trace_swatch, sample::sample_at_with_shape},
     theme,
     tokens::Tokens,
-    widgets::{IconButton, chip},
+    widgets::{IconButton, chip, chip_width},
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
@@ -288,7 +288,6 @@ pub fn show_header(
     // The right-hand controls are laid out first and take the width they
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
-    let actions_width_id = egui::Id::new(("pane-actions-width", model.analysis_key));
     let action_width = if plotted {
         let space = header_regions(rect, f32::INFINITY).actions;
         let drawn = ui.scope_builder(
@@ -324,17 +323,11 @@ pub fn show_header(
                 }
             },
         );
-        let width = space.right() - drawn.response.rect.left();
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(actions_width_id, width));
-        width
+        space.right() - drawn.response.rect.left()
     } else {
-        // A pane with nothing plotted draws no buttons but keeps their
-        // width, so its hidden control stands in one column with those of
-        // the panes above and below it.
-        ui.ctx()
-            .data(|data| data.get_temp::<f32>(actions_width_id))
-            .unwrap_or(0.0)
+        // A pane with nothing plotted draws no axis controls, and its legend
+        // has the row.
+        0.0
     };
     let PaneHeaderRegions {
         legend: legend_rect,
@@ -383,75 +376,69 @@ pub fn show_header(
         })
         .collect();
 
-    // The hidden control is laid out next, whole, at the legend's right end:
-    // the plotted entries share what is left, and the ones that do not fit
-    // go behind the overflow control instead of under it.
+    // Whatever the row cannot name waits behind one control, the pane's
+    // trace list, right after the last entry that fits: the drawn curves
+    // there is no room for, and the ones not drawn. The far right of the row
+    // is the strip's column of scale and window controls, not the legend's.
     let hidden_count = hidden.len() + hidden_expressions.len();
-    let mut entries_right = legend_rect.right();
-    if hidden_count > 0 {
-        let drawn = ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(legend_rect)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            |ui| {
-                ui.menu_button(format!("{hidden_count} hidden"), |ui| {
-                    for trace in &hidden {
-                        let mut shown = false;
-                        if ui
-                            .checkbox(&mut shown, &*display_name(&trace.name))
-                            .clicked()
-                        {
-                            host.toggle_trace_visibility(trace);
-                        }
-                    }
-                    for expression in &hidden_expressions {
-                        let mut shown = false;
-                        if ui
-                            .checkbox(&mut shown, &expression.label)
-                            .on_hover_text(&expression.text)
-                            .clicked()
-                        {
-                            output.toggle_expression = Some(expression.slot);
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(format!("Hidden traces of the {} pane", pane_name(pane)));
-            },
-        );
-        entries_right = drawn.response.rect.left() - 3.0;
-    }
-    let entries_rect = egui::Rect::from_min_max(
-        legend_rect.min,
-        egui::pos2(entries_right.max(legend_rect.left()), legend_rect.bottom()),
-    );
+    let hidden_entries: Vec<Entry<'_>> = hidden
+        .iter()
+        .map(|trace| Entry::Signal(trace))
+        .chain(hidden_expressions.iter().map(|e| Entry::Expression(e)))
+        .collect();
     ui.scope_builder(
         egui::UiBuilder::new()
-            .max_rect(entries_rect)
+            .max_rect(legend_rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
-            ui.set_clip_rect(entries_rect);
-            ui.spacing_mut().item_spacing.x = 3.0;
-            let fitted = fitted_chips(&chips, entries_rect.width(), |overflow| {
-                control_width(ui, &format!("+{overflow}")) + 3.0
+            ui.set_clip_rect(legend_rect);
+            // The entries take the header controls' height. The theme's
+            // control height is taller than the band, and a row of them
+            // grew past it and sat a pixel and a half below its centre.
+            let spacing = ui.spacing_mut();
+            spacing.item_spacing.x = 3.0;
+            spacing.interact_size.y = ACTION_ICON_SIDE;
+            spacing.button_padding.y = spacing.button_padding.y.min(2.0);
+            let fitted = fitted_chips(&chips, legend_rect.width(), |overflow| {
+                trace_list_label(overflow, hidden_count)
+                    .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
             for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
                 entry.show(ui, chip, &display_name, host, &mut output);
             }
-            if fitted < chips.len() {
-                let overflow = &entries[fitted..];
-                ui.menu_button(format!("+{}", overflow.len()), |ui| {
-                    for (entry, chip) in overflow.iter().zip(&chips[fitted..]) {
-                        ui.horizontal(|ui| entry.show(ui, chip, &display_name, host, &mut output));
+            let Some(label) = trace_list_label(chips.len() - fitted, hidden_count) else {
+                return;
+            };
+            // Centred on the band as the scale chip and the icon are, and
+            // under its own id, so the list stays open while a toggle in it
+            // moves an entry onto or off the row in front of it.
+            let width = chip_width(ui, &label);
+            let slot = egui::Rect::from_center_size(
+                egui::pos2(ui.cursor().left() + 0.5 * width, legend_rect.center().y),
+                egui::vec2(width, ACTION_ICON_SIDE),
+            );
+            let list = ui
+                .scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(slot)
+                        .id_salt("pane-trace-list"),
+                    |ui| chip(ui, &label, false),
+                )
+                .inner
+                .on_hover_text(format!("Traces of the {} pane", pane_name(pane)));
+            egui::Popup::menu(&list)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    for entry in &entries {
+                        trace_list_row(ui, entry, &display_name, host, &mut output);
                     }
-                })
-                .response
-                .on_hover_text(format!(
-                    "{} more plotted in the {} pane",
-                    overflow.len(),
-                    pane_name(pane)
-                ));
-            }
+                    if !entries.is_empty() && !hidden_entries.is_empty() {
+                        ui.separator();
+                    }
+                    for entry in &hidden_entries {
+                        trace_list_row(ui, entry, &display_name, host, &mut output);
+                    }
+                });
         },
     );
     if let Some(menu) = abscissa.as_ref() {
@@ -678,7 +665,7 @@ fn control_width(ui: &Ui, label: &str) -> f32 {
     // (the body face unless the style overrides it, not the `Button` text
     // style) inside its frame's margins, at the widest of its states. The
     // `Button` style measured every chip a twelfth narrow, so a crowded row
-    // ran past its end and cut the hidden control to "10 hidd".
+    // ran past its end and cut the control after it short.
     use egui::widget_style::{Classes, WidgetState};
     let style = ui.style();
     let classes = Classes::default();
@@ -704,21 +691,87 @@ fn control_width(ui: &Ui, label: &str) -> f32 {
         + margin
 }
 
-/// How many of `chips` the row shows in `width`: all of them when they fit,
-/// otherwise as many as leave room for the chip that counts the rest.
-fn fitted_chips(chips: &[LegendEntry], width: f32, overflow_width: impl Fn(usize) -> f32) -> usize {
-    let total: f32 = chips.iter().map(|chip| chip.width).sum();
-    if total <= width {
-        return chips.len();
-    }
+/// How many of `chips` the row shows in `width`: as many as leave room for
+/// the trace list after them, whose width for `n` chips left over is
+/// `list_width(n)`, nothing when it is not drawn.
+fn fitted_chips(chips: &[LegendEntry], width: f32, list_width: impl Fn(usize) -> f32) -> usize {
     let mut used = 0.0;
     for (index, chip) in chips.iter().enumerate() {
-        if used + chip.width + overflow_width(chips.len() - index) > width {
+        if used + chip.width + list_width(chips.len() - index - 1) > width {
             return index;
         }
         used += chip.width;
     }
     chips.len()
+}
+
+/// The trace list's label: "+N" for drawn curves the row has no room for
+/// and "M hidden" for the ones not drawn, whichever apply; none when the row
+/// names every curve and none is hidden.
+fn trace_list_label(overflow: usize, hidden: usize) -> Option<String> {
+    let parts: Vec<String> = [
+        (overflow > 0).then(|| format!("+{overflow}")),
+        (hidden > 0).then(|| format!("{hidden} hidden")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// One row of a pane's trace list: whether it is drawn, its swatch and its
+/// whole name. Its box and its name both toggle it, and the list stays open.
+fn trace_list_row(
+    ui: &mut Ui,
+    entry: &Entry<'_>,
+    display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+    host: &mut impl PaneHeaderHost,
+    output: &mut UnitPaneHeaderResponse,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (name, color, look, visible, typed) = match entry {
+        Entry::Signal(trace) => (
+            display_name(&trace.name).into_owned(),
+            trace.color,
+            SwatchStyle::of(trace).look(t.color_safe_traces),
+            trace.visible,
+            None,
+        ),
+        Entry::Expression(expression) => (
+            expression.label.clone(),
+            expression.color,
+            expression.swatch.look(t.color_safe_traces),
+            expression.visible,
+            Some(expression.text.as_str()),
+        ),
+    };
+    let toggled = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let mut shown = visible;
+            let check = ui.checkbox(&mut shown, "");
+            check.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, visible, &name)
+            });
+            let (swatch, _) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::hover());
+            paint_trace_swatch(ui.painter(), swatch, color, look, t.color.bg_panel);
+            let mut label = ui.add(
+                egui::Label::new(name.as_str())
+                    .extend()
+                    .sense(egui::Sense::click()),
+            );
+            if let Some(typed) = typed.filter(|typed| *typed != name) {
+                label = label.on_hover_text(typed);
+            }
+            check.clicked() || label.clicked()
+        })
+        .inner;
+    if toggled {
+        match entry {
+            Entry::Signal(trace) => host.toggle_trace_visibility(trace),
+            Entry::Expression(expression) => output.toggle_expression = Some(expression.slot),
+        }
+    }
 }
 
 /// A plotted trace's chip: its swatch, which hides it, then its name and

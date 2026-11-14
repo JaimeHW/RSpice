@@ -335,14 +335,14 @@ fn crowded_frame(ctx: &egui::Context, state: &mut ResultsTestHost, width: f32) -
     output.expect("a frame ran")
 }
 
-/// A pane's hidden control is painted whole however crowded its row: at a
+/// A pane's trace list is painted whole however crowded its row: at a
 /// narrow width, with a dozen signals plotted and ten hidden, the plotted
-/// ones that do not fit go behind the overflow control, and "10 hidden" is
-/// neither clipped nor under the log and autoscale buttons at the row's
-/// end. The buttons took their width after the legend had been laid out,
-/// and the hidden control was the entry they cut, to "10 hidd".
+/// ones that do not fit go behind it with the hidden ones, and its
+/// "+N · 10 hidden" is neither clipped nor under the log and autoscale
+/// buttons at the row's end. The buttons once took their width after the
+/// legend had been laid out, and cut the hidden control to "10 hidd".
 #[test]
-fn the_hidden_control_shows_whole_on_a_crowded_row() {
+fn the_trace_list_shows_whole_on_a_crowded_row() {
     fn painted(
         shape: &egui::Shape,
         clip: egui::Rect,
@@ -370,27 +370,21 @@ fn the_hidden_control_shows_whole_on_a_crowded_row() {
         for clipped in &output.shapes {
             painted(&clipped.shape, clipped.clip_rect, &mut texts);
         }
-        let Some((_, chip, clip)) = texts.iter().find(|(text, ..)| text == "10 hidden") else {
-            failures.push(format!("{width} {cursor:?}: no whole hidden control"));
+        // The plotted signals that do not fit wait behind the trace list
+        // with the hidden ones, and it counts both.
+        let list = texts.iter().find(|(text, ..)| {
+            text.strip_suffix(" · 10 hidden")
+                .and_then(|overflow| overflow.strip_prefix('+'))
+                .is_some_and(|count| count.parse::<usize>().is_ok())
+        });
+        let Some((_, chip, clip)) = list else {
+            failures.push(format!("{width} {cursor:?}: no whole trace list"));
             continue;
         };
         if !clip.contains_rect(*chip) {
             failures.push(format!(
-                "{width} {cursor:?}: the hidden control is clipped: {chip:?} in {clip:?}"
+                "{width} {cursor:?}: the trace list is clipped: {chip:?} in {clip:?}"
             ));
-        }
-        // The plotted signals that do not fit wait behind the overflow
-        // control, which is whole too.
-        let overflow = texts.iter().find(|(text, ..)| {
-            text.strip_prefix('+')
-                .is_some_and(|count| count.parse::<usize>().is_ok())
-        });
-        match overflow {
-            Some((text, rect, clip)) if !clip.contains_rect(*rect) => failures.push(format!(
-                "{width} {cursor:?}: the overflow control {text:?} is clipped"
-            )),
-            None => failures.push(format!("{width} {cursor:?}: no overflow control")),
-            Some(_) => {}
         }
         let buttons: Vec<egui::Rect> = output
             .platform_output
@@ -419,7 +413,7 @@ fn the_hidden_control_shows_whole_on_a_crowded_row() {
         for button in buttons {
             if button.intersects(*chip) {
                 failures.push(format!(
-                    "{width} {cursor:?}: the hidden control {chip:?} runs under a button {button:?}"
+                    "{width} {cursor:?}: the trace list {chip:?} runs under a button {button:?}"
                 ));
             }
         }
