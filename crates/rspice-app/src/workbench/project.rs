@@ -92,6 +92,9 @@ impl Feature for ProjectFeature {
 /// deletion. Then the library and view membership dialogs the Library
 /// surface draws, which hold a modal gate while open. Each is open while its
 /// form is. The staged deletion draws nothing, so nothing of it is ever open.
+/// Last come the technology attachment dialog, the launcher and the
+/// examples browser. Their steps only hold the gate, in the order the
+/// shell's modal-only list names them, and each is drawn where its work is.
 const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
     FeatureDialog {
         key: DialogKey("project.new_project"),
@@ -171,6 +174,26 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         key: DialogKey("project.rename_view"),
         is_open: |project| project.rename_view_dialog,
         render: ProjectFeature::process_rename_view_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.technology_attachment"),
+        is_open: |project| project.technology_attachment.open,
+        // The shell host draws it on the Project workspace's stage, after
+        // the page or the landing, in the feature's context.
+        render: |_, _| {},
+    },
+    FeatureDialog {
+        key: DialogKey("project.launcher"),
+        is_open: |project| project.project_launcher_open,
+        // The frame draws it through the shell host's launcher
+        // composition.
+        render: |_, _| {},
+    },
+    FeatureDialog {
+        key: DialogKey("project.examples"),
+        is_open: |project| project.examples_selection.is_some(),
+        // The frame's examples composition draws it.
+        render: |_, _| {},
     },
 ];
 

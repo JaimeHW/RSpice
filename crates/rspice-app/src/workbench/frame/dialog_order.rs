@@ -608,7 +608,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("project.technology_attachment"),
         modality: Modality::Dialog,
-        is_open: |state| state.project.technology_attachment.open,
+        is_open: |state| features::dialog_open(state, DialogKey("project.technology_attachment")),
     },
     ModalSpec {
         key: DialogKey("results.dataset_export"),
@@ -623,7 +623,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("project.launcher"),
         modality: Modality::Application,
-        is_open: |state| state.project.project_launcher_open,
+        is_open: |state| features::dialog_open(state, DialogKey("project.launcher")),
     },
     ModalSpec {
         key: DialogKey("project.launcher_route"),
@@ -633,7 +633,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("project.examples"),
         modality: Modality::Application,
-        is_open: |state| state.project.examples_selection.is_some(),
+        is_open: |state| features::dialog_open(state, DialogKey("project.examples")),
     },
     ModalSpec {
         key: DialogKey("project.design_management_route"),
