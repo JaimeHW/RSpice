@@ -45,8 +45,7 @@ impl Producer {
         simulation: &crate::config::SimulationConfig,
         config: &QpssConfig,
     ) -> Result<Self, SimulationError> {
-        let semantic_netlist = netlist_checkpoint_identity(netlist)
-            .ok_or_else(|| invalid("netlist has no canonical semantic identity"))?;
+        let semantic_netlist = netlist_checkpoint_identity(netlist);
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"rspice-qpss-torus-source-config-v1\0");
         let bytes = serde_json::to_vec(config)

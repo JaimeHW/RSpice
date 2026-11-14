@@ -129,12 +129,7 @@ impl Engine {
                             .into(),
                     ));
                 }
-                let mode = checkpoint.startup_mode().ok_or_else(|| {
-                    SimulationError::Circuit(
-                        "legacy transient checkpoint does not record its startup mode".into(),
-                    )
-                })?;
-                (Some(checkpoint), mode, checkpoint.time)
+                (Some(checkpoint), checkpoint.startup_mode(), checkpoint.time)
             }
         };
         self.validate_transient_checkpoint_schedule(netlist, start, tstop, stream.times)?;

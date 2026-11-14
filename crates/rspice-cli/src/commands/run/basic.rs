@@ -861,7 +861,7 @@ pub(super) fn run_transient(
                     resume_path.display()
                 )),
             })?;
-            if checkpoint.startup_mode() != Some(startup_mode) {
+            if checkpoint.startup_mode() != startup_mode {
                 return Err(CliError::SimulationError {
                     message: format!(
                         "checkpoint startup mode {:?} does not match the selected .TRAN startup mode {:?}",

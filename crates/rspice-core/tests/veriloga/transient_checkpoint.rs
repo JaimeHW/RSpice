@@ -842,7 +842,7 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
         )
         .expect("UIC first segment completes without a DC operating point");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
-    assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
+    assert_eq!(checkpoint.startup_mode(), TransientStartupMode::Uic);
     assert!(checkpoint.to_text().contains("startup_mode uic\n"));
     assert!(checkpoint.to_text().contains("linearized_startup 1\n"));
 
@@ -852,10 +852,7 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
         .run_tran_resume(&netlist, &restored, 4.0e-6, 0.5e-6)
         .expect("UIC checkpoint resumes without reclassifying startup as an operating point");
     let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
-    assert_eq!(
-        final_checkpoint.startup_mode(),
-        Some(TransientStartupMode::Uic)
-    );
+    assert_eq!(final_checkpoint.startup_mode(), TransientStartupMode::Uic);
     assert!(
         final_checkpoint
             .to_text()

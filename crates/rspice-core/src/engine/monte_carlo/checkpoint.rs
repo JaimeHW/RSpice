@@ -349,11 +349,7 @@ impl Engine {
                 command.confidence_method = Default::default();
             }
         }
-        field(
-            crate::engine::transient::netlist_checkpoint_identity(&normalized)
-                .ok_or_else(|| invalid("circuit identity unavailable"))?
-                .as_bytes(),
-        );
+        field(crate::engine::transient::netlist_checkpoint_identity(&normalized).as_bytes());
         // Parsed nominal values alone cannot identify statistical expressions.
         // Only literal reporting fields authenticated by the parser may vary.
         field(&crate::netlist::monte_carlo_identity::source_identity(

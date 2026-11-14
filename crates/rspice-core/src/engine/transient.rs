@@ -1284,7 +1284,7 @@ struct ScheduledCheckpointPoint<'a> {
 #[derive(Clone, Copy)]
 struct ScheduledCheckpointIdentity<'a> {
     fingerprint: u64,
-    netlist_identity: &'a Option<String>,
+    netlist_identity: &'a str,
     restart_identity: &'a Option<String>,
     simulation_identity: &'a str,
 }
@@ -3916,12 +3916,7 @@ impl Engine {
                 checkpoint.time
             )));
         }
-        let startup_mode = checkpoint.startup_mode().ok_or_else(|| {
-            SimulationError::Circuit(
-                "legacy transient checkpoint does not record its startup mode; refusing to guess whether the captured trajectory used UIC"
-                    .to_string(),
-            )
-        })?;
+        let startup_mode = checkpoint.startup_mode();
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
@@ -4585,7 +4580,7 @@ impl Engine {
             &self.config,
             CheckpointIdentity {
                 fingerprint,
-                netlist_identity: netlist_identity.clone(),
+                netlist_identity: netlist_identity.to_owned(),
                 restart_identity: restart_identity.clone(),
                 simulation_identity: simulation_identity.to_owned(),
             },
@@ -5148,9 +5143,7 @@ impl Engine {
                 }
                 (
                     checkpoint.solution.clone(),
-                    checkpoint
-                        .initial_solution_mode()
-                        .map_err(SimulationError::Circuit)?,
+                    checkpoint.initial_solution_mode(),
                     None,
                 )
             } else if let Some(seed) = dc_seed {
@@ -15614,7 +15607,7 @@ D1 D 0 DMOD
             .expect("UIC t=0 checkpoint trajectory solves");
         assert_eq!(scheduled.len(), 1);
         let checkpoint = &scheduled[0].checkpoint;
-        assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
+        assert_eq!(checkpoint.startup_mode(), TransientStartupMode::Uic);
         let continuation = checkpoint
             .validated_integration_continuation()
             .expect("UIC t=0 continuation validates")

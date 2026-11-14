@@ -447,12 +447,7 @@ impl HbOperatingPointIdentity {
         } else {
             std::borrow::Cow::Borrowed(netlist)
         };
-        let semantic_netlist_identity =
-            netlist_checkpoint_identity(&semantic_netlist).ok_or_else(|| {
-                SimulationError::Circuit(
-                    "HB producer netlist has no canonical semantic identity".to_owned(),
-                )
-            })?;
+        let semantic_netlist_identity = netlist_checkpoint_identity(&semantic_netlist);
         Ok(HbOperatingPointProducerInputs {
             semantic_netlist_identity,
             resolved_simulation_identity: hb_resolved_simulation_identity(simulation_config),

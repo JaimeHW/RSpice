@@ -206,13 +206,13 @@ impl TransientCheckpointBlockerSource {
 }
 
 /// What a checkpoint says it is a checkpoint *of*: the deck fingerprint, the
-/// optional netlist and restart identities, and the simulation identity. All
-/// four are compared on resume, so a swapped pair would accept a checkpoint
-/// from a different run.
+/// netlist identity, the optional restart identity, and the simulation
+/// identity. All four are compared on resume, so a swapped pair would accept a
+/// checkpoint from a different run.
 #[derive(Clone, Debug)]
 pub(super) struct CheckpointIdentity {
     pub fingerprint: u64,
-    pub netlist_identity: Option<String>,
+    pub netlist_identity: String,
     pub restart_identity: Option<String>,
     pub simulation_identity: String,
 }
@@ -484,23 +484,19 @@ pub struct TransientCheckpoint {
     /// mismatch rather than silently continuing a different circuit.
     pub netlist_fingerprint: u64,
     /// Collision-resistant identity of the fully elaborated semantic netlist.
-    /// Legacy files have no safe identity and are refused for resume.
-    netlist_identity: Option<String>,
+    netlist_identity: String,
     /// Collision-resistant trajectory identity for authored restart decks.
     /// Unlike `netlist_identity`, this deliberately excludes only the
     /// transient stop horizon and `.OPTIONS RESTART` control-plane metadata.
-    /// Legacy files have no safe compatible identity and fail closed.
+    /// An image captured without one cannot resume an authored restart deck.
     restart_identity: Option<String>,
     /// Identity of the resolved, state-affecting simulation configuration.
-    /// Kept optional solely so legacy checkpoint files can be parsed and
-    /// rejected with a precise diagnostic.
-    simulation_identity: Option<String>,
-    /// Startup contract of the selected `.TRAN` analysis. Optional only so
-    /// older files can be parsed and rejected with a precise resume error.
-    startup_mode: Option<TransientStartupMode>,
-    /// Whether the original startup selected relaxed transient recovery.
-    /// Legacy files cannot reconstruct this from the authored UIC flag alone.
-    linearized_startup: Option<bool>,
+    simulation_identity: String,
+    /// Startup contract of the selected `.TRAN` analysis.
+    startup_mode: TransientStartupMode,
+    /// Whether the original startup selected relaxed transient recovery,
+    /// which the authored UIC flag alone does not determine.
+    linearized_startup: bool,
     /// Per-call transient maximum-step bound the captured segment ran under.
     /// This is provenance, not resume state: like the stop horizon, the cap
     /// only bounds steps a segment is about to take, so a resumed segment
@@ -1121,11 +1117,8 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
 /// Collision-resistant identity of the fully elaborated semantic netlist.
 /// Source paths, diagnostics, and original source spelling are excluded;
 /// expanded include/SPEF content and public post-parse AST edits are included.
-pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
-    Some(semantic_netlist_identity(
-        netlist,
-        b"rspice-transient-elaborated-netlist-v7\0",
-    ))
+pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> String {
+    semantic_netlist_identity(netlist, b"rspice-transient-elaborated-netlist-v7\0")
 }
 
 /// Collision-resistant trajectory identity used by authored checkpoint/restart
@@ -5236,7 +5229,7 @@ fn accepted_integration_runtime_retained_value_count(
 impl TransientCheckpoint {
     /// Return the typed capability of this captured checkpoint image.
     ///
-    /// This reports both explicit capture-time blockers and incomplete legacy
+    /// This reports both explicit capture-time blockers and missing segment
     /// metadata that guarantees the normal resume path will reject the image.
     /// It does not replace exact netlist/configuration identity validation,
     /// which is performed again when a checkpoint is captured or resumed.
@@ -5303,34 +5296,11 @@ impl TransientCheckpoint {
             }
         }
 
-        for (missing, message) in [
-            (
-                self.netlist_identity.is_none(),
-                "collision-resistant netlist identity is unavailable",
-            ),
-            (
-                self.simulation_identity.is_none(),
-                "resolved simulation configuration identity is unavailable",
-            ),
-            (
-                self.startup_mode.is_none(),
-                "transient startup mode is unavailable",
-            ),
-            (
-                self.linearized_startup.is_none(),
-                "transient startup recovery policy is unavailable",
-            ),
-            (
-                self.integration_max_step.is_none(),
-                "captured segment maximum step is unavailable",
-            ),
-        ] {
-            if missing {
-                push(
-                    TransientCheckpointBlockerSource::Structural,
-                    message.to_string(),
-                );
-            }
+        if self.integration_max_step.is_none() {
+            push(
+                TransientCheckpointBlockerSource::Structural,
+                "captured segment maximum step is unavailable".to_string(),
+            );
         }
 
         TransientCheckpointCapability::from_blockers(blockers)
@@ -5458,12 +5428,12 @@ impl TransientCheckpoint {
                 super::MAX_DYNAMIC_TLINE_BREAKPOINTS
             ));
         }
-        if self.netlist_identity.as_ref().is_some_and(|identity| {
-            identity.len() != 64
-                || !identity
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        }) {
+        if self.netlist_identity.len() != 64
+            || !self
+                .netlist_identity
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(
                 "checkpoint netlist identity must be 64 lowercase hexadecimal digits".to_string(),
             );
@@ -5481,9 +5451,7 @@ impl TransientCheckpoint {
         if self.solution.iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
         }
-        if self.startup_mode == Some(TransientStartupMode::Uic)
-            && self.linearized_startup == Some(false)
-        {
+        if self.startup_mode == TransientStartupMode::Uic && !self.linearized_startup {
             return Err(
                 "checkpoint UIC startup requires the linearized startup recovery policy".to_owned(),
             );
@@ -6077,7 +6045,7 @@ impl TransientCheckpoint {
     #[cfg(test)]
     pub(crate) fn capture(
         fingerprint: u64,
-        netlist_identity: Option<String>,
+        netlist_identity: String,
         config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
@@ -6097,7 +6065,7 @@ impl TransientCheckpoint {
     /// capture still validates its device identities and every numeric lane.
     pub(in crate::engine) fn capture_with_junction_history(
         fingerprint: u64,
-        netlist_identity: Option<String>,
+        netlist_identity: String,
         config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
@@ -6347,9 +6315,9 @@ impl TransientCheckpoint {
             netlist_fingerprint: fingerprint,
             netlist_identity,
             restart_identity,
-            simulation_identity: Some(simulation_identity),
-            startup_mode: Some(startup_mode),
-            linearized_startup: Some(linearized_startup),
+            simulation_identity,
+            startup_mode,
+            linearized_startup,
             integration_max_step,
             source_time_basis: circuit.independent_source_time_basis()?,
             integration_continuation: integration_continuation.map_or_else(
@@ -6572,13 +6540,11 @@ impl TransientCheckpoint {
         )
     }
 
-    pub(super) fn initial_solution_mode(
-        &self,
-    ) -> Result<super::startup::InitialSolutionMode, String> {
-        match self.linearized_startup {
-            Some(true) => Ok(super::startup::InitialSolutionMode::LinearizedSeed),
-            Some(false) => Ok(super::startup::InitialSolutionMode::TransientOperatingPoint),
-            None => Err("legacy transient checkpoint does not record the startup recovery policy; re-run the transient from t=0".to_owned()),
+    pub(super) fn initial_solution_mode(&self) -> super::startup::InitialSolutionMode {
+        if self.linearized_startup {
+            super::startup::InitialSolutionMode::LinearizedSeed
+        } else {
+            super::startup::InitialSolutionMode::TransientOperatingPoint
         }
     }
 
@@ -6943,15 +6909,9 @@ impl TransientCheckpoint {
         // Before the identity, which hashes the files too: this refusal names
         // the file.
         vcd::validate_files(&self.vcd_files)?;
-        let target_identity = netlist_checkpoint_identity(netlist)
-            .expect("semantic netlist identity is available for every elaborated AST");
-        let Some(captured_identity) = self.netlist_identity.as_deref() else {
-            return Err(
-                "legacy transient checkpoint does not contain a collision-resistant netlist identity"
-                    .to_string(),
-            );
-        };
-        if captured_identity != target_identity {
+        let target_identity = netlist_checkpoint_identity(netlist);
+        let captured_identity = &self.netlist_identity;
+        if *captured_identity != target_identity {
             return Err(format!(
                 "checkpoint was captured from a different netlist (identity {captured_identity}, this deck is {target_identity}); refusing to resume mismatched state"
             ));
@@ -7057,9 +7017,6 @@ impl TransientCheckpoint {
         config: &SimulationConfig,
     ) -> Result<(), String> {
         self.validate_numeric_state()?;
-        if self.simulation_identity.is_none() {
-            return self.validate_resolved_config(config);
-        }
         self.validate_for(netlist)?;
         self.validate_resolved_config(config)
     }
@@ -7070,33 +7027,18 @@ impl TransientCheckpoint {
         config: &SimulationConfig,
     ) -> Result<(), String> {
         self.validate_numeric_state()?;
-        if self.simulation_identity.is_none() {
-            return self.validate_resolved_config(config);
-        }
         self.validate_for_restart(netlist)?;
         self.validate_resolved_config(config)
     }
 
     fn validate_resolved_config(&self, config: &SimulationConfig) -> Result<(), String> {
-        let Some(captured_identity) = self.simulation_identity.as_deref() else {
-            return Err(
-                "legacy transient checkpoint does not contain a collision-resistant simulation configuration identity"
-                    .to_string(),
-            );
-        };
+        let captured_identity = &self.simulation_identity;
         let target_identity = simulation_checkpoint_identity(config);
-        if captured_identity != target_identity {
+        if *captured_identity != target_identity {
             return Err(format!(
                 "checkpoint was captured with a different resolved simulation configuration (identity {captured_identity}, this run is {target_identity}); refusing to resume mismatched state"
             ));
         }
-        if self.startup_mode.is_none() {
-            return Err(
-                "legacy transient checkpoint does not record whether its selected .TRAN analysis used UIC; refusing to resume an ambiguous trajectory"
-                    .to_string(),
-            );
-        }
-        self.initial_solution_mode()?;
         Ok(())
     }
 
@@ -7648,9 +7590,7 @@ impl TransientCheckpoint {
     }
 
     /// Startup contract captured for the selected transient analysis.
-    ///
-    /// Legacy checkpoint formats return `None` and are refused for resume.
-    pub fn startup_mode(&self) -> Option<TransientStartupMode> {
+    pub fn startup_mode(&self) -> TransientStartupMode {
         self.startup_mode
     }
 
@@ -7674,28 +7614,23 @@ impl TransientCheckpoint {
         let mut out = String::new();
         out.push_str(&format!("{TEXT_HEADER_PREFIX}{FORMAT_VERSION}\n"));
         out.push_str(&format!("fingerprint {:#018x}\n", self.netlist_fingerprint));
-        out.push_str(&format!(
-            "netlist_identity {}\n",
-            self.netlist_identity.as_deref().unwrap_or("none")
-        ));
+        out.push_str(&format!("netlist_identity {}\n", self.netlist_identity));
         out.push_str(&format!(
             "restart_identity {}\n",
             self.restart_identity.as_deref().unwrap_or("none")
         ));
         out.push_str(&format!(
             "simulation_identity {}\n",
-            self.simulation_identity.as_deref().unwrap_or("none")
+            self.simulation_identity
         ));
         let startup_mode = match self.startup_mode {
-            Some(TransientStartupMode::OperatingPoint) => "operating-point",
-            Some(TransientStartupMode::Uic) => "uic",
-            None => "unknown",
+            TransientStartupMode::OperatingPoint => "operating-point",
+            TransientStartupMode::Uic => "uic",
         };
         out.push_str(&format!("startup_mode {startup_mode}\n"));
         out.push_str(&format!(
             "linearized_startup {}\n",
-            self.linearized_startup
-                .map_or("unknown", |value| if value { "1" } else { "0" })
+            u8::from(self.linearized_startup)
         ));
         out.push_str(&format!("time {}\n", self.time));
         out.push_str(&format!(
@@ -8480,18 +8415,12 @@ impl TransientCheckpoint {
                 .strip_prefix("netlist_identity ")
                 .map(str::trim)
                 .ok_or_else(|| format!("malformed netlist identity line: '{identity_line}'"))?;
-            if identity == "none" {
-                None
-            } else if identity.len() == 64
+            if identity.len() == 64
                 && identity
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                Some(copy_checkpoint_string(
-                    identity,
-                    "netlist identity",
-                    budget,
-                )?)
+                copy_checkpoint_string(identity, "netlist identity", budget)?
             } else {
                 return Err(format!(
                     "malformed netlist identity line: '{identity_line}'"
@@ -8530,18 +8459,12 @@ impl TransientCheckpoint {
                 .strip_prefix("simulation_identity ")
                 .map(str::trim)
                 .ok_or_else(|| format!("malformed simulation identity line: '{identity_line}'"))?;
-            if identity == "none" {
-                None
-            } else if identity.len() == 64
+            if identity.len() == 64
                 && identity
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                Some(copy_checkpoint_string(
-                    identity,
-                    "simulation identity",
-                    budget,
-                )?)
+                copy_checkpoint_string(identity, "simulation identity", budget)?
             } else {
                 return Err(format!(
                     "malformed simulation identity line: '{identity_line}'"
@@ -8552,9 +8475,8 @@ impl TransientCheckpoint {
         let startup_mode = {
             let mode_line = lines.next().ok_or("missing startup mode line")?;
             match mode_line.strip_prefix("startup_mode ").map(str::trim) {
-                Some("operating-point") => Some(TransientStartupMode::OperatingPoint),
-                Some("uic") => Some(TransientStartupMode::Uic),
-                Some("unknown") => None,
+                Some("operating-point") => TransientStartupMode::OperatingPoint,
+                Some("uic") => TransientStartupMode::Uic,
                 _ => return Err(format!("malformed startup mode line: '{mode_line}'")),
             }
         };
@@ -8562,8 +8484,7 @@ impl TransientCheckpoint {
         let linearized_startup = {
             let line = lines.next().ok_or("missing startup recovery policy line")?;
             match line.strip_prefix("linearized_startup ").map(str::trim) {
-                Some("unknown") => None,
-                Some(field) => Some(parse_checkpoint_bool(field, "startup recovery policy")?),
+                Some(field) => parse_checkpoint_bool(field, "startup recovery policy")?,
                 None => return Err(format!("malformed startup recovery policy line: '{line}'")),
             }
         };
@@ -11180,11 +11101,11 @@ mod tests {
             time: 1.2345678901234567e-6,
             solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
             netlist_fingerprint: 0xDEAD_BEEF_0123_4567,
-            netlist_identity: Some("fedcba9876543210".repeat(4)),
+            netlist_identity: "fedcba9876543210".repeat(4),
             restart_identity: Some("1234567890abcdef".repeat(4)),
-            simulation_identity: Some("abcdef0123456789".repeat(4)),
-            startup_mode: Some(TransientStartupMode::Uic),
-            linearized_startup: Some(true),
+            simulation_identity: "abcdef0123456789".repeat(4),
+            startup_mode: TransientStartupMode::Uic,
+            linearized_startup: true,
             integration_max_step: Some(2.5e-9),
             source_time_basis: Some(crate::circuit::SourceTimeBasis {
                 tstep: 2.5e-9,
@@ -11391,24 +11312,13 @@ mod tests {
             (true, InitialSolutionMode::LinearizedSeed),
         ] {
             let mut checkpoint = sample();
-            checkpoint.startup_mode = Some(TransientStartupMode::OperatingPoint);
-            checkpoint.linearized_startup = Some(linearized);
+            checkpoint.startup_mode = TransientStartupMode::OperatingPoint;
+            checkpoint.linearized_startup = linearized;
             let restored = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
-            assert_eq!(restored.initial_solution_mode().unwrap(), expected);
-
-            let mut unknown = checkpoint.clone();
-            unknown.linearized_startup = None;
-            let unknown = TransientCheckpoint::from_text(&unknown.to_text()).unwrap();
-            assert!(
-                unknown
-                    .initial_solution_mode()
-                    .unwrap_err()
-                    .contains("startup recovery policy")
-            );
-            assert!(unknown.capability().require_resumable().is_err());
+            assert_eq!(restored.initial_solution_mode(), expected);
         }
         let text = sample().to_text();
-        for field in ["0", "2", "true", "NaN", "", "1 0"] {
+        for field in ["0", "2", "true", "NaN", "", "1 0", "unknown"] {
             assert!(
                 TransientCheckpoint::from_text(&text.replace(
                     "linearized_startup 1\n",
@@ -13198,7 +13108,7 @@ mod tests {
         let checkpoint = sample();
         let current = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current checkpoint parses");
-        assert_eq!(current.startup_mode(), Some(TransientStartupMode::Uic));
+        assert_eq!(current.startup_mode(), TransientStartupMode::Uic);
     }
 
     #[cfg(feature = "veriloga")]
@@ -13811,10 +13721,10 @@ mod tests {
     #[test]
     fn programmatic_netlists_have_complete_semantic_identities() {
         let netlist = Netlist::default();
-        let identity = netlist_checkpoint_identity(&netlist).expect("semantic identity");
+        let identity = netlist_checkpoint_identity(&netlist);
         let mut checkpoint = sample();
         checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
-        checkpoint.netlist_identity = Some(identity);
+        checkpoint.netlist_identity = identity;
         checkpoint
             .validate_for(&netlist)
             .expect("programmatic AST identity authorizes its own checkpoint");
@@ -14071,8 +13981,8 @@ mod tests {
         let first = Netlist::parse("identity bench\nr1 1 0 1k\n.end\n").expect("first deck parses");
         let second =
             Netlist::parse("identity bench\nr1 1 0 2k\n.end\n").expect("second deck parses");
-        let first_identity = netlist_checkpoint_identity(&first).expect("source identity");
-        let second_identity = netlist_checkpoint_identity(&second).expect("source identity");
+        let first_identity = netlist_checkpoint_identity(&first);
+        let second_identity = netlist_checkpoint_identity(&second);
         assert_eq!(first_identity.len(), 64);
         assert_ne!(
             first_identity, second_identity,
@@ -14081,7 +13991,7 @@ mod tests {
 
         let mut checkpoint = sample();
         checkpoint.netlist_fingerprint = netlist_fingerprint(&first);
-        checkpoint.netlist_identity = Some(first_identity);
+        checkpoint.netlist_identity = first_identity;
         checkpoint
             .validate_for(&first)
             .expect("matching cryptographic netlist identity validates");
@@ -14295,7 +14205,10 @@ mod tests {
     /// must fail parsing as a malformed `kind` identity.
     fn assert_identity_requires_lowercase_blake3_hex(valid: &str, kind: &str) {
         let text = sample().to_text();
-        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+        let invalid_values = ["abc".to_string(), "A".repeat(64), "g".repeat(64)];
+        // Only the restart identity may be absent from a current image.
+        let none = (kind != "restart").then(|| "none".to_string());
+        for invalid in invalid_values.into_iter().chain(none) {
             let err = TransientCheckpoint::from_text(&text.replacen(valid, &invalid, 1))
                 .expect_err("malformed identity must fail during parsing");
             assert!(
@@ -14586,7 +14499,7 @@ mod tests {
                     .end\n";
         let first = Netlist::parse(deck).expect("first statistical deck parses");
         let control = Netlist::parse(deck).expect("control statistical deck parses");
-        let _ = netlist_checkpoint_identity(&first).expect("identity computes");
+        let _ = netlist_checkpoint_identity(&first);
         assert_eq!(
             first.params.random().next_uniform().to_bits(),
             control.params.random().next_uniform().to_bits(),
@@ -14601,7 +14514,7 @@ mod tests {
         let mut checkpoint = sample();
         checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
         checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
-        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&base));
+        checkpoint.simulation_identity = simulation_checkpoint_identity(&base);
         checkpoint
             .validate_for_with_config(&netlist, &base)
             .expect("matching resolved config validates");
@@ -14659,7 +14572,7 @@ mod tests {
         let mut checkpoint = sample();
         checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
         checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
-        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&base));
+        checkpoint.simulation_identity = simulation_checkpoint_identity(&base);
         checkpoint
             .validate_for_with_config(&netlist, &base)
             .unwrap();
@@ -14698,7 +14611,7 @@ mod tests {
         let mut checkpoint = sample();
         checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
         checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
-        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&iteration_control));
+        checkpoint.simulation_identity = simulation_checkpoint_identity(&iteration_control);
         checkpoint
             .validate_for_with_config(&netlist, &iteration_control)
             .expect("resume reanchors the active span from checkpoint time");

@@ -723,7 +723,7 @@ impl Engine {
         }
         let checkpoint = TransientCheckpoint::capture_with_junction_history(
             netlist_fingerprint(netlist),
-            Some(authenticated_netlist_identity.to_string()),
+            authenticated_netlist_identity.to_string(),
             &self.config,
             CheckpointState {
                 time: 0.0,
@@ -771,12 +771,9 @@ impl Engine {
         let config = engine.hb_config_for_netlist(netlist, config)?;
         engine.hb_validate_config(&config)?;
         let requested_sources = Self::hb_envelope_requested_source_set(frozen_source_names)?;
-        let authenticated_netlist_identity = netlist_checkpoint_identity(netlist)
-            .expect("every elaborated netlist has a semantic identity");
+        let authenticated_netlist_identity = netlist_checkpoint_identity(netlist);
         let original_circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        if netlist_checkpoint_identity(netlist).as_deref()
-            != Some(authenticated_netlist_identity.as_str())
-        {
+        if netlist_checkpoint_identity(netlist) != authenticated_netlist_identity {
             return Err(SimulationError::Circuit(
                 "HB Envelope input dependencies changed during circuit elaboration; refusing to authenticate a stale source snapshot"
                     .to_string(),
@@ -835,9 +832,7 @@ impl Engine {
             None,
             abort,
         )?;
-        if netlist_checkpoint_identity(netlist).as_deref()
-            != Some(authenticated_netlist_identity.as_str())
-        {
+        if netlist_checkpoint_identity(netlist) != authenticated_netlist_identity {
             return Err(SimulationError::Circuit(
                 "HB Envelope input dependencies changed during the carrier solve; refusing to publish a mismatched continuation artifact"
                     .to_string(),
@@ -975,8 +970,7 @@ impl Engine {
                 "HB Envelope continuation duration must be finite and positive, got {duration:e}"
             )));
         }
-        let netlist_identity = netlist_checkpoint_identity(netlist)
-            .expect("every elaborated netlist has a semantic identity");
+        let netlist_identity = netlist_checkpoint_identity(netlist);
         if netlist_identity != state.original_netlist_identity {
             return Err(SimulationError::Circuit(
                 "HB Envelope continuation artifact belongs to a different original netlist"

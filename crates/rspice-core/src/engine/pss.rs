@@ -1031,11 +1031,7 @@ impl PssOperatingPointIdentity {
         simulation_config: &super::SimulationConfig,
         pss_config: &PssConfig,
     ) -> Result<PssOperatingPointProducerInputs, SimulationError> {
-        let semantic_netlist_identity = netlist_checkpoint_identity(netlist).ok_or_else(|| {
-            SimulationError::Circuit(
-                "PSS producer netlist has no canonical semantic identity".to_owned(),
-            )
-        })?;
+        let semantic_netlist_identity = netlist_checkpoint_identity(netlist);
         Ok(PssOperatingPointProducerInputs {
             semantic_netlist_identity,
             resolved_simulation_identity: pss_resolved_simulation_identity(simulation_config),
@@ -2063,7 +2059,7 @@ impl Engine {
         }
         let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
-            Some(authenticated_netlist_identity),
+            authenticated_netlist_identity,
             &self.config,
             CheckpointState {
                 time: 0.0,
@@ -2149,12 +2145,7 @@ impl Engine {
     }
 
     fn pss_continuation_netlist_identity(netlist: &Netlist) -> Result<String, SimulationError> {
-        super::transient::netlist_checkpoint_identity(netlist).ok_or_else(|| {
-            SimulationError::Circuit(
-                "PSS continuation could not authenticate the semantic netlist and its external dependencies before circuit construction"
-                    .to_string(),
-            )
-        })
+        Ok(super::transient::netlist_checkpoint_identity(netlist))
     }
 
     fn ensure_pss_continuation_netlist_identity(

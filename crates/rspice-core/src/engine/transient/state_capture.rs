@@ -266,13 +266,7 @@ impl Engine {
                 checkpoint.time
             )));
         }
-        let startup_mode = checkpoint.startup_mode().ok_or_else(|| {
-            SimulationError::Circuit(
-                "legacy transient checkpoint does not record its startup mode; refusing to \
-                 guess whether the captured trajectory used UIC"
-                    .to_string(),
-            )
-        })?;
+        let startup_mode = checkpoint.startup_mode();
         let times = [checkpoint.time];
         let capture = TransientStateCapture::new(&times, tstop)?;
         self.reset_convergence_quality();
