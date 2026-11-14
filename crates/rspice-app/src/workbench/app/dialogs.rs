@@ -10,8 +10,8 @@ pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save;
 pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save_validation;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
-pub(in crate::workbench) mod connectivity_manager;
-pub(in crate::workbench) mod create_model_bound_symbol;
+pub(crate) mod connectivity_manager;
+pub(crate) mod create_model_bound_symbol;
 #[cfg(test)]
 pub(crate) use rspice_app_project::workbench::app::dialogs::design_management;
 #[cfg(test)]
@@ -57,7 +57,7 @@ pub(crate) use rspice_app_code::workbench::app::dialogs::source_document;
 pub(crate) use rspice_app_code::workbench::app::dialogs::source_find;
 pub(crate) use rspice_app_code::workbench::app::dialogs::source_language_tools;
 pub(in crate::workbench) mod state;
-pub(in crate::workbench) mod stimulus_link;
+pub(crate) mod stimulus_link;
 pub(crate) mod symbol_definition;
 pub(in crate::workbench) use rspice_app_code::workbench::app::dialogs::veriloga_build_settings;
 pub(crate) mod visibility_options;

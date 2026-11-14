@@ -52,17 +52,18 @@ impl PinPortDialogState {
 }
 
 const TITLE: &str = "Create pins";
-const PRIMARY: &str = "Place";
+pub(crate) const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";
-const READ_ONLY: &str = "This schematic is read-only.";
+pub(crate) const READ_ONLY: &str = "This schematic is read-only.";
 /// What Place waits for while no name is typed.
-const NAMES_MISSING: &str = "Type the names of the pins to place.";
-const DOCUMENT_CHANGED: &str = "The active schematic changed. Close this form and open it again.";
-const TOO_MANY: &str = "A batch holds at most 256 pins.";
+pub(crate) const NAMES_MISSING: &str = "Type the names of the pins to place.";
+pub(crate) const DOCUMENT_CHANGED: &str =
+    "The active schematic changed. Close this form and open it again.";
+pub(crate) const TOO_MANY: &str = "A batch holds at most 256 pins.";
 
 /// One batch's ceiling. A cell with more than this many new pins is a cell
 /// being generated, not drawn.
-const MAX_NAMES: usize = 256;
+pub(crate) const MAX_NAMES: usize = 256;
 
 /// Open Create pins for the active schematic.
 ///
@@ -104,7 +105,7 @@ pub(crate) fn open_create_pins(dialog: &mut PinPortDialogState, model: &Model) {
 
 /// What the typed draft is, measured against the live document.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Draft {
+pub(crate) enum Draft {
     /// The form cannot be used at all, and says why.
     Blocked(&'static str),
     /// Nothing typed. The primary is off and the footer says what it
@@ -117,7 +118,7 @@ enum Draft {
 }
 
 impl Draft {
-    fn names(&self) -> &[String] {
+    pub(crate) fn names(&self) -> &[String] {
         match self {
             Self::Ready(names) => names,
             _ => &[],
@@ -183,7 +184,7 @@ fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
 
 /// What the names declare: the pins, the conductors under them, and where they
 /// will sit in the cell's port list.
-fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
+pub(crate) fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
     if names.is_empty() {
         return None;
     }
@@ -205,7 +206,7 @@ fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
 
 /// The deck formals, for the one case where a reader cannot work them out: a
 /// single name that declares a range.
-fn deck_bits_line(names: &[String]) -> Option<String> {
+pub(crate) fn deck_bits_line(names: &[String]) -> Option<String> {
     let [only] = names else {
         return None;
     };
@@ -295,4 +296,4 @@ fn arm_create_pins(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

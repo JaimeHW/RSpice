@@ -8,8 +8,8 @@ use crate::state::{
     CellViewRef, PortDirection, PortSpec, PropertyType, SymbolElectricalType, SymbolPinSide,
 };
 
-pub(super) const TITLE: &str = "Create model-bound symbol";
-pub(super) const PRIMARY: &str = "Create symbol revision";
+pub(crate) const TITLE: &str = "Create model-bound symbol";
+pub(crate) const PRIMARY: &str = "Create symbol revision";
 pub(super) const DESCRIPTION: &str = "Create one governed symbol definition from an explicit source contract, ordered electrical terminals, and versioned generated views.";
 /// Held in every state: only a refusal paints a strip, and a surface sized to
 /// its content would jump under the pointer as the draft became valid.

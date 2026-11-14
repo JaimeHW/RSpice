@@ -39,7 +39,7 @@ use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
-const PRIMARY: &str = "Apply reviewed connectivity repairs";
+pub(crate) const PRIMARY: &str = "Apply reviewed connectivity repairs";
 /// Why "Begin bus placement" is disabled while the declaration is empty.
 const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
 /// Why the manager's Apply is disabled while nothing is chosen to apply.
@@ -1015,14 +1015,14 @@ fn validate_bus_draft(dialog: &ConnectivityManagerDialogState) -> Result<BusDecl
 /// the model and the session. Revealing a finding, opening the source map and
 /// applying reviewed repairs reach the whole session, so it hands those to
 /// the shell.
-pub(in crate::workbench) struct ConnectivityManager<'a> {
-    pub(in crate::workbench) dialog: &'a mut ConnectivityManagerDialogState,
-    pub(in crate::workbench) model: &'a mut Model,
-    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+pub(crate) struct ConnectivityManager<'a> {
+    pub(crate) dialog: &'a mut ConnectivityManagerDialogState,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
 }
 
 impl ConnectivityManager<'_> {
-    pub(in crate::workbench) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
+    pub(crate) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }
@@ -2196,7 +2196,7 @@ fn create_bus_form(
 }
 
 const CREATE_BUS_TITLE: &str = "Create indexed bus";
-const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
+pub(crate) const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
 
 /// The line under the declaration: what it declares, why it is refused, or,
 /// while it is empty, what placement waits for.

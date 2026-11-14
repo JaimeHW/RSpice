@@ -29,7 +29,7 @@
 //! its net; undo restores the old type and the old card together because the
 //! whole thing is one entry.
 
-mod adopt;
+pub(crate) mod adopt;
 mod extract;
 mod shell;
 
@@ -69,8 +69,8 @@ pub(crate) struct StimulusLinkDialogState {
     mode: StimulusLinkMode,
     component_id: u64,
     reference: String,
-    chip: String,
-    provenance: ProvenanceState,
+    pub(crate) chip: String,
+    pub(crate) provenance: ProvenanceState,
     card: String,
     nets: [String; 2],
     timing: PreviewTiming,
@@ -79,12 +79,12 @@ pub(crate) struct StimulusLinkDialogState {
     data_root: Option<std::path::PathBuf>,
     retained_table: Option<std::path::PathBuf>,
     /// Adopt: the definition the reader has picked.
-    pick: Option<String>,
+    pub(crate) pick: Option<String>,
     /// Adopt: what the reader has typed into the list filter.
     filter: String,
     /// Extract: the name and purpose being authored.
-    name: String,
-    purpose: String,
+    pub(crate) name: String,
+    pub(crate) purpose: String,
     /// Extract: whether the generated name is still the untouched suggestion
     /// and should be offered whole to the first keystroke.
     select_name: bool,
@@ -333,7 +333,7 @@ fn consequence(component: &Component, definition: &StimulusDefinition) -> String
 }
 
 /// Why this name cannot be saved, in the model's own words.
-fn extract_refusal(model: &Model, component: &Component, name: &str) -> Option<String> {
+pub(crate) fn extract_refusal(model: &Model, component: &Component, name: &str) -> Option<String> {
     if let Err(error) = StimulusDefinition::new(
         name,
         component.kind,
@@ -477,7 +477,7 @@ pub(crate) fn commit_adoption(
 
 /// Publish the instance's card as a new `r1` definition and point the instance
 /// at it.
-fn commit_extraction(
+pub(crate) fn commit_extraction(
     dialog: &StimulusLinkDialogState,
     selected_definition: &mut Option<String>,
     model: &mut Model,
@@ -539,4 +539,4 @@ pub(crate) fn show_stimulus_definition(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

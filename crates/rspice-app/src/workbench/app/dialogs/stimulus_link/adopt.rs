@@ -54,8 +54,8 @@ const PURPOSE: &str =
     "Copy a stimulus definition's card onto this instance and record the revision it came from";
 
 /// One definition as the list states it.
-pub(super) struct AdoptRow<'a> {
-    pub(super) name: String,
+pub(crate) struct AdoptRow<'a> {
+    pub(crate) name: String,
     pub(super) revision: u32,
     /// What the mini shows if this definition has no curve.
     pub(super) gap: source_preview::MiniGap,
@@ -71,9 +71,9 @@ pub(super) struct AdoptRow<'a> {
 }
 
 /// One run of rows under one label.
-pub(super) struct AdoptGroup<'a> {
-    pub(super) label: String,
-    pub(super) rows: Vec<AdoptRow<'a>>,
+pub(crate) struct AdoptGroup<'a> {
+    pub(crate) label: String,
+    pub(crate) rows: Vec<AdoptRow<'a>>,
 }
 
 /// Every definition the library holds, grouped by what adopting it would do and
@@ -81,7 +81,7 @@ pub(super) struct AdoptGroup<'a> {
 ///
 /// An empty group is absent rather than headed by nothing: a project with no
 /// current sources should not be told twice that it has none.
-pub(super) fn adopt_groups<'a>(
+pub(crate) fn adopt_groups<'a>(
     model: &Model,
     component: &Component,
     filter: &str,
@@ -462,7 +462,7 @@ fn step_selection(ui: &Ui, groups: &[AdoptGroup<'_>], pick: &mut Option<String>)
 /// Separated from the input read so the rule can be stated without a frame: the
 /// claim worth holding is that no walk of this list ever arrives on a row the
 /// primary would refuse.
-pub(super) fn stepped(groups: &[AdoptGroup<'_>], pick: Option<&str>, step: i32) -> Option<String> {
+pub(crate) fn stepped(groups: &[AdoptGroup<'_>], pick: Option<&str>, step: i32) -> Option<String> {
     let reachable: Vec<&str> = groups
         .iter()
         .flat_map(|group| group.rows.iter())
