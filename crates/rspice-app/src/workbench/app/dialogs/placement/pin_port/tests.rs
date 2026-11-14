@@ -9,17 +9,15 @@
 
 use super::*;
 use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 
 /// Draw the form as its dialog step does.
-pub(crate) fn render(app: &mut RSpiceApp, ctx: &egui::Context) {
-    render_pin_port_dialog(&mut app.state.design.pin_port, &mut app.state.model, ctx);
+pub(crate) fn render(form: &mut PinPortDialogState, model: &mut Model, ctx: &egui::Context) {
+    render_pin_port_dialog(form, model, ctx);
 }
 
 /// The batch the form holds, over what it reads.
-pub(crate) fn draft(state: &AppState) -> Draft {
-    super::draft(&state.design.pin_port, &state.model)
+pub(crate) fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
+    super::draft(form, model)
 }
 
 pub(crate) fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
@@ -100,13 +98,16 @@ fn supply_coerces_signal_to_power_and_power_coerces_direction() {
 
 /// Every labelled node the form publishes, with its role and bounds, after a
 /// few frames at the desktop size.
-pub(crate) fn published(app: &mut RSpiceApp) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {
+pub(crate) fn published(
+    form: &mut PinPortDialogState,
+    model: &mut Model,
+) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
-        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(app, ctx));
+        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(form, model, ctx));
         nodes.extend(
             output
                 .platform_output

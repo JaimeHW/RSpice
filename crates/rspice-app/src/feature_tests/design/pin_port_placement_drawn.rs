@@ -7,11 +7,27 @@ use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
 use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::placement::pin_port::tests::{
-    dialog_input, draft, key_event, published, render,
+    self as form, dialog_input, key_event,
 };
 use crate::workbench::app::dialogs::placement::pin_port::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+
+/// Draw the form as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    form::render(&mut app.state.design.pin_port, &mut app.state.model, ctx);
+}
+
+/// The batch the form holds, over what it reads.
+fn draft(state: &AppState) -> Draft {
+    form::draft(&state.design.pin_port, &state.model)
+}
+
+/// Every labelled node the form publishes, with its role and bounds, after a
+/// few frames at the desktop size.
+fn published(app: &mut RSpiceApp) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {
+    form::published(&mut app.state.design.pin_port, &mut app.state.model)
+}
 
 /// What the names declare, over the model they are declared in.
 fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
