@@ -367,8 +367,8 @@ const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its
 /// generated compact model: the charges of F(x) + dQ(x)/dt and nothing else.
 const GENERATED_VERILOGA_PSS_STATE: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
      charges it contributes, F(x) + dQ(x)/dt, with no `ddt` or `idt` carried as an unknown \
-     of its own, no voltage contribution, no event operator and no variable the next \
-     evaluation reads back";
+     of its own, no voltage contribution that stores flux at its parameters, no event \
+     operator and no variable the next evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \

@@ -421,12 +421,13 @@ const PSS_GENERATED_EVIDENCE: &[&str] = &[
 
 /// Shooting takes the generated compact models harmonic balance takes: the
 /// period map integrates their charges from the state the period starts at,
-/// whose coordinates fix every node they reach.
+/// whose coordinates fix the nodes their charges are functions of, with the
+/// nodes their own source branches tie taken as one.
 const fn pss_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution; its charges are integrated over the period from the state the period starts at",
+        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution that stores flux (an inductance) at its parameters; its charges are integrated over the period from the state the period starts at, with the nodes its own voltage contributions tie taken as one",
         evidence: PSS_GENERATED_EVIDENCE,
     }
 }
