@@ -757,28 +757,18 @@ impl DcOperatingPointSeedArtifact {
 /// Floquet data, and reactive phase-origin state bit-for-bit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeriodicStateArtifact {
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
     result_floquet_real: Vec<f64>,
     result_floquet_imag: Vec<f64>,
     floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
-    #[serde(default)]
     floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
-    #[serde(default)]
     trivial_floquet_multiplier_index: Option<usize>,
-    #[serde(default = "indeterminate_floquet_verdict")]
     floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
-    #[serde(default)]
     floquet_authenticated: bool,
     analysis_floquet_real: Vec<f64>,
     analysis_floquet_imag: Vec<f64>,
-    #[serde(default)]
     analysis_is_stable: bool,
-}
-
-fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
-    rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
 }
 
 /// Parse a consumer analysis's deck under the operating environment its periodic
@@ -1863,9 +1853,7 @@ struct PeriodicWaveformTransferMetadata {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct PeriodicStateTransferMetadata {
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
-    #[serde(default)]
     producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
     config_fundamental_freq: f64,
     config_num_harmonics: usize,
@@ -1888,19 +1876,14 @@ struct PeriodicStateTransferMetadata {
     result_residual_norm: f64,
     time: TransferBufferRef,
     waveforms: Vec<PeriodicWaveformTransferMetadata>,
-    #[serde(default)]
     branch_waveforms: Vec<PeriodicWaveformTransferMetadata>,
     period_detected: bool,
     result_floquet_real: TransferBufferRef,
     result_floquet_imag: TransferBufferRef,
     floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
-    #[serde(default)]
     floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
-    #[serde(default)]
     trivial_floquet_multiplier_index: Option<usize>,
-    #[serde(default = "indeterminate_floquet_verdict")]
     floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
-    #[serde(default)]
     floquet_authenticated: bool,
     analysis_iterations: usize,
     analysis_final_residual: f64,
@@ -1909,9 +1892,7 @@ struct PeriodicStateTransferMetadata {
     analysis_floquet_real: TransferBufferRef,
     analysis_floquet_imag: TransferBufferRef,
     is_stable: bool,
-    #[serde(default)]
     analysis_is_stable: bool,
-    #[serde(default)]
     shooting_state_basis: Vec<String>,
     shooting_state: TransferBufferRef,
 }
