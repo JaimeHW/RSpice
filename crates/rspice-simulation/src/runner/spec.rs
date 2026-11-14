@@ -979,6 +979,80 @@ C1 CTRL 0 159.154943091895n\n",
         );
     }
 
+    /// A .TF or .STB run that elaboration refuses reports the refusal as
+    /// every other analysis does: typed, with its instance and the card that
+    /// wrote it, not as "Invalid configuration" prose around it.
+    #[test]
+    fn stb_and_tf_report_an_elaboration_refusal_typed() {
+        let temp = TempDeckDir::new();
+        fs::write(temp.deck_path(), "").expect("deck path placeholder");
+        fs::write(
+            temp.path.join("ares.va"),
+            "`include \"disciplines.vams\"\n\
+module ares(p, n);\n\
+inout p, n;\n\
+electrical p, n;\n\
+analog I(p, n) <+ V(p, n) / 1k;\n\
+endmodule\n",
+        )
+        .expect("Verilog-A write");
+        let deck = "an X line with three nets on a two-terminal module\n\
+.hdl \"ares.va\"\n\
+VIN in 0 1\n\
+E1 eo 0 in 0 -10\n\
+VPROBE eo x 0\n\
+R1 x in 1k\n\
+XA in 0 b ares\n\
+.end\n";
+        let run = |spec| {
+            run_spec_request(
+                &EngineBridge::new(),
+                spec,
+                SpecExecutionOptions::default(),
+                deck,
+                Some(&temp.deck_path()),
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::abort_signal::NoAbort,
+            )
+        };
+        let transfer = run(AnalysisSpec::Tf {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(x)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: rspice_simulation_contract::analysis_spec::TfNormalization::None,
+            accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy::Balanced,
+        });
+        let stability = run(AnalysisSpec::Stb {
+            probe_node: "VPROBE".to_owned(),
+            start_freq: 10.0,
+            stop_freq: 1.0e4,
+            sweep: rspice_simulation_contract::config::FrequencySweep::Decade,
+            points_per_decade: 2,
+            compute_nyquist: false,
+        });
+        for (label, result) in [("TF", transfer), ("STB", stability)] {
+            let Err(SimulationError::Elaboration {
+                instance,
+                kind,
+                location,
+                ..
+            }) = &result
+            else {
+                panic!("{label} must report the refusal typed: {result:?}");
+            };
+            assert_eq!(kind, "port_count", "{label}");
+            assert_eq!(instance.as_deref(), Some("XA"), "{label}");
+            assert!(
+                location
+                    .as_deref()
+                    .is_some_and(|line| line.ends_with(":7") || line == "line 7"),
+                "{label} names the X line: {location:?}"
+            );
+        }
+    }
+
     /// A temperature step is solved one declared point at a time, so nothing
     /// solves the declaration. Refusing it here is what keeps the sweep from
     /// costing 2N: an executor that accepted it would quietly solve the whole

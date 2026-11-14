@@ -624,6 +624,11 @@ pub enum ServiceRunError {
     /// runner reports the refusal's own identity rather than prose.
     #[error("{}", .0.message)]
     UnsupportedCapability(Box<CapabilityRefusal>),
+    /// The engine refused to bind the deck. Kept typed, and unprefixed, for
+    /// the same reason: the runner reports the refusal's kind, instance and
+    /// card rather than a stage's prose around them.
+    #[error("{0}")]
+    Elaboration(Box<rspice_core::ElaborationError>),
     /// Validation, parsing, circuit, or solver failure.
     #[error("{0}")]
     Failure(String),
@@ -744,6 +749,7 @@ impl From<rspice_core::SimulationError> for ServiceRunError {
             rspice_core::SimulationError::UnsupportedCapability(refusal) => {
                 Self::UnsupportedCapability(Box::new(CapabilityRefusal::from(*refusal)))
             }
+            rspice_core::SimulationError::Elaboration(refusal) => Self::Elaboration(refusal),
             other => Self::Failure(other.to_string()),
         }
     }
@@ -804,6 +810,9 @@ impl From<ServiceRunError> for SimulationError {
                 limit: error.limit,
             },
             ServiceRunError::UnsupportedCapability(refusal) => (*refusal).into(),
+            ServiceRunError::Elaboration(refusal) => {
+                rspice_core::SimulationError::Elaboration(refusal).into()
+            }
             ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
         }
     }

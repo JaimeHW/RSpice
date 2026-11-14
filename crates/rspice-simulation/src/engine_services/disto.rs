@@ -86,6 +86,8 @@ enum DistoRunError {
     ResourceLimit(rspice_core::ResourceLimitError),
     /// A capability refusal, carried through unchanged.
     Refused(Box<crate::error::CapabilityRefusal>),
+    /// An elaboration refusal, carried through unchanged.
+    Elaboration(Box<rspice_core::ElaborationError>),
     Validation(String),
     Parse(String),
     Execution(String),
@@ -99,6 +101,7 @@ impl fmt::Display for DistoRunError {
             Self::Aborted => f.write_str("Simulation aborted"),
             Self::ResourceLimit(error) => fmt::Display::fmt(error, f),
             Self::Refused(refusal) => f.write_str(&refusal.message),
+            Self::Elaboration(refusal) => fmt::Display::fmt(refusal, f),
             Self::Validation(message)
             | Self::Parse(message)
             | Self::Execution(message)
@@ -116,6 +119,7 @@ impl DistoRunError {
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
             ServiceRunError::UnsupportedCapability(refusal) => Self::Refused(refusal),
+            ServiceRunError::Elaboration(refusal) => Self::Elaboration(refusal),
             ServiceRunError::Failure(message) => classify(message),
         }
     }
@@ -126,6 +130,7 @@ impl DistoRunError {
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
             ServiceRunError::UnsupportedCapability(refusal) => Self::Refused(refusal),
+            ServiceRunError::Elaboration(refusal) => Self::Elaboration(refusal),
             ServiceRunError::Failure(message) => Self::Execution(message),
         }
     }
@@ -136,6 +141,7 @@ impl DistoRunError {
             Self::Aborted => ServiceRunError::Aborted,
             Self::ResourceLimit(error) => ServiceRunError::ResourceLimit(error),
             Self::Refused(refusal) => ServiceRunError::UnsupportedCapability(refusal),
+            Self::Elaboration(refusal) => ServiceRunError::Elaboration(refusal),
             other => ServiceRunError::Failure(other.to_string()),
         }
     }
