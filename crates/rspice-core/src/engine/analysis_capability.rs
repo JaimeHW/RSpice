@@ -475,6 +475,13 @@ const PAC_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
 ];
 
+const PNOISE_VERILOGA_EVIDENCE: &[&str] = &[
+    "tests/veriloga/veriloga_hb.rs::veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier",
+];
+
+const PNOISE_GENERATED_EVIDENCE: &[&str] =
+    &["tests/generated/generated_hb.rs::a_generated_resistors_noise_folds_as_its_native_twins"];
+
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands",
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
@@ -500,6 +507,28 @@ const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
             PAC_GENERATED_EVIDENCE
         } else {
             PAC_VERILOGA_EVIDENCE
+        },
+    }
+}
+
+/// Periodic noise folds through the linearization periodic AC takes on the
+/// same carrier, so it takes the Verilog-A periodic AC takes there, with each
+/// module's `white_noise` and `flicker_noise` processes sampled over the
+/// orbit. The noise a sampler cannot fold is refused by the cyclostationary
+/// noise gaps and, per process, by the folding itself.
+const fn carrier_admits_veriloga_noise(generated: bool) -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::CarrierAdmitsVerilogA,
+        token: PERIODIC_VERILOGA,
+        condition: if generated {
+            "every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit"
+        } else {
+            "every Verilog-A module periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit"
+        },
+        evidence: if generated {
+            PNOISE_GENERATED_EVIDENCE
+        } else {
+            PNOISE_VERILOGA_EVIDENCE
         },
     }
 }
@@ -603,6 +632,9 @@ pub const fn capability_cell(
             F::VerilogARuntime if matches!(analysis, A::Pac | A::Pxf) => {
                 carrier_admits_veriloga(false)
             }
+            F::VerilogARuntime if matches!(analysis, A::Pnoise) => {
+                carrier_admits_veriloga_noise(false)
+            }
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
@@ -611,6 +643,9 @@ pub const fn capability_cell(
             F::VerilogAGenerated if matches!(analysis, A::Pss) => pss_admissible_generated(),
             F::VerilogAGenerated if matches!(analysis, A::Pac | A::Pxf) => {
                 carrier_admits_veriloga(true)
+            }
+            F::VerilogAGenerated if matches!(analysis, A::Pnoise) => {
+                carrier_admits_veriloga_noise(true)
             }
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
@@ -653,8 +688,6 @@ const fn periodic_veriloga_reason(analysis: CapabilityAnalysis, generated: bool)
         (A::Hb | A::QuasiPeriodic, true) => "generated Verilog-A compact-model equations",
         (A::Pss | A::Pstb, false) => "Verilog-A integration state is not part of a period map",
         (A::Pss | A::Pstb, true) => "generated Verilog-A integration state",
-        (A::Pnoise, false) => "periodic Verilog-A noise sources are not declared",
-        (A::Pnoise, true) => "periodic generated Verilog-A noise sources are not declared",
         (A::Envelope, false) => "Verilog-A integration state is not part of an envelope",
         (A::Envelope, true) => "generated Verilog-A integration state",
         (_, false) => "runtime Verilog-A equations have no periodic small-signal formulation",
@@ -1045,9 +1078,9 @@ fn hb_admission_refusal(
     }
 }
 
-/// A periodic small-signal analysis asked without its carrier refuses the
-/// first Verilog-A instance of `family`: what it linearizes is the carrier's,
-/// and no carrier was named.
+/// A periodic small-signal analysis asked without a driven carrier (the
+/// oscillator phase-noise projection) refuses the first Verilog-A instance of
+/// `family`: only a harmonic-balance or shooting carrier linearizes one.
 fn carrier_refusal(
     circuit: &CircuitData,
     family: CapabilityFamily,
@@ -1061,8 +1094,8 @@ fn carrier_refusal(
     let mut refusal = UnsupportedCapabilityError::new(
         PERIODIC_VERILOGA,
         format!(
-            "{} '{instance}'{module_text} cannot take part in {} without the periodic steady \
-             state it linearizes around",
+            "{} '{instance}'{module_text} cannot take part in {}: only a driven \
+             harmonic-balance or shooting carrier linearizes a Verilog-A module",
             family.label(),
             analysis.label(),
         ),

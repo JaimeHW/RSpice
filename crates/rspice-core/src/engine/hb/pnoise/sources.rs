@@ -352,6 +352,9 @@ impl Engine {
                 })?,
         );
         sources.extend(self.native_periodic_noise_sources(solver, state, temperature, abort)?);
+        sources.extend(Self::veriloga_periodic_noise_sources(
+            circuit, solver, state, abort,
+        )?);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }

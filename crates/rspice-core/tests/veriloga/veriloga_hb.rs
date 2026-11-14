@@ -1231,3 +1231,218 @@ fn shooting_refuses_each_operator_with_state_by_name() {
         );
     }
 }
+
+/// A resistor with thermal noise and, as a native model with `AF=2`, flicker
+/// noise in its current squared, with the circuit's CODATA 2018 Boltzmann
+/// constant.
+const NOISY_RESISTOR: (&str, &str) = (
+    "va_noisy_resistor",
+    "parameter real r = 10.0e3;\n    parameter real kf = 1.0e-10;\n    analog begin\n        \
+     I(p, n) <+ V(p, n) / r;\n        \
+     I(p, n) <+ white_noise(4.0 * 1.380649e-23 * $temperature / r, \"thermal\");\n        \
+     I(p, n) <+ flicker_noise(kf * pow(V(p, n) / r, 2.0), 1.0, \"flicker\");\n    end",
+);
+
+/// The ideal diode with shot noise `2q|I|`, with the circuit's CODATA 2018
+/// electron charge.
+const NOISY_DIODE: (&str, &str) = (
+    "va_noisy_diode",
+    "parameter real is = 1.0e-14;\n    real id;\n    analog begin\n        \
+     id = is * (exp(V(p, n) / $vt) - 1.0);\n        I(p, n) <+ id;\n        \
+     I(p, n) <+ white_noise(2.0 * 1.602176634e-19 * abs(id), \"shot\");\n    end",
+);
+
+/// A diode pumped by `VLO` through `R1`, with `resistor` and `diode` at node
+/// `a`, which never falls below 0.15 V.
+fn noisy_mixer(resistor: &str, diode: &str, cards: &str) -> String {
+    format!(
+        "* noisy pumped mixer\n\
+         VLO lo 0 DC 0.6 SIN(0.6 0.4 1meg)\n\
+         R1 lo a 1k\n\
+         {resistor}\n\
+         C1 a 0 100p\n\
+         {diode}\n\
+         .model dmod D IS=1e-14 N=1\n\
+         .model rm R(KF=1e-10 AF=2 EF=1)\n\
+         {cards}\n\
+         .end\n"
+    )
+}
+
+/// One output sideband's periodic noise at each offset: the total, and the
+/// part the sources of one instance contribute.
+struct SidebandNoise {
+    total: Vec<f64>,
+    device: Vec<f64>,
+}
+
+/// Periodic noise of `V(a)` at output sidebands -2..=2 and two offsets, on
+/// the deck's harmonic-balance carrier, with the contributions of the
+/// sources whose labels name `device`.
+fn pnoise_by_sideband(deck: &str, device: &str) -> Vec<SidebandNoise> {
+    use rspice_core::NoAbort;
+    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+    let netlist = Netlist::parse(deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(8))
+        .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"));
+    let offsets = [0.13 * F0, 0.37 * F0];
+    let names = |label: &str| {
+        let label = label.to_ascii_lowercase();
+        label
+            .strip_prefix(device)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', ':']))
+    };
+    (-2..=2)
+        .map(|output| {
+            let result = engine
+                .run_pnoise_from_hb_request_with_abort(
+                    &netlist,
+                    &PeriodicNoiseRequest {
+                        sampling: None,
+                        offsets: &offsets,
+                        output_node: "a",
+                        output_ref: None,
+                        input_source: None,
+                        max_sideband: 4,
+                        sidebands: PeriodicNoiseSidebands { input: 0, output },
+                    },
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("pnoise must run: {error}\n{deck}"));
+            let mut device = vec![0.0; offsets.len()];
+            for (_, values) in result.contributors.iter().filter(|(label, _)| names(label)) {
+                for (sum, value) in device.iter_mut().zip(values) {
+                    *sum += value;
+                }
+            }
+            SidebandNoise {
+                total: result.output_noise,
+                device,
+            }
+        })
+        .collect()
+}
+
+/// Periodic noise folds a pumped Verilog-A module's `white_noise` and
+/// `flicker_noise` processes as it folds its native twin's noise: a
+/// resistor's thermal noise, and its flicker noise modulated by the pumped
+/// current through it; and a diode's shot noise, which switches with its
+/// current. Reference: the native resistor (`AF=2` flicker) and diode on the
+/// same harmonic-balance carrier, at output sidebands -2..=2 and two
+/// offsets. Allowance: 1e-6 of the largest native total at that sideband, as
+/// for the periodic AC twins; the modules state the circuit's constants.
+#[test]
+fn veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier() {
+    let (resistor_model, resistor_card) = two_terminal("pnoise_twin", NOISY_RESISTOR);
+    let (diode_model, diode_card) = two_terminal("pnoise_twin", NOISY_DIODE);
+    let cases = [
+        (
+            noisy_mixer("R2 a 0 rm 10k", "D1 a 0 dmod", ""),
+            "r2",
+            noisy_mixer("XR2 a 0 va_noisy_resistor", "D1 a 0 dmod", &resistor_card),
+            "xr2",
+        ),
+        (
+            noisy_mixer("R2 a 0 10k", "D1 a 0 dmod", ""),
+            "d1",
+            noisy_mixer("R2 a 0 10k", "XD1 a 0 va_noisy_diode", &diode_card),
+            "xd1",
+        ),
+    ];
+    for (native_deck, native_device, twin_deck, twin_device) in cases {
+        let native = pnoise_by_sideband(&native_deck, native_device);
+        let twin = pnoise_by_sideband(&twin_deck, twin_device);
+        for (sideband, (native, twin)) in (-2..=2).zip(native.iter().zip(&twin)) {
+            let scale = native.total.iter().copied().fold(0.0, f64::max);
+            for (index, (native_value, twin_value)) in native
+                .total
+                .iter()
+                .chain(&native.device)
+                .zip(twin.total.iter().chain(&twin.device))
+                .enumerate()
+            {
+                assert!(
+                    (twin_value - native_value).abs() <= 1.0e-6 * scale,
+                    "{twin_device} sideband {sideband} value {index}: Verilog-A {twin_value:e} \
+                     against native {native_value:e}"
+                );
+            }
+            assert!(
+                native.device.iter().all(|&value| value > 1.0e-3 * scale),
+                "{native_device} must contribute at sideband {sideband}: {:?} of {:?}",
+                native.device,
+                native.total
+            );
+        }
+    }
+    let _ = std::fs::remove_file(resistor_model);
+    let _ = std::fs::remove_file(diode_model);
+}
+
+/// Periodic noise refuses, by instance and module, the Verilog-A noise it
+/// cannot fold: a noise table, which has no cyclostationary form, refused as
+/// the folding evaluates it; and noise in a module with an operator harmonic
+/// balance carries as an unknown of its own, whose noise evaluation does not
+/// see that unknown, refused before any evaluation.
+#[test]
+fn periodic_noise_refuses_verilog_a_noise_it_cannot_fold_by_name() {
+    use rspice_core::NoAbort;
+    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+    for (module, body, reason) in [
+        (
+            "va_table_noise",
+            "analog I(p, n) <+ V(p, n) / 10.0e3 \
+             + noise_table('{1.0, 1.0e-18, 1.0e7, 3.0e-18}, \"tbl\");",
+            "a noise table has no cyclostationary form",
+        ),
+        (
+            "va_delayed_noise",
+            "analog I(p, n) <+ V(p, n) / 10.0e3 + 1.0e-5 * absdelay(V(p, n), 1.0e-8) \
+             + white_noise(1.0e-24, \"white\");",
+            "noise in a module with an operator harmonic balance carries as an unknown",
+        ),
+    ] {
+        let (model, card) = two_terminal("pnoise_refusal", (module, body));
+        let deck = noisy_mixer(&format!("XN a 0 {module}"), "D1 a 0 dmod", &card);
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let engine = Engine::new(SimulationConfig::default());
+        let hb = engine
+            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(8))
+            .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"));
+        let error = engine
+            .run_pnoise_from_hb_request_with_abort(
+                &netlist,
+                &PeriodicNoiseRequest {
+                    sampling: None,
+                    offsets: &[0.13 * F0],
+                    output_node: "a",
+                    output_ref: None,
+                    input_source: None,
+                    max_sideband: 2,
+                    sidebands: PeriodicNoiseSidebands::default(),
+                },
+                &hb.operating_point,
+                &NoAbort,
+            )
+            .map(drop)
+            .expect_err("pnoise must refuse the noise");
+        let _ = std::fs::remove_file(model);
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{module}: expected a capability refusal, got {error}");
+        };
+        assert_eq!(
+            refusal.capability, "analysis.pnoise.colored_noise",
+            "{error}"
+        );
+        assert!(
+            refusal.detail.contains("'XN'")
+                && refusal.detail.contains(&format!("'{module}'"))
+                && refusal.detail.contains(reason),
+            "{module}: the refusal must name the instance, the module and why: {}",
+            refusal.detail
+        );
+    }
+}

@@ -15,6 +15,7 @@ mod bsim4;
 pub(super) use bjt::NativeNoiseWaveforms;
 mod sampled;
 mod sources;
+mod veriloga;
 pub use sampled::{
     PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSamplePoint, PeriodicNoiseSampling,
     PeriodicNoiseSamplingEvidence,
@@ -711,8 +712,20 @@ impl Engine {
         // linearization, which a mixed Verilog-AMS module has no form for; the
         // refusal is the same one AC, noise, PSS and HB give, placed at the
         // first point the circuit exists. See `prepare_periodic_ac` for why
-        // the omission this replaces was silent.
-        Self::ensure_analysis_capability(&circuit, crate::engine::CapabilityAnalysis::Pnoise)?;
+        // the omission this replaces was silent. The carrier decides which
+        // Verilog-A it linearizes, as it does for periodic AC.
+        Self::ensure_carrier_analysis_capability(
+            &circuit,
+            crate::engine::CapabilityAnalysis::Pnoise,
+            match &operating_point {
+                Some(PnoiseOperatingPoint::Shooting(_)) => {
+                    crate::engine::analysis_capability::PeriodicCarrier::Shooting
+                }
+                Some(PnoiseOperatingPoint::HarmonicBalance(_)) | None => {
+                    crate::engine::analysis_capability::PeriodicCarrier::HarmonicBalance
+                }
+            },
+        )?;
         validate_resistor_noise_metadata(&circuit)?;
         let hb_config = match &operating_point {
             Some(PnoiseOperatingPoint::HarmonicBalance(_)) => hb_config,

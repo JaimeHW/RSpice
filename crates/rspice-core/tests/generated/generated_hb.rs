@@ -818,6 +818,86 @@ fn a_generated_resistor_mixes_its_native_twins_sidebands() {
     );
 }
 
+/// Periodic noise of `V(a)` at output sidebands -2..=2 and two offsets on the
+/// deck's harmonic-balance carrier: each sideband's total at each offset,
+/// then the part the sources whose labels name `device` contribute.
+#[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+fn pnoise_by_sideband(deck: &str, device: &str) -> Vec<(Vec<f64>, Vec<f64>)> {
+    use rspice_core::NoAbort;
+    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+    let netlist = Netlist::parse(deck).expect("parse");
+    let hb = run_hb(deck);
+    let offsets = [0.13 * F0, 0.37 * F0];
+    (-2..=2)
+        .map(|output| {
+            let result = engine()
+                .run_pnoise_from_hb_request_with_abort(
+                    &netlist,
+                    &PeriodicNoiseRequest {
+                        sampling: None,
+                        offsets: &offsets,
+                        output_node: "a",
+                        output_ref: None,
+                        input_source: None,
+                        max_sideband: 4,
+                        sidebands: PeriodicNoiseSidebands { input: 0, output },
+                    },
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("pnoise must run: {error}\n{deck}"));
+            let mut part = vec![0.0; offsets.len()];
+            for (label, values) in &result.contributors {
+                let label = label.to_ascii_lowercase();
+                if label
+                    .strip_prefix(device)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', ':']))
+                {
+                    for (sum, value) in part.iter_mut().zip(values) {
+                        *sum += value;
+                    }
+                }
+            }
+            (result.output_noise, part)
+        })
+        .collect()
+}
+
+/// Periodic noise samples a generated model's noise processes over the orbit
+/// and folds them as the native twin's, so the generated R2_CMC in a pumped
+/// mixer gives each output sideband's noise, and its own part of it, that
+/// the native resistor gives. Allowance: 2e-6 of the largest native total at
+/// that sideband: R2_CMC's thermal noise uses its NIST 2004 Boltzmann
+/// constant, 1.38065050e-23, which is 1.09e-6 above the circuit's CODATA
+/// 2018 one.
+#[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+#[test]
+fn a_generated_resistors_noise_folds_as_its_native_twins() {
+    let native = pnoise_by_sideband(&pumped_mixer("R3 a 0 2k"), "r3");
+    let twin = pnoise_by_sideband(&pumped_mixer("XR3 a 0 r2_cmc r=2k"), "xr3");
+    for (sideband, ((native_total, native_part), (twin_total, twin_part))) in
+        (-2..=2).zip(native.iter().zip(&twin))
+    {
+        let scale = native_total.iter().copied().fold(0.0, f64::max);
+        for (index, (native_value, twin_value)) in native_total
+            .iter()
+            .chain(native_part)
+            .zip(twin_total.iter().chain(twin_part))
+            .enumerate()
+        {
+            assert!(
+                (twin_value - native_value).abs() <= 2.0e-6 * scale,
+                "sideband {sideband} value {index}: generated {twin_value:e} against native \
+                 {native_value:e}"
+            );
+        }
+        assert!(
+            native_part.iter().all(|&value| value > 1.0e-3 * scale),
+            "R3 must contribute at sideband {sideband}: {native_part:?} of {native_total:?}"
+        );
+    }
+}
+
 /// Periodic AC from `vrf` into sidebands -2..=2 of `V(a)` at three offsets,
 /// and the periodic transfer function into the upper first sideband, on the
 /// deck's shooting carrier.

@@ -8,6 +8,9 @@ use crate::analysis::noise::{
 };
 use std::collections::HashMap;
 
+/// One noise mechanism sampled over the orbit, injected between one-based
+/// node rows (zero is ground): its intensity, or for a colored law the power
+/// of its modulating amplitude.
 pub(in crate::engine::hb) struct NativeNoiseWaveform {
     pub(in crate::engine::hb) name: String,
     pub(in crate::engine::hb) nodes: [usize; 2],
@@ -384,6 +387,75 @@ impl NativeNoiseWaveforms {
     }
 }
 
+/// Periodic noise sources from intensities sampled over the orbit: a white
+/// waveform's samples are the intensity `s(t)` itself; a colored one's are
+/// the power of the amplitude that modulates one stationary `1/f^ef`
+/// process. Shared by the native and Verilog-A samplers.
+pub(in crate::engine::hb) fn sampled_noise_sources(
+    solver: &mut HbSolver,
+    waveforms: Vec<NativeNoiseWaveform>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<PeriodicNoiseSource>, SimulationError> {
+    let mut sources = Vec::new();
+    for mut waveform in waveforms {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if waveform.samples.iter().all(|sample| sample.mantissa == 0.0) {
+            continue;
+        }
+        if waveform.frequency_exponent.is_some() {
+            // A flicker law is a positive noise power. Its square root
+            // modulates one stationary colored process; Fourier-transforming
+            // the power instead loses correlations.
+            for sample in &mut waveform.samples {
+                sample.mantissa = (sample.mantissa
+                    * if sample.exponent.rem_euclid(2) == 0 {
+                        1.0
+                    } else {
+                        2.0
+                    })
+                .sqrt();
+                sample.exponent = sample.exponent.div_euclid(2);
+            }
+        }
+        let (samples, exponent) =
+            normalize_scaled_noise_waveform(&waveform.samples).map_err(|error| {
+                SimulationError::Circuit(format!("pnoise source '{}': {error}", waveform.name))
+            })?;
+        // Noise laws can generate harmonics above the voltage basis. Keep
+        // the complete usable collocation spectrum, including colored
+        // modulation beyond the requested conversion window.
+        let spectrum = solver
+            .checked_periodic_spectrum(&samples, (samples.len() - 1) / 2, &waveform.name)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        let mut source = PeriodicNoiseSource {
+            correlated: None,
+            name: waveform.name,
+            node_pos: waveform.nodes[0].checked_sub(1).unwrap_or(usize::MAX),
+            node_neg: waveform.nodes[1].checked_sub(1).unwrap_or(usize::MAX),
+            psd: spectrum,
+            binary_scale_exponent: exponent,
+            flicker: None,
+        };
+        if let Some(frequency_exponent) = waveform.frequency_exponent {
+            source.binary_scale_exponent = exponent.checked_mul(2).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "pnoise source '{}' amplitude exponent overflows",
+                    source.name
+                ))
+            })?;
+            source.flicker = Some(PeriodicFlickerNoise {
+                coefficient: 1.0,
+                exponent: frequency_exponent,
+                modulation: std::mem::replace(&mut source.psd, vec![Complex64::new(0.0, 0.0)]),
+            });
+        }
+        sources.push(source);
+    }
+    Ok(sources)
+}
+
 impl Engine {
     pub(in crate::engine::hb) fn native_periodic_noise_sources(
         &self,
@@ -410,63 +482,7 @@ impl Engine {
                 )),
             })?;
 
-        let mut sources = Vec::new();
-        for mut waveform in frames.waveforms {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            if waveform.samples.iter().all(|sample| sample.mantissa == 0.0) {
-                continue;
-            }
-            if waveform.frequency_exponent.is_some() {
-                // Native junction flicker_noise is a positive noise-power law.
-                // Its square root modulates one stationary colored process;
-                // Fourier-transforming the power instead loses correlations.
-                for sample in &mut waveform.samples {
-                    sample.mantissa = (sample.mantissa
-                        * if sample.exponent.rem_euclid(2) == 0 {
-                            1.0
-                        } else {
-                            2.0
-                        })
-                    .sqrt();
-                    sample.exponent = sample.exponent.div_euclid(2);
-                }
-            }
-            let (samples, exponent) =
-                normalize_scaled_noise_waveform(&waveform.samples).map_err(|error| {
-                    SimulationError::Circuit(format!("pnoise source '{}': {error}", waveform.name))
-                })?;
-            // Native noise laws can generate harmonics above the voltage
-            // basis. Keep the complete usable collocation spectrum, including
-            // colored modulation beyond the requested conversion window.
-            let spectrum = solver
-                .checked_periodic_spectrum(&samples, (samples.len() - 1) / 2, &waveform.name)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
-            let mut source = PeriodicNoiseSource {
-                correlated: None,
-                name: waveform.name,
-                node_pos: waveform.nodes[0].checked_sub(1).unwrap_or(usize::MAX),
-                node_neg: waveform.nodes[1].checked_sub(1).unwrap_or(usize::MAX),
-                psd: spectrum,
-                binary_scale_exponent: exponent,
-                flicker: None,
-            };
-            if let Some(frequency_exponent) = waveform.frequency_exponent {
-                source.binary_scale_exponent = exponent.checked_mul(2).ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "pnoise source '{}' amplitude exponent overflows",
-                        source.name
-                    ))
-                })?;
-                source.flicker = Some(PeriodicFlickerNoise {
-                    coefficient: 1.0,
-                    exponent: frequency_exponent,
-                    modulation: std::mem::replace(&mut source.psd, vec![Complex64::new(0.0, 0.0)]),
-                });
-            }
-            sources.push(source);
-        }
+        let mut sources = sampled_noise_sources(solver, frames.waveforms, abort)?;
         for waveform in frames.correlated {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);

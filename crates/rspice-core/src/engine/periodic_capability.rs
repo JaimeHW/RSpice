@@ -363,6 +363,18 @@ const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equatio
 const RUNTIME_VERILOGA_PSS_STATE: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
      F(x) + dQ(x)/dt, with no voltage contribution, no other operator with state, no event \
      operator, no `$abstime` and no variable kept between time points";
+/// The condition behind a runtime module's periodic noise, which
+/// [`cyclostationary_noise_gaps`] decides per instance from its artifact and
+/// the folding decides per process from its evaluation.
+const RUNTIME_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` process, sampled over the orbit, that \
+     reaches one pair of node rows through a real, frequency-independent gain, in a module \
+     with no operator harmonic balance carries as an unknown and no `$abstime`; no noise table";
+/// The condition behind a generated model's periodic noise, decided as for a
+/// runtime module.
+const GENERATED_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` process of a model built with its noise \
+     schedules, grouped into processes and sampled over the orbit, that reaches one pair of \
+     node rows through a real, frequency-independent gain, in a model with no operator \
+     harmonic balance carries as an unknown; no noise table";
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
@@ -698,7 +710,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Restricted(RUNTIME_VERILOGA_HB_RESIDUAL),
             dynamic_state: Restricted(RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR),
             small_signal: Inapplicable,
-            noise: Absent("periodic Verilog-A noise sources are not declared"),
+            noise: Restricted(RUNTIME_VERILOGA_NOISE),
             pss_state: Restricted(RUNTIME_VERILOGA_PSS_STATE),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -708,7 +720,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Restricted(GENERATED_VERILOGA_HB_RESIDUAL),
             dynamic_state: Complete,
             small_signal: Inapplicable,
-            noise: Absent("periodic generated Verilog-A noise sources are not declared"),
+            noise: Restricted(GENERATED_VERILOGA_NOISE),
             pss_state: Restricted(GENERATED_VERILOGA_PSS_STATE),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1721,6 +1733,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
             }
         }
     }
+    veriloga_noise_gaps(circuit, &mut gaps);
     if !capability_support(F::Jfet, Cap).admits_every_instance() {
         for jfet in &circuit.jfets {
             if jfet.params.kf != 0.0 {
@@ -1736,6 +1749,62 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
     }
 
     gaps
+}
+
+/// The Verilog-A instances whose noise the periodic folding cannot sample,
+/// before it evaluates any: a runtime artifact compiled before noise calls
+/// were grouped into processes, a generated catalog built without its noise
+/// schedules or without processes, and a noisy module with an operator
+/// harmonic balance carries as an unknown of its own (its noise evaluation
+/// does not see that unknown) or, at runtime, one that reads `$abstime`
+/// (its noise evaluation does not set each sample's instant).
+fn veriloga_noise_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
+    #[cfg(feature = "veriloga")]
+    for device in circuit.veriloga_devices().iter() {
+        let noisy = !device.grouped_noise_process_catalog().is_empty();
+        let reason = if !device.uses_grouped_noise_processes() {
+            Some("an artifact compiled before noise calls were grouped into processes")
+        } else if noisy && !device.periodic_operator_sites().is_empty() {
+            Some("noise in a module with an operator harmonic balance carries as an unknown")
+        } else if noisy && device.analog_operator_inventory().contains(&"$abstime") {
+            Some("noise in a module that reads `$abstime`")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            gaps.push(CapabilityGap::new(
+                PeriodicDeviceFamily::RuntimeVerilogA,
+                format!(
+                    "Verilog-A instance '{}' (module '{}'): {reason}",
+                    device.name,
+                    device.model_name()
+                ),
+            ));
+        }
+    }
+    #[cfg(feature = "veriloga-builtins-base")]
+    for device in circuit.generated_veriloga_devices().iter() {
+        let reason = if cfg!(not(feature = "veriloga-builtins-noise")) {
+            Some("a generated catalog built without its noise schedules")
+        } else if !device.has_grouped_noise_processes() {
+            (!device.noise_descriptors().is_empty())
+                .then_some("noise sources not grouped into processes")
+        } else if !device.harmonic_balance_periodic_sites().is_empty() {
+            Some("noise in a model with an operator harmonic balance carries as an unknown")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            gaps.push(CapabilityGap::new(
+                PeriodicDeviceFamily::GeneratedVerilogA,
+                format!(
+                    "generated Verilog-A instance '{}' (model '{}'): {reason}",
+                    device.instance_name, device.model_name
+                ),
+            ));
+        }
+    }
+    let _ = (circuit, gaps);
 }
 
 #[cfg(test)]

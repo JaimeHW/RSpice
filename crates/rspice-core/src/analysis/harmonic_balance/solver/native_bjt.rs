@@ -927,6 +927,35 @@ impl HbSolver {
         Ok(())
     }
 
+    /// The carrier's fundamental, in hertz.
+    pub(crate) fn fundamental_freq(&self) -> Value {
+        self.config.fundamental_freq
+    }
+
+    /// Visit each collocation sample of the retained periodic state as one
+    /// solution over the periodic unknowns: every node voltage, then every
+    /// periodic MNA branch current, as the device samplers read them.
+    pub(crate) fn visit_periodic_samples(
+        &mut self,
+        state: &HbSolverState,
+        abort: &dyn AbortSignal,
+        mut visit: impl FnMut(usize, usize, &[Value]) -> Result<(), HbError>,
+    ) -> Result<(), HbError> {
+        let waves = self.native_state_waveforms(state)?;
+        let count = self.fft.size();
+        let mut solution = vec![0.0; waves.len()];
+        for time in 0..count {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            for (value, wave) in solution.iter_mut().zip(&waves) {
+                *value = wave[time];
+            }
+            visit(time, count, &solution)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn add_native_periodic_residual(
         &mut self,
         state: &mut HbSolverState,
