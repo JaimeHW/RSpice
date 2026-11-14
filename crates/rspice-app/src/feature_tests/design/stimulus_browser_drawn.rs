@@ -1,8 +1,8 @@
 //! The navigator's stimulus browser drawn through a whole application.
 
+use super::stimulus_browser::library;
 use crate::state::ComponentType;
 use crate::workbench::app::actions::stimulus as stimulus_verbs;
-use crate::workbench::design::navigator::stimulus::tests::library;
 use crate::workbench::state::PURPOSE_FIELD;
 use crate::workbench::{AppState, RSpiceApp};
 

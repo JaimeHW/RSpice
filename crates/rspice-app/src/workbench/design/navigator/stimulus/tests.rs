@@ -7,19 +7,8 @@
 
 use super::*;
 
-use crate::state::stimulus_library::fixtures;
-use crate::workbench::AppState;
-
 /// The dock's own minimum, at the fit the workspace is held to.
 pub(crate) const NAVIGATOR: egui::Vec2 = egui::vec2(228.0, 640.0);
-
-/// The mockup's fourteen definitions, with nothing adopted, in the workspace
-/// whose navigator lists them.
-pub(crate) fn library(state: &mut AppState) {
-    state.model.workspace.content.stimulus_library = fixtures::library();
-    state.workbench.activate(Workspace::Stimulus);
-    state.design.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
-}
 
 /// Every row's three tracks stay positive at the dock's own minimum, so a name
 /// is elided rather than painted over the mini or under the revision.

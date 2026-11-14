@@ -7,11 +7,19 @@ use crate::state::stimulus_library::draft::DefinitionDraft;
 use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, Point};
 use crate::workbench::design::inspector::stimulus as inspector_dock;
-use crate::workbench::design::navigator::stimulus::tests::{NAVIGATOR, library};
+use crate::workbench::design::navigator::stimulus::tests::NAVIGATOR;
 use crate::workbench::design::navigator::stimulus::*;
 use crate::workbench::docks::navigator::stimulus_browser_state::StimulusScope;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
+
+/// The mockup's fourteen definitions, with nothing adopted, in the workspace
+/// whose navigator lists them.
+pub(super) fn library(state: &mut AppState) {
+    state.model.workspace.content.stimulus_library = fixtures::library();
+    state.workbench.activate(Workspace::Stimulus);
+    state.design.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
+}
 
 /// The inspector's own width at the same fit.
 const INSPECTOR: egui::Vec2 = egui::vec2(300.0, 640.0);
