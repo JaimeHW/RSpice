@@ -210,11 +210,14 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 record.message
             );
         }
-        // A deck that is not applied does not stop a run, and a square in
-        // place of a character does not either, so each is a warning, not an
-        // error; it still has to count.
+        // A deck that is not applied does not stop a run, a square in place
+        // of a character does not either, and neither does a symbol pin that
+        // needs attention, so each is a warning, not an error; it still has
+        // to count.
         let counted = match owner {
-            DiagnosticOwner::RuleDeck | DiagnosticOwner::Lettering => listed.counts().warnings,
+            DiagnosticOwner::RuleDeck
+            | DiagnosticOwner::Lettering
+            | DiagnosticOwner::SymbolPins => listed.counts().warnings,
             _ => listed.counts().errors,
         };
         assert!(
