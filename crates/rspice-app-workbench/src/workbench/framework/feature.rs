@@ -104,6 +104,19 @@ pub trait DesignPort {
     ) -> Vec<(String, String)>;
 }
 
+/// Which netlist document the netlist editor shows, as a key: two reads are
+/// equal exactly when the same document is shown. It identifies nothing
+/// else, and is only for change checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetlistDocumentKey(u8);
+
+impl NetlistDocumentKey {
+    /// The key `id` names. The code feature gives each document its own.
+    pub const fn new(id: u8) -> Self {
+        Self(id)
+    }
+}
+
 /// What code shows that another feature reads.
 pub trait CodePort {
     /// Whether the netlist editor shows the project's own netlist source.
@@ -115,6 +128,11 @@ pub trait CodePort {
     fn netlist_cursor_line(&self) -> usize;
     /// Which netlist document the editor shows, as a manual-deck run reads it.
     fn netlist_shown(&self) -> NetlistShown;
+    /// Which netlist document the editor shows, as a change check compares
+    /// it. A port with no netlist editor always shows the same one.
+    fn shown_netlist_document_key(&self) -> NetlistDocumentKey {
+        NetlistDocumentKey::new(0)
+    }
     /// The receipt of the project's Verilog-A compilation, when one is
     /// current. Read here while code's state holds the receipt; the read
     /// ends when the receipt moves to the model.

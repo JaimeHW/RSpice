@@ -7,7 +7,7 @@ use crate::simulation::NetlistShown;
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
-use crate::workbench::framework::feature::CodePort;
+use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 /// What the code feature keeps open between frames.
@@ -138,6 +138,10 @@ impl CodePort for CodeState {
         CodeState::netlist_shown(self)
     }
 
+    fn shown_netlist_document_key(&self) -> NetlistDocumentKey {
+        netlist_document_key(self.netlist.active_document)
+    }
+
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
         CodeState::veriloga_compilation(self)
     }
@@ -194,5 +198,45 @@ impl CodePort for CodeState {
             messages,
             &[],
         );
+    }
+}
+
+/// The key a change check compares for `document`: each document its own,
+/// so a switch between any two of them is a change.
+const fn netlist_document_key(document: ActiveNetlistDocument) -> NetlistDocumentKey {
+    NetlistDocumentKey::new(match document {
+        ActiveNetlistDocument::Generated => 0,
+        ActiveNetlistDocument::OwnedSource => 1,
+        ActiveNetlistDocument::GeneratedDiff => 2,
+        ActiveNetlistDocument::RunSnapshot => 3,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run's sealed deck and the generated netlist are different
+    /// documents, so the switch between them is a change a reader re-projects
+    /// on, as is every other switch.
+    #[test]
+    fn every_shown_netlist_document_has_its_own_key() {
+        let documents = [
+            ActiveNetlistDocument::Generated,
+            ActiveNetlistDocument::OwnedSource,
+            ActiveNetlistDocument::GeneratedDiff,
+            ActiveNetlistDocument::RunSnapshot,
+        ];
+        let mut code = CodeState::default();
+        let keys = documents.map(|document| {
+            code.netlist.active_document = document;
+            code.shown_netlist_document_key()
+        });
+        assert_ne!(keys[0], keys[3], "the generated netlist and a run's deck");
+        for (index, key) in keys.iter().enumerate() {
+            for other in &keys[index + 1..] {
+                assert_ne!(key, other);
+            }
+        }
     }
 }
