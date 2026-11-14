@@ -405,19 +405,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        route: [interp, native]
+        route: [interp, native, worker]
     env:
       CARGO_BUILD_JOBS: "1"
       # The route is the build; the test refuses a binary built as the other.
+      # The worker route runs the interp build's cells in the browser worker
+      # under Node, from the worker image generated into crates/rspice-app/web.
       RSPICE_MIXED_ROUTE: ${{ matrix.route }}
       RSPICE_MIXED_EXTENDED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+        run: >-
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          ${{ matrix.route == 'worker' && '--target wasm32-unknown-unknown' || '' }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: mixed-corpus-${{ matrix.route }}
+      # The shipped browser worker image and its bindings, where the
+      # application's simulation-worker.js loads them.
+      - name: Build browser worker image
+        if: matrix.route == 'worker'
+        run: >-
+          cargo build --locked --profile web-release -p rspice-worker
+          --bin rspice-worker --target wasm32-unknown-unknown
+      - name: Install pinned wasm-bindgen CLI
+        if: matrix.route == 'worker'
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Generate browser worker bindings
+        if: matrix.route == 'worker'
+        run: >-
+          wasm-bindgen --target web --out-name rspice-ui-worker
+          --out-dir crates/rspice-app/web/pkg
+          target/wasm32-unknown-unknown/web-release/rspice-worker.wasm
       # O3 replays RSpice's boundary inputs through Icarus live; the checked-in
       # O1/O2/O4/O5 references need no simulator here.
       - name: Install Icarus Verilog for O3 replay
@@ -429,9 +449,21 @@ jobs:
       - name: Mixed corpus (${{ matrix.route }})
         shell: bash
         run: >-
+          node --version &&
           cargo test --locked -p rspice-conformance --release
           ${{ matrix.route == 'native' && '--features veriloga-native' || '' }}
           --test mixed_corpus -- --nocapture --test-threads 1
+      # One design's cells again through the same worker in headless Chrome
+      # (tools/ci/browser_worker_host.py), ratcheted against the worker rows
+      # the Node run just matched. C12 takes Verilog-A JIT models, HDL
+      # processes and a transient checkpoint through the browser.
+      - name: Mixed corpus worker in Chrome (C12)
+        if: matrix.route == 'worker'
+        env:
+          RSPICE_WORKER_HOST: python3 tools/ci/browser_worker_host.py
+        run: >-
+          target/release/rspice-mixed-corpus run --design C12
+          --worker crates/rspice-app/web --expect-route worker --jobs 1
 
   ivtest:
     name: Icarus ivtest selection
