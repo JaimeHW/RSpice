@@ -8906,7 +8906,8 @@ instance.validate_parameters().unwrap();
 /// its residual, and states the reason when it cannot: an operator with state
 /// in time, `$abstime`, or a variable the next evaluation reads back after
 /// the body assigned it. A variable an event body writes but the body
-/// recomputes before every read is not history. A `ddt` that is not the
+/// recomputes before every read is not history, nor is one only the initial
+/// step sets from parameters, which harmonic balance evaluates once. A `ddt` that is not the
 /// derivative of a contributed charge, and every `idt`, is a site harmonic
 /// balance carries as an unknown of its own, listed in site order; one only a
 /// bias-dependent branch reads is still evaluated on every sample.
@@ -8926,8 +8927,9 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
             "real x;",
             "I(p,n) <+ x*V(p,n); x = V(p,n);",
             Some(
-                "`x` is read before it is assigned, so it keeps its value from the last \
-                 accepted time point, which no harmonic-balance spectrum carries",
+                "`x` is read before it is assigned on a path its parameters do not rule out, so \
+                 it keeps its value from the last accepted time point, which no \
+                 harmonic-balance spectrum carries",
             ),
             "",
         ),
@@ -8935,7 +8937,7 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
             3,
             "real g;",
             "@(initial_step) g = 1.0e-3; I(p,n) <+ g*V(p,n);",
-            Some("`g` is read before it is assigned"),
+            None,
             "",
         ),
         (
