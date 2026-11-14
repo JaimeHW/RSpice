@@ -585,7 +585,8 @@ pub(crate) struct WorkerPeriodicWaveformTransport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerPssOperatingPointTransport {
     config: rspice_core::analysis::PssConfig,
-    #[serde(default)]
+    /// A required key: `null` is an unauthenticated point, an absent key is refused.
+    #[serde(deserialize_with = "Option::deserialize")]
     producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
     result_period: f64,
     result_frequency: f64,
@@ -593,7 +594,6 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     result_residual_norm: f64,
     result_time: WorkerF64Series,
     result_waveforms: Vec<WorkerPeriodicWaveformTransport>,
-    #[serde(default)]
     result_branch_waveforms: Vec<WorkerPeriodicWaveformTransport>,
     result_period_detected: bool,
     result_floquet_real: WorkerF64Series,
@@ -610,7 +610,6 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     analysis_is_stable: bool,
     analysis_floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
     analysis_floquet_authenticated: bool,
-    #[serde(default)]
     shooting_state_basis: Vec<String>,
     shooting_state: WorkerF64Series,
 }
@@ -827,11 +826,11 @@ pub(crate) struct WorkerHbIntegralSpectrumTransport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerHbOperatingPointTransport {
     config: rspice_core::analysis::HbConfig,
-    #[serde(default)]
+    /// A required key: `null` is an unauthenticated point, an absent key is refused.
+    #[serde(deserialize_with = "Option::deserialize")]
     producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<WorkerHbSpectrumTransport>,
     mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
-    #[serde(default)]
     integral_spectra: Vec<WorkerHbIntegralSpectrumTransport>,
     iterations: usize,
     residual_norm: f64,
@@ -1645,15 +1644,15 @@ mod hb_state_contract_tests {
                 .unwrap_err()
                 .contains("identity or configuration digest mismatch")
         );
-        let mut missing = serde_json::to_value(&transport).unwrap();
-        missing.as_object_mut().unwrap().remove("integral_spectra");
-        let missing: WorkerHbOperatingPointTransport = serde_json::from_value(missing).unwrap();
-        assert!(
-            missing
-                .into_operating_point(&buffers)
-                .unwrap_err()
-                .contains("identity or configuration digest mismatch")
-        );
+        let encoded = serde_json::to_value(&transport).unwrap();
+        for field in ["integral_spectra", "producer_identity"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<WorkerHbOperatingPointTransport>(missing).is_err(),
+                "{field}"
+            );
+        }
         let WorkerF64Series::Buffer { buffer, .. } = transport.integral_spectra[0].real else {
             panic!("integrals must use transfer buffers")
         };
@@ -1663,19 +1662,6 @@ mod hb_state_contract_tests {
                 .into_operating_point(&buffers)
                 .unwrap_err()
                 .contains("integral spectral payload digest mismatch")
-        );
-
-        // An older branch-only payload still has its original digest.
-        let (legacy, buffers) = self::transport();
-        let mut legacy = serde_json::to_value(legacy).unwrap();
-        legacy.as_object_mut().unwrap().remove("integral_spectra");
-        let legacy: WorkerHbOperatingPointTransport = serde_json::from_value(legacy).unwrap();
-        assert!(
-            legacy
-                .into_operating_point(&buffers)
-                .unwrap()
-                .integral_spectra()
-                .is_empty()
         );
     }
 
@@ -1840,17 +1826,21 @@ mod pss_floquet_contract_tests {
     }
 
     #[test]
-    fn retained_pss_transport_parses_pre_identity_metadata_as_untrusted_legacy_state() {
-        let (transport, buffers) = transport();
-        let mut encoded = serde_json::to_value(transport).unwrap();
-        let object = encoded.as_object_mut().unwrap();
-        object.remove("producer_identity");
-        object.remove("shooting_state_basis");
-
-        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
-        let operating_point = restored.into_operating_point(&buffers).unwrap();
-        assert!(operating_point.producer_identity().is_none());
-        assert!(operating_point.shooting_state_basis().is_empty());
+    fn retained_pss_transport_without_identity_or_state_basis_is_refused() {
+        let (transport, _) = transport();
+        let encoded = serde_json::to_value(transport).unwrap();
+        for field in [
+            "producer_identity",
+            "shooting_state_basis",
+            "result_branch_waveforms",
+        ] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<WorkerPssOperatingPointTransport>(missing).is_err(),
+                "{field}"
+            );
+        }
     }
 
     #[test]
