@@ -4750,6 +4750,102 @@ r2 b 0 1k
     }
 }
 
+/// An expression-controlled switch's `CONTROL` and a capacitor's value
+/// expression read node voltages, so a digital output only one of them reads
+/// gets the bridge any other analog reader gets, whichever card comes first.
+///
+/// The expressions' node references were missing from the nodes analog
+/// devices use, so no bridge was planted: the switch never moved and the
+/// capacitor kept the value it has at 0 V on `dosc`.
+#[test]
+fn a_switch_control_or_a_capacitor_value_expression_follows_the_digital_output_it_reads() {
+    const CLOCK: &str = "\
+vc cntl 0 0.5
+aosc cntl dosc osc1
+.model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 rise_delay=1e-10 fall_delay=1e-10)
+";
+    const SWITCH: &str = "\
+vdd vdd 0 1
+r1 vdd a 1k
+s1 a 0 swm control={v(dosc)}
+.model swm sw ron=1 roff=1e9 on=2 off=1
+";
+    const CAPACITOR: &str = "\
+vq q 0 pulse(0 10 0 1n 1n 1 2)
+rq q c 10k
+c1 c 0 c={1n+1n*v(dosc)}
+";
+    for (reader, cards) in [("switch", SWITCH), ("capacitor", CAPACITOR)] {
+        for (order, deck) in [
+            (
+                "clock first",
+                format!("* {reader} after the clock\n{CLOCK}{cards}.end\n"),
+            ),
+            (
+                "clock last",
+                format!("* {reader} before the clock\n{cards}{CLOCK}.end\n"),
+            ),
+        ] {
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            let result = Engine::default()
+                .run_tran(&netlist, 2.0e-6, 1.0e-8)
+                .expect("transient solves");
+            let index_at = |time: f64| {
+                result
+                    .time
+                    .iter()
+                    .position(|&t| t >= time)
+                    .expect("the run reaches the sample")
+            };
+            if reader == "switch" {
+                let a = transient_node_series(&result, "a");
+                // The clock is low over the first half period and high over
+                // the second.
+                for (time, high) in [
+                    (0.25e-6, false),
+                    (0.75e-6, true),
+                    (1.25e-6, false),
+                    (1.75e-6, true),
+                ] {
+                    let a = a[index_at(time)];
+                    if high {
+                        assert!(
+                            a < 0.01,
+                            "{order}: the closed switch pulls `a` low at {time:e} s: {a}"
+                        );
+                    } else {
+                        assert!(
+                            a > 0.99,
+                            "{order}: the open switch leaves `a` high at {time:e} s: {a}"
+                        );
+                    }
+                }
+                continue;
+            }
+            let q = transient_node_series(&result, "q");
+            let c = transient_node_series(&result, "c");
+            // The capacitance over a window inside one clock phase: the
+            // charging current through `rq` over the slope of `c`.
+            let capacitance = |from: f64, to: f64| {
+                let (i, j) = (index_at(from), index_at(to));
+                let mid = index_at(0.5 * (from + to));
+                let current = (q[mid] - c[mid]) / 10.0e3;
+                current * (result.time[j] - result.time[i]) / (c[j] - c[i])
+            };
+            let low = capacitance(1.1e-6, 1.4e-6);
+            let high = capacitance(1.6e-6, 1.9e-6);
+            assert!(
+                (low - 1.0e-9).abs() < 0.05e-9,
+                "{order}: `c1` is 1 nF with the clock low: {low:e}"
+            );
+            assert!(
+                high > 3.0 * low,
+                "{order}: `c1` grows with the high clock: {high:e} against {low:e}"
+            );
+        }
+    }
+}
+
 //=============================================================================
 // The same rule at a solved DC point (R2.15 part C)
 //=============================================================================

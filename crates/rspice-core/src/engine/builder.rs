@@ -2958,19 +2958,35 @@ fn collect_flat_analog_nodes(
         }
     }
     // A voltage read is an electrical use even if the node is absent from
-    // the source's terminal list. Use compiled references after parameter
-    // and expression lowering, including behavioral R/C/L expansions.
+    // the element's terminal list. Use compiled references after parameter
+    // and expression lowering: behavioral sources (behavioral R/C/L
+    // expansions among them), an expression-controlled switch's CONTROL and
+    // a capacitor value that reads the solution.
     for program in circuit
         .behavioral_sources
         .voltage_sources
         .iter()
-        .map(|source| &source.program)
+        .map(|source| &*source.program)
         .chain(
             circuit
                 .behavioral_sources
                 .current_sources
                 .iter()
-                .map(|source| &source.program),
+                .map(|source| &*source.program),
+        )
+        .chain(
+            circuit
+                .generic_switches
+                .iter()
+                .map(|switch| &switch.program),
+        )
+        .chain(
+            circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .flatten()
+                .map(|capacitor| &capacitor.program),
         )
     {
         for name in program.node_map.keys() {
