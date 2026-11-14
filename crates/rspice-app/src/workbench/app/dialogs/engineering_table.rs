@@ -1988,7 +1988,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The engineering table over the application's parts, as its dialog
     /// step lends them.
@@ -2005,7 +2005,7 @@ pub(crate) mod tests {
 
     #[test]
     fn opening_manager_captures_truthful_active_schematic_revision() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
