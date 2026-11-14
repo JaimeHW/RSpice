@@ -525,8 +525,12 @@ fn lowered_transient_and_ac_analyses_match_their_spice_equivalents() {
         .position(|name: &String| name.eq_ignore_ascii_case("out"))
         .expect("out is a solved node");
     assert_eq!(
-        lowered.voltage_waveform(index),
-        authored.voltage_waveform(authored_index),
+        lowered
+            .try_voltage_waveform(index)
+            .expect("node index in range"),
+        authored
+            .try_voltage_waveform(authored_index)
+            .expect("node index in range"),
         "the lowered vccs must drive the same waveform as the authored G card"
     );
 

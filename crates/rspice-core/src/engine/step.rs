@@ -304,17 +304,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Build a checked Cartesian plan without materializing any run netlists.
-    pub fn plan_step_commands<'a>(
-        &self,
-        netlist: &'a Netlist,
-        steps: &[StepCommand],
-        limits: StepPlanLimits,
-    ) -> Result<StepPlan<'a>, SimulationError> {
-        self.plan_step_commands_with_abort(netlist, steps, limits, &NoAbort)
-    }
-
-    /// Build a checked Cartesian plan with cooperative cancellation.
+    /// Build a checked Cartesian plan without materializing any run netlists,
+    /// with cooperative cancellation.
     pub fn plan_step_commands_with_abort<'a>(
         &self,
         netlist: &'a Netlist,
@@ -482,19 +473,11 @@ impl Engine {
         })
     }
 
-    /// Materialize one indexed member of a checked `.STEP` plan.
+    /// Materialize one indexed member of a checked `.STEP` plan with
+    /// cooperative cancellation.
     ///
     /// The plan retains its immutable planning base, so DATA coordinates and
     /// target resolution cannot be applied to a different netlist.
-    pub fn materialize_step_run(
-        &self,
-        plan: &StepPlan<'_>,
-        run_index: usize,
-    ) -> Result<MaterializedStepRun, SimulationError> {
-        self.materialize_step_run_with_abort(plan, run_index, &NoAbort)
-    }
-
-    /// Materialize one indexed member with cooperative cancellation.
     pub fn materialize_step_run_with_abort(
         &self,
         plan: &StepPlan<'_>,
@@ -2529,13 +2512,13 @@ mod tests {
                 sweep: StepSweep::List(vec![1.0e3, 2.0e3]),
             }];
             engine
-                .plan_step_commands(&netlist, &steps, plan_limits(2))
+                .plan_step_commands_with_abort(&netlist, &steps, plan_limits(2), &NoAbort)
                 .expect("step plan is valid")
                 .into_owned()
         };
 
         let materialized = engine
-            .materialize_step_run(&plan, 1)
+            .materialize_step_run_with_abort(&plan, 1, &NoAbort)
             .expect("owned plan remains materializable");
 
         assert_eq!(materialized.step_values(), [2.0e3]);
@@ -2580,7 +2563,7 @@ mod tests {
         let engine = Engine::new(SimulationConfig::default());
         let steps = step_commands(&netlist);
         let plan = engine
-            .plan_step_commands(&netlist, &steps, plan_limits(6))
+            .plan_step_commands_with_abort(&netlist, &steps, plan_limits(6), &NoAbort)
             .expect("six-run plan fits its explicit limit");
 
         assert_eq!(plan.total_runs(), 6);
@@ -2600,14 +2583,14 @@ mod tests {
         );
 
         let limit_error = engine
-            .plan_step_commands(&netlist, &steps, plan_limits(5))
+            .plan_step_commands_with_abort(&netlist, &steps, plan_limits(5), &NoAbort)
             .expect_err("requested Cartesian count must be checked against the limit");
         let message = limit_error.to_string();
         assert!(message.contains("requests 6 run(s)"), "{message}");
         assert!(message.contains("limit 5"), "{message}");
 
         let zero_error = engine
-            .plan_step_commands(&netlist, &steps, plan_limits(0))
+            .plan_step_commands_with_abort(&netlist, &steps, plan_limits(0), &NoAbort)
             .expect_err("zero is not a usable execution limit");
         assert!(zero_error.to_string().contains("configured limit is 0"));
     }
@@ -2632,7 +2615,12 @@ mod tests {
             .collect::<Vec<_>>();
         let engine = Engine::new(SimulationConfig::default());
         let error = engine
-            .plan_step_commands(&netlist, &many_dimensions, StepPlanLimits::new(1, 4, 8, 8))
+            .plan_step_commands_with_abort(
+                &netlist,
+                &many_dimensions,
+                StepPlanLimits::new(1, 4, 8, 8),
+                &NoAbort,
+            )
             .expect_err("many one-point dimensions must respect max_dimensions");
         assert!(error.to_string().contains("max_dimensions 4"));
 
@@ -2647,12 +2635,22 @@ mod tests {
         .expect("wide DATA deck parses");
         let steps = step_commands(&data_netlist);
         let binding_error = engine
-            .plan_step_commands(&data_netlist, &steps, StepPlanLimits::new(1, 1, 3, 4))
+            .plan_step_commands_with_abort(
+                &data_netlist,
+                &steps,
+                StepPlanLimits::new(1, 1, 3, 4),
+                &NoAbort,
+            )
             .expect_err("one-row many-column DATA must respect per-run bindings");
         assert!(binding_error.to_string().contains("4 bindings per run"));
 
         let storage_error = engine
-            .plan_step_commands(&data_netlist, &steps, StepPlanLimits::new(1, 1, 4, 3))
+            .plan_step_commands_with_abort(
+                &data_netlist,
+                &steps,
+                StepPlanLimits::new(1, 1, 4, 3),
+                &NoAbort,
+            )
             .expect_err("DATA cells must respect stored-value limit");
         assert!(storage_error.to_string().contains("4 stored values"));
 
@@ -2663,7 +2661,12 @@ mod tests {
             sweep: StepSweep::List(vec![1.0, 2.0, 3.0, 4.0]),
         }];
         let scalar_error = engine
-            .plan_step_commands(&netlist, &scalar, StepPlanLimits::new(4, 1, 1, 3))
+            .plan_step_commands_with_abort(
+                &netlist,
+                &scalar,
+                StepPlanLimits::new(4, 1, 1, 3),
+                &NoAbort,
+            )
             .expect_err("scalar axes must be bounded before cloning");
         assert!(
             scalar_error
@@ -2701,7 +2704,12 @@ mod tests {
         ];
         for pair in alias_pairs {
             let error = engine
-                .plan_step_commands(&netlist, &pair, StepPlanLimits::new(1, 2, 2, 2))
+                .plan_step_commands_with_abort(
+                    &netlist,
+                    &pair,
+                    StepPlanLimits::new(1, 2, 2, 2),
+                    &NoAbort,
+                )
                 .expect_err("aliases for one physical parameter must collide");
             assert!(
                 error.to_string().contains("Duplicate .STEP target"),
@@ -2711,7 +2719,12 @@ mod tests {
 
         let distinct = [command("C1", Some("C")), command("C1", Some("M"))];
         engine
-            .plan_step_commands(&netlist, &distinct, StepPlanLimits::new(1, 2, 2, 2))
+            .plan_step_commands_with_abort(
+                &netlist,
+                &distinct,
+                StepPlanLimits::new(1, 2, 2, 2),
+                &NoAbort,
+            )
             .expect("distinct supported capacitor parameters must remain usable");
     }
 
@@ -2736,10 +2749,10 @@ mod tests {
         let mut steps = step_commands(&netlist);
         steps.insert(1, data_step("samples"));
         let plan = engine
-            .plan_step_commands(&netlist, &steps, plan_limits(4))
+            .plan_step_commands_with_abort(&netlist, &steps, plan_limits(4), &NoAbort)
             .expect("four-run plan fits");
         let run = engine
-            .materialize_step_run(&plan, 3)
+            .materialize_step_run_with_abort(&plan, 3, &NoAbort)
             .expect("selected mixed binding materializes");
 
         assert_eq!(run.run_index(), 3);
@@ -2784,7 +2797,12 @@ mod tests {
         .expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let error = engine
-            .plan_step_commands(&netlist, &step_commands(&netlist), plan_limits(4))
+            .plan_step_commands_with_abort(
+                &netlist,
+                &step_commands(&netlist),
+                plan_limits(4),
+                &NoAbort,
+            )
             .expect_err("syntactic aliases for one model target must collide");
         let message = error.to_string();
         assert!(message.contains("Duplicate .STEP target"), "{message}");
@@ -2807,7 +2825,7 @@ mod tests {
         let mut steps = step_commands(&collision);
         steps.insert(0, data_step("samples"));
         let error = engine
-            .plan_step_commands(&collision, &steps, plan_limits(1))
+            .plan_step_commands_with_abort(&collision, &steps, plan_limits(1), &NoAbort)
             .expect_err("DATA device override and explicit DEVICE target must collide");
         let message = error.to_string();
         assert!(message.contains("Duplicate .STEP target"), "{message}");
@@ -2823,7 +2841,12 @@ mod tests {
         )
         .expect("hierarchical-column deck parses");
         let error = engine
-            .plan_step_commands(&hierarchical, &step_commands(&hierarchical), plan_limits(1))
+            .plan_step_commands_with_abort(
+                &hierarchical,
+                &step_commands(&hierarchical),
+                plan_limits(1),
+                &NoAbort,
+            )
             .expect_err("a DATA column naming no instance must fail during planning");
         let message = error.to_string();
         assert!(
@@ -2865,10 +2888,15 @@ mod tests {
         .expect("bare-device DATA deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let plan = engine
-            .plan_step_commands(&device, &step_commands(&device), plan_limits(2))
+            .plan_step_commands_with_abort(
+                &device,
+                &step_commands(&device),
+                plan_limits(2),
+                &NoAbort,
+            )
             .expect("a bare device column plans");
         let run = engine
-            .materialize_step_run(&plan, 1)
+            .materialize_step_run_with_abort(&plan, 1, &NoAbort)
             .expect("row 1 materializes");
         assert_eq!(data_row_resistance(run.netlist(), "R1"), 3000.0);
         let stepped = engine
@@ -2892,10 +2920,15 @@ mod tests {
         )
         .expect("parameter DATA deck parses");
         let plan = engine
-            .plan_step_commands(&parameter, &step_commands(&parameter), plan_limits(2))
+            .plan_step_commands_with_abort(
+                &parameter,
+                &step_commands(&parameter),
+                plan_limits(2),
+                &NoAbort,
+            )
             .expect("a parameter column plans");
         let run = engine
-            .materialize_step_run(&plan, 1)
+            .materialize_step_run_with_abort(&plan, 1, &NoAbort)
             .expect("row 1 materializes");
         assert_eq!(run.netlist().params.get("R1"), Some(3000.0));
 
@@ -2912,7 +2945,12 @@ mod tests {
         )
         .expect("unknown-column DATA deck parses");
         let error = engine
-            .plan_step_commands(&unknown, &step_commands(&unknown), plan_limits(1))
+            .plan_step_commands_with_abort(
+                &unknown,
+                &step_commands(&unknown),
+                plan_limits(1),
+                &NoAbort,
+            )
             .expect_err("a column naming nothing must be refused, not stepped silently");
         assert!(
             error
@@ -2947,7 +2985,12 @@ mod tests {
         netlist.source_text = None;
         let engine = Engine::new(SimulationConfig::default());
         let plan = engine
-            .plan_step_commands(&netlist, &step_commands(&netlist), plan_limits(128))
+            .plan_step_commands_with_abort(
+                &netlist,
+                &step_commands(&netlist),
+                plan_limits(128),
+                &NoAbort,
+            )
             .expect("DATA plan builds");
         let abort = crate::abort_signal::CountingAbort::new(20);
         let run = engine

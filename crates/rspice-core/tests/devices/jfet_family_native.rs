@@ -6,6 +6,7 @@
 
 use super::waveform;
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use waveform::interpolate;
@@ -592,7 +593,15 @@ fn jfet_gate_shot_noise_is_the_junction_leakage_in_every_dialect() {
             spice_dialect: dialect,
             ..Default::default()
         })
-        .run_noise_named_with_input_source(&netlist, "g", None, "vg", &[1.0e3], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "g",
+            None,
+            "vg",
+            &[1.0e3],
+            300.15,
+            &NoAbort,
+        )
         .expect("JFET gate noise analysis runs");
         let mechanism = |name: &str| {
             results[0]

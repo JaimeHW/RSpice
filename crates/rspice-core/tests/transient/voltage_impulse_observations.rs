@@ -740,7 +740,13 @@ fn ccvs_uic_preserves_authored_capacitor_charge_and_winding_flux() {
     use rspice_core::engine::TransientStartupMode;
     let deck=Netlist::parse("CCVS IC transition\nV1 in 0 1\nC1 in 0 2p IC=.25\nH1 out 0 V1 3\nL1 out 0 5n IC=.002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
     let result = ccvs_engine()
-        .run_tran_with_startup_mode(&deck, 1e-9, 5e-12, TransientStartupMode::Uic)
+        .run_tran_with_startup_mode_and_abort(
+            &deck,
+            1e-9,
+            5e-12,
+            TransientStartupMode::Uic,
+            &NoAbort,
+        )
         .unwrap();
     // Cin*(1-.25) transfers -4.5 pV*s, changing the winding current
     // by -0.9 mA from the authored 2 mA, independently of the first dt.
@@ -838,7 +844,13 @@ fn ccvs_nonbinary_startup_preserves_exact_stored_charge() {
                 rspice_core::SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
             config.convergence_config.gmin_target = 0.0;
             Engine::new(config)
-                .run_tran_with_startup_mode(&deck, 0.5e-9, 5e-12, TransientStartupMode::Uic)
+                .run_tran_with_startup_mode_and_abort(
+                    &deck,
+                    0.5e-9,
+                    5e-12,
+                    TransientStartupMode::Uic,
+                    &NoAbort,
+                )
                 .unwrap()
         } else {
             ccvs_engine().run_tran(&deck, 0.5e-9, 5e-12).unwrap()
@@ -951,7 +963,7 @@ fn current_driven_winding_startup_keeps_authored_flux_and_regular_source_slopes(
                 };
                 config.convergence_config.gmin_target = 0.0;
                 let result = Engine::new(config)
-                    .run_tran_with_startup_mode(&deck, 2e-9, 5e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&deck, 2e-9, 5e-12, startup, &NoAbort)
                     .unwrap();
                 // t = 0 publishes the operating point, or under UIC the
                 // authored initial state with unset nodes at zero; the 1 ns
@@ -1002,7 +1014,13 @@ fn xyce_capacitor_ic_preserves_ccvs_startup_transfer() {
     let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
     config.convergence_config.gmin_target = 0.0;
     let result = Engine::new(config)
-        .run_tran_with_startup_mode(&deck, 1e-9, 5e-12, TransientStartupMode::Uic)
+        .run_tran_with_startup_mode_and_abort(
+            &deck,
+            1e-9,
+            5e-12,
+            TransientStartupMode::Uic,
+            &NoAbort,
+        )
         .unwrap();
     let winding = result.try_branch_current_waveform_named("l1").unwrap();
     // Xyce 7.10 gives I(L1)=1.1 mA after the first transfer. Independently,
@@ -1042,7 +1060,13 @@ fn xyce_capacitor_ic_preserves_differential_charge_and_slope() {
             config.integration_method = method;
             config.convergence_config.gmin_target = 0.0;
             let result = Engine::new(config)
-                .run_tran_with_startup_mode(&deck, 3e-9, 5e-12, TransientStartupMode::Uic)
+                .run_tran_with_startup_mode_and_abort(
+                    &deck,
+                    3e-9,
+                    5e-12,
+                    TransientStartupMode::Uic,
+                    &NoAbort,
+                )
                 .unwrap();
             // delta Q=2 pC and I=C*dV/dt=2 mA during the one-ns ramp.
             // H=3 ohms transfers 6 pV*s, then 6 mV, into L=5 nH.

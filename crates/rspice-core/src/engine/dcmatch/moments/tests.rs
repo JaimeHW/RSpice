@@ -43,7 +43,7 @@ fn finite_sigmas_and_shares_do_not_require_representable_variances() {
             0.0,
             entries,
             &correlations(None),
-            &NoAbort,
+            &crate::abort_signal::NoAbort,
         )
         .unwrap();
         assert!(
@@ -72,7 +72,7 @@ fn correlated_covariance_preserves_scale_and_cancellation_between_rows() {
             0.0,
             vec![entry(0, 3.0 * scale), entry(1, 4.0 * scale)],
             &correlations(Some(vec![vec![1.0, 0.5], vec![0.5, 1.0]])),
-            &NoAbort,
+            &crate::abort_signal::NoAbort,
         )
         .unwrap();
         assert!((result.sigma_total / (37.0_f64.sqrt() * scale) - 1.0).abs() < 2e-15);
@@ -101,7 +101,7 @@ fn correlated_covariance_preserves_scale_and_cancellation_between_rows() {
                 .map(|(index, value)| entry(index, value))
                 .collect(),
             &matrix,
-            &NoAbort,
+            &crate::abort_signal::NoAbort,
         )
         .unwrap();
         assert!(
@@ -123,7 +123,7 @@ fn independent_instances_do_not_cancel_and_true_zero_variance_stays_zero() {
         0.0,
         entries.clone(),
         &correlation,
-        &NoAbort,
+        &crate::abort_signal::NoAbort,
     )
     .unwrap();
     assert_eq!(cancelled.sigma_total, 0.0);
@@ -142,7 +142,7 @@ fn independent_instances_do_not_cancel_and_true_zero_variance_stays_zero() {
         0.0,
         separate,
         &correlation,
-        &NoAbort,
+        &crate::abort_signal::NoAbort,
     )
     .unwrap();
     assert!((result.sigma_total / (std::f64::consts::SQRT_2 * 1e200) - 1.0).abs() < 2e-15);
@@ -174,7 +174,7 @@ fn derivatives_recover_overflowing_spans_and_unrepresentable_outputs_fail_explic
         0.0,
         vec![entry(0, f64::MAX), entry(1, f64::MAX)],
         &correlations(None),
-        &NoAbort,
+        &crate::abort_signal::NoAbort,
     );
     assert!(result.is_err());
     let mut quote = card();
@@ -186,7 +186,7 @@ fn derivatives_recover_overflowing_spans_and_unrepresentable_outputs_fail_explic
             0.0,
             vec![entry(0, f64::MAX)],
             &correlations(None),
-            &NoAbort
+            &crate::abort_signal::NoAbort
         )
         .is_err()
     );
@@ -198,7 +198,7 @@ fn derivatives_recover_overflowing_spans_and_unrepresentable_outputs_fail_explic
             0.0,
             vec![entry(0, 1e200), entry(1, 1e-200)],
             &correlations(None),
-            &NoAbort
+            &crate::abort_signal::NoAbort
         )
         .is_err()
     );

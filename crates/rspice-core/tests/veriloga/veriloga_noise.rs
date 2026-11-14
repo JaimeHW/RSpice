@@ -12,6 +12,7 @@
 //!   - series voltage noise (potential contribution) reaches the output
 //!     through the branch-equation row.
 
+use crate::model_outcome::RunWithOutcome;
 use rspice_core::analysis::NoiseContributionProbe;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -158,7 +159,7 @@ fn output_noise(deck: &str, node: &str, frequencies: &[f64]) -> Vec<f64> {
         .position(|n| n.eq_ignore_ascii_case(node))
         .unwrap_or_else(|| panic!("node {node} in {:?}", dc.node_names));
     engine
-        .run_noise_ports(&netlist, node_idx, None, frequencies, T_NOM)
+        .run_noise_ports_with_abort(&netlist, node_idx, None, frequencies, T_NOM, &NoAbort)
         .expect("noise analysis")
         .iter()
         .map(|r| r.output_noise_density)
@@ -289,13 +290,14 @@ endmodule
         let mut config = SimulationConfig::default();
         config.resource_limits.max_parallel_workers = workers;
         Engine::new(config)
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &ordinary_deck,
                 "out",
                 None,
                 "VREF",
                 &frequencies,
                 T_NOM,
+                &NoAbort,
             )
             .expect("ordinary final-step noise runs")
     };
@@ -510,7 +512,15 @@ fn ranked_contributions_name_sources_by_their_module_labels() {
     ))
     .expect("deck parses");
     let results = Engine::new(SimulationConfig::default())
-        .run_noise_named_with_input_source(&netlist, "out", None, "v1", &[1.0, 1e3, 1e6], T_NOM)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "out",
+            None,
+            "v1",
+            &[1.0, 1e3, 1e6],
+            T_NOM,
+            &NoAbort,
+        )
         .expect("noise analysis");
     let summary = rspice_core::analysis::IntegratedNoise::new(results).contribution_summary();
 
@@ -855,7 +865,7 @@ endmodule
         .position(|name| name.eq_ignore_ascii_case("in"))
         .expect("input node");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM)
+        engine.run_noise_ports_with_abort(&netlist, input, None, &[1.0e3], T_NOM, &NoAbort)
     }));
 
     let _ = std::fs::remove_file(model);
@@ -942,7 +952,15 @@ endmodule
     // Noise must instead use the 1 mS and 1 uF analysis("noise") shunt.
     // The 4e-18 A²/Hz source sees 2 mS + jw*1 uF in total.
     let ordinary = engine
-        .run_noise_named_with_input_source(&netlist, "out", None, "VPORT", &frequencies, T_NOM)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "out",
+            None,
+            "VPORT",
+            &frequencies,
+            T_NOM,
+            &NoAbort,
+        )
         .expect("ordinary noise runs");
     for point in &ordinary {
         let omega_c = 2.0 * std::f64::consts::PI * point.frequency * 1.0e-6;
@@ -1017,7 +1035,7 @@ endmodule
         .position(|name| name.eq_ignore_ascii_case("in"))
         .expect("input node");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM)
+        engine.run_noise_ports_with_abort(&netlist, input, None, &[1.0e3], T_NOM, &NoAbort)
     }));
 
     let _ = std::fs::remove_file(model);

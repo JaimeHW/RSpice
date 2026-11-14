@@ -18,6 +18,7 @@
 //! its card may say. The refusals these rules imply live beside the rest of
 //! the seam's typed diagnostics in `veriloga_elaboration_diagnostics`.
 
+use rspice_core::NoAbort;
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::io::Write;
 use std::path::PathBuf;
@@ -839,7 +840,7 @@ fn dc_sensitivity_covers_verilog_a_instance_and_card_parameters() {
         );
         let netlist = Netlist::parse(&deck).expect("deck parses");
         Engine::new(SimulationConfig::default())
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 rspice_core::analysis::AcSensitivityOutput::Voltage {
                     // V1 a 0 names node 1, R1 a b names node 2.
@@ -847,6 +848,7 @@ fn dc_sensitivity_covers_verilog_a_instance_and_card_parameters() {
                     negative: None,
                 },
                 &[],
+                &NoAbort,
             )
             .expect("sensitivity runs")
     };

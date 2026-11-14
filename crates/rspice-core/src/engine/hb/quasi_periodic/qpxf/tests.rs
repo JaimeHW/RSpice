@@ -40,7 +40,7 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
     let identity = point.retained_identity().to_owned();
     assert!(point.spectra().len() * 125 > 512);
     let result = engine
-        .run_qpxf_from_qpss(&netlist, request(), &point)
+        .run_qpxf_from_qpss_with_abort(&netlist, request(), &point, &NoAbort)
         .unwrap();
     assert_eq!(result.metadata.operating_point_identity, identity);
     assert_eq!(result.solutions.len(), 3);
@@ -91,7 +91,7 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
     voltage.input_lattices = QpxfInputLattices::MaxOrders(vec![0, 0, 0]);
     voltage.group_delay = true;
     let result = engine
-        .run_qpxf_from_qpss(&netlist, voltage, &point)
+        .run_qpxf_from_qpss_with_abort(&netlist, voltage, &point, &NoAbort)
         .unwrap();
     assert_eq!(result.metadata.input_sources[0].name, "VPROBE");
     assert_eq!(result.transfers.len(), 1);
@@ -106,13 +106,18 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
     assert_eq!(point.retained_identity(), identity);
     let mut direct = request();
     direct.linear.method = QuasiPeriodicLinearMethod::Direct;
-    assert!(engine.run_qpxf_from_qpss(&netlist, direct, &point).is_err());
     assert!(
         engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(&netlist, direct, &point, &NoAbort)
+            .is_err()
+    );
+    assert!(
+        engine
+            .run_qpxf_from_qpss_with_abort(
                 &Netlist::parse(&deck.replace("R1 in mid 1k", "R1 in mid 2k")).unwrap(),
                 request(),
-                &point
+                &point,
+                &NoAbort
             )
             .is_err()
     );
@@ -149,7 +154,7 @@ fn qpxf_engine_output_frequency_anchor_preserves_small_signal_and_full_input_lat
     // 1e18 Hz carrier. Keep those paths valid and retain their rounded physical
     // coordinates; the independently authored OUTPUT grid is the sweep axis.
     let result = engine
-        .run_qpxf_from_qpss(&netlist, req.clone(), &point)
+        .run_qpxf_from_qpss_with_abort(&netlist, req.clone(), &point, &NoAbort)
         .unwrap();
     assert_eq!(result.metadata.input_lattices.len(), 9);
     assert_eq!(result.transfers.len(), 18);
@@ -178,7 +183,9 @@ fn qpxf_engine_output_frequency_anchor_preserves_small_signal_and_full_input_lat
     let mut offset = req.clone();
     offset.frequency_axis = QpxfFrequencyAxis::Offset;
     assert!(
-        engine.run_qpxf_from_qpss(&netlist, offset, &point).is_err(),
+        engine
+            .run_qpxf_from_qpss_with_abort(&netlist, offset, &point, &NoAbort)
+            .is_err(),
         "a physical output grid that collapses must be refused"
     );
     let mut bad = req.clone();
@@ -186,22 +193,38 @@ fn qpxf_engine_output_frequency_anchor_preserves_small_signal_and_full_input_lat
     assert!(bad.validate().is_err());
     let mut bad = req.clone();
     bad.input_sources = QpxfSources::Named(vec!["missing".into()]);
-    assert!(engine.run_qpxf_from_qpss(&netlist, bad, &point).is_err());
+    assert!(
+        engine
+            .run_qpxf_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+            .is_err()
+    );
     let mut bad = req.clone();
     bad.input_lattices = QpxfInputLattices::Explicit(vec![vec![2, 0]]);
-    assert!(engine.run_qpxf_from_qpss(&netlist, bad, &point).is_err());
+    assert!(
+        engine
+            .run_qpxf_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+            .is_err()
+    );
     let mut bad = req.clone();
     bad.input_lattices = QpxfInputLattices::MaxOrders(vec![2, 1]);
-    assert!(engine.run_qpxf_from_qpss(&netlist, bad, &point).is_err());
+    assert!(
+        engine
+            .run_qpxf_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+            .is_err()
+    );
     let mut bad = req.clone();
     bad.output = QpxfOutput::BranchCurrent {
         branch: "R1".into(),
     };
-    assert!(engine.run_qpxf_from_qpss(&netlist, bad, &point).is_err());
+    assert!(
+        engine
+            .run_qpxf_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+            .is_err()
+    );
     let mut config = engine.config.clone();
     config.resource_limits.max_result_values = 100;
     assert!(matches!(
-        Engine::new(config).run_qpxf_from_qpss(&netlist, req, &point),
+        Engine::new(config).run_qpxf_from_qpss_with_abort(&netlist, req, &point, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
     ));
 }

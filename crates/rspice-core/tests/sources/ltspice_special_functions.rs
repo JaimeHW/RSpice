@@ -5,6 +5,7 @@
 //! circuit; LTspice alone decides each device's parameter defaults.
 
 use rspice_core::Complex64;
+use rspice_core::NoAbort;
 use rspice_core::analysis::NoiseContributionProbe;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
@@ -543,7 +544,15 @@ fn device_noise_density(
     frequencies: &[f64],
 ) -> Vec<f64> {
     Engine::default()
-        .run_noise_named_with_input_source(&parse(deck), "out", None, "V1", frequencies, 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &parse(deck),
+            "out",
+            None,
+            "V1",
+            frequencies,
+            300.15,
+            &NoAbort,
+        )
         .expect("noise solves")
         .iter()
         .map(|point| {

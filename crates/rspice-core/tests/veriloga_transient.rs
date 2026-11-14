@@ -6,6 +6,11 @@
 //! and the backward-Euler ddt() state pipeline.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/model_outcome.rs"]
+mod model_outcome;
+
+use model_outcome::RunWithOutcome;
+use rspice_core::NoAbort;
 use rspice_core::engine::TransientCheckpoint;
 #[cfg(not(feature = "veriloga-native"))]
 use rspice_core::register_precompiled_veriloga_model;
@@ -212,7 +217,7 @@ endmodule
         rspice_core::engine::TransientStartupMode::Uic,
     ] {
         let result = Engine::default()
-            .run_tran_with_startup_mode(&netlist, 1e-5, 1e-6, startup)
+            .run_tran_with_startup_mode_and_abort(&netlist, 1e-5, 1e-6, startup, &NoAbort)
             .unwrap();
         let output = node_series(&result.node_names, &result.voltages, "out");
         assert!((output[0] - 1.0).abs() < 1e-10, "{startup:?}");

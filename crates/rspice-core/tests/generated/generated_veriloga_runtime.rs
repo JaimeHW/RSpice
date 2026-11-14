@@ -603,7 +603,15 @@ fn generated_noise_processes_take_their_xyce_branch_names() {
         ..SimulationConfig::default()
     });
     let points = engine
-        .run_noise_named_with_input_source(&netlist, "4", None, "VIN", &[100.0], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "4",
+            None,
+            "VIN",
+            &[100.0],
+            300.15,
+            &rspice_core::NoAbort,
+        )
         .expect("DiodeClipper_noise runs");
     // Xyce 7.10, OutputData/DIODE_CMC/DiodeClipper_noise.cir.NOISE.prn at
     // 100 Hz: Xyce's log() is base 10 there, and -1e50 is log(0).

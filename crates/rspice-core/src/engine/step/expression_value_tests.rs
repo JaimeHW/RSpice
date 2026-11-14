@@ -549,7 +549,12 @@ R2 out 0 {3*r}\n\
     assert_eq!(steps.len(), 2, "both .STEP cards parse");
 
     let plan = engine
-        .plan_step_commands(&netlist, &steps, StepPlanLimits::new(16, 8, 64, 4096))
+        .plan_step_commands_with_abort(
+            &netlist,
+            &steps,
+            StepPlanLimits::new(16, 8, 64, 4096),
+            &NoAbort,
+        )
         .expect("the Cartesian plan is valid");
     let runs: Vec<_> = (0..plan.total_runs())
         .map(|run_index| {

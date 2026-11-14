@@ -9,6 +9,7 @@
 //! constructing errors, because the value of the taxonomy is that the refusal
 //! survives the whole path from the parser or the elaborator out to the caller.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::HbConfig;
 use rspice_core::netlist::ParseError;
 use rspice_core::{Engine, Netlist, SimulationError, SimulationErrorCategory, SimulationErrorCode};
@@ -146,7 +147,15 @@ fn noise_refuses_a_device_whose_reference_noise_it_does_not_implement() {
          .end\n",
     );
     let error = Engine::default()
-        .run_noise_named_with_input_source(&netlist, "3", None, "vin", &[1.0e3], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "3",
+            None,
+            "vin",
+            &[1.0e3],
+            300.15,
+            &NoAbort,
+        )
         .expect_err("a SOI device's unimplemented noise must not read as zero");
     assert_eq!(capability_token(&error), "analysis.noise.device");
     let SimulationError::UnsupportedCapability(refusal) = &error else {
@@ -601,7 +610,14 @@ mod mixed_signal_discrete_state {
             .run_sensitivity_linearized(&netlist, probe, None)
             .expect(".sens runs on the held equilibrium");
         engine
-            .run_transfer_function(&netlist, "p", None, false, "v1")
+            .run_transfer_function_with_abort(
+                &netlist,
+                "p",
+                None,
+                false,
+                "v1",
+                &rspice_core::NoAbort,
+            )
             .expect(".tf runs on the held equilibrium");
         engine
             .run_dc_op(&netlist)
@@ -671,7 +687,7 @@ fn a_transfer_function_refusal_names_the_transfer_function() {
          .end\n",
     );
     let error = Engine::default()
-        .run_transfer_function(&netlist, "c", None, false, "V1")
+        .run_transfer_function_with_abort(&netlist, "c", None, false, "V1", &NoAbort)
         .expect_err("a coupled line has no small-signal load");
     assert_eq!(
         capability_token(&error),
@@ -839,7 +855,7 @@ mod capability_matrix_cells {
                 .run_noise(&netlist, out(), &[1.0e3], 300.15)
                 .map(drop)),
             CapabilityAnalysis::Tf => ok(engine
-                .run_transfer_function(&netlist, "out", None, false, "vin")
+                .run_transfer_function_with_abort(&netlist, "out", None, false, "vin", &NoAbort)
                 .map(drop)),
             CapabilityAnalysis::Sp => {
                 let card = netlist
@@ -869,9 +885,9 @@ mod capability_matrix_cells {
             CapabilityAnalysis::Sens => ok(engine
                 .run_sensitivity_linearized(&netlist, out(), None)
                 .map(drop)),
-            CapabilityAnalysis::Disto => {
-                ok(engine.run_distortion(&netlist, &[1.0e3], None).map(drop))
-            }
+            CapabilityAnalysis::Disto => ok(engine
+                .run_distortion_with_abort(&netlist, &[1.0e3], None, &NoAbort)
+                .map(drop)),
             CapabilityAnalysis::Tran => ok(engine.run_tran(&netlist, 2.0e-6, 2.0e-8).map(drop)),
             CapabilityAnalysis::TranNoise => {
                 let noisy = deck(family, extra, ".tran 20n 2u noisefmax=100meg noiseseed=3\n");

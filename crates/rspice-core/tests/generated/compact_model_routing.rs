@@ -582,6 +582,7 @@ Q1 cx bx 0 0 qmod
 ))]
 mod xyce_vbic_generated {
     use super::*;
+    use rspice_core::NoAbort;
     use rspice_core::engine::{ConvergenceConfig, SpiceDialect};
 
     #[test]
@@ -833,13 +834,14 @@ mod xyce_vbic_generated {
             });
             let frequencies = rows.map(|(frequency, _, _)| frequency);
             let points = engine
-                .run_noise_named_with_input_source(
+                .run_noise_named_with_input_source_and_abort(
                     &netlist,
                     "OUT",
                     None,
                     "V1",
                     &frequencies,
                     300.15,
+                    &NoAbort,
                 )
                 .unwrap_or_else(|error| panic!("{name} noise runs: {error}"));
             for (point, (frequency, onoise, inoise)) in points.iter().zip(rows) {

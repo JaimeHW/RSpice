@@ -24,14 +24,6 @@ fn qpnoise_error(message: impl Into<String>) -> SimulationError {
 }
 
 impl Engine {
-    pub fn run_qpnoise_from_qpss(
-        &self,
-        netlist: &Netlist,
-        request: QpnoiseRequest,
-        point: &QpssOperatingPoint,
-    ) -> Result<QpnoiseAnalysisResult, SimulationError> {
-        self.run_qpnoise_from_qpss_with_abort(netlist, request, point, &NoAbort)
-    }
     /// Evaluate all selected stochastic mechanisms with one shared adjoint
     /// linearization. The caller's authenticated QPSS orbit is never re-solved.
     pub fn run_qpnoise_from_qpss_with_abort(

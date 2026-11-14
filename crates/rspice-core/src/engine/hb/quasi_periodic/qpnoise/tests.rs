@@ -105,7 +105,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
         linear: Default::default(),
     };
     let result = engine
-        .run_qpnoise_from_qpss(&netlist, request.clone(), &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, request.clone(), &point, &NoAbort)
         .unwrap();
     let s = 4.0
         * super::super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect)
@@ -169,7 +169,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
     zero.frequencies_hz = vec![0.0];
     assert!(
         engine
-            .run_qpnoise_from_qpss(&netlist, zero, &point)
+            .run_qpnoise_from_qpss_with_abort(&netlist, zero, &point, &NoAbort)
             .unwrap_err()
             .to_string()
             .contains("nonzero")
@@ -178,7 +178,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
     crossing.frequencies_hz = vec![-0.01, 0.01];
     assert!(
         engine
-            .run_qpnoise_from_qpss(&netlist, crossing.clone(), &point)
+            .run_qpnoise_from_qpss_with_abort(&netlist, crossing.clone(), &point, &NoAbort)
             .unwrap_err()
             .to_string()
             .contains("spectral line")
@@ -238,7 +238,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
     crossing.integration = None;
     crossing.contributor_ranking = false;
     engine
-        .run_qpnoise_from_qpss(&netlist, crossing, &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, crossing, &point, &NoAbort)
         .unwrap();
     let mut narrow = request;
     narrow.input_lattices = QpnoiseLattices::Explicit {
@@ -246,7 +246,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
     };
     narrow.sources = QpnoiseSources::Only(vec!["RX thermal".into()]);
     let narrow = engine
-        .run_qpnoise_from_qpss(&netlist, narrow, &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, narrow, &point, &NoAbort)
         .unwrap();
     assert_eq!(narrow.sources.len(), 1);
     assert_eq!(narrow.metadata.input_lattices, [vec![1, 0]]);
@@ -265,7 +265,7 @@ fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
 fn qpnoise_engine_multioutput_referral_figure_and_integrated_contributors_match_rc() {
     let (engine, netlist, point) = fixture();
     let result = engine
-        .run_qpnoise_from_qpss(&netlist, request(), &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, request(), &point, &NoAbort)
         .unwrap();
     let kb = super::super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect)
         .boltzmann;
@@ -343,7 +343,7 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
         maximum: vec![1, 1],
     };
     let result = engine
-        .run_qpnoise_from_qpss(&netlist, req.clone(), &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, req.clone(), &point, &NoAbort)
         .unwrap();
     assert_eq!(result.metadata.input_lattices.len(), 6);
     assert!(
@@ -372,7 +372,7 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
     req.input = None;
     req.sources = QpnoiseSources::Except(vec!["rs thermal".into(), "rl thermal".into()]);
     let quiet = engine
-        .run_qpnoise_from_qpss(&netlist, req.clone(), &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, req.clone(), &point, &NoAbort)
         .unwrap();
     assert!(quiet.sources.is_empty());
     assert!(
@@ -385,7 +385,7 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
     req.frequencies_hz = vec![100.0];
     req.integration = None;
     let one = engine
-        .run_qpnoise_from_qpss(&netlist, req.clone(), &point)
+        .run_qpnoise_from_qpss_with_abort(&netlist, req.clone(), &point, &NoAbort)
         .unwrap();
     assert_eq!(
         one.outputs[0].ranking.as_ref().unwrap()[0].percentage,
@@ -395,10 +395,18 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
         minimum: vec![-2, 0],
         maximum: vec![1, 1],
     };
-    assert!(engine.run_qpnoise_from_qpss(&netlist, req, &point).is_err());
+    assert!(
+        engine
+            .run_qpnoise_from_qpss_with_abort(&netlist, req, &point, &NoAbort)
+            .is_err()
+    );
     let mut bad = request();
     bad.sources = QpnoiseSources::Only(vec!["rl thermal".into()]);
-    assert!(engine.run_qpnoise_from_qpss(&netlist, bad, &point).is_err());
+    assert!(
+        engine
+            .run_qpnoise_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+            .is_err()
+    );
     assert!(matches!(
         engine.run_qpnoise_from_qpss_with_abort(
             &netlist,
@@ -417,7 +425,7 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
     let changed = Netlist::parse("changed\nV1 in 0 0\nRs in out 2k\nRl out 0 2k\n.end\n").unwrap();
     assert!(
         engine
-            .run_qpnoise_from_qpss(&changed, request(), &point)
+            .run_qpnoise_from_qpss_with_abort(&changed, request(), &point, &NoAbort)
             .is_err()
     );
 }
@@ -501,7 +509,9 @@ fn qpnoise_packed_transport_preserves_colored_lattices_and_rejects_corruption() 
     req.noise_figure = None;
     req.integration = None;
     req.frequencies_hz = vec![100.0, 300.0, 700.0];
-    let mut result = engine.run_qpnoise_from_qpss(&netlist, req, &point).unwrap();
+    let mut result = engine
+        .run_qpnoise_from_qpss_with_abort(&netlist, req, &point, &NoAbort)
+        .unwrap();
     let grid = result
         .validate_retained_payload_with_abort(&engine.config.resource_limits, &NoAbort)
         .unwrap();

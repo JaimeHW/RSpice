@@ -1,4 +1,5 @@
 use super::*;
+use rspice_core::NoAbort;
 
 // Independent clamped-terminal GP laws. The derivative term belongs to
 // instantaneous charge; only transport sees the delay and constant prehistory.
@@ -164,11 +165,12 @@ fn gp_behavioral_uic_preserves_charge_impulses_and_zero_transport_prehistory() {
         });
         for polarity in [1.0, -1.0] {
             let result = engine
-                .run_tran_with_startup_mode(
+                .run_tran_with_startup_mode_and_abort(
                     &deck(polarity, true),
                     2.5e-9,
                     4e-12,
                     TransientStartupMode::Uic,
+                    &NoAbort,
                 )
                 .unwrap();
             check(&result, dialect, polarity, Some("bi"), "bb", true);
@@ -328,7 +330,7 @@ fn gp_nodal_behavioral_current_couples_to_gp_charge_at_startup() {
                 TransientStartupMode::Uic,
             ] {
                 let result = engine
-                    .run_tran_with_startup_mode(&deck, 2.5e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&deck, 2.5e-9, 4e-12, startup, &NoAbort)
                     .unwrap_or_else(|e| panic!("{dialect:?}/{polarity}/{startup:?}: {e}"));
                 let base = result.try_branch_current_waveform_named("VB").unwrap();
                 let current = result.try_branch_current_waveform_named("BI").unwrap();

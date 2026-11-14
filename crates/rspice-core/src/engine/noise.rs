@@ -3159,30 +3159,11 @@ impl Engine {
         )
     }
 
-    /// Run noise analysis with optional differential output reference.
+    /// Run differential noise analysis with cooperative cancellation.
     ///
     /// The measured output noise is based on:
     /// - `V(output_pos)` when `output_neg` is `None`
     /// - `V(output_pos) - V(output_neg)` when `output_neg` is provided
-    pub fn run_noise_ports(
-        &self,
-        netlist: &Netlist,
-        output_pos: usize,
-        output_neg: Option<usize>,
-        frequencies: &[Value],
-        temperature: Value,
-    ) -> Result<Vec<NoiseResult>, SimulationError> {
-        self.run_noise_ports_with_abort(
-            netlist,
-            output_pos,
-            output_neg,
-            frequencies,
-            temperature,
-            &NoAbort,
-        )
-    }
-
-    /// Run differential noise analysis with cooperative cancellation.
     pub fn run_noise_ports_with_abort(
         &self,
         netlist: &Netlist,
@@ -3270,29 +3251,6 @@ impl Engine {
         Ok((results, operating_point))
     }
 
-    /// Non-cancellable convenience wrapper for named-node input-referred
-    /// noise analysis.
-    #[allow(clippy::too_many_arguments)]
-    pub fn run_noise_named_with_input_source(
-        &self,
-        netlist: &Netlist,
-        output_pos: &str,
-        output_neg: Option<&str>,
-        input_source: &str,
-        frequencies: &[Value],
-        temperature: Value,
-    ) -> Result<Vec<NoiseResult>, SimulationError> {
-        self.run_noise_named_with_input_source_and_abort(
-            netlist,
-            output_pos,
-            output_neg,
-            input_source,
-            frequencies,
-            temperature,
-            &NoAbort,
-        )
-    }
-
     /// Execute a Xyce-style table-driven noise sweep. Every `.DATA` row is
     /// applied atomically to a freshly resolved netlist, and rows are solved
     /// in authored order at their literal `FREQ` or `HERTZ` value.
@@ -3349,28 +3307,6 @@ impl Engine {
         .map(|(_, result)| result)
     }
 
-    /// Non-cancellable variant of [`Self::run_noise_table_named_with_input_source_and_abort`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn run_noise_table_named_with_input_source(
-        &self,
-        netlist: &Netlist,
-        output_pos: &str,
-        output_neg: Option<&str>,
-        input_source: &str,
-        table_name: &str,
-        default_temperature: Value,
-    ) -> Result<FrequencyDataResult<NoiseResult>, SimulationError> {
-        self.run_noise_table_named_with_input_source_and_abort(
-            netlist,
-            output_pos,
-            output_neg,
-            input_source,
-            table_name,
-            default_temperature,
-            &NoAbort,
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn run_noise_data_impl(
         &self,
@@ -3405,27 +3341,6 @@ impl Engine {
                 )
             },
             NoiseResult::retained_value_count,
-        )
-    }
-    /// Non-cancellable convenience wrapper for table-driven named-node noise.
-    #[allow(clippy::too_many_arguments)]
-    pub fn run_noise_data_named_with_input_source(
-        &self,
-        netlist: &Netlist,
-        output_pos: &str,
-        output_neg: Option<&str>,
-        input_source: &str,
-        table_name: &str,
-        default_temperature: Value,
-    ) -> Result<(Vec<Netlist>, Vec<NoiseResult>), SimulationError> {
-        self.run_noise_data_named_with_input_source_and_abort(
-            netlist,
-            output_pos,
-            output_neg,
-            input_source,
-            table_name,
-            default_temperature,
-            &NoAbort,
         )
     }
 
@@ -4859,13 +4774,14 @@ mod tests {
         ] {
             let result =
                 Engine::new(crate::engine::SimulationConfig::default().with_spice_dialect(dialect))
-                    .run_noise_named_with_input_source(
+                    .run_noise_named_with_input_source_and_abort(
                         &bridge,
                         "a",
                         Some("b"),
                         "VIN",
                         &[10.0],
                         300.15,
+                        &crate::abort_signal::NoAbort,
                     )
                     .expect("a transfer null refers through the gain floor");
             assert_eq!(result[0].input_gain_squared, 1.0e-20);
@@ -4891,7 +4807,15 @@ mod tests {
         )
         .expect("quiet transfer-null deck parses");
         let result = Engine::default()
-            .run_noise_named_with_input_source(&quiet, "out", None, "VIN", &[1.0e3], 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &quiet,
+                "out",
+                None,
+                "VIN",
+                &[1.0e3],
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect("zero output noise at a transfer null is exactly zero");
         assert_eq!(result[0].output_noise_density, 0.0);
         assert_eq!(result[0].input_referred_density, 0.0);
@@ -4942,13 +4866,29 @@ mod tests {
         let mut single = Engine::default();
         single.config.resource_limits.max_parallel_workers = 1;
         let expected = single
-            .run_noise_named_with_input_source(&netlist, "out", None, "V1", &frequencies, 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "out",
+                None,
+                "V1",
+                &frequencies,
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect("single-worker noise succeeds");
 
         let mut parallel = Engine::default();
         parallel.config.resource_limits.max_parallel_workers = 4;
         let actual = parallel
-            .run_noise_named_with_input_source(&netlist, "out", None, "V1", &frequencies, 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "out",
+                None,
+                "V1",
+                &frequencies,
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect("parallel noise succeeds");
 
         assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
@@ -4973,7 +4913,15 @@ R2 out 0 1k
 ",
         );
         let (rows, results) = xyce_engine()
-            .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+            .run_noise_data_named_with_input_source_and_abort(
+                &netlist,
+                "out",
+                None,
+                "V1",
+                "points",
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect("table-driven noise executes");
 
         assert_eq!(results.len(), 2);
@@ -5439,13 +5387,14 @@ r1 a 0 rmod
             .run_ac(&netlist, &frequencies)
             .expect("AC analysis runs");
         let noise = engine
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &netlist,
                 "OUT",
                 Some("0"),
                 "vin",
                 &frequencies,
                 300.15,
+                &crate::abort_signal::NoAbort,
             )
             .expect("named noise analysis runs");
 
@@ -5543,7 +5492,15 @@ r1 a 0 rmod
 
         let frequencies = [1.0e-2, 1.0e-1, 1.0, 10.0];
         let results = engine
-            .run_noise_named_with_input_source(&netlist, "e", None, "V1", &frequencies, 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "e",
+                None,
+                "V1",
+                &frequencies,
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect("physical Chebyshev noise operator remains solvable without a shunt");
 
         assert_eq!(results.len(), frequencies.len());
@@ -5584,7 +5541,15 @@ r1 a 0 rmod
         )
         .expect("deck parses");
         let error = Engine::default()
-            .run_noise_named_with_input_source(&netlist, "missing", None, "V1", &[1.0e3], 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "missing",
+                None,
+                "V1",
+                &[1.0e3],
+                300.15,
+                &crate::abort_signal::NoAbort,
+            )
             .expect_err("unknown output must fail");
         assert!(error.to_string().contains("missing"));
     }

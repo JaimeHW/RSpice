@@ -663,11 +663,12 @@ mod tests {
                     let circuit = engine.build_circuit(&netlist).unwrap();
                     assert!(circuit.bjts.devices[0].mna_promoted());
                     let result = engine
-                        .run_tran_with_startup_mode(
+                        .run_tran_with_startup_mode_and_abort(
                             &netlist,
                             2e-9,
                             1e-10,
                             TransientStartupMode::Uic,
+                            &NoAbort,
                         )
                         .unwrap();
                     let values = result.try_voltage_waveform_named("th").unwrap();

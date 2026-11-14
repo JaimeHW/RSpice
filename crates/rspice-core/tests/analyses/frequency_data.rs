@@ -1,4 +1,5 @@
 //! Table-driven frequency analyses: physical row identity and bounded execution.
+use rspice_core::NoAbort;
 use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimits, SimulationConfig, SimulationError,
 };
@@ -113,9 +114,19 @@ fn compact_coordinates_and_row_solutions_match_independent_rc_equations() {
     use rspice_core::engine::FrequencyDataTarget;
     let netlist = Netlist::parse("RC table\n.param resistance=1k\n.options temp=27\nV1 in 0 AC 1\nR1 in out {resistance}\nC1 out 0 1u\n.data MixedRows resistance HERTZ C1:CAP TEMP\n1k 100 1u 27\n2k 10 2u 127\n3k 100 3u -73\n.enddata\n.end\n").unwrap();
     let engine = engine(ResourceLimits::default());
-    let ac = engine.run_ac_table(&netlist, "mixedrows").unwrap();
+    let ac = engine
+        .run_ac_table_with_abort(&netlist, "mixedrows", &NoAbort)
+        .unwrap();
     let noise = engine
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "mixedrows", 999.0)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist,
+            "out",
+            None,
+            "V1",
+            "mixedrows",
+            999.0,
+            &NoAbort,
+        )
         .unwrap();
     assert_eq!(ac.table_name, "MixedRows");
     assert_eq!(ac.requested_rows, 3);
@@ -186,7 +197,9 @@ fn compact_coordinates_and_row_solutions_match_independent_rc_equations() {
 fn declared_parameter_target_wins_over_an_identically_named_device() {
     use rspice_core::engine::FrequencyDataTarget;
     let netlist = Netlist::parse("Parameter precedence\n.param R1=1k\nI1 out 0 AC 1\nR1 out 0 {R1}\n.data points FREQ r1\n100 2k\n10 3k\n.enddata\n.end\n").unwrap();
-    let result = Engine::default().run_ac_table(&netlist, "points").unwrap();
+    let result = Engine::default()
+        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
+        .unwrap();
     assert_eq!(
         result.columns[1].target,
         FrequencyDataTarget::Parameter("R1".into())
@@ -200,9 +213,13 @@ fn declared_parameter_target_wins_over_an_identically_named_device() {
 fn numeric_budget_covers_coordinates_and_every_row_in_both_apis() {
     let netlist = Netlist::parse(DECK).unwrap();
     let ordinary = engine(ResourceLimits::default());
-    let ac = ordinary.run_ac_table(&netlist, "points").unwrap();
+    let ac = ordinary
+        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
+        .unwrap();
     let noise = ordinary
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+        )
         .unwrap();
     for (is_noise, required) in [
         (false, ac.retained_value_count()),
@@ -220,17 +237,17 @@ fn numeric_budget_covers_coordinates_and_every_row_in_both_apis() {
             for legacy in [false, true] {
                 let result = match (is_noise, legacy) {
                     (false, false) => bounded
-                        .run_ac_table(&netlist, "points")
+                        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
                         .map(|r| r.points.len()),
                     (false, true) => bounded.run_ac_data(&netlist, "points").map(|r| r.1.len()),
                     (true, false) => bounded
-                        .run_noise_table_named_with_input_source(
-                            &netlist, "out", None, "V1", "points", 300.15,
+                        .run_noise_table_named_with_input_source_and_abort(
+                            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
                         )
                         .map(|r| r.points.len()),
                     (true, true) => bounded
-                        .run_noise_data_named_with_input_source(
-                            &netlist, "out", None, "V1", "points", 300.15,
+                        .run_noise_data_named_with_input_source_and_abort(
+                            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
                         )
                         .map(|r| r.1.len()),
                 };
@@ -256,7 +273,7 @@ fn compatibility_netlists_have_an_aggregate_source_budget() {
         let bounded = engine(limits);
         assert_eq!(
             bounded
-                .run_ac_table(&netlist, "points")
+                .run_ac_table_with_abort(&netlist, "points", &NoAbort)
                 .unwrap()
                 .points
                 .len(),
@@ -264,8 +281,8 @@ fn compatibility_netlists_have_an_aggregate_source_budget() {
         );
         assert_eq!(
             bounded
-                .run_noise_table_named_with_input_source(
-                    &netlist, "out", None, "V1", "points", 300.15
+                .run_noise_table_named_with_input_source_and_abort(
+                    &netlist, "out", None, "V1", "points", 300.15, &NoAbort
                 )
                 .unwrap()
                 .points
@@ -275,8 +292,8 @@ fn compatibility_netlists_have_an_aggregate_source_budget() {
         for result in [
             bounded.run_ac_data(&netlist, "points").map(|r| r.1.len()),
             bounded
-                .run_noise_data_named_with_input_source(
-                    &netlist, "out", None, "V1", "points", 300.15,
+                .run_noise_data_named_with_input_source_and_abort(
+                    &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
                 )
                 .map(|r| r.1.len()),
         ] {
@@ -306,14 +323,16 @@ fn row_counts_and_all_table_values_are_checked_before_solving() {
         }
         let bounded = engine(limits);
         assert_limit(
-            bounded.run_ac_table(&netlist, "points").unwrap_err(),
+            bounded
+                .run_ac_table_with_abort(&netlist, "points", &NoAbort)
+                .unwrap_err(),
             kind,
             1,
         );
         assert_limit(
             bounded
-                .run_noise_table_named_with_input_source(
-                    &netlist, "out", None, "V1", "points", 300.15,
+                .run_noise_table_named_with_input_source_and_abort(
+                    &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
                 )
                 .unwrap_err(),
             kind,
@@ -326,7 +345,7 @@ fn row_counts_and_all_table_values_are_checked_before_solving() {
         modified.data_tables[0].rows[1][1] = invalid;
         assert!(
             engine
-                .run_ac_table(&modified, "points")
+                .run_ac_table_with_abort(&modified, "points", &NoAbort)
                 .unwrap_err()
                 .to_string()
                 .contains("must be finite")
@@ -335,12 +354,18 @@ fn row_counts_and_all_table_values_are_checked_before_solving() {
     let mut zero = netlist.clone();
     zero.data_tables[0].rows[1][0] = 0.0;
     assert_eq!(
-        engine.run_ac_table(&zero, "points").unwrap().points[1].frequency,
+        engine
+            .run_ac_table_with_abort(&zero, "points", &NoAbort)
+            .unwrap()
+            .points[1]
+            .frequency,
         0.0
     );
     assert!(
         engine
-            .run_noise_table_named_with_input_source(&zero, "out", None, "V1", "points", 300.15)
+            .run_noise_table_named_with_input_source_and_abort(
+                &zero, "out", None, "V1", "points", 300.15, &NoAbort
+            )
             .unwrap_err()
             .to_string()
             .contains("strictly positive")
@@ -349,7 +374,7 @@ fn row_counts_and_all_table_values_are_checked_before_solving() {
     malformed.data_tables[0].rows[1].pop();
     assert!(
         engine
-            .run_ac_table(&malformed, "points")
+            .run_ac_table_with_abort(&malformed, "points", &NoAbort)
             .unwrap_err()
             .to_string()
             .contains("row 2")
@@ -361,7 +386,9 @@ fn row_counts_and_all_table_values_are_checked_before_solving() {
     ] {
         let mut modified = netlist.clone();
         modified.data_tables[0].params[1] = column.into();
-        let error = engine.run_ac_table(&modified, "points").unwrap_err();
+        let error = engine
+            .run_ac_table_with_abort(&modified, "points", &NoAbort)
+            .unwrap_err();
         assert!(error.to_string().contains(message), "{error}");
     }
 }
@@ -432,7 +459,9 @@ fn row_replay_honors_the_callers_source_limit_for_ac_and_noise() {
     );
     assert_limit(
         bounded
-            .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+            .run_noise_data_named_with_input_source_and_abort(
+                &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+            )
             .unwrap_err(),
         ResourceKind::NetlistBytes,
         limit,
@@ -441,7 +470,9 @@ fn row_replay_honors_the_callers_source_limit_for_ac_and_noise() {
     assert_eq!(ordinary.run_ac_data(&netlist, "points").unwrap().1.len(), 2);
     assert_eq!(
         ordinary
-            .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+            .run_noise_data_named_with_input_source_and_abort(
+                &netlist, "out", None, "V1", "points", 300.15, &NoAbort
+            )
             .unwrap()
             .1
             .len(),
@@ -463,9 +494,13 @@ fn table_measurement_adapters_share_resolved_complex_parameter_environments() {
     source.push_str(".end\n");
     let netlist = Netlist::parse(&source).unwrap();
     let engine = Engine::default();
-    let ac = engine.run_ac_table(&netlist, "points").unwrap();
+    let ac = engine
+        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
+        .unwrap();
     let noise = engine
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+        )
         .unwrap();
     for measures in [
         evaluate_ac_table_measurements_with_abort(&netlist, &ac, &NoAbort).unwrap(),

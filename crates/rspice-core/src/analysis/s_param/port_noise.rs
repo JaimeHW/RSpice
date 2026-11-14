@@ -339,7 +339,7 @@ mod tests {
                 Complex64::new(conductance, 0.0),
             ],
         ];
-        let square = super::super::s_from_y(&admittance, &impedances)
+        let square = super::super::s_from_y_with_abort(&admittance, &impedances, &NoAbort)
             .expect("a series resistor has a scattering representation");
         let mut matrix = SMatrix::new(1.0e9, 2);
         for (row, entries) in square.iter().enumerate() {

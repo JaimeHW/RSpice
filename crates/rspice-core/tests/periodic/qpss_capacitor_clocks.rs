@@ -158,7 +158,7 @@ fn qpss_capacitor_clocks_and_nested_memory_match_carrier_and_qpac() {
                 };
                 let output = grid.index_of(&request.output_lattice).unwrap();
                 let result = engine()
-                    .run_qpac_from_qpss(&netlist, request, &point)
+                    .run_qpac_from_qpss_with_abort(&netlist, request, &point, &NoAbort)
                     .unwrap();
                 drive.fill(Complex64::ZERO);
                 drive[grid.index_of(&input).unwrap()] = Complex64::new(1.0, 0.0);

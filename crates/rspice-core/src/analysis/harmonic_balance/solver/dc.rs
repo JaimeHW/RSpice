@@ -11,7 +11,8 @@ struct HbDcCheckpoint {
 }
 
 impl HbSolver {
-    /// Solve DC operating point before full HB iteration
+    /// Solve DC operating point before full HB iteration, polling a
+    /// cooperative abort signal.
     ///
     /// This method solves only the DC component (k=0) of the HB problem to establish
     /// the nonlinear device operating points. The DC solution provides a much better
@@ -22,14 +23,6 @@ impl HbSolver {
     /// - Source stepping as fallback
     ///
     /// Returns the DC node voltages if successful.
-    pub fn solve_dc_operating_point(
-        &mut self,
-        state: &mut HbSolverState,
-    ) -> Result<Vec<Value>, HbError> {
-        self.solve_dc_operating_point_with_abort(state, &NoAbort)
-    }
-
-    /// Solve the HB DC seed while polling a cooperative abort signal.
     pub fn solve_dc_operating_point_with_abort(
         &mut self,
         state: &mut HbSolverState,
@@ -1497,7 +1490,7 @@ mod linear_solve_tests {
         let mut state = HbSolverState::new(1, solver.num_harmonics());
 
         let solution = solver
-            .solve_dc_operating_point(&mut state)
+            .solve_dc_operating_point_with_abort(&mut state, &NoAbort)
             .expect("physical high-impedance DC seed solves");
         assert!((solution[0] - 1.0e18).abs() <= 1.0e3);
     }
@@ -1510,7 +1503,7 @@ mod linear_solve_tests {
         let mut state = HbSolverState::new(1, solver.num_harmonics());
 
         assert!(matches!(
-            solver.solve_dc_operating_point(&mut state),
+            solver.solve_dc_operating_point_with_abort(&mut state, &NoAbort),
             Err(HbError::InvalidConfig(_))
         ));
     }
@@ -1534,7 +1527,7 @@ mod linear_solve_tests {
         let mut state = HbSolverState::new(2, solver.num_harmonics());
 
         let voltages = solver
-            .solve_dc_operating_point(&mut state)
+            .solve_dc_operating_point_with_abort(&mut state, &NoAbort)
             .expect("branch-aware nonlinear DC seed converges");
 
         assert!((voltages[0] - 1.0).abs() <= 1.0e-10);
@@ -1584,7 +1577,7 @@ mod linear_solve_tests {
         let mut state = HbSolverState::new(1, solver.num_harmonics());
 
         let error = solver
-            .solve_dc_operating_point(&mut state)
+            .solve_dc_operating_point_with_abort(&mut state, &NoAbort)
             .expect_err("a partial legacy branch registry must fail closed");
         assert!(error.to_string().contains("canonical exact-MNA"), "{error}");
     }

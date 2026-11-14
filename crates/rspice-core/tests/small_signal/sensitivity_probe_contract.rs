@@ -179,7 +179,12 @@ fn sparse_adjoint_accepts_ground_and_reports_the_same_physical_probe() {
     ] {
         assert!(
             engine
-                .run_sensitivity_dc_complete(&netlist, output.clone(), &["R1".into()])
+                .run_sensitivity_dc_complete_with_abort(
+                    &netlist,
+                    output.clone(),
+                    &["R1".into()],
+                    &NoAbort
+                )
                 .is_err()
         );
         assert!(
@@ -302,7 +307,10 @@ fn standalone_adjoint_retains_both_numeric_terminals_and_voltage_units() {
             .unwrap();
     for result in [
         dense.analyze(0, Some(1)).unwrap(),
-        sparse.analyze_precomputed(0, Some(1)).unwrap(),
+        sparse
+            .analyze_precomputed_with_abort(0, Some(1), &NoAbort)
+            .expect("NoAbort cannot cancel")
+            .unwrap(),
     ] {
         assert_eq!(result.output, "V(1,2)");
         assert_eq!(result.output_value, 2.0);

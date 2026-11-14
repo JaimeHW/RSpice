@@ -747,12 +747,6 @@ impl RequestedSignalUnavailableError {
         self.analysis = Some(analysis);
         self
     }
-
-    #[must_use]
-    pub fn with_coordinate(mut self, coordinate: RunCoordinateId) -> Self {
-        self.coordinate = Some(coordinate);
-        self
-    }
 }
 
 impl std::fmt::Display for RequestedSignalUnavailableError {
@@ -816,12 +810,6 @@ impl ResultSchemaMismatchError {
     #[must_use]
     pub fn with_analysis(mut self, analysis: AnalysisInstanceId) -> Self {
         self.analysis = Some(analysis);
-        self
-    }
-
-    #[must_use]
-    pub fn with_coordinate(mut self, coordinate: RunCoordinateId) -> Self {
-        self.coordinate = Some(coordinate);
         self
     }
 }
@@ -919,7 +907,8 @@ impl std::error::Error for ContinuationFailure {}
 #[derive(Debug, Error)]
 pub enum SimulationError {
     /// Internal completion propagation and compatibility for result-only APIs.
-    /// `Engine::run_with_outcome` translates this into successful normal finish.
+    /// A run under its own model-run scope translates this into successful
+    /// normal finish.
     #[error("{0}")]
     ModelFinished(Box<crate::ModelFinish>),
     #[error("Invalid simulation configuration: {0}")]

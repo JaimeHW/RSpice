@@ -11,7 +11,7 @@ fn physical_source_sides_share_the_public_pwl_event_clock_and_refuse_collapsed_p
     )
     .unwrap();
     let events = engine
-        .transient_source_event_times(&deck, 1.3, 0.1, &["V1".into()])
+        .transient_source_event_times_with_abort(&deck, 1.3, 0.1, &["V1".into()], &NoAbort)
         .unwrap();
     let circuit = engine.build_circuit(&deck).unwrap();
     for cycle in [0, 1, 3, 11] {
@@ -44,7 +44,7 @@ fn physical_source_sides_share_the_public_pwl_event_clock_and_refuse_collapsed_p
     )
     .unwrap();
     let error = engine
-        .transient_source_event_times(&collapsed, 2.0, 0.1, &["V1".into()])
+        .transient_source_event_times_with_abort(&collapsed, 2.0, 0.1, &["V1".into()], &NoAbort)
         .unwrap_err();
     assert!(error.to_string().contains("cannot advance"), "{error}");
     // The clock can advance initially and then lose resolution at a power of
@@ -53,7 +53,13 @@ fn physical_source_sides_share_the_public_pwl_event_clock_and_refuse_collapsed_p
     let delay = 1.0_f64.next_down();
     let late = crate::Netlist::parse(&format!("later PWL resolution loss\nV1 in 0 PWL(0 0 {period:.17e} 1) TD={delay:.17e} R=0\nR1 in 0 1k\n.end\n")).unwrap();
     let error = engine
-        .transient_source_event_times(&late, 1.0 + 8.0 * Value::EPSILON, 0.1, &["V1".into()])
+        .transient_source_event_times_with_abort(
+            &late,
+            1.0 + 8.0 * Value::EPSILON,
+            0.1,
+            &["V1".into()],
+            &NoAbort,
+        )
         .unwrap_err();
     assert!(error.to_string().contains("cannot advance"), "{error}");
 }

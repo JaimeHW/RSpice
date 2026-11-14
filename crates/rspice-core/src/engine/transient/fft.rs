@@ -754,6 +754,7 @@ fn modified_bessel_i0(value: Value) -> Value {
 /// Compute the coherent gain of the exact FFT window convention used by the
 /// transient engine. Public result adapters use this to validate that
 /// serialized window metadata describes the coefficients the engine applied.
+#[cfg(test)]
 pub fn transient_fft_window_coherent_gain(
     window: FftWindow,
     mode: XyceFftMode,

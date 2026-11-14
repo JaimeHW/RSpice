@@ -10,7 +10,7 @@ mod refinement;
 use refinement::{DerivativeEstimate, OperatorSample, refine};
 
 use super::{Engine, SimulationError};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::distortion::{checked_second_frequency, validate_frequency};
 use crate::analysis::{
     AcResult, DistortionAnalysisResult, DistortionPointResult, DistortionProduct,
@@ -21,20 +21,6 @@ use crate::{CircuitData, Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
 impl Engine {
-    /// Run harmonic (single-tone) or intermodulation (two-tone) small-signal
-    /// distortion analysis through third Volterra order.
-    ///
-    /// When `f2_over_f1` is present, F2 is fixed at
-    /// `f2_over_f1 * frequencies[0]` while F1 is swept, matching SPICE.
-    pub fn run_distortion(
-        &self,
-        netlist: &Netlist,
-        frequencies: &[Value],
-        f2_over_f1: Option<Value>,
-    ) -> Result<DistortionAnalysisResult, SimulationError> {
-        self.run_distortion_with_abort(netlist, frequencies, f2_over_f1, &NoAbort)
-    }
-
     /// Distortion analysis with cooperative cancellation between every
     /// nonlinear operator evaluation and sparse solve.
     pub fn run_distortion_with_abort(
@@ -852,6 +838,7 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
+    use crate::abort_signal::NoAbort;
 
     #[test]
     fn distortion_refreshes_frequency_dependent_behavioral_conductance() {
@@ -872,7 +859,7 @@ mod tests {
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         );
         let results = engine
-            .run_distortion(&netlist, &[10.0, 100.0], None)
+            .run_distortion_with_abort(&netlist, &[10.0, 100.0], None, &NoAbort)
             .expect("frequency-dependent distortion operators solve");
         for (point, expected) in results.points.iter().zip([10.0, 100.0]) {
             let actual = point.fundamental_f1.voltages[0].norm();
@@ -934,7 +921,7 @@ mod tests {
         )
         .expect("linear deck parses");
         let result = Engine::default()
-            .run_distortion(&netlist, &[1.0e3], None)
+            .run_distortion_with_abort(&netlist, &[1.0e3], None, &NoAbort)
             .expect("linear distortion solve succeeds");
         let point = &result.points[0];
         assert_eq!(point.fundamental_f1.voltages[0], Complex64::new(1.0, 0.0));
@@ -958,7 +945,7 @@ mod tests {
         )
         .expect("diode deck parses");
         let result = Engine::default()
-            .run_distortion(&netlist, &[1.0e3], None)
+            .run_distortion_with_abort(&netlist, &[1.0e3], None, &NoAbort)
             .expect("diode distortion solve succeeds");
         let point = &result.points[0];
         let second = point
@@ -1005,7 +992,7 @@ mod tests {
         )
         .expect("two-tone diode deck parses");
         let result = Engine::default()
-            .run_distortion(&netlist, &[1.0e3, 2.0e3], Some(0.9))
+            .run_distortion_with_abort(&netlist, &[1.0e3, 2.0e3], Some(0.9), &NoAbort)
             .expect("two-tone diode distortion solve succeeds");
         assert!(result.is_two_tone());
         for (point, f1) in result.points.iter().zip([1.0e3, 2.0e3]) {
@@ -1063,7 +1050,7 @@ mod tests {
         )
         .expect("capacitive diode deck parses");
         let result = Engine::default()
-            .run_distortion(&netlist, &[F1], None)
+            .run_distortion_with_abort(&netlist, &[F1], None, &NoAbort)
             .expect("capacitive diode distortion solve succeeds");
         let point = &result.points[0];
         let second = point
@@ -1123,7 +1110,7 @@ mod tests {
         );
         let netlist = Netlist::parse(&deck).expect("feedback diode deck parses");
         let result = Engine::default()
-            .run_distortion(&netlist, &[1.0e3], None)
+            .run_distortion_with_abort(&netlist, &[1.0e3], None, &NoAbort)
             .expect("feedback diode distortion solve succeeds");
         let point = &result.points[0];
         let output_index = point

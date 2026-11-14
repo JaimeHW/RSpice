@@ -167,7 +167,6 @@ fn a_deadline_signal_relabels_a_propagated_stop_as_a_timeout() {
 #[test]
 fn capability_refusals_carry_a_stable_token_analysis_and_source_span() {
     let analysis = planned_analysis_id();
-    let coordinate = coordinate_id();
     let location = NetlistSourceLocation::in_file("decks/mixer.cir", 91);
     let error = SimulationError::from(
         UnsupportedCapabilityError::new(
@@ -175,7 +174,6 @@ fn capability_refusals_carry_a_stable_token_analysis_and_source_span() {
             "device 'Q1' (vbic) has no harmonic-balance stamp",
         )
         .with_analysis(analysis)
-        .with_coordinate(coordinate)
         .at(location.clone()),
     );
 
@@ -186,7 +184,6 @@ fn capability_refusals_carry_a_stable_token_analysis_and_source_span() {
     assert_eq!(descriptor.category.as_str(), "capability");
     assert!(!descriptor.retryable);
     assert_eq!(descriptor.analysis, Some(analysis));
-    assert_eq!(descriptor.coordinate, Some(coordinate));
     assert_eq!(error.source_location(), Some(&location));
 
     let message = error.to_string();
@@ -327,23 +324,17 @@ fn schema_mismatch_without_a_coordinate_preserves_empty_registries() {
 #[test]
 fn result_errors_carry_typed_identities_when_the_producer_knows_them() {
     let analysis = planned_analysis_id();
-    let coordinate = coordinate_id();
 
     let unavailable = SimulationError::from(
-        RequestedSignalUnavailableError::new("@Mdriver[Id]", "AC", None)
-            .with_analysis(analysis)
-            .with_coordinate(coordinate),
+        RequestedSignalUnavailableError::new("@Mdriver[Id]", "AC", None).with_analysis(analysis),
     );
     assert_eq!(unavailable.analysis_instance(), Some(analysis));
-    assert_eq!(unavailable.run_coordinate(), Some(coordinate));
 
     let schema = SimulationError::from(
         ResultSchemaMismatchError::new("AC", None, "node voltages", Vec::new(), Vec::new(), 0, 0)
-            .with_analysis(analysis)
-            .with_coordinate(coordinate),
+            .with_analysis(analysis),
     );
     assert_eq!(schema.descriptor().analysis, Some(analysis));
-    assert_eq!(schema.descriptor().coordinate, Some(coordinate));
 }
 
 /// The code and category every variant must publish.

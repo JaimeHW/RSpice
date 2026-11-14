@@ -8,6 +8,7 @@ use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
 use super::family_src;
+use rspice_core::NoAbort;
 
 /// The BSIM4 oracle cards (n45/p90, LEVEL=54, CAPMOD=2), read from the
 /// device model that owns them in whichever crate of the family holds it.
@@ -267,7 +268,7 @@ fn bsim4_periodic_ac_nqs_pac_and_quasiperiodic_responses_match_ac() {
             )
             .unwrap();
         let qpac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![f],
@@ -281,11 +282,12 @@ fn bsim4_periodic_ac_nqs_pac_and_quasiperiodic_responses_match_ac() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(qpac.output_transfer[0], expected, 2e-6);
         let qpxf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![f],
@@ -302,6 +304,7 @@ fn bsim4_periodic_ac_nqs_pac_and_quasiperiodic_responses_match_ac() {
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(qpxf.transfers[0].values[0], expected, 2e-6);
@@ -348,7 +351,7 @@ fn bsim4_periodic_driven_ac_nqs_sidebands_agree_between_hb_and_qpss() {
     let point = engine.run_qpss(&netlist, config).unwrap();
     for sideband in [-1, 0, 1] {
         let response = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![offset],
@@ -362,6 +365,7 @@ fn bsim4_periodic_driven_ac_nqs_sidebands_agree_between_hb_and_qpss() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         let expected = pac.result.conversion_matrix.get(0, sideband, 0).unwrap();
@@ -518,7 +522,7 @@ fn bsim4_driven_noise_agreement(tnoi: i32) {
     config.solver.relative_tolerance = 1e-9;
     let point = engine.run_qpss(&netlist, config).unwrap();
     let quasi = engine
-        .run_qpnoise_from_qpss(
+        .run_qpnoise_from_qpss_with_abort(
             &netlist,
             QpnoiseRequest {
                 frequencies_hz: offsets.to_vec(),
@@ -542,6 +546,7 @@ fn bsim4_driven_noise_agreement(tnoi: i32) {
                 linear: Default::default(),
             },
             &point,
+            &NoAbort,
         )
         .unwrap();
     assert!(

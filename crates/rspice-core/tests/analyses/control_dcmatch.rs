@@ -96,7 +96,9 @@ fn dcmatch_explicit_and_run_preserve_direct_results_and_physical_units() {
                 let AnalysisCommand::DcMatch(card) = &netlist.analyses[0] else {
                     panic!("card")
                 };
-                let expected = Engine::default().run_dc_match(&netlist, card).unwrap();
+                let expected = Engine::default()
+                    .run_dc_match_with_abort(&netlist, card, &NoAbort)
+                    .unwrap();
                 close(expected.nominal_value, gain);
                 close(expected.sigma_total, gain.abs() * 0.0005_f64.sqrt());
                 let mut circuit = ControlCircuit::new(netlist).unwrap();

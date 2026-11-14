@@ -52,10 +52,11 @@ fn unrepresentable_spacing_is_reported_by_both_step_planners_and_dc() {
         .collect::<Vec<_>>();
     let engine = Engine::default();
     let error = engine
-        .plan_step_commands(
+        .plan_step_commands_with_abort(
             &netlist,
             &steps,
             StepPlanLimits::from_resource_limits(ResourceLimits::default()),
+            &NoAbort,
         )
         .expect_err("STEP must reject duplicate generated points");
     assert!(

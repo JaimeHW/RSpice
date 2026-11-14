@@ -48,7 +48,9 @@ fn voltage(result: &TransientResult, name: &str, time: f64) -> f64 {
         .position(|n| n.eq_ignore_ascii_case(name))
         .unwrap();
     let sample = result.time.iter().position(|t| *t >= time).unwrap();
-    result.voltage_waveform(node + 1)[sample]
+    result
+        .try_voltage_waveform(node + 1)
+        .expect("node index in range")[sample]
 }
 
 #[test]
@@ -246,7 +248,9 @@ fn event_assigned_values_refresh_continuous_real_and_logic_drivers() {
             .position(|n| n.eq_ignore_ascii_case(name))
             .unwrap();
         let sample = result.time.iter().rposition(|t| *t <= time).unwrap();
-        result.voltage_waveform(node + 1)[sample]
+        result
+            .try_voltage_waveform(node + 1)
+            .expect("node index in range")[sample]
     };
     let source = Source::new(
         r#"
@@ -673,7 +677,9 @@ endmodule
                     .iter()
                     .rposition(|value| *value <= time)
                     .unwrap();
-                let actual = result.voltage_waveform(index + 1)[point];
+                let actual = result
+                    .try_voltage_waveform(index + 1)
+                    .expect("node index in range")[point];
                 assert!(
                     (actual - expected).abs() < 1e-7,
                     "{module} {node}@{time}: {actual} != {expected}"
@@ -889,7 +895,9 @@ endmodule
                 .iter()
                 .rposition(|value| *value <= time)
                 .unwrap();
-            let actual = result.voltage_waveform(index + 1)[point];
+            let actual = result
+                .try_voltage_waveform(index + 1)
+                .expect("node index in range")[point];
             assert!(
                 (actual - expected).abs() < 1e-4,
                 "{node}@{time}: {actual} != {expected}"
@@ -1150,7 +1158,9 @@ endmodule
                     .iter()
                     .rposition(|value| *value <= time)
                     .unwrap();
-                let actual = result.voltage_waveform(node + 1)[point];
+                let actual = result
+                    .try_voltage_waveform(node + 1)
+                    .expect("node index in range")[point];
                 assert!(
                     (actual - expected).abs() < 1e-4,
                     "out@{time}: {actual} != {expected}"
@@ -1483,7 +1493,9 @@ endmodule
             .iter()
             .position(|n| n.eq_ignore_ascii_case(name))
             .unwrap();
-        let wave = result.voltage_waveform(node + 1);
+        let wave = result
+            .try_voltage_waveform(node + 1)
+            .expect("node index in range");
         let times: Vec<_> = result
             .time
             .iter()
@@ -1523,7 +1535,9 @@ endmodule
                 .position(|n| n.eq_ignore_ascii_case(name))
                 .unwrap();
             let sample = result.time.iter().rposition(|t| *t <= time).unwrap();
-            let actual = result.voltage_waveform(node + 1)[sample];
+            let actual = result
+                .try_voltage_waveform(node + 1)
+                .expect("node index in range")[sample];
             assert!(
                 (actual - expected).abs() < 1e-5,
                 "{name}@{time}: {actual} != {expected}"

@@ -1065,8 +1065,7 @@ pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
 pub use fft::{
-    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain,
-    transient_fft_window_coherent_gain_with_alpha,
+    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain_with_alpha,
 };
 
 mod mosfet;
@@ -3187,21 +3186,6 @@ impl Engine {
         self.run_tran_with_abort(netlist, tstop, max_step, &NoAbort)
     }
 
-    /// Run transient analysis with an explicit startup contract.
-    ///
-    /// Frontends executing one selected `.TRAN` card should use this method so
-    /// another card in the same deck cannot change whether the operating point
-    /// is skipped.
-    pub fn run_tran_with_startup_mode(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        startup_mode: TransientStartupMode,
-    ) -> Result<TransientResult, SimulationError> {
-        self.run_tran_with_startup_mode_and_abort(netlist, tstop, max_step, startup_mode, &NoAbort)
-    }
-
     /// Return the exact discontinuity/event times authored by selected
     /// independent transient sources over `[0, tstop]`.
     ///
@@ -3214,25 +3198,8 @@ impl Engine {
     /// The returned schedule intentionally excludes internally generated
     /// switch, transmission-line, behavioral-expression, and XSPICE events;
     /// it is the source-event contract needed by analyses whose sampling is
-    /// explicitly aligned to authored modulation sources.
-    pub fn transient_source_event_times(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        source_names: &[String],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.transient_source_event_times_with_abort(
-            netlist,
-            tstop,
-            max_step,
-            source_names,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable, resource-bounded form of
-    /// [`Self::transient_source_event_times`].
+    /// explicitly aligned to authored modulation sources. Cancellable and
+    /// resource-bounded.
     pub fn transient_source_event_times_with_abort(
         &self,
         netlist: &Netlist,
@@ -3261,7 +3228,7 @@ impl Engine {
 
     /// Cancellable form of [`Self::transient_source_names`]. Names are the
     /// canonical, hierarchy-expanded circuit identities accepted by
-    /// [`Self::validate_transient_source_names`].
+    /// [`Self::validate_transient_source_names_with_abort`].
     pub fn transient_source_names_with_abort(
         &self,
         netlist: &Netlist,
@@ -3315,15 +3282,6 @@ impl Engine {
 
     /// Validate that every requested case-insensitive source name resolves to
     /// an elaborated independent source with an authored transient waveform.
-    pub fn validate_transient_source_names(
-        &self,
-        netlist: &Netlist,
-        source_names: &[String],
-    ) -> Result<(), SimulationError> {
-        self.validate_transient_source_names_with_abort(netlist, source_names, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::validate_transient_source_names`].
     pub fn validate_transient_source_names_with_abort(
         &self,
         netlist: &Netlist,
@@ -3549,8 +3507,8 @@ impl Engine {
     ///
     /// Returns simulation results up to the point of abort, or an error if aborted.
     /// An accepted model `$finish` completes at its retained transient point.
-    /// Wrap the call in [`Engine::run_with_outcome`] to receive that completion
-    /// reason alongside the result.
+    /// Run it under its own model-run scope to receive that completion reason
+    /// alongside the result.
     ///
     /// # Example
     ///
@@ -19229,7 +19187,13 @@ D1 D 0 DMOD
                         assert_eq!(circuit.inductors.ic[index], Some(expected));
                     }
                     let result = engine
-                        .run_tran_with_startup_mode(&netlist, 1e-6, 1e-6, TransientStartupMode::Uic)
+                        .run_tran_with_startup_mode_and_abort(
+                            &netlist,
+                            1e-6,
+                            1e-6,
+                            TransientStartupMode::Uic,
+                            &NoAbort,
+                        )
                         .unwrap();
                     for (index, q) in q.iter().enumerate() {
                         let expected = constant.unwrap_or(q * multiplier);
@@ -19309,11 +19273,12 @@ D1 D 0 DMOD
         assert!(circuit.capacitors.ic_branch_indices[0].is_some());
 
         let xyce_result = xyce
-            .run_tran_with_startup_mode(
+            .run_tran_with_startup_mode_and_abort(
                 &non_ground,
                 1.0e-10,
                 1.0e-10,
                 TransientStartupMode::OperatingPoint,
+                &NoAbort,
             )
             .expect("Xyce constrained startup solves");
         let out = xyce_result
@@ -19341,11 +19306,12 @@ D1 D 0 DMOD
             assert!(circuit.capacitors.ic_branch_indices[0].is_none());
 
             let ordinary = engine
-                .run_tran_with_startup_mode(
+                .run_tran_with_startup_mode_and_abort(
                     &grounded,
                     1.0e-10,
                     1.0e-10,
                     TransientStartupMode::OperatingPoint,
+                    &NoAbort,
                 )
                 .unwrap_or_else(|error| {
                     panic!("{dialect:?} operating-point startup must solve: {error}")
@@ -19359,7 +19325,13 @@ D1 D 0 DMOD
                 "without UIC, {dialect:?} IC= must not become a DC voltage constraint"
             );
             let uic = engine
-                .run_tran_with_startup_mode(&grounded, 1.0e-10, 1.0e-10, TransientStartupMode::Uic)
+                .run_tran_with_startup_mode_and_abort(
+                    &grounded,
+                    1.0e-10,
+                    1.0e-10,
+                    TransientStartupMode::Uic,
+                    &NoAbort,
+                )
                 .unwrap_or_else(|error| panic!("{dialect:?} UIC startup must solve: {error}"));
             assert_eq!(
                 uic.try_voltage_waveform_named("out")

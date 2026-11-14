@@ -1,4 +1,5 @@
 use super::*;
+use rspice_core::NoAbort;
 use rspice_core::engine::TransientStartupMode;
 
 fn xyce_engine(method: IntegrationMethod, max_step: f64) -> Engine {
@@ -30,7 +31,7 @@ fn gp_capacitor_ic_preserves_rc_decay_and_outgoing_current() {
             TransientStartupMode::Uic,
         ] {
             let result = xyce_engine(method, 1e-12)
-                .run_tran_with_startup_mode(&deck, 3e-9, 1e-12, startup)
+                .run_tran_with_startup_mode_and_abort(&deck, 3e-9, 1e-12, startup, &NoAbort)
                 .unwrap();
             let voltage = result.try_voltage_waveform_named("out").unwrap();
             let current = result.try_branch_current_waveform_named("c1").unwrap();
@@ -194,7 +195,7 @@ fn gp_capacitor_ic_shares_nonlinear_junction_charge_without_double_counting() {
             // the OP constraint. UIC releases the capacitor into its DAE row.
             let startup = TransientStartupMode::Uic;
             let result = xyce_engine(method, 5e-12)
-                .run_tran_with_startup_mode(&deck, 2.5e-9, 5e-12, startup)
+                .run_tran_with_startup_mode_and_abort(&deck, 2.5e-9, 5e-12, startup, &NoAbort)
                 .unwrap_or_else(|error| panic!("{kind}/{method:?}/{startup:?}: {error}"));
             let capacitor = actions(&result, "c1");
             assert!(capacitor.complete && capacitor.derivatives.is_empty());
@@ -384,7 +385,7 @@ fn gp_prescribed_capacitor_rc_decay_obeys_product_charge() {
             TransientStartupMode::Uic,
         ] {
             let result = xyce_engine(method, 1e-12)
-                .run_tran_with_startup_mode(&deck, 2e-9, 1e-12, startup)
+                .run_tran_with_startup_mode_and_abort(&deck, 2e-9, 1e-12, startup, &NoAbort)
                 .unwrap();
             let voltage = result.try_voltage_waveform_named("out").unwrap();
             let current = result.try_branch_current_waveform_named("c1").unwrap();

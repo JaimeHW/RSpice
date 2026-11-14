@@ -1,4 +1,5 @@
 //! A frequency table has one physical temperature for circuit and noise laws.
+use rspice_core::NoAbort;
 use rspice_core::{Engine, Netlist};
 
 fn deck(columns: &str, rows: &str, options: &str) -> Netlist {
@@ -16,9 +17,13 @@ fn close(actual: f64, expected: f64) {
 }
 
 fn check(engine: &Engine, netlist: &Netlist, temperatures: &[f64], fallback: f64) {
-    let ac = engine.run_ac_table(netlist, "points").unwrap();
+    let ac = engine
+        .run_ac_table_with_abort(netlist, "points", &NoAbort)
+        .unwrap();
     let noise = engine
-        .run_noise_table_named_with_input_source(netlist, "out", None, "V1", "points", fallback)
+        .run_noise_table_named_with_input_source_and_abort(
+            netlist, "out", None, "V1", "points", fallback, &NoAbort,
+        )
         .unwrap();
     for ((ac, noise), &temperature) in ac.points.iter().zip(&noise.points).zip(temperatures) {
         let resistance = 1000.0 * (1.0 + 0.01 * (temperature - 27.0));
@@ -96,10 +101,14 @@ fn noise_fallback_heats_the_circuit_as_well_as_the_noise_sources() {
     let netlist = deck("FREQ", "100\n10", "");
     let engine = Engine::default();
     let result = engine
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 400.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 400.15, &NoAbort,
+        )
         .unwrap();
     let (_, legacy) = engine
-        .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "points", 400.15)
+        .run_noise_data_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 400.15, &NoAbort,
+        )
         .unwrap();
     for (point, compatibility) in result.points.iter().zip(legacy) {
         let wrc = std::f64::consts::TAU * point.frequency * 2000.0 * 1e-6;
@@ -114,7 +123,9 @@ fn noise_fallback_heats_the_circuit_as_well_as_the_noise_sources() {
     }
     assert!(
         engine
-            .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", -1.0)
+            .run_noise_table_named_with_input_source_and_abort(
+                &netlist, "out", None, "V1", "points", -1.0, &NoAbort
+            )
             .is_err()
     );
 }
@@ -153,7 +164,9 @@ fn physical_temperature_survives_executed_control_options_and_legacy_replay() {
     let resolved = engine.resolved_for_netlist(circuit.netlist());
     check(&resolved, circuit.netlist(), &[27.0, 127.0], 999.0);
     let (rows, legacy) = resolved.run_ac_data(circuit.netlist(), "points").unwrap();
-    let compact = resolved.run_ac_table(circuit.netlist(), "points").unwrap();
+    let compact = resolved
+        .run_ac_table_with_abort(circuit.netlist(), "points", &NoAbort)
+        .unwrap();
     for (index, row) in rows.iter().enumerate() {
         assert_eq!(row.options.temp, Some([27.0, 127.0][index]));
         assert_eq!(row.options.temp, row.params.get("TEMP"));

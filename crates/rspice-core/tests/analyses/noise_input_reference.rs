@@ -1,4 +1,5 @@
 //! Independent unit-source noise referral; ordinary AC observations remain intact.
+use rspice_core::NoAbort;
 use rspice_core::analysis::noise::{NoiseInputQuantity, NoisePhysicalConstants, NoiseResult};
 use rspice_core::{Engine, Netlist, SimulationConfig, SpiceDialect};
 
@@ -21,13 +22,14 @@ fn noise(engine: &Engine, deck: &str, source: &str) -> Vec<NoiseResult> {
     let frequencies = [10.0, 1e3, 1e5];
     let ac = engine.run_ac(&netlist, &frequencies).unwrap();
     let result = engine
-        .run_noise_named_with_input_source(
+        .run_noise_named_with_input_source_and_abort(
             &netlist,
             "out",
             Some("ref"),
             source,
             &frequencies,
             300.15,
+            &NoAbort,
         )
         .unwrap();
     for (point, ac) in result.iter().zip(ac) {

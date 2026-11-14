@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::HbConfig;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::netlist::{IncludeProcessor, NetlistParseOptions, ParseError};
@@ -828,7 +829,7 @@ fn dcmatch_bounds_all_candidate_contributors_before_report_truncation() {
         for count in [0, 1, 10] {
             card.contributor_limit = count;
             assert!(
-                matches!(bounded.run_dc_match(&netlist, &card), Err(SimulationError::ResourceLimit(error))
+                matches!(bounded.run_dc_match_with_abort(&netlist, &card, &NoAbort), Err(SimulationError::ResourceLimit(error))
                 if error.resource == ResourceKind::ResultValues && error.requested == required
                 && error.limit == config.resource_limits.max_result_values)
             );
@@ -842,7 +843,9 @@ fn dcmatch_bounds_all_candidate_contributors_before_report_truncation() {
         // The process circuit needs room for its OP too. Mismatch uses its
         // exact candidate boundary, then checks the actual returned storage.
         config.resource_limits.max_result_values = required.max(128);
-        let result = Engine::new(config).run_dc_match(&netlist, &card).unwrap();
+        let result = Engine::new(config)
+            .run_dc_match_with_abort(&netlist, &card, &NoAbort)
+            .unwrap();
         assert_eq!(result.contributors.len(), expected_rows);
         assert_eq!(result.retained_value_count(), required);
         assert!(result.sigma_total.is_finite() && result.sigma_total > 0.0);
@@ -925,7 +928,7 @@ fn dcmatch_preserves_statistical_moment_resource_errors() {
             };
             let engine = Engine::new(config);
             assert!(
-                matches!(engine.run_dc_match(&netlist, &card), Err(SimulationError::ResourceLimit(error)) if error == expected),
+                matches!(engine.run_dc_match_with_abort(&netlist, &card, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error == expected),
                 "{scope:?}/{case}"
             );
             assert_eq!(engine.convergence_quality().total_iterations, 0);
@@ -937,7 +940,9 @@ fn dcmatch_preserves_statistical_moment_resource_errors() {
             if case == "matrix" {
                 admitted.resource_limits.max_result_values = 288;
             }
-            let result = Engine::new(admitted).run_dc_match(&netlist, &card).unwrap();
+            let result = Engine::new(admitted)
+                .run_dc_match_with_abort(&netlist, &card, &NoAbort)
+                .unwrap();
             assert!((result.nominal_value - 1.0).abs() < 1e-12);
             let sigma = match case {
                 "matrix" => 0.2,

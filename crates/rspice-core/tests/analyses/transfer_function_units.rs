@@ -1,4 +1,5 @@
 //! Transfer units follow the actual elaborated input and output quantities.
+use rspice_core::NoAbort;
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, SignalUnit,
 };
@@ -43,7 +44,7 @@ fn all_four_transfer_quantities_keep_physical_gain_units() {
     ] {
         let netlist = Netlist::parse(&format!("TF units\n{body}.end\n")).unwrap();
         let result = Engine::default()
-            .run_transfer_function(&netlist, output, None, current, input)
+            .run_transfer_function_with_abort(&netlist, output, None, current, input, &NoAbort)
             .unwrap();
         assert!((result.gain - gain).abs() < gain.abs() * 1e-10 + 1e-15);
         let document = AnalysisResultDocument::from_transfer_function(
@@ -74,7 +75,7 @@ fn hierarchical_current_input_keeps_transimpedance_and_probe_identity() {
     )
     .unwrap();
     let result = Engine::default()
-        .run_transfer_function(&netlist, "out", Some("0"), false, "x1.i1")
+        .run_transfer_function_with_abort(&netlist, "out", Some("0"), false, "x1.i1", &NoAbort)
         .unwrap();
     assert!((result.gain - 3000.0).abs() < 1e-6);
     let document = AnalysisResultDocument::from_transfer_function(

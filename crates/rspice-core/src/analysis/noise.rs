@@ -1803,21 +1803,14 @@ pub(crate) fn integrate_noise_density(
 /// A linear-PSD integral normalized to a finite reference density in dB.
 /// Keeping that reference separate also permits dB results whose linear
 /// powers cannot be represented, without another accumulator or allocation.
+#[cfg(test)]
 pub(crate) struct DecibelNoiseIntegral {
     reference_db: Value,
     power: ScaledPositiveSum,
 }
 
+#[cfg(test)]
 impl DecibelNoiseIntegral {
-    pub(crate) fn decibels(self) -> Value {
-        let Some((significand, exponent)) = self.power.parts() else {
-            return Value::NEG_INFINITY;
-        };
-        self.reference_db
-            + 10.0 * (significand.log10() + Value::from(exponent) * std::f64::consts::LOG10_2)
-    }
-
-    #[cfg(test)]
     pub(crate) fn phase_rms(self) -> Value {
         let Some((significand, exponent)) = self.power.parts() else {
             return 0.0;
@@ -1845,6 +1838,7 @@ impl DecibelNoiseIntegral {
 /// clipped to a band. Frequencies must be finite, nonnegative and increasing;
 /// densities must be finite dB or negative infinity (exact zero). `None`
 /// denotes no positive-width overlap. The whole supplied series is validated.
+#[cfg(test)]
 pub(crate) fn integrate_decibel_noise(
     points: impl Iterator<Item = (Value, Value)> + Clone,
     band: Option<(Value, Value)>,

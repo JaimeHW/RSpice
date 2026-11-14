@@ -1,5 +1,6 @@
 //! Temperature transport for authored Xyce CORE winding models.
 
+use rspice_core::NoAbort;
 use rspice_core::config::SpiceDialect;
 use rspice_core::{Complex64, Engine, Netlist, SimulationConfig};
 
@@ -97,7 +98,15 @@ fn temperature_scaled_core_matches_analytic_ac_and_noise_at_zero_bias() {
         (expected - Complex64::new(0.115_207_007_980_681_66, 0.319_271_598_005_242)).norm() < 1e-15
     );
     let noise = engine()
-        .run_noise_named_with_input_source(&netlist, "p", None, "V1", &[1e5], 350.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "p",
+            None,
+            "V1",
+            &[1e5],
+            350.15,
+            &NoAbort,
+        )
         .unwrap();
     assert!((noise[0].input_gain_squared / expected.norm_sqr() - 1.0).abs() < 1e-10);
     let psd = 4.0 * 1.3806226e-23 * 350.15 * expected.norm_sqr();

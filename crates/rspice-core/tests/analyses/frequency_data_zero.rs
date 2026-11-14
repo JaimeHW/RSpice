@@ -1,4 +1,5 @@
 //! AC table axes retain zero, repeated rows and row-local parameters; noise rejects DC.
+use rspice_core::NoAbort;
 use rspice_core::{Engine, Netlist};
 
 const DECK: &str = "AC table\nV1 in 0 AC 1\n.param load=1k\nR1 in out 1k\nR2 out 0 {load}\n.data pts FREQ load\n1000 1000\n0 2000\n1000 500\n.enddata\n.end\n";
@@ -28,7 +29,9 @@ fn ac_data_keeps_zero_and_repeated_frequency_rows_with_their_parameters() {
 fn noise_rejects_zero_in_any_row_before_running_the_table() {
     let netlist = Netlist::parse(DECK).unwrap();
     let error = Engine::default()
-        .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "pts", 300.15)
+        .run_noise_data_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "pts", 300.15, &NoAbort,
+        )
         .unwrap_err();
     assert!(error.to_string().contains("strictly positive"), "{error}");
 }

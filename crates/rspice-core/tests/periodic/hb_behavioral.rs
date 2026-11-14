@@ -1,5 +1,6 @@
 //! Behavioral expressions across the shared periodic MNA solver.
 use num_complex::Complex64;
+use rspice_core::NoAbort;
 use rspice_core::analysis::HbConfig;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::constants::{K_BOLTZMANN, TEMP_REFERENCE};
@@ -405,7 +406,7 @@ fn behavioral_quasiperiodic_clocks_feed_retained_conversion_and_noise() {
             close(point.spectra()[row][grid.index_of(&tuple).unwrap()], value);
         }
         let pac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![10.0],
@@ -422,11 +423,12 @@ fn behavioral_quasiperiodic_clocks_feed_retained_conversion_and_noise() {
                     },
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(pac.output_transfer[0], Complex64::new(0.0, -250.0));
         let xf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![10.0],
@@ -443,11 +445,12 @@ fn behavioral_quasiperiodic_clocks_feed_retained_conversion_and_noise() {
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(xf.transfers[0].values[0], Complex64::new(0.0, -250.0));
         let noise = engine
-            .run_qpnoise_from_qpss(
+            .run_qpnoise_from_qpss_with_abort(
                 &netlist,
                 QpnoiseRequest {
                     frequencies_hz: vec![10.0],
@@ -471,6 +474,7 @@ fn behavioral_quasiperiodic_clocks_feed_retained_conversion_and_noise() {
                     linear: linear.clone(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * 1e3 * 1.25;
@@ -692,7 +696,7 @@ fn behavioral_quasiperiodic_table_clock_retains_control_phase_derivatives() {
             expected,
         );
         let pac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![10.0],
@@ -706,6 +710,7 @@ fn behavioral_quasiperiodic_table_clock_retains_control_phase_derivatives() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(pac.output_transfer[0], expected_derivative);

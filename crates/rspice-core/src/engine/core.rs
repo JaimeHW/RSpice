@@ -391,7 +391,7 @@ impl Engine {
     /// Each analysis entry point clears this first, so the value describes one
     /// run. Read it before starting the next.
     ///
-    /// This is orthogonal to [`Self::health_check`], which exercises a fixed
+    /// This is orthogonal to [`Self::health_check_with_abort`], which exercises a fixed
     /// three-line probe deck to answer whether the engine works at all.
     pub fn convergence_quality(&self) -> ConvergenceQuality {
         self.convergence

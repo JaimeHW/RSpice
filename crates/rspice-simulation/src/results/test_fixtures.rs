@@ -24,7 +24,7 @@ pub(crate) fn qpac_test_fixture() -> SimulationResult {
         solver: Default::default(),
     };
     let result = engine
-        .run_qpac_from_qpss(&netlist, request, &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request, &point, &rspice_core::NoAbort)
         .unwrap();
     SimulationResult::from_qpac_response(Arc::new(result)).unwrap()
 }
@@ -58,7 +58,7 @@ pub(crate) fn qpxf_test_fixture() -> SimulationResult {
     };
     SimulationResult::from_qpxf_response(Arc::new(
         engine
-            .run_qpxf_from_qpss(&netlist, request, &point)
+            .run_qpxf_from_qpss_with_abort(&netlist, request, &point, &rspice_core::NoAbort)
             .unwrap(),
     ))
     .unwrap()
@@ -100,7 +100,7 @@ pub(crate) fn qpnoise_test_fixture() -> SimulationResult {
     .unwrap();
     SimulationResult::from_qpnoise_response(Arc::new(
         engine
-            .run_qpnoise_from_qpss(&netlist, request, &point)
+            .run_qpnoise_from_qpss_with_abort(&netlist, request, &point, &rspice_core::NoAbort)
             .unwrap(),
     ))
     .unwrap()

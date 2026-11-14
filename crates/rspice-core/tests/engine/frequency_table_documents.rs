@@ -21,9 +21,13 @@ fn results() -> (
     let netlist = Netlist::parse(DECK).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     (
-        engine.run_ac_table(&netlist, "Mixed").unwrap(),
         engine
-            .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "Mixed", 300.15)
+            .run_ac_table_with_abort(&netlist, "Mixed", &NoAbort)
+            .unwrap(),
+        engine
+            .run_noise_table_named_with_input_source_and_abort(
+                &netlist, "out", None, "V1", "Mixed", 300.15, &NoAbort,
+            )
             .unwrap(),
     )
 }
@@ -47,14 +51,24 @@ fn close(actual: f64, expected: f64) {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn physical_coordinates_complex_signals_and_noise_round_trip_with_windows() {
     let (ac, noise) = results();
-    let ac_doc = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
-        .unwrap()
-        .build()
-        .unwrap();
-    let noise_doc = AnalysisResultDocument::from_noise_table(identity(AnalysisKind::Noise), &noise)
-        .unwrap()
-        .build()
-        .unwrap();
+    let ac_doc = AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+        identity(AnalysisKind::Ac),
+        &ac,
+        &ResourceLimits::default(),
+        &NoAbort,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let noise_doc = AnalysisResultDocument::from_noise_table_with_limits_and_abort(
+        identity(AnalysisKind::Noise),
+        &noise,
+        &ResourceLimits::default(),
+        &NoAbort,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     for document in [&ac_doc, &noise_doc] {
         assert_eq!(
             document.schema_version(),
@@ -168,10 +182,15 @@ fn physical_coordinates_complex_signals_and_noise_round_trip_with_windows() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn malformed_table_metadata_and_axis_links_are_rejected() {
     let (ac, _) = results();
-    let document = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
-        .unwrap()
-        .build()
-        .unwrap();
+    let document = AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+        identity(AnalysisKind::Ac),
+        &ac,
+        &ResourceLimits::default(),
+        &NoAbort,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     let original = serde_json::to_value(&document).unwrap();
     for (pointer, value) in [
         ("/frequencyTable/requestedRows", serde_json::json!(4)),
@@ -236,7 +255,15 @@ fn model_finish_prefixes_keep_requested_rows_and_strict_finish_metadata() {
     for column in &mut ac.columns {
         column.values.truncate(2);
     }
-    assert!(AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac).is_err());
+    assert!(
+        AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+            identity(AnalysisKind::Ac),
+            &ac,
+            &ResourceLimits::default(),
+            &NoAbort
+        )
+        .is_err()
+    );
     for point in [
         ModelFinishPoint::Initialization,
         ModelFinishPoint::OperatingPoint,
@@ -252,10 +279,15 @@ fn model_finish_prefixes_keep_requested_rows_and_strict_finish_metadata() {
             source: None,
             message: None,
         });
-        let document = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
-            .unwrap()
-            .build()
-            .unwrap();
+        let document = AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+            identity(AnalysisKind::Ac),
+            &ac,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         assert_eq!(metadata(&document).finish, ac.finish);
         assert_eq!(document.point_count(), 2);
         assert_eq!(metadata(&document).requested_rows, 3);
@@ -274,7 +306,15 @@ fn model_finish_prefixes_keep_requested_rows_and_strict_finish_metadata() {
         }
     }
     ac.finish.as_mut().unwrap().point = ModelFinishPoint::Transient { time: 1.0 };
-    assert!(AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac).is_err());
+    assert!(
+        AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+            identity(AnalysisKind::Ac),
+            &ac,
+            &ResourceLimits::default(),
+            &NoAbort
+        )
+        .is_err()
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -295,7 +335,13 @@ fn malformed_source_coordinates_and_signal_shapes_cannot_be_projected() {
             _ => changed.columns.clear(),
         }
         assert!(
-            AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &changed).is_err(),
+            AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+                identity(AnalysisKind::Ac),
+                &changed,
+                &ResourceLimits::default(),
+                &NoAbort
+            )
+            .is_err(),
             "mutation {mutation}"
         );
     }
@@ -400,10 +446,15 @@ fn zero_ac_frequency_is_retained_and_zero_noise_frequency_is_rejected() {
     let (mut ac, mut noise) = results();
     ac.points[0].frequency = 0.0;
     ac.columns[1].values[0] = 0.0;
-    let document = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
-        .unwrap()
-        .build()
-        .unwrap();
+    let document = AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+        identity(AnalysisKind::Ac),
+        &ac,
+        &ResourceLimits::default(),
+        &NoAbort,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     assert_eq!(
         AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap(),
         document
@@ -411,7 +462,13 @@ fn zero_ac_frequency_is_retained_and_zero_noise_frequency_is_rejected() {
     noise.points[0].frequency = 0.0;
     noise.columns[1].values[0] = 0.0;
     assert!(
-        AnalysisResultDocument::from_noise_table(identity(AnalysisKind::Noise), &noise).is_err()
+        AnalysisResultDocument::from_noise_table_with_limits_and_abort(
+            identity(AnalysisKind::Noise),
+            &noise,
+            &ResourceLimits::default(),
+            &NoAbort
+        )
+        .is_err()
     );
 }
 
@@ -420,12 +477,19 @@ fn zero_ac_frequency_is_retained_and_zero_noise_frequency_is_rejected() {
 fn current_referred_noise_keeps_density_units_and_aligned_contributions() {
     let netlist = Netlist::parse("Current noise\nI1 0 out AC 1\nR1 out 0 1k\n.data rows FREQ R1\n10 1k\n100 2k\n.enddata\n.end\n").unwrap();
     let noise = Engine::default()
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "I1", "rows", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "I1", "rows", 300.15, &NoAbort,
+        )
         .unwrap();
-    let document = AnalysisResultDocument::from_noise_table(identity(AnalysisKind::Noise), &noise)
-        .unwrap()
-        .build()
-        .unwrap();
+    let document = AnalysisResultDocument::from_noise_table_with_limits_and_abort(
+        identity(AnalysisKind::Noise),
+        &noise,
+        &ResourceLimits::default(),
+        &NoAbort,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     let input = document
         .signals()
         .iter()

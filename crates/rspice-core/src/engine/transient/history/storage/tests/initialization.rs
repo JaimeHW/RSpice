@@ -64,11 +64,13 @@ fn public_bjt_initialization_failures_leave_the_engine_reusable() {
             TransientStartupMode::Uic,
         ] {
             let baseline = engine
-                .run_tran_with_startup_mode(&netlist, 1e-10, 1e-12, mode)
+                .run_tran_with_startup_mode_and_abort(&netlist, 1e-10, 1e-12, mode, &NoAbort)
                 .unwrap();
             for count in [0, 1, lanes - 1] {
                 let error = fail_reservation_after(count, || {
-                    engine.run_tran_with_startup_mode(&netlist, 1e-10, 1e-12, mode)
+                    engine.run_tran_with_startup_mode_and_abort(
+                        &netlist, 1e-10, 1e-12, mode, &NoAbort,
+                    )
                 })
                 .unwrap_err();
                 assert_allocation(&error);
@@ -82,7 +84,9 @@ fn public_bjt_initialization_failures_leave_the_engine_reusable() {
             }
             if parameters.starts_with("TF=") && mode == TransientStartupMode::Uic {
                 let error = fail_reservation_after(lanes, || {
-                    engine.run_tran_with_startup_mode(&netlist, 1e-10, 1e-12, mode)
+                    engine.run_tran_with_startup_mode_and_abort(
+                        &netlist, 1e-10, 1e-12, mode, &NoAbort,
+                    )
                 })
                 .unwrap_err();
                 assert!(matches!(
@@ -94,7 +98,7 @@ fn public_bjt_initialization_failures_leave_the_engine_reusable() {
                 ));
             }
             let rerun = engine
-                .run_tran_with_startup_mode(&netlist, 1e-10, 1e-12, mode)
+                .run_tran_with_startup_mode_and_abort(&netlist, 1e-10, 1e-12, mode, &NoAbort)
                 .unwrap();
             assert_eq!(rerun.time, baseline.time);
             assert_eq!(rerun.voltages, baseline.voltages);

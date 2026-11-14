@@ -1,5 +1,6 @@
 //! Native diode validation against Cadence PSpice, ngspice 46, and Xyce 7.10.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
@@ -1286,7 +1287,15 @@ fn split_sidewall_noise_reports_the_authored_diode() {
     )
     .unwrap();
     let point = Engine::new(SimulationConfig::default())
-        .run_noise_named_with_input_source(&deck, "b2", None, "V2", &[1e3], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &deck,
+            "b2",
+            None,
+            "V2",
+            &[1e3],
+            300.15,
+            &NoAbort,
+        )
         .expect("noise through a split sidewall")
         .pop()
         .unwrap();

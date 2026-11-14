@@ -5,6 +5,7 @@
 //! singular operator, but it must not make these nonsingular circuits easier by
 //! changing their transfer, noise, sensitivity, or pole locations.
 
+use rspice_core::NoAbort;
 use rspice_core::constants::K_BOLTZMANN;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -444,7 +445,7 @@ fn sensitivity_retains_the_zero_resistor_flicker_domain_boundary() {
     // KF changes resistor noise, so both deterministic transfer derivatives
     // are zero, including at the nonnegative coefficient's domain boundary.
     let dc = engine
-        .run_sensitivity_dc_complete(&netlist, probe.clone(), &filters)
+        .run_sensitivity_dc_complete_with_abort(&netlist, probe.clone(), &filters, &NoAbort)
         .unwrap();
     let ac = engine
         .run_sensitivity_ac_complete(&netlist, probe, &[1.0], &filters)
@@ -475,10 +476,11 @@ fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
          M1 drain gate 0 body NM W=1u L=1u\n.model NM NMOS(LEVEL=1 VTO=1 KP=0 GAMMA=0 PHI=0.6)\n.end\n",
     ).unwrap();
     let result = physical_engine()
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             &netlist,
             rspice_core::analysis::AcSensitivityOutput::BranchCurrent("VD".into()),
             &["NM:KP".into()],
+            &NoAbort,
         )
         .unwrap();
     // The source supplies Id = KP/2 * (Vgs - Vto)^2 at gamma=0.
@@ -502,7 +504,7 @@ fn sensitivity_refinement_resolves_zero_mos_body_effect() {
     let output = AcSensitivityOutput::BranchCurrent("VD".into());
     let filters = ["NM:GAMMA".to_owned()];
     let dc = engine
-        .run_sensitivity_dc_complete(&netlist, output.clone(), &filters)
+        .run_sensitivity_dc_complete_with_abort(&netlist, output.clone(), &filters, &NoAbort)
         .unwrap();
     let ac = engine
         .run_sensitivity_ac_complete(&netlist, output.clone(), &[1.0, 1e9], &filters)
@@ -636,13 +638,14 @@ fn sensitivity_refinement_uses_finite_stencils_at_the_binary64_boundary() {
         "boundary sensitivity",
     );
     let complete = engine
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             &netlist,
             rspice_core::analysis::AcSensitivityOutput::Voltage {
                 positive: output,
                 negative: None,
             },
             &["V1".to_owned()],
+            &NoAbort,
         )
         .unwrap();
     assert_relative(
@@ -693,7 +696,7 @@ fn ideal_voltage_short_has_exactly_zero_output_noise() {
     let output = node_id(&engine, &netlist, "out");
 
     let result = engine
-        .run_noise_ports(&netlist, output, None, &[1.0e3], TEMPERATURE_K)
+        .run_noise_ports_with_abort(&netlist, output, None, &[1.0e3], TEMPERATURE_K, &NoAbort)
         .expect("noise analysis solves");
 
     assert_eq!(result.len(), 1);
@@ -714,7 +717,7 @@ fn high_impedance_resistor_noise_is_four_k_t_r() {
     let output = node_id(&engine, &netlist, "out");
 
     let result = engine
-        .run_noise_ports(&netlist, output, None, &[1.0e3], TEMPERATURE_K)
+        .run_noise_ports_with_abort(&netlist, output, None, &[1.0e3], TEMPERATURE_K, &NoAbort)
         .expect("noise analysis solves");
     let expected_psd = 4.0 * K_BOLTZMANN * TEMPERATURE_K * HIGH_NOISE_RESISTANCE_OHM;
 
@@ -821,7 +824,7 @@ fn high_impedance_transfer_function_is_unperturbed() {
     let engine = physical_engine();
 
     let result = engine
-        .run_transfer_function(&netlist, "out", None, false, "iin")
+        .run_transfer_function_with_abort(&netlist, "out", None, false, "iin", &NoAbort)
         .expect("transfer-function analysis solves");
 
     // A unit input current develops Vout = Iin R. The same lone resistor is

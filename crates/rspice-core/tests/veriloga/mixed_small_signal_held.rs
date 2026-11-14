@@ -8,6 +8,7 @@
 //! twin are the same linear system at the bias, so every small-signal answer
 //! must agree to rounding.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::{AcSensitivityOutput, StbConfig};
 use rspice_core::{Complex64, Engine, Netlist};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -269,10 +270,10 @@ fn assert_held_equivalence(mixed: &Netlist, twin: &Netlist, noise_tolerance: f64
     }
 
     let tf = engine
-        .run_transfer_function(mixed, "out", None, false, "vin")
+        .run_transfer_function_with_abort(mixed, "out", None, false, "vin", &NoAbort)
         .expect(".tf runs on the held state");
     let twin_tf = engine
-        .run_transfer_function(twin, "out", None, false, "vin")
+        .run_transfer_function_with_abort(twin, "out", None, false, "vin", &NoAbort)
         .expect("twin .tf");
     assert_close(".tf gain", tf.gain, twin_tf.gain, 1.0e-5, 1.0e-5);
     assert_close(
@@ -339,23 +340,25 @@ fn assert_held_equivalence(mixed: &Netlist, twin: &Netlist, noise_tolerance: f64
 
     let filters = ["r1", "rf", "rt3", "rt1", "rl", "vin"].map(String::from);
     let complete = engine
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             mixed,
             AcSensitivityOutput::Voltage {
                 positive: out,
                 negative: None,
             },
             &filters,
+            &NoAbort,
         )
         .expect("complete DC .sens runs on the held state");
     let twin_complete = engine
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             twin,
             AcSensitivityOutput::Voltage {
                 positive: twin_out,
                 negative: None,
             },
             &filters,
+            &NoAbort,
         )
         .expect("twin complete DC .sens");
     assert_eq!(complete.sensitivities.len(), filters.len());
@@ -375,10 +378,10 @@ fn assert_held_equivalence(mixed: &Netlist, twin: &Netlist, noise_tolerance: f64
     }
 
     let disto = engine
-        .run_distortion(mixed, &[1.0e3], None)
+        .run_distortion_with_abort(mixed, &[1.0e3], None, &NoAbort)
         .expect(".disto runs on the held state");
     let twin_disto = engine
-        .run_distortion(twin, &[1.0e3], None)
+        .run_distortion_with_abort(twin, &[1.0e3], None, &NoAbort)
         .expect("twin .disto");
     for (point, reference) in disto.points.iter().zip(&twin_disto.points) {
         assert_phasor_close(
@@ -574,10 +577,10 @@ fn a_digital_read_of_an_analog_value_is_frozen_at_the_held_sample() {
         assert_close("held-code transfer", gain, code * 0.05, 1.0e-12, 1.0e-9);
 
         let tf = engine
-            .run_transfer_function(&deck, "p", None, false, "va")
+            .run_transfer_function_with_abort(&deck, "p", None, false, "va", &NoAbort)
             .expect(".tf runs");
         let twin_tf = engine
-            .run_transfer_function(&twin, "p", None, false, "va")
+            .run_transfer_function_with_abort(&twin, "p", None, false, "va", &NoAbort)
             .expect("twin .tf");
         assert_close(".tf gain", tf.gain, code * 0.05, 1.0e-12, 1.0e-9);
         assert_close(".tf gain", tf.gain, twin_tf.gain, 1.0e-12, 1.0e-9);

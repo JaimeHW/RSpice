@@ -13,7 +13,7 @@
 
 use super::ac::{AcExcitation, PreparedAc};
 use super::{Engine, SimulationError};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::TransferFunctionResult;
 use crate::analysis::ac::AcResult;
 use crate::solver::ComplexMatrix;
@@ -25,31 +25,7 @@ use crate::{Netlist, Value};
 const NGSPICE_INFINITE_IMPEDANCE: Value = 1.0e20;
 
 impl Engine {
-    /// Run a `.TF` analysis: DC small-signal gain, input impedance, and
-    /// output impedance from `input_source` to the probe.
-    ///
-    /// The probe is `V(output_node[,reference_node])`, or the branch
-    /// current of element `output_node` when `output_is_current` is set
-    /// (the element must add a branch, e.g. a voltage source or inductor).
-    pub fn run_transfer_function(
-        &self,
-        netlist: &Netlist,
-        output_node: &str,
-        reference_node: Option<&str>,
-        output_is_current: bool,
-        input_source: &str,
-    ) -> Result<TransferFunctionResult, SimulationError> {
-        self.run_transfer_function_with_abort(
-            netlist,
-            output_node,
-            reference_node,
-            output_is_current,
-            input_source,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable form of [`Self::run_transfer_function`].
+    /// Run `.TF` transfer-function analysis, cancellable through `abort`.
     pub fn run_transfer_function_with_abort(
         &self,
         netlist: &Netlist,

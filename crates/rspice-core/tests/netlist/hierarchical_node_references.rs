@@ -10,6 +10,7 @@
 //! case-insensitive class one spelling, every reference became a second,
 //! disconnected node and each analysis reported the node twice.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::measure_signals::evaluate_tran_measurements;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{Flattener, Netlist};
@@ -183,7 +184,15 @@ fn noise_output_on_the_reference_resolves_to_the_internal_node() {
         ".noise v(xout.xin.mid) v1 lin 1 1k 1k",
     );
     let points = engine()
-        .run_noise_named_with_input_source(&netlist, "XOUT.XIN.MID", None, "v1", &[1.0e3], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "XOUT.XIN.MID",
+            None,
+            "v1",
+            &[1.0e3],
+            300.15,
+            &NoAbort,
+        )
         .expect("noise");
     let point = &points[0];
     let mid = only_internal_node(&point.node_names, "noise");

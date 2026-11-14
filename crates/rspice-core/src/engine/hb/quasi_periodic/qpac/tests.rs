@@ -40,7 +40,7 @@ fn qpac_engine_binds_three_tone_sources_differential_outputs_and_retained_identi
         let mut request = voltage_request.clone();
         request.input_source = source.into();
         let result = engine
-            .run_qpac_from_qpss(&netlist, request.clone(), &point)
+            .run_qpac_from_qpss_with_abort(&netlist, request.clone(), &point, &NoAbort)
             .unwrap();
         let limits = crate::ResourceLimits::default();
         assert_eq!(
@@ -139,14 +139,14 @@ fn qpac_engine_binds_three_tone_sources_differential_outputs_and_retained_identi
     let mut converted = request();
     converted.output_lattice = vec![0, 1, 0];
     let result = engine
-        .run_qpac_from_qpss(&netlist, converted, &point)
+        .run_qpac_from_qpss_with_abort(&netlist, converted, &point, &NoAbort)
         .unwrap();
     assert!(result.output_transfer.iter().all(|v| v.norm() < 1e-12));
     assert_eq!(point.retained_identity(), identity);
     let altered = Netlist::parse(&deck.replace("R1 in out 1k", "R1 in out 2k")).unwrap();
     assert!(
         engine
-            .run_qpac_from_qpss(&altered, request(), &point)
+            .run_qpac_from_qpss_with_abort(&altered, request(), &point, &NoAbort)
             .is_err()
     );
     for (input, output, source) in [
@@ -158,7 +158,11 @@ fn qpac_engine_binds_three_tone_sources_differential_outputs_and_retained_identi
         bad.input_lattice = input;
         bad.output_lattice = output;
         bad.input_source = source.into();
-        assert!(engine.run_qpac_from_qpss(&netlist, bad, &point).is_err());
+        assert!(
+            engine
+                .run_qpac_from_qpss_with_abort(&netlist, bad, &point, &NoAbort)
+                .is_err()
+        );
     }
     let abort = CountingAbort::new(10);
     assert!(matches!(

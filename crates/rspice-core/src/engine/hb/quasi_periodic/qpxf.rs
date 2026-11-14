@@ -18,15 +18,6 @@ fn qpxf_error(message: impl Into<String>) -> SimulationError {
 }
 
 impl Engine {
-    pub fn run_qpxf_from_qpss(
-        &self,
-        netlist: &Netlist,
-        request: QpxfRequest,
-        point: &QpssOperatingPoint,
-    ) -> Result<QpxfAnalysisResult, SimulationError> {
-        self.run_qpxf_from_qpss_with_abort(netlist, request, point, &NoAbort)
-    }
-
     /// All source/tuple paths share the exact QPSS orbit and one adjoint solve
     /// per output frequency. The producer is authenticated before and after
     /// execution; this never re-solves QPSS or substitutes a common-period HB.

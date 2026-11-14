@@ -99,6 +99,7 @@ impl<'a> BusMemberHistory<'a> {
     ///
     /// "Held" is the last point at or before `time`: a digital history records
     /// only changes, so a member keeps its value until the next one.
+    #[cfg(test)]
     fn held_at(&self, time: Value) -> Option<u8> {
         let boundary = self
             .points
@@ -233,6 +234,7 @@ pub fn split_bus_notation(text: &str) -> (&str, Option<(i64, i64)>) {
 /// before it — or `None` when the member had not been observed by then. This
 /// answers a single time without materializing the bus's whole timeline, which
 /// is what a cursor, a probe or a table cell needs.
+#[cfg(test)]
 pub fn bus_value_at(members: &[BusMemberHistory<'_>], time: Value) -> Vec<Option<u8>> {
     members.iter().map(|member| member.held_at(time)).collect()
 }

@@ -1,5 +1,6 @@
 //! Physical public-API oracles for Volterra harmonic products.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::{DistortionAnalysisResult, DistortionProduct};
 use rspice_core::constants::{TEMP_REFERENCE, thermal_voltage};
 use rspice_core::{Engine, Netlist};
@@ -33,7 +34,11 @@ fn distortion_honors_cancellation_from_its_last_progress_callback() {
     let engine = Engine::default();
     for frequencies in [&[1e3][..], &[1e3, 2e3][..]] {
         for ratio in [None, Some(0.9)] {
-            assert!(engine.run_distortion(&netlist, frequencies, ratio).is_ok());
+            assert!(
+                engine
+                    .run_distortion_with_abort(&netlist, frequencies, ratio, &NoAbort)
+                    .is_ok()
+            );
             let abort = CancelAtCompletion(AtomicBool::new(false));
             let result = engine.run_distortion_with_abort(&netlist, frequencies, ratio, &abort);
             assert!(abort.is_aborted(), "the final progress callback must run");
@@ -53,7 +58,7 @@ fn tied_current_terminals_cannot_erase_distortion_input_tones() {
             "tied distortion source\nI1 0 out DC 0 DISTOF1 1 37 DISTOF2 .5 -90\nI2 {terminals} DC 0 DISTOF1 1e100 37 DISTOF2 1e100 -90\nR1 out 0 1\n.end\n"
         )).unwrap();
         let result = Engine::default()
-            .run_distortion(&netlist, &[1e3], Some(0.9))
+            .run_distortion_with_abort(&netlist, &[1e3], Some(0.9), &NoAbort)
             .unwrap();
         let point = &result.points[0];
         for (response, amplitude, phase) in [
@@ -86,7 +91,7 @@ fn two_tone_distortion_without_a_distof2_excitation_is_refused() {
     )
     .unwrap();
     let error = Engine::default()
-        .run_distortion(&netlist, &[1e3], Some(0.9))
+        .run_distortion_with_abort(&netlist, &[1e3], Some(0.9), &NoAbort)
         .expect_err("a second tone with no DISTOF2 source must not solve");
     assert!(
         matches!(&error, rspice_core::SimulationError::Circuit(message) if message.contains("DISTOF2")),
@@ -104,7 +109,7 @@ fn run_diode(amplitude: f64, frequencies: &[f64]) -> DistortionAnalysisResult {
     );
     let netlist = Netlist::parse(&deck).expect("diode distortion oracle parses");
     Engine::default()
-        .run_distortion(&netlist, frequencies, None)
+        .run_distortion_with_abort(&netlist, frequencies, None, &NoAbort)
         .expect("diode distortion oracle solves")
 }
 
@@ -256,7 +261,9 @@ fn reactive_loading_preserves_small_polynomial_and_cascaded_products() {
                             + 0.75 * cubic * u1 * u1 * u2.conj())
                             / linear(2.0 * f1 - f2);
                         for ratio in [None, Some(f2 / f1)] {
-                            let result = engine.run_distortion(&deck, &[f1], ratio).unwrap();
+                            let result = engine
+                                .run_distortion_with_abort(&deck, &[f1], ratio, &NoAbort)
+                                .unwrap();
                             let point = &result.points[0];
                             let node = point
                                 .fundamental_f1
@@ -326,7 +333,9 @@ fn saturated_outer_probes_cannot_erase_resolved_local_curvature() {
                  B1 out 0 I={{{scale}*tanh({slope}*v(out))}}\n.options GMIN=0\n.end\n"
             ))
             .unwrap();
-            let result = engine.run_distortion(&deck, &[1e3], None).unwrap();
+            let result = engine
+                .run_distortion_with_abort(&deck, &[1e3], None, &NoAbort)
+                .unwrap();
             for (product, derivative, divisor, tolerance) in [
                 (DistortionProduct::SecondHarmonic, second, 4.0, 2e-5),
                 (DistortionProduct::ThirdHarmonic, third, 24.0, 2e-3),
@@ -369,7 +378,12 @@ fn both_im3_sidebands_and_second_harmonics_match_complex_polynomial_feedback() {
                     // Include an IM2/IM3 coincidence (1050), DC (1400), and a
                     // negative signed IM3 (2100); keep F2 fixed at 700 Hz.
                     let result = engine
-                        .run_distortion(&deck, &[1000.0, 1050.0, 1400.0, 2100.0], Some(0.7))
+                        .run_distortion_with_abort(
+                            &deck,
+                            &[1000.0, 1050.0, 1400.0, 2100.0],
+                            Some(0.7),
+                            &NoAbort,
+                        )
                         .unwrap();
                     let f2 = 700.0;
                     for point in &result.points {
@@ -480,7 +494,7 @@ fn second_tone_charge_products_use_the_signed_frequency_before_conjugation() {
             };
         let bias_current = 1e-12 * (0.2 / vt).exp();
         let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
-            .run_distortion(&deck, &[1e6, 1.8e6, 2.6e6], Some(0.9))
+            .run_distortion_with_abort(&deck, &[1e6, 1.8e6, 2.6e6], Some(0.9), &NoAbort)
             .unwrap();
         for point in &result.points {
             let f1 = point.fundamental_f1.frequency;

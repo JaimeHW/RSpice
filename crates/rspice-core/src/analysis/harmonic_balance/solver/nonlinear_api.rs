@@ -101,11 +101,6 @@ impl HbSolver {
         self.add_nonlinear_device(NonlinearDeviceInstance::diode(anode, cathode, is, n));
     }
 
-    /// Add a voltage-controlled switch for Newton iteration
-    pub fn add_voltage_switch(&mut self, nodes: HbSwitchNodes, model: HbVoltageSwitchModel) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::voltage_switch(nodes, model));
-    }
-
     /// Add a Verilog-A instance to the F/Q sampler. Its residual must be
     /// `F(x) + dQ(x)/dt`, which the harmonic-balance capability gate decides
     /// before the solver is built.

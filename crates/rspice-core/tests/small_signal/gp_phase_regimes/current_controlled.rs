@@ -1,4 +1,5 @@
 use super::*;
+use rspice_core::NoAbort;
 use rspice_core::engine::TransientStartupMode;
 use rspice_core::{CurrentImpulseOwner, CurrentImpulseTrace};
 
@@ -290,7 +291,7 @@ fn gp_current_controlled_sources_preserve_finite_currents_impulses_and_restart()
                 TransientStartupMode::Uic,
             ] {
                 let result = engine
-                    .run_tran_with_startup_mode(&source, 2.5e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&source, 2.5e-9, 4e-12, startup, &NoAbort)
                     .unwrap_or_else(|error| {
                         panic!("{dialect:?}/{polarity}/{startup:?}: {error:?}")
                     });

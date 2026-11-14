@@ -666,14 +666,14 @@ c1 mid 0 1n
     // Reference: the stationary noise analysis at the same frequencies.
     let dc = engine.run_dc_op(&netlist).expect("dc op");
     // run_dc_op node names include ground at index 0, so the position is
-    // already the matrix node index run_noise_ports expects.
+    // already the matrix node index run_noise_ports_with_abort expects.
     let mid_idx = dc
         .node_names
         .iter()
         .position(|n| n.eq_ignore_ascii_case("mid"))
         .expect("mid node");
     let stationary = engine
-        .run_noise_ports(&netlist, mid_idx, None, &offsets, T_REF)
+        .run_noise_ports_with_abort(&netlist, mid_idx, None, &offsets, T_REF, &NoAbort)
         .expect("stationary noise completes");
 
     for (i, &freq) in offsets.iter().enumerate() {
@@ -1002,7 +1002,7 @@ fn mos_nlev3_periodic_noise_follows_modulated_inversion_charge_at_zero_vds() {
                         .position(|n| n.eq_ignore_ascii_case("out"))
                         .unwrap();
                     let stationary = engine
-                        .run_noise_ports(&deck, out, None, &[1e4], T_REF)
+                        .run_noise_ports_with_abort(&deck, out, None, &[1e4], T_REF, &NoAbort)
                         .unwrap();
                     assert!(
                         (stationary[0].output_noise_density - expected).abs() < expected * 2e-10
@@ -1174,7 +1174,9 @@ fn native_vbic_periodic_noise_matches_stationary_physical_sources() {
         simulation.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(simulation);
         let noise = engine
-            .run_noise_named_with_input_source(&netlist, "c", None, "VB", &offsets, T_REF)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist, "c", None, "VB", &offsets, T_REF, &NoAbort,
+            )
             .unwrap();
         let mut config = HbConfig::new(1e6).with_harmonics(8).with_tolerance(1e-10);
         // This loaded, finite-resistance network cannot resolve attoamp

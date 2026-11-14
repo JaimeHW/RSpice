@@ -43,7 +43,9 @@ fn voltage(result: &TransientResult, name: &str, time: f64) -> f64 {
         .position(|node| node.eq_ignore_ascii_case(name))
         .unwrap();
     let sample = result.time.iter().position(|value| *value >= time).unwrap();
-    result.voltage_waveform(node + 1)[sample]
+    result
+        .try_voltage_waveform(node + 1)
+        .expect("node index in range")[sample]
 }
 
 const DAC: &str = r#"

@@ -64,7 +64,10 @@ fn student_interval<const N: usize>(
     samples: [f64; N],
     confidence_pct: f64,
 ) -> MeanConfidenceInterval {
-    let mut config = MonteCarloConfig::new(N).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(N)
+    };
     config.histogram_bins = 1;
     config.confidence_pct = confidence_pct;
     let mut samples = samples.into_iter();
@@ -171,7 +174,10 @@ fn student_limits_retain_center_offsets_between_adjacent_samples() {
 
 #[test]
 fn student_cancellation_stops_during_moments_without_publishing() {
-    let mut config = MonteCarloConfig::new(128).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(128)
+    };
     config.histogram_bins = 1;
     let mut samples = [1e308, 1e-308, -1e308].into_iter().cycle();
     let mut result = MonteCarloRunner::new(config)
@@ -250,7 +256,10 @@ fn exact_means_keep_large_constants_and_small_spreads_representable() {
 #[test]
 fn bootstrap_preserves_small_means_after_extreme_cancellation() {
     for residual in [-1e-308, 1e-308] {
-        let mut config = MonteCarloConfig::new(3).with_seed(1);
+        let mut config = MonteCarloConfig {
+            seed: Some(1),
+            ..MonteCarloConfig::new(3)
+        };
         config.histogram_bins = 1;
         config.confidence_pct = 1.0;
         config.confidence_method = MeanConfidenceMethod::PercentileBootstrap {
@@ -280,7 +289,10 @@ fn bootstrap_preserves_small_means_after_extreme_cancellation() {
 
 #[test]
 fn bootstrap_sample_buffer_is_budgeted_before_simulation() {
-    let mut config = MonteCarloConfig::new(64).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(64)
+    };
     config.histogram_bins = 1;
     config.resource_limits.max_result_values = 80;
     config.confidence_method = MeanConfidenceMethod::PercentileBootstrap {
@@ -302,7 +314,10 @@ fn bootstrap_sample_buffer_is_budgeted_before_simulation() {
 
 #[test]
 fn bootstrap_budget_includes_live_results_and_preserves_previous_estimates() {
-    let mut config = MonteCarloConfig::new(3).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(3)
+    };
     config.histogram_bins = 1;
     let mut samples = [0.0, 1.0, 2.0].into_iter();
     let mut result = MonteCarloRunner::new(config)
@@ -344,7 +359,10 @@ fn bootstrap_budget_includes_live_results_and_preserves_previous_estimates() {
 
 #[test]
 fn bootstrap_cancellation_stops_during_exact_summation_without_publishing() {
-    let mut config = MonteCarloConfig::new(128).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(128)
+    };
     config.histogram_bins = 1;
     let mut samples = [1e308, 1e-308, -1e308].into_iter().cycle();
     let mut result = MonteCarloRunner::new(config)

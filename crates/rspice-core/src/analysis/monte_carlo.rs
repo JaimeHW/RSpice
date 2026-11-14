@@ -57,11 +57,6 @@ impl Distribution {
         Distribution::Uniform { tolerance }
     }
 
-    /// Create a worst-case distribution with given tolerance
-    pub fn worst_case(tolerance: Value) -> Self {
-        Distribution::WorstCase { tolerance }
-    }
-
     pub(crate) fn validate(self) -> Result<(), SimulationConfigError> {
         let spread = match self {
             Self::Gaussian { sigma } => sigma,
@@ -178,12 +173,6 @@ impl MonteCarloConfig {
             confidence_method: MeanConfidenceMethod::StudentT,
             resource_limits: ResourceLimits::default(),
         }
-    }
-
-    /// Set random seed for reproducibility
-    pub fn with_seed(mut self, seed: u64) -> Self {
-        self.seed = Some(seed);
-        self
     }
 }
 
@@ -811,7 +800,10 @@ mod tests {
 
     #[test]
     fn monte_carlo_rejects_a_whole_nonfinite_trial_without_shortening_variables() {
-        let runner = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(7));
+        let runner = MonteCarloRunner::new(MonteCarloConfig {
+            seed: Some(7),
+            ..MonteCarloConfig::new(3)
+        });
         let mut run = 0;
         let result = runner
             .run::<_, ()>(|_| {
@@ -840,7 +832,10 @@ mod tests {
 
     #[test]
     fn monte_carlo_rejects_output_schema_drift_as_a_failed_trial() {
-        let runner = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(9));
+        let runner = MonteCarloRunner::new(MonteCarloConfig {
+            seed: Some(9),
+            ..MonteCarloConfig::new(2)
+        });
         let mut run = 0;
         let result = runner
             .run::<_, ()>(|_| {

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use rspice_core::NoAbort;
 use rspice_core::engine::CompressionConfig;
 use rspice_core::engine::TransientStartupMode;
 use rspice_core::{
@@ -113,7 +114,7 @@ fn the_history_budget_is_aggregate_across_devices_and_startup_modes() {
     ] {
         assert_limit(
             engine
-                .run_tran_with_startup_mode(&deck(2, 90.0), 1e-9, 1e-12, mode)
+                .run_tran_with_startup_mode_and_abort(&deck(2, 90.0), 1e-9, 1e-12, mode, &NoAbort)
                 .unwrap_err(),
             bytes,
         );

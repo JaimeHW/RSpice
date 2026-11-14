@@ -23,7 +23,15 @@ fn noise_input_units_follow_resolved_hierarchical_current_sources() {
         .clone();
     let frequencies = [1e3, 1e4];
     let ordinary = engine
-        .run_noise_named_with_input_source(&netlist, "out", None, &input_name, &frequencies, 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "out",
+            None,
+            &input_name,
+            &frequencies,
+            300.15,
+            &crate::abort_signal::NoAbort,
+        )
         .unwrap();
     let expected_current = 4.0 * K_BOLTZMANN * 300.15 / 1e3;
     for point in &ordinary {

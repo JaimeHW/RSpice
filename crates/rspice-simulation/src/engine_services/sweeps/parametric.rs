@@ -631,11 +631,12 @@ R2 out 0 1k
             ))
             .unwrap();
             let result = Engine::default()
-                .run_tran_with_startup_mode(
+                .run_tran_with_startup_mode_and_abort(
                     &reference,
                     100e-6,
                     maximum_step,
                     rspice_core::engine::TransientStartupMode::from_uic(uic),
+                    &NoAbort,
                 )
                 .unwrap();
             let index = result

@@ -83,7 +83,7 @@ use moments::{assemble, central_difference, contributor};
 
 use super::core::DcOpStartup;
 use super::{Engine, SimulationError};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::dcmatch::{DcMatchContributor, DcMatchResult, DcMatchScope};
 use crate::analysis::sensitivity::AcSensitivityOutput;
 use crate::netlist::{
@@ -101,17 +101,6 @@ use crate::{Netlist, Value};
 const PROCESS_OWNER: &str = "(design)";
 
 impl Engine {
-    /// Run one authored `.DCMATCH` card.
-    pub fn run_dc_match(
-        &self,
-        netlist: &Netlist,
-        card: &DcMatchCard,
-    ) -> Result<DcMatchResult, SimulationError> {
-        self.run_dc_match_with_abort(netlist, card, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::run_dc_match`].
-    ///
     /// Cost is two operating points per `(instance, variable)` mismatch pair
     /// plus two per process variable, each warm started from the nominal
     /// solution.

@@ -130,7 +130,7 @@ Rsink sink 0 1k
     }
     let offsets = vec![37.0, 127.0];
     let ac = engine
-        .run_qpac_from_qpss(
+        .run_qpac_from_qpss_with_abort(
             &netlist,
             QpacRequest {
                 offsets_hz: offsets.clone(),
@@ -147,10 +147,11 @@ Rsink sink 0 1k
                 },
             },
             &restored,
+            &NoAbort,
         )
         .unwrap();
     let xf = engine
-        .run_qpxf_from_qpss(
+        .run_qpxf_from_qpss_with_abort(
             &netlist,
             QpxfRequest {
                 frequencies_hz: offsets.clone(),
@@ -167,10 +168,11 @@ Rsink sink 0 1k
                 group_delay_magnitude_floor: 0.0,
             },
             &restored,
+            &NoAbort,
         )
         .unwrap();
     let noise = engine
-        .run_qpnoise_from_qpss(
+        .run_qpnoise_from_qpss_with_abort(
             &netlist,
             QpnoiseRequest {
                 frequencies_hz: offsets.clone(),
@@ -194,6 +196,7 @@ Rsink sink 0 1k
                 linear: config.solver.linear,
             },
             &restored,
+            &NoAbort,
         )
         .unwrap();
     let kb = super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect).boltzmann;

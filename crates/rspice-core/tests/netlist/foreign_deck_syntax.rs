@@ -559,7 +559,15 @@ Q1 b a 0 QX
     };
     let noise = |netlist: &Netlist| {
         Engine::default()
-            .run_noise_named_with_input_source(netlist, "b", None, "V1", &[1e3], 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                netlist,
+                "b",
+                None,
+                "V1",
+                &[1e3],
+                300.15,
+                &NoAbort,
+            )
             .expect("noise solves")
             .remove(0)
     };
@@ -1077,7 +1085,15 @@ fn a_noiseless_instance_flag_quiets_that_device() {
     };
     let noise = |netlist: &Netlist| {
         Engine::default()
-            .run_noise_named_with_input_source(netlist, "o", None, "V2", &[1e3], 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                netlist,
+                "o",
+                None,
+                "V2",
+                &[1e3],
+                300.15,
+                &NoAbort,
+            )
             .expect("noise solves")
             .remove(0)
     };
@@ -1494,7 +1510,7 @@ c1 a 0 1n
     assert_close("V(a) dc", swept, 1.0 / 3.0, 1e-9);
 
     let transfer = engine
-        .run_transfer_function(&netlist, "a", None, false, "v1")
+        .run_transfer_function_with_abort(&netlist, "a", None, false, "v1", &NoAbort)
         .expect(".tf solves");
     assert_close("tf gain", transfer.gain, 1.0 / 3.0, 1e-9);
     assert_close("tf zin", transfer.input_impedance, 600.0, 1e-6);
@@ -1506,13 +1522,14 @@ c1 a 0 1n
         .get_node_by_name("a")
         .expect("node a");
     let sens = engine
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             &netlist,
             AcSensitivityOutput::Voltage {
                 positive: output,
                 negative: None,
             },
             &["R1".to_owned(), "R2".to_owned(), "V1".to_owned()],
+            &NoAbort,
         )
         .expect(".sens solves");
     // dV(a)/dR1 = -(G2 + g) V1 / (1 + R1 (G2 + g))^2, dV(a)/dR2 = R1 G2^2 V1 / (same).
@@ -2000,7 +2017,15 @@ R2 out 0 1k
         .expect("one AC point");
     assert_close("V(out) ac", ac.voltages[out(&ac.node_names)].re, 3.0, 1e-9);
     let noise = Engine::default()
-        .run_noise_named_with_input_source(&netlist, "out", None, "V1", &[1e3], 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "out",
+            None,
+            "V1",
+            &[1e3],
+            300.15,
+            &NoAbort,
+        )
         .expect("noise solves")
         .pop()
         .expect("one noise point");
@@ -2041,7 +2066,7 @@ fn step_op_voltages(netlist: &Netlist, node: &str) -> Vec<f64> {
     (0..plan.total_runs())
         .map(|run| {
             let materialized = engine
-                .materialize_step_run(&plan, run)
+                .materialize_step_run_with_abort(&plan, run, &NoAbort)
                 .expect("run materializes");
             op_voltage(materialized.netlist(), node)
         })
@@ -2058,12 +2083,13 @@ fn step_plan<'a>(engine: &Engine, netlist: &'a Netlist) -> rspice_core::engine::
         })
         .collect::<Vec<_>>();
     engine
-        .plan_step_commands(
+        .plan_step_commands_with_abort(
             netlist,
             &steps,
             rspice_core::engine::StepPlanLimits::from_resource_limits(
                 engine.config().resource_limits,
             ),
+            &NoAbort,
         )
         .expect("the sweep plans")
 }
@@ -2153,7 +2179,11 @@ fn a_parameter_replay_of_a_step_run_keeps_that_runs_draws() {
     let engine = Engine::default();
     let plan = step_plan(&engine, &netlist);
     let nominal: Vec<_> = (0..plan.total_runs())
-        .map(|run| engine.materialize_step_run(&plan, run).unwrap())
+        .map(|run| {
+            engine
+                .materialize_step_run_with_abort(&plan, run, &NoAbort)
+                .unwrap()
+        })
         .collect();
     let mut seen = Vec::new();
     for run in &nominal {
@@ -2224,13 +2254,14 @@ C1 out 0 1u
 ",
     );
     let (_, points) = Engine::default()
-        .run_noise_data_named_with_input_source(
+        .run_noise_data_named_with_input_source_and_abort(
             &netlist,
             "out",
             None,
             "V1",
             &netlist.data_tables[0].name,
             300.15,
+            &NoAbort,
         )
         .expect("noise solves");
     assert_eq!(points.len(), 4);

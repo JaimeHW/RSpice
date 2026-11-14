@@ -1,6 +1,7 @@
 //! Public GP excess-phase admission, continuation and invalid-parameter contracts.
 //! Independent accuracy oracles also run through the public APIs in physical_dispatch_tests.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{
     CompressionConfig, Engine, SimulationConfig, SpiceDialect, TransientStartupMode,
 };
@@ -57,7 +58,7 @@ fn gp_phase_runs_both_polarities_models_dialects_and_startup_modes() {
                             TransientStartupMode::OperatingPoint,
                             TransientStartupMode::Uic,
                         ] {
-                            let result = engine.run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
+                            let result = engine.run_tran_with_startup_mode_and_abort(&source, 2e-9, 4e-12, startup, &NoAbort)
                                 .unwrap_or_else(|error| panic!("{dialect:?}/{model:?}/{kind}/{phase}/{private}/{startup:?}: {error}"));
                             assert_eq!(result.time.last(), Some(&2e-9));
                             assert!(
@@ -175,7 +176,7 @@ fn gp_noncausal_phase_refuses_before_startup_and_checkpoint_publication() {
         ] {
             assert_noncausal(
                 engine
-                    .run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&source, 2e-9, 4e-12, startup, &NoAbort)
                     .unwrap_err(),
                 "Q1",
             );

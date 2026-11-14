@@ -10,7 +10,7 @@ use crate::analysis::fourier::FourierResult;
 use crate::analysis::measure::{ContinuousMeasureResult, MeasureResult};
 use crate::netlist::OutputScheduleError;
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
-use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
+use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use thiserror::Error;
@@ -317,64 +317,6 @@ mod maximum_step_tests {
             Err(TransientMaximumStepError::UnrepresentableDefault { .. })
         ));
     }
-}
-
-/// Stable wire spelling of one XSPICE digital logic state.
-///
-/// Persistence layers need a stable text spelling of a committed digital
-/// sample. The engine owns the one it publishes so a pickle or a wire format
-/// never has to invent a second naming of the same state.
-pub const fn digital_state_tag(state: DigitalState) -> &'static str {
-    match state {
-        DigitalState::Zero => "zero",
-        DigitalState::One => "one",
-        DigitalState::Unknown => "unknown",
-        DigitalState::ZeroR => "zero-resistive",
-        DigitalState::OneR => "one-resistive",
-        DigitalState::UnknownR => "unknown-resistive",
-        DigitalState::ZeroZ => "zero-high-z",
-        DigitalState::OneZ => "one-high-z",
-        DigitalState::UnknownZ => "unknown-high-z",
-        DigitalState::HighZ => "high-z",
-    }
-}
-
-/// Parse a spelling produced by [`digital_state_tag`].
-pub fn digital_state_from_tag(tag: &str) -> Option<DigitalState> {
-    Some(match tag {
-        "zero" => DigitalState::Zero,
-        "one" => DigitalState::One,
-        "unknown" => DigitalState::Unknown,
-        "zero-resistive" => DigitalState::ZeroR,
-        "one-resistive" => DigitalState::OneR,
-        "unknown-resistive" => DigitalState::UnknownR,
-        "zero-high-z" => DigitalState::ZeroZ,
-        "one-high-z" => DigitalState::OneZ,
-        "unknown-high-z" => DigitalState::UnknownZ,
-        "high-z" => DigitalState::HighZ,
-        _ => return None,
-    })
-}
-
-/// Stable wire spelling of one XSPICE digital drive strength.
-pub const fn digital_strength_tag(strength: DigitalStrength) -> &'static str {
-    match strength {
-        DigitalStrength::Undetermined => "undetermined",
-        DigitalStrength::HighZ => "high-z",
-        DigitalStrength::Resistive => "resistive",
-        DigitalStrength::Strong => "strong",
-    }
-}
-
-/// Parse a spelling produced by [`digital_strength_tag`].
-pub fn digital_strength_from_tag(tag: &str) -> Option<DigitalStrength> {
-    Some(match tag {
-        "undetermined" => DigitalStrength::Undetermined,
-        "high-z" => DigitalStrength::HighZ,
-        "resistive" => DigitalStrength::Resistive,
-        "strong" => DigitalStrength::Strong,
-        _ => None?,
-    })
 }
 
 /// One accepted or linearly interpolated transient output sample.
@@ -1894,6 +1836,7 @@ impl TransientResult {
     /// Panics for invalid non-ground node IDs or time indices. Use
     /// [`Self::try_voltage_at`] for checked access.
     #[track_caller]
+    #[cfg(test)]
     pub fn voltage_at(&self, node: usize, time_index: usize) -> Value {
         self.try_voltage_at(node, time_index).unwrap_or_else(|| {
             panic!(
@@ -1934,20 +1877,6 @@ impl TransientResult {
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(name))
             .map(|idx| idx + 1)
-    }
-
-    /// Get the complete voltage waveform for a node.
-    ///
-    /// Panics when `node` is invalid. Use [`Self::try_voltage_waveform`] for
-    /// checked access.
-    #[track_caller]
-    pub fn voltage_waveform(&self, node: usize) -> &[Value] {
-        self.try_voltage_waveform(node).unwrap_or_else(|| {
-            panic!(
-                "node {} out of range for TransientResult with {} nodes",
-                node, self.num_nodes
-            )
-        })
     }
 
     /// Get the complete voltage waveform for a node, returning `None` when the

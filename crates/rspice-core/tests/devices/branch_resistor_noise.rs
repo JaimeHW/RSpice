@@ -1,3 +1,4 @@
+use rspice_core::NoAbort;
 use rspice_core::analysis::NoiseSourceType;
 use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::constants::K_BOLTZMANN;
@@ -25,7 +26,7 @@ fn ordinary(netlist: &Netlist, frequency: f64) -> rspice_core::analysis::NoiseRe
         .get_node_by_name("out")
         .expect("output node exists");
     engine
-        .run_noise_ports(netlist, output, None, &[frequency], TEMPERATURE)
+        .run_noise_ports_with_abort(netlist, output, None, &[frequency], TEMPERATURE, &NoAbort)
         .expect("ordinary noise solves")
         .remove(0)
 }
@@ -540,7 +541,7 @@ fn pnoise_scales_an_overflowing_elementary_density_while_ordinary_noise_refuses_
         .get_node_by_name("out")
         .expect("output node exists");
     let error = engine
-        .run_noise_ports(&netlist, output, None, &[1.0e3], temperature)
+        .run_noise_ports_with_abort(&netlist, output, None, &[1.0e3], temperature, &NoAbort)
         .expect_err("ordinary NoiseSource density cannot materialize infinity");
     let message = error.to_string().to_ascii_lowercase();
     assert!(
@@ -571,7 +572,7 @@ fn noisy_negative_branch_resistance_fails_closed_but_quiet_branch_is_allowed() {
         .get_node_by_name("out")
         .expect("output node exists");
     let error = engine
-        .run_noise_ports(&noisy, output, None, &[1.0e3], TEMPERATURE)
+        .run_noise_ports_with_abort(&noisy, output, None, &[1.0e3], TEMPERATURE, &NoAbort)
         .expect_err("negative noisy resistance must fail closed");
     let message = error.to_string().to_ascii_lowercase();
     assert!(

@@ -1,6 +1,7 @@
 //! Native EKV 2.6 validation against Xyce 7.10.
 
 use num_complex::Complex64;
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
@@ -754,7 +755,15 @@ fn ekv26_noise_contribution_table_reads_the_same_on_either_route() {
         .map(|index| 10.0_f64.powf(1.0 + f64::from(index) / 10.0))
         .collect();
     let results = Engine::new(SimulationConfig::default())
-        .run_noise_named_with_input_source(&netlist, "d", None, "vin", &frequencies, 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "d",
+            None,
+            "vin",
+            &frequencies,
+            300.15,
+            &NoAbort,
+        )
         .expect("EKV26 noise analysis runs");
 
     let whole_device = results

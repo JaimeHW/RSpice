@@ -3,9 +3,9 @@
 //! One table answers "may this analysis run on a circuit that contains this
 //! family of instances", and it is the only place that answer is written. Every
 //! analysis entry point asks it through [`Engine::ensure_analysis_capability`]
-//! before solver work, and the same table is exported through
-//! [`capability_matrix`] so a support table shown to a person is generated
-//! from the code that enforces it rather than restated beside it.
+//! before solver work, and [`capability_cell`] reads the same table, so a
+//! support table shown to a person is generated from the code that enforces
+//! it rather than restated beside it.
 //!
 //! A cell is one of three answers:
 //!
@@ -541,6 +541,7 @@ const fn periodic_veriloga_reason(analysis: CapabilityAnalysis, generated: bool)
 
 /// The whole matrix, family-major in [`CapabilityFamily::ALL`] order and then
 /// [`CapabilityAnalysis::ALL`] order.
+#[cfg(test)]
 pub fn capability_matrix()
 -> impl Iterator<Item = (CapabilityFamily, CapabilityAnalysis, CellSupport)> {
     CapabilityFamily::ALL.into_iter().flat_map(|family| {

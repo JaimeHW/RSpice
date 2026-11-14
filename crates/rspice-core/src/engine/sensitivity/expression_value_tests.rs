@@ -131,7 +131,12 @@ fn an_expression_valued_resistor_reports_the_row_a_literal_one_reports() {
     let engine = Engine::default();
     let study = |deck: &str| {
         engine
-            .run_sensitivity_dc_complete(&Netlist::parse(deck).expect("deck parses"), probe(2), &[])
+            .run_sensitivity_dc_complete_with_abort(
+                &Netlist::parse(deck).expect("deck parses"),
+                probe(2),
+                &[],
+                &NoAbort,
+            )
             .expect("the unfiltered DC study runs")
     };
     let literal = study(LITERAL_DIVIDER);
@@ -184,10 +189,15 @@ fn perturbing_an_expression_valued_element_leaves_its_siblings_at_nominal() {
     let literals = Netlist::parse(SHARED_PARAMETER_LITERALS).expect("literal deck parses");
 
     let expression = engine
-        .run_sensitivity_dc_complete(&parameterized, probe(2), &filters(&["R*", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &parameterized,
+            probe(2),
+            &filters(&["R*", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the union study runs");
     let literal = engine
-        .run_sensitivity_dc_complete(&literals, probe(2), &filters(&["R*"]))
+        .run_sensitivity_dc_complete_with_abort(&literals, probe(2), &filters(&["R*"]), &NoAbort)
         .expect("the literal study runs");
     assert_eq!(row_names(&expression), ["PARAM:R", "R1", "R2", "R3"]);
     assert_eq!(row_names(&literal), ["R1", "R2", "R3"]);
@@ -258,7 +268,12 @@ fn the_ratiometric_divider_obeys_the_chain_rule_through_its_expressions() {
     );
 
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R*", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["R*", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the union study runs");
     assert_eq!(row_names(&result), ["PARAM:R", "R1", "R2"]);
     close(result.output_value, 20.0 / 3.0, 1e-9, "V(out) = 10*2r/3r");
@@ -307,7 +322,12 @@ RL out 0 1k\n\
     .expect("deck parses");
     let engine = Engine::default();
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(3), &filters(&["V1", "E1"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(3),
+            &filters(&["V1", "E1"]),
+            &NoAbort,
+        )
         .expect("the study runs");
     assert_eq!(row_names(&result), ["E1", "V1"]);
     close(result.output_value, 6.0, 1e-9, "V(out) = 2*k * vdd");
@@ -339,7 +359,7 @@ R2 out 0 4k M={2*m0}\n\
     .expect("deck parses");
     let engine = Engine::default();
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &[])
+        .run_sensitivity_dc_complete_with_abort(&netlist, probe(2), &[], &NoAbort)
         .expect("the unfiltered study runs");
     assert_eq!(row_names(&result), ["R1", "R2", "R2_M", "V1"]);
     close(result.output_value, 20.0 / 3.0, 1e-9, "V(out) = 10*2k/3k");

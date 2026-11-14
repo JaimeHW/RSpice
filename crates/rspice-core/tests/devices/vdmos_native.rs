@@ -1,5 +1,6 @@
 //! Native VDMOS / Xyce MOS LEVEL=18 integration tests.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
@@ -2678,7 +2679,15 @@ fn assert_vdmos_noise_matches_ngspice46(deck: &str, table: &[[f64; 6]; 6]) {
         spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
         ..Default::default()
     })
-    .run_noise_named_with_input_source(&netlist, "d", None, "vin", &frequencies, 300.15)
+    .run_noise_named_with_input_source_and_abort(
+        &netlist,
+        "d",
+        None,
+        "vin",
+        &frequencies,
+        300.15,
+        &NoAbort,
+    )
     .expect("VDMOS noise analysis runs");
     assert_eq!(results.len(), table.len());
     for (result, row) in results.iter().zip(table) {

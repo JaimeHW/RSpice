@@ -7,6 +7,7 @@
 //! LTspice 26.1.1 batch run of the same deck are pinned beside the analytic
 //! value; QSPICE has no netlist form of a generic op-amp to vote with.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 
@@ -236,13 +237,14 @@ X2 in2 out2 vp vn out2 RSPICE_FN_OPAMP IB=100n IOS=20n
 fn op_amp_noise_densities_are_its_parameters() {
     let noise = |deck: &str, frequencies: &[f64]| -> Vec<f64> {
         Engine::default()
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &parse(deck),
                 "out",
                 None,
                 "VIN",
                 frequencies,
                 300.15,
+                &NoAbort,
             )
             .expect("noise solves")
             .iter()
@@ -498,13 +500,14 @@ VO out 0 0
 
     let noise = |deck: &str, frequencies: &[f64]| -> Vec<f64> {
         Engine::default()
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &parse(deck),
                 "out",
                 None,
                 "VIN",
                 frequencies,
                 300.15,
+                &NoAbort,
             )
             .expect("noise solves")
             .iter()

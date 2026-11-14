@@ -75,10 +75,11 @@ fn a_sens_card_with_no_filter_names_no_design_parameter() {
 
     let netlist = Netlist::parse(SOURCE_DRIVEN).expect("deck parses");
     let result = engine
-        .run_sensitivity_dc_complete(
+        .run_sensitivity_dc_complete_with_abort(
             &netlist,
             AcSensitivityOutput::BranchCurrent("V1".into()),
             &[],
+            &NoAbort,
         )
         .expect("unfiltered DC sensitivity runs");
     assert_eq!(row_names(&result), ["R1", "V1"]);
@@ -98,7 +99,7 @@ fn a_sens_card_with_no_filter_names_no_design_parameter() {
 
     let netlist = Netlist::parse(RATIOMETRIC_DIVIDER).expect("deck parses");
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &[])
+        .run_sensitivity_dc_complete_with_abort(&netlist, probe(2), &[], &NoAbort)
         .expect("unfiltered DC sensitivity runs");
     assert_eq!(row_names(&result), ["R1", "R2", "V1"]);
     close(
@@ -128,7 +129,12 @@ fn a_param_filter_selects_design_parameters_by_name_and_by_glob() {
         &["param:drive"],
     ] {
         let result = engine
-            .run_sensitivity_dc_complete(&netlist, probe(1), &filters(selection))
+            .run_sensitivity_dc_complete_with_abort(
+                &netlist,
+                probe(1),
+                &filters(selection),
+                &NoAbort,
+            )
             .unwrap_or_else(|error| panic!("{selection:?} must select DRIVE: {error}"));
         assert_eq!(row_names(&result), ["PARAM:DRIVE"], "filter {selection:?}");
         let row = result.get("PARAM:DRIVE").expect("design row");
@@ -139,7 +145,12 @@ fn a_param_filter_selects_design_parameters_by_name_and_by_glob() {
     }
 
     let mixed = engine
-        .run_sensitivity_dc_complete(&netlist, probe(1), &filters(&["R1", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(1),
+            &filters(&["R1", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("a mixed filter list selects from both namespaces");
     assert_eq!(row_names(&mixed), ["PARAM:DRIVE", "R1"]);
 }
@@ -162,7 +173,12 @@ R1 out 0 {rload}\n\
     let engine = Engine::default();
     for selection in [&["R*"][..], &["*"], &["R1:*"]] {
         let result = engine
-            .run_sensitivity_dc_complete(&netlist, probe(1), &filters(selection))
+            .run_sensitivity_dc_complete_with_abort(
+                &netlist,
+                probe(1),
+                &filters(selection),
+                &NoAbort,
+            )
             .unwrap_or_else(|error| panic!("{selection:?} must still select devices: {error}"));
         assert!(
             result
@@ -176,7 +192,7 @@ R1 out 0 {rload}\n\
     // The parameter's own bare name belongs to no namespace this filter list
     // addresses, so it is dead rather than a way in.
     let message = engine
-        .run_sensitivity_dc_complete(&netlist, probe(1), &filters(&["RLOAD"]))
+        .run_sensitivity_dc_complete_with_abort(&netlist, probe(1), &filters(&["RLOAD"]), &NoAbort)
         .expect_err("a bare parameter name must not reach the design parameters")
         .to_string();
     assert!(
@@ -184,7 +200,12 @@ R1 out 0 {rload}\n\
         "unexpected refusal: {message}"
     );
     let design = engine
-        .run_sensitivity_dc_complete(&netlist, probe(1), &filters(&["PARAM:RLOAD"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(1),
+            &filters(&["PARAM:RLOAD"]),
+            &NoAbort,
+        )
         .expect("the design parameter is still reachable by its own spelling");
     assert_eq!(row_names(&design), ["PARAM:RLOAD"]);
 }
@@ -206,7 +227,12 @@ R2 out 0 1k\n\
     .expect("deck parses");
     let engine = Engine::default();
     let message = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["PARAM:*"]),
+            &NoAbort,
+        )
         .expect_err("an ambiguous owner must not be resolved silently")
         .to_string();
     assert!(
@@ -218,7 +244,12 @@ R2 out 0 1k\n\
     // `PARAM:RSH` is the model's own parameter here, and it is refused for the
     // same reason: one spelling cannot mean two things in one filter list.
     let ambiguous = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:RSH"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["PARAM:RSH"]),
+            &NoAbort,
+        )
         .expect_err("the model's own parameter spelling is ambiguous too")
         .to_string();
     assert!(
@@ -228,7 +259,7 @@ R2 out 0 1k\n\
     // Without a `PARAM:` filter there is no ambiguity, and the model row keeps
     // the name the engine has always given it.
     let devices = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &[])
+        .run_sensitivity_dc_complete_with_abort(&netlist, probe(2), &[], &NoAbort)
         .expect("the unfiltered study is unaffected");
     assert!(
         devices.get("PARAM:RSH").is_some(),
@@ -247,7 +278,12 @@ fn an_empty_param_filter_is_refused() {
         (
             "DC",
             engine
-                .run_sensitivity_dc_complete(&netlist, probe(1), &filters(&["PARAM:"]))
+                .run_sensitivity_dc_complete_with_abort(
+                    &netlist,
+                    probe(1),
+                    &filters(&["PARAM:"]),
+                    &NoAbort,
+                )
                 .expect_err("a truncated filter must be refused")
                 .to_string(),
         ),
@@ -276,7 +312,12 @@ fn a_filter_that_selects_nothing_is_refused_by_name() {
     let engine = Engine::default();
 
     let message = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R1", "GIAN", "R9*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["R1", "GIAN", "R9*"]),
+            &NoAbort,
+        )
         .expect_err("a live filter must not excuse the dead ones")
         .to_string();
     assert!(
@@ -285,7 +326,12 @@ fn a_filter_that_selects_nothing_is_refused_by_name() {
     );
 
     let message = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:GIAN"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["PARAM:GIAN"]),
+            &NoAbort,
+        )
         .expect_err("a dead design-parameter filter is refused the same way")
         .to_string();
     assert!(
@@ -305,7 +351,12 @@ fn a_filter_that_selects_nothing_is_refused_by_name() {
 
     // A list in which every item selects something still runs.
     engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R*", "PARAM:R"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["R*", "PARAM:R"]),
+            &NoAbort,
+        )
         .expect("a wholly live filter list runs");
 }
 
@@ -352,7 +403,12 @@ fn the_chain_rule_joins_a_design_parameter_to_the_source_it_drives() {
     );
 
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, output, &filters(&["*", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            output,
+            &filters(&["*", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the union study runs");
     assert_eq!(row_names(&result), ["PARAM:DRIVE", "R1", "V1"]);
     close(result.output_value, -1.0, 1e-9, "I(V1) = -drive/R1");
@@ -389,7 +445,12 @@ fn the_chain_rule_sums_over_every_element_a_design_parameter_drives() {
         "the ratiometric divider is qualified linear: PARAM:R must be exact"
     );
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R*", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["R*", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the union study runs");
     close(result.output_value, 20.0 / 3.0, 1e-9, "V(out) = 10*2r/3r");
     assert_eq!(row_names(&result), ["PARAM:R", "PARAM:RR", "R1", "R2"]);
@@ -487,7 +548,12 @@ B1 out 0 V={gain*scale*V(in)}\n\
     );
 
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["*", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["*", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the union DC study runs");
     close(result.output_value, 6.0, 1e-9, "V(out) = gain*scale*V(in)");
     let row = |name: &str| result.get(name).expect("row").absolute;
@@ -781,7 +847,12 @@ RBOT output 0 1k\n\
         "a parameter read inside a subcircuit body keeps its captured direction"
     );
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["*RTOP", "PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["*RTOP", "PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the hierarchical union study runs");
     close(result.output_value, 5.0, 1e-9, "V(out) = 10*RBOT/(r+RBOT)");
     let device = result
@@ -821,7 +892,12 @@ B1 out 0 V={gain*V(in)}\n\
     let mut config = crate::engine::SimulationConfig::default();
     config.resource_limits.max_batch_runs = 1;
     let error = Engine::new(config)
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["PARAM:*"]),
+            &NoAbort,
+        )
         .expect_err("one run buys the nominal solve and nothing else");
     assert!(
         matches!(error, SimulationError::ResourceLimit(_)),
@@ -833,7 +909,12 @@ B1 out 0 V={gain*V(in)}\n\
     );
 
     let generous = Engine::default()
-        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(
+            &netlist,
+            probe(2),
+            &filters(&["PARAM:*"]),
+            &NoAbort,
+        )
         .expect("the same study runs against the default budget");
     close(
         generous.get("PARAM:GAIN").expect("design row").absolute,
@@ -864,7 +945,7 @@ fn a_design_parameter_on_a_deck_with_no_retained_source_is_reported_as_it_resolv
         "the exact path needs the retained source it replays"
     );
     let result = engine
-        .run_sensitivity_dc_complete(&netlist, output, &filters(&["PARAM:*"]))
+        .run_sensitivity_dc_complete_with_abort(&netlist, output, &filters(&["PARAM:*"]), &NoAbort)
         .expect("the design row is still published");
     let row = result.get("PARAM:DRIVE").expect("design row");
     assert_eq!(

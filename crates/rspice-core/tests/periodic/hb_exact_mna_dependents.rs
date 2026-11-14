@@ -238,13 +238,14 @@ fn expected_noise() -> (f64, f64, f64) {
 
 fn ordinary_noise_oracle() -> (f64, f64, f64) {
     let result = engine()
-        .run_noise_named_with_input_source(
+        .run_noise_named_with_input_source_and_abort(
             &parse(true),
             "drain",
             None,
             "VIN",
             &[OFFSET],
             TEMPERATURE,
+            &NoAbort,
         )
         .expect("ordinary input-referred noise completes")
         .pop()

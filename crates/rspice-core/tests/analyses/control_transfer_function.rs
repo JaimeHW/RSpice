@@ -42,7 +42,7 @@ fn explicit_transfer_function_creates_a_typed_dataset() {
         AnalysisKind::TransferFunction
     );
     let direct = Engine::default()
-        .run_transfer_function(circuit.netlist(), "OUT", None, false, "V1")
+        .run_transfer_function_with_abort(circuit.netlist(), "OUT", None, false, "V1", &NoAbort)
         .unwrap();
     let dataset = &circuit.datasets()[0];
     let ControlAnalysisResult::TransferFunction(actual) = &dataset.result else {

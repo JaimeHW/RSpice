@@ -1,5 +1,6 @@
 //! End-to-end DC lifecycle pins for runtime-compiled Verilog-A devices.
 
+use crate::model_outcome::RunWithOutcome;
 use rspice_core::abort_signal::CountingAbort;
 use rspice_core::engine::DcSweepRange;
 use rspice_core::notice::{EngineNotice, NoticeCollector};

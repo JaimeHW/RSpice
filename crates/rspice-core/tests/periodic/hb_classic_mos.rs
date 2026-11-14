@@ -269,7 +269,7 @@ fn classic_mos_driven_rates_feed_shooting_and_quasi_periodic_responses() {
             "PSS sideband {sideband}: {sampled} vs {expected}"
         );
         let qpac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &deck,
                 QpacRequest {
                     offsets_hz: vec![offset],
@@ -283,6 +283,7 @@ fn classic_mos_driven_rates_feed_shooting_and_quasi_periodic_responses() {
                     solver: Default::default(),
                 },
                 &quasi,
+                &NoAbort,
             )
             .unwrap();
         assert!((qpac.output_transfer[0] - expected).norm() < 2e-6 + 3e-3 * expected.norm());
@@ -300,7 +301,7 @@ fn classic_mos_driven_rates_feed_shooting_and_quasi_periodic_responses() {
         )
         .unwrap();
     let noise = engine
-        .run_qpnoise_from_qpss(
+        .run_qpnoise_from_qpss_with_abort(
             &deck,
             QpnoiseRequest {
                 frequencies_hz: vec![offset],
@@ -324,6 +325,7 @@ fn classic_mos_driven_rates_feed_shooting_and_quasi_periodic_responses() {
                 linear: Default::default(),
             },
             &quasi,
+            &NoAbort,
         )
         .unwrap();
     assert!(

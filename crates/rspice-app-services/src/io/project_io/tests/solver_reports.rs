@@ -143,7 +143,15 @@ fn solved_noise_summary(deck: &str, output: &str, input: &str) -> crate::state::
     let frequencies = [1.0e1, 1.0e2, 1.0e3, 1.0e4, 1.0e5];
     let results =
         rspice_core::engine::Engine::new(rspice_core::engine::SimulationConfig::default())
-            .run_noise_named_with_input_source(&netlist, output, None, input, &frequencies, 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                output,
+                None,
+                input,
+                &frequencies,
+                300.15,
+                &rspice_core::NoAbort,
+            )
             .expect("noise analysis runs");
     let integrated = rspice_core::analysis::IntegratedNoise::new(results);
     crate::state::NoiseSummary {

@@ -12,6 +12,9 @@ mod family_src;
 #[path = "../common/log_capture.rs"]
 mod log_capture;
 #[cfg(feature = "veriloga")]
+#[path = "../common/model_outcome.rs"]
+mod model_outcome;
+#[cfg(feature = "veriloga")]
 #[path = "../common/veriloga_source_fixture.rs"]
 mod veriloga_source_fixture;
 

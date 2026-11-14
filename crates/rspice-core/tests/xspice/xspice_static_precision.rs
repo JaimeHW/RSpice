@@ -1,4 +1,5 @@
 //! Code-model arithmetic must retain representable responses and derivatives.
+use rspice_core::NoAbort;
 use rspice_core::xspice::{
     CmContext, CodeModel,
     models::{Divider, Multiplier, SXfer, Spice2Poly},
@@ -864,7 +865,15 @@ fn small_signal_analyses_reject_unrepresentable_transfer_gain_instead_of_zero() 
             (
                 "noise",
                 engine
-                    .run_noise_named_with_input_source(&netlist, "out", None, "V1", &[1.0], 300.15)
+                    .run_noise_named_with_input_source_and_abort(
+                        &netlist,
+                        "out",
+                        None,
+                        "V1",
+                        &[1.0],
+                        300.15,
+                        &NoAbort,
+                    )
                     .map(|_| ()),
             ),
             (

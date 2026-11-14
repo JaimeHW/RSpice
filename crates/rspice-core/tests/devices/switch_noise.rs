@@ -13,6 +13,7 @@
 //! same deck run through ngspice-46 reports `v(2) = 0.999` in `.AC` with the
 //! switch ON at the operating point.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::NoiseResult;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
@@ -69,7 +70,15 @@ fn noise_at_1khz(deck: &str, dialect: SpiceDialect) -> NoiseResult {
         spice_dialect: dialect,
         ..Default::default()
     })
-    .run_noise_named_with_input_source(&netlist, "2", None, "v1", &[1.0e3], 300.15)
+    .run_noise_named_with_input_source_and_abort(
+        &netlist,
+        "2",
+        None,
+        "v1",
+        &[1.0e3],
+        300.15,
+        &NoAbort,
+    )
     .expect("the switch noise analysis runs")
     .into_iter()
     .next()

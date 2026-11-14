@@ -404,6 +404,7 @@ pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
 
 /// Exhaustive signal-to-row lookup. This is the signal-schema counterpart of
 /// `analysis_result_capability`.
+#[cfg(test)]
 pub const fn signal_capability(kind: SignalKind) -> &'static SignalCapability {
     match kind {
         SignalKind::Voltage => &SIGNAL_CAPABILITY_MATRIX[0],

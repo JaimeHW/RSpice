@@ -8,6 +8,7 @@
 //! operating point reports.
 
 use super::*;
+use crate::abort_signal::NoAbort;
 use crate::engine::SimulationConfig;
 use crate::netlist::{
     SpectreCorrelation, SpectreCorrelationMatrix, SpectreDistribution, SpectreSpread,
@@ -81,9 +82,10 @@ fn a_linear_mismatch_probe_preserves_representable_extreme_spreads() {
             &format!(".param p=1000\nB1 out 0 V={{{scale:e}*p}}\nR1 out 0 1k"),
         );
         let result = engine()
-            .run_dc_match(
+            .run_dc_match_with_abort(
                 &netlist,
                 &all_contributors(&DcMatchCard::voltage_probe("OUT")),
+                &NoAbort,
             )
             .unwrap();
         assert!(
@@ -132,9 +134,10 @@ fn a_dcmatch_sigma_matches_the_analytic_resistor_divider() {
     let expected = libm::sqrt(from_r1 * from_r1 + from_r2 * from_r2);
 
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &divider(),
             &all_contributors(&DcMatchCard::voltage_probe("OUT")),
+            &NoAbort,
         )
         .expect("mismatch variance solves");
 
@@ -245,9 +248,10 @@ fn a_declared_process_correlation_enters_the_variance_exactly() {
     assert!(from_r1 < 0.0 && from_r2 > 0.0, "the two signs are opposite");
     for coefficient in [-1.0, -0.5, 0.0, 0.5, 1.0] {
         let result = engine()
-            .run_dc_match(
+            .run_dc_match_with_abort(
                 &correlated_process_divider(DIVIDER_R2, &format!("{coefficient}")),
                 &process_card(),
+                &NoAbort,
             )
             .expect("the correlated process variance solves");
         // sigma^2 = c1^2 + c2^2 + 2*rho*c1*c2, the quadratic form written out
@@ -280,9 +284,10 @@ fn a_declared_process_correlation_enters_the_variance_exactly() {
     assert_eq!(equal_r1, -equal_r2);
     let independent = libm::sqrt(equal_r1 * equal_r1 + equal_r2 * equal_r2);
     let cancelled = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &correlated_process_divider(DIVIDER_R1, "1"),
             &process_card(),
+            &NoAbort,
         )
         .expect("the perfectly correlated variance solves");
     assert!(
@@ -329,9 +334,10 @@ fn correlated_mismatch_ladder(coefficient: &str) -> Netlist {
 #[test]
 fn a_correlation_inside_one_instance_does_not_couple_two_instances() {
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &correlated_mismatch_ladder(&format!("{LADDER_COEFFICIENT}")),
             &all_contributors(&DcMatchCard::voltage_probe("TOP")),
+            &NoAbort,
         )
         .expect("the correlated mismatch variance solves");
 
@@ -372,9 +378,10 @@ fn a_correlation_inside_one_instance_does_not_couple_two_instances() {
 #[test]
 fn uncorrelated_statistics_report_the_numbers_they_always_did() {
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &divider(),
             &all_contributors(&DcMatchCard::voltage_probe("OUT")),
+            &NoAbort,
         )
         .expect("mismatch variance solves");
 
@@ -443,7 +450,11 @@ fn correlated_process_ladder(coefficient: &str) -> Netlist {
 fn the_variance_shares_sum_to_one_and_keep_their_sign() {
     const COEFFICIENT: Value = -0.9;
     let result = engine()
-        .run_dc_match(&correlated_process_ladder("-0.9"), &process_card())
+        .run_dc_match_with_abort(
+            &correlated_process_ladder("-0.9"),
+            &process_card(),
+            &NoAbort,
+        )
         .expect("the anticorrelated process variance solves");
 
     let from_a = LADDER_CURRENT * LADDER_SIGMA_A;
@@ -511,7 +522,7 @@ fn an_invalid_correlation_matrix_is_refused_in_the_samplers_own_words() {
          R3 low 0 {pc}",
     );
     let message = engine()
-        .run_dc_match(&netlist, &process_card())
+        .run_dc_match_with_abort(&netlist, &process_card(), &NoAbort)
         .expect_err("three mutually inconsistent coefficients are not a correlation matrix")
         .to_string();
 
@@ -536,7 +547,7 @@ fn dc_mismatch_and_monte_carlo_agree_on_a_correlated_divider() {
     const RUNS: usize = 2000;
     let netlist = correlated_process_divider(DIVIDER_R2, "0.8");
     let linearized = engine()
-        .run_dc_match(&netlist, &process_card())
+        .run_dc_match_with_abort(&netlist, &process_card(), &NoAbort)
         .expect("the correlated process variance solves");
     assert_eq!(linearized.applied_correlations_process, 1);
 
@@ -582,7 +593,7 @@ fn a_dcmatch_sigma_matches_a_monte_carlo_population_on_a_resistor_divider() {
     const RUNS: usize = 2000;
     let netlist = divider();
     let linearized = engine()
-        .run_dc_match(&netlist, &DcMatchCard::voltage_probe("OUT"))
+        .run_dc_match_with_abort(&netlist, &DcMatchCard::voltage_probe("OUT"), &NoAbort)
         .expect("mismatch variance solves");
 
     // The same statistics block, sampled by the existing Monte Carlo
@@ -613,7 +624,7 @@ fn contributors_sum_to_the_total_variance() {
     let netlist = divider();
     let probe = DcMatchCard::voltage_probe("OUT");
     let complete = engine()
-        .run_dc_match(&netlist, &all_contributors(&probe))
+        .run_dc_match_with_abort(&netlist, &all_contributors(&probe), &NoAbort)
         .expect("mismatch variance solves");
     // Every (instance, variable) pair is evaluated: three instances
     // (`V1`, `R1`, `R2`) times two declared mismatch variables. A pair the
@@ -627,12 +638,13 @@ fn contributors_sum_to_the_total_variance() {
     assert!(complete.contributors[0].share > complete.contributors[1].share);
 
     let largest = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &netlist,
             &DcMatchCard {
                 contributor_limit: 1,
                 ..probe.clone()
             },
+            &NoAbort,
         )
         .expect("mismatch variance solves");
     assert_eq!(largest.contributors.len(), 1);
@@ -641,13 +653,14 @@ fn contributors_sum_to_the_total_variance() {
     assert_eq!(largest.sigma_total, complete.sigma_total);
 
     let above_half = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &netlist,
             &DcMatchCard {
                 contributor_limit: 0,
                 threshold: 0.5,
                 ..probe
             },
+            &NoAbort,
         )
         .expect("mismatch variance solves");
     assert_eq!(above_half.contributors.len(), 1);
@@ -662,7 +675,7 @@ fn process_spreads_are_perfectly_correlated_across_instances() {
     let body = ".param rv=1k\nI1 0 top DC 1m\nR1 top mid {rv}\nR2 mid 0 {rv}";
 
     let independent = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &deck(
                 &plan(vec![variation(
                     2,
@@ -673,6 +686,7 @@ fn process_spreads_are_perfectly_correlated_across_instances() {
                 body,
             ),
             &all_contributors(&DcMatchCard::voltage_probe("TOP")),
+            &NoAbort,
         )
         .expect("mismatch variance solves");
     let expected_mismatch = libm::sqrt(2.0) * CURRENT * SIGMA;
@@ -683,7 +697,7 @@ fn process_spreads_are_perfectly_correlated_across_instances() {
     );
 
     let correlated = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &deck(
                 &plan(vec![variation(
                     2,
@@ -699,6 +713,7 @@ fn process_spreads_are_perfectly_correlated_across_instances() {
                 contributor_limit: 0,
                 ..DcMatchCard::voltage_probe("TOP")
             },
+            &NoAbort,
         )
         .expect("process variance solves");
     let expected_process = 2.0 * CURRENT * SIGMA;
@@ -774,13 +789,14 @@ fn a_differential_pair_offset_matches_pelgrom() {
     let expected = libm::sqrt(2.0) * gm1 * 20.0e3 * sigma_vth;
 
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &netlist,
             &DcMatchCard {
                 reference_node: Some("D2".to_owned()),
                 contributor_limit: 0,
                 ..DcMatchCard::voltage_probe("D1")
             },
+            &NoAbort,
         )
         .expect("mismatch variance solves");
 
@@ -813,7 +829,7 @@ fn a_design_without_statistics_is_refused_with_the_remedy() {
     let netlist = Netlist::parse("plain divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.end\n")
         .expect("deck parses");
     let error = engine()
-        .run_dc_match(&netlist, &DcMatchCard::voltage_probe("OUT"))
+        .run_dc_match_with_abort(&netlist, &DcMatchCard::voltage_probe("OUT"), &NoAbort)
         .expect_err("a design with no statistics has no mismatch to report");
     let message = error.to_string();
     assert!(
@@ -835,13 +851,14 @@ fn a_scope_the_design_does_not_declare_is_refused_by_name() {
         ".param rv=1k\nV1 in 0 1\nR1 in out {rv}\nR2 out 0 2k",
     );
     let error = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &netlist,
             &DcMatchCard {
                 mismatch: false,
                 process: true,
                 ..DcMatchCard::voltage_probe("OUT")
             },
+            &NoAbort,
         )
         .expect_err("the design declares no process variation");
     let message = error.to_string();
@@ -854,7 +871,7 @@ fn a_scope_the_design_does_not_declare_is_refused_by_name() {
 #[test]
 fn a_probe_the_design_does_not_have_is_refused() {
     let error = engine()
-        .run_dc_match(&divider(), &DcMatchCard::voltage_probe("nowhere"))
+        .run_dc_match_with_abort(&divider(), &DcMatchCard::voltage_probe("nowhere"), &NoAbort)
         .expect_err("an absent probe cannot be measured");
     assert!(
         error.to_string().contains(".DCMATCH output"),
@@ -866,12 +883,13 @@ fn a_probe_the_design_does_not_have_is_refused() {
 #[test]
 fn a_dcmatch_result_quotes_the_requested_sigma_multiple() {
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &divider(),
             &DcMatchCard {
                 sigma_multiplier: 3.0,
                 ..DcMatchCard::voltage_probe("OUT")
             },
+            &NoAbort,
         )
         .expect("mismatch variance solves");
     assert_eq!(result.sigma_multiplier, 3.0);
@@ -927,9 +945,10 @@ fn hundred_cell_array() -> Netlist {
 #[test]
 fn a_hundred_cell_array_evaluates_one_pair_per_scope_and_variable() {
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &hundred_cell_array(),
             &all_contributors(&DcMatchCard::voltage_probe("OUT")),
+            &NoAbort,
         )
         .expect("the array's mismatch variance solves");
     assert_eq!(result.evaluated_contributors, 306);
@@ -1006,7 +1025,9 @@ fn bounded_moments_reach_process_and_instance_mismatch_circuit_variances() {
             mismatch: scope == SpectreVariationScope::Mismatch,
             ..all_contributors(&DcMatchCard::voltage_probe("TOP"))
         };
-        let result = engine().run_dc_match(&circuit, &card).unwrap();
+        let result = engine()
+            .run_dc_match_with_abort(&circuit, &card, &NoAbort)
+            .unwrap();
         // Each resistor has Var(da+db) = 300+400 Var(Z|-1<Z<1).
         // Process variation shares draws between resistors; mismatch does not.
         let multiplier = if card.process { 4e-6 } else { 2e-6 };
@@ -1045,13 +1066,14 @@ fn bounded_moments_reach_process_and_instance_mismatch_circuit_variances() {
         ".param r=1000\nI1 0 top 1m\nR1 top 0 {r}",
     );
     let result = engine()
-        .run_dc_match(
+        .run_dc_match_with_abort(
             &circuit,
             &DcMatchCard {
                 process: true,
                 mismatch: false,
                 ..DcMatchCard::voltage_probe("TOP")
             },
+            &NoAbort,
         )
         .unwrap();
     let expected = libm::exp(0.02) * libm::sqrt(libm::expm1(0.04));

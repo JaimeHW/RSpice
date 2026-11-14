@@ -1,3 +1,4 @@
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};
 use rspice_core::netlist::Netlist;
 
@@ -528,11 +529,12 @@ fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
         ..SimulationConfig::default()
     });
     let result = engine
-        .run_tran_with_startup_mode(
+        .run_tran_with_startup_mode_and_abort(
             &deck,
             100.0e-9,
             10.0e-9,
             TransientStartupMode::OperatingPoint,
+            &NoAbort,
         )
         .unwrap();
     assert_eq!(result.time.last().copied(), Some(100.0e-9));
@@ -608,7 +610,13 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
         ..SimulationConfig::default()
     });
     let result = engine
-        .run_tran_with_startup_mode(&deck, 60.0e-9, 6.0e-9, TransientStartupMode::OperatingPoint)
+        .run_tran_with_startup_mode_and_abort(
+            &deck,
+            60.0e-9,
+            6.0e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+        )
         .unwrap();
     // The schedule's copy of the 25 ns corner's arrival, and the line's own.
     let breakpoint: f64 = 25.0e-9 + 10.0e-9;

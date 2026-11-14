@@ -16,10 +16,13 @@
 
 #[path = "common/veriloga_source_fixture.rs"]
 mod fixture;
+#[path = "common/model_outcome.rs"]
+mod model_outcome;
 
 use fixture::{
     DIVIDER_VALUES, Fixture, HALF_DIVIDER_OHMS, divider_deck, divider_out, resistor_module,
 };
+use model_outcome::RunWithOutcome;
 use rspice_core::{Engine, Netlist};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};

@@ -911,34 +911,12 @@ fn integrated_noise_contribution_range_and_ranking_in_wasm() {
 }
 
 #[wasm_bindgen_test]
-fn phase_noise_spot_and_sideband_range_in_wasm() {
-    use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
-    let mut result = PnoiseResult::new(1e6, "out");
-    result.add_point(PhaseNoisePoint::new(1e-14, -100.0));
-    result.add_point(PhaseNoisePoint::new(1e-12, -160.0));
-    assert!((result.phase_noise_at(1e-13).unwrap() + 130.0).abs() < 3e-14);
+fn phase_noise_sideband_range_in_wasm() {
+    use rspice_core::analysis::pnoise::PhaseNoisePoint;
     for db in [4000.0, -4000.0] {
         let combined = PhaseNoisePoint::with_sidebands(1.0, db, db).pn_dbc_hz;
         assert_eq!(combined, db + 10.0 * 2.0_f64.log10());
     }
-}
-
-#[wasm_bindgen_test]
-fn integrated_phase_noise_clipping_and_range_in_wasm() {
-    use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
-    let mut result = PnoiseResult::new(1e6, "out");
-    result.add_point(PhaseNoisePoint::new(1.0, 0.0));
-    result.add_point(PhaseNoisePoint::new(3.0, 10.0 * 9.0_f64.log10()));
-    let clipped = result.integrated_noise_power(1.0, 2.0).unwrap();
-    assert!((clipped - 10.0 * 3.0_f64.log10()).abs() < 2e-14);
-    result.spectral_points = vec![
-        PhaseNoisePoint::new(0.0, f64::NEG_INFINITY),
-        PhaseNoisePoint::new(1e300, 4000.0),
-    ];
-    let extreme = result.integrated_noise_power(0.0, 1e-100).unwrap();
-    assert!((extreme - (-1000.0 - 10.0 * 2.0_f64.log10())).abs() < 1e-12);
-    result.spectral_points[1].pn_dbc_hz = f64::NAN;
-    assert_eq!(result.integrated_noise_power(0.0, 1.0), None);
 }
 
 #[wasm_bindgen_test]
@@ -3797,7 +3775,10 @@ fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
     };
     let original = run(MonteCarloConfig::new(4));
     let seed = original.sampling.expect("resolved seed is retained").seed;
-    let replay = run(MonteCarloConfig::new(4).with_seed(seed));
+    let replay = run(MonteCarloConfig {
+        seed: Some(seed),
+        ..MonteCarloConfig::new(4)
+    });
     assert_eq!(
         original.variables["R1"].samples,
         replay.variables["R1"].samples

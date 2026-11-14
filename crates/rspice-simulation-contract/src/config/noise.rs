@@ -572,13 +572,14 @@ mod tests {
                 if table_name.eq_ignore_ascii_case("rspice_noise_frequency")
         )));
         let (_, results) = rspice_core::Engine::default()
-            .run_noise_data_named_with_input_source(
+            .run_noise_data_named_with_input_source_and_abort(
                 &netlist,
                 "out",
                 None,
                 "V1",
                 "rspice_noise_frequency",
                 config.temperature_kelvin,
+                &rspice_core::NoAbort,
             )
             .expect("generated explicit axis executes");
         assert_eq!(

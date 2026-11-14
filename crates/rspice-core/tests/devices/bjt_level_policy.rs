@@ -4,6 +4,7 @@
 //! but advanced BJT families without native implementations must not be
 //! silently evaluated as VBIC or legacy GP.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{ElementKind, Netlist};
 
@@ -1718,13 +1719,14 @@ fn vbic_noise_switch_removes_device_noise_without_changing_the_operating_point()
         );
         for (text, enabled) in [(&deck, true), (&quiet, false)] {
             let points = Engine::default()
-                .run_noise_named_with_input_source(
+                .run_noise_named_with_input_source_and_abort(
                     &Netlist::parse(text).unwrap(),
                     "c",
                     None,
                     "Vb",
                     &[1e3],
                     300.15,
+                    &NoAbort,
                 )
                 .unwrap();
             let device = points[0]
@@ -1752,13 +1754,14 @@ fn vbic13_extrinsic_flicker_noise_matches_xyce710() {
              .model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27 WBE=0 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.end\n"
         );
         let points = Engine::default()
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &Netlist::parse(&deck).unwrap(),
                 "c",
                 None,
                 "Vb",
                 &[1.0],
                 300.15,
+                &NoAbort,
             )
             .unwrap();
         assert_rel_close(
@@ -4642,7 +4645,13 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
             "External BC initial charge\nVB b 0 0\nVC c 0 0\nQ1 c b 0 qm AREA=3 M=2 IC={},0\n.model qm {kind}(IS=0 RB=50 CJC=1n MJC=0 XCJC=0)\n.save @Q1[ib] I(VB)\n.end", polarity * 0.2,
         )).unwrap();
         let result = engine
-            .run_tran_with_startup_mode(&netlist, 10e-9, 5e-9, TransientStartupMode::Uic)
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                10e-9,
+                5e-9,
+                TransientStartupMode::Uic,
+                &NoAbort,
+            )
             .unwrap();
         let current = result.try_branch_current_waveform_named("VB").unwrap()[1];
         // C=6n, V(0)=+/-0.2, V(5ns)=0 => dQ/dt=-/+0.24 A.
@@ -5830,13 +5839,14 @@ fn legacy_base_resistance_temperature_matches_ngspice_dc_ac_noise_and_transient(
                     );
                 }
                 let noise = engine
-                    .run_noise_named_with_input_source(
+                    .run_noise_named_with_input_source_and_abort(
                         &deck,
                         "b",
                         None,
                         "VD",
                         &[1e6],
                         temperature + 273.15,
+                        &NoAbort,
                     )
                     .unwrap();
                 let rb_noise: f64 = noise[0]

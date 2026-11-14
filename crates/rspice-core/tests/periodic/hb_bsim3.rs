@@ -9,6 +9,7 @@ use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
 use super::family_src;
+use rspice_core::NoAbort;
 
 /// The BSIM3v3 oracle cards (n018/p018, LEVEL=49, CAPMOD=3), read from the
 /// device model that owns them in whichever crate of the family holds it.
@@ -271,7 +272,7 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
             )
             .unwrap();
         let qpac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![f],
@@ -285,11 +286,12 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(qpac.output_transfer[0], ac[0].voltages[out], 2e-6);
         let qpxf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![f],
@@ -306,6 +308,7 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(qpxf.transfers[0].values[0], ac[0].voltages[out], 2e-6);
@@ -332,7 +335,7 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
                 QpnoiseOutput, QpnoiseRequest, QpnoiseSources,
             };
             let noise = engine
-                .run_qpnoise_from_qpss(
+                .run_qpnoise_from_qpss_with_abort(
                     &netlist,
                     QpnoiseRequest {
                         frequencies_hz: vec![f],
@@ -356,6 +359,7 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
                         linear: Default::default(),
                     },
                     &point,
+                    &NoAbort,
                 )
                 .unwrap();
             assert!(
@@ -404,7 +408,7 @@ fn bsim3_ac_only_nqs_driven_sidebands_match_quasiperiodic_response() {
     let point = engine.run_qpss(&netlist, qpss).unwrap();
     for sideband in [-1, 0, 1] {
         let response = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![offset],
@@ -418,6 +422,7 @@ fn bsim3_ac_only_nqs_driven_sidebands_match_quasiperiodic_response() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         let expected = pac.result.conversion_matrix.get(0, sideband, 0).unwrap();

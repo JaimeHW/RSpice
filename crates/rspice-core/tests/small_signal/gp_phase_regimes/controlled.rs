@@ -1,5 +1,6 @@
 use super::*;
 use rspice_core::CurrentImpulseOwner;
+use rspice_core::NoAbort;
 use rspice_core::engine::TransientStartupMode;
 
 fn deck(polarity: f64) -> Netlist {
@@ -33,7 +34,7 @@ fn gp_voltage_controlled_sources_preserve_transport_charge_currents_and_restart(
                 TransientStartupMode::Uic,
             ] {
                 let result = engine
-                    .run_tran_with_startup_mode(&source, 2.5e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&source, 2.5e-9, 4e-12, startup, &NoAbort)
                     .unwrap();
                 let uic = startup == TransientStartupMode::Uic;
                 behavioral::check(&result, dialect, polarity, Some("g1"), "e1", uic);

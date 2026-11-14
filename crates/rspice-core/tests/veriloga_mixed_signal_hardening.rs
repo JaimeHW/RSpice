@@ -48,10 +48,14 @@
 mod determinism_fingerprint;
 #[path = "common/digital_trace_invariants.rs"]
 mod digital_trace_invariants;
+#[path = "common/model_outcome.rs"]
+mod model_outcome;
 
 use determinism_fingerprint::{
     Fingerprint, assert_fingerprints_survive_new_processes, fingerprint, pin_fingerprint, pin_grid,
 };
+use model_outcome::RunWithOutcome;
+use rspice_core::NoAbort;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
@@ -1200,7 +1204,9 @@ fn an_automatic_real_to_voltage_converter_resumes_bit_for_bit() {
     let s = baseline.node_index_named("s").unwrap();
     let held = baseline.time.iter().rposition(|t| *t <= 150e-9).unwrap();
     assert_eq!(
-        baseline.voltage_waveform(s)[held],
+        baseline
+            .try_voltage_waveform(s)
+            .expect("node index in range")[held],
         3.75,
         "seven steps by 150 ns"
     );
@@ -1268,7 +1274,11 @@ fn a_resumed_real_to_voltage_converter_continues_its_saved_ramp() {
     assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
     let out = resumed.node_index_named("out").unwrap();
     let mut checked = 0;
-    for (t, v) in resumed.time.iter().zip(resumed.voltage_waveform(out)) {
+    for (t, v) in resumed.time.iter().zip(
+        resumed
+            .try_voltage_waveform(out)
+            .expect("node index in range"),
+    ) {
         if *t <= 100e-9 || *t > 150e-9 {
             continue;
         }
@@ -1554,7 +1564,9 @@ fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
         "the resumed run prints the testbench's `$finish`: {resumed_printed:?}"
     );
     let meas = baseline.node_index_named("meas").unwrap();
-    let moved = baseline.voltage_waveform(meas)[baseline.time.len() - 1];
+    let moved = baseline
+        .try_voltage_waveform(meas)
+        .expect("node index in range")[baseline.time.len() - 1];
     assert!(moved > 1.0, "the last reading reaches meas: {moved}");
 }
 
@@ -1616,7 +1628,8 @@ fn the_ladders_nettype_biquad_runs_bit_for_bit_as_its_wreal_twin() {
     // The biquad's output reaches the quantizer: the step overshoots 0.6 V.
     let out = wreal.node_index_named("out").unwrap();
     let peak = wreal
-        .voltage_waveform(out)
+        .try_voltage_waveform(out)
+        .expect("node index in range")
         .iter()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max);
@@ -1920,7 +1933,7 @@ fn every_analysis_that_copies_the_circuit_copies_the_held_equilibrium() {
         "every noise point is finite"
     );
     engine
-        .run_distortion(&netlist, &frequencies[..2], None)
+        .run_distortion_with_abort(&netlist, &frequencies[..2], None, &NoAbort)
         .expect("distortion analysis runs on the held equilibrium");
 }
 

@@ -7,7 +7,9 @@ use rspice_core::{Engine, Netlist, NoAbort};
 const NETWORK: &str = "Frequency ownership\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.data points FREQ\n10\n100\n10\n.enddata\n";
 
 fn check_ac(netlist: &Netlist) {
-    let result = Engine::default().run_ac_table(netlist, "points").unwrap();
+    let result = Engine::default()
+        .run_ac_table_with_abort(netlist, "points", &NoAbort)
+        .unwrap();
     assert_eq!(result.columns[0].values, [10.0, 100.0, 10.0]);
     for point in result.points {
         let index = point
@@ -31,7 +33,9 @@ fn declarative_frequency_tables_survive_multi_run_expansion() {
     let netlist = Netlist::parse(&decks[0].source).unwrap();
     check_ac(&netlist);
     let noise = Engine::default()
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+        )
         .unwrap();
     assert_eq!(noise.columns[0].values, [10.0, 100.0, 10.0]);
 }

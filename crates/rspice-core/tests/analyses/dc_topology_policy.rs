@@ -1,5 +1,6 @@
 //! End-to-end policy for floating components at the shared DC-bias boundary.
 
+use rspice_core::NoAbort;
 use rspice_core::StaticMatrix;
 use rspice_core::engine::{
     ContinuationAid, ContinuationStage, Engine, SimulationConfig, SimulationError,
@@ -529,11 +530,12 @@ fn a_uic_transient_holds_a_node_without_a_dc_path() {
          R2 mid 0 1e12\nV5 in5 0 1\nR5 in5 0 1k\nG1 0 u in5 0 0\n.end\n",
     );
     let result = engine()
-        .run_tran_with_startup_mode(
+        .run_tran_with_startup_mode_and_abort(
             &netlist,
             1e-6,
             2e-8,
             rspice_core::engine::TransientStartupMode::Uic,
+            &NoAbort,
         )
         .expect("the node without a DC path is held");
     let mid = waveform(&result, "mid");

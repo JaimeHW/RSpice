@@ -5,6 +5,7 @@
 //! inductor was invisible to .ac. These tests pin the reactive stamping
 //! (jw * dQ/dx) against closed-form single-pole responses.
 
+use crate::model_outcome::RunWithOutcome;
 use rspice_core::engine::SimulationConfig;
 use rspice_core::{Engine, ModelFinishPoint, Netlist, NoAbort, SimulationOutcome};
 use std::io::Write;
@@ -547,13 +548,14 @@ endmodule"#,
         );
         assert_eq!(
             engine
-                .run_noise_data_named_with_input_source(
+                .run_noise_data_named_with_input_source_and_abort(
                     &netlist,
                     "out",
                     None,
                     "VREF",
                     "finish_rows",
-                    300.15
+                    300.15,
+                    &NoAbort
                 )
                 .unwrap()
                 .1

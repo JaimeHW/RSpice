@@ -81,7 +81,12 @@ fn explicit_and_run_distortion_preserve_every_direct_spectrum() {
         );
         let mut circuit = circuit(&format!(".disto {args}"));
         let direct = Engine::default()
-            .run_distortion(circuit.netlist(), &[1000.0, 1500.0, 2000.0], ratio)
+            .run_distortion_with_abort(
+                circuit.netlist(),
+                &[1000.0, 1500.0, 2000.0],
+                ratio,
+                &NoAbort,
+            )
             .unwrap();
         execute(&mut circuit, "disto", &args).unwrap();
         execute(&mut circuit, "run", "").unwrap();
@@ -361,8 +366,12 @@ fn two_tone_budget_includes_every_new_spectrum() {
     for limit in [119, 120] {
         let mut config = SimulationConfig::default();
         config.resource_limits.max_result_values = limit;
-        let result =
-            Engine::new(config).run_distortion(&deck, &[1000.0, 1800.0, 2600.0], Some(0.9));
+        let result = Engine::new(config).run_distortion_with_abort(
+            &deck,
+            &[1000.0, 1800.0, 2600.0],
+            Some(0.9),
+            &NoAbort,
+        );
         if limit == 119 {
             let Err(SimulationError::ResourceLimit(error)) = result else {
                 panic!("missing result budget refusal");

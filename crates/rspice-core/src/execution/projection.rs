@@ -296,13 +296,6 @@ impl<'a> ProjectionSource<'a> {
         }
     }
 
-    /// Identify the sweep/step coordinate this result belongs to.
-    #[must_use]
-    pub fn with_coordinate(mut self, coordinate: Option<String>) -> Self {
-        self.coordinate = coordinate;
-        self
-    }
-
     /// The analysis axis (time, frequency, sweep value), used by authored
     /// output expressions.
     #[must_use]

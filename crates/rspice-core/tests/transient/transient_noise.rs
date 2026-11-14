@@ -1,5 +1,6 @@
 //! TRNOISE end-to-end: transient noise sources through the full engine.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -239,10 +240,18 @@ fn hierarchical_random_sources_match_scoped_flat_instances() {
                 let selection = [name.clone()];
                 assert_eq!(
                     engine
-                        .transient_source_event_times(&hierarchical, 10e-9, 1e-9, &selection)
+                        .transient_source_event_times_with_abort(
+                            &hierarchical,
+                            10e-9,
+                            1e-9,
+                            &selection,
+                            &NoAbort
+                        )
                         .unwrap(),
                     engine
-                        .transient_source_event_times(&flat, 10e-9, 1e-9, &selection)
+                        .transient_source_event_times_with_abort(
+                            &flat, 10e-9, 1e-9, &selection, &NoAbort
+                        )
                         .unwrap(),
                 );
             }

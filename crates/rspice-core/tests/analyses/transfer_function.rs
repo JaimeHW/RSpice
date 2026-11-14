@@ -6,6 +6,7 @@
 //! impedance, output impedance), so these tests pin ngspice parity, not
 //! self-consistency.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
@@ -29,7 +30,7 @@ fn tf_suppresses_hierarchical_ac_drives() {
     )
     .unwrap();
     let result = Engine::new(SimulationConfig::default())
-        .run_transfer_function(&netlist, "out", None, false, "vin")
+        .run_transfer_function_with_abort(&netlist, "out", None, false, "vin", &NoAbort)
         .unwrap();
     // Two equal series resistors; all other independent drives are zero.
     assert_close(result.gain, 0.5, "hierarchical divider gain");
@@ -60,7 +61,7 @@ fn tf_can_drive_hierarchical_sources_without_probe_name_collisions() {
         ))
         .unwrap();
         let result = engine
-            .run_transfer_function(&netlist, "out", None, false, source)
+            .run_transfer_function_with_abort(&netlist, "out", None, false, source, &NoAbort)
             .unwrap();
         assert_close(result.gain, gain, "hierarchical source gain");
         assert_close(
@@ -154,7 +155,7 @@ r2 out 0 2k
     let netlist = Netlist::parse(deck).expect("parse");
     let engine = Engine::new(SimulationConfig::default());
     let result = engine
-        .run_transfer_function(&netlist, "OUT", None, false, "VIN")
+        .run_transfer_function_with_abort(&netlist, "OUT", None, false, "VIN", &NoAbort)
         .expect("tf analysis");
     assert_close(result.gain, 2.0 / 3.0, "transfer function");
     assert_close(result.input_impedance, 3000.0, "input impedance");
@@ -178,7 +179,7 @@ r2 out 0 2k
     let netlist = Netlist::parse(deck).expect("parse");
     let engine = Engine::new(SimulationConfig::default());
     let result = engine
-        .run_transfer_function(&netlist, "VMEAS", None, true, "VIN")
+        .run_transfer_function_with_abort(&netlist, "VMEAS", None, true, "VIN", &NoAbort)
         .expect("tf analysis");
     assert_close(result.gain, 1.0 / 3000.0, "transadmittance");
     assert_close(result.input_impedance, 3000.0, "input impedance");
@@ -204,7 +205,7 @@ r1 in 0 3k
     let netlist = Netlist::parse(deck).expect("parse");
     let engine = Engine::new(SimulationConfig::default());
     let result = engine
-        .run_transfer_function(&netlist, "IN", None, false, "IIN")
+        .run_transfer_function_with_abort(&netlist, "IN", None, false, "IIN", &NoAbort)
         .expect("tf analysis");
     assert_close(result.gain, 3000.0, "transimpedance");
     assert_close(result.input_impedance, 3000.0, "input impedance");
@@ -225,7 +226,7 @@ r2 out 0 2k
     let engine = Engine::new(SimulationConfig::default());
     assert!(
         engine
-            .run_transfer_function(&netlist, "OUT", None, false, "R1")
+            .run_transfer_function_with_abort(&netlist, "OUT", None, false, "R1", &NoAbort)
             .is_err(),
         ".tf with a resistor as input source must be rejected"
     );
@@ -236,7 +237,7 @@ fn tf_current_probe_impedance_matches_ngspice_branch_rules() {
     let engine = Engine::new(SimulationConfig::default());
     let passive = Netlist::parse("same-source TF\nVin in 0 0\nR1 in 0 1k\n.end\n").unwrap();
     let result = engine
-        .run_transfer_function(&passive, "vin", None, true, "VIN")
+        .run_transfer_function_with_abort(&passive, "vin", None, true, "VIN", &NoAbort)
         .unwrap();
     // ngspice tfanal.c reuses Zin for a probe of the input voltage source.
     assert_close(result.input_impedance, 1000.0, "input impedance");
@@ -252,7 +253,7 @@ fn tf_current_probe_impedance_matches_ngspice_branch_rules() {
     )
     .unwrap();
     let result = engine
-        .run_transfer_function(&active, "Vprobe", None, true, "Vin")
+        .run_transfer_function_with_abort(&active, "Vprobe", None, true, "Vin", &NoAbort)
         .unwrap();
     // A unit branch drive draws +1 mA from this negative conductance.
     // ngspice returns 1 / max(1e-20, Iprobe), not an unconditional sentinel.
@@ -263,7 +264,7 @@ fn tf_current_probe_impedance_matches_ngspice_branch_rules() {
 fn tf_ground_only_probe_has_zero_response() {
     let netlist = Netlist::parse("ground-only transfer\nIin 0 0 0\n.end\n").unwrap();
     let result = Engine::new(SimulationConfig::default())
-        .run_transfer_function(&netlist, "0", None, false, "Iin")
+        .run_transfer_function_with_abort(&netlist, "0", None, false, "Iin", &NoAbort)
         .unwrap();
     assert_eq!(result.gain, 0.0);
     assert_eq!(result.input_impedance, 0.0);

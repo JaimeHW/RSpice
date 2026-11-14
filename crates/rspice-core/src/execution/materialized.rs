@@ -384,16 +384,8 @@ impl DeckPlanMaterializer<'_> {
 }
 
 impl Engine {
-    /// Prepare a lazy materializer under this engine's resource policy.
-    pub fn prepare_deck_plan_materializer<'a>(
-        &'a self,
-        netlist: &'a Netlist,
-        plan: &DeckPlan,
-    ) -> Result<DeckPlanMaterializer<'a>, MaterializedRunError> {
-        self.prepare_deck_plan_materializer_with_abort(netlist, plan, &NoAbort)
-    }
-
-    /// Prepare a lazy materializer while observing cooperative cancellation.
+    /// Prepare a lazy materializer under this engine's resource policy while
+    /// observing cooperative cancellation.
     pub fn prepare_deck_plan_materializer_with_abort<'a>(
         &'a self,
         netlist: &'a Netlist,
@@ -703,7 +695,7 @@ mod tests {
         let plan = plan(&netlist);
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("scalar materializer");
 
         assert_eq!(materializer.len(), 1);
@@ -753,7 +745,7 @@ mod tests {
             .expect("canonical coordinates");
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("mixed-axis materializer");
 
         assert_eq!(materializer.coordinates(), expected);
@@ -808,7 +800,7 @@ mod tests {
         let plan = plan(&netlist);
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("repeated-analysis materializer");
         let run = materializer.materialize_run(0).expect("scalar run");
 
@@ -850,7 +842,7 @@ mod tests {
         assert_eq!(plan.analyses()[0].id().kind(), AnalysisKind::Tran);
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("post-process materializer");
         let run = materializer.materialize_run(0).expect("transient run");
 
@@ -893,7 +885,7 @@ mod tests {
         let plan = plan(&netlist);
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("conditional-topology materializer");
 
         materializer
@@ -944,7 +936,7 @@ mod tests {
         // Preparation is intentionally lazy: it does not build either
         // coordinate's netlist or topology.
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("lazy materializer");
         materializer
             .materialize_run(0)
@@ -978,7 +970,7 @@ mod tests {
         let alter_plan = DeckPlan::new(vec![alter], vec![AnalysisRequest::new(AnalysisKind::Op)])
             .expect("manual ALTER plan");
         let error = Engine::default()
-            .prepare_deck_plan_materializer(&netlist, &alter_plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &alter_plan, &NoAbort)
             .err()
             .expect("explicit ALTER axis is refused");
         assert_eq!(capability_token(&error), Some("deck.alter.materialization"));
@@ -994,7 +986,7 @@ mod tests {
         .expect("parser retains the base ALTER variant");
         let authored_plan = plan(&authored);
         let error = Engine::default()
-            .prepare_deck_plan_materializer(&authored, &authored_plan)
+            .prepare_deck_plan_materializer_with_abort(&authored, &authored_plan, &NoAbort)
             .err()
             .expect("authored ALTER text is refused");
         assert_eq!(capability_token(&error), Some("deck.alter.materialization"));
@@ -1016,7 +1008,7 @@ mod tests {
         config.resource_limits.max_batch_runs = 1;
         let limited = Engine::new(config);
         assert!(matches!(
-            limited.prepare_deck_plan_materializer(&netlist, &plan),
+            limited.prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort),
             Err(MaterializedRunError::DeckPlan(
                 DeckPlanError::ResourceLimit(ResourceLimitError {
                     resource: ResourceKind::BatchRuns,
@@ -1032,7 +1024,7 @@ mod tests {
             Err(MaterializedRunError::Aborted)
         ));
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("normal materializer");
         assert!(matches!(
             materializer.materialize_run_with_abort(0, &ImmediateAbort),
@@ -1067,7 +1059,7 @@ mod tests {
         let plan = plan(&netlist);
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("scalar materializer");
         let abort = crate::abort_signal::CountingAbort::new(2);
 
@@ -1113,7 +1105,7 @@ mod tests {
 
         for netlist in [&different_axis, &different_analysis] {
             let error = engine
-                .prepare_deck_plan_materializer(netlist, &first_plan)
+                .prepare_deck_plan_materializer_with_abort(netlist, &first_plan, &NoAbort)
                 .err()
                 .expect("plan and netlist must agree");
             assert!(
@@ -1144,7 +1136,7 @@ mod tests {
         ));
         let engine = Engine::default();
         let materializer = engine
-            .prepare_deck_plan_materializer(&netlist, &plan)
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
             .expect("typed-target materializer");
         for index in 0..2 {
             let run = materializer.materialize_run(index).expect("coordinate");

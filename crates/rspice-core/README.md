@@ -98,10 +98,10 @@ quasi-periodic QPSS/QPAC/QPNOISE/QPXF. `.MEAS`, `.FOUR` and `.FFT`
 post-process results. The root README's
 [analysis table](../../README.md#analyses) says how each is invoked.
 
-Whether an analysis may run on a circuit is one table, `engine::capability_cell`
-(exported whole as `engine::capability_matrix`), indexed by analysis and by
-instance family: native SPICE, XSPICE analog and event models, runtime and
-generated Verilog-A, mixed Verilog-AMS, and real-number nets. Every analysis
+Whether an analysis may run on a circuit is one table, `engine::capability_cell`,
+indexed by analysis and by instance family: native SPICE, XSPICE analog and
+event models, runtime and generated Verilog-A, mixed Verilog-AMS, and
+real-number nets. Every analysis
 consults it before solver work, and a refused cell names the analysis, the
 instance, its module and the reason. Generated compact models, for example,
 are refused by every periodic analysis.

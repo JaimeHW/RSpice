@@ -93,9 +93,13 @@ fn explicit_and_declarative_tables_match_direct_solvers_and_circuit_equations() 
     ))
     .unwrap();
     let engine = Engine::default();
-    let direct_ac = engine.run_ac_table(&netlist, "points").unwrap();
+    let direct_ac = engine
+        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
+        .unwrap();
     let direct_noise = engine
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+        )
         .unwrap();
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     execute(&mut circuit, &engine, "run", "").unwrap();
@@ -228,7 +232,7 @@ fn failed_rows_and_cumulative_budgets_publish_nothing_and_do_not_consume_ordinal
         assert!(circuit.datasets().is_empty());
     }
     let cost = engine
-        .run_ac_table(&netlist, "points")
+        .run_ac_table_with_abort(&netlist, "points", &NoAbort)
         .unwrap()
         .retained_value_count();
     let mut config = SimulationConfig::default();
@@ -339,7 +343,9 @@ fn noise_table_budget_includes_coordinates_and_presentation_retention() {
     let netlist = Netlist::parse(&format!("{NETWORK}{TABLE}.end\n")).unwrap();
     let engine = Engine::default();
     let count = engine
-        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .run_noise_table_named_with_input_source_and_abort(
+            &netlist, "out", None, "V1", "points", 300.15, &NoAbort,
+        )
         .unwrap()
         .retained_value_count();
     for limit in [count - 1, count] {

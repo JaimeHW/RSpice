@@ -1,3 +1,4 @@
+use rspice_core::NoAbort;
 use rspice_core::ResourceLimits;
 use rspice_core::abort_signal::ImmediateAbort;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
@@ -33,7 +34,13 @@ fn repeating_pwl_events_preserve_distinct_authored_times_at_small_scales() {
         ))
         .unwrap();
         let events = Engine::default()
-            .transient_source_event_times(&netlist, 6.5 * scale, scale / 16.0, &[])
+            .transient_source_event_times_with_abort(
+                &netlist,
+                6.5 * scale,
+                scale / 16.0,
+                &[],
+                &NoAbort,
+            )
             .unwrap();
         for knot in 0..=6 {
             assert!(
@@ -52,7 +59,7 @@ fn authored_event_catalog_keeps_redundant_flat_pwl_knots() {
     )
     .unwrap();
     let events = Engine::default()
-        .transient_source_event_times(&netlist, 4e-9, 1e-10, &[])
+        .transient_source_event_times_with_abort(&netlist, 4e-9, 1e-10, &[], &NoAbort)
         .unwrap();
     for knot in 0..=4 {
         assert!(
@@ -66,7 +73,13 @@ fn authored_event_catalog_keeps_redundant_flat_pwl_knots() {
 fn selected_source_events_use_the_transient_breakpoint_contract() {
     let engine = Engine::new(SimulationConfig::default());
     let events = engine
-        .transient_source_event_times(&event_deck(), 6.0e-6, 1.0e-7, &["vPuLsE".to_string()])
+        .transient_source_event_times_with_abort(
+            &event_deck(),
+            6.0e-6,
+            1.0e-7,
+            &["vPuLsE".to_string()],
+            &NoAbort,
+        )
         .expect("pulse event schedule");
 
     let expected = [1.0e-6, 1.1e-6, 3.1e-6, 3.3e-6, 6.0e-6];
@@ -84,7 +97,7 @@ fn ac_annotations_preserve_waveform_event_schedules() {
     let mut netlist = event_deck();
     let engine = Engine::default();
     let expected = engine
-        .transient_source_event_times(&netlist, 6e-6, 1e-7, &[])
+        .transient_source_event_times_with_abort(&netlist, 6e-6, 1e-7, &[], &NoAbort)
         .unwrap();
     for element in &mut netlist.elements {
         if let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
@@ -94,7 +107,7 @@ fn ac_annotations_preserve_waveform_event_schedules() {
         }
     }
     let actual = engine
-        .transient_source_event_times(&netlist, 6e-6, 1e-7, &[])
+        .transient_source_event_times_with_abort(&netlist, 6e-6, 1e-7, &[], &NoAbort)
         .unwrap();
     assert_eq!(actual, expected);
 }
@@ -123,7 +136,7 @@ fn transient_source_catalog_is_canonical_sorted_and_excludes_dc_only_sources() {
 fn all_source_events_are_sorted_and_deduplicated() {
     let engine = Engine::new(SimulationConfig::default());
     let events = engine
-        .transient_source_event_times(&event_deck(), 6.0e-6, 1.0e-7, &[])
+        .transient_source_event_times_with_abort(&event_deck(), 6.0e-6, 1.0e-7, &[], &NoAbort)
         .expect("complete event schedule");
 
     assert!(events.windows(2).all(|pair| pair[0] < pair[1]));
@@ -141,7 +154,13 @@ fn all_source_events_are_sorted_and_deduplicated() {
 fn unknown_selected_source_is_rejected() {
     let engine = Engine::new(SimulationConfig::default());
     let error = engine
-        .transient_source_event_times(&event_deck(), 6.0e-6, 1.0e-7, &["missing".to_string()])
+        .transient_source_event_times_with_abort(
+            &event_deck(),
+            6.0e-6,
+            1.0e-7,
+            &["missing".to_string()],
+            &NoAbort,
+        )
         .expect_err("unknown source must fail closed");
 
     assert!(
@@ -153,9 +172,10 @@ fn unknown_selected_source_is_rejected() {
 fn selected_sources_require_unique_time_varying_waveforms() {
     let engine = Engine::new(SimulationConfig::default());
     let duplicate = engine
-        .validate_transient_source_names(
+        .validate_transient_source_names_with_abort(
             &event_deck(),
             &["VpUlSe".to_string(), "vpulse".to_string()],
+            &NoAbort,
         )
         .expect_err("case-insensitive duplicate selections must fail");
     assert!(duplicate.to_string().contains("repeats independent source"));
@@ -163,7 +183,7 @@ fn selected_sources_require_unique_time_varying_waveforms() {
     let dc_only =
         Netlist::parse("dc source\nVbias out 0 1\nR1 out 0 1k\n.end\n").expect("DC deck parses");
     let error = engine
-        .validate_transient_source_names(&dc_only, &["Vbias".to_string()])
+        .validate_transient_source_names_with_abort(&dc_only, &["Vbias".to_string()], &NoAbort)
         .expect_err("DC-only source cannot be a modulation waveform");
     assert!(error.to_string().contains("no time-varying waveform"));
 }
@@ -187,7 +207,13 @@ fn event_enumeration_is_cancellable_and_resource_bounded() {
     limits.max_analysis_points = 3;
     config.resource_limits = limits;
     let bounded = Engine::new(config)
-        .transient_source_event_times(&event_deck(), 6.0e-6, 1.0e-7, &["Vpulse".to_string()])
+        .transient_source_event_times_with_abort(
+            &event_deck(),
+            6.0e-6,
+            1.0e-7,
+            &["Vpulse".to_string()],
+            &NoAbort,
+        )
         .expect_err("event schedule must obey the configured point limit");
     assert!(
         bounded.to_string().contains("analysis") && bounded.to_string().contains("3"),
@@ -210,7 +236,7 @@ fn hierarchical_canonical_source_name_is_accepted() {
     let engine = Engine::new(SimulationConfig::default());
 
     engine
-        .validate_transient_source_names(&netlist, &["Xdrv.Vmod".to_string()])
+        .validate_transient_source_names_with_abort(&netlist, &["Xdrv.Vmod".to_string()], &NoAbort)
         .expect("elaborated hierarchical source name should resolve");
     assert_eq!(
         engine

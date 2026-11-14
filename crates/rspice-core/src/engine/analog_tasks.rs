@@ -1,10 +1,8 @@
 //! Host delivery and model completion at public analysis boundaries.
 
 use super::{Engine, SimulationError};
-use crate::abort_signal::ModelRunSignal;
 use crate::{
     AbortSignal, CircuitData, ModelFinish, ModelFinishPoint, ModelFinishSource, ModelFinishTask,
-    SimulationOutcome,
 };
 use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskEvent, AnalogTaskKind};
 
@@ -385,32 +383,6 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         let _ = (circuit, matrix, solution);
         Ok(())
-    }
-
-    /// Run one analysis with an explicit normal-completion outcome. A model
-    /// may finish during initialization, before any numerical result exists.
-    /// The callback must pass the supplied signal to its analysis entry point.
-    /// Reusing this Engine or its caller's abort flag does not reuse model control.
-    pub fn run_with_outcome<T>(
-        &self,
-        abort: &dyn AbortSignal,
-        run: impl FnOnce(&Self, &dyn AbortSignal) -> Result<T, SimulationError>,
-    ) -> Result<SimulationOutcome<T>, SimulationError> {
-        let signal = ModelRunSignal::new(abort);
-        match run(self, &signal) {
-            Ok(result) => match signal.model_control().and_then(|control| control.finish()) {
-                Some(finish) => Ok(SimulationOutcome::Finished {
-                    result: Some(result),
-                    finish,
-                }),
-                None => Ok(SimulationOutcome::Completed(result)),
-            },
-            Err(SimulationError::ModelFinished(finish)) => Ok(SimulationOutcome::Finished {
-                result: None,
-                finish: *finish,
-            }),
-            Err(error) => Err(error),
-        }
     }
 
     pub(super) fn ensure_model_run_active(abort: &dyn AbortSignal) -> Result<(), SimulationError> {

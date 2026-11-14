@@ -89,12 +89,6 @@ impl UnsupportedCapabilityError {
     }
 
     #[must_use]
-    pub fn with_coordinate(mut self, coordinate: RunCoordinateId) -> Self {
-        self.coordinate = Some(coordinate);
-        self
-    }
-
-    #[must_use]
     pub fn at(mut self, location: NetlistSourceLocation) -> Self {
         self.location = Some(location);
         self

@@ -406,15 +406,18 @@ fn control_options_drive_the_integrator_and_survive_source_replay_atomically() {
         })
         .collect::<Vec<_>>();
     let plan = engine
-        .plan_step_commands(
+        .plan_step_commands_with_abort(
             circuit.netlist(),
             &steps,
             rspice_core::engine::StepPlanLimits::from_resource_limits(
                 engine.config().resource_limits,
             ),
+            &NoAbort,
         )
         .unwrap();
-    let replayed = engine.materialize_step_run(&plan, 1).unwrap();
+    let replayed = engine
+        .materialize_step_run_with_abort(&plan, 1, &NoAbort)
+        .unwrap();
     assert_eq!(replayed.netlist().options.xmu, Some(0.49));
     assert_eq!(replayed.netlist().options.reltol, Some(1e-4));
     assert_eq!(replayed.netlist().options.trtol, Some(2.0));

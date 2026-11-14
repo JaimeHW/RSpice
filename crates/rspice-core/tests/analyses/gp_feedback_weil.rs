@@ -5,6 +5,7 @@
 //! Early/high-injection terms and bias-dependent diffusion charge. Weil is a
 //! discrete filter, so its numerical oracle must use the reference time grid.
 //! Provenance and the independently checked PNP symmetry live beside the data.
+use rspice_core::NoAbort;
 use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode};
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, SpiceDialect};
@@ -115,7 +116,13 @@ fn feedback_tracks_recorded_ngspice_without_clamping_a_transistor_terminal() {
             let mut policy = config(GpTransientPhaseModel::NgspiceWeil);
             policy.locked_time_grid = Some(grid.clone());
             let result = Engine::new(policy)
-                .run_tran_with_startup_mode(&case.netlist(polarity), stop, 8e-12, case.startup)
+                .run_tran_with_startup_mode_and_abort(
+                    &case.netlist(polarity),
+                    stop,
+                    8e-12,
+                    case.startup,
+                    &NoAbort,
+                )
                 .unwrap_or_else(|e| panic!("{}/{polarity}: {e}", case.name));
             assert_eq!(result.time, *grid);
             let outputs = [

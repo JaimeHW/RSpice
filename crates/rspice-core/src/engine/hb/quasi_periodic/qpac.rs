@@ -59,15 +59,6 @@ fn qpac_error(message: impl Into<String>) -> SimulationError {
 }
 
 impl Engine {
-    pub fn run_qpac_from_qpss(
-        &self,
-        netlist: &Netlist,
-        request: QpacRequest,
-        point: &QpssOperatingPoint,
-    ) -> Result<QpacAnalysisResult, SimulationError> {
-        self.run_qpac_from_qpss_with_abort(netlist, request, point, &NoAbort)
-    }
-
     /// Consume the exact retained driven orbit, without re-solving QPSS or
     /// substituting a commensurate HB basis. Probe AC annotations in the deck
     /// do not override this request's explicitly authored drive.

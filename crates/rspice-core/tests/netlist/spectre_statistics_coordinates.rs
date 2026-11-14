@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::execution::DeckPlan;
 use rspice_core::netlist::Netlist;
@@ -86,7 +87,7 @@ fn swept_output_bits(netlist: &Netlist) -> Vec<u64> {
     let plan = DeckPlan::from_netlist(netlist, &engine.config().resource_limits)
         .expect("deck plan is canonical");
     let materializer = engine
-        .prepare_deck_plan_materializer(netlist, &plan)
+        .prepare_deck_plan_materializer_with_abort(netlist, &plan, &NoAbort)
         .expect("deck plan materializes");
     assert!(
         materializer.len() >= 2,

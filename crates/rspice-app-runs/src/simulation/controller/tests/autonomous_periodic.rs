@@ -149,17 +149,19 @@ fn autonomous_qpac_qpxf_project_round_trip_preserves_phase_response() {
     .unwrap();
     let (engine, netlist, point) = response_source(deck, producer.qpss_config().unwrap());
     let ac = engine
-        .run_qpac_from_qpss(
+        .run_qpac_from_qpss_with_abort(
             &netlist,
             QpacRequest::from_qpac_card(&ac.qpac_card().unwrap()).unwrap(),
             &point,
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let xf = engine
-        .run_qpxf_from_qpss(
+        .run_qpxf_from_qpss_with_abort(
             &netlist,
             QpxfRequest::from_qpxf_card(&xf.qpxf_card().unwrap()).unwrap(),
             &point,
+            &rspice_core::NoAbort,
         )
         .unwrap();
     round_trip_response(
@@ -212,10 +214,11 @@ fn autonomous_qpnoise_project_round_trip_preserves_correlations_and_solver_optio
     let spec = draft.to_spec().unwrap();
     let (engine, netlist, point) = response_source(deck, producer.qpss_config().unwrap());
     let response = engine
-        .run_qpnoise_from_qpss(
+        .run_qpnoise_from_qpss_with_abort(
             &netlist,
             QpnoiseRequest::from_qpnoise_card(&spec.qpnoise_card().unwrap()).unwrap(),
             &point,
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let analysis = round_trip_response(

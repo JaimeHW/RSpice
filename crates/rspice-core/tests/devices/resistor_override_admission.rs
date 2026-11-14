@@ -71,7 +71,15 @@ fn noise_alias_override_changes_the_resistors_published_spectrum() {
     let engine = Engine::default();
     let spectrum = |row: &Netlist| {
         engine
-            .run_noise_named_with_input_source(row, "out", None, "I1", &[10.0], 300.15)
+            .run_noise_named_with_input_source_and_abort(
+                row,
+                "out",
+                None,
+                "I1",
+                &[10.0],
+                300.15,
+                &NoAbort,
+            )
             .unwrap()[0]
             .output_noise_density
     };

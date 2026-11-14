@@ -7,6 +7,7 @@
 
 use super::waveform;
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -893,7 +894,7 @@ fn zero_hz_transfer_function_does_not_require_dynamic_charge_support() {
 
     let netlist = Netlist::parse(deck).expect("deck parses");
     let result = engine()
-        .run_transfer_function(&netlist, "out", None, false, "vin")
+        .run_transfer_function_with_abort(&netlist, "out", None, false, "vin", &NoAbort)
         .expect(".TF should not require a dynamic charge model at 0 Hz");
 
     assert!(

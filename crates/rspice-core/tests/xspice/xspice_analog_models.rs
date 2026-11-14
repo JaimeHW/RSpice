@@ -1,6 +1,7 @@
 //! Native XSPICE analog code models pinned against ngspice code-model semantics.
 
 use rspice_core::Complex64;
+use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
@@ -1055,7 +1056,12 @@ fn sensitivity_uses_xspice_parameter_types_for_model_and_instance_targets() {
             "lim:GAIN"
         };
         let dc = engine
-            .run_sensitivity_dc_complete(&netlist, output.clone(), &[filter.to_owned()])
+            .run_sensitivity_dc_complete_with_abort(
+                &netlist,
+                output.clone(),
+                &[filter.to_owned()],
+                &NoAbort,
+            )
             .unwrap();
         assert!(
             dc.sensitivities
@@ -1082,7 +1088,12 @@ fn sensitivity_uses_xspice_parameter_types_for_model_and_instance_targets() {
         };
         assert!(
             engine
-                .run_sensitivity_dc_complete(&netlist, output, &[discrete.to_owned()])
+                .run_sensitivity_dc_complete_with_abort(
+                    &netlist,
+                    output,
+                    &[discrete.to_owned()],
+                    &NoAbort
+                )
                 .is_err()
         );
     }

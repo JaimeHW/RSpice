@@ -77,7 +77,7 @@ fn xyce_qpss_frequency_context_preserves_lifted_clocks_and_response_dependency()
         }
     }
     let error = engine
-        .run_qpac_from_qpss(
+        .run_qpac_from_qpss_with_abort(
             &netlist,
             QpacRequest {
                 offsets_hz: vec![130.0],
@@ -91,6 +91,7 @@ fn xyce_qpss_frequency_context_preserves_lifted_clocks_and_response_dependency()
                 solver: Default::default(),
             },
             &point,
+            &NoAbort,
         )
         .unwrap_err()
         .to_string();
@@ -218,13 +219,13 @@ fn qpss_chained_nonlinear_integrals_share_budget_and_retain_response() {
         solver: Default::default(),
     };
     let positive = engine
-        .run_qpac_from_qpss(&netlist, request("second", 1), &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request("second", 1), &point, &NoAbort)
         .unwrap();
     let negative = engine
-        .run_qpac_from_qpss(&netlist, request("second", -1), &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request("second", -1), &point, &NoAbort)
         .unwrap();
     let output = engine
-        .run_qpac_from_qpss(&netlist, request("out", 0), &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request("out", 0), &point, &NoAbort)
         .unwrap();
     let expected = (Complex64::new(0.0, 0.5) * positive.output_transfer[0]
         - Complex64::new(0.0, 0.5) * negative.output_transfer[0])
@@ -279,15 +280,15 @@ fn qpss_integrates_an_independent_nonlinear_input_and_preserves_response() {
         solver: Default::default(),
     };
     let input = engine
-        .run_qpac_from_qpss(&netlist, request("shaped"), &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request("shaped"), &point, &NoAbort)
         .unwrap();
     let output = engine
-        .run_qpac_from_qpss(&netlist, request("out"), &point)
+        .run_qpac_from_qpss_with_abort(&netlist, request("out"), &point, &NoAbort)
         .unwrap();
     let expected = input.output_transfer[0] / Complex64::new(0.0, ratio);
     assert!((output.output_transfer[0] / expected - 1.0).norm() < 1e-7);
     let xf = engine
-        .run_qpxf_from_qpss(
+        .run_qpxf_from_qpss_with_abort(
             &netlist,
             QpxfRequest {
                 frequencies_hz: vec![rate * ratio],
@@ -304,6 +305,7 @@ fn qpss_integrates_an_independent_nonlinear_input_and_preserves_response() {
                 group_delay_magnitude_floor: 0.0,
             },
             &point,
+            &NoAbort,
         )
         .unwrap();
     assert!((xf.transfers[0].values[0] / expected - 1.0).norm() < 1e-7);
@@ -362,7 +364,7 @@ fn qpss_differential_integrals_keep_independent_common_mode_feedback() {
         let ratio = 0.13 + std::f64::consts::SQRT_2 - 1.0;
         let expected = if name == "out" { 0.25 } else { 1.5 } / Complex64::new(0.0, ratio);
         let ac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![rate * 0.13],
@@ -376,11 +378,12 @@ fn qpss_differential_integrals_keep_independent_common_mode_feedback() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(ac.output_transfer[0], expected);
         let xf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![rate * ratio],
@@ -397,6 +400,7 @@ fn qpss_differential_integrals_keep_independent_common_mode_feedback() {
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(xf.transfers[0].values[0], expected);
@@ -464,7 +468,7 @@ fn qpss_filtered_integrals_preserve_network_phase_current_and_response() {
             network
         };
         let ac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![rate * 0.13],
@@ -478,11 +482,12 @@ fn qpss_filtered_integrals_preserve_network_phase_current_and_response() {
                     solver: Default::default(),
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(ac.output_transfer[0], expected);
         let xf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![rate * ratio],
@@ -499,6 +504,7 @@ fn qpss_filtered_integrals_preserve_network_phase_current_and_response() {
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         close(xf.transfers[0].values[0], expected);
@@ -584,7 +590,7 @@ Ri sink 0 1k
                 gain / jw
             };
             let ac = engine
-                .run_qpac_from_qpss(
+                .run_qpac_from_qpss_with_abort(
                     &netlist,
                     QpacRequest {
                         offsets_hz: vec![rate * 0.13],
@@ -601,11 +607,12 @@ Ri sink 0 1k
                         },
                     },
                     &point,
+                    &NoAbort,
                 )
                 .unwrap();
             close(ac.output_transfer[0], expected);
             let xf = engine
-                .run_qpxf_from_qpss(
+                .run_qpxf_from_qpss_with_abort(
                     &netlist,
                     QpxfRequest {
                         frequencies_hz: vec![frequency],
@@ -622,12 +629,13 @@ Ri sink 0 1k
                         group_delay_magnitude_floor: 0.0,
                     },
                     &point,
+                    &NoAbort,
                 )
                 .unwrap();
             close(xf.transfers[0].values[0], expected);
         }
         let noise = engine
-            .run_qpnoise_from_qpss(
+            .run_qpnoise_from_qpss_with_abort(
                 &netlist,
                 QpnoiseRequest {
                     frequencies_hz: vec![rate * 0.13],
@@ -651,6 +659,7 @@ Ri sink 0 1k
                     linear: config.solver.linear,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         let kb =
@@ -795,7 +804,7 @@ Rz zero 0 1k
         .unwrap();
         let identity = point.retained_identity().to_owned();
         let ac = engine
-            .run_qpac_from_qpss(
+            .run_qpac_from_qpss_with_abort(
                 &netlist,
                 QpacRequest {
                     offsets_hz: vec![rate * 0.037],
@@ -812,13 +821,14 @@ Rz zero 0 1k
                     },
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap_or_else(|error| {
                 panic!("QPAC rate={rate}, method={method:?}, mixing={mixing:?}: {error}")
             });
         close(ac.output_transfer[0], Complex64::new(-0.05, 0.0), 1.0);
         let xf = engine
-            .run_qpxf_from_qpss(
+            .run_qpxf_from_qpss_with_abort(
                 &netlist,
                 QpxfRequest {
                     frequencies_hz: vec![rate * 0.037],
@@ -835,6 +845,7 @@ Rz zero 0 1k
                     group_delay_magnitude_floor: 0.0,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         for transfer in &xf.transfers {
@@ -845,7 +856,7 @@ Rz zero 0 1k
             );
         }
         let noise = engine
-            .run_qpnoise_from_qpss(
+            .run_qpnoise_from_qpss_with_abort(
                 &netlist,
                 QpnoiseRequest {
                     frequencies_hz: vec![rate * 0.037],
@@ -869,6 +880,7 @@ Rz zero 0 1k
                     linear: config.solver.linear,
                 },
                 &point,
+                &NoAbort,
             )
             .unwrap();
         let kb =

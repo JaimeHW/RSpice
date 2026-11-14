@@ -11,7 +11,7 @@
 //! its own engine, its own cancellation, and its own error type, and none of
 //! that belongs in here.
 
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::ac::AcResult;
 use crate::netlist::Netlist;
 use crate::{Complex64, Value};
@@ -123,23 +123,6 @@ fn node_voltage<E>(point: &AcResult, node: &str) -> Result<Complex64, ExtractErr
             voltages: point.voltages.len(),
         })?;
     Ok(value)
-}
-
-/// Extract the full scattering matrix through a non-cancellable
-/// compatibility path.
-///
-/// First-party surfaces call [`extract_s_matrix_with_abort`] instead; this
-/// remains for third-party embedding that has no abort source to offer.
-pub fn extract_s_matrix<F>(
-    netlist: &Netlist,
-    ports: &[SParameterPort],
-    frequencies: &[Value],
-    run_ac: F,
-) -> Result<Vec<Vec<Vec<Complex64>>>, ExtractError>
-where
-    F: FnMut(&Netlist) -> Result<Vec<AcResult>, String>,
-{
-    extract_s_matrix_with_abort(netlist, ports, frequencies, run_ac, &NoAbort)
 }
 
 /// Extract the full scattering matrix, indexed `[row][column][frequency]`,

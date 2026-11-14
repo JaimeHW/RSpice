@@ -8,10 +8,11 @@
 //! `analysis` above the layer that drives it.
 
 use rspice_core::Complex64;
+use rspice_core::NoAbort;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::s_param::{
     ExtractError, GainAnalysis, Port, PortError, StabilityAnalysis, collect_ports,
-    declare_ports_with_abort, extract_s_matrix,
+    declare_ports_with_abort, extract_s_matrix_with_abort,
 };
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
@@ -360,11 +361,17 @@ fn s_at_dc(deck: &str) -> Vec<Vec<Complex64>> {
     let ports = collect_ports(&netlist).expect("ports collect");
     let engine = Engine::new(SimulationConfig::default());
     let frequencies = vec![1.0];
-    let s = extract_s_matrix(&netlist, &ports, &frequencies, |driven| {
-        engine
-            .run_ac(driven, &frequencies)
-            .map_err(|error| error.to_string())
-    })
+    let s = extract_s_matrix_with_abort(
+        &netlist,
+        &ports,
+        &frequencies,
+        |driven| {
+            engine
+                .run_ac(driven, &frequencies)
+                .map_err(|error| error.to_string())
+        },
+        &NoAbort,
+    )
     .expect("extraction succeeds");
     (0..ports.len())
         .map(|row| (0..ports.len()).map(|col| s[row][col][0]).collect())
@@ -515,15 +522,21 @@ fn missing_declared_port_node_fails_instead_of_becoming_zero_volts() {
         Netlist::parse("* missing port result basis\nP1 p1 0 PORT=1 Z0=50\nR1 p1 0 50\n.end\n")
             .expect("deck parses");
     let ports = collect_ports(&netlist).expect("ports collect");
-    let error = extract_s_matrix(&netlist, &ports, &[1.0], |_| {
-        Ok(vec![AcResult {
-            frequency: 1.0,
-            node_names: vec!["different".to_string()],
-            branch_names: Vec::new(),
-            voltages: vec![Complex64::new(0.5, 0.0)],
-            currents: Vec::new(),
-        }])
-    })
+    let error = extract_s_matrix_with_abort(
+        &netlist,
+        &ports,
+        &[1.0],
+        |_| {
+            Ok::<_, String>(vec![AcResult {
+                frequency: 1.0,
+                node_names: vec!["different".to_string()],
+                branch_names: Vec::new(),
+                voltages: vec![Complex64::new(0.5, 0.0)],
+                currents: Vec::new(),
+            }])
+        },
+        &NoAbort,
+    )
     .expect_err("a missing port coordinate cannot be measured as zero");
 
     assert!(matches!(

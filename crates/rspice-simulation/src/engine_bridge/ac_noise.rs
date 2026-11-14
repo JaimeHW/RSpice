@@ -733,13 +733,14 @@ R3 n 0 3k
         let config = exact_noise_config("v1");
         let frequencies = config.generate_frequencies();
         let expected = rspice_core::Engine::default()
-            .run_noise_named_with_input_source(
+            .run_noise_named_with_input_source_and_abort(
                 &netlist,
                 "p",
                 Some("n"),
                 "V1",
                 &frequencies,
                 config.default_temperature(),
+                &NoAbort,
             )
             .expect("exact core noise analysis runs");
 

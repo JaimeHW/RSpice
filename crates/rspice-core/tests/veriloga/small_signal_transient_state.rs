@@ -132,7 +132,7 @@ fn a_state_request_follows_its_card_into_each_materialized_run() {
     let plan = DeckPlan::from_netlist(&netlist, &engine.config().resource_limits)
         .expect("the stepped deck plans");
     let materializer = engine
-        .prepare_deck_plan_materializer(&netlist, &plan)
+        .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &NoAbort)
         .expect("the stepped deck materializes");
     assert_eq!(materializer.len(), 2, "one run per stepped value");
     for run_index in 0..materializer.len() {

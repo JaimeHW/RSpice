@@ -11,6 +11,7 @@
 //! for real rather than fixtured, so the check is against what the engine
 //! actually emitted.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::{IntegratedNoise, is_persistable_noise_mechanism};
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -25,7 +26,15 @@ fn ranked_mechanisms(family: &str, deck: &str, output: &str, input: &str) -> Vec
     let netlist =
         Netlist::parse(deck).unwrap_or_else(|error| panic!("{family} deck parses: {error}"));
     let results = Engine::new(SimulationConfig::default())
-        .run_noise_named_with_input_source(&netlist, output, None, input, &FREQUENCIES, 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            output,
+            None,
+            input,
+            &FREQUENCIES,
+            300.15,
+            &NoAbort,
+        )
         .unwrap_or_else(|error| panic!("{family} noise analysis runs: {error}"));
     IntegratedNoise::new(results)
         .contribution_summary()
@@ -263,13 +272,14 @@ fn classic_mos_signed_noise_reaches_output_and_port_analyses() {
                     };
                     let frequencies = [1000.0, 10_000.0];
                     let output = engine
-                        .run_noise_named_with_input_source(
+                        .run_noise_named_with_input_source_and_abort(
                             &make(1e-24, false),
                             "d",
                             None,
                             "VIN",
                             &frequencies,
                             300.15,
+                            &NoAbort,
                         )
                         .unwrap();
                     let port = engine
@@ -347,13 +357,14 @@ fn extreme_mos_flicker_power_reaches_output_and_port_analyses() {
                     "Extreme MOS noise\n{load}\nVIN g 0 DC {} AC 1\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF={af} NLEV=0)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n", p*1.4)).unwrap()
             };
             let result = engine
-                .run_noise_named_with_input_source(
+                .run_noise_named_with_input_source_and_abort(
                     &deck(false),
                     "d",
                     None,
                     "VIN",
                     &[1000.0],
                     300.15,
+                    &NoAbort,
                 )
                 .unwrap();
             let density = result[0]
@@ -512,13 +523,14 @@ fn mos_flicker_coefficients_outside_f64_range_preserve_in_band_noise() {
                     };
                     let frequencies = [1e4_f64, 2e4];
                     let scalar = engine
-                        .run_noise_named_with_input_source(
+                        .run_noise_named_with_input_source_and_abort(
                             &make(false),
                             "d",
                             None,
                             "VIN",
                             &frequencies,
                             300.15,
+                            &NoAbort,
                         )
                         .unwrap();
                     let port = engine
@@ -913,7 +925,15 @@ fn legacy_bjt_private_noise_matches_ngspice_spectra() {
                 "Private BJT noise\nVCC supply 0 {}\nRL supply c 1000\nVB drive 0 {} AC 1\nRIN drive b 100\nQ1 c b 0 qm AREA=2 M=3\n.model qm {kind}(IS=1e-14 BF=100 VAF=50 RB=120 RBM=20 IRB=1e-5 CJE=2p CJC=3p XCJC=.35 TF=2n KF=1e-12 AF=1 SUBS=1)\n.options GMIN=0 RELTOL=1e-10 ABSTOL=1e-18\n.temp 27\n.end", p * 5.0, p * bias,
             )).unwrap();
             let noise = engine
-                .run_noise_named_with_input_source(&deck, "c", None, "VB", &frequencies, 300.15)
+                .run_noise_named_with_input_source_and_abort(
+                    &deck,
+                    "c",
+                    None,
+                    "VB",
+                    &frequencies,
+                    300.15,
+                    &NoAbort,
+                )
                 .unwrap_or_else(|error| panic!("{kind} bias={bias}: {error}"));
             for (point, reference) in noise.iter().zip(reference) {
                 for (index, mechanism) in ["RB", "IB", "IC", "FN"].iter().enumerate() {
@@ -986,23 +1006,25 @@ fn legacy_bjt_base_noise_matches_explicit_network_and_port_correlation() {
                 }
                 let sources = "VIN drive 0 0 AC 1\nRS drive b 1000\nVC c 0 0";
                 let actual = engine
-                    .run_noise_named_with_input_source(
+                    .run_noise_named_with_input_source_and_abort(
                         &make(&model, sources),
                         "b",
                         None,
                         "VIN",
                         &frequencies,
                         temperature,
+                        &NoAbort,
                     )
                     .unwrap();
                 let expected = engine
-                    .run_noise_named_with_input_source(
+                    .run_noise_named_with_input_source_and_abort(
                         &make(equivalent, sources),
                         "b",
                         None,
                         "VIN",
                         &frequencies,
                         temperature,
+                        &NoAbort,
                     )
                     .unwrap();
                 for (a, b) in actual.iter().zip(expected) {
@@ -1082,23 +1104,25 @@ fn legacy_private_resistor_noise_matches_full_port_covariance() {
                     let sources =
                         "VIN drive 0 0 AC 1\nRIN drive b 1000\nVC c 0 0\nVE e 0 0\nVS s 0 0";
                     let actual = engine
-                        .run_noise_named_with_input_source(
+                        .run_noise_named_with_input_source_and_abort(
                             &make(&model, sources),
                             "b",
                             None,
                             "VIN",
                             &frequencies,
                             temperature,
+                            &NoAbort,
                         )
                         .unwrap();
                     let expected = engine
-                        .run_noise_named_with_input_source(
+                        .run_noise_named_with_input_source_and_abort(
                             &make(&reference, sources),
                             "b",
                             None,
                             "VIN",
                             &frequencies,
                             temperature,
+                            &NoAbort,
                         )
                         .unwrap();
                     for (a, b) in actual.iter().zip(expected) {
@@ -1167,7 +1191,15 @@ R3 R3_P R3_N 500k
         .map(|point| 1.0e3 * 10.0_f64.powf(f64::from(point) / 25.0))
         .collect();
     let results = Engine::new(SimulationConfig::default())
-        .run_noise_named_with_input_source(&netlist, "vout", None, "v2", &frequencies, 300.15)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "vout",
+            None,
+            "v2",
+            &frequencies,
+            300.15,
+            &NoAbort,
+        )
         .expect("noise analysis runs");
     let integrated = IntegratedNoise::new(results);
     for (label, actual, reference, tolerance) in [

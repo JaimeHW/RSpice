@@ -212,7 +212,7 @@ pub fn invert_complex_matrix_with_abort(
 /// every undriven port is matched, so its voltage is purely the wave leaving
 /// the network. No branch currents and no matrix inversion are involved, which
 /// is why this works on networks that have no admittance representation at all
-/// — the ones [`s_from_y`] can only report as a singular matrix.
+/// — the ones [`s_from_y_with_abort`] can only report as a singular matrix.
 ///
 /// `voltages[j]` is the complex voltage across port `j` at one frequency, taken
 /// at its reference plane. Ports must be normalized to their Thevenin form
@@ -369,7 +369,7 @@ pub(super) fn renormalize_with_abort(
 
 /// Convert scattering parameters back to an N-port admittance matrix.
 ///
-/// The exact inverse of [`s_from_y`]:
+/// The exact inverse of [`s_from_y_with_abort`]:
 ///
 /// ```text
 /// Y = D^-1 (I + S)^-1 (I - S) D^-1,   D = diag(sqrt(Z0_i))
@@ -441,18 +441,11 @@ pub fn y_from_s(
     Ok(admittance)
 }
 
-/// Convert an N-port admittance matrix to scattering parameters.
+/// Convert an N-port admittance matrix to scattering parameters,
+/// cancellable through `abort`.
 ///
 /// `admittance` is indexed `[row][column]`; `reference_impedances` gives one
 /// real, positive reference impedance per port, in port order.
-pub fn s_from_y(
-    admittance: &[Vec<Complex64>],
-    reference_impedances: &[Value],
-) -> Result<Vec<Vec<Complex64>>, NetworkError> {
-    s_from_y_with_abort(admittance, reference_impedances, &NoAbort)
-}
-
-/// [`s_from_y`], cancellable through `abort`.
 pub fn s_from_y_with_abort(
     admittance: &[Vec<Complex64>],
     reference_impedances: &[Value],
@@ -647,7 +640,7 @@ mod tests {
             vec![Complex64::new(-1.0 / r, 0.0), Complex64::new(1.0 / r, 0.0)],
         ];
 
-        let s = s_from_y(&y, &[z1, z2]).expect("conversion succeeds");
+        let s = s_from_y_with_abort(&y, &[z1, z2], &NoAbort).expect("conversion succeeds");
 
         let (a, b) = (z1 / r, z2 / r);
         let c = (z1 * z2).sqrt() / r;
@@ -676,7 +669,7 @@ mod tests {
             vec![Complex64::new(1.0 / r, 0.0), Complex64::new(-1.0 / r, 0.0)],
             vec![Complex64::new(-1.0 / r, 0.0), Complex64::new(1.0 / r, 0.0)],
         ];
-        let expected = s_from_y(&y, &[z1, z2]).expect("conversion succeeds");
+        let expected = s_from_y_with_abort(&y, &[z1, z2], &NoAbort).expect("conversion succeeds");
 
         let total = z1 + r + z2;
         // Port voltages with port 1 driven, then with port 2 driven.
@@ -742,7 +735,7 @@ mod tests {
         ];
         let z0 = [50.0, 75.0];
 
-        let s = s_from_y(&y, &z0).expect("conversion succeeds");
+        let s = s_from_y_with_abort(&y, &z0, &NoAbort).expect("conversion succeeds");
         let recovered = y_from_s(&s, &z0).expect("inverse succeeds");
 
         for (row, values) in y.iter().enumerate() {
@@ -762,7 +755,7 @@ mod tests {
             vec![Complex64::new(0.02, 0.01), Complex64::new(-0.005, 0.002)],
             vec![Complex64::new(-0.005, 0.002), Complex64::new(0.01, -0.003)],
         ];
-        let s = s_from_y(&y, &[50.0, 75.0]).expect("conversion succeeds");
+        let s = s_from_y_with_abort(&y, &[50.0, 75.0], &NoAbort).expect("conversion succeeds");
         assert!((s[0][1] - s[1][0]).norm() < 1e-14);
     }
 
@@ -770,7 +763,7 @@ mod tests {
     fn matched_load_is_reflectionless() {
         let z0 = 50.0;
         let y = vec![vec![Complex64::new(1.0 / z0, 0.0)]];
-        let s = s_from_y(&y, &[z0]).expect("conversion succeeds");
+        let s = s_from_y_with_abort(&y, &[z0], &NoAbort).expect("conversion succeeds");
         assert!(s[0][0].norm() < 1e-15);
     }
 
@@ -783,7 +776,7 @@ mod tests {
             vec![Complex64::new(0.0, 0.0), Complex64::new(-1.0 / z0, 0.0)],
         ];
         assert_eq!(
-            s_from_y(&y, &[z0, z0]),
+            s_from_y_with_abort(&y, &[z0, z0], &NoAbort),
             Err(NetworkError::SingularNormalization)
         );
     }
@@ -792,15 +785,15 @@ mod tests {
     fn malformed_and_invalid_inputs_are_rejected() {
         let y = vec![vec![Complex64::new(0.02, 0.0)]];
         assert!(matches!(
-            s_from_y(&y, &[50.0, 50.0]),
+            s_from_y_with_abort(&y, &[50.0, 50.0], &NoAbort),
             Err(NetworkError::MalformedAdmittance { .. })
         ));
         assert!(matches!(
-            s_from_y(&y, &[0.0]),
+            s_from_y_with_abort(&y, &[0.0], &NoAbort),
             Err(NetworkError::InvalidReferenceImpedance { port: 0, .. })
         ));
         assert!(matches!(
-            s_from_y(&y, &[f64::NAN]),
+            s_from_y_with_abort(&y, &[f64::NAN], &NoAbort),
             Err(NetworkError::InvalidReferenceImpedance { port: 0, .. })
         ));
     }
@@ -814,7 +807,7 @@ mod tests {
 
         let nonfinite = vec![vec![Complex64::new(Value::NAN, 0.0)]];
         assert_eq!(
-            s_from_y(&nonfinite, &[50.0]),
+            s_from_y_with_abort(&nonfinite, &[50.0], &NoAbort),
             Err(NetworkError::NonFiniteMatrixEntry { row: 0, column: 0 })
         );
         assert_eq!(

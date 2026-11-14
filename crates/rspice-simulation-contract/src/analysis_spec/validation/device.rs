@@ -362,7 +362,7 @@ mod tests {
             rspice_core::engine::Engine::try_new(rspice_core::engine::SimulationConfig::default())
                 .expect("the default numerical policy is valid");
         let core = engine
-            .run_dc_match(&netlist, &card)
+            .run_dc_match_with_abort(&netlist, &card, &rspice_core::NoAbort)
             .expect_err("a card with neither scope is refused")
             .to_string();
         tied_to_the_engine(&core, &refusal(&dc_mismatch("V(out)", 1.0, (false, false))));

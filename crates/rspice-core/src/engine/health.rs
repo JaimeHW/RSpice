@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::{Engine, SimulationError};
 use crate::Value;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::netlist::{Netlist, NetlistParseOptions, ParseError, ParseWithAbortError};
 
 const HEALTH_NETLIST: &str =
@@ -29,16 +29,12 @@ pub struct EngineHealthReport {
 
 impl Engine {
     /// Exercise configuration validation, bounded parsing, circuit
-    /// construction, matrix assembly, and a deterministic linear DC solve.
+    /// construction, matrix assembly, and a deterministic linear DC solve,
+    /// with cooperative cancellation.
     ///
     /// This is a readiness probe, not a comprehensive numerical test suite. It
     /// performs no filesystem or network I/O and honors this engine's resource
     /// limits. Services can call it during startup or from a readiness endpoint.
-    pub fn health_check(&self) -> Result<EngineHealthReport, SimulationError> {
-        self.health_check_with_abort(&NoAbort)
-    }
-
-    /// Run the readiness probe with cooperative cancellation.
     pub fn health_check_with_abort(
         &self,
         abort: &dyn AbortSignal,

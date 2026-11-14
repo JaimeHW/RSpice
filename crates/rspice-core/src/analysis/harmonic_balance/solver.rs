@@ -7,7 +7,9 @@ use super::config::{HbConfig, HbConfigError};
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};
 use crate::Value;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
+#[cfg(test)]
+use crate::abort_signal::NoAbort;
 use num_complex::Complex64;
 
 mod capacitors;

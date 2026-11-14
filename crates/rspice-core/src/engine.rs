@@ -47,7 +47,6 @@ mod analog_tasks;
 mod analysis_capability;
 pub use analysis_capability::{
     CapabilityAnalysis, CapabilityFamily, CellSupport, InstanceGate, capability_cell,
-    capability_matrix,
 };
 mod builder;
 mod built_topology;
@@ -187,7 +186,6 @@ pub use result::{
     RealTracePoint, TransientDeviceOpTrace, TransientFftBin, TransientFftHarmonic,
     TransientFftMetrics, TransientFftResult, TransientFftStatus, TransientFourierResult,
     TransientOutputProjection, TransientPostResults, TransientResult, TransientStoreTrace,
-    digital_state_from_tag, digital_state_tag, digital_strength_from_tag, digital_strength_tag,
     validate_digital_bus_table,
 };
 pub use stb::StbAnalysisResult;
@@ -199,8 +197,8 @@ pub use transient::{
     TransientCheckpointStream, TransientEnd, TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE,
     XyceRestartJobPlan, XyceRestartPlanError, evaluate_transient_fourier_results,
     evaluate_transient_post_results, netlist_fingerprint,
-    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain,
-    transient_fft_window_coherent_gain_with_alpha, xyce_restart_schedule_is_due,
+    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain_with_alpha,
+    xyce_restart_schedule_is_due,
 };
 pub use waveform::{
     CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,

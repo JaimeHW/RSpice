@@ -3431,7 +3431,7 @@ impl Engine {
     }
 
     /// Differentiate one DC probe with respect to the variables a filter list
-    /// names.
+    /// names, with cooperative cancellation.
     ///
     /// The variable universe is the union of two namespaces: the device
     /// variables of the flattened circuit (instance parameters, element and
@@ -3452,16 +3452,6 @@ impl Engine {
     /// can be assembled at the converged solution is a Richardson-extrapolated
     /// three-point stencil of re-solves accepted only on 1e-4 relative
     /// agreement of four independent fits, else refused by name.
-    pub fn run_sensitivity_dc_complete(
-        &self,
-        netlist: &Netlist,
-        output: AcSensitivityOutput,
-        filters: &[String],
-    ) -> Result<SensitivityResult, SimulationError> {
-        self.run_sensitivity_dc_complete_with_abort(netlist, output, filters, &NoAbort)
-    }
-
-    /// Complete DC sensitivity with cooperative cancellation.
     pub fn run_sensitivity_dc_complete_with_abort(
         &self,
         netlist: &Netlist,
@@ -3675,7 +3665,7 @@ impl Engine {
     ///
     /// The variable universe, the `PARAM:` rule, the empty-filter default and
     /// the total-derivative semantics are exactly those of
-    /// [`Self::run_sensitivity_dc_complete`], and so is the method of record:
+    /// [`Self::run_sensitivity_dc_complete_with_abort`], and so is the method of record:
     /// exact for a design parameter or eligible R/L/C value field on a qualified
     /// linear deck, refined finite
     /// differences otherwise. The returned derivatives are complex and
@@ -4583,13 +4573,14 @@ R2 out 0 1k
     fn complete_dc_sensitivity_reports_device_and_source_derivatives() {
         let netlist = Netlist::parse(DC_DIVIDER).expect("deck parses");
         let result = Engine::default()
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 AcSensitivityOutput::Voltage {
                     positive: 2,
                     negative: None,
                 },
                 &[],
+                &crate::abort_signal::NoAbort,
             )
             .expect("complete DC sensitivity runs");
         assert!(
@@ -4610,10 +4601,11 @@ R2 out 0 1k
     fn complete_dc_sensitivity_supports_branch_current_and_filters() {
         let netlist = Netlist::parse(DC_DIVIDER).expect("deck parses");
         let result = Engine::default()
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 AcSensitivityOutput::BranchCurrent("v1".to_string()),
                 &["R1".to_string()],
+                &crate::abort_signal::NoAbort,
             )
             .expect("branch-current DC sensitivity runs");
         assert_eq!(result.output, "I(v1)");
@@ -4636,13 +4628,14 @@ RBOT output 0 1k\n\
         )
         .expect("deck parses");
         let result = Engine::default()
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 AcSensitivityOutput::Voltage {
                     positive: 2,
                     negative: None,
                 },
                 &["*RTOP".to_string()],
+                &crate::abort_signal::NoAbort,
             )
             .expect("hierarchical filtered DC sensitivity runs");
         assert_eq!(result.len(), 1);
@@ -4667,13 +4660,14 @@ YMEMRISTOR mr1 out 0 team_model ivrelation=0\n\
         .expect("TEAM sensitivity deck parses");
 
         let message = Engine::default()
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 AcSensitivityOutput::Voltage {
                     positive: 1,
                     negative: None,
                 },
                 &[],
+                &crate::abort_signal::NoAbort,
             )
             .expect_err("complete DC sensitivity must fail closed for TEAM")
             .to_string();
@@ -4703,13 +4697,14 @@ YMEMRISTOR state p n local_team ivrelation=0\n\
         .expect("hierarchical TEAM sensitivity deck parses");
 
         let message = Engine::default()
-            .run_sensitivity_dc_complete(
+            .run_sensitivity_dc_complete_with_abort(
                 &netlist,
                 AcSensitivityOutput::Voltage {
                     positive: 2,
                     negative: None,
                 },
                 &["R1".to_string()],
+                &crate::abort_signal::NoAbort,
             )
             .expect_err("filters must not permit a partially covered TEAM analysis")
             .to_string();

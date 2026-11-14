@@ -1,6 +1,7 @@
 //! Cancellation requested after accepted GP work, rather than during setup.
 //! The assertions count work, so they are portable across hosts.
 
+use rspice_core::NoAbort;
 use rspice_core::abort_signal::{AbortSignal, TransientSample};
 use rspice_core::engine::TransientStartupMode;
 use rspice_core::{
@@ -78,7 +79,7 @@ fn gp_cancellation_after_accepted_work_bounds_progress_and_preserves_reuse() {
                 TransientStartupMode::Uic,
             ] {
                 let baseline = engine
-                    .run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&source, 2e-9, 4e-12, startup, &NoAbort)
                     .unwrap();
                 for request_at in [1, 32, 128] {
                     let abort = CancelAfterSamples::new(request_at);
@@ -92,7 +93,7 @@ fn gp_cancellation_after_accepted_work_bounds_progress_and_preserves_reuse() {
                     abort.assert_stopped();
                 }
                 let reused = engine
-                    .run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
+                    .run_tran_with_startup_mode_and_abort(&source, 2e-9, 4e-12, startup, &NoAbort)
                     .unwrap();
                 assert_eq!(baseline.time, reused.time);
                 assert_eq!(baseline.step_sizes, reused.step_sizes);

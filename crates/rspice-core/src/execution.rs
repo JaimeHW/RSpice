@@ -47,11 +47,11 @@ pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
-    analysis_result_capability, analysis_result_kind, signal_capability,
+    analysis_result_capability, analysis_result_kind,
 };
 pub use event_bus::{
     BusEventTable, BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events,
-    bus_value_at, split_bus_notation,
+    split_bus_notation,
 };
 pub use event_export::{
     EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,

@@ -225,7 +225,10 @@ fn aggregation_checks_the_batch_limit_before_reading_trials() {
 #[test]
 fn callback_sampling_is_independent_of_component_registration_order() {
     let sample = |reverse: bool| {
-        let mut runner = MonteCarloRunner::new(MonteCarloConfig::new(8).with_seed(42));
+        let mut runner = MonteCarloRunner::new(MonteCarloConfig {
+            seed: Some(42),
+            ..MonteCarloConfig::new(8)
+        });
         for index in 0..8 {
             let index = if reverse { 7 - index } else { index };
             runner.add_component(
@@ -262,7 +265,10 @@ fn callback_host_seed_can_replay_the_exact_samples() {
     };
     let original = run(MonteCarloConfig::new(12));
     let sampling = original.sampling.expect("host seed is retained");
-    let replay = run(MonteCarloConfig::new(12).with_seed(sampling.seed));
+    let replay = run(MonteCarloConfig {
+        seed: Some(sampling.seed),
+        ..MonteCarloConfig::new(12)
+    });
     assert_eq!(replay.sampling, original.sampling);
     assert_eq!(
         replay.variables["R1"].samples,
@@ -273,7 +279,10 @@ fn callback_host_seed_can_replay_the_exact_samples() {
 #[test]
 fn callback_configuration_is_rejected_before_simulation() {
     for case in 0..6 {
-        let mut config = MonteCarloConfig::new(3).with_seed(1);
+        let mut config = MonteCarloConfig {
+            seed: Some(1),
+            ..MonteCarloConfig::new(3)
+        };
         match case {
             0 => config.num_runs = 0,
             1 => config.histogram_bins = 0,
@@ -290,7 +299,10 @@ fn callback_configuration_is_rejected_before_simulation() {
         );
     }
     for (nominal, spread) in [(f64::NAN, 0.1), (1.0, -0.1), (1.0, f64::INFINITY)] {
-        let mut runner = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(1));
+        let mut runner = MonteCarloRunner::new(MonteCarloConfig {
+            seed: Some(1),
+            ..MonteCarloConfig::new(3)
+        });
         runner.add_component(
             "R1",
             nominal,
@@ -309,7 +321,10 @@ fn callback_configuration_is_rejected_before_simulation() {
 
 #[test]
 fn callback_result_budget_accounts_for_samples_and_histograms() {
-    let mut config = MonteCarloConfig::new(4).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(4)
+    };
     config.histogram_bins = 1;
     config.resource_limits.max_result_values = 12;
     let runner = MonteCarloRunner::new(config);
@@ -342,7 +357,10 @@ fn callback_cancellation_preserves_the_deadline_reason() {
         }
     }
     let deadline = Deadline(std::sync::atomic::AtomicBool::new(false));
-    let runner = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(1));
+    let runner = MonteCarloRunner::new(MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(2)
+    });
     let error = runner
         .run_with_abort::<_, ()>(
             |_| {
@@ -376,7 +394,10 @@ fn callback_cancellation_preserves_the_deadline_reason() {
 #[test]
 fn confidence_level_changes_the_student_t_mean_interval() {
     let run = |level| {
-        let mut config = MonteCarloConfig::new(5).with_seed(1);
+        let mut config = MonteCarloConfig {
+            seed: Some(1),
+            ..MonteCarloConfig::new(5)
+        };
         config.confidence_pct = level;
         let mut value = 0;
         MonteCarloRunner::new(config)
@@ -421,16 +442,19 @@ fn confidence_level_changes_the_student_t_mean_interval() {
 #[test]
 fn failed_trials_qualify_mean_confidence_and_insufficient_samples_stay_unavailable() {
     let mut attempted = 0;
-    let result = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(1))
-        .run(|_| {
-            attempted += 1;
-            if attempted == 1 {
-                Ok(std::collections::HashMap::from([("out".to_owned(), 2.0)]))
-            } else {
-                Err(())
-            }
-        })
-        .unwrap();
+    let result = MonteCarloRunner::new(MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(3)
+    })
+    .run(|_| {
+        attempted += 1;
+        if attempted == 1 {
+            Ok(std::collections::HashMap::from([("out".to_owned(), 2.0)]))
+        } else {
+            Err(())
+        }
+    })
+    .unwrap();
     let confidence = result.confidence.unwrap();
     assert_eq!(confidence.successful_samples, 1);
     assert!(confidence.conditional_on_successful_trials);
@@ -443,7 +467,10 @@ fn failed_trials_qualify_mean_confidence_and_insufficient_samples_stay_unavailab
 #[test]
 fn bootstrap_is_repeatable_and_separate_from_circuit_sampling() {
     let run = |method| {
-        let mut config = MonteCarloConfig::new(2).with_seed(1);
+        let mut config = MonteCarloConfig {
+            seed: Some(1),
+            ..MonteCarloConfig::new(2)
+        };
         config.confidence_method = method;
         let mut runner = MonteCarloRunner::new(config);
         runner.add_component("R1", 1000.0, Tolerance::uniform(5.0));
@@ -485,7 +512,10 @@ fn bootstrap_is_repeatable_and_separate_from_circuit_sampling() {
 
 #[test]
 fn bootstrap_work_is_bounded_before_callback_execution() {
-    let mut config = MonteCarloConfig::new(1000).with_seed(1);
+    let mut config = MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(1000)
+    };
     config.confidence_method = MeanConfidenceMethod::PercentileBootstrap {
         resamples: 10_000,
         seed: 1,
@@ -504,15 +534,18 @@ fn bootstrap_work_is_bounded_before_callback_execution() {
 #[test]
 fn interrupted_confidence_recalculation_keeps_the_previous_estimate() {
     let mut value = 0;
-    let mut result = MonteCarloRunner::new(MonteCarloConfig::new(4).with_seed(1))
-        .run::<_, ()>(|_| {
-            value += 1;
-            Ok(std::collections::HashMap::from([(
-                "out".to_owned(),
-                value as f64,
-            )]))
-        })
-        .unwrap();
+    let mut result = MonteCarloRunner::new(MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(4)
+    })
+    .run::<_, ()>(|_| {
+        value += 1;
+        Ok(std::collections::HashMap::from([(
+            "out".to_owned(),
+            value as f64,
+        )]))
+    })
+    .unwrap();
     let previous_method = result.confidence;
     let previous_interval = result.variables["out"].mean_confidence;
     let error = result
@@ -534,18 +567,21 @@ fn interrupted_confidence_recalculation_keeps_the_previous_estimate() {
 #[test]
 fn confidence_reports_unrepresentable_student_t_limits_without_losing_bootstrap_limits() {
     let mut index = 0;
-    let mut result = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(1))
-        .run::<_, ()>(|_| {
-            index += 1;
-            Ok(std::collections::HashMap::from([
-                (
-                    "out".to_owned(),
-                    if index == 1 { -f64::MAX } else { f64::MAX },
-                ),
-                ("constant".to_owned(), f64::MAX),
-            ]))
-        })
-        .unwrap();
+    let mut result = MonteCarloRunner::new(MonteCarloConfig {
+        seed: Some(1),
+        ..MonteCarloConfig::new(2)
+    })
+    .run::<_, ()>(|_| {
+        index += 1;
+        Ok(std::collections::HashMap::from([
+            (
+                "out".to_owned(),
+                if index == 1 { -f64::MAX } else { f64::MAX },
+            ),
+            ("constant".to_owned(), f64::MAX),
+        ]))
+    })
+    .unwrap();
     assert_eq!(
         result.variables["out"].mean_confidence,
         Some(MeanConfidenceInterval::Unrepresentable)

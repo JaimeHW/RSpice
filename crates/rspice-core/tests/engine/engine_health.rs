@@ -1,3 +1,4 @@
+use rspice_core::NoAbort;
 use rspice_core::{
     AtomicAbort, Engine, ResourceKind, SimulationConfig, SimulationError, SimulationErrorCode,
 };
@@ -6,7 +7,7 @@ use rspice_core::{
 fn readiness_probe_exercises_parser_and_solver() {
     let report = Engine::try_new(SimulationConfig::default())
         .expect("valid engine")
-        .health_check()
+        .health_check_with_abort(&NoAbort)
         .expect("default backend is ready");
 
     assert_eq!(report.element_count, 2);
@@ -32,7 +33,7 @@ fn readiness_probe_honors_the_engine_resource_policy() {
     config.resource_limits.max_netlist_bytes = 1;
     let error = Engine::try_new(config)
         .expect("resource policy is a valid configuration")
-        .health_check()
+        .health_check_with_abort(&NoAbort)
         .expect_err("probe must use the configured parser limit");
     let descriptor = error.descriptor();
     let limit = descriptor.resource_limit.expect("numeric resource details");

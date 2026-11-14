@@ -986,6 +986,7 @@ impl SensitivityAnalyzer {
     /// [`Self::with_precomputed_adjoint`]. `output_ref` affects only the
     /// reported nominal output; its `-1` observation coefficient must already
     /// be present in the supplied adjoint RHS.
+    #[cfg(test)]
     pub fn analyze_precomputed(
         &self,
         output_node: usize,

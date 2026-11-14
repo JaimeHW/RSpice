@@ -15,6 +15,7 @@
 //! carrying the `statistics` block, pulled in by `.include`, lowered by the
 //! include expander, with the card authored as `.DCMATCH` in the deck.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::dcmatch::DcMatchScope;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, DcMatchCard, Netlist};
@@ -80,7 +81,7 @@ fn dcmatch_reproduces_the_analytic_resistor_divider_variance() {
     assert_eq!(card.contributor_limit, 0);
 
     let result = Engine::new(SimulationConfig::default())
-        .run_dc_match(&netlist, &card)
+        .run_dc_match_with_abort(&netlist, &card, &NoAbort)
         .expect("the divider's mismatch variance solves");
 
     // V(out) = Vs*R2/(R1+R2); d/dR1 = -Vs*R2/(R1+R2)^2, d/dR2 = Vs*R1/(R1+R2)^2.
@@ -173,7 +174,7 @@ fn dcmatch_applies_a_declared_process_correlation_to_the_divider_variance() {
     );
 
     let result = Engine::new(SimulationConfig::default())
-        .run_dc_match(&netlist, &dcmatch_card(&netlist))
+        .run_dc_match_with_abort(&netlist, &dcmatch_card(&netlist), &NoAbort)
         .expect("the correlated divider's variance solves");
 
     let (source, r1, r2, sigma, coefficient) = (1.0_f64, 1.0e3_f64, 2.0e3_f64, 10.0_f64, 0.8_f64);
@@ -292,7 +293,7 @@ fn dcmatch_reproduces_the_pelgrom_differential_pair_offset() {
     let expected = 2.0_f64.sqrt() * gm * 20.0e3 * sigma_threshold;
 
     let result = engine
-        .run_dc_match(&netlist, &dcmatch_card(&netlist))
+        .run_dc_match_with_abort(&netlist, &dcmatch_card(&netlist), &NoAbort)
         .expect("the pair's mismatch variance solves");
 
     let error = (result.sigma_total - expected).abs() / expected;
@@ -341,7 +342,7 @@ fn a_design_without_a_statistics_block_is_refused_with_the_remedy() {
     .expect("the deck parses; the card is refused at run time, not at parse time");
 
     let message = Engine::new(SimulationConfig::default())
-        .run_dc_match(&netlist, &dcmatch_card(&netlist))
+        .run_dc_match_with_abort(&netlist, &dcmatch_card(&netlist), &NoAbort)
         .expect_err("there is no declared spread to report")
         .to_string();
     assert!(

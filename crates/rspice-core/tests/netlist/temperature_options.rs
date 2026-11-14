@@ -1,4 +1,5 @@
 //! Temperature option expressions must agree with eagerly parsed values.
+use rspice_core::NoAbort;
 use rspice_core::netlist::expr::{ParamContext, eval_expression};
 use rspice_core::{Engine, Netlist};
 
@@ -342,7 +343,9 @@ fn parameter_table_rows_set_physical_noise_temperature_through_authored_options(
             ..Default::default()
         });
         let result = engine
-            .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "rows", 999.0)
+            .run_noise_table_named_with_input_source_and_abort(
+                &netlist, "out", None, "V1", "rows", 999.0, &NoAbort,
+            )
             .unwrap();
         assert_eq!(result.points.len(), 2);
         for (point, temperature) in result.points.iter().zip([358.15, 398.15]) {

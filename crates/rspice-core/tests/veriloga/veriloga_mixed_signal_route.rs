@@ -47,6 +47,7 @@
 
 use super::digital_trace_invariants;
 
+use crate::model_outcome::RunWithOutcome;
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
 use rspice_core::engine::{DigitalBusSource, TransientResult};
 use rspice_core::{Engine, Netlist, SimulationConfig};
@@ -314,7 +315,10 @@ fn waveform(result: &TransientResult, node: &str) -> Vec<f64> {
     let index = result
         .node_index_named(node)
         .unwrap_or_else(|| panic!("node '{node}' is not in the result"));
-    result.voltage_waveform(index).to_vec()
+    result
+        .try_voltage_waveform(index)
+        .expect("node index in range")
+        .to_vec()
 }
 
 /// How many times a recorded waveform crosses a level going up.

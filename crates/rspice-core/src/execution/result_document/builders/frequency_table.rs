@@ -6,7 +6,7 @@ use super::super::frequency_table::{
 };
 use super::*;
 use crate::engine::{FrequencyDataResult, FrequencyDataTarget};
-use crate::{AbortSignal, NoAbort, ResourceKind, ResourceLimitError, ResourceLimits};
+use crate::{AbortSignal, ResourceKind, ResourceLimitError, ResourceLimits};
 
 fn admit(count: usize, limits: &ResourceLimits) -> Result<(), ResultDocumentError> {
     ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)
@@ -98,19 +98,7 @@ fn validate_source<T>(
 
 impl AnalysisResultDocument {
     /// Project a table's AC points with every physical coordinate and completion.
-    pub fn from_ac_table(
-        analysis: AnalysisInstanceId,
-        result: &FrequencyDataResult<AcResult>,
-    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        Self::from_ac_table_with_limits_and_abort(
-            analysis,
-            result,
-            &ResourceLimits::default(),
-            &NoAbort,
-        )
-    }
-
-    /// Bounded, cancellable table projection; limits include every retained axis.
+    /// Bounded and cancellable; limits include every retained axis.
     pub fn from_ac_table_with_limits_and_abort(
         analysis: AnalysisInstanceId,
         result: &FrequencyDataResult<AcResult>,
@@ -140,19 +128,7 @@ impl AnalysisResultDocument {
     }
 
     /// Project noise spectra and contributions with physical table-row identity.
-    pub fn from_noise_table(
-        analysis: AnalysisInstanceId,
-        result: &FrequencyDataResult<NoiseResult>,
-    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        Self::from_noise_table_with_limits_and_abort(
-            analysis,
-            result,
-            &ResourceLimits::default(),
-            &NoAbort,
-        )
-    }
-
-    /// Bounded, cancellable projection including contribution-series storage.
+    /// Bounded and cancellable, including contribution-series storage.
     pub fn from_noise_table_with_limits_and_abort(
         analysis: AnalysisInstanceId,
         result: &FrequencyDataResult<NoiseResult>,

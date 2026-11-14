@@ -2,12 +2,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::family_src::read_family_src;
 use num_complex::Complex64;
-use rspice_core::analysis::harmonic_balance::{
-    DepletionCap, HbSwitchNodes, HbVoltageSwitchModel, NonlinearDeviceInstance,
-};
+use rspice_core::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 use rspice_core::analysis::{HbConfig, HbError, HbFft, HbSolver, HbSolverState};
 use rspice_core::engine::HbOperatingPoint;
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, Netlist, NoAbort};
 
 fn fixture() -> Netlist {
     Netlist::parse("HB config validation\nV1 out 0 1\nR1 out 0 1k\n.end").expect("fixture parses")
@@ -99,7 +97,7 @@ fn public_solver_constructor_is_fallible_and_legacy_constructor_is_fail_closed()
         .expect("legacy solver construction must retain, not panic on, validation failure");
     let mut state = HbSolverState::new(1, 1);
     assert!(matches!(
-        legacy.solve_dc_operating_point(&mut state),
+        legacy.solve_dc_operating_point_with_abort(&mut state, &NoAbort),
         Err(HbError::InvalidConfig(_))
     ));
 }
@@ -156,7 +154,7 @@ fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
         solver.add_nonlinear_device(device);
         let mut state = HbSolverState::new(1, 1);
         let error = solver
-            .solve_dc_operating_point(&mut state)
+            .solve_dc_operating_point_with_abort(&mut state, &NoAbort)
             .expect_err("invalid public nonlinear-device parameters must fail before solving");
         assert!(matches!(error, HbError::InvalidCircuit(_)));
         assert!(
@@ -164,33 +162,6 @@ fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
             "wrong public-solver parameter diagnostic: {error}"
         );
     }
-
-    let mut switch_solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
-    switch_solver.add_voltage_switch(
-        HbSwitchNodes {
-            node_pos: 0,
-            node_neg: 0,
-            ctrl_pos: 0,
-            ctrl_neg: 0,
-        },
-        HbVoltageSwitchModel {
-            vt: 0.0,
-            vh: 0.1,
-            ron: 1.0,
-            roff: 1.0e6,
-            smooth: 0.1,
-        },
-    );
-    let mut state = HbSolverState::new(1, 1);
-    let error = switch_solver
-        .solve_dc_operating_point(&mut state)
-        .expect_err("public exact-HB switch API must reject unrepresented hysteresis");
-    assert!(
-        error
-            .to_string()
-            .contains("requires zero finite hysteresis"),
-        "wrong public switch diagnostic: {error}"
-    );
 }
 
 #[test]

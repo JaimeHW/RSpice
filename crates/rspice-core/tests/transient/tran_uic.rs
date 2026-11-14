@@ -2,6 +2,7 @@
 //! initial conditions, ngspice-style. Without `UIC` the same `.IC` card
 //! instead constrains the bias solution that starts the transient.
 
+use rspice_core::NoAbort;
 use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{
     ConvergenceConfig, Engine, SimulationConfig, SpiceDialect, TransientStartupMode,
@@ -340,11 +341,12 @@ fn xyce_inductor_ic_cannot_fall_back_to_an_unconstrained_dc_solution() {
                     "Inconsistent winding current\nI1 0 out .00025\n{load}.options GMIN=0\n.end\n"
                 ))
                 .unwrap();
-                let result = engine.run_tran_with_startup_mode(
+                let result = engine.run_tran_with_startup_mode_and_abort(
                     &deck,
                     2e-9,
                     5e-12,
                     TransientStartupMode::OperatingPoint,
+                    &NoAbort,
                 );
                 assert!(
                     result.is_err(),
@@ -467,15 +469,22 @@ fn mixed_tran_cards_require_and_honor_explicit_selected_startup_mode() {
     assert!(error.to_string().contains("explicit TransientStartupMode"));
 
     let operating_point = engine
-        .run_tran_with_startup_mode(
+        .run_tran_with_startup_mode_and_abort(
             &netlist,
             1.0e-3,
             10.0e-6,
             TransientStartupMode::OperatingPoint,
+            &NoAbort,
         )
         .expect("the selected ordinary .TRAN executes");
     let uic = engine
-        .run_tran_with_startup_mode(&netlist, 1.0e-3, 10.0e-6, TransientStartupMode::Uic)
+        .run_tran_with_startup_mode_and_abort(
+            &netlist,
+            1.0e-3,
+            10.0e-6,
+            TransientStartupMode::Uic,
+            &NoAbort,
+        )
         .expect("the selected UIC .TRAN executes");
     let op_out = operating_point
         .try_voltage_waveform_named("out")
@@ -723,7 +732,7 @@ fn uic_bjt_charge_accuracy_improves_with_requested_tolerance() {
                 };
                 config.convergence_config.gmin_target = 0.0;
                 let result = Engine::new(config)
-                    .run_tran_with_startup_mode(&source, 4e-9, 100e-12, TransientStartupMode::Uic)
+                    .run_tran_with_startup_mode_and_abort(&source, 4e-9, 100e-12, TransientStartupMode::Uic, &NoAbort)
                     .unwrap();
                 assert_eq!(result.time.last(), Some(&4e-9));
                 let voltage = result.try_voltage_waveform_named("b").unwrap();
@@ -770,7 +779,7 @@ fn ngspice_inductor_ic_requires_uic_for_linear_and_nonlinear_startup() {
             TransientStartupMode::Uic,
         ] {
             let result = engine
-                .run_tran_with_startup_mode(&deck, 0.1e-9, 1e-12, startup)
+                .run_tran_with_startup_mode_and_abort(&deck, 0.1e-9, 1e-12, startup, &NoAbort)
                 .unwrap();
             let current = result.try_branch_current_waveform_named("l1").unwrap()[0];
             let expected = if startup == TransientStartupMode::Uic {

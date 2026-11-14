@@ -10,6 +10,7 @@
 //! delay oracle evaluates the prescribed input at t - delay analytically;
 //! ngspice's discrete recurrence is a separate phase law.
 
+use rspice_core::NoAbort;
 use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, TransientResult};
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, SpiceDialect};
@@ -140,7 +141,13 @@ fn gp_clamped_uic_preserves_tight_charge_tolerance() {
             config.convergence_config.gmin_target = 0.0;
             let engine = Engine::new(config);
             let result = engine
-                .run_tran_with_startup_mode(&deck, 2.5e-9, 4e-12, TransientStartupMode::Uic)
+                .run_tran_with_startup_mode_and_abort(
+                    &deck,
+                    2.5e-9,
+                    4e-12,
+                    TransientStartupMode::Uic,
+                    &NoAbort,
+                )
                 .unwrap_or_else(|error| panic!("{dialect:?}/{polarity}: {error}"));
             behavioral::check(&result, dialect, polarity, None, "vb", true);
             let impulse = result

@@ -1,4 +1,5 @@
 //! Independent AC and noise oracles for Xyce LEVEL=2 magnetic cores.
+use rspice_core::NoAbort;
 use rspice_core::config::SpiceDialect;
 use rspice_core::{Complex64, Engine, Netlist, SimulationConfig};
 
@@ -140,7 +141,15 @@ fn shared_level2_ac_uses_all_ampere_turns_and_the_authored_core_coupling() {
 fn level2_core_noise_uses_the_material_transfer_function() {
     let netlist = Netlist::parse("Core resistor noise\nV1 in 0 DC 0 AC 1\nR1 in p 1\nL1 p 0 10\nK1 L1 1 core\n.model core CORE level=2 c=.001\n.end\n").unwrap();
     let points = engine()
-        .run_noise_named_with_input_source(&netlist, "p", None, "V1", &[1.0, 1e5, 1e9], 300.0)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "p",
+            None,
+            "V1",
+            &[1.0, 1e5, 1e9],
+            300.0,
+            &NoAbort,
+        )
         .unwrap();
     for point in points {
         let z = Complex64::new(
@@ -183,7 +192,15 @@ fn undefined_level2_material_tangent_is_reported_by_ac_and_noise() {
     let netlist = Netlist::parse("Singular core\nV1 in 0 DC 0 AC 1\nR1 in p 1\nL1 p 0 10\nK1 L1 1 core\n.model core CORE level=2 ms=1 a=1 k=1 alpha=1 betam=1 c=.001\n.end\n").unwrap();
     let ac = engine().run_ac(&netlist, &[1e3]).unwrap_err();
     let noise = engine()
-        .run_noise_named_with_input_source(&netlist, "p", None, "V1", &[1e3], 300.0)
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            "p",
+            None,
+            "V1",
+            &[1e3],
+            300.0,
+            &NoAbort,
+        )
         .unwrap_err();
     for error in [ac, noise] {
         let message = error.to_string();

@@ -3416,15 +3416,6 @@ impl Engine {
 
     /// Execute table-driven AC while retaining compact, typed row coordinates.
     /// Repeated and decreasing frequencies retain their original row identity.
-    pub fn run_ac_table(
-        &self,
-        netlist: &Netlist,
-        table_name: &str,
-    ) -> Result<FrequencyDataResult<AcResult>, SimulationError> {
-        self.run_ac_table_with_abort(netlist, table_name, &NoAbort)
-    }
-
-    /// Cancellable variant of [`Self::run_ac_table`].
     pub fn run_ac_table_with_abort(
         &self,
         netlist: &Netlist,

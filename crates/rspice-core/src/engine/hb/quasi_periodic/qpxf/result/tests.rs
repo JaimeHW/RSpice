@@ -30,7 +30,7 @@ fn qpxf_retained_result_round_trip_and_corruption_boundaries() {
         group_delay_magnitude_floor: 1e-8,
     };
     let result = engine
-        .run_qpxf_from_qpss(&netlist, request, &point)
+        .run_qpxf_from_qpss_with_abort(&netlist, request, &point, &NoAbort)
         .unwrap();
     let limits = ResourceLimits::default();
     assert_eq!(result.transfers.len(), 18);
