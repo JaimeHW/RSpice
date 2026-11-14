@@ -1607,7 +1607,7 @@ mod tests {
             }),
             ("run geometry", |state| {
                 install_projected_run_geometry(
-                    state,
+                    &mut state.model,
                     HashMap::from([("VOUT".to_owned(), vec![Point::new(100, 0)])]),
                 );
             }),

@@ -357,7 +357,7 @@ pub(super) fn hierarchy_sheet() -> AppState {
     document.net_labels = labels;
     settle(&mut state);
 
-    crate::schematic::view::frame_cost::install_projected_run_geometry(&mut state, nets);
+    crate::schematic::view::frame_cost::install_projected_run_geometry(&mut state.model, nets);
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {

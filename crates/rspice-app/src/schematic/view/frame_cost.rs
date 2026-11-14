@@ -9,6 +9,7 @@ use crate::state::{
     PortDirection, PortSpec, SchematicAnnotationVisibility, SimulationRun, SymbolDocument,
     SymbolPin, SymbolShape, View, ViewType, Wire,
 };
+use crate::workbench::app_state::Model;
 
 use super::AppState;
 
@@ -256,24 +257,21 @@ fn cross_probe_nets(sheets: &[SheetContent; 2]) -> HashMap<String, Vec<Point>> {
 /// every point as the netlister read it off the projected document, where the
 /// sheet at catalog index `k` lies `k * 1_000_000` along x, and the snapshot
 /// takes each point home to its sheet.
-pub(crate) fn install_projected_run_geometry(
-    state: &mut AppState,
-    nets: HashMap<String, Vec<Point>>,
-) {
+pub(crate) fn install_projected_run_geometry(model: &mut Model, nets: HashMap<String, Vec<Point>>) {
     let point_to_net = nets
         .iter()
         .flat_map(|(net, points)| points.iter().map(move |point| (*point, net.clone())))
         .collect();
     let sheets = rspice_simulation::netlist_gen::net_geometry_by_sheet(
-        super::sheet_visibility::active_sheet_catalog(state),
+        super::sheet_visibility::active_sheet_catalog(model),
         point_to_net,
         nets,
         HashMap::new(),
     );
-    state.model.simulation.source.cross_probe.install(
-        state.model.workspace.content.active_view.clone(),
+    model.simulation.source.cross_probe.install(
+        model.workspace.content.active_view.clone(),
         sheets,
-        state.model.schematic.topology_version(),
+        model.schematic.topology_version(),
     );
 }
 
@@ -290,7 +288,7 @@ pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
     state.model.schematic.bump_topology_version();
     let projected = |point: Point| Point::new(point.x + 1_000_000, point.y);
     install_projected_run_geometry(
-        &mut state,
+        &mut state.model,
         HashMap::from([
             ("VOUT".to_owned(), vec![start, end]),
             ("BIAS".to_owned(), vec![projected(start), projected(end)]),
@@ -449,7 +447,7 @@ pub(crate) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     state.model.schematic.bump_topology_version();
     state.sync_active_schematic_to_workspace();
 
-    install_projected_run_geometry(&mut state, nets);
+    install_projected_run_geometry(&mut state.model, nets);
     state
         .model
         .simulation
