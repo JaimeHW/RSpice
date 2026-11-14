@@ -2919,7 +2919,7 @@ impl Instance {
 		BIK=BHL;
 		}else{
 		BIC=BEW;
-		BID=A;
+		BID=IS;
 		BIF=A;
 		BIH=A;
 		BIJ=A;
@@ -14578,7 +14578,7 @@ impl Instance {
 		HLR=HKS;
 		}else{
 		HLJ=HID;
-		HLK=A;
+		HLK=FIS;
 		HLM=A;
 		HLO=A;
 		HLQ=A;

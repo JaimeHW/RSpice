@@ -2929,7 +2929,7 @@ impl Instance {
 		BIQ=BHR;
 		}else{
 		BII=BFC;
-		BIJ=A;
+		BIJ=IY;
 		BIL=A;
 		BIN=A;
 		BIP=A;
@@ -14776,7 +14776,7 @@ impl Instance {
 		HOW=HNX;
 		}else{
 		HOO=HLI;
-		HOP=A;
+		HOP=FLX;
 		HOR=A;
 		HOT=A;
 		HOV=A;

@@ -1043,7 +1043,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 9;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([90, 233, 76, 177, 22, 201, 37, 193, 244, 81, 86, 197, 51, 187, 180, 158, 65, 243, 4, 158, 228, 116, 143, 160, 67, 217, 89, 230, 197, 191, 90, 144]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([226, 229, 168, 250, 172, 65, 161, 17, 206, 108, 89, 134, 78, 52, 238, 145, 254, 179, 4, 23, 122, 230, 60, 143, 128, 13, 32, 219, 122, 157, 31, 5]);
 	pub const EVENT_STATE_COUNT: usize = 18;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const HB_ADMISSIBLE: bool = true;
@@ -1051,7 +1051,7 @@ impl Instance {
 	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3092d9166e20d7377b3298fffe57d49fd6494b278a46f92f99c1722413deb602";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e4504400a4988da6e8abb8199ba4eded670eaf83672961944dd3d2ccb4c24b72";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

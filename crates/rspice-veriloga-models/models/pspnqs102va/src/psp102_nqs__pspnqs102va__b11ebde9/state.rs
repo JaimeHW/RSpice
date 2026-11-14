@@ -935,7 +935,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 9;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([1, 41, 248, 109, 182, 167, 242, 53, 232, 139, 109, 202, 118, 188, 6, 11, 61, 244, 117, 75, 163, 56, 159, 42, 40, 233, 24, 192, 115, 181, 177, 74]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([92, 189, 99, 244, 73, 57, 189, 30, 72, 97, 234, 208, 117, 188, 132, 83, 192, 51, 240, 159, 32, 110, 125, 138, 58, 22, 108, 244, 247, 189, 37, 132]);
 	pub const EVENT_STATE_COUNT: usize = 18;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const HB_ADMISSIBLE: bool = true;
@@ -943,7 +943,7 @@ impl Instance {
 	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "4cc2ff3219aee7f60a8780f72975f3983beead585793e70d95de8d8df78cc1a9";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3fb6dc5626df107e30e30ef45da961e77c6808786fa549e9b2732256bc32c7a5";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

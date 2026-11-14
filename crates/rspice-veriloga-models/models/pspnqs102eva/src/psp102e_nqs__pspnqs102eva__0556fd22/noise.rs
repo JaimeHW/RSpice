@@ -2869,7 +2869,7 @@ impl Instance {
 		BHN=BGO;
 		}else{
 		BHF=BDZ;
-		BHG=A;
+		BHG=HV;
 		BHI=A;
 		BHK=A;
 		BHM=A;
@@ -14209,7 +14209,7 @@ impl Instance {
 		HFK=HEL;
 		}else{
 		HFC=HBW;
-		HFD=A;
+		HFD=FCL;
 		HFF=A;
 		HFH=A;
 		HFJ=A;

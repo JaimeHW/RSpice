@@ -2928,7 +2928,7 @@ impl Instance {
 		BIP=BHQ;
 		}else{
 		BIH=BFA;
-		BII=A;
+		BII=IY;
 		BIK=A;
 		BIM=A;
 		BIO=A;
@@ -14773,7 +14773,7 @@ impl Instance {
 		HOU=HNV;
 		}else{
 		HOM=HLF;
-		HON=A;
+		HON=FLW;
 		HOP=A;
 		HOR=A;
 		HOT=A;
