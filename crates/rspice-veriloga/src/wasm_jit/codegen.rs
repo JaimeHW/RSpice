@@ -1164,10 +1164,13 @@ fn emit_assignments(
                     body.instruction(&WasmInstruction::BrIf(0));
                 }
                 emit_value_entry_call(body, *argument_entry, scalar_count)?;
+                // Only `$finish` hands a value back from its helper; an output
+                // task's argument entry journals its operands and leaves the
+                // stack empty, so dropping there would be an invalid module.
                 if matches!(assignment, WasmAssignment::Finish { .. }) {
                     emit_task_helper(body, 462, *site, true, scratch_f64_local);
+                    body.instruction(&WasmInstruction::Drop);
                 }
-                body.instruction(&WasmInstruction::Drop);
                 body.instruction(&WasmInstruction::End);
             }
             WasmAssignment::Direct {

@@ -3327,6 +3327,42 @@ endmodule
     }
 
     #[test]
+    fn wasm_postfix_output_tasks_under_a_guard_journal_and_leave_the_stack_balanced() {
+        use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskKind};
+        let mut harness = FusedKernelHarness::for_source_with_plan(
+            "module guarded_printer(p,n); inout p,n; electrical p,n; integer k;
+             analog begin k=3; if (k > 1) $strobe(\"k=%d\", k); $display(\"plain\");
+             I(p,n)<+V(p,n); end endmodule",
+            "guarded_printer",
+            true,
+        );
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.call_assignments();
+        harness.call_prelude();
+        let pending = harness
+            .store
+            .data()
+            .context()
+            .candidate_analog_tasks()
+            .unwrap()
+            .iter()
+            .map(|call| (call.kind, call.arguments.to_vec()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pending,
+            vec![
+                (AnalogTaskKind::Strobe, vec![AnalogTaskArgument::Real(3.0)]),
+                (AnalogTaskKind::Display, Vec::new()),
+            ]
+        );
+    }
+
+    #[test]
     fn wasm_task_argument_function_observation_skips_invalid_input_conversion() {
         for (body, call_count) in [
             ("identity=x;", 1),
