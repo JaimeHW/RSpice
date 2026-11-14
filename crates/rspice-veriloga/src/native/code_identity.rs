@@ -19,7 +19,7 @@ use super::census_models::shipped_census_models;
 /// Pinned beside the digest because the digest alone cannot tell "no module
 /// moved" from "the corpus shrank": a census that discovered forty-two modules
 /// would produce a different digest and say nothing about which one it lost.
-const SHIPPED_CENSUS_MODELS: usize = 43;
+const SHIPPED_CENSUS_MODELS: usize = 60;
 
 /// The combined machine-code digest of the shipped corpus.
 ///
@@ -54,6 +54,27 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `bsimsoi` 4.7.0 and the three `hisimsoi_va` variants moved at
 /// `b7f8dc59ee`, which ties to ground an internal node that no contribution
 /// reaches (2 to 8 helper calls each).
+///
+/// `7e735f56…` is the census of `fc035ddf98`, read from nightly 43597918930,
+/// the first run of this test on the sixty-module tree. Seventeen modules are
+/// new: the six PSP 102.5.0 builds and the three PSP 103.4.0 builds
+/// (`d44cfd5135`), the four Mextram 504.12.1 builds (`f0a5cebbfe`) and BSIM-CMG
+/// 107.0.0, 108.0.0, 110.0.0 and 111.2.1 (`32d384cf74`). The nightlies in
+/// between name three moves, and every module each one moved is a module its
+/// change reaches:
+/// - `94680b659e` (nightly 42482275297), which differentiates `limexp` past
+///   its threshold, moved the five modules that call `limexp` and no other:
+///   `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va`, `vbic_4T_et_cf`.
+/// - `ae6e1d3281` (nightly 42644599855), which starts a `$limit` junction from
+///   its critical voltage, moved the four VBIC 1.3 modules, which are the
+///   corpus's only `$limit` callers (`vbic13_4t` 410,815 to 514,095 bytes).
+/// - `4dba88262d` (nightly 43597918930), in which a switch held in its flow
+///   arm injects its retained current on both nodes instead of carrying a
+///   private current, moved forty-eight modules. They are exactly the
+///   forty-eight whose generated Rust that change rewrote; the other twelve
+///   (`EPFL_HEMT_10a`, `JUNCAP200`, BSIM-CMG 107, `ekv3_rf`, `ekv_va`,
+///   `mosvar`, `r2_cmc`, `r2_et_cmc` and the four VBIC 1.3 modules) changed
+///   only their digest header there, and their census digests did not move.
 ///
 /// # How it is re-baselined
 ///
@@ -349,7 +370,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "11fc2b411d93478014208e775acf009372eb7862b74817bbb66dbb5efa772ee7";
+    "7e735f564c7d5cf9a55597b3e68394d1bbea568bbd2865f770eb371895dd3a06";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
