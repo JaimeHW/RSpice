@@ -437,11 +437,18 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
             "V1 in 0 SIN(0.3 0.6 1meg)\nR1 in a 1k\nXD a 0 juncap200\n",
             "a",
         ),
+        // EKV 2.6's and PSP 102's drain charge barely depends on the drain
+        // voltage on these cards, so the drain is an algebraic node a gate
+        // charge drives. The trapezoidal rule carries the inconsistent
+        // derivative a start from rest (UIC) gives that charge as an
+        // undamped point-to-point oscillation of about 20 mV, which the
+        // shortened last step before tstop turns into a 1e-2 shift of the
+        // last period's spectrum. Gear's rule damps it in a few steps.
         #[cfg(feature = "veriloga-model-ekv-va")]
         (
             "MOSFET (EKV 2.6)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-                 XM d g 0 0 ekv_va\n",
+                 XM d g 0 0 ekv_va\n.options method=gear\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-bsimbulk")]
@@ -490,7 +497,7 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
         (
             "MOSFET (PSP 102)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-                 XM d g 0 0 psp102va\n",
+                 XM d g 0 0 psp102va\n.options method=gear\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-psp102bva")]
