@@ -1610,10 +1610,18 @@ fn random_bias_point(
 /// reading [`MirParameterSlot::default`] gives such a parameter zero. BSIM-IMG
 /// then has a zero `TOXP` and a zero `WELLTYPE` and is not finite at its own
 /// declared defaults. The runtime model compiled from the same source resolves
-/// them, so it is asked: every literal parameter is set to the point's value
-/// and the rest are evaluated in declaration order. The CFG is still told that
-/// no parameter was given, so the point is the model with these literal
-/// defaults rather than an instance card that sets them.
+/// them, so it is asked: every literal parameter the point moved off its
+/// declared default is set to the point's value, and the rest are evaluated in
+/// declaration order. The CFG is still told that no parameter was given, so
+/// the point is the model with these literal defaults rather than an instance
+/// card that sets them.
+///
+/// A parameter left at its declared default is not set, because setting one
+/// gives it, and `$param_given` is part of what a model computes. BSIM-CMG
+/// 108 and 110 declare `NVTM = 0` and take `nVtm = NVTM` only when it is given
+/// (`bsimcmg_body.include:2525`), computing it otherwise; giving the default
+/// divides by a zero `nVtm` while the runtime discovers which contributions
+/// are active.
 fn resolve_dependent_defaults(
     model: &Arc<CompiledModel>,
     artifact: &CanonicalIrArtifact,
@@ -1631,7 +1639,10 @@ fn resolve_dependent_defaults(
             .filter(|(_, slot)| slot.dimensions.is_empty())
     };
     for (index, slot) in scalars() {
-        if slot.default.is_some() {
+        if slot
+            .default
+            .is_some_and(|default| default.to_bits() != bias.parameters[index].to_bits())
+        {
             device.set_parameter(&slot.name, bias.parameters[index]);
         }
     }
