@@ -27,7 +27,7 @@ use crate::workbench::state::WorkbenchSession;
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
 /// Why "Post reply" is disabled: there is no thread to reply to.
-const NO_THREAD_SELECTED: &str = "Select a review thread to reply to.";
+pub(crate) const NO_THREAD_SELECTED: &str = "Select a review thread to reply to.";
 /// Why "Post reply" is disabled: the reply is empty.
 const NO_REPLY_WRITTEN: &str = "Write a reply to post it.";
 /// Where every row of the body starts, as the title and footer do.
@@ -63,7 +63,7 @@ pub(crate) enum DesignReviewRevisionScope {
 impl DesignReviewRevisionScope {
     const ALL: [Self; 2] = [Self::CurrentAndCarried, Self::CurrentOnly];
 
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::CurrentAndCarried => "Current revision + carried forward",
             Self::CurrentOnly => "Current revision only",
@@ -135,7 +135,7 @@ struct EvidenceCandidate {
 }
 
 #[derive(Default, Debug, Clone)]
-enum ReviewAction {
+pub(crate) enum ReviewAction {
     #[default]
     None,
     Select(u64),
@@ -185,17 +185,17 @@ pub(crate) fn reply_id() -> egui::Id {
 /// What Design review comments draws over and changes: its draft, the
 /// design note form a new comment opens, the model, the session, and the
 /// cloud's state and sessions that name the reviewer.
-pub(in crate::workbench) struct ReviewComments<'a> {
-    pub(in crate::workbench) dialog: &'a mut DesignReviewCommentsDialogState,
-    pub(in crate::workbench) design_note: &'a mut DesignNoteDialogState,
-    pub(in crate::workbench) model: &'a mut Model,
-    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
-    pub(in crate::workbench) cloud: &'a dyn CloudPort,
-    pub(in crate::workbench) session: &'a dyn CloudSessionPort,
+pub(crate) struct ReviewComments<'a> {
+    pub(crate) dialog: &'a mut DesignReviewCommentsDialogState,
+    pub(crate) design_note: &'a mut DesignNoteDialogState,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) cloud: &'a dyn CloudPort,
+    pub(crate) session: &'a dyn CloudSessionPort,
 }
 
 impl ReviewComments<'_> {
-    pub(in crate::workbench) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
+    pub(crate) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }
@@ -287,7 +287,7 @@ impl ReviewComments<'_> {
         self.session.review_actor(self.cloud)
     }
 
-    fn handle_design_review_action(&mut self, action: ReviewAction) {
+    pub(crate) fn handle_design_review_action(&mut self, action: ReviewAction) {
         match action {
             ReviewAction::None => {}
             ReviewAction::Select(id) => {
@@ -663,7 +663,7 @@ fn review_body(
     action
 }
 
-const NO_THREADS: &str = "No review threads match this filter";
+pub(crate) const NO_THREADS: &str = "No review threads match this filter";
 
 fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
