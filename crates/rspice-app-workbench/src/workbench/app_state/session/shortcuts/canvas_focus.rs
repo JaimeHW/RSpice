@@ -310,8 +310,15 @@ mod tests {
                     return_engineering_canvas_focus(ui.ctx());
                 }
                 let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
-                // accessibility-pointer-shim: test-only stand-in for an
-                // engineering canvas, which publishes its own semantics.
+                // accessibility-pointer-shim: test-only stand-ins for an
+                // engineering canvas, which publishes its own semantics, and
+                // for a field beside it; egui keeps focus only on a widget it
+                // draws.
+                let _ = ui.interact(
+                    rect.translate(egui::vec2(200.0, 0.0)),
+                    field,
+                    egui::Sense::click(),
+                );
                 let response = ui.interact(rect, canvas, egui::Sense::click());
                 report_engineering_canvas_focus(&response, ViewType::Symbol);
             });
