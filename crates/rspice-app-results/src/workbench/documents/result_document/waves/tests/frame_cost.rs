@@ -343,7 +343,10 @@ fn report(load: &str, state: &mut ResultsTestHost) {
     let walks = WorkCounts::reset();
     let (cold, warm, hover) = measure(state, 10, 20);
     let walks = walks.since();
+    let pan_walks = WorkCounts::reset();
     let pan = measure_pan(state, 10);
+    let pan_walks = pan_walks.since();
+    let (indexed, scanned) = window_fit_cost(state);
     let text = [
         load.to_owned(),
         line("cold", &[cold]),
@@ -358,11 +361,62 @@ fn report(load: &str, state: &mut ResultsTestHost) {
             walks.nonzero(),
             walks.nonzero_samples()
         ),
+        format!(
+            "  pan frames read {:?} | fitting Y to a moving window: {:.1} µs a frame from the \
+             block extremes, {:.1} µs scanning the window's samples",
+            pan_walks.nonzero_samples(),
+            indexed.as_secs_f64() * 1e6,
+            scanned.as_secs_f64() * 1e6,
+        ),
     ]
     .join("\n");
     // Through a locked handle: the crate denies the printing macros.
     let mut out = std::io::stdout().lock();
     writeln!(out, "{text}").expect("the report is written");
+}
+
+/// What fitting the strip's one pane to a moving half-width window costs a
+/// frame: through the block extremes the strip keeps, and by scanning every
+/// sample in the window, as a fit without them would.
+fn window_fit_cost(state: &mut ResultsTestHost) -> (Duration, Duration) {
+    use rspice_results_ui::waves::stack::{PaneFit, pane_fit};
+    const FRAMES: u32 = 100;
+    let results = &mut state.results.results;
+    let model = &results.models.last_built().expect("the strip was built")[0];
+    let pane = &model.unit_panes()[0];
+    let (x0, x1) = model.x_range.expect("the strip has an X extent");
+    let window = |frame: u32| {
+        let left = (f64::from(frame) / f64::from(FRAMES) * 0.5).mul_add(x1 - x0, x0);
+        (left, 0.5f64.mul_add(x1 - x0, left))
+    };
+    let derived = &mut results.session.derived;
+    let started = Instant::now();
+    let mut indexed = 0.0;
+    for frame in 0..FRAMES {
+        let fit = PaneFit {
+            traces: &pane.traces,
+            expressions: &[],
+            limits: &[],
+            window: window(frame),
+            log: false,
+        };
+        indexed += pane_fit(derived, model, &fit, |_| {}).map_or(0.0, |(lo, _)| lo);
+    }
+    let by_blocks = started.elapsed() / FRAMES;
+    let started = Instant::now();
+    let mut scanned = 0.0;
+    for frame in 0..FRAMES {
+        let (left, right) = window(frame);
+        for trace in pane.traces.iter().map(|index| &model.traces[*index]) {
+            let first = trace.x.partition_point(|x| *x < left);
+            let last = trace.x.partition_point(|x| *x <= right);
+            scanned += rspice_results::measurements::finite_extremes(&trace.y[first..last])
+                .map_or(0.0, |(lo, _)| lo);
+        }
+    }
+    let by_samples = started.elapsed() / FRAMES;
+    assert!(indexed.is_finite() && scanned.is_finite());
+    (by_blocks, by_samples)
 }
 
 /// Times the two large loads. Run in release, one load per process, under
@@ -398,6 +452,24 @@ fn measure_family_500_frame_cost() {
 fn measure_long_transient_frame_cost() {
     let mut state = crowded_transient(20, 5_000_000);
     report("20 traces x 5M points", &mut state);
+}
+
+/// An ordinary large transient: twenty signals of forty thousand points.
+/// Its pan frames move the X window every frame, so each refits every pane.
+#[test]
+#[ignore = "measurement harness"]
+fn measure_twenty_by_40k_frame_cost() {
+    let mut state = crowded_transient(20, 40_000);
+    report("20 traces x 40k points", &mut state);
+}
+
+/// Eight million cells, the most one retained document holds, as twenty
+/// signals of four hundred thousand points.
+#[test]
+#[ignore = "measurement harness"]
+fn measure_eight_million_cells_frame_cost() {
+    let mut state = crowded_transient(20, 400_000);
+    report("20 traces x 400k points", &mut state);
 }
 
 /// A family too large to stroke member by member is drawn as the band it
