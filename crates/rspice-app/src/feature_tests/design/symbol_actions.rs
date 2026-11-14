@@ -172,30 +172,26 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
     assert_eq!(metadata_encoding(&app.state), encoded);
 
+    // A selected pin turns and flips with the Arrange commands the
+    // schematic uses; there is no pin-only pair beside them.
     app.state.design.symbol.editor.select_pin("IN");
-    app.execute_command_key(DesignCommand::SymbolRotatePin.key());
-    let rotated = app.state.model.load_active_symbol_document().unwrap();
-    assert_eq!(
-        rotated.pin("IN").unwrap().side(),
-        crate::state::SymbolPinSide::Top
-    );
-    assert_eq!(rotated.pin("IN").unwrap().offset(), 10);
-    app.execute_command_key(DesignCommand::SymbolMirrorPin.key());
-    assert_eq!(
+    let pin_at = |app: &crate::workbench::RSpiceApp| {
         app.state
             .model
             .load_active_symbol_document()
             .unwrap()
             .pin("IN")
             .unwrap()
-            .offset(),
-        -10
-    );
+            .position
+    };
+    let placed = pin_at(&app);
+    app.execute_command_key(DesignCommand::RotateSelection.key());
+    let rotated = pin_at(&app);
+    assert_ne!(rotated, placed, "Rotate turns the selected pin");
+    app.execute_command_key(DesignCommand::MirrorSelectionHorizontal.key());
+    assert_ne!(pin_at(&app), rotated, "Mirror flips the selected pin");
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(
-        app.state.model.load_active_symbol_document().unwrap(),
-        rotated
-    );
+    assert_eq!(pin_at(&app), rotated);
 }
 
 /// Escape lets go of the shape being drawn and leaves its tool armed; a

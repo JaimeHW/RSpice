@@ -538,8 +538,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::SymbolArcTool.key(),
     DesignCommand::SymbolPolygonTool.key(),
     DesignCommand::SymbolTextTool.key(),
-    DesignCommand::SymbolRotatePin.key(),
-    DesignCommand::SymbolMirrorPin.key(),
     DesignCommand::SymbolUpdatePinsFromContract.key(),
     DesignCommand::EditSymbolInPlace.key(),
     DesignCommand::ExitSymbolInPlace.key(),

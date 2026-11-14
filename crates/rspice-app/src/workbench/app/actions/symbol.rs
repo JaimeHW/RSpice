@@ -9,7 +9,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::symbol_editor::commands::{
-    self, SymbolEditAction, SymbolEditRequest, SymbolPinTransform, SymbolTransform,
+    self, SymbolEditAction, SymbolEditRequest, SymbolTransform,
 };
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolEditCapabilities, bind_canvas_source,
@@ -52,23 +52,6 @@ pub(crate) fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, to
         .then(|| model.load_active_symbol_document().ok())
         .flatten();
     commands::activate_tool(&mut symbol.editor, tool, document.as_ref());
-}
-
-/// Turn the one selected pin to the next side, or across the body, as one
-/// edit. `modal_open` is whether anything holding the application modal is
-/// open, which refuses the edit.
-pub(crate) fn transform_selected_symbol_pin(
-    symbol: &mut SymbolUiState,
-    model: &mut Model,
-    wb: &mut WorkbenchSession,
-    modal_open: bool,
-    transform: SymbolPinTransform,
-) {
-    if symbol.editor.effective_selection().pins.len() != 1 || deny_read_only_edit(model, wb) {
-        return;
-    }
-    let request = symbol_edit_request(symbol, model, wb, SymbolEditAction::TransformPin(transform));
-    apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
 /// Turn or flip the selected pins and shapes as one edit. `modal_open` is

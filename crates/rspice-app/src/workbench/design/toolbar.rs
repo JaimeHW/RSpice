@@ -345,11 +345,13 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
     symbol_tool::<6>(),
     symbol_tool::<7>(),
     ToolbarEntry::Separator,
-    icon(DesignCommand::SymbolRotatePin.key(), WorkbenchIcon::Rotate),
-    icon(DesignCommand::SymbolMirrorPin.key(), WorkbenchIcon::Mirror),
-    // Reconciling the pin list against the interface contract belongs beside
-    // the two gestures that edit one pin. `Refresh` already means the arc tool
-    // in this row, so the pin mark carries it instead.
+    // The turns and flips the Arrange menu and Ctrl+R and Ctrl+M apply.
+    icon(DesignCommand::RotateSelection.key(), WorkbenchIcon::Rotate),
+    icon(
+        DesignCommand::MirrorSelectionHorizontal.key(),
+        WorkbenchIcon::Mirror,
+    ),
+    // Reconciling the pin list against the interface contract.
     icon(
         DesignCommand::SymbolUpdatePinsFromContract.key(),
         WorkbenchIcon::Pin,

@@ -607,6 +607,69 @@ fn shift_t_resolves_schematic_text_without_breaking_plain_bus_tap() {
     assert_eq!(resolve(shift, models_symbol(true)).command, None);
 }
 
+/// One command owns each key in the symbol canvas: G is the grid there as
+/// in the schematic, Shift+L draws a polygon, and Ctrl+R and Ctrl+M turn and
+/// flip the selection as the Arrange menu does.
+#[test]
+fn the_symbol_canvas_keys_have_one_owner_each() {
+    let profile = ShortcutPreferences::default();
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    let primary_shift = Modifiers {
+        shift: true,
+        ..primary()
+    };
+    let resolve = |key, modifiers, environment| {
+        ShortcutResolverState::default()
+            .resolve(
+                &snapshot(&[event(key, modifiers, false)], false),
+                &profile,
+                &CommandRegistry,
+                CommandPlatform::Desktop,
+                environment,
+                Duration::ZERO,
+                |_| true,
+            )
+            .command
+    };
+    let design_symbol = ShortcutEnvironment {
+        workspace: Workspace::Design,
+        active_view: ViewType::Symbol,
+        canvas_focus: true,
+        source_editor_focus: false,
+    };
+    for environment in [design_symbol, models_symbol(true)] {
+        for (key, modifiers, expected) in [
+            (Key::G, Modifiers::NONE, DesignCommand::CycleGrid),
+            (Key::L, shift, DesignCommand::SymbolPolygonTool),
+            (Key::R, primary(), DesignCommand::RotateSelection),
+            (
+                Key::R,
+                primary_shift,
+                DesignCommand::RotateSelectionCounterClockwise,
+            ),
+            (Key::M, primary(), DesignCommand::MirrorSelectionHorizontal),
+            (
+                Key::M,
+                primary_shift,
+                DesignCommand::MirrorSelectionVertical,
+            ),
+        ] {
+            assert_eq!(
+                resolve(key, modifiers, environment),
+                Some(expected.key()),
+                "{key:?} {modifiers:?} in {environment:?}"
+            );
+        }
+    }
+    assert_eq!(
+        resolve(Key::G, Modifiers::NONE, design(true)),
+        Some(DesignCommand::CycleGrid.key())
+    );
+}
+
 #[test]
 fn result_context_beats_global_only_when_enabled() {
     let mut profile = ShortcutPreferences::default();

@@ -484,7 +484,8 @@ const PLACE_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(DesignCommand::PlaceGround.key(), "Ground").access('G'),
 ];
 
-/// What a symbol view places: its drawing tools, then the edits to one pin.
+/// What a symbol view places: its drawing tools, then its pins from the
+/// interface contract.
 const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
     design_as(DesignCommand::SymbolPinTool, "Pin").access('P'),
     design_as(DesignCommand::SymbolPolylineTool, "Line").access('L'),
@@ -494,8 +495,6 @@ const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
     design_as(DesignCommand::SymbolPolygonTool, "Polygon").access('G'),
     design_as(DesignCommand::SymbolTextTool, "Text").access('T'),
     Separator,
-    design(DesignCommand::SymbolRotatePin).access('N'),
-    design(DesignCommand::SymbolMirrorPin).access('M'),
     design(DesignCommand::SymbolUpdatePinsFromContract).access('U'),
 ];
 

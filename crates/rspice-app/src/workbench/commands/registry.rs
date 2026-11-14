@@ -520,10 +520,8 @@ mod tests {
             (DesignCommand::SymbolRectangleTool, "R"),
             (DesignCommand::SymbolCircleTool, "C"),
             (DesignCommand::SymbolArcTool, "A"),
-            (DesignCommand::SymbolPolygonTool, "G"),
+            (DesignCommand::SymbolPolygonTool, "Shift+L"),
             (DesignCommand::SymbolTextTool, "T"),
-            (DesignCommand::SymbolRotatePin, "Ctrl+R"),
-            (DesignCommand::SymbolMirrorPin, "Ctrl+M"),
         ] {
             let spec = command.declared_spec();
             assert_eq!(spec.context, ShortcutContext::SymbolCanvas);
@@ -553,6 +551,30 @@ mod tests {
             ] {
                 assert_eq!(label(command.declared_spec().bindings, platform), chord);
             }
+        }
+    }
+
+    /// G is the grid, and the turns and flips act on the selection, in the
+    /// symbol canvas as in the schematic one: one command owns each key.
+    #[test]
+    fn grid_turn_and_flip_keys_hold_in_every_drawing_canvas() {
+        for (command, chord) in [
+            (DesignCommand::CycleGrid, "G"),
+            (DesignCommand::RotateSelection, "Ctrl+R"),
+            (
+                DesignCommand::RotateSelectionCounterClockwise,
+                "Ctrl+Shift+R",
+            ),
+            (DesignCommand::MirrorSelectionHorizontal, "Ctrl+M"),
+            (DesignCommand::MirrorSelectionVertical, "Ctrl+Shift+M"),
+        ] {
+            let spec = command.declared_spec();
+            assert_eq!(spec.context, ShortcutContext::EditContext, "{command:?}");
+            assert_eq!(
+                label(spec.bindings, CommandPlatform::Desktop),
+                chord,
+                "{command:?}"
+            );
         }
     }
 

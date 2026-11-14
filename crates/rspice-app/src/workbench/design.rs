@@ -13,9 +13,7 @@ pub(crate) mod test_host;
 pub(crate) mod toolbar;
 
 use egui::Context;
-use rspice_schematic_editor::symbol_editor::commands::{
-    SymbolPinTransform, SymbolTransform, activate_tool,
-};
+use rspice_schematic_editor::symbol_editor::commands::{SymbolTransform, activate_tool};
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
@@ -46,7 +44,7 @@ use crate::workbench::app::actions::workspace::{
     NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
 };
 use crate::workbench::app::actions::{
-    activate_symbol_tool, stimulus, transform_selected_symbol_item, transform_selected_symbol_pin,
+    activate_symbol_tool, stimulus, transform_selected_symbol_item,
 };
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
@@ -326,9 +324,12 @@ impl CommandSet for DesignCommand {
             | Self::MirrorSelectionVertical
                 if routed::symbol_editor(reads.wb.workspace, reads.model) =>
             {
-                (reads.model.active_view_read_only()
-                    || reads.state.symbol.editor.effective_selection().is_empty())
-                .then_some("open an editable schematic or testbench")
+                if reads.model.active_view_read_only() {
+                    Some("the symbol is read-only")
+                } else {
+                    (reads.state.symbol.editor.effective_selection().is_empty())
+                        .then_some("select an editable object")
+                }
             }
             Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
@@ -461,14 +462,6 @@ impl CommandSet for DesignCommand {
             | Self::SymbolPolygonTool
             | Self::SymbolTextTool => {
                 (!editable_symbol(reads)).then_some("command is unavailable in this context")
-            }
-            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
-                let selection = reads.state.symbol.editor.effective_selection();
-                let one_pin = selection.pins.len() == 1
-                    && selection.shapes.is_empty()
-                    && selection.attributes.is_empty();
-                (!(editable_symbol(reads) && one_pin))
-                    .then_some("command is unavailable in this context")
             }
             // Nothing to reconcile against without a declared interface, and
             // the command must say so by reporting unavailable rather than
@@ -946,20 +939,6 @@ impl CommandSet for DesignCommand {
             | Self::SymbolPolygonTool
             | Self::SymbolTextTool => {
                 activate_symbol_tool(&mut cx.state.symbol, cx.model, symbol_tool(self));
-            }
-            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
-                let transform = match self {
-                    Self::SymbolMirrorPin => SymbolPinTransform::Mirror,
-                    _ => SymbolPinTransform::Rotate,
-                };
-                let modal_open = cx.application_modal_open();
-                transform_selected_symbol_pin(
-                    &mut cx.state.symbol,
-                    cx.model,
-                    cx.wb,
-                    modal_open,
-                    transform,
-                );
             }
             Self::SymbolUpdatePinsFromContract => {
                 match update_active_symbol_pins_from_contract(&mut cx.state.symbol, cx.model, cx.wb)

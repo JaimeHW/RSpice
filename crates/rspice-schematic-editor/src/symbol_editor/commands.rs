@@ -21,12 +21,6 @@ pub enum SymbolTransform {
     MirrorVertical,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolPinTransform {
-    Rotate,
-    Mirror,
-}
-
 #[derive(Debug, Clone)]
 pub enum SymbolEditAction {
     Paste {
@@ -37,7 +31,6 @@ pub enum SymbolEditAction {
         cut: bool,
     },
     Transform(SymbolTransform),
-    TransformPin(SymbolPinTransform),
     /// Place the text typed into the text tool's entry at `anchor`.
     PlaceText {
         anchor: Point,
@@ -121,9 +114,6 @@ pub fn apply_edit(
                     ),
                 }
             }
-        }
-        SymbolEditAction::TransformPin(transform) => {
-            transform_pin(document, &selection, transform, &mut outcome)
         }
         SymbolEditAction::PlaceText { anchor, text } => {
             session.text_draft = None;
@@ -373,46 +363,6 @@ fn transform_selection(
         outcome.undo_before = Some(Box::new(before));
     }
     outcome.changed = changed;
-}
-
-fn transform_pin(
-    document: &mut SymbolDocument,
-    selection: &SymbolSelection,
-    transform: SymbolPinTransform,
-    outcome: &mut SymbolEditOutcome,
-) {
-    let Some(name) = (selection.pins.len() == 1)
-        .then(|| selection.pins.iter().next())
-        .flatten()
-    else {
-        return;
-    };
-    let bounds = document.body_bounds();
-    let before = document.clone();
-    let Some(pin) = document.pin_mut(name) else {
-        return;
-    };
-    let side = pin.side();
-    let offset = pin.offset();
-    let (side, offset) = match transform {
-        SymbolPinTransform::Rotate => (
-            match side {
-                SymbolPinSide::Left => SymbolPinSide::Top,
-                SymbolPinSide::Top => SymbolPinSide::Right,
-                SymbolPinSide::Right => SymbolPinSide::Bottom,
-                SymbolPinSide::Bottom => SymbolPinSide::Left,
-            },
-            offset,
-        ),
-        SymbolPinTransform::Mirror => match side {
-            SymbolPinSide::Left => (SymbolPinSide::Right, offset),
-            SymbolPinSide::Right => (SymbolPinSide::Left, offset),
-            SymbolPinSide::Top | SymbolPinSide::Bottom => (side, -offset),
-        },
-    };
-    pin.set_side_and_offset(side, offset, bounds);
-    outcome.undo_before = Some(Box::new(before));
-    outcome.changed = true;
 }
 
 #[cfg(test)]

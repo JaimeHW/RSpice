@@ -209,10 +209,6 @@ pub(crate) enum DesignCommand {
     SymbolPolygonTool,
     /// The symbol canvas's text tool.
     SymbolTextTool,
-    /// Turn the one selected pin to the next side of the body.
-    SymbolRotatePin,
-    /// Flip the one selected pin across the body.
-    SymbolMirrorPin,
     /// Bring the symbol's pins back into agreement with the interface its
     /// schematic declares.
     SymbolUpdatePinsFromContract,
@@ -354,8 +350,8 @@ const CHECK_CELLVIEW: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, false, "Ctrl+E"),
     EVERYWHERE,
 )];
-// The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
-// the two contexts never match the same view.
+// The turns and flips act on whatever is selected in a schematic, testbench
+// or symbol canvas, so their chords hold in all three.
 const ROTATE_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::R, true, false, false, "Ctrl+R"),
     EVERYWHERE,
@@ -388,18 +384,13 @@ const SYMBOL_CIRCLE: &[ShortcutBinding] =
     &[primary(chord(Key::C, false, false, false, "C"), EVERYWHERE)];
 const SYMBOL_ARC: &[ShortcutBinding] =
     &[primary(chord(Key::A, false, false, false, "A"), EVERYWHERE)];
-const SYMBOL_POLYGON: &[ShortcutBinding] =
-    &[primary(chord(Key::G, false, false, false, "G"), EVERYWHERE)];
+// G is the grid in every canvas, so the polygon is the line tool's shifted key.
+const SYMBOL_POLYGON: &[ShortcutBinding] = &[primary(
+    chord(Key::L, false, false, true, "Shift+L"),
+    EVERYWHERE,
+)];
 const SYMBOL_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, false, "T"), EVERYWHERE)];
-const SYMBOL_ROTATE_PIN: &[ShortcutBinding] = &[primary(
-    chord(Key::R, true, false, false, "Ctrl+R"),
-    EVERYWHERE,
-)];
-const SYMBOL_MIRROR_PIN: &[ShortcutBinding] = &[primary(
-    chord(Key::M, true, false, false, "Ctrl+M"),
-    EVERYWHERE,
-)];
 // Return leaves an in-place symbol edit, as Esc does once nothing is in flight.
 const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
     chord(Key::Enter, false, false, false, "Enter"),
@@ -408,7 +399,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 99] = [
+    pub(crate) const ALL: [Self; 97] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -503,8 +494,6 @@ impl DesignCommand {
         Self::SymbolArcTool,
         Self::SymbolPolygonTool,
         Self::SymbolTextTool,
-        Self::SymbolRotatePin,
-        Self::SymbolMirrorPin,
         Self::SymbolUpdatePinsFromContract,
         Self::EditSymbolInPlace,
         Self::ExitSymbolInPlace,
@@ -613,8 +602,6 @@ impl DesignCommand {
             Self::SymbolArcTool => CommandKey::new("symbol-arc-tool"),
             Self::SymbolPolygonTool => CommandKey::new("symbol-polygon-tool"),
             Self::SymbolTextTool => CommandKey::new("symbol-text-tool"),
-            Self::SymbolRotatePin => CommandKey::new("symbol-rotate-pin"),
-            Self::SymbolMirrorPin => CommandKey::new("symbol-mirror-pin"),
             Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
             Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
             Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
@@ -673,7 +660,8 @@ impl DesignCommand {
     /// checking the whole design also needs an open project.
     /// Every turn, flip, layout and snap, and the collinear join, edits the
     /// drawing and is one Repeat last command runs again; the turns and
-    /// flips have chords, and they and the snaps are chords of the canvas.
+    /// flips have chords of every drawing canvas, symbols included, and the
+    /// snaps are chords of the schematic canvas.
     /// Choosing the standard-value series needs an open project and is a
     /// chord of the design workspace.
     /// Selecting by kind and Properties are chords of the edit context, and
@@ -683,8 +671,9 @@ impl DesignCommand {
     /// last command runs again.
     /// The symbol editor's commands change only the symbol canvas's own
     /// state or its document and are chords of the symbol canvas, the tools
-    /// and the pin turns with chords of their own; editing a symbol in place
-    /// is a chord of the design workspace, and Return leaves it.
+    /// with chords of their own; editing a symbol in place is a chord of the
+    /// design workspace, and Return leaves it. Cycling the grid is a chord
+    /// of every drawing canvas.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -828,7 +817,7 @@ impl DesignCommand {
             Self::FitSchematicContent => {
                 ("Fit content", "View", palette, edit, FIT_SCHEMATIC_CONTENT)
             }
-            Self::CycleGrid => ("Cycle grid display", "View", palette, canvas, CYCLE_GRID),
+            Self::CycleGrid => ("Cycle grid display", "View", palette, edit, CYCLE_GRID),
             Self::GridDots => ("Dot grid", "View", palette, canvas, NONE),
             Self::GridLines => ("Line grid", "View", palette, canvas, NONE),
             Self::GridOff => ("No grid", "View", palette, canvas, NONE),
@@ -895,28 +884,28 @@ impl DesignCommand {
                 "Rotate clockwise",
                 "Design",
                 arrange,
-                canvas,
+                edit,
                 ROTATE_SELECTION,
             ),
             Self::RotateSelectionCounterClockwise => (
                 "Rotate counter-clockwise",
                 "Design",
                 arrange,
-                canvas,
+                edit,
                 ROTATE_SELECTION_CCW,
             ),
             Self::MirrorSelectionHorizontal => (
                 "Mirror about vertical axis",
                 "Design",
                 arrange,
-                canvas,
+                edit,
                 MIRROR_SELECTION_HORIZONTAL,
             ),
             Self::MirrorSelectionVertical => (
                 "Mirror about horizontal axis",
                 "Design",
                 arrange,
-                canvas,
+                edit,
                 MIRROR_SELECTION_VERTICAL,
             ),
             Self::AlignSelectionLeft => ("Align left", "Design", arrange, global, NONE),
@@ -1027,20 +1016,6 @@ impl DesignCommand {
                 palette,
                 symbol_canvas,
                 SYMBOL_TEXT,
-            ),
-            Self::SymbolRotatePin => (
-                "Rotate selected pin to next side",
-                "Design",
-                palette,
-                symbol_canvas,
-                SYMBOL_ROTATE_PIN,
-            ),
-            Self::SymbolMirrorPin => (
-                "Mirror selected pin across body",
-                "Design",
-                palette,
-                symbol_canvas,
-                SYMBOL_MIRROR_PIN,
             ),
             Self::SymbolUpdatePinsFromContract => (
                 "Update pins from contract",
