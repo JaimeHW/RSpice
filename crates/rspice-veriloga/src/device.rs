@@ -925,27 +925,7 @@ pub struct VerilogADevice {
 }
 
 /// The accepted-state payload's own version, independent of the outer
-/// checkpoint file format.
-///
-/// Version 8 changes no field and no encoding: it changes what the *indices*
-/// mean. Through version 7 a module's `state_values_prev`, `cross_detectors`
-/// and sibling arrays were indexed by the bytecode generator's per-*emission*
-/// slot, which gave one source operator several records when the generator
-/// compiled it more than once. The compiler now renumbers every slot to the
-/// canonical per-*site* numbering, so those arrays are shorter for twelve of
-/// the forty-three shipped modules and, more importantly, a given index names a
-/// different operator's record than it did.
-///
-/// `checkpoint_shape_identity` already refuses a version-7 payload for those
-/// twelve on array length alone. The version is the explicit statement, and it
-/// is what refuses the modules whose length happens not to move.
-/// Version 9 separates transient discontinuities from Newton convergence hints.
-/// Version 8 cannot distinguish an accepted `-1` hint from a time discontinuity.
-/// Version 10 retains each limiter's previous Newton value. Earlier payloads
-/// saved its unused integration history instead, so they cannot resume it.
-/// Version 11 retains exact circular-integrator origins when the modulus changes.
-/// Version 12 retains left limits at accepted transport-delay discontinuities.
-/// Version 13 retains explicitly known lower bounds on transport event order.
+/// checkpoint file format. A payload of any other version is refused.
 pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 13;
 
 /// What one charge slot held immediately before an accepted-state rotation.

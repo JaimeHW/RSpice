@@ -5,7 +5,7 @@
 //! histories. Mutual-inductance overlays are reconstructed from those same
 //! winding histories. Restoring injects that state into a freshly built
 //! circuit and continues from the checkpoint time with absolute-time source
-//! evaluation. Current files also retain the post-accept next-step proposal,
+//! evaluation. A checkpoint also retains the post-accept next-step proposal,
 //! its active Xyce breakpoint-span ceiling, its effective controller maximum,
 //! and the accepted analysis/restart phase controls that govern the next
 //! interval.
@@ -11431,16 +11431,16 @@ mod tests {
                 && exact_text.contains("accepted_integration_trapgear trapezoidal 5 2 0\n")
         );
         assert_eq!(
-            TransientCheckpoint::from_text(&exact_text).expect("exact v21 runtime parses"),
+            TransientCheckpoint::from_text(&exact_text).expect("exact runtime parses"),
             exact
         );
         assert_eq!(
             TransientCheckpoint::from_bytes(
                 &exact
                     .to_bytes(TransientCheckpointEncoding::Packed)
-                    .expect("exact v21 runtime packs")
+                    .expect("exact runtime packs")
             )
-            .expect("packed exact v21 runtime parses"),
+            .expect("packed exact runtime parses"),
             exact
         );
 
@@ -11450,7 +11450,7 @@ mod tests {
             sample_restart_normalized_runtime(normalized.time, 17);
         let normalized_text = normalized.to_text();
         let restored = TransientCheckpoint::from_text(&normalized_text)
-            .expect("restart-normalized v21 runtime parses");
+            .expect("restart-normalized runtime parses");
         assert_eq!(restored, normalized);
         assert!(matches!(
             restored
@@ -11670,9 +11670,9 @@ mod tests {
         assert_eq!(original, restored);
         let packed = original
             .to_bytes(TransientCheckpointEncoding::Packed)
-            .expect("v21 checkpoint packs");
+            .expect("checkpoint packs");
         let restored_packed =
-            TransientCheckpoint::from_bytes(&packed).expect("v21 packed checkpoint parses");
+            TransientCheckpoint::from_bytes(&packed).expect("packed checkpoint parses");
         assert_eq!(original, restored_packed);
         // Bit-level check on the touchy values (subnormals, negative zero).
         for (a, b) in original.solution.iter().zip(&restored.solution) {
@@ -12311,7 +12311,7 @@ mod tests {
             vbic_snapshot_cache: cache,
         } = empty_checkpoint
             .restore_accepted_junction_transient_history(&empty)
-            .expect("available-empty v20 history validates exact zero topology");
+            .expect("available-empty history validates exact zero topology");
         assert_eq!(bjt, BjtTransientHistory::default());
         assert_eq!(diode, DiodeTransientHistory::default());
         assert_eq!(jfet, JfetTransientHistory::default());
@@ -12387,7 +12387,7 @@ mod tests {
     fn accepted_native_blockers_round_trip_and_fail_before_circuit_construction() {
         let mut checkpoint = sample();
         checkpoint.accepted_nonlinear_states.resume_blockers =
-            vec!["QVBIC: promoted native VBIC runtime has no v18 checkpoint contract".to_string()];
+            vec!["QVBIC: promoted native VBIC runtime has no checkpoint contract".to_string()];
         let retained_before = sample().retained_value_count();
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("accepted nonlinear blockers parse");
