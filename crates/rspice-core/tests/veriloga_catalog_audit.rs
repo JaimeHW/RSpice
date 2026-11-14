@@ -289,3 +289,80 @@ fn a_stale_count_is_reported_against_the_compiled_catalog() {
         )]
     );
 }
+
+/// The catalog README documents each model's registry name as the name an X
+/// line gives it. Every shipped model binds by that name, with one node per
+/// terminal its descriptor lists, into a circuit that carries it as a
+/// generated device.
+#[test]
+fn every_shipped_model_binds_on_an_x_line_by_its_registry_name() {
+    use rspice_core::engine::{Engine, SimulationConfig};
+    use rspice_core::netlist::Netlist;
+    let catalog_readme = include_str!("../../rspice-veriloga-models/README.md");
+    let engine = Engine::new(SimulationConfig::default());
+    let mut failures = Vec::new();
+    for descriptor in generated_veriloga_model_descriptors() {
+        let name = descriptor.model_name;
+        if !catalog_readme.contains(&format!("| `{name}` |")) {
+            failures.push(format!("{name}: the catalog README does not document it"));
+        }
+        let nodes = (0..descriptor.terminals.len())
+            .map(|terminal| format!("n{terminal}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let deck = format!("* {name} by its registry name\nV1 n0 0 1\nX1 {nodes} {name}\n.end\n");
+        let built = Netlist::parse(&deck)
+            .map_err(|error| error.to_string())
+            .and_then(|netlist| {
+                engine
+                    .build_circuit(&netlist)
+                    .map_err(|error| error.to_string())
+            });
+        match built {
+            Ok(circuit) if circuit.has_generated_veriloga_devices() => {}
+            Ok(_) => failures.push(format!("{name}: X1 built no generated device")),
+            Err(error) => failures.push(format!("{name}: {error}")),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// An X line that names a module the catalog compiles under names of its
+/// own is not bound to one of them by guess: it is refused, and the refusal
+/// gives the names it can write.
+#[test]
+fn an_x_line_naming_a_multiply_built_module_is_told_its_registry_names() {
+    use rspice_core::engine::{Engine, SimulationConfig};
+    use rspice_core::netlist::Netlist;
+    for (card, module, builds) in [
+        (
+            "XM d g s b t l_utsoi",
+            "l_utsoi",
+            &["l_utsoi__832ce87d", "l_utsoi__485e0ac9"][..],
+        ),
+        (
+            "XM d g s e b t bsimsoi",
+            "bsimsoi",
+            &["bsimsoi__18c250bc", "bsimsoi__e2aff994"][..],
+        ),
+        (
+            "XM d g s e bsimcmg",
+            "bsimcmg",
+            &["bsimcmg107", "bsimcmg108", "bsimcmg110"][..],
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!("* module name\nVD d 0 1\n{card}\n.end\n"))
+            .expect("the deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .map(drop)
+            .expect_err("a module name binds no generated model")
+            .to_string();
+        assert!(
+            error.contains("has not been defined for instance XM")
+                && error.contains(&format!("compiles module {module} as "))
+                && builds.iter().all(|build| error.contains(build)),
+            "{card}: {error}"
+        );
+    }
+}

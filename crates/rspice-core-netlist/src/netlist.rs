@@ -274,6 +274,44 @@ pub(crate) fn generated_builtin_masters() -> &'static std::collections::HashMap<
     })
 }
 
+/// The names the generated model catalog compiled into this build gives a
+/// Verilog-A module it carries under names of its own: one release of a
+/// module per name (`bsimcmg` as `bsimcmg107`, `bsimcmg110`), or one per
+/// source variant (`l_utsoi` as `l_utsoi__832ce87d`, `l_utsoi__485e0ac9`).
+/// An X line names a generated model by its catalog name, so a deck that
+/// names the module is told which names it can write. Empty when `master`
+/// is no such module.
+fn generated_module_builds_hint(master: &str) -> String {
+    #[cfg(feature = "veriloga-builtins-base")]
+    {
+        let builds: Vec<_> = rspice_veriloga_models::registry::builtin_descriptors()
+            .iter()
+            .filter(|descriptor| {
+                descriptor.module_name.eq_ignore_ascii_case(master)
+                    && !descriptor.model_name.eq_ignore_ascii_case(master)
+            })
+            .collect();
+        if let Some((last, rest)) = builds.split_last() {
+            let mut names = rest
+                .iter()
+                .map(|descriptor| descriptor.model_name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !names.is_empty() {
+                names.push_str(" or ");
+            }
+            names.push_str(last.model_name);
+            return format!(
+                "; the generated model catalog compiles module {} as {names}, and an X line \
+                 names one of those",
+                last.module_name
+            );
+        }
+    }
+    let _ = master;
+    String::new()
+}
+
 // Defined below the parser, so the refusals and diagnostics that cite a deck
 // line need not reach up into `netlist` for it.
 pub use crate::source_location::NetlistSourceLocation;
@@ -429,10 +467,12 @@ pub struct DuplicateModelParameterError {
 }
 
 /// A subcircuit instance names a definition that is absent from its visible
-/// lexical scope.
+/// lexical scope. When the name is a module the generated model catalog
+/// compiles under names of its own, the message gives those names.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
-    "Subcircuit {canonical_subcircuit_name} has not been defined for instance {canonical_instance_name}"
+    "Subcircuit {canonical_subcircuit_name} has not been defined for instance {canonical_instance_name}{catalog}",
+    catalog = generated_module_builds_hint(.subcircuit_name)
 )]
 pub struct UndefinedSubcircuitError {
     pub subcircuit_name: String,
