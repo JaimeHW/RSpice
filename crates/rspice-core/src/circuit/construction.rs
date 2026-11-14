@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 impl CircuitData {
     pub fn new() -> Self {
-        let mut node_map = HashMap::new();
+        let mut node_map = rustc_hash::FxHashMap::default();
         // Ground is always node 0
         node_map.insert("0".to_string(), 0);
 

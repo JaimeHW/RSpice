@@ -530,8 +530,9 @@ pub(crate) enum BehavioralOutput {
 /// caches use `Cell`/`RefCell` and are not shareable across threads.
 #[derive(Debug, Clone)]
 pub struct CircuitData {
-    /// Node name to ID mapping
-    node_map: HashMap<String, NodeId>,
+    /// Node name to ID mapping, Fx-hashed: every terminal of every element
+    /// is looked up here while the circuit is built.
+    node_map: rustc_hash::FxHashMap<String, NodeId>,
     /// Whether the circuit has its reference node: an element named node 0,
     /// or the build chose one for a deck that names none.
     has_explicit_ground_reference: bool,
