@@ -3363,11 +3363,14 @@ impl Engine {
     /// dates no crossing: it samples the analog solution at accepted points,
     /// as in ngspice. A mixed module without code models is untouched.
     ///
-    /// A module that dates no crossing is left to the device truncation as
-    /// well: one whose every port is an event net a code model shares reads
-    /// no node voltage at all. A `d_process` toggling a `dac_bridge` beside
-    /// a Verilog observer of its output took 232,985 points over 2 ms where
-    /// the same deck without the observer took 84,009.
+    /// A module that meets the analog solution nowhere is left to the device
+    /// truncation as well: one whose every port is an event net a code model
+    /// shares reads and drives no node voltage. A `d_process` toggling a
+    /// `dac_bridge` beside a Verilog observer of its output took 232,985
+    /// points over 2 ms where the same deck without the observer took 84,009.
+    /// A module that reads a node voltage without dating a crossing stays:
+    /// C6's vams controller samples V(fb) on a timer, and left to the device
+    /// truncation its output again moved 5.13 mV from the ngspice run.
     pub(super) fn mixed_crossings_hold_node_voltage_estimator(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
@@ -3377,7 +3380,7 @@ impl Engine {
                 && circuit
                     .mixed_signal_hosts
                     .iter()
-                    .any(crate::xspice::verilog::MixedSignalHost::dates_analog_crossings)
+                    .any(crate::xspice::verilog::MixedSignalHost::meets_analog_solution)
         }
         #[cfg(not(feature = "veriloga"))]
         {
