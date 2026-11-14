@@ -6,8 +6,6 @@
 //! guarded undo transaction; anonymous, ground-owned, stale, or ambiguous
 //! conductor selections are never guessed into an editable target.
 
-#[cfg(test)]
-use crate::state::NetLabel;
 pub(crate) use crate::state::named_net::{
     NamedNetTarget, apply_named_net_rename, validate_named_net_rename,
 };
@@ -189,7 +187,7 @@ fn exactly_one<'a>(mut values: impl Iterator<Item = &'a DesignNet>) -> Option<&'
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ComponentType, Point, Wire};
+    use crate::state::{ComponentType, NetLabel, Point, Wire};
     use crate::workbench::app_state::AppState;
 
     fn named_wire_state(name: &str) -> AppState {

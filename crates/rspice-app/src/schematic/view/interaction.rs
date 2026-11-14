@@ -31,10 +31,6 @@ use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
 use rspice_schematic_editor::view::scene::normalized_probe_expression;
-#[cfg(test)]
-use rspice_schematic_editor::view::selection_drag::{
-    select_drag_can_start, select_drag_is_authorized,
-};
 use rspice_schematic_editor::view::tool_input::{ToolInput, ToolPointerAction, ToolPointerView};
 
 mod pin_placement;

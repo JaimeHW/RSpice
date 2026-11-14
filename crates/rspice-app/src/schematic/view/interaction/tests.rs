@@ -18,6 +18,9 @@ use crate::state::{
     SheetDefinition, SheetPortPolicy, SheetTemplate, Tool, Wire,
 };
 use rspice_design::connectivity::extract_with_hierarchy as extract;
+use rspice_schematic_editor::view::selection_drag::{
+    select_drag_can_start, select_drag_is_authorized,
+};
 
 mod bus_tap;
 mod probe_markers;
