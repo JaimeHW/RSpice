@@ -856,7 +856,7 @@ impl Bjt {
         let areas = self.legacy_junction_params.as_deref();
         let base = areas.and_then(|areas| areas.base).unwrap_or(self.area);
         let collector = areas.and_then(|areas| areas.collector).unwrap_or(self.area);
-        match self.substrate_topology {
+        match self.effective_substrate_topology() {
             BjtSubstrateTopology::Vertical => (base, collector),
             BjtSubstrateTopology::Lateral => (collector, base),
         }
@@ -3955,6 +3955,37 @@ mod tests {
             pnp_vertical.substrate_topology,
             BjtSubstrateTopology::Vertical
         );
+    }
+
+    #[test]
+    fn xyce_substrate_junction_joins_the_collector_whatever_the_polarity_or_subs() {
+        // Xyce's level-1 BJT has no SUBS: its substrate junction always joins
+        // the substrate to the intrinsic collector. ngspice puts a PNP's on
+        // the base unless SUBS=1 says otherwise.
+        for subs in [None, Some(-1.0), Some(1.0)] {
+            let mut params = HashMap::from([("CJS".to_string(), 1e-12)]);
+            if let Some(subs) = subs {
+                params.insert("SUBS".to_string(), subs);
+            }
+            let mut pnp = Bjt::new_pnp("q1".to_string(), 1, 2, 3).with_params(&params);
+            pnp.set_xyce_compatibility(true);
+            assert_eq!(
+                pnp.legacy_charge_substrate_connection_terminal(),
+                pnp.legacy_charge_collector_terminal(),
+                "Xyce, SUBS {subs:?}"
+            );
+            pnp.set_xyce_compatibility(false);
+            let ngspice = if subs == Some(1.0) {
+                pnp.legacy_charge_collector_terminal()
+            } else {
+                pnp.legacy_charge_base_terminal()
+            };
+            assert_eq!(
+                pnp.legacy_charge_substrate_connection_terminal(),
+                ngspice,
+                "ngspice, SUBS {subs:?}"
+            );
+        }
     }
 
     #[test]

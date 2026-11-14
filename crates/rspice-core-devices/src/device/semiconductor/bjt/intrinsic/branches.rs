@@ -484,7 +484,7 @@ impl Bjt {
             // DC current's derivative here so AC and transient linearize
             // the same substrate branch and preserve current conservation.
             if !self.xyce_compatibility {
-                let (connection, index) = match self.substrate_topology {
+                let (connection, index) = match self.effective_substrate_topology() {
                     BjtSubstrateTopology::Vertical => (voltages.vci, IDX_VCI),
                     BjtSubstrateTopology::Lateral => (voltages.vbi, IDX_VBI),
                 };
@@ -493,7 +493,8 @@ impl Bjt {
                 branch.d_internal[IDX_VSI] = gmin;
                 branch.d_internal[index] = -gmin;
                 if let Some(junctions) = &self.legacy_junction_params {
-                    let polarity = self.polarity() * self.substrate_topology.ngspice_sign();
+                    let polarity =
+                        self.polarity() * self.effective_substrate_topology().ngspice_sign();
                     let (current, conductance) = self.legacy_junction_iv(
                         LegacyCurrent::Substrate,
                         junctions.substrate_current,

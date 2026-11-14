@@ -5446,7 +5446,13 @@ fn legacy_private_base_ac_reduction_matches_explicit_rc_network() {
                     let sources = "Private BJT AC\nVC c 0 0 AC .3\nVB b 0 0 AC 1\nVE e 0 0 AC .2\nVS s 0 0 AC .4\n";
                     let actual = Netlist::parse(&format!("{sources}Q1 c b e s mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS={subs} RC=2k RB=5k RBM=1k RE=1k CJE=1p CJC=2p CJS=3p MJE=0 MJC=0 MJS=0)\n.end\n")).unwrap();
                     let scale = area * m;
-                    let connection = if subs == 1 { "ci" } else { "bi" };
+                    // Xyce's level-1 BJT has no SUBS: its substrate
+                    // junction always joins the intrinsic collector.
+                    let connection = if subs == 1 || dialect == SpiceDialect::Xyce {
+                        "ci"
+                    } else {
+                        "bi"
+                    };
                     let reference = Netlist::parse(&format!("{sources}RC c ci {}\nRB b bi {}\nRE e ei {}\nCBE bi ei {}\nCBC bi ci {}\nCS s {connection} {}\n.end\n",2e3/scale,5e3/scale,1e3/scale,1e-12*scale,2e-12*scale,3e-12*scale)).unwrap();
                     let frequencies = [1e3, 1e6, 1e9];
                     let expected = engine.run_ac(&reference, &frequencies).unwrap();
@@ -5962,7 +5968,13 @@ fn legacy_private_collector_preserves_external_bc_storage_and_checkpoint() {
                     };
                     // Zero grading and IS make an independent linear R/C oracle.
                     // The external BC branch bypasses RB, while CBE and CBC do not.
-                    let substrate_connection = if subs == 1 { "ci" } else { "bi" };
+                    // Xyce's level-1 BJT has no SUBS: its substrate
+                    // junction always joins the intrinsic collector.
+                    let substrate_connection = if subs == 1 || dialect == SpiceDialect::Xyce {
+                        "ci"
+                    } else {
+                        "bi"
+                    };
                     let deck = Netlist::parse(&format!(
                         "Private collector charge\n{}{}Q1 c b e s qm AREA=2 M=3\n.model qm {kind}(LEVEL=1 IS=0 {base} RCX=60 RCI=120 RE=30 RS=90 CJE=1n CJC=2n CJS=3n MJE=0 MJC=0 MJS=0 XCJC=.25 SUBS={subs})\n\
                          RCref cr ci 30\nRBref br bi {rb}\nREref er ei 5\nRSref sr si 15\nCBE bi ei 6n\nCBC bi ci 3n\nCBX br ci 9n\nCS si {substrate_connection} 18n\n\

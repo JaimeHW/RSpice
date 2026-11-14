@@ -210,12 +210,13 @@ impl Bjt {
         let vbc = p * (internal[IDX_VBI] - internal[IDX_VCI]);
         let external = self.external_terminal_voltages(solution);
         let vbx = p * (external[EXT_B] - internal[IDX_VCI]);
-        let substrate_connection = match self.substrate_topology {
+        let substrate_connection = match self.effective_substrate_topology() {
             BjtSubstrateTopology::Vertical => internal[IDX_VCI],
             BjtSubstrateTopology::Lateral => internal[IDX_VBI],
         };
-        let vsub =
-            p * self.substrate_topology.ngspice_sign() * (internal[IDX_VSI] - substrate_connection);
+        let vsub = p
+            * self.effective_substrate_topology().ngspice_sign()
+            * (internal[IDX_VSI] - substrate_connection);
         let ns = self
             .legacy_junction_params
             .as_ref()
@@ -318,7 +319,11 @@ mod tests {
                     let state = |v: Value| match terminal {
                         0 => [0.0, p * v, 0.0],
                         1 => [-p * v, 0.0, 0.0],
-                        _ => [0.0, 0.0, p * model.substrate_topology.ngspice_sign() * v],
+                        _ => [
+                            0.0,
+                            0.0,
+                            p * model.effective_substrate_topology().ngspice_sign() * v,
+                        ],
                     };
                     assert!(model.legacy_event_locally_c1(&state(join)), "{kind:?}");
                     assert!(!model.legacy_event_locally_c2(&state(join)), "{kind:?}");

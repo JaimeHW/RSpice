@@ -1250,7 +1250,7 @@ impl Bjt {
     pub(super) fn legacy_charge_substrate_connection_terminal(
         &self,
     ) -> (Option<usize>, Option<usize>) {
-        match self.substrate_topology {
+        match self.effective_substrate_topology() {
             BjtSubstrateTopology::Vertical => self.legacy_charge_collector_terminal(),
             BjtSubstrateTopology::Lateral => self.legacy_charge_base_terminal(),
         }

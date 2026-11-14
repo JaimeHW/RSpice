@@ -155,7 +155,7 @@ impl Bjt {
         let vbe_eff = p * vbe;
         let vbc_eff = p * vbc;
         let vbx_eff = p * vbx;
-        let substrate_sign = self.substrate_topology.ngspice_sign();
+        let substrate_sign = self.effective_substrate_topology().ngspice_sign();
         let substrate_polarity = p * substrate_sign;
         let vsub_eff = -substrate_polarity * vcs;
         let transport = transport

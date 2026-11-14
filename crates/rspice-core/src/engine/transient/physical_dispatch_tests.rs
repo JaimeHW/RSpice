@@ -468,9 +468,10 @@ fn physical_dispatch_gp_terminal_impulses_match_independent_linear_junction_char
         let vt = crate::constants::XYCE_K_BOLTZMANN * 300.15 / crate::constants::XYCE_Q_ELECTRON;
         let qbe = polarity * (1e-13 + 1e-21 * ((0.3 / vt).exp() - (0.2 / vt).exp()));
         let qbc = polarity * 2e-13;
-        // GP defaults to a vertical NPN and lateral PNP. The latter's
-        // substrate junction connects to the base, so it also sees this jump.
-        let qbs = if kind == "PNP" { polarity * 1e-13 } else { 0.0 };
+        // Xyce's level-1 BJT joins the substrate junction to the intrinsic
+        // collector for either polarity, so the base jump moves no substrate
+        // charge.
+        let qbs = 0.0;
         let mut total = 0.0;
         for (parameter, expected, source) in [
             ("ic", -qbc, "Vc"),

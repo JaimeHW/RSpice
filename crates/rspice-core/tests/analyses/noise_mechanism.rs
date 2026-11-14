@@ -1100,16 +1100,19 @@ fn legacy_private_resistor_noise_matches_full_port_covariance() {
         config.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(config);
         for (kind, subs) in [("NPN", 1), ("PNP", -1)] {
+            // Xyce's level-1 BJT has no SUBS: its substrate junction always
+            // joins the collector. ngspice puts it on the base when SUBS=-1.
+            let lateral = subs != 1 && !matches!(dialect, SpiceDialect::Xyce);
             for substrate_only in [false, true] {
                 let (resistances, reference, mechanisms) = if substrate_only {
-                    let connection = if subs == 1 { "c" } else { "b" };
+                    let connection = if lateral { "b" } else { "c" };
                     (
                         "RS=90",
                         format!("RS s si 15\nCBE b e 6n\nCBC b c 12n\nCS si {connection} 18n"),
                         vec!["RS"],
                     )
                 } else {
-                    let connection = if subs == 1 { "ci" } else { "bi" };
+                    let connection = if lateral { "bi" } else { "ci" };
                     (
                         "RCX=60 RCI=120 RBX=50 RBI=70 RE=30 RS=90",
                         format!(

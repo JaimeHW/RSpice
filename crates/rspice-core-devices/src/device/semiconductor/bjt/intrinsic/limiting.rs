@@ -140,7 +140,7 @@ impl Bjt {
         LegacyNonlinearBranchVoltages {
             vbe: p * (internal[IDX_VBI] - internal[IDX_VEI]),
             vbc: p * (internal[IDX_VBI] - internal[IDX_VCI]),
-            vsub: match self.substrate_topology {
+            vsub: match self.effective_substrate_topology() {
                 BjtSubstrateTopology::Vertical => p * (internal[IDX_VSI] - internal[IDX_VCI]),
                 BjtSubstrateTopology::Lateral => p * (internal[IDX_VBI] - internal[IDX_VSI]),
             },
@@ -295,7 +295,7 @@ impl Bjt {
         if tied(EXT_C, EXT_E) {
             limited.vbc = limited.vbe;
         }
-        match self.substrate_topology {
+        match self.effective_substrate_topology() {
             BjtSubstrateTopology::Vertical => {
                 if tied(EXT_S, EXT_C) {
                     limited.vsub = 0.0;
@@ -328,7 +328,7 @@ impl Bjt {
         let constraints = [
             [0.0, 0.0, 0.0, p, -p, 0.0, 0.0],
             [0.0, -p, 0.0, p, 0.0, 0.0, 0.0],
-            match self.substrate_topology {
+            match self.effective_substrate_topology() {
                 BjtSubstrateTopology::Vertical => [0.0, -p, 0.0, 0.0, 0.0, 0.0, p],
                 BjtSubstrateTopology::Lateral => [0.0, 0.0, 0.0, p, 0.0, 0.0, -p],
             },

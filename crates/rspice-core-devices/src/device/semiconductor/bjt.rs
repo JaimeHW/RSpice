@@ -3031,6 +3031,20 @@ impl Bjt {
         self.charge_model == BjtChargeModel::LegacyGummelPoon
     }
 
+    /// Where the substrate junction joins the device. Xyce's level-1 BJT has
+    /// no SUBS parameter (it warns and ignores one): its substrate junction
+    /// always joins the substrate to the intrinsic collector, a PNP's too.
+    /// Everywhere else this is ngspice's topology: vertical for an NPN,
+    /// lateral for a PNP, unless SUBS says otherwise.
+    #[inline]
+    pub(crate) fn effective_substrate_topology(&self) -> BjtSubstrateTopology {
+        if self.xyce_compatibility && self.uses_legacy_gummel_poon() {
+            BjtSubstrateTopology::Vertical
+        } else {
+            self.substrate_topology
+        }
+    }
+
     /// Whether no DC terminal current of this device can flow towards the
     /// higher potential, the no-gain element of Willson's theorem. The
     /// transport current `IS/qb * (exp(vbe/(NF*Vt)) - exp(vbc/(NR*Vt)))`

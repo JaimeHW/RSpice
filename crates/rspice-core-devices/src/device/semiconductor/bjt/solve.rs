@@ -424,7 +424,7 @@ impl Bjt {
         let emitter =
             Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
         if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            match self.substrate_topology {
+            match self.effective_substrate_topology() {
                 BjtSubstrateTopology::Vertical => {
                     collector = Self::sub_branches(collector, eval.ibcp)
                 }
