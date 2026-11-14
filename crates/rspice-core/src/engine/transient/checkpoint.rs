@@ -1185,66 +1185,8 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v21 retains the sparse solver's numerical factorization across resumes.
-    // Earlier exact proposals omitted pivot, scaling and factor-reuse state;
-    // promoted PNP VBIC charge stamps also lacked physical polarity conversion.
-    // v22 corrects VBIC resistance topology, thermal-voltage constants and
-    // convergence-history advancement for an unchanged physical candidate.
-    // v23 removes the four-terminal substrate network from LEVEL=11 VBIC.
-    // v24 restores native VBIC 1.3 thermal defaults and instance switches.
-    // v25 applies VBIC 1.3 thermal-resistance scaling, temperature limits and
-    // authored CTH, and scopes the limited-evaluation cache to one matrix load.
-    // v31 maps VBIC saturation currents from nominal emission coefficients.
-    // v32 implements VBIC 1.3 PNJMAXI and per-junction expLinA transitions.
-    // v33 retains VBIC 1.3's floored electrical resistance branches.
-    // v34 differentiates the Early-voltage cutoff without collapsing thermal probes.
-    // v35 preserves physical VBIC currents in operating-point correction solves.
-    // v36 gives RBI an independent current and voltage constitutive equation.
-    // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v63 resolves the native BSIM1/2 body-junction laws and limiting.
-    // v64 replaces legacy BSIM Meyer approximations with terminal charge.
-    // v65 respects explicit zero MOS series resistances and checks their scaling.
-    // v66 implements legacy BSIM body-junction potentials and charge laws.
-    // v67 preserves representable shared depletion charge across the f64 range.
-    // v68 preserves MOS noise parameters and their dialect-specific laws.
-    // v69 retains representable flicker density across intermediate power overflow.
-    // v70 applies ngspice MOS3 noise width narrowing independently of mask shifts.
-    // v73 retains out-of-range MOS flicker coefficients until frequency evaluation.
-    // v74 preserves semiconductor flicker laws and configured JFET junction GMIN.
-    // v84 preserves flicker density through cancellation of extreme logarithms.
-    // v85 preserves private BJT node constraints and thermal bias recovery.
-    // v86 removes environment-controlled legacy BJT transient equations.
-    // v87 preserves signed linear magnetic coupling in every resolved overlay.
-    // v88 preserves mutual inductance across intermediate product range loss.
-    // v89 preserves diode currents at small bias and intermediate quotient range loss.
-    // v90 preserves raw subexpressions during behavioral time specialization.
-    // v91 binds the configurable physical-event flux conservation tolerance.
-    // v92 binds the C2 GP transport-event tracking cutoff.
-    // v93 binds native GP physical-event integration epochs and passive clocks.
-    // v94 binds ngspice's native GP thermal constants.
-    // v95 binds the selected GP transient phase law and legacy filter memory.
-    // v96 fits rounding-sized stop remainders before exact-history solves
-    // and retains current OneStep static residuals across hybrid Gear2 steps.
-    // v97 balances rounding-sized event remainders before model floor fitting.
-    // v98 selects charge-component hubs for the algebraic event rows, retaining
-    // small peripheral storage modes without subtracting dominant charges.
-    // v99 preserves authenticated operating-point balance during physical
-    // startup and avoids inventing a transport event for stationary forcing.
-    // v100 initializes continuous-event rates from audited integration
-    // references, with original physical scales and floating-component KCL.
-    // v101 balances short unaccepted physical-event tails before integration.
-    // v102 adds prescribed smooth behavioral forcing to physical events.
-    // v103 adds controlled voltage/current events and VCCS current observations.
-    // v104 adds CCCS event conservation and finite/impulsive F-current output.
-    // v105 corrects source and free-coordinate signs in the event voltage seed.
-    // v106 preserves accepted diode displacement current through normalized restart.
-    // v114 binds periodic diode projection to the resolved native M/FC law.
-    // v126 retains prescribed capacitor charge and finite current across physical events.
-    // v127 resolves XSPICE driver banks in stable instance/port/element order.
-    // v128 includes finite CCVS sensing-cutset equations in physical events.
-    // v129 binds the unified mixed-runtime checkpoint ABI.
-    // v133 centers semiconductor charge currents before timestep scaling.
-    // v134 retains algebraic current fanout under constant voltage clamps.
+    // The domain tag changes whenever the engine changes the trajectory an
+    // unchanged configuration resumes, so an image from before is refused.
     hasher.update(b"rspice-transient-resolved-config-v134\0");
     #[cfg(feature = "veriloga")]
     hash_field(
