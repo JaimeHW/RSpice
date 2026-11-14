@@ -337,8 +337,10 @@ const TRANSIENT_NOISE_VERILOGA: &str =
 const SHAPED_NOISE_VERILOGA: &str =
     "tests/transient_noise_veriloga.rs::a_laplace_shaped_process_renders_its_transfer";
 
-/// The reason periodic analyses refuse a running discrete state.
-const DISCRETE_STATE_REASON: &str = "a periodic steady state with a running discrete state has no formulation yet: the digital half's event queue, process resumptions and drivers are not part of a period map";
+/// The reason periodic analyses refuse a running discrete state, and the
+/// route that answers instead: a transient runs the digital half, and
+/// transient noise carries the circuit's noise sources through it.
+const DISCRETE_STATE_REASON: &str = "a periodic steady state with a running discrete state has no formulation yet: the digital half's event queue, process resumptions and drivers are not part of a period map; a transient runs the circuit with its digital half live, and transient noise (.TRAN with NOISEFMAX) gives its noise";
 const DISCRETE_STATE: &str = "analysis.mixed_signal.discrete_state";
 const PERIODIC_VERILOGA: &str = "analysis.periodic.veriloga";
 
