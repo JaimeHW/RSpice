@@ -1123,12 +1123,24 @@ impl IncludeProcessor {
         current_path: &Path,
         rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
     ) -> Result<String, ParseError> {
-        self.resolved_dependencies.clear();
-        let expanded = finish_non_aborting_parse(self.expand_content_mapped_with_abort(
+        finish_non_aborting_parse(self.expand_content_rewriting_with_abort(
             content,
             current_path,
+            rewrite,
             &NoAbort,
-        ))?;
+        ))
+    }
+
+    /// [`Self::expand_content_rewriting`] with cooperative cancellation.
+    pub fn expand_content_rewriting_with_abort(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        self.resolved_dependencies.clear();
+        let expanded = self.expand_content_mapped_with_abort(content, current_path, abort)?;
         let mut output = String::with_capacity(expanded.rendered_bytes);
         for item in &expanded.items {
             if let ExpandedSourceItem::Line { text, origin } = item {

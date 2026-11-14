@@ -5640,6 +5640,7 @@ dependencies = [
  "rspice-simulation",
  "rspice-veriloga",
  "rspice-veriloga-runtime",
+ "rspice-vocabulary",
  "rustyhdf5",
  "serde",
  "serde_json",

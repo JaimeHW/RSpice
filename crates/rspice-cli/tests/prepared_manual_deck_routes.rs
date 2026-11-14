@@ -19,13 +19,22 @@ use std::time::Duration;
 
 use common::{passed, run_to_json, test_dir};
 use rspice_simulation::analysis_preparation::AnalysisInputs;
-use rspice_simulation::execution::PreparedRunAuthorization;
+use rspice_core::abort_signal::NoAbort;
+use rspice_core::netlist::IncludeProcessor;
+use rspice_simulation::execution::{
+    HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest, PreparedRunAuthorization,
+    prepare_headless_run,
+};
 use rspice_simulation::execution::preparation::{
     ManualSourceInputs, RunPreparationInputs, build_prepared_manual_deck,
 };
 use rspice_simulation::netlist_gen::{NetlistSourceData, NetlistSourceHost, TableRoute};
 use rspice_simulation::project_technology::ProjectTechnologyInputs;
+use rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes;
+use rspice_simulation::netlist_preparation::{IncludeSearchChain, seal_deck_hdl_sources};
+use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::SimulationResult;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 /// A manual deck reads no schematic source tables; asking for one is a bug.
 struct NoSchematicFiles;
@@ -106,7 +115,72 @@ fn prepared_manual_run(origin: &Path) -> Vec<SimulationResult> {
     let dispatch = PreparedRunAuthorization::default()
         .authorize_campaign_member(snapshot)
         .expect("the snapshot is authorized");
-    let mut pending: VecDeque<_> = dispatch.into_tasks();
+    run_tasks(dispatch.into_tasks())
+}
+
+/// The deck at `origin` prepared on the headless route the conformance
+/// runner and `rspice study` run: its HDL sealed, each line an included file
+/// writes sealed where it stands, its one `.tran` card the task and the rest
+/// the circuit.
+fn headless_run(origin: &Path) -> Vec<SimulationResult> {
+    let source = std::fs::read_to_string(origin).expect("read the deck");
+    let (cards, circuit): (Vec<&str>, Vec<&str>) = source
+        .lines()
+        .partition(|line| line.trim_start().to_ascii_lowercase().starts_with(".tran"));
+    let [card] = cards.as_slice() else {
+        panic!("one .tran card, saw {cards:?}");
+    };
+    let circuit = circuit.join("\n") + "\n";
+    let sealed = seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default())
+        .unwrap_or_else(|refusal| panic!("the deck's sources seal: {refusal:?}"));
+    let expanded = IncludeProcessor::new(origin.parent().expect("a deck directory"))
+        .expand_content_rewriting(&sealed.source, origin, &mut |location, _| {
+            sealed.included_line(location)
+        })
+        .expect("the deck's includes expand");
+    let body: Vec<&str> = expanded
+        .lines()
+        .filter(|line| !line.trim().eq_ignore_ascii_case(".end"))
+        .collect();
+    let queue = build_manual_deck_queue_with_runtimes(
+        27.0,
+        &format!("{}\n{card}\n.end\n", body.join("\n")),
+        &sealed.runtimes,
+    )
+    .unwrap_or_else(|error| panic!("the card lowers: {error:?}"));
+    let tasks = queue
+        .into_iter()
+        .map(|queued| HeadlessTaskRequest {
+            instance_id: AnalysisInstanceId::new(),
+            label: "Transient".to_owned(),
+            dependencies: Vec::new(),
+            analysis: QueuedAnalysis {
+                spec: queued.spec,
+                config: None,
+                spec_options: queued.spec_options,
+                analysis_line: (*card).to_owned(),
+                numeric_override: None,
+            },
+        })
+        .collect();
+    let mut input = HeadlessRunInput::new(&sealed.source, origin, tasks);
+    input.resolver = HeadlessSourceResolver::Native {
+        include_search_paths: Vec::new(),
+    };
+    input.veriloga_runtimes = sealed.runtimes;
+    input.included_hdl_lines = sealed.included;
+    let snapshot = prepare_headless_run(input, &NoAbort)
+        .unwrap_or_else(|error| panic!("{} prepares headless: {error}", origin.display()));
+    let dispatch = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
+        .expect("the snapshot is authorized");
+    run_tasks(dispatch.into_tasks())
+}
+
+/// Run dispatched tasks one by one, threading each producer's artifact.
+fn run_tasks(
+    mut pending: VecDeque<rspice_simulation::execution::AuthorizedTaskDispatch>,
+) -> Vec<SimulationResult> {
     let mut artifacts = HashMap::new();
     let mut runner = rspice_simulation::runner::SimulationRunner::new();
     let mut results = Vec::new();
@@ -185,8 +259,18 @@ fn event_code(point: &serde_json::Value) -> u8 {
 /// every voltage and current bit for bit, and every digital event at the
 /// same time with the same value. Returns the digital events of `node`.
 fn assert_same_transient(deck: &Path, node: &str) -> Vec<(f64, String)> {
+    assert_same_transient_on(deck, node, prepared_manual_run)
+}
+
+/// The CLI's transient of `deck` against `route`'s, bit for bit; the events
+/// of digital `node`, as the CLI states them.
+fn assert_same_transient_on(
+    deck: &Path,
+    node: &str,
+    route: fn(&Path) -> Vec<SimulationResult>,
+) -> Vec<(f64, String)> {
     let cli = cli_run(deck);
-    let prepared = prepared_manual_run(deck);
+    let prepared = route(deck);
     let [
         SimulationResult::Transient {
             time,
@@ -348,6 +432,13 @@ fn source_lines_of_an_included_file_give_the_clis_numbers() {
         &format!("included sources\n.include \"models/clock.inc\"\n{CIRCUIT}"),
     );
     assert_clock(&assert_same_transient(&dir.join("deck.cir"), "q"));
+    // The headless route seals the included file's lines where they stand,
+    // as the prepared manual-deck route does.
+    assert_clock(&assert_same_transient_on(
+        &dir.join("deck.cir"),
+        "q",
+        headless_run,
+    ));
 }
 
 /// The toggle peer of the `d_process` protocol: it echoes the header, then

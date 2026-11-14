@@ -43,11 +43,10 @@ use rspice_simulation::execution::{
 };
 use rspice_simulation::manual_deck::ManualDeckError;
 use rspice_simulation::netlist_preparation::{
-    DeckHdlRefusal, IncludeSearchChain, seal_deck_hdl_sources,
+    DeckHdlRefusal, IncludeSearchChain, SealedDeckHdl, seal_deck_hdl_sources,
 };
 use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::SimulationResult;
-use rspice_simulation::veriloga::PreparedVerilogARuntimeSet;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_vocabulary::product::AnalysisInstanceId;
 
@@ -244,17 +243,16 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         .map(|(_, card)| card)
         .collect();
     let circuit = strip_cards(source);
-    let (circuit, runtimes) =
-        match seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default()) {
-            Ok(sealed) => (sealed.source, sealed.runtimes),
-            Err(refusal) => return result.failed(hdl_refusal(&refusal)),
-        };
+    let sealed = match seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default())
+    {
+        Ok(sealed) => sealed,
+        Err(refusal) => return result.failed(hdl_refusal(&refusal)),
+    };
     let lowered = match kind {
         "mc-tran" | "step-tran" | "ckpt" => {
-            family_tasks(request, kind, &circuit, origin, source, &cards, &runtimes)
+            family_tasks(request, kind, &sealed, origin, source, &cards)
         }
-        _ => headless_tasks(&circuit, origin, &cards, &runtimes)
-            .map(|tasks| (tasks, Family::default())),
+        _ => headless_tasks(&sealed, origin, &cards).map(|tasks| (tasks, Family::default())),
     };
     let (tasks, family) = match lowered {
         Ok(lowered) => lowered,
@@ -265,11 +263,12 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         .map(|task| (task.instance_id, task.label.clone()))
         .collect();
     let abort = DeadlineAbort::new(Instant::now(), request.budget.as_millis());
-    let mut input = HeadlessRunInput::new(&circuit, origin, tasks);
+    let mut input = HeadlessRunInput::new(&sealed.source, origin, tasks);
     input.resolver = HeadlessSourceResolver::Native {
         include_search_paths: Vec::new(),
     };
-    input.veriloga_runtimes = runtimes;
+    input.veriloga_runtimes = sealed.runtimes;
+    input.included_hdl_lines = sealed.included;
     let snapshot = match prepare_headless_run(input, &abort) {
         Ok(snapshot) => snapshot,
         Err(error) => return result.failed(preparation_error(error)),
@@ -413,16 +412,19 @@ struct ActiveTask {
 /// as the application's manual-deck preparation lowers its expanded source: a
 /// driven `.PSS` takes its tone list from the circuit's time-varying sources,
 /// so a card read without its circuit binds none, and the circuit elaborates
-/// only with the sealed HDL runtimes its `.veriloga` lines name.
+/// only with the sealed HDL runtimes its `.veriloga` lines name, including
+/// those an included file writes, sealed where they stand.
 fn headless_tasks(
-    circuit: &str,
+    sealed: &SealedDeckHdl,
     origin: &Path,
     cards: &[String],
-    runtimes: &PreparedVerilogARuntimeSet,
 ) -> Result<Vec<HeadlessTaskRequest>, CaseError> {
     let directory = origin.parent().unwrap_or(Path::new("."));
+    let runtimes = &sealed.runtimes;
     let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
-        .expand_content(circuit, origin)
+        .expand_content_rewriting(&sealed.source, origin, &mut |location, _| {
+            sealed.included_line(location)
+        })
         .map_err(|error| ErrorRecord {
             category: "parse".into(),
             stage: Some("preparation".into()),
@@ -1149,11 +1151,10 @@ impl Family {
 fn family_tasks(
     request: &CaseRequest<'_>,
     kind: &str,
-    circuit: &str,
+    sealed: &SealedDeckHdl,
     origin: &Path,
     source: &str,
     cards: &[String],
-    runtimes: &PreparedVerilogARuntimeSet,
 ) -> Result<(Vec<HeadlessTaskRequest>, Family), CaseError> {
     use rspice_simulation::deck_family;
     let family_word = match kind {
@@ -1174,9 +1175,7 @@ fn family_tasks(
         .filter(|card| !is_family_card(card))
         .cloned()
         .collect();
-    let base = match <[HeadlessTaskRequest; 1]>::try_from(headless_tasks(
-        circuit, origin, &rest, runtimes,
-    )?) {
+    let base = match <[HeadlessTaskRequest; 1]>::try_from(headless_tasks(sealed, origin, &rest)?) {
         Ok([base]) if matches!(base.analysis.spec, AnalysisSpec::Transient { .. }) => base,
         _ => {
             return Err(harness_error(format!(

@@ -57,6 +57,12 @@ pub struct HeadlessRunInput<'a> {
     pub reference_process: ProcessCorner,
     pub reference_temperature_celsius: f64,
     pub veriloga_runtimes: PreparedVerilogARuntimeSet,
+    /// The sealed directive for each HDL source line an included file
+    /// writes, by that file's canonical path and the line's 1-based number
+    /// there ([`crate::netlist_preparation::SealedDeckHdl::included`]). The
+    /// expansion writes each in place of its line, as the prepared
+    /// manual-deck route does, so the line names its sealed runtime.
+    pub included_hdl_lines: BTreeMap<(PathBuf, usize), String>,
     pub measurement_references: PreparedMeasurementReferences,
     pub saved_outputs: Vec<SavedOutput>,
     pub save_policy: SavePolicy,
@@ -81,6 +87,7 @@ impl<'a> HeadlessRunInput<'a> {
             reference_process: ProcessCorner::TT,
             reference_temperature_celsius: 27.0,
             veriloga_runtimes: PreparedVerilogARuntimeSet::default(),
+            included_hdl_lines: BTreeMap::new(),
             measurement_references: PreparedMeasurementReferences::default(),
             saved_outputs: Vec::new(),
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -178,7 +185,13 @@ pub fn prepare_headless_run(
     let reads_files = false;
     let (origin, mut processor) = source_processor(input.origin, input.resolver)?;
     processor = processor.with_resource_limits(limits);
-    let expanded = processor.expand_content_with_abort(input.source, &origin, abort)?;
+    let included = &input.included_hdl_lines;
+    let expanded = processor.expand_content_rewriting_with_abort(
+        input.source,
+        &origin,
+        &mut |location, _| crate::netlist_preparation::included_hdl_line(included, location),
+        abort,
+    )?;
     let sealed_source_dependencies = processor.resolved_dependencies().to_vec();
     // A `d_process` program starts from the root deck's directory, as the
     // CLI starts it. A sealed bundle has no directory to start one from.
@@ -221,6 +234,12 @@ pub fn prepare_headless_run(
     // compatibility check can repeat flattening under default limits.
     validated_parsed_hierarchy_with_limits_and_abort(&parsed, expanded_limits, abort)?;
     super::preparation::reject_unresolved_device_models(&expanded, false)?;
+    if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
+        &expanded,
+        &sealed_source_dependencies,
+    ) {
+        return Err(refusal.into());
+    }
     reject_deferred_external_sources_with_project_runtimes(
         &expanded,
         &input.veriloga_runtimes,

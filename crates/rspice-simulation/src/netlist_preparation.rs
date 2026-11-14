@@ -24,6 +24,7 @@ pub use external_sources::{
     reject_deferred_external_sources_with_project_runtimes,
 };
 pub(crate) use hdl_sources::included_hdl_source_refusal;
+pub(crate) use hdl_sources::included_line as included_hdl_line;
 pub use hdl_sources::{DeckHdlRefusal, SealedDeckHdl, deck_source_key, seal_deck_hdl_sources};
 pub(crate) use process_programs::resolve_process_programs;
 

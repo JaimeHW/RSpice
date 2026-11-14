@@ -63,12 +63,21 @@ impl SealedDeckHdl {
     /// of the deck's includes puts in its place
     /// (`IncludeProcessor::expand_content_rewriting`).
     pub fn included_line(&self, location: &NetlistSourceLocation) -> Option<String> {
-        if self.included.is_empty() {
-            return None;
-        }
-        let path = canonical(location.path.as_deref()?);
-        self.included.get(&(path, location.line)).cloned()
+        included_line(&self.included, location)
     }
+}
+
+/// The sealed directive `included` ([`SealedDeckHdl::included`]) holds for
+/// the line `location` names.
+pub(crate) fn included_line(
+    included: &BTreeMap<(PathBuf, usize), String>,
+    location: &NetlistSourceLocation,
+) -> Option<String> {
+    if included.is_empty() {
+        return None;
+    }
+    let path = canonical(location.path.as_deref()?);
+    included.get(&(path, location.line)).cloned()
 }
 
 /// Why a Verilog-A source a deck names could not be sealed.
