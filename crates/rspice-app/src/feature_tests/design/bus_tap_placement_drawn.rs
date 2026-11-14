@@ -3,7 +3,7 @@
 use crate::state::Tool;
 use crate::state::{Bus, BusDeclaration, Point};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::bus_tap::tests::{fill, key_event, render};
+use crate::workbench::app::dialogs::placement::bus_tap::tests::{key_event, render};
 use crate::workbench::app::dialogs::placement::bus_tap::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
@@ -280,4 +280,10 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
             "{change}"
         );
     }
+}
+
+/// Type a complete tap into the open form.
+pub(crate) fn fill(state: &mut AppState, bus: &str, slice: &str) {
+    state.design.bus_tap.fields.bus = bus.to_owned();
+    state.design.bus_tap.fields.slice = slice.to_owned();
 }

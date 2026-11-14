@@ -144,7 +144,7 @@ fn validate_draft(
 pub(crate) mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
     pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -152,7 +152,7 @@ pub(crate) mod tests {
     }
 
     /// The draft's validation, over what the form reads.
-    fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String> {
+    fn validate_draft(state: &DesignTestHost) -> Result<PendingDesignNotePlacement, String> {
         super::validate_draft(&state.design.design_note, &state.model)
     }
 
@@ -161,7 +161,7 @@ pub(crate) mod tests {
     /// "Bias network".
     #[test]
     fn an_untouched_form_places_no_note() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let source = schematic_editor_request_source(&state);
         state.design.design_note.open(source);
         assert_eq!(state.design.design_note.text, "");
@@ -179,7 +179,7 @@ pub(crate) mod tests {
     /// one character a typed one is.
     #[test]
     fn a_decomposed_note_is_placed_composed() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let source = schematic_editor_request_source(&state);
         state.design.design_note.open(source);
         state.design.design_note.text = " Cafe\u{301} bias ".to_owned();
@@ -191,7 +191,7 @@ pub(crate) mod tests {
 
     #[test]
     fn valid_draft_freezes_authority_without_mutating_document() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         assert!(validate_draft(&state).is_err());
         let source = schematic_editor_request_source(&state);
         state.design.design_note.open(source.clone());
@@ -221,7 +221,7 @@ pub(crate) mod tests {
             "read-only",
             "safe-mode",
         ] {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             let master = CellViewRef::new("work", "note_child", "schematic");
             state.model.workspace.descend_into(
                 "X1".to_owned(),

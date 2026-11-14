@@ -147,7 +147,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::BusTapOrientation;
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the form as its dialog step does.
     pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -155,7 +155,7 @@ pub(crate) mod tests {
     }
 
     fn test_source() -> EditorRequestSource {
-        crate::workbench::app::schematic_editor_request_source(&AppState::default())
+        crate::workbench::app::schematic_editor_request_source(&DesignTestHost::default())
     }
 
     pub(crate) fn key_event(key: egui::Key) -> egui::Event {
@@ -166,12 +166,6 @@ pub(crate) mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
-    }
-
-    /// Type a complete tap into the open form.
-    pub(crate) fn fill(state: &mut AppState, bus: &str, slice: &str) {
-        state.design.bus_tap.fields.bus = bus.to_owned();
-        state.design.bus_tap.fields.slice = slice.to_owned();
     }
 
     #[test]

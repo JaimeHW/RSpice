@@ -155,7 +155,7 @@ fn materialize_draft(
 mod tests {
     use super::*;
     use crate::state::Tool;
-    use crate::workbench::app::RSpiceApp;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     #[test]
     fn materialization_uses_the_exact_selected_width() {
@@ -164,20 +164,19 @@ mod tests {
             .find(|descriptor| descriptor.model_type == "d_lut")
             .expect("lookup-table descriptor");
         let ports = crate::state::builtin_xspice_vector_ports(descriptor).expect("ports");
-        let mut app = RSpiceApp::test_instance();
-        app.state.design.builtin_xspice_placement.open(
+        let mut app = DesignTestHost::default();
+        app.design.builtin_xspice_placement.open(
             descriptor.stable_id,
             descriptor.display_name,
             ports,
-            schematic_editor_request_source(&app.state),
+            schematic_editor_request_source(&app),
         );
-        app.state
-            .design
+        app.design
             .builtin_xspice_placement
             .widths
             .insert("in".to_owned(), 6);
 
-        let binding = validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
+        let binding = validate_draft(&app.design.builtin_xspice_placement, &app.model)
             .expect("validated binding");
         assert_eq!(binding.terminal_order.len(), 7);
         assert_eq!(binding.builtin_xspice.unwrap().ports[0].vector_width, 6);
@@ -199,8 +198,8 @@ mod tests {
             "safe-mode",
             "missing",
         ] {
-            let mut app = RSpiceApp::test_instance();
-            let state = &mut app.state;
+            let mut app = DesignTestHost::default();
+            let state = &mut app;
             let master = CellViewRef::new("work", "xspice_child", "schematic");
             state.model.workspace.descend_into(
                 "X1".to_owned(),
@@ -226,11 +225,8 @@ mod tests {
                 ports.clone(),
                 source.clone(),
             );
-            assert!(
-                validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
-                    .is_ok()
-            );
-            let state = &mut app.state;
+            assert!(validate_draft(&app.design.builtin_xspice_placement, &app.model).is_ok());
+            let state = &mut app;
             match change {
                 "design" => state.model.design_execution_epoch += 1,
                 "buffer" => state.model.active_schematic_epoch += 1,
@@ -282,15 +278,14 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                materialize_draft(&app.state.design.builtin_xspice_placement).is_ok(),
+                materialize_draft(&app.design.builtin_xspice_placement).is_ok(),
                 "contract remains valid: {change}"
             );
             assert!(
-                validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
-                    .is_err(),
+                validate_draft(&app.design.builtin_xspice_placement, &app.model).is_err(),
                 "stale or read-only: {change}"
             );
-            let state = &mut app.state;
+            let state = &mut app;
             assert!(
                 state
                     .model
@@ -315,8 +310,7 @@ mod tests {
                     schematic_editor_request_source(state),
                 );
                 assert!(
-                    validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
-                        .is_ok(),
+                    validate_draft(&app.design.builtin_xspice_placement, &app.model).is_ok(),
                     "reopened: {change}"
                 );
             }
