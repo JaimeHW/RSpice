@@ -553,15 +553,17 @@ fn generated_diode_target(
 /// Resolve explicit generated BJT types and dialect-owned Q-level devices.
 ///
 /// Xyce 7.10 registers its ADMS VBIC 1.3 devices directly as Q LEVEL=11
-/// (three electrical terminals) and Q LEVEL=12 (four electrical terminals).
-/// Both expose optional internal nodes in order: dt, cx, ci, bx, bi, ei.
-/// The LEVEL=11 thermal variant already declares dt as its fourth terminal.
-/// Selecting those modules is dialect semantics, not an opportunistic fallback.
-/// A build lacking that
-/// exact generated module must fail explicitly rather than silently selecting
-/// another BJT implementation. ngspice and BestAvailable selectors remain on
-/// the native BJT policy, while explicit module types remain available in
-/// every dialect.
+/// (three electrical terminals, `N_DEV_ADMSvbic13.C:9194`, generated from
+/// `vbic_1p3.va`) and Q LEVEL=12 (four electrical terminals,
+/// `N_DEV_ADMSvbic13_4t.C:10175`). Both expose optional internal nodes in
+/// order: dt, cx, ci, bx, bi, ei. The LEVEL=11 thermal variant already
+/// declares dt as its fourth terminal. A build with the generated module runs
+/// the card on it; a build without it runs the card on RSpice's native VBIC,
+/// which implements the same VBIC 1.3 at those two levels (its LEVEL=11
+/// optional fourth terminal is thermal, as Xyce's), so the route depends only
+/// on whether that module is built, never on which other models are. ngspice
+/// and BestAvailable selectors remain on the native BJT policy, while explicit
+/// module types remain available in every dialect.
 fn generated_bjt_target(
     model_name: &str,
     model_def: Option<&ModelDef>,
@@ -631,15 +633,16 @@ fn generated_bjt_target(
     }
 
     Ok(match checked_model_level("BJT", model_name, model)? {
-        Some(11) if instance_terminal_count >= 4 => Some(
-            GeneratedTarget::new("vbic13_3t_et")
-                .with_optional_internal_nodes(&["cx", "ci", "bx", "bi", "ei"]),
-        ),
-        Some(11) => Some(GeneratedTarget::new("vbic13")),
-        Some(12) => Some(
+        Some(11) if instance_terminal_count >= 4 => cfg!(feature = "veriloga-model-vbic13-3t-et")
+            .then(|| {
+                GeneratedTarget::new("vbic13_3t_et")
+                    .with_optional_internal_nodes(&["cx", "ci", "bx", "bi", "ei"])
+            }),
+        Some(11) => cfg!(feature = "veriloga-model-vbic13").then(|| GeneratedTarget::new("vbic13")),
+        Some(12) => cfg!(feature = "veriloga-model-vbic13-4t").then(|| {
             GeneratedTarget::new("vbic13_4t")
-                .with_optional_internal_nodes(&["dt", "cx", "ci", "bx", "bi", "ei"]),
-        ),
+                .with_optional_internal_nodes(&["dt", "cx", "ci", "bx", "bi", "ei"])
+        }),
         // Xyce registers Mextram 504.12.1 as Q LEVEL=504 (bjt504va) and its
         // self-heating variant as LEVEL=505 (bjt504tva); neither is Mextram 505.
         Some(504) => Some(GeneratedTarget::new("bjt504va")),
@@ -2403,12 +2406,24 @@ mod tests {
         );
     }
 
+    /// A Xyce VBIC level selects its exact generated variant when the build
+    /// has it, and the native VBIC 1.3 otherwise, whatever else is built.
     #[test]
     fn xyce_q_levels_select_the_exact_registered_vbic_variant() {
-        for (level, terminals, expected) in [
-            (11, 3, "vbic13"),
-            (11, 4, "vbic13_3t_et"),
-            (12, 4, "vbic13_4t"),
+        for (level, terminals, expected, built) in [
+            (11, 3, "vbic13", cfg!(feature = "veriloga-model-vbic13")),
+            (
+                11,
+                4,
+                "vbic13_3t_et",
+                cfg!(feature = "veriloga-model-vbic13-3t-et"),
+            ),
+            (
+                12,
+                4,
+                "vbic13_4t",
+                cfg!(feature = "veriloga-model-vbic13-4t"),
+            ),
         ] {
             let netlist = Netlist::parse(&format!(
                 "Xyce VBIC level routing\nQ1 c b e model\n.MODEL model NPN LEVEL={level}\n.END\n"
@@ -2421,9 +2436,12 @@ mod tests {
                 terminals,
                 crate::config::SpiceDialect::Xyce,
             )
-            .expect("Xyce level resolves")
-            .expect("Xyce level selects a generated model");
-            assert_eq!(target.model_name, expected);
+            .expect("Xyce level resolves");
+            assert_eq!(
+                target.map(|target| target.model_name),
+                built.then_some(expected),
+                "LEVEL={level} with {terminals} terminals"
+            );
         }
     }
 

@@ -54,7 +54,8 @@ fn build_error(model_card: &str) -> String {
 }
 
 /// Every Verilog-A-delivered BJT family this build does not compile is refused
-/// by name, whichever alias the deck used for the model type.
+/// by name, whichever alias the deck used for the model type, and one it
+/// compiles takes the card.
 #[test]
 fn a_verilog_a_delivered_bjt_family_names_its_module_and_feature() {
     let cases = [
@@ -102,14 +103,16 @@ fn a_verilog_a_delivered_bjt_family_names_its_module_and_feature() {
         ),
     ];
 
-    let mut refusals = 0usize;
     for (model_card, family, module, feature) in cases {
-        // A build that compiled this module routes the card instead of
-        // refusing it; the boundary under test is the refusal.
+        // A build that compiled this module routes the card to it instead of
+        // refusing it.
         if module_is_compiled(module) {
+            let netlist = Netlist::parse(&bjt_deck(model_card)).expect("routing fixture parses");
+            if let Err(error) = engine().build_circuit(&netlist) {
+                panic!("{model_card}: a compiled {module} must take the card: {error}");
+            }
             continue;
         }
-        refusals += 1;
         let message = build_error(model_card);
         assert!(
             message.contains(family),
@@ -137,11 +140,6 @@ fn a_verilog_a_delivered_bjt_family_names_its_module_and_feature() {
             "{model_card}: a delivered compact model is not a malformed type name: {message}"
         );
     }
-    assert!(
-        refusals > 0,
-        "no build compiles every delivered BJT module, so at least one case must exercise the \
-         routing boundary"
-    );
 }
 
 /// A model type nobody delivers still reads as a malformed card, so the new
@@ -596,7 +594,6 @@ Q1 cx bx 0 0 qmod
 ))]
 mod xyce_vbic_generated {
     use super::*;
-    use rspice_core::NoAbort;
     use rspice_core::engine::{ConvergenceConfig, SpiceDialect};
 
     #[test]
@@ -855,7 +852,7 @@ mod xyce_vbic_generated {
                     "V1",
                     &frequencies,
                     300.15,
-                    &NoAbort,
+                    &rspice_core::NoAbort,
                 )
                 .unwrap_or_else(|error| panic!("{name} noise runs: {error}"));
             for (point, (frequency, onoise, inoise)) in points.iter().zip(rows) {
