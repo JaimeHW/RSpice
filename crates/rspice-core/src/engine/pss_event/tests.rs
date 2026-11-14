@@ -346,3 +346,74 @@ fn a_delay_history_is_refused_as_opaque_state() {
         "{text}"
     );
 }
+/// PAC around the switched-capacitor twin's event orbit, against the
+/// sampled-data transfer: with the sample at t_s = 480.556 ns, the update
+/// at t_u = 520.556 ns, a = C1/(C1 + C2) and H_d(ω) = a/(1 − (1 − a)e^{−jωT}),
+/// Y_m = H_d·e^{jω(t_s − t_u)}·e^{−jmω₀t_u}·(1 − e^{−jωT})/(j(ω + mω₀)T).
+/// The Ron·C time constants (about 1 ns) the closed form neglects move the
+/// phase by at most 0.04° at 100 kHz; the allowance is 0.5 % and 0.5°.
+#[test]
+fn event_pac_meets_the_sampled_data_transfer_of_the_switched_capacitor_twin() {
+    use crate::analysis::{PacConfig, PacSweepType};
+    use num_complex::Complex64;
+    let deck = SC_PULSE.replace(
+        "sin(0.5 0.2 1meg 0 0 -83)",
+        "sin(0.5 0.2 1meg 0 0 -83) ac 1",
+    );
+    let netlist = Netlist::parse(&deck).expect("the filter parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(1.0e6).with_tstab(10.0e-6),
+            &NoAbort,
+        )
+        .expect("event shooting solves the switched-capacitor orbit");
+    let config = PacConfig::new()
+        .with_sweep(1.0e3, 1.0e5, 1)
+        .with_sweep_type(PacSweepType::Decade)
+        .with_sidebands(-1, 1)
+        .with_input_source("vin")
+        .with_output_node("out");
+    let pac = engine
+        .run_pac_from_pss_with_abort(&netlist, config, &point, &NoAbort)
+        .expect("PAC runs on the event orbit");
+    let result = &pac.result;
+    let out = result.node_index("out").expect("v(out) is solved");
+    let period = 1.0e-6;
+    let omega_0 = std::f64::consts::TAU / period;
+    let (sample, update) = (480.0e-9 + 1.0e-9 / 1.8, 520.0e-9 + 1.0e-9 / 1.8);
+    let share = 0.1;
+    assert_eq!(result.frequencies.len(), 3, "{:?}", result.frequencies);
+    for (index, &frequency) in result.frequencies.iter().enumerate() {
+        let omega = std::f64::consts::TAU * frequency;
+        let z_inverse = Complex64::from_polar(1.0, -omega * period);
+        for m in [-1, 0, 1] {
+            let shifted = omega + f64::from(m) * omega_0;
+            let expected = share / (1.0 - (1.0 - share) * z_inverse)
+                * Complex64::from_polar(1.0, omega * (sample - update))
+                * Complex64::from_polar(1.0, -f64::from(m) * omega_0 * update)
+                * (1.0 - z_inverse)
+                / (Complex64::i() * shifted * period);
+            let got = result
+                .get_sideband_data(index, m)
+                .expect("the sideband is published")
+                .node_voltages[out];
+            let magnitude = got.norm() / expected.norm() - 1.0;
+            let phase = (got / expected).arg().to_degrees();
+            println!(
+                "pac {frequency:e} Hz sb {m:+}: {got:.6e} against {expected:.6e} \
+                 ({magnitude:+.3e}, {phase:+.3}°)"
+            );
+            assert!(
+                magnitude.abs() < 5.0e-3 && phase.abs() < 0.5,
+                "sideband {m} at {frequency:e} Hz: {got} against {expected}"
+            );
+            let converted = result
+                .conversion_matrix
+                .get(index, m, 0)
+                .expect("the conversion matrix holds the input at sideband 0");
+            assert!((converted - got).norm() <= 1.0e-12 * got.norm().max(1.0e-30));
+        }
+    }
+}

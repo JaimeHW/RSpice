@@ -22,11 +22,13 @@
 //! - [`newton`]: the period map and the inner Newton iteration on `z`.
 //! - [`certify`]: the mesh, linearization and event-margin checks an orbit
 //!   passes before it is published.
+//! - [`pac`]: PAC, and PXF through it, on the orbit in the time domain.
 
 mod basis;
 mod boundary;
 mod certify;
 mod newton;
+mod pac;
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pss::{PeriodicWaveform, PssResult};
@@ -304,6 +306,43 @@ fn opaque_veriloga_refusal(_circuit: &CircuitData) -> Option<SimulationError> {
     None
 }
 
+/// A stabilized circuit at its quiet boundary: everything the solve and a
+/// small-signal analysis that reproduces a retained orbit share.
+struct Prepared {
+    /// The engine every traversal runs on, with tightened Newton tolerances.
+    traversals: Engine,
+    /// The run's own relative and absolute voltage tolerances.
+    mesh_tolerance: (Value, Value),
+    period: Value,
+    max_step: Value,
+    guard: Value,
+    basis: ShootingBasis,
+    /// The live image at the boundary.
+    image: CapturedTransientState,
+    /// The nominal mesh of the period from the boundary.
+    mesh: Vec<Value>,
+}
+
+impl Prepared {
+    fn orbit<'a>(
+        &'a self,
+        netlist: &'a Netlist,
+        config: &'a PssConfig,
+        abort: &'a dyn AbortSignal,
+    ) -> Orbit<'a> {
+        Orbit {
+            engine: &self.traversals,
+            netlist,
+            basis: &self.basis,
+            config,
+            max_step: self.max_step,
+            guard: self.guard,
+            mesh_tolerance: self.mesh_tolerance,
+            abort,
+        }
+    }
+}
+
 impl Engine {
     /// Solve a driven periodic steady state by event shooting.
     pub(in crate::engine) fn run_event_pss(
@@ -313,6 +352,32 @@ impl Engine {
         dc_seed: Option<&crate::engine::PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<EventPss, SimulationError> {
+        let prepared = self.prepare_event_orbit(netlist, config, dc_seed, abort)?;
+        let orbit = prepared.orbit(netlist, config, abort);
+        let (image, solved, mesh, discrete_iterations) = orbit.solve_discrete(
+            prepared.image.clone(),
+            prepared.mesh.clone(),
+            prepared.period,
+        )?;
+        let certified = orbit.certify(&image, solved, mesh)?;
+        certified.publish(
+            &prepared.basis,
+            &image,
+            config,
+            prepared.period,
+            discrete_iterations,
+        )
+    }
+
+    /// Stabilize the circuit, choose its quiet boundary and lay out the
+    /// orbit's coordinates and nominal mesh there.
+    fn prepare_event_orbit(
+        &self,
+        netlist: &Netlist,
+        config: &PssConfig,
+        dc_seed: Option<&crate::engine::PssDcOperatingPointSeed>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Prepared, SimulationError> {
         config
             .validate()
             .map_err(crate::engine::PssError::InvalidConfig)?;
@@ -390,16 +455,6 @@ impl Engine {
             .cloned()
             .ok_or_else(|| SimulationError::Circuit("PSS lost its boundary image".to_string()))?;
         let basis = ShootingBasis::of(&image)?;
-        let orbit = Orbit {
-            engine: &traversals,
-            netlist,
-            basis: &basis,
-            config,
-            max_step,
-            guard,
-            mesh_tolerance: (resolved.voltage_reltol(), resolved.voltage_abstol()),
-            abort,
-        };
         // The stabilization's own history already shows a discrete state
         // that repeats only after several periods.
         let fingerprint_at = |time: Value| {
@@ -438,10 +493,16 @@ impl Engine {
             .map(|event| event.time)
             .collect();
         let mesh = boundary::nominal_mesh(&stabilization.time, boundary_time, period, &excluded);
-        let (image, solved, mesh, discrete_iterations) =
-            orbit.solve_discrete(image, mesh, period)?;
-        let certified = orbit.certify(&image, solved, mesh)?;
-        certified.publish(&basis, &image, config, period, discrete_iterations)
+        Ok(Prepared {
+            mesh_tolerance: (resolved.voltage_reltol(), resolved.voltage_abstol()),
+            traversals,
+            period,
+            max_step,
+            guard,
+            basis,
+            image,
+            mesh,
+        })
     }
 }
 

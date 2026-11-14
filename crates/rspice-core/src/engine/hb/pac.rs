@@ -78,6 +78,9 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let engine = self.resolved_for_netlist(netlist);
+        if operating_point.is_event_orbit() {
+            return engine.run_event_pac(netlist, config, operating_point, abort);
+        }
         engine.run_pac_impl(
             netlist,
             config,

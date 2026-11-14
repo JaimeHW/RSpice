@@ -1466,12 +1466,36 @@ impl PssOperatingPoint {
         if self.is_event_orbit() {
             return Err(UnsupportedCapabilityError::new(
                 super::pss_event::EVENT_CARRIER,
-                "the periodic steady state was solved by event shooting, and the periodic \
-                 small-signal analyses (PAC, PXF, PNOISE, PSTB) linearize only an orbit native \
-                 shooting solved",
+                "the periodic steady state was solved by event shooting; PAC and PXF run on its \
+                 orbit, and PNOISE and PSTB linearize only an orbit native shooting solved",
             )
             .into());
         }
+        self.authenticate_producer(netlist, simulation_config, pss_config)
+    }
+
+    /// [`Self::authenticate_for_reuse`] for the analyses that run on an
+    /// orbit event shooting solved.
+    pub(in crate::engine) fn authenticate_event_orbit_for_reuse(
+        &self,
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        pss_config: &PssConfig,
+    ) -> Result<(), SimulationError> {
+        if !self.is_event_orbit() {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point was not solved by event shooting".to_owned(),
+            ));
+        }
+        self.authenticate_producer(netlist, simulation_config, pss_config)
+    }
+
+    fn authenticate_producer(
+        &self,
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        pss_config: &PssConfig,
+    ) -> Result<(), SimulationError> {
         let retained = self.producer_identity.as_ref().ok_or_else(|| {
             SimulationError::Circuit(
                 "retained PSS operating point is a legacy identityless artifact and is not trusted for dependent numerical reuse"
