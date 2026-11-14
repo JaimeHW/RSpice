@@ -287,8 +287,7 @@ pub struct ProjectSimulationRun {
     pub dataset_id: Option<DatasetId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_target: Option<ExecutionTarget>,
-    /// Required by schema v6. Historical schemas are migrated to an explicit
-    /// `LegacyUnknown` value without outcome inference.
+    /// Required; a run without one is refused rather than given an outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<SimulationRunLifecycle>,
     /// Display sequence retained for labels and v1 migration.
@@ -435,9 +434,12 @@ impl ProjectSimulationRun {
             self.job_id,
             self.execution_target,
         );
-        let restored_lifecycle = self
-            .lifecycle
-            .unwrap_or(SimulationRunLifecycle::LegacyUnknown);
+        let restored_lifecycle = self.lifecycle.ok_or_else(|| {
+            format!(
+                "simulation run sequence {} has no persisted lifecycle",
+                self.id
+            )
+        })?;
         let was_active = matches!(
             restored_lifecycle,
             SimulationRunLifecycle::Preparing

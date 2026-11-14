@@ -1309,21 +1309,19 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
 }
 
 #[test]
-fn missing_persisted_lifecycle_restores_as_explicit_legacy_unknown() {
+fn missing_persisted_lifecycle_is_refused() {
     let mut run = SimulationRun::new(13);
     seal_legacy_unattributed(&mut run);
-    let expected_run_id = run.run_id;
     let mut persisted = ProjectSimulationRun::from(&run);
     persisted.job_id = None;
     persisted.execution_target = None;
     persisted.lifecycle = None;
 
-    let restored = persisted.into_run().expect("legacy run restores");
+    let error = persisted
+        .into_run()
+        .expect_err("a run without a lifecycle is refused");
 
-    assert_eq!(restored.run_id, expected_run_id);
-    assert_eq!(restored.job_id, None);
-    assert_eq!(restored.execution_target, None);
-    assert_eq!(restored.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+    assert!(error.contains("has no persisted lifecycle"), "{error}");
 }
 
 mod canonical_tag_round_trip;
