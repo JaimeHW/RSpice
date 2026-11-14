@@ -11,11 +11,11 @@ use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub(crate) mod bundle;
+pub mod bundle;
 mod external_change;
 mod find;
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 mod import;
 mod platform;
 mod save;
@@ -25,7 +25,7 @@ mod tests;
 
 pub use external_change::apply_staged_external_netlist_change;
 pub use find::apply_netlist_find_step;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use import::sha256;
 pub use import::{
     ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,

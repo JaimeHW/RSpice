@@ -13,7 +13,6 @@
 //! `workflows::project_workflow`). Only accessors over this struct's own
 //! fields are defined here.
 
-pub(crate) use rspice_app_state::workbench::app_state::cell_usage;
 pub(crate) use rspice_app_state::workbench::app_state::design_checks;
 pub(crate) use rspice_app_state::workbench::app_state::design_history;
 pub(crate) use rspice_app_state::workbench::app_state::diagnostic_store;
@@ -57,9 +56,8 @@ use rspice_app_services::workbench::slots::platform::trim_recent_files;
 
 pub(crate) use design_checks::{DesignCheckStatus, model_design_view, model_location_anchor};
 pub(crate) use design_history::{
-    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta, VerilogABuildSettingsHistoryEntry,
-    VerilogAModuleBinding, publish_symbol_definition_candidate,
-    publish_symbol_definition_candidate_with_fixture,
+    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
+    publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,
 };
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType};

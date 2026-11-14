@@ -14,7 +14,6 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
-pub(crate) mod code_context;
 mod enablement;
 pub(crate) mod netlist_validation;
 mod registry;

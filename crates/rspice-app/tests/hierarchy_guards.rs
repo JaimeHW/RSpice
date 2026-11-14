@@ -367,6 +367,11 @@ fn app_simulate_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src")
 }
 
+/// The application's code feature, named the same way.
+fn app_code_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -534,6 +539,7 @@ fn path_grammar_is_owned_by_one_module() {
         ("", app_cloud_src_dir()),
         ("", app_models_src_dir()),
         ("", app_simulate_src_dir()),
+        ("", app_code_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -647,6 +653,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
         app_cloud_src_dir(),
         app_models_src_dir(),
         app_simulate_src_dir(),
+        app_code_src_dir(),
     ] {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
@@ -1065,6 +1072,7 @@ fn every_command_has_a_user_route() {
                 app_cloud_src_dir().join(file),
                 app_models_src_dir().join(file),
                 app_simulate_src_dir().join(file),
+                app_code_src_dir().join(file),
             ]
             .into_iter()
             .find(|path| path.is_file())
@@ -1420,6 +1428,7 @@ fn persisted_policies_reach_a_projection() {
         ("", app_cloud_src_dir()),
         ("", app_models_src_dir()),
         ("", app_simulate_src_dir()),
+        ("", app_code_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),

@@ -125,16 +125,12 @@ pub(crate) use dialogs::project::TechnologyAttachmentDialogState;
 
 pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
 
-pub(crate) use dialogs::source_document::{
-    begin_new_top_deck_in, open_source_document_dialog_in, source_document_dialog_is_available,
-};
-
 pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
 
+pub(crate) use dialogs::veriloga_build_settings::open_veriloga_build_settings;
 #[cfg(test)]
-pub(crate) use dialogs::veriloga_build_settings::save_veriloga_build_settings;
 pub(crate) use dialogs::veriloga_build_settings::{
-    VerilogABuildSettingsDraft, open_veriloga_build_settings, veriloga_build_settings_available,
+    VerilogABuildSettingsDraft, save_veriloga_build_settings,
 };
 
 pub(crate) use dialogs::create_model_bound_symbol::{

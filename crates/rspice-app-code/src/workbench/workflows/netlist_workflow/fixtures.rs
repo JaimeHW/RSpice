@@ -4,7 +4,7 @@
 //! cases and the code feature's whole-application tests share them.
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod vendor_profiles;
+pub mod vendor_profiles;
 
 pub fn generated_bundle_fixture() -> Vec<u8> {
     use crate::product::{ContentDigest, ObjectRevision};

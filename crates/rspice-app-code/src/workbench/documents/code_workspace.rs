@@ -55,7 +55,7 @@ pub use language_services::{
     format_language_document, open_language_tools_in_bundle,
 };
 // A managed run the frame tests seed, to press its Stop.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use page::PendingAutomationRuntimeExecution;
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
@@ -95,16 +95,16 @@ pub use veriloga::{
     selected_veriloga_editor_snapshot_in, selected_veriloga_source_in, viewed_veriloga_header,
     writable_libraries, write_veriloga_build_profile,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use veriloga_inspector::veriloga_diagnostics;
 pub use veriloga_inspector::{
     VerilogAInspectorAction, show_veriloga_inspector, veriloga_compile_status,
     veriloga_current_diagnostics, veriloga_receipt,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use veriloga_interface::VerilogASymbolDrift;
 pub use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
@@ -403,7 +403,10 @@ mod tests {
 
     #[test]
     fn browser_worker_script_has_a_separate_compile_protocol() {
-        let source = include_str!("../../../web/simulation-worker.js");
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rspice-app/web/simulation-worker.js"
+        ));
         assert!(source.contains("compile-veriloga"));
         assert!(source.contains("runRspiceUiVerilogACompileRequest"));
         assert!(source.contains("veriloga-result"));

@@ -138,19 +138,29 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-formats", "rspice-results", "rspice-results-ui", "rspice-schematic-editor",
         "rspice-ui-kit", "rspice-vocabulary",
     },
+    # The code feature: the persisted model, the platform services, the run
+    # tier whose controller generates the netlists it shows, the workbench
+    # framework it registers with, and the design, project, model library,
+    # simulation, format, result and painting crates its source editors,
+    # netlist documents and automation workspace are built on.
+    "rspice-app-code": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-design", "rspice-project", "rspice-model-library", "rspice-simulation",
+        "rspice-formats", "rspice-results", "rspice-ui-kit", "rspice-vocabulary",
+    },
     "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
     "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
-    "rspice-app-models", "rspice-app-simulate",
+    "rspice-app-models", "rspice-app-simulate", "rspice-app-code",
 }
 # The application's feature crates. A feature reaches no other feature, and
 # nothing above the workbench framework.
 FEATURES = {
     "rspice-app-simulate", "rspice-app-results", "rspice-app-models", "rspice-app-sheets",
-    "rspice-app-hardcopy", "rspice-app-settings", "rspice-app-cloud",
+    "rspice-app-hardcopy", "rspice-app-settings", "rspice-app-cloud", "rspice-app-code",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {

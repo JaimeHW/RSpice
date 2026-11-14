@@ -11,14 +11,14 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-pub(crate) mod generation;
+pub mod generation;
 mod language;
 mod ownership;
 mod revision;
-pub(crate) mod search;
-pub(crate) mod source_menu;
-pub(crate) mod toolbar;
-pub(crate) mod transfer;
+pub mod search;
+pub mod source_menu;
+pub mod toolbar;
+pub mod transfer;
 
 use egui::Ui;
 
@@ -1136,8 +1136,8 @@ fn document_syntax_status(
     }
     None
 }
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod tests {
     use super::fixtures::{retain_generated, seal_manual_run};

@@ -9,7 +9,7 @@
 //! transaction builds its result in a clone of the whole state.
 
 use rspice_app_cloud::workbench::slots::cloud;
-mod code;
+use rspice_app_code::workbench::slots::code;
 mod design;
 use rspice_app_hardcopy::workbench::slots::hardcopy;
 use rspice_app_models::workbench::slots::models;
@@ -23,7 +23,7 @@ mod shell;
 use rspice_app_simulate::workbench::slots::simulate;
 
 pub(crate) use cloud::CloudState;
-pub(crate) use code::{CodeState, netlist_shown_in, veriloga_compilation_in};
+pub(crate) use code::CodeState;
 pub(crate) use design::{DesignPanel, DesignState};
 pub(crate) use hardcopy::HardcopyState;
 pub(crate) use models::ModelsState;

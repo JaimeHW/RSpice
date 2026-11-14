@@ -25,7 +25,7 @@ SERVICES_SRC = ROOT / "crates" / "rspice-app-services" / "src"
 RUST_BROWSER_RUNTIME = SERVICES_SRC / "automation_runtime_browser.rs"
 RUST_NATIVE_RUNTIME = SERVICES_SRC / "automation_runtime.rs"
 CODE_WORKSPACE_AUTOMATION = (
-    ROOT / "crates" / "rspice-app" / "src" / "workbench" / "documents" / "code_workspace" / "automation.rs"
+    ROOT / "crates" / "rspice-app-code" / "src" / "workbench" / "documents" / "code_workspace" / "automation.rs"
 )
 NATIVE_RUNTIME_LIBRARY = ROOT / "crates" / "rspice-automation-runtime" / "src" / "lib.rs"
 NATIVE_RUNTIME_QUALIFIER = (

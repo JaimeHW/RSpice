@@ -55,10 +55,10 @@ const CODE_STATUS_MARK_COLUMN: f32 = CODE_STATUS_MARK_SIDE + CODE_STATUS_MARK_GA
 pub struct CodeToolbarLayout {
     pub content: egui::Rect,
     /// Exact rect the status chips were painted into.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub status: egui::Rect,
     /// Exact rect the action group actually occupied, not the reservation.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub actions: egui::Rect,
 }
 
@@ -900,9 +900,9 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
 
     CodeToolbarLayout {
         content,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         status: status_rect,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         actions: regions.1,
     }
 }

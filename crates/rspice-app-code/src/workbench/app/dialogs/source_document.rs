@@ -1889,8 +1889,8 @@ fn revision_history(
     action
 }
 
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod tests;
 

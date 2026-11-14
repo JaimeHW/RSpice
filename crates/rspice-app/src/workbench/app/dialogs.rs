@@ -52,12 +52,13 @@ pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
 pub(crate) mod rule_setup;
 pub(crate) mod selection;
-pub(crate) mod source_document;
-pub(crate) mod source_find;
-pub(crate) mod source_language_tools;
+pub(crate) use rspice_app_code::workbench::app::dialogs::source_document;
+#[cfg(test)]
+pub(crate) use rspice_app_code::workbench::app::dialogs::source_find;
+pub(crate) use rspice_app_code::workbench::app::dialogs::source_language_tools;
 pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
 pub(crate) mod symbol_definition;
-pub(in crate::workbench) mod veriloga_build_settings;
+pub(in crate::workbench) use rspice_app_code::workbench::app::dialogs::veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::window_session;

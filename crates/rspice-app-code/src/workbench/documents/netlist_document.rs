@@ -30,7 +30,7 @@ mod editor;
 mod executed_deck;
 mod highlight;
 mod import_review;
-pub(crate) mod language;
+pub mod language;
 mod navigation;
 mod owned_source;
 mod param_scan;
@@ -2349,7 +2349,7 @@ impl NetlistDocumentState {
 
     /// Record a settled parse of `revision`, as the editor does once it has
     /// validated the buffer.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mark_validated_for_test(&mut self, revision: u64) {
         self.diag_revision = Some(revision);
     }
@@ -2449,7 +2449,7 @@ fn refresh_diff_pips_from_baseline_in(model: &Model, runs: &mut RunsState) {
     );
 }
 
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod tests;

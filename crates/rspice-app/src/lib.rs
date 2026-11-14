@@ -108,10 +108,11 @@ pub(crate) use rspice_app_state::results;
 /// Shared product identity and outcome vocabulary.
 pub(crate) use rspice_app_state::product;
 
+#[cfg(test)]
+pub(crate) use rspice_app_code::automation_workflow;
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
 use rspice_app_services::automation_runtime;
-pub(crate) mod automation_workflow;
 
 // =============================================================================
 // Core Infrastructure
@@ -163,11 +164,6 @@ pub(crate) use rspice_app_state::time_compat;
 /// guards that assert their own shipped code takes no panic shortcuts.
 #[cfg(test)]
 mod source_guard;
-
-/// The real on-disk identity of the temporary directory, for fixtures that
-/// hand paths to a subject which records them through `std::fs::canonicalize`.
-#[cfg(test)]
-use rspice_app_state::fixture_root;
 
 /// Tests that construct the whole application to observe one slice's
 /// behaviour, kept in the shell because only the shell can build it.

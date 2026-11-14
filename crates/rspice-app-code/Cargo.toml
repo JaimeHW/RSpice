@@ -1,0 +1,71 @@
+[package]
+name = "rspice-app-code"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's code feature: the netlist and Verilog-A source editors, their documents and workflows, the source dialogs and the automation workspace"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# Opens the feature's test-only seams to the application's own tests.
+test-support = ["rspice-app-workbench/test-support"]
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-runs.workspace = true
+rspice-app-workbench.workspace = true
+rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
+rspice-vocabulary.workspace = true
+rspice-ui-kit.workspace = true
+rspice-design.workspace = true
+rspice-project.workspace = true
+rspice-results.workspace = true
+rspice-model-library.workspace = true
+rspice-formats.workspace = true
+rspice-simulation.workspace = true
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
+egui = { version = "0.35.0", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+semver.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+sha2 = "0.10"
+similar = "2.7"
+web-time.workspace = true
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+ropey.workspace = true
+rfd = { version = "0.17", features = ["file-handle-inner"] }
+dirs = "7.0"
+
+[dev-dependencies]
+rspice-app-state = { workspace = true, features = ["test-support"] }
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-runs = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
+rspice-ui-kit = { workspace = true, features = ["test-support"] }
+rspice-project = { workspace = true, features = ["library-test-fixtures"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+lopdf = { version = "0.45", default-features = false }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+
+[lints]
+workspace = true

@@ -375,7 +375,7 @@ pub fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchState, pat
 
 /// What the picker delivers when a file is chosen, for tests that cannot
 /// open a native picker.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn complete_veriloga_file_pick(
     parts: &mut CodeWorkspaceParts<'_>,
     file_name: &str,
@@ -385,7 +385,7 @@ pub fn complete_veriloga_file_pick(
 }
 
 /// What the picker delivers when files are chosen from `folder`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn complete_veriloga_files_pick(
     parts: &mut CodeWorkspaceParts<'_>,
     files: &[(&str, &str)],

@@ -2,6 +2,14 @@
 //! state for the document in front, worded in English. The dialog's own
 //! cases and the code feature's whole-application tests share them.
 
+// Test-only code compiled under test-support, outside the parent's cfg(test) exemption.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use super::{DocumentFacts, document_facts};
 use crate::workbench::MessageCatalog;
 use crate::workbench::app_state::{Model, PlatformState};

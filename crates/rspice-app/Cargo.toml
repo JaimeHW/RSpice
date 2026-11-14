@@ -29,7 +29,6 @@ browser-qualification = ["rspice-app-services/browser-qualification"]
 [dependencies]
 # RSpice core simulation engine lives in the target sections below: native
 # builds keep the default fast paths (parallel), wasm opts out.
-rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
 
 # Design-management state authority and the drawing-sheet package contract.
 rspice-design-model = { workspace = true }
@@ -44,6 +43,7 @@ rspice-app-simulate.workspace = true
 rspice-app-results.workspace = true
 rspice-app-settings.workspace = true
 rspice-app-sheets.workspace = true
+rspice-app-code.workspace = true
 rspice-vocabulary.workspace = true
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-schematic-editor.workspace = true
@@ -67,12 +67,9 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
-semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true
-thiserror.workspace = true
 sha2 = "0.10"
-similar = "2.7"
 
 # Logging
 log = "0.4"
@@ -84,7 +81,6 @@ base64 = "0.23"
 
 # UUID for document identification
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
-ropey.workspace = true
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = { version = "0.35.0", default-features = false }
@@ -106,6 +102,7 @@ rspice-app-models = { workspace = true, features = ["test-support"] }
 rspice-app-simulate = { workspace = true, features = ["test-support"] }
 rspice-app-results = { workspace = true, features = ["test-support"] }
 rspice-app-settings = { workspace = true, features = ["test-support"] }
+rspice-app-code = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }

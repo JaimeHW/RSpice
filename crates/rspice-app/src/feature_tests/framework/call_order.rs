@@ -12,7 +12,7 @@
 
 const APP: &str = include_str!("../../workbench/app.rs");
 const CLOUD: &str = include_str!("../../../../rspice-app-cloud/src/workbench/cloud.rs");
-const CODE: &str = include_str!("../../workbench/code.rs");
+const CODE: &str = include_str!("../../../../rspice-app-code/src/workbench/code.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");

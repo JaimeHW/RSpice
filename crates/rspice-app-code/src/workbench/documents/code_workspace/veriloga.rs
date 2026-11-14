@@ -195,7 +195,7 @@ pub use import::{
     import_dropped_veriloga_sources, request_veriloga_add_files, request_veriloga_import_locate,
     request_veriloga_source_replacement, writable_libraries,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use import::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 
 pub fn active_veriloga_file_path(

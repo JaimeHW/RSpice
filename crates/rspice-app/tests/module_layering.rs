@@ -58,10 +58,11 @@ const LAYERS: &[(&str, u32)] = &[
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
     // compiles as `rspice-app-workbench`, and the sheets, settings, results,
-    // hardcopy, cloud, models and simulate features as `rspice-app-sheets`,
+    // hardcopy, cloud, models, simulate and code features as `rspice-app-sheets`,
     // `rspice-app-settings`, `rspice-app-results`, `rspice-app-hardcopy`,
-    // `rspice-app-cloud`, `rspice-app-models` and `rspice-app-simulate`, inside
-    // `workbench`, where the interior order below ranks them.
+    // `rspice-app-cloud`, `rspice-app-models`, `rspice-app-simulate` and
+    // `rspice-app-code`, inside `workbench`, where the interior order below
+    // ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -227,10 +228,11 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// eleven split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 12] = [
+/// twelve split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 13] = [
     "rspice-app",
     "rspice-app-cloud",
+    "rspice-app-code",
     "rspice-app-hardcopy",
     "rspice-app-models",
     "rspice-app-results",
@@ -831,8 +833,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "cross_probe"),
     // The source find and source document dialogs' tests that only seed and
     // read code's state run over the code feature's harness, as code's own
-    // seeders do.
-    ("app", "code"), // retires at the code flip
+    // seeders do. The dialogs compile in rspice-app-code at their application
+    // path, so the row is their cases calling `code::tests::harness` there.
+    // It retires when those cases reach the harness from inside `code`:
+    // moved into the code feature's tests, or with the dialogs re-homed
+    // under it.
+    ("app", "code"),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //
@@ -856,11 +862,22 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // The tests of code's documents, navigator panes and netlist workflow
     // that only seed and read state run over the code feature on its own,
     // and the feature builds that harness, as the models feature builds the
-    // model editor's below.
-    ("documents/code_workspace", "code"), // retires at the code flip
-    ("documents/netlist_document", "code"), // retires at the code flip
-    ("docks", "code"),                    // retires at the code flip
-    ("workflows/netlist_workflow", "code"), // retires at the code flip
+    // model editor's below. Each module compiles in rspice-app-code at its
+    // application path, so each row is the module's cases calling
+    // `code::tests::harness` there. Each retires when those cases reach the
+    // harness from inside `code`: moved into the code feature's tests, or
+    // with the module re-homed under it.
+    //
+    // The automation, language services, source files, source search and
+    // Verilog-A cases.
+    ("documents/code_workspace", "code"),
+    // The netlist editor's, its library folder's, the language's and the
+    // document's cases.
+    ("documents/netlist_document", "code"),
+    // The code inspector's and the netlist and source bundle navigators' cases.
+    ("docks", "code"),
+    // The netlist workflow's cases.
+    ("workflows/netlist_workflow", "code"),
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
     // host holds the slot its parts run against. The row retires when the
@@ -904,12 +921,13 @@ fn workbench_dir() -> PathBuf {
 }
 
 /// The workbench's framework modules compile as `rspice-app-workbench`, and the
-/// sheets, settings, results, hardcopy, cloud, models and simulate features as
-/// `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
-/// `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models` and
-/// `rspice-app-simulate`, at the paths they had here, and keep their rank in
-/// the same order: each crate's `src/workbench` is scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 9] {
+/// sheets, settings, results, hardcopy, cloud, models, simulate and code features
+/// as `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
+/// `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models`,
+/// `rspice-app-simulate` and `rspice-app-code`, at the paths they had here, and
+/// keep their rank in the same order: each crate's `src/workbench` is scanned
+/// beside this crate's.
+fn workbench_roots() -> [PathBuf; 10] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
@@ -920,6 +938,7 @@ fn workbench_roots() -> [PathBuf; 9] {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src/workbench"),
     ]
 }
 
@@ -1582,6 +1601,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-cloud/src",
     "rspice-app-models/src",
     "rspice-app-simulate/src",
+    "rspice-app-code/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

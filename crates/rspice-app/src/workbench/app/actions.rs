@@ -16,6 +16,8 @@ pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(crate) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 pub(crate) mod symbol;
+pub(crate) use rspice_app_code::workbench::app::actions::veriloga_placement;
+pub(crate) use rspice_app_code::workbench::app::actions::veriloga_symbol;
 #[cfg(test)]
 pub(crate) use rspice_app_simulate::workbench::app::actions::tuning_staging;
 pub(crate) use symbol::{
@@ -24,8 +26,6 @@ pub(crate) use symbol::{
     pending_symbol_polyline_request, select_all_symbol_items, transform_selected_symbol_item,
     transform_selected_symbol_pin,
 };
-pub(crate) mod veriloga_placement;
-pub(crate) mod veriloga_symbol;
 pub(crate) mod workspace;
 
 use egui::{Context, Popup};

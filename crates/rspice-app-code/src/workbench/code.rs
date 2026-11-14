@@ -3,7 +3,7 @@
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
-pub(crate) mod commands;
+pub mod commands;
 mod docks;
 
 use egui::Context;

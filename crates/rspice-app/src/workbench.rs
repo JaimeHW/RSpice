@@ -68,8 +68,8 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
     }
     pub(crate) mod document_bar {
+        pub(crate) use rspice_app_code::workbench::chrome::document_bar::code;
         pub use rspice_app_workbench::workbench::chrome::document_bar::*;
-        pub(crate) mod code;
         pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
         pub(in crate::workbench) mod project;
@@ -84,8 +84,8 @@ pub(crate) mod chrome {
         pub(in crate::workbench) mod shell;
     }
     pub(crate) mod title_bar {
+        pub(in crate::workbench) use rspice_app_code::workbench::chrome::title_bar::code;
         pub use rspice_app_workbench::workbench::chrome::title_bar::*;
-        pub(in crate::workbench) mod code;
         pub(in crate::workbench) mod design;
     }
     pub(crate) mod toolbar {
@@ -98,7 +98,7 @@ pub(crate) mod chrome {
     }
 }
 pub(crate) use rspice_app_cloud::workbench::cloud;
-pub(crate) mod code;
+pub(crate) use rspice_app_code::workbench::code;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod design;
@@ -112,38 +112,34 @@ pub(crate) mod docks {
     pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
-        pub(in crate::workbench) mod code_workspace;
         pub(crate) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
-        pub(in crate::workbench) mod veriloga;
     }
     pub(crate) mod navigator {
         pub use rspice_app_workbench::workbench::docks::navigator::*;
-        pub(in crate::workbench) mod netlist;
         pub(crate) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
-        pub(in crate::workbench) mod source_bundle;
         pub(crate) mod stimulus_browser_state;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
-        pub(in crate::workbench) mod veriloga;
     }
 }
 pub(crate) mod documents {
-    pub use rspice_app_workbench::workbench::documents::*;
-    pub(crate) mod code_workspace;
-    pub(crate) mod editor_font;
+    pub(crate) use rspice_app_code::workbench::documents::code_workspace;
+    pub(crate) use rspice_app_code::workbench::documents::editor_font;
+    pub(crate) use rspice_app_code::workbench::documents::netlist_document;
+    pub(crate) use rspice_app_code::workbench::documents::text_editor_commands;
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) use rspice_app_code::workbench::documents::virtual_text_editor;
     #[cfg(test)]
     pub(crate) use rspice_app_models::workbench::documents::model_correlation;
     pub(crate) use rspice_app_models::workbench::documents::model_editor;
-    pub(crate) mod netlist_document;
     pub(crate) use rspice_app_results::workbench::documents::result_document;
-    pub(crate) mod text_document_model;
-    pub(crate) mod text_editor_commands;
-    pub(crate) mod virtual_text_editor;
+    #[cfg(test)]
+    pub use rspice_app_workbench::workbench::documents::*;
 }
 // The bundled circuits Help's Examples dialog opens as projects are model
 // logic in `rspice_app_state::workbench::examples`. The test fixtures beside
@@ -209,16 +205,16 @@ pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
+    pub(crate) use rspice_app_code::workbench::surfaces::automation;
     pub use rspice_app_workbench::workbench::surfaces::*;
-    pub(crate) mod automation;
     pub(crate) mod code_adapters;
     pub(crate) mod library_cellview_manager;
-    pub(crate) mod netlist;
+    pub(crate) use rspice_app_code::workbench::surfaces::netlist;
     pub(crate) mod project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(crate) mod stimulus;
+    pub(super) use rspice_app_code::workbench::surfaces::veriloga;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
-    pub(super) mod veriloga;
 }
 pub(crate) mod tools;
 pub(crate) mod workflows;

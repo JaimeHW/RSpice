@@ -26,10 +26,10 @@ pub use simulate_session::*;
 pub use stimulus_editor::*;
 #[cfg(test)]
 use workbench_session::LAYOUT_SCHEMA_VERSION;
-pub use workbench_session::{ActiveSourceEditor, default_console_height};
+pub use workbench_session::default_console_height;
 pub use workbench_session::{
-    ConsolePage, Drawer, SourceReference, SourceReferences, WorkbenchSession, WorkspaceDocumentId,
-    WorkspaceDocumentRegistry, WorkspaceLayoutState,
+    ConsolePage, Drawer, WorkbenchSession, WorkspaceDocumentId, WorkspaceDocumentRegistry,
+    WorkspaceLayoutState,
 };
 #[cfg(test)]
 pub use workbench_session::{StatusPrompt, WidthClass};

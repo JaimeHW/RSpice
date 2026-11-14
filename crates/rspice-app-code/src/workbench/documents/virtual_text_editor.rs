@@ -11,7 +11,7 @@ mod keymap;
 mod touch;
 
 pub(crate) use accessibility::bounded_accessible_text;
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
 use context_menu::{context_menu_id, take_menu_keys};
@@ -266,7 +266,7 @@ pub(crate) fn resynchronize(ctx: &egui::Context, editor_id: egui::Id) {
 }
 
 /// The text the editor `editor_id` showed when it was last drawn.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> {
     ctx.data(|data| {
         data.get_temp::<VirtualEditorSession>(editor_id.with("virtual-session"))
