@@ -3,12 +3,21 @@
 //! netlist, the models feature's selection and the project's copy-cell
 //! dialog. The surface raises each request where it once wrote in place,
 //! and the shell answers it once the surface has drawn, in the same frame.
+//!
+//! Here too, what the design feature's dialogs hand the shell to carry out
+//! over the whole session.
 
 use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
+use crate::workbench::app::dialogs::connectivity_manager::{
+    open_connectivity_source_map, reveal_connectivity_target,
+};
+use crate::workbench::app::dialogs::design_request::DesignRequest;
+use crate::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
+use crate::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
 use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
-use crate::workbench::app::open_create_model_bound_symbol_dialog;
+use crate::workbench::app::{open_create_model_bound_symbol_dialog, open_property_editor};
 use crate::workbench::documents::result_document::open_specification_editor;
-use crate::workbench::{AppState, ResultViewer};
+use crate::workbench::{AppState, RSpiceApp, ResultViewer};
 
 /// Carry out what the design surface asked of another feature's workspace,
 /// as the surface once did in place.
@@ -69,4 +78,41 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
         |state| &mut state.workbench.outbox,
         answer_surface_request,
     );
+}
+
+impl RSpiceApp {
+    /// Carry out what a design dialog handed over, as the dialog once did in
+    /// place.
+    ///
+    /// The shell answers these for now, because what they do still reaches
+    /// the whole session, and applying repairs the simulation controller too.
+    /// Design carries each out itself once it sits on its own parts.
+    pub(crate) fn answer_design_request(&mut self, request: DesignRequest) {
+        match request {
+            DesignRequest::Descend(choice) => answer_descend_hierarchy(&mut self.state, choice),
+            DesignRequest::ReopenPropertyEditor(component_id) => {
+                open_property_editor(&mut self.state, component_id);
+            }
+            DesignRequest::RevealConnectivity(target) => {
+                reveal_connectivity_target(&mut self.state, target);
+            }
+            DesignRequest::OpenSourceMap => open_connectivity_source_map(&mut self.state),
+            DesignRequest::ApplyConnectivityRepairs => {
+                if let Err(error) = self.apply_selected_connectivity_repairs() {
+                    self.state.design.connectivity_manager.error = Some(error);
+                }
+            }
+            DesignRequest::CreateHierarchy => {
+                let state = &mut self.state;
+                if let Err(error) = commit_create_hierarchy(
+                    &mut state.design.create_hierarchy,
+                    &mut state.design.symbol,
+                    &mut state.model,
+                    &state.workbench,
+                ) {
+                    self.state.design.create_hierarchy.validation_error = Some(error);
+                }
+            }
+        }
+    }
 }
