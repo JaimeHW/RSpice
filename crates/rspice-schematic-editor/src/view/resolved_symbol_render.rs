@@ -223,15 +223,24 @@ fn draw_symbol_pins(
         }
     };
     for pin in symbol.connectable_pins() {
-        let offset = symbol.effective_pin_offset(pin);
-        let terminal = to_screen(origin, scale, component, offset);
-        let inner = to_screen(origin, scale, component, symbol.pin_lead_inner(pin));
         // No dot on the terminal: a filled dot means a junction of three or
-        // more, and an open pin takes the scene's open-pin mark instead.
-        if leads.paint_leads(painter, &[terminal, inner], stroke).len() == 2 {
-            painter.line_segment([terminal, inner], stroke);
+        // more, and an open pin takes the scene's open-pin mark instead. A
+        // bare connection point draws nothing here at all.
+        let drawing = symbol.pin_drawing(pin);
+        let screen = |point: Point| to_screen(origin, scale, component, point);
+        if let Some((tip, end)) = drawing.lead {
+            let (terminal, inner) = (screen(tip), screen(end));
+            if leads.paint_leads(painter, &[terminal, inner], stroke).len() == 2 {
+                painter.line_segment([terminal, inner], stroke);
+            }
+            draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
         }
-        draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
+        if let Some((centre, radius)) = drawing.bubble {
+            painter.circle_stroke(screen(centre), radius as f32 * scale, stroke);
+        }
+        if let Some(wedge) = drawing.wedge {
+            painter.add(Shape::line(wedge.map(screen).to_vec(), stroke));
+        }
 
         if let Some(font_size) = font_size.filter(|_| !pin.name_hidden) {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
@@ -537,6 +546,13 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
     for pin in symbol.connectable_pins() {
         include(symbol.effective_pin_offset(pin));
         include(symbol.pin_lead_inner(pin));
+        let drawing = symbol.pin_drawing(pin);
+        if let Some((centre, radius)) = drawing.bubble {
+            for point in cardinal_bounds(centre, radius) {
+                include(point);
+            }
+        }
+        drawing.wedge.into_iter().flatten().for_each(&mut include);
     }
 
     for shape in &symbol.document().body {
@@ -637,6 +653,7 @@ mod tests {
         symbol::{SymbolDocument, SymbolPin, SymbolTextSize},
     };
     use rspice_design_model::port::PortSpec;
+    use rspice_design_model::symbol_pin::{SymbolPinSide, SymbolPinStyle};
     use rspice_ui_kit::raster::Canvas;
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
@@ -962,6 +979,91 @@ mod tests {
             );
             assert!(covered > 0, "the asserted crop must be on the canvas");
             assert_eq!(name > 0, !hidden, "hidden = {hidden}");
+        }
+    }
+
+    /// A placed pin draws the mark its style puts where the lead meets the
+    /// body: an open bubble the lead stops at, a wedge inside the body. A
+    /// bare connection point draws nothing.
+    #[test]
+    fn a_placed_pin_draws_the_mark_of_its_style() {
+        let canvas_for = |length: i32, style: SymbolPinStyle| {
+            let symbol = ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    pins: vec![
+                        SymbolPin::new("P", PortDirection::InOut, Some(Point::new(-40, 0)))
+                            .with_side(SymbolPinSide::Left)
+                            .with_length(length)
+                            .with_style(style),
+                    ],
+                    ..SymbolDocument::default()
+                },
+                &[port("P", PortDirection::InOut)],
+            );
+            let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+            rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                draw_symbol_pins(
+                    &ui.painter().clone(),
+                    pos2(160.0, 160.0),
+                    4.0,
+                    &component,
+                    &symbol,
+                    Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+                    false,
+                    &PinLeads::NONE,
+                );
+            })
+        };
+        // Four pixels to the unit from (160, 160): the lead's body end is x
+        // -20 at screen 80, a bubble centres on -23 (68) with radius 3 (12),
+        // and a wedge's upper arm runs from (-20, -3) to (-16, 0).
+        let painted = |canvas: &Canvas, at: Pos2| {
+            let (covered, painted) = painted_pixels(
+                canvas,
+                egui::Rect::from_center_size(at, egui::vec2(3.0, 3.0)),
+            );
+            assert!(covered > 0, "the asserted crop must be on the canvas");
+            painted > 0
+        };
+        let bubble_centre = pos2(68.0, 160.0);
+        let bubble_top = pos2(68.0, 148.0);
+        let wedge_arm = pos2(88.0, 154.0);
+        let marks = |canvas: &Canvas| {
+            (
+                painted(canvas, bubble_centre),
+                painted(canvas, bubble_top),
+                painted(canvas, wedge_arm),
+            )
+        };
+        assert_eq!(
+            marks(&canvas_for(20, SymbolPinStyle::Plain)),
+            (true, false, false)
+        );
+        assert_eq!(
+            marks(&canvas_for(20, SymbolPinStyle::Inverted)),
+            (false, true, false)
+        );
+        assert_eq!(
+            marks(&canvas_for(20, SymbolPinStyle::Clock)),
+            (true, false, true)
+        );
+        assert_eq!(
+            marks(&canvas_for(20, SymbolPinStyle::InvertedClock)),
+            (false, true, true)
+        );
+        for style in SymbolPinStyle::ALL {
+            let bare = canvas_for(0, style);
+            let (covered, painted) = painted_pixels(
+                &bare,
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 320.0)),
+            );
+            assert!(covered > 0);
+            assert_eq!(
+                painted,
+                0,
+                "a bare {} connection point draws nothing",
+                style.label()
+            );
         }
     }
 

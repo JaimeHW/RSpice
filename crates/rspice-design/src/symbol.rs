@@ -28,7 +28,7 @@ pub use rspice_design_model::symbol_geometry::{
 };
 
 use crate::library::View;
-use crate::symbol_generation::{GeneratedSymbol, PinLabel, generate_symbol_with_roles};
+use crate::symbol_generation::{GeneratedSymbol, PinLabel, PinMark, generate_symbol_with_roles};
 use rspice_design_model::{
     Point,
     bus::{BusDeclaration, declared_vector, declared_width},
@@ -929,7 +929,7 @@ impl SymbolDocument {
     /// lettered as it says.
     pub fn from_generated(generated: GeneratedSymbol) -> Self {
         let body = generated
-            .body_outline()
+            .artwork_outline()
             .into_iter()
             .map(|(points, closed)| SymbolShape::Polyline { points, closed })
             .collect();
@@ -938,17 +938,25 @@ impl SymbolDocument {
         let body_box = generated.body_bounds();
         // The generator knows which edge every pin belongs to and how far its
         // terminal stands off the body; both are stored, so nothing
-        // downstream re-derives either from the artwork.
+        // downstream re-derives either from the artwork. A clock's wedge is
+        // its pin's style rather than artwork.
         let pins = generated
             .pins
             .into_iter()
             .zip(generated.labels)
-            .map(|(pin, label)| {
+            .zip(generated.marks)
+            .map(|((pin, label), mark)| {
                 let tip = pin.offset;
                 let side = pin.side;
+                let style = if mark == PinMark::Clock {
+                    SymbolPinStyle::Clock
+                } else {
+                    SymbolPinStyle::Plain
+                };
                 let pin = SymbolPin::new(pin.name, pin.direction, Some(tip))
                     .with_contract(default_electrical_type(pin.direction), side)
-                    .with_length(lead_length_to_body(tip, side, body_box));
+                    .with_length(lead_length_to_body(tip, side, body_box))
+                    .with_style(style);
                 match label {
                     PinLabel::Inside => pin,
                     PinLabel::InsideFrom(reach) => pin.with_name_offset(Some(reach)),
@@ -1805,6 +1813,80 @@ mod validation_tests {
             .validate()
             .expect_err("a lead cannot run away from the body");
         assert!(error.contains("negative lead length"), "{error}");
+    }
+
+    /// Each style marks the body end of the lead: a bubble the lead stops
+    /// at, a wedge inside the body, or both. A bare connection point draws
+    /// nothing, whatever its style.
+    #[test]
+    fn each_pin_style_marks_the_body_end_of_its_lead() {
+        let tip = Point::new(-40, 0);
+        let drawing = |length, style| pin_drawing(tip, SymbolPinSide::Left, length, style);
+        let wedge = [Point::new(-20, 3), Point::new(-16, 0), Point::new(-20, -3)];
+
+        let plain = drawing(20, SymbolPinStyle::Plain);
+        assert_eq!(plain.lead, Some((tip, Point::new(-20, 0))));
+        assert_eq!((plain.bubble, plain.wedge), (None, None));
+
+        let inverted = drawing(20, SymbolPinStyle::Inverted);
+        assert_eq!(inverted.lead, Some((tip, Point::new(-26, 0))));
+        assert_eq!(inverted.bubble, Some((Point::new(-23, 0), 3)));
+        assert_eq!(inverted.wedge, None);
+
+        let clock = drawing(20, SymbolPinStyle::Clock);
+        assert_eq!(clock.lead, plain.lead);
+        assert_eq!((clock.bubble, clock.wedge), (None, Some(wedge)));
+
+        let both = drawing(20, SymbolPinStyle::InvertedClock);
+        assert_eq!(both.lead, inverted.lead);
+        assert_eq!((both.bubble, both.wedge), (inverted.bubble, Some(wedge)));
+
+        for style in SymbolPinStyle::ALL {
+            let bare = drawing(0, style);
+            assert_eq!((bare.lead, bare.bubble, bare.wedge), (None, None, None));
+        }
+    }
+
+    /// A generated clock input stores its wedge as its pin's style, so the
+    /// document's artwork no longer carries it and the pin draws it exactly
+    /// where the generator drew it.
+    #[test]
+    fn a_generated_clock_pin_draws_its_wedge_as_its_style() {
+        let ports = [
+            ("in", PortDirection::In),
+            ("clk", PortDirection::In),
+            ("en", PortDirection::In),
+            ("out", PortDirection::Out),
+            ("vdd", PortDirection::InOut),
+            ("vss", PortDirection::InOut),
+        ]
+        .map(|(name, direction)| PortSpec {
+            name: name.to_owned(),
+            direction,
+        });
+        let generated = crate::symbol_generation::generate_symbol(&ports);
+        let wedge = vec![Point::new(-30, 3), Point::new(-26, 0), Point::new(-30, -3)];
+        assert!(generated.body_outline().contains(&(wedge.clone(), false)));
+
+        let document = SymbolDocument::from_generated(generated);
+        assert!(
+            !document.body.iter().any(
+                |shape| matches!(shape, SymbolShape::Polyline { points, .. } if *points == wedge)
+            ),
+            "the wedge is the pin's, not artwork"
+        );
+        let clk = document.pin("clk").expect("the clock pin");
+        assert_eq!(clk.style, SymbolPinStyle::Clock);
+        let tip = clk.position.expect("a generated pin is placed");
+        let drawn = pin_drawing(tip, clk.side, clk.length, clk.style);
+        assert_eq!(drawn.wedge.map(Vec::from), Some(wedge));
+        assert!(
+            document
+                .pins
+                .iter()
+                .filter(|pin| pin.name != "clk")
+                .all(|pin| pin.style.is_plain())
+        );
     }
 
     /// A port the symbol has no pin for is placed in line with the pins

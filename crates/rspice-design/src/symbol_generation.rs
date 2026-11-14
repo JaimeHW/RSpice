@@ -215,10 +215,20 @@ impl GeneratedSymbol {
         self.body_extent
     }
 
-    /// The body as polylines, each with whether it closes. Every renderer
-    /// draws exactly these, so the canvas and the printed sheet draw the same
-    /// outline.
+    /// The body as polylines, each with whether it closes, clock wedges
+    /// included: what a placed block draws, on the canvas and on the printed
+    /// sheet alike.
     pub fn body_outline(&self) -> Vec<(Vec<Point>, bool)> {
+        self.outline(true)
+    }
+
+    /// The body as a symbol document stores it: the outline without the
+    /// clock wedges, which the clock pins draw as their style.
+    pub fn artwork_outline(&self) -> Vec<(Vec<Point>, bool)> {
+        self.outline(false)
+    }
+
+    fn outline(&self, clock_wedges: bool) -> Vec<(Vec<Point>, bool)> {
         let (min, max) = self.body_extent;
         let mut outline = match self.body {
             GeneratedBody::Block => vec![(
@@ -239,6 +249,7 @@ impl GeneratedSymbol {
             };
             match mark {
                 PinMark::Plain => {}
+                PinMark::Clock if !clock_wedges => {}
                 PinMark::Clock => outline.push((
                     vec![
                         point(0, CLOCK_WEDGE_HALF),

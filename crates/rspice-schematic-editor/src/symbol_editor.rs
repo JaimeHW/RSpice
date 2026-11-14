@@ -21,8 +21,8 @@ use rspice_design::{
         component_type::ComponentType,
     },
     symbol::{
-        SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve, SymbolDocument,
-        SymbolEditorMetadata, SymbolPin, SymbolShape, SymbolTextAlign,
+        PinDrawing, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve, SymbolDocument,
+        SymbolEditorMetadata, SymbolShape, SymbolTextAlign, pin_drawing,
     },
 };
 use rspice_design_model::{
@@ -614,15 +614,15 @@ fn draw_pins(
         .map(|port| port.name.to_ascii_lowercase())
         .collect();
     for pin in &document.pins {
-        let (Some(position), Some(inner)) = (pin.position, pin.lead_inner()) else {
+        let Some(position) = pin.position else {
             continue;
         };
         let start = viewport.world_to_screen(position);
-        let inner = viewport.world_to_screen(inner);
+        let drawing = pin_drawing(position, pin.side, pin.length, pin.style);
         let orphan = !ports.is_empty() && !port_names.contains(&pin.name.to_ascii_lowercase());
         let color = if orphan { t.color.err } else { t.color.wire };
         let stroke = Stroke::new(1.2, color);
-        painter.line_segment([start, inner], stroke);
+        paint_pin_drawing(painter, viewport, drawing, stroke);
         let pad = Rect::from_center_size(start, vec2(8.0, 8.0));
         let pad_stroke = if selection.pins.contains(&pin.name) {
             Stroke::new(1.8, t.color.accent)
@@ -640,7 +640,33 @@ fn draw_pins(
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.symbol,
         );
-        draw_direction_mark(painter, viewport, pin, color);
+        draw_direction_mark(painter, viewport, pin.direction, drawing.lead, color);
+    }
+}
+
+/// A pin's lead and the marks its style puts where the lead meets the body.
+fn paint_pin_drawing(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    drawing: PinDrawing,
+    stroke: Stroke,
+) {
+    if let Some((tip, end)) = drawing.lead {
+        painter.line_segment(
+            [viewport.world_to_screen(tip), viewport.world_to_screen(end)],
+            stroke,
+        );
+    }
+    if let Some((centre, radius)) = drawing.bubble {
+        painter.circle_stroke(
+            viewport.world_to_screen(centre),
+            radius as f32 * viewport.zoom,
+            stroke,
+        );
+    }
+    if let Some(wedge) = drawing.wedge {
+        let corners = wedge.map(|corner| viewport.world_to_screen(corner));
+        painter.add(Shape::line(corners.to_vec(), stroke));
     }
 }
 
@@ -1007,22 +1033,23 @@ fn pin_label_pos(position: Point, side: SymbolPinSide, viewport: SymbolViewport)
     }
 }
 
-/// Signal-flow arrow on a pin's lead: an input points into the body it
-/// drives, an output points out toward the net it drives.
+/// Signal-flow arrow on a pin's drawn lead: an input points into the body
+/// it drives, an output points out toward the net it drives.
 fn draw_direction_mark(
     painter: &egui::Painter,
     viewport: SymbolViewport,
-    pin: &SymbolPin,
+    direction: PortDirection,
+    lead: Option<(Point, Point)>,
     color: Color32,
 ) {
-    if !matches!(pin.direction, PortDirection::In | PortDirection::Out) {
+    if !matches!(direction, PortDirection::In | PortDirection::Out) {
         return;
     }
-    let (Some(position), Some(inner)) = (pin.position, pin.lead_inner()) else {
+    let Some((tip, end)) = lead else {
         return;
     };
-    let terminal = viewport.world_to_screen(position);
-    let inner = viewport.world_to_screen(inner);
+    let terminal = viewport.world_to_screen(tip);
+    let inner = viewport.world_to_screen(end);
     let lead = inner - terminal;
     let inward = lead.normalized();
     if !inward.is_finite() {
@@ -1030,7 +1057,7 @@ fn draw_direction_mark(
     }
     let length = (MARK_LENGTH * viewport.zoom).min(lead.length() * 0.5);
     let base_offset = (lead.length() - length) * 0.5;
-    let (tip, base) = if pin.direction == PortDirection::In {
+    let (tip, base) = if direction == PortDirection::In {
         (
             terminal + inward * (base_offset + length),
             terminal + inward * base_offset,

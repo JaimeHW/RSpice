@@ -17,7 +17,11 @@ use rspice_design::schematic::{
     wire::{Wire, WireBridge},
 };
 use rspice_design::symbol::{PinNamePlacement, SymbolCurve, SymbolPin};
-use rspice_design_model::{design_management::CrossSheetPortDirection, port::PortDirection};
+use rspice_design_model::{
+    design_management::CrossSheetPortDirection,
+    port::PortDirection,
+    symbol_pin::{SymbolPinSide, SymbolPinStyle},
+};
 use std::collections::BTreeSet;
 
 const UM: i64 = SCHEMATIC_UNIT_UM;
@@ -390,6 +394,91 @@ fn a_placed_symbol_prints_its_pin_names_as_the_canvas_letters_them() {
             TextAnchor::End,
             SceneTextRotation::CounterClockwise90,
         )]
+    );
+}
+
+/// A placed part's pins print their leads and the marks their styles put
+/// where each lead meets the body; a bare connection point prints neither.
+#[test]
+fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
+    let mut symbol = cell_symbol();
+    let pin = |name: &str, y: i32, style| {
+        SymbolPin::new(
+            name,
+            PortDirection::InOut,
+            Some(SchematicPoint::new(-50, y)),
+        )
+        .with_side(SymbolPinSide::Left)
+        .with_style(style)
+    };
+    symbol.pins = vec![
+        pin("A", -10, SymbolPinStyle::Plain),
+        pin("B", 0, SymbolPinStyle::Inverted),
+        pin("C", 10, SymbolPinStyle::Clock),
+        SymbolPin::new("D", PortDirection::InOut, Some(SchematicPoint::new(30, 0)))
+            .with_side(SymbolPinSide::Right)
+            .with_length(0),
+    ];
+    let mut carried = sheet(Vec::new());
+    carried.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(2, ComponentType::CellInstance, (40, 40), "", ""),
+        resolved_symbol: Some(symbol),
+    });
+    let compiled = compile(&carried);
+    let um = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+    let lines = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Line { from, to, .. } => Some((um(from), um(to))),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for lead in [
+        (compiled.at(-10.0, 30.0), compiled.at(10.0, 30.0)),
+        (compiled.at(-10.0, 40.0), compiled.at(4.0, 40.0)),
+        (compiled.at(-10.0, 50.0), compiled.at(10.0, 50.0)),
+    ] {
+        assert!(lines.contains(&lead), "{lead:?} is not among {lines:?}");
+    }
+    let bare = compiled.at(70.0, 40.0);
+    assert!(
+        !lines.iter().any(|(from, to)| *from == bare || *to == bare),
+        "a bare connection point prints no lead"
+    );
+    let bubbles = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Circle { center, radius, .. }
+                if radius.micrometres() == 3 * UM as u64 =>
+            {
+                Some(um(center))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bubbles, [compiled.at(7.0, 40.0)]);
+    let wedges = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                points,
+                closed: false,
+                ..
+            } => Some(points.iter().map(um).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        wedges,
+        [vec![
+            compiled.at(10.0, 53.0),
+            compiled.at(14.0, 50.0),
+            compiled.at(10.0, 47.0),
+        ]]
     );
 }
 

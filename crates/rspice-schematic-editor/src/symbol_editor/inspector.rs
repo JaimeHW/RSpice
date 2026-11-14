@@ -10,7 +10,10 @@ use rspice_design::symbol::{
     SymbolTextSize,
 };
 use rspice_design_model::{
-    Point, cell_view::CellViewRef, port::PortSpec, symbol_pin::SymbolPinSide,
+    Point,
+    cell_view::CellViewRef,
+    port::PortSpec,
+    symbol_pin::{SymbolPinSide, SymbolPinStyle},
 };
 use rspice_ui_kit::panels::{
     PANEL_INSET, Problem, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
@@ -491,6 +494,29 @@ fn pin_section(
     {
         record_once(edit, &before);
         document.pins[order].side = new_side;
+        changed = true;
+    }
+
+    let style = document.pins[order].style;
+    let mut style_value = style.label().to_owned();
+    let style_options = SymbolPinStyle::ALL
+        .into_iter()
+        .map(|style| (style.label().to_owned(), style.label().to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        "Style",
+        ("symbol-pin-style", order),
+        &mut style_value,
+        &style_options,
+        true,
+    ) && let Some(new_style) = SymbolPinStyle::ALL
+        .into_iter()
+        .find(|candidate| candidate.label() == style_value)
+        && new_style != style
+    {
+        record_once(edit, &before);
+        document.pins[order].style = new_style;
         changed = true;
     }
 

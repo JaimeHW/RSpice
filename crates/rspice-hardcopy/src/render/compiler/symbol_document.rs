@@ -213,6 +213,38 @@ impl SemanticSceneCompiler<'_> {
             let Some(position) = pin.position else {
                 continue;
             };
+            // A pin's lead and the marks its style puts where the lead meets
+            // the body print in the body's ink: one symbol weight.
+            let drawing =
+                rspice_design::symbol::pin_drawing(position, pin.side, pin.length, pin.style);
+            if let Some((from, to)) = drawing.lead {
+                self.primitives.push(ScenePrimitive::Line {
+                    from: convert(self, from)?,
+                    to: convert(self, to)?,
+                    stroke: body_stroke,
+                });
+            }
+            if let Some((centre, radius)) = drawing.bubble {
+                self.primitives.push(ScenePrimitive::Circle {
+                    center: convert(self, centre)?,
+                    radius: Length::from_micrometres(
+                        u64::from(radius.unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
+                    ),
+                    stroke: Some(body_stroke),
+                    fill: None,
+                });
+            }
+            if let Some(wedge) = drawing.wedge {
+                self.primitives.push(ScenePrimitive::Polyline {
+                    points: wedge
+                        .into_iter()
+                        .map(|point| convert(self, point))
+                        .collect::<Result<_, _>>()?,
+                    closed: false,
+                    stroke: body_stroke,
+                    fill: None,
+                });
+            }
             let position = convert(self, position)?;
             self.primitives.push(ScenePrimitive::Circle {
                 center: position,
