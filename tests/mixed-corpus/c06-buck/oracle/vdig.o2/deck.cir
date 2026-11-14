@@ -1,4 +1,4 @@
-* C6 buck converter, variants vdig and vams, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* C6 buck converter, variant vdig, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
 * The same power stage (../../net/stage.cir) under the digital half of the
 * controller (buck_digital.v) in d_cosim. A B-source quantizer gives it the
 * code the RSpice controller computes from V(fb) (round(V·512), clipped to
