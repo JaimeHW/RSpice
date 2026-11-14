@@ -70,7 +70,7 @@ struct DependencyRow {
     status: String,
 }
 
-pub(super) fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub(crate) fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     // One projection of live authority per frame, read by the strip, the
     // ledger and the exported manifest alike.
     let rows = dependency_rows(cx);

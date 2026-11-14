@@ -10,12 +10,17 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::workbench::RSpiceApp;
+use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::publication_filename;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::surfaces::project::library_publication::{PublicationAction, publish_native};
+use crate::workbench::shell_host::project::library_publication::publish_native;
+use crate::workbench::shell_host::project::library_publication::show;
+use crate::workbench::shell_host::project::library_publication::validate_rollback_artifact;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::surfaces::project::library_publication::PublicationAction;
 use crate::workbench::surfaces::project::library_publication::{
-    PublicationDraft, audit_text_valid, commit_project_library_publication, open_publication,
-    open_rollback, prepare_project_library_publication, publication_filename, safe_file_stem, show,
-    validate_rollback_artifact,
+    PublicationDraft, audit_text_valid, open_publication, open_rollback, safe_file_stem,
 };
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 #[cfg(not(target_arch = "wasm32"))]

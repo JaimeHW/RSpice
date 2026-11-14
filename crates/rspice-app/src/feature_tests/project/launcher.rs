@@ -6,10 +6,10 @@ use egui::{Context, Rect, Vec2, vec2};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::project::workspace_state::ProjectLauncherPage;
+use crate::workbench::shell_host::project::launcher::dismiss_launcher;
+use crate::workbench::shell_host::project::launcher::show;
 use crate::workbench::state::Workspace;
-use crate::workbench::tools::project_launcher::{
-    LAUNCHER_VERSION_LABEL, LauncherLayout, dismiss_launcher, show,
-};
+use crate::workbench::tools::project_launcher::{LAUNCHER_VERSION_LABEL, LauncherLayout};
 
 #[test]
 fn launcher_dismissal_returns_through_canonical_history() {

@@ -805,7 +805,7 @@ struct DrcCounts {
 /// The Overview page, over the dispatcher's answers the context holds for
 /// the commands its rows offer. What the reader asked of it is raised as the
 /// page returns, and the shell carries it out straight after.
-pub(super) fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub(crate) fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let snapshot = OverviewSnapshot::capture(cx);
     let mut intent = None;
     let shown = &*cx;

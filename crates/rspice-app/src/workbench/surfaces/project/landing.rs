@@ -13,16 +13,12 @@ use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
-use crate::workbench::features;
-use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
 use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
+use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 use crate::workbench::slots::ProjectState;
 
 const HEADER_HEIGHT: f32 = 116.0;
@@ -55,7 +51,7 @@ struct RecentProjectRow {
 }
 
 #[derive(Debug, Clone)]
-enum LandingAction {
+pub(crate) enum LandingAction {
     NewProject,
     OpenProject,
     OpenNetlist,
@@ -64,25 +60,9 @@ enum LandingAction {
     ReviewRecovery,
 }
 
-/// The landing, drawn in the project feature's context, with what the reader
-/// asked of it carried out by the shell as soon as it has drawn.
-pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(
-        &mut app.state.platform,
-        &app.state.model,
-        app.file_workflow_io.as_ref(),
-    );
-
-    let action = landing(ui, &mut features::cx(app));
-
-    if let Some(action) = action {
-        execute_action(app, action);
-    }
-}
-
 /// Draw the landing over the project feature's context and return what the
 /// reader asked of it in this frame.
-fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAction> {
+pub(crate) fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAction> {
     let mut action = None;
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)
@@ -972,35 +952,6 @@ fn response_activated(ui: &mut Ui, response: &Response) -> bool {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                     || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
             }))
-}
-
-fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
-    match action {
-        LandingAction::NewProject => app.execute_command_key(ProjectCommand::NewProject.key()),
-        LandingAction::OpenProject => app.execute_command_key(ProjectCommand::OpenProject.key()),
-        LandingAction::OpenNetlist => app.execute_command_key(ids::OPEN_NETLIST),
-        LandingAction::OpenSchematic => {
-            app.execute_command_key(ProjectCommand::OpenSchematic.key())
-        }
-        LandingAction::OpenRecent(recent) => {
-            #[cfg(not(target_arch = "wasm32"))]
-            app.open_recent_file(recent);
-            #[cfg(target_arch = "wasm32")]
-            {
-                let _ = recent;
-                app.execute_command_key(ProjectCommand::OpenProject.key());
-            }
-        }
-        LandingAction::ReviewRecovery => {
-            crate::workbench::project::open_project_launcher(
-                &mut app.state.project,
-                &mut app.state.workbench,
-                &mut app.state.platform,
-            );
-            app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
-            app.state.platform.recovery_catalog.request_refresh();
-        }
-    }
 }
 
 #[cfg(test)]

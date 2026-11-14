@@ -7,10 +7,9 @@ use egui::{Color32, Modifiers, Rect, Ui, pos2};
 use crate::ui::tokens::Tokens;
 use crate::workbench::framework::host::{Host, Point};
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::project::library_publication::{
-    commit_project_library_publication, prepare_project_library_publication,
-};
 use crate::workbench::surfaces::project::recovery;
 use crate::workbench::{RSpiceApp, features};
 

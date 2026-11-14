@@ -3,7 +3,7 @@
 use egui::{Rect, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::project::landing::show;
+use crate::workbench::shell_host::project::landing::show;
 
 #[test]
 fn landing_renders_without_project_state_at_all_supported_widths() {

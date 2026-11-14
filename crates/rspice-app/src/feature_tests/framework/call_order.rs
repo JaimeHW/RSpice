@@ -28,6 +28,7 @@ const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/seri
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 const LIBRARY_SURFACE: &str = include_str!("../../workbench/surfaces/project/library.rs");
+const LIBRARY_HOST: &str = include_str!("../../workbench/shell_host/project/library.rs");
 const TECHNOLOGY_DIALOG: &str = include_str!("../../workbench/surfaces/project/technology.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
@@ -241,7 +242,7 @@ const SHOW: &[Step] = &[
         "11.24",
         &[
             "crate::workbench::project::open_project_launcher(",
-            "tools::project_launcher::show(ctx, app)",
+            "shell_host::project::launcher::show(ctx, app)",
         ],
     ),
     (
@@ -988,7 +989,7 @@ const PROJECT_CONTRIBUTIONS: &[Step] = &[
             "ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);\
            project::chrome(&mut features::cx(app), ui);\
            app.after_contribution();\
-           project::page(ui, app);\
+           self::project::page(ui, app);\
            app.after_contribution();\
            });",
             "project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));\
@@ -2275,12 +2276,12 @@ const CATALOG_CHANGED: &[Step] = &[(
 fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_it_returns() {
     assert_runs_in_order(
         "surfaces::project::library::page",
-        &body(LIBRARY_SURFACE, "pub(super) fn page("),
+        &body(LIBRARY_SURFACE, "pub(crate) fn page("),
         LIBRARY_PAGE,
     );
-    let library = body(LIBRARY_SURFACE, "pub(super) fn library(");
+    let library = body(LIBRARY_HOST, "pub(super) fn library(");
     assert_runs_in_order(
-        "surfaces::project::library",
+        "shell_host::project::library",
         &library,
         &[LIBRARY_COMPOSITION, LIBRARY_DIALOGS].concat(),
     );

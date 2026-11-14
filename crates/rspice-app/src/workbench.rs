@@ -202,7 +202,7 @@ pub(crate) mod session {
 }
 pub(crate) use rspice_app_settings::workbench::settings;
 pub(crate) use rspice_app_sheets::workbench::sheets;
-mod shell_host;
+pub(crate) mod shell_host;
 #[cfg(test)]
 pub(crate) use rspice_app_settings::workbench::shortcuts;
 pub(crate) use rspice_app_simulate::workbench::simulate;

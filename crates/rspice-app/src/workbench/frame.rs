@@ -176,7 +176,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     } else if !launcher_route_active && app.state.project.project_launcher_open {
         app.state.project.project_launcher_open = false;
     }
-    tools::project_launcher::show(ctx, app);
+    shell_host::project::launcher::show(ctx, app);
     // The example New project's prompt let through opens first. Then the
     // Examples dialog draws in the project feature's context, and the example
     // it asked for is requested in place of the open project as it returns.

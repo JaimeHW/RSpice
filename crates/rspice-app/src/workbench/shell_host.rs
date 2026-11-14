@@ -12,6 +12,7 @@
 
 mod menus;
 mod palette_icons;
+pub(crate) mod project;
 mod status_order;
 
 use egui::Ui;
@@ -138,11 +139,11 @@ impl Host for RSpiceApp {
                                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
                                 project::chrome(&mut features::cx(app), ui);
                                 app.after_contribution();
-                                project::page(ui, app);
+                                self::project::page(ui, app);
                                 app.after_contribution();
                             });
                         } else {
-                            project::show_landing(ui, app);
+                            self::project::show_landing(ui, app);
                         }
                         project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));
                     }

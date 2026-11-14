@@ -154,7 +154,7 @@ fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryInten
     }
 }
 
-pub(super) fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub(crate) fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     #[cfg(target_arch = "wasm32")]
     poll_browser_manual_checkpoint(cx);
     ensure_project_recovery_catalog(ui.ctx(), cx);

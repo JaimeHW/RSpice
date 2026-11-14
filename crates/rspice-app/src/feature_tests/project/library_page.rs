@@ -10,13 +10,12 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::features;
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::rollback_project_library_publication;
 use crate::workbench::state::Workspace;
 use crate::workbench::surfaces::project::library::{
     AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
-};
-use crate::workbench::surfaces::project::library_publication::{
-    commit_project_library_publication, prepare_project_library_publication,
-    rollback_project_library_publication,
 };
 
 /// Carry `intent` out as the page does, then answer what it raised, as

@@ -27,7 +27,7 @@ use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
 
-use super::project;
+use crate::workbench::shell_host::project;
 
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const SPLIT_BREAKPOINT: f32 = 960.0;
