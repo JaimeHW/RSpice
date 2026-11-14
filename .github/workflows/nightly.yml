@@ -423,12 +423,15 @@ jobs:
         with:
           key: mixed-corpus-${{ matrix.route }}
       # The shipped browser worker image and its bindings, where the
-      # application's simulation-worker.js loads them.
+      # application's simulation-worker.js loads them. Built as ci.yml builds
+      # the production image, with the generated compact-model catalog: C5's
+      # JUNCAP200 runs in the worker as it does on the desktop.
       - name: Build browser worker image
         if: matrix.route == 'worker'
         run: >-
           cargo build --locked --profile web-release -p rspice-worker
-          --bin rspice-worker --target wasm32-unknown-unknown
+          --bin rspice-worker --features generated-veriloga-catalog
+          --target wasm32-unknown-unknown
       - name: Install pinned wasm-bindgen CLI
         if: matrix.route == 'worker'
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
