@@ -174,14 +174,39 @@ pub(crate) fn canvas_frame(state: &mut AppState) -> CanvasFrame<'_> {
 /// The canvas frame over the design feature's context, with its modal facts
 /// as the shell lent them.
 pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFrame<'a> {
-    let application_modal = cx.application_modal_open();
-    let dialog_modal = cx.dialog_modal_open();
+    let application_modal_open = cx.application_modal_open();
+    let dialog_modal_open = cx.dialog_modal_open();
+    canvas_frame_lent(
+        &mut *cx.state,
+        &mut *cx.model,
+        &mut *cx.wb,
+        &mut *cx.runs,
+        cx.peers.results(),
+        application_modal_open,
+        dialog_modal_open,
+    )
+}
+
+/// The canvas frame over the design slot, the model, the session, the runs
+/// and the results workspace, with the two modal facts lent as
+/// `application_modal_open` and `dialog_modal_open`.
+pub(crate) fn canvas_frame_lent<'a>(
+    state: &'a mut DesignState,
+    model: &'a mut Model,
+    wb: &'a mut WorkbenchSession,
+    runs: &'a mut RunsState,
+    results: &'a dyn ResultsPort,
+    application_modal_open: bool,
+    dialog_modal_open: bool,
+) -> CanvasFrame<'a> {
+    let application_modal = application_modal_open;
+    let dialog_modal = dialog_modal_open;
     CanvasFrame {
-        design: &mut *cx.state,
-        model: &mut *cx.model,
-        workbench: &mut *cx.wb,
-        runs: &mut *cx.runs,
-        results: cx.peers.results(),
+        design: &mut *state,
+        model: &mut *model,
+        workbench: &mut *wb,
+        runs: &mut *runs,
+        results,
         application_modal,
         dialog_modal,
     }
