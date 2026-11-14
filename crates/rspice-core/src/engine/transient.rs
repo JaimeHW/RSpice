@@ -875,14 +875,32 @@ fn annotate_terminal_convergence_failure(
     }
 }
 
-/// A rescue that could not evaluate a device finitely has not rescued the
+/// Why a transient trial iterate failed in a way a smaller step can repair,
+/// or `None` when the failure has to end the run.
+///
+/// Two failures belong to the iterate rather than to the circuit: a device
+/// that refused a non-finite evaluation, and an assembled system that left
+/// the finite range, which the matrix reports as [`SolverError::Overflow`]
+/// (a diverging Newton iterate whose device currents or correction residual
+/// overflow). Both are rejected like a singular trial solve: the step is
+/// cut and retried, and only an exhausted retry budget reports them.
+///
+/// [`SolverError::Overflow`]: crate::solver::SolverError::Overflow
+fn rejectable_trial_detail(error: &SimulationError) -> Option<String> {
+    match error {
+        SimulationError::Solver(crate::solver::SolverError::Overflow) => Some(error.to_string()),
+        _ => error.nonfinite_trial_detail().map(str::to_owned),
+    }
+}
+
+/// A rescue whose trial could not be evaluated finitely has not rescued the
 /// step: it rejected its own trial, and the caller's dt cut is the next move.
 /// Any other rescue failure still ends the run.
 fn rescued_or_rejected_nonfinite(
     rescue: Result<Option<Vec<Value>>, SimulationError>,
 ) -> Result<Option<Vec<Value>>, SimulationError> {
     match rescue {
-        Err(error) if error.nonfinite_trial_detail().is_some() => Ok(None),
+        Err(error) if rejectable_trial_detail(&error).is_some() => Ok(None),
         other => other,
     }
 }
@@ -8989,26 +9007,25 @@ impl Engine {
             // step is still carrying. It decides which of the two the
             // exhausted step reports as its headline.
             let mut attempt_rejected_nonfinite_trial = false;
-            // A device that cannot evaluate finitely at a Newton TRIAL point
-            // has rejected that iterate, not the run: Spectre and ngspice cut
-            // dt and try again, exactly as they do for a failed linear solve
-            // (the `Err(e)` arm at the bottom of the Newton loop). Expanding
-            // at a trial stamp leaves `converged` false, so the shared
-            // recovery path below shrinks the step, rolls the device state
-            // back, and retries. Every other stamping failure is structural
-            // and still ends the run where it happens.
+            // A device that cannot evaluate finitely at a Newton TRIAL point,
+            // or an assembled system that overflows there, has rejected that
+            // iterate, not the run: Spectre and ngspice cut dt and try again,
+            // exactly as they do for a failed linear solve (the `Err(e)` arm
+            // at the bottom of the Newton loop). Expanding at a trial stamp
+            // leaves `converged` false, so the shared recovery path below
+            // shrinks the step, rolls the device state back, and retries.
+            // Every other stamping failure is structural and still ends the
+            // run where it happens (see `rejectable_trial_detail`).
             macro_rules! stamp_trial_or_reject {
                 ($stamp:expr) => {
                     match $stamp {
                         Ok(value) => value,
                         Err(error) => {
-                            let Some(detail) =
-                                error.nonfinite_trial_detail().map(str::to_owned)
-                            else {
+                            let Some(detail) = rejectable_trial_detail(&error) else {
                                 return Err(error);
                             };
                             log::debug!(
-                                "Rejecting a non-finite device trial iterate at t={:.6e}, dt={:.3e}: {}",
+                                "Rejecting a non-finite trial iterate at t={:.6e}, dt={:.3e}: {}",
                                 step_time,
                                 dt,
                                 detail
@@ -9271,7 +9288,11 @@ impl Engine {
                         if let Some(residual) = direct_correction_rhs {
                             direct_xyce_dae_norms(residual)?
                         } else {
-                            matrix.raw_residual_norms(&new_solution, &rhs)?
+                            stamp_trial_or_reject!(
+                                matrix
+                                    .raw_residual_norms(&new_solution, &rhs)
+                                    .map_err(SimulationError::from)
+                            )
                         };
                     if let Some(status) = xyce_damped_status.as_mut() {
                         status.begin_solve_with_initial_residual(
@@ -9413,7 +9434,11 @@ impl Engine {
                         if let Some(correction) = direct_correction_rhs {
                             direct_xyce_dae_norms(correction)?
                         } else {
-                            matrix.raw_residual_norms(&new_solution, &rhs)?
+                            stamp_trial_or_reject!(
+                                matrix
+                                    .raw_residual_norms(&new_solution, &rhs)
+                                    .map_err(SimulationError::from)
+                            )
                         };
                     let device_converged = core_trial_converged(&circuit)
                         && (!enforce_device_convergence
@@ -9768,7 +9793,11 @@ impl Engine {
                             } else if uses_direct_device_correction {
                                 direct_xyce_dae_norms(&correction_rhs)?
                             } else {
-                                matrix.raw_residual_norms(&new_solution, &rhs)?
+                                stamp_trial_or_reject!(
+                                    matrix
+                                        .raw_residual_norms(&new_solution, &rhs)
+                                        .map_err(SimulationError::from)
+                                )
                             };
                             let device_converged = core_trial_converged(&circuit)
                                 && (!enforce_device_convergence
@@ -10024,8 +10053,8 @@ impl Engine {
                             // residual criterion.
                             let postsolve_residual_start =
                                 DiagnosticTimer::start(diagnostic_timing_enabled);
-                            residual_converged_for_acceptance = self
-                                .transient_nonlinear_residual_converged(
+                            residual_converged_for_acceptance = stamp_trial_or_reject!(
+                                self.transient_nonlinear_residual_converged(
                                     &mut circuit,
                                     &mut matrix,
                                     &mut rhs,
@@ -10080,7 +10109,8 @@ impl Engine {
                                         .as_mut()
                                         .map(|(row_ax, row_rhs)| (row_ax, row_rhs)),
                                     &mut correction_rhs,
-                                )?;
+                                )
+                            );
                             mosfet_caps_valid = residual_converged_for_acceptance
                                 && classic_mos_stamp_cache.is_some()
                                 && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
@@ -14386,6 +14416,36 @@ mod tests {
     use crate::engine::waveform::TransientCompressionSignal;
     use crate::{Netlist, SimulationConfig};
     use std::cell::Cell;
+
+    /// A diverging trial iterate whose assembled system overflows is a
+    /// rejected iterate, as a non-finite device evaluation is; a singular
+    /// system or a structural stamping failure still ends the run.
+    #[test]
+    fn an_overflowing_trial_system_is_a_rejectable_iterate() {
+        let overflow = SimulationError::from(crate::solver::SolverError::Overflow);
+        assert_eq!(
+            rejectable_trial_detail(&overflow).as_deref(),
+            Some(overflow.to_string().as_str())
+        );
+        let trial = SimulationError::from(crate::device::StampError::nonfinite_trial(
+            "d1",
+            "diode 'd1' current overflowed",
+        ));
+        assert_eq!(
+            rejectable_trial_detail(&trial).as_deref(),
+            Some("diode 'd1' current overflowed")
+        );
+        for fatal in [
+            SimulationError::from(crate::solver::SolverError::SingularMatrix),
+            SimulationError::Circuit("no such branch".to_string()),
+        ] {
+            assert_eq!(rejectable_trial_detail(&fatal), None, "{fatal}");
+        }
+        assert!(matches!(
+            rescued_or_rejected_nonfinite(Err(overflow)),
+            Ok(None)
+        ));
+    }
 
     /// A step that ran out of retries is a convergence failure even when an
     /// earlier, larger attempt at the same timepoint rejected a non-finite
