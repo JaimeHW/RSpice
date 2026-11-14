@@ -30,11 +30,24 @@ pub struct RunLogLine {
     pub message: String,
 }
 
+/// The source line an HDL call that wrote a line of the log was written on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunLogSource {
+    /// The file as the run named it.
+    pub file: String,
+    /// One-based.
+    pub line: u32,
+}
+
 /// A run's log, bounded at [`RUN_LOG_ENGINE_LINES`] engine lines.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunLog {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     lines: Vec<RunLogLine>,
+    /// The source line of each line an HDL call wrote, by the line's position
+    /// in `lines`, in ascending order. Only lines that name one are listed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sources: Vec<(usize, RunLogSource)>,
     /// Engine lines past the bound, counted and not kept.
     #[serde(default, skip_serializing_if = "is_zero")]
     withheld: usize,
@@ -57,6 +70,27 @@ impl RunLog {
             return;
         }
         self.lines.push(line);
+    }
+
+    /// Append a line with the source line the HDL call that wrote it was
+    /// written on, or count it as [`Self::push`] does.
+    pub fn push_sourced(&mut self, line: RunLogLine, source: Option<RunLogSource>) {
+        let position = self.lines.len();
+        self.push(line);
+        if let Some(source) = source
+            && self.lines.len() > position
+        {
+            self.sources.push((position, source));
+        }
+    }
+
+    /// The source line the line at `position` was written on, where an HDL
+    /// call wrote it and the run knew where the call was.
+    pub fn source(&self, position: usize) -> Option<&RunLogSource> {
+        self.sources
+            .binary_search_by_key(&position, |(at, _)| *at)
+            .ok()
+            .map(|index| &self.sources[index].1)
     }
 
     /// Whether another engine line would be past the bound.
@@ -233,5 +267,31 @@ mod tests {
         let read: RunLog = serde_json::from_str(&text).expect("deserializes");
         assert_eq!(read, log);
         assert_eq!(read.count(LogSeverity::Warning), 1);
+    }
+
+    /// A line an HDL call wrote keeps the source line it names, through the
+    /// project file too; a line past the bound is counted and keeps nothing,
+    /// and a line that names none has none.
+    #[test]
+    fn an_hdl_line_keeps_its_source_line_and_a_withheld_one_keeps_none() {
+        let source = |line| RunLogSource {
+            file: "tb.v".to_owned(),
+            line,
+        };
+        let mut log = RunLog::default();
+        log.push(line(LogSource::Run, "Run 1 started"));
+        log.push_sourced(line(LogSource::Hdl, "out stuck low"), Some(source(9)));
+        log.push_sourced(line(LogSource::Hdl, "edge"), None);
+        assert_eq!(log.source(0), None);
+        assert_eq!(log.source(1), Some(&source(9)));
+        assert_eq!(log.source(2), None);
+        let text = serde_json::to_string(&log).expect("serializes");
+        let read: RunLog = serde_json::from_str(&text).expect("deserializes");
+        assert_eq!(read.source(1), Some(&source(9)));
+
+        let mut full = full_of_engine_lines();
+        full.push_sourced(line(LogSource::Hdl, "late"), Some(source(12)));
+        assert_eq!(full.withheld(), 1);
+        assert_eq!(full.source(RUN_LOG_ENGINE_LINES), None);
     }
 }

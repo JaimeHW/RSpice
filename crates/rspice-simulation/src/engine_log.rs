@@ -47,6 +47,10 @@ pub struct EngineLogLine {
     /// sink delivered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ordinal: Option<u64>,
+    /// The source line the HDL call that wrote it was written on, where the
+    /// run knows it. `None` for every line no HDL call wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<rspice_vocabulary::run_log::RunLogSource>,
 }
 
 /// The part of a run a line came from, so the Console can say whose words
@@ -131,6 +135,7 @@ impl EngineLogQueue {
             ),
             origin: EngineLogOrigin::Engine,
             ordinal: None,
+            source: None,
         });
     }
 
@@ -651,6 +656,7 @@ pub fn offer(record: &log::Record<'_>) {
                         },
                         origin: EngineLogOrigin::Engine,
                         ordinal: Some(ordinal),
+                        source: None,
                     }
                 }),
             }
@@ -722,6 +728,7 @@ mod tests {
             message: message.to_owned(),
             origin: EngineLogOrigin::Engine,
             ordinal: Some(ordinal),
+            source: None,
         }
     }
 

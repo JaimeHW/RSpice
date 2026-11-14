@@ -38,12 +38,15 @@ pub fn publish(
             EngineLogOrigin::VerilogA => LogSource::VerilogA,
         };
         let position = log.lines().len();
-        log.push(RunLogLine {
-            unix_ms,
-            severity: line.severity,
-            source,
-            message: line.message,
-        });
+        log.push_sourced(
+            RunLogLine {
+                unix_ms,
+                severity: line.severity,
+                source,
+                message: line.message,
+            },
+            line.source,
+        );
         if let Some(ordinal) = line.ordinal
             && log.lines().len() > position
         {
@@ -209,6 +212,7 @@ mod tests {
                 message: "Transient noise: 2 device noise source(s)".to_owned(),
                 origin: EngineLogOrigin::Engine,
                 ordinal: Some(0),
+                source: None,
             }]
         );
 
@@ -235,6 +239,7 @@ mod tests {
             message: message.to_owned(),
             origin,
             ordinal: None,
+            source: None,
         };
         let mut log = RunLog::default();
         publish(
@@ -263,6 +268,7 @@ mod tests {
             message: message.to_owned(),
             origin,
             ordinal: None,
+            source: None,
         };
         let mut log = RunLog::default();
         publish(

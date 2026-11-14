@@ -26,6 +26,7 @@ use crate::diagnostics::{LogAnchor, LogSeverity};
 use crate::io::file_exchange::{self, FileKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
+use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleView};
@@ -81,6 +82,8 @@ fn source<'a>(state: &'a impl ConsoleHost, view: &mut ConsoleView) -> Source<'a>
 #[derive(Default)]
 struct Intent {
     follow: Option<LogAnchor>,
+    /// The source line an HDL line names, to open.
+    open: Option<DiagnosticRoute>,
     clipboard: Option<String>,
     /// A file name and the text to save under it.
     save: Option<(String, String)>,
@@ -102,6 +105,31 @@ pub fn console(ui: &mut Ui, state: &mut impl ConsoleHost) {
     if let Some(anchor) = intent.follow {
         state.jump_to_log_anchor(anchor);
     }
+    if let Some(route) = intent.open {
+        state.model_mut().diagnostics.request_route(route);
+    }
+}
+
+/// The source line an HDL line names, as the link the row draws: the route
+/// that opens it, as the run's Problems rows route, and where its
+/// `file:line` stands in the message. `None` where the line names no source,
+/// or names one no editor of the app holds, such as a manual deck's `.hdl`
+/// file: the message still says where the call was, as text.
+fn source_link(
+    state: &impl ConsoleHost,
+    channel: ConsoleChannel,
+    line: &Line<'_>,
+) -> Option<(DiagnosticRoute, std::ops::Range<usize>)> {
+    let ConsoleChannel::Run(run_sequence) = channel else {
+        return None;
+    };
+    let source = line.source?;
+    let route = state
+        .model()
+        .hdl_call_route(run_sequence, &source.file, source.line)?;
+    let place = format!("{}:{}", source.file, source.line);
+    let start = line.message.rfind(&place)?;
+    Some((route, start..start + place.len()))
 }
 
 /// Say how a save the page started went, once the picker has answered.
@@ -234,12 +262,31 @@ fn body(ui: &mut Ui, state: &impl ConsoleHost, view: &mut ConsoleView) -> Intent
                 let Some(line) = source.line(rows.keys()[index]) else {
                     continue;
                 };
-                let galley = ui.painter().layout(
-                    line.message.to_owned(),
-                    row_font(),
-                    log_message_color(&tokens, line.severity),
-                    columns.metrics.wrap,
-                );
+                let link = source_link(state, view.channel, &line);
+                let color = log_message_color(&tokens, line.severity);
+                let galley = match &link {
+                    Some((_, place)) => {
+                        // The row stays in neutral ink, as every Console row
+                        // is; the underline alone marks the place as a link.
+                        let plain = egui::TextFormat::simple(row_font(), color);
+                        let linked = egui::TextFormat {
+                            underline: egui::Stroke::new(1.0, tokens.color.text_dim),
+                            ..plain.clone()
+                        };
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(&line.message[..place.start], 0.0, plain.clone());
+                        job.append(&line.message[place.clone()], 0.0, linked);
+                        job.append(&line.message[place.end..], 0.0, plain);
+                        job.wrap.max_width = columns.metrics.wrap;
+                        ui.painter().layout_job(job)
+                    }
+                    None => ui.painter().layout(
+                        line.message.to_owned(),
+                        row_font(),
+                        color,
+                        columns.metrics.wrap,
+                    ),
+                };
                 let height = columns.metrics.row_height_for(galley.size().y);
                 remeasured |= rows.measure(index, height);
                 let rect = Rect::from_min_size(pos2(origin.x, top), vec2(columns.width, height));
@@ -254,6 +301,7 @@ fn body(ui: &mut Ui, state: &impl ConsoleHost, view: &mut ConsoleView) -> Intent
                     },
                     &line,
                     galley,
+                    link,
                     rect,
                     view,
                     &mut intent,
@@ -380,6 +428,7 @@ fn row(
     context: &RowContext<'_, '_, impl ConsoleHost>,
     line: &Line<'_>,
     galley: Arc<egui::Galley>,
+    link: Option<(DiagnosticRoute, std::ops::Range<usize>)>,
     rect: Rect,
     view: &mut ConsoleView,
     intent: &mut Intent,
@@ -425,11 +474,31 @@ fn row(
         row_font(),
         tokens.color.text_faint,
     );
+    let message_origin = pos2(
+        rect.left() + context.columns.message,
+        rect.top() + context.columns.metrics.inset(),
+    );
+    // The `file:line` an HDL line names is a link to that line, where the
+    // app holds the file: a press on it opens the source, as a jump from the
+    // run's Problems rows does.
+    if let Some((route, place)) = &link {
+        let start = line.message[..place.start].chars().count();
+        let end = start + line.message[place.clone()].chars().count();
+        let from = galley.pos_from_cursor(egui::text::CCursor::new(start));
+        let to = galley.pos_from_cursor(egui::text::CCursor::new(end));
+        let linked = Rect::from_min_max(from.min, pos2(to.max.x.max(from.min.x), from.max.y))
+            .translate(message_origin.to_vec2());
+        let pressed = ui
+            .interact(linked, id.with("source"), Sense::CLICK)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("Open {}", &line.message[place.clone()]))
+            .clicked();
+        if pressed {
+            intent.open = Some(route.clone());
+        }
+    }
     ui.painter().galley(
-        pos2(
-            rect.left() + context.columns.message,
-            rect.top() + context.columns.metrics.inset(),
-        ),
+        message_origin,
         galley,
         log_message_color(&tokens, line.severity),
     );
@@ -457,10 +526,12 @@ fn row(
         view.selection = Some(ConsoleSelection::single(line.key));
         outcome.pressed = true;
     }
-    if response.double_clicked()
-        && let Some(anchor) = line.anchor
-    {
-        outcome.left = log_anchor::follow(context.state, view, anchor, &mut intent.follow);
+    if response.double_clicked() {
+        if let Some(anchor) = line.anchor {
+            outcome.left = log_anchor::follow(context.state, view, anchor, &mut intent.follow);
+        } else if let Some((route, _)) = &link {
+            intent.open = Some(route.clone());
+        }
     }
     response.context_menu(|ui| {
         if ui.button("Copy").clicked() {
@@ -483,6 +554,16 @@ fn row(
         if let Some(anchor) = line.anchor {
             ui.separator();
             outcome.left |= log_anchor::menu(ui, context.state, view, anchor, &mut intent.follow);
+        }
+        if let Some((route, place)) = &link {
+            ui.separator();
+            if ui
+                .button(format!("Open {}", &line.message[place.clone()]))
+                .clicked()
+            {
+                intent.open = Some(route.clone());
+                ui.close();
+            }
         }
     });
     outcome.cursor = view
@@ -645,10 +726,17 @@ fn keyboard(
     }
     if keys.enter
         && let Some(selection) = view.selection
-        && let Some(anchor) = source.line(selection.cursor).and_then(|line| line.anchor)
-        && log_anchor::follow(state, view, anchor, &mut intent.follow)
+        && let Some(line) = source.line(selection.cursor)
     {
-        ui.memory_mut(|memory| memory.surrender_focus(id));
+        let left = match line.anchor {
+            Some(anchor) => log_anchor::follow(state, view, anchor, &mut intent.follow),
+            None => source_link(state, view.channel, &line)
+                .map(|(route, _)| intent.open = Some(route))
+                .is_some(),
+        };
+        if left {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
     }
 }
 

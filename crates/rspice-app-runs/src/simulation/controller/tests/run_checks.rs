@@ -70,3 +70,58 @@ fn a_runs_assertion_report_is_retained_saved_and_restored() {
         .expect("the transient is restored");
     assert_eq!(reopened.checks, checks);
 }
+
+/// An HDL call is routed to its line where a project Verilog-A bundle holds
+/// its file, as its Problems row and its Console line both open it, and only
+/// there: a file no bundle holds, or one two cell views each hold, is stated
+/// without a jump rather than opened on a guess.
+#[test]
+fn an_hdl_call_routes_to_the_one_project_bundle_that_holds_its_file() {
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
+    let mut state = RunTestHost::default();
+    let bundle = |library: &str| {
+        crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
+                library, "tb", "veriloga",
+            )),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "tb/tb.va",
+            "module tb; endmodule\n",
+            Vec::<crate::state::ProjectSourceFile>::new(),
+            Vec::<crate::state::ProjectSourceDependency>::new(),
+        )
+        .expect("a valid Verilog-A bundle")
+    };
+    let first = bundle("lib_a");
+    let id = first.id();
+    state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(first)
+        .expect("attach the cell view's source");
+    let run = state.model.simulation.start_run().id;
+    assert_eq!(
+        state.model.hdl_call_route(run, "tb/tb.va", 9),
+        Some(DiagnosticRoute::CodeDocument {
+            bundle: id,
+            logical_path: "tb/tb.va".into(),
+            line: Some(9),
+            column: None,
+        })
+    );
+    assert_eq!(state.model.hdl_call_route(run, "elsewhere.va", 9), None);
+    state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(bundle("lib_b"))
+        .expect("attach a second cell view's source");
+    assert_eq!(
+        state.model.hdl_call_route(run, "tb/tb.va", 9),
+        None,
+        "two cell views hold the file"
+    );
+}

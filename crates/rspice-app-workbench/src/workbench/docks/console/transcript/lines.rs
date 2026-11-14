@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use rspice_vocabulary::run_log::RunLog;
+use rspice_vocabulary::run_log::{RunLog, RunLogSource};
 
 use crate::diagnostics::{LogAnchor, LogBuffer, LogSeverity};
 use crate::state::SimulationRun;
@@ -26,6 +26,9 @@ pub(super) struct Line<'a> {
     pub(super) severity: LogSeverity,
     pub(super) message: &'a str,
     pub(super) anchor: Option<&'a LogAnchor>,
+    /// The source line the HDL call that wrote it was written on, for a run
+    /// line one wrote.
+    pub(super) source: Option<&'a RunLogSource>,
 }
 
 /// The log a channel reads.
@@ -88,6 +91,7 @@ impl<'a> Source<'a> {
                     severity: line.severity,
                     message: &line.message,
                     anchor: None,
+                    source: log.source(index),
                 })
             }
         }
@@ -113,12 +117,13 @@ impl<'a> Source<'a> {
                     .iter()
                     .enumerate()
                     .skip(usize::try_from(from).unwrap_or(usize::MAX))
-                    .map(|(index, line)| Line {
+                    .map(move |(index, line)| Line {
                         key: index as u64,
                         unix_ms: line.unix_ms,
                         severity: line.severity,
                         message: &line.message,
                         anchor: None,
+                        source: log.source(index),
                     }),
             ),
         }
@@ -132,6 +137,7 @@ fn session_line(entry: &crate::diagnostics::LogEntry) -> Line<'_> {
         severity: entry.severity,
         message: &entry.message,
         anchor: entry.anchor.as_ref(),
+        source: None,
     }
 }
 

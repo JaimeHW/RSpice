@@ -121,15 +121,7 @@ impl Model {
     /// run where it is not already one of the records.
     fn check_rows(&self, analysis: &str, checks: &RunChecks, run_sequence: u64) -> Vec<CheckRow> {
         let scope = super::producers::run_scope(self, run_sequence);
-        let manual_deck = self
-            .simulation
-            .retained
-            .run_by_sequence(run_sequence)
-            .and_then(|run| run.prepared_receipt())
-            .is_some_and(|receipt| {
-                receipt.source_domain()
-                    == rspice_results::provenance::AnalysisResultSourceDomain::ManualDeck
-            });
+        let manual_deck = self.ran_a_manual_deck(run_sequence);
         let deck_path = self
             .workspace
             .content
@@ -277,6 +269,30 @@ impl Model {
             });
         }
         rows
+    }
+
+    /// Where the source line an HDL call of run `run_sequence` was written
+    /// on is edited, as that run's Problems rows route to it: the Console
+    /// opens a line the call wrote the same way. `None` where the app holds
+    /// no editor for that file.
+    pub fn hdl_call_route(
+        &self,
+        run_sequence: u64,
+        file: &str,
+        line: u32,
+    ) -> Option<DiagnosticRoute> {
+        self.hdl_source_route(file, line, self.ran_a_manual_deck(run_sequence))
+    }
+
+    fn ran_a_manual_deck(&self, run_sequence: u64) -> bool {
+        self.simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .and_then(|run| run.prepared_receipt())
+            .is_some_and(|receipt| {
+                receipt.source_domain()
+                    == rspice_results::provenance::AnalysisResultSourceDomain::ManualDeck
+            })
     }
 
     /// Where an HDL call's source line is edited, where the app edits it.

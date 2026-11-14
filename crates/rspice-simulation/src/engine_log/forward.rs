@@ -4,6 +4,7 @@
 use super::*;
 use rspice_core::config::{HdlOutputRecord, HdlOutputSink, HdlSeverity, HdlStream};
 use rspice_veriloga::{CompileDiagnosticSeverity, SourceCompileDiagnostic};
+use rspice_vocabulary::run_log::RunLogSource;
 
 /// Delivers lines to the run that was executing on the thread that made it,
 /// from whichever thread the engine later calls back on.
@@ -116,6 +117,10 @@ fn hdl_line(record: &HdlOutputRecord) -> Option<EngineLogLine> {
         message,
         origin: EngineLogOrigin::Hdl,
         ordinal: None,
+        source: (!origin.file.is_empty() && origin.line > 0).then(|| RunLogSource {
+            file: origin.file.clone(),
+            line: origin.line,
+        }),
     })
 }
 
@@ -131,6 +136,7 @@ fn compiler_line(diagnostic: &SourceCompileDiagnostic) -> EngineLogLine {
         message: diagnostic.located().to_string(),
         origin: EngineLogOrigin::VerilogA,
         ordinal: None,
+        source: None,
     }
 }
 
@@ -167,6 +173,14 @@ mod tests {
         assert_eq!(display.severity, LogSeverity::Info);
         assert_eq!(display.origin, EngineLogOrigin::Hdl);
         assert_eq!(display.message, "n=5 \u{2014} tb (tb.v:12)");
+        assert_eq!(
+            display.source,
+            Some(RunLogSource {
+                file: "tb.v".to_owned(),
+                line: 12
+            }),
+            "the line names the call's source line for the Console to open"
+        );
 
         let error = hdl_line(&record(
             HdlStream::Diagnostic {
@@ -180,6 +194,7 @@ mod tests {
         .expect("a severity task is console output");
         assert_eq!(error.severity, LogSeverity::Error);
         assert_eq!(error.message, "mismatch 7 \u{2014} tb.check");
+        assert_eq!(error.source, None, "a call with no known line names none");
 
         let stderr = hdl_line(&record(HdlStream::Stderr, "to stderr", "", "tb.v", 3))
             .expect("a standard-error write is console output");
