@@ -9,7 +9,7 @@ use crate::state::{
     SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::drawing_sheet_edit::transaction::*;
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::transaction::*;
 
 fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
     let mut app = RSpiceApp::test_instance();

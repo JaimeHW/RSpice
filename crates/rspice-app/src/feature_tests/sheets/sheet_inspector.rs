@@ -9,10 +9,10 @@ use crate::state::{
     SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design::inspector::tests::{accesskit_nodes, painted_panel};
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_sheets::workbench::docks::inspector::design::sheet::*;
 
 /// The sheet's section over `state`'s parts, as the sheets feature hands

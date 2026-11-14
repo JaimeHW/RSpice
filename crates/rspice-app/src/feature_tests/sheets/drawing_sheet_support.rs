@@ -6,7 +6,7 @@ use crate::state::{
     SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::drawing_sheet_support::*;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support::*;
 
 /// [`open_sheet_format_manager`] on the application's own parts.
 fn open_manager(state: &mut crate::workbench::app_state::AppState) -> Result<(), String> {

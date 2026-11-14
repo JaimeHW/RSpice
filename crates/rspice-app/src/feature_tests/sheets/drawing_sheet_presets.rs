@@ -13,12 +13,14 @@ use crate::state::{
 };
 use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::drawing_sheet_presets::model::{
+use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::model::{
     ImportResolution, all_visible_presets,
 };
-use crate::workbench::app::dialogs::drawing_sheet_presets::render::{LibraryBodyAction, PresetKey};
-use crate::workbench::app::dialogs::drawing_sheet_presets::*;
-use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::render::{
+    LibraryBodyAction, PresetKey,
+};
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::*;
 
 /// The custom sheet size dialogs over the parts of `state`.
 fn preset_dialogs(state: &mut AppState) -> PresetDialogs<'_> {

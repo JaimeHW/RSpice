@@ -14,20 +14,8 @@ pub(crate) mod connectivity_manager;
 pub(crate) mod create_model_bound_symbol;
 #[cfg(test)]
 pub(crate) use rspice_app_project::workbench::app::dialogs::design_management;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
 pub(crate) mod design_request;
 pub(crate) mod design_review_comments;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_overflow;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support;
 pub(crate) mod engineering_table;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 pub(crate) mod find_replace;

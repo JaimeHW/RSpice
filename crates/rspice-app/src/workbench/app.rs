@@ -86,8 +86,6 @@ pub(crate) use rspice_app_code::workbench::app::netlist_lifecycle;
 pub(crate) mod project_transactions;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
 pub(crate) mod schematic;
 
 #[cfg(target_arch = "wasm32")]

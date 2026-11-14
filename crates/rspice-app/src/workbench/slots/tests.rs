@@ -176,7 +176,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
 fn open_drawing_sheet_presets_alone(dialogs: &mut AppState) {
     let mut state = crate::workbench::app_state::AppState::default();
     assert!(
-        crate::workbench::app::dialogs::drawing_sheet_presets::open_custom_sheet_size_library(
+        rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::open_custom_sheet_size_library(
             &mut state.sheets.drawing_sheet_presets,
             &state.model
         )
@@ -423,7 +423,7 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("delete_sheet", |dialogs| {
         dialogs.sheets.delete_sheet = Some(
-            crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
+            rspice_app_sheets::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
                 sheet: crate::state::SheetId::new(),
                 name: "Sheet 2".to_owned(),
                 objects: 3,

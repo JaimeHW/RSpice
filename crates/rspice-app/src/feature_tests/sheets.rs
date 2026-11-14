@@ -17,8 +17,10 @@ mod sheet_edit;
 mod sheet_inspector;
 mod sheet_strip;
 
-use crate::workbench::app::drawing_sheet_edit::{DrawingSheetEdit, apply_drawing_sheet_edit_on};
 use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::{
+    DrawingSheetEdit, apply_drawing_sheet_edit_on,
+};
 
 /// [`apply_drawing_sheet_edit_on`] over the whole state, as tests hold it.
 fn apply_drawing_sheet_edit(

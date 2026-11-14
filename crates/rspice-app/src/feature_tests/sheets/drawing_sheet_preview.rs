@@ -5,9 +5,9 @@ use crate::state::{
     DrawingSheetFrameLayer, DrawingSheetFrameMark, Junction, NetLabel, Point, SchematicProbe,
     SchematicSheetFormat,
 };
-use crate::workbench::app::dialogs::drawing_sheet_preview::*;
 use crate::workbench::app_state::AppState;
 use egui::{Pos2, Rect, Shape, vec2};
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview::*;
 use rspice_schematic_editor::view::drawing_sheet::DrawingSheetPrintablePreviewKind;
 
 #[test]

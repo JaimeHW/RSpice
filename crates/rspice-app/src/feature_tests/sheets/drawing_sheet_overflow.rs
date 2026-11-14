@@ -1,7 +1,7 @@
 //! The overflow review's opener over a whole application.
 
-use crate::workbench::app::dialogs::drawing_sheet_overflow::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_overflow::*;
 
 #[test]
 fn review_opener_is_modal_and_idempotent_for_schematic_views() {

@@ -359,7 +359,7 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
         (pending.objects, pending.destination_name.as_str()),
         (1, "Sheet 1")
     );
-    crate::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(
+    rspice_app_sheets::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(
         &mut state.model,
         &mut state.workbench,
         &pending,
@@ -396,7 +396,7 @@ fn a_confirmed_delete_whose_outcome_changed_deletes_nothing() {
     let mut pending = state.sheets.delete_sheet.clone().expect("pending");
     pending.objects += 1;
 
-    crate::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(
+    rspice_app_sheets::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(
         &mut state.model,
         &mut state.workbench,
         &pending,

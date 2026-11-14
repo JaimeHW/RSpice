@@ -6,7 +6,7 @@ use crate::state::{
     SchematicPageOrientation, SchematicSheetFormat,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::drawing_sheet_defaults::*;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults::*;
 
 /// A format reaches several sheets through the project default: a new
 /// default is the new format of every sheet that follows it, a sheet with
