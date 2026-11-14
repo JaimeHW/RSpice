@@ -11,6 +11,13 @@ token run `RTH0 94 = .006` to the intended `RTH0 = .006`, matching the sibling
 BSIM3SOI model cards. The recorded ngspice-46 `.out` references remain
 unchanged.
 
+Re-recorded reference: `general/rtlinv.out` is an ngspice-47 run. Its source
+`pulse(0 5 2ns 2ns 2ns 80ns)` leaves PER out, and ngspice-46 repeated it on
+TR + PW + TF against the manual's TSTOP (section 4.1.1); ngspice-47 fires it
+once, as the manual says. ngspice-47 batch mode refuses this deck's
+`.print tran` after its `.dc` ("no such vector 3"), so the transient table
+comes from a second ngspice-47 run of the same deck without the `.dc` lines.
+
 How RSpice runs it: tools/rspice-conformance/tests/ngspice_regression.rs runs
 every suite in one test (test_full_ngspice_suite_summary). Per-deck validation
 contracts live in validation-manifest.tsv (smoke, scripted_control,
