@@ -222,7 +222,8 @@ fn a_compiled_symbol_saves_and_keeps_its_rails_through_an_update() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
     app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
-    assert_eq!(app.state.refuse_unsavable_active_symbol(), None);
+    app.state.run_active_symbol_pin_checks();
+    assert_eq!(app.state.active_symbol_pin_finding_count(), Some(0));
 
     open_in_design(&mut app.state, &reference);
     hand_draw(&mut app, &reference);

@@ -508,22 +508,24 @@ impl DrcViolationType {
                 title: "Unplaced symbol pin",
                 explanation: "A pin the cell's interface requires has no terminal on the symbol. \
                     Every instance placed from the symbol then draws fewer terminals than the \
-                    interface declares, and the netlister refuses it. Place the pin on the \
-                    terminal grid.",
-                default_severity: DrcSeverity::Error,
-                floor: ENGINE_REFUSES,
+                    interface declares, and the netlister refuses it. A warning while the \
+                    symbol and its schematic are still being drawn, in either order. Place the \
+                    pin on the terminal grid.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
                 max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::SymbolOrphanedPin => &DrcRule {
                 code: "SYMBOL-ORPHANED-PIN",
                 title: "Orphaned symbol pin",
-                explanation: "The symbol carries a pin the cell's schematic no longer declares. \
+                explanation: "The symbol carries a pin the cell's schematic does not declare. \
                     Every instance placed from it draws more terminals than the interface \
-                    declares, and the netlister refuses it. Delete the pin, or add the port back \
-                    to the schematic.",
-                default_severity: DrcSeverity::Error,
-                floor: ENGINE_REFUSES,
+                    declares, and the netlister refuses it. A warning while the symbol and its \
+                    schematic are still being drawn, in either order. Delete the pin, or add \
+                    the port to the schematic.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
                 max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
@@ -537,6 +539,40 @@ impl DrcViolationType {
                 floor: ANY,
                 max_severity: DrcSeverity::Critical,
                 waivable: true,
+            },
+            Self::SymbolPinOrder => &DrcRule {
+                code: "SYMBOL-PIN-ORDER",
+                title: "Symbol pin order",
+                explanation: "The symbol carries the pins its interface declares, in another \
+                    order. A symbol's pin order is its netlist order, so a model or element that \
+                    reads its nodes by position is wired to the wrong nets. Reorder the pins.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: true,
+            },
+            Self::SymbolPinDirection => &DrcRule {
+                code: "SYMBOL-PIN-DIRECTION",
+                title: "Symbol pin direction",
+                explanation: "A symbol pin states a direction, or for a symbol bound to a model \
+                    an electrical type, that its interface does not declare. Connectivity checks \
+                    on every sheet that places the symbol read the symbol's word for it. Set the \
+                    pin's direction to the interface's.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: true,
+            },
+            Self::SymbolModelFamily => &DrcRule {
+                code: "SYMBOL-MODEL-FAMILY",
+                title: "Symbol bound to another cell",
+                explanation: "The symbol is bound to the model of a different cell, so its \
+                    instances netlist as that cell's model. Bind the symbol to this cell's \
+                    model, or move it to the cell it belongs to.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: false,
             },
         }
     }
@@ -605,6 +641,9 @@ mod tests {
             DrcViolationType::SymbolUnplacedPin => "SYMBOL-UNPLACED-PIN",
             DrcViolationType::SymbolOrphanedPin => "SYMBOL-ORPHANED-PIN",
             DrcViolationType::SymbolPinOffGrid => "SYMBOL-PIN-OFF-GRID",
+            DrcViolationType::SymbolPinOrder => "SYMBOL-PIN-ORDER",
+            DrcViolationType::SymbolPinDirection => "SYMBOL-PIN-DIRECTION",
+            DrcViolationType::SymbolModelFamily => "SYMBOL-MODEL-FAMILY",
         }
     }
 

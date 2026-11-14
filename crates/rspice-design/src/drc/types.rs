@@ -190,6 +190,13 @@ pub enum DrcViolationType {
     SymbolOrphanedPin,
     /// Symbol pin terminal is not on the required terminal grid.
     SymbolPinOffGrid,
+    /// Symbol pins carry the interface's names in another order.
+    SymbolPinOrder,
+    /// Symbol pin states a direction or electrical type its interface does
+    /// not declare.
+    SymbolPinDirection,
+    /// Symbol is bound to the model of a different cell.
+    SymbolModelFamily,
 }
 
 impl DrcViolationType {
@@ -200,7 +207,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 39] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -237,6 +244,9 @@ impl DrcViolationType {
         Self::SymbolUnplacedPin,
         Self::SymbolOrphanedPin,
         Self::SymbolPinOffGrid,
+        Self::SymbolPinOrder,
+        Self::SymbolPinDirection,
+        Self::SymbolModelFamily,
     ];
 
     /// The part of the design this rule reads.
@@ -274,9 +284,12 @@ impl DrcViolationType {
             | Self::ValueOutOfRange
             | Self::UnknownComponent
             | Self::UnresolvedReference => DrcRuleCategory::Component,
-            Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
-                DrcRuleCategory::SymbolContract
-            }
+            Self::SymbolUnplacedPin
+            | Self::SymbolOrphanedPin
+            | Self::SymbolPinOffGrid
+            | Self::SymbolPinOrder
+            | Self::SymbolPinDirection
+            | Self::SymbolModelFamily => DrcRuleCategory::SymbolContract,
         }
     }
 
@@ -364,6 +377,9 @@ impl DrcViolationType {
             Self::SymbolUnplacedPin => "Symbol pin is not placed",
             Self::SymbolOrphanedPin => "Symbol pin is not in the schematic interface",
             Self::SymbolPinOffGrid => "Symbol pin is off the terminal grid",
+            Self::SymbolPinOrder => "Symbol pin order differs from the interface",
+            Self::SymbolPinDirection => "Symbol pin direction differs from the interface",
+            Self::SymbolModelFamily => "Symbol is bound to another cell's model",
         }
     }
 
@@ -431,6 +447,9 @@ impl DrcViolationType {
             Self::SymbolUnplacedPin => "Place the symbol pin on the terminal grid",
             Self::SymbolOrphanedPin => "Delete the orphaned pin or add the schematic port back",
             Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",
+            Self::SymbolPinOrder => "Reorder the symbol pins to the interface's order",
+            Self::SymbolPinDirection => "Set the pin's direction to the one the interface declares",
+            Self::SymbolModelFamily => "Bind the symbol to this cell's model",
         }
     }
 }

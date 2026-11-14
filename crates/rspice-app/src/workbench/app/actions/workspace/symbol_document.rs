@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
 use crate::state::{
-    CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
+    CellViewRef, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
+    SymbolInterface,
 };
 use crate::ui::accessibility::counted;
 use crate::workbench::app_state::{Model, SlotFacts};
@@ -34,9 +34,7 @@ use crate::workbench::app_state::diagnostic_store::{
     FindingKey, mint_canonical,
 };
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
-use rspice_design::symbol::publication::{
-    EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
-};
+use rspice_design::symbol::publication::{EncodedSymbolEditorBundle, check_symbol_pins};
 
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::history::SchematicSnapshot;
@@ -86,82 +84,9 @@ pub(crate) fn store_symbol_canvas_frame(
     )
 }
 
-/// Publish a symbol revision, refusing on the first contract row that
-/// fails.
-///
-/// The refusal is the point: the dialog disables its primary control on
-/// the same rows, so a command that published without consulting them
-/// would be a second, more permissive save path for the same document.
-pub(crate) fn publish_active_symbol_revision(
-    symbol: &mut SymbolUiState,
-    model: &mut Model,
-    wb: &mut WorkbenchSession,
-    document: &SymbolDocument,
-    metadata: &mut SymbolEditorMetadata,
-    revision_note: &str,
-) -> Result<u64, String> {
-    let ports = active_symbol_ports(model);
-    if let Some(failed) = active_symbol_save_checks(model, document, &ports)
-        .into_iter()
-        .find(|check| !check.passed)
-    {
-        return Err(failed.refusal());
-    }
-    let mut candidate = metadata.clone();
-    let revision = candidate.publish_revision(document, revision_note)?;
-    store_active_symbol_editor_bundle(symbol, model, wb, document, &candidate)?;
-    *metadata = candidate;
-    let key = model.workspace.content.active_key();
-    symbol.history.mark_save_point(key);
-    Ok(revision)
-}
-
 /// The ports the interface its schematic declares gives the active symbol.
 pub(crate) fn active_symbol_ports(model: &Model) -> Vec<PortSpec> {
     model.symbol_ports(&model.workspace.content.active_view)
-}
-
-/// The model definition the active symbol view is bound to, if any.
-fn active_model_bound_symbol_definition(model: &Model) -> Option<ModelBoundSymbolDefinition> {
-    let reference = &model.workspace.content.active_view;
-    model
-        .library_manager
-        .get_library(&reference.library)
-        .and_then(|library| library.get_cell(&reference.cell))
-        .and_then(|cell| cell.get_view(&reference.view))
-        .and_then(|view| crate::state::load_model_bound_symbol(view).ok().flatten())
-}
-
-/// The publication contract of the active symbol view.
-pub(crate) fn active_symbol_save_checks(
-    model: &Model,
-    document: &SymbolDocument,
-    ports: &[PortSpec],
-) -> Vec<SymbolSaveCheck> {
-    let definition = active_model_bound_symbol_definition(model);
-    symbol_save_checks(
-        definition.as_ref(),
-        &model.workspace.content.active_view.cell,
-        document,
-        ports,
-    )
-}
-
-/// The first contract row that refuses publication, if any.
-///
-/// This is the headless half of the save transaction: the command runs it
-/// before the dialog exists, so a symbol that cannot be published is
-/// refused by name rather than by a disabled button.
-pub(crate) fn refuse_unsavable_active_symbol(model: &Model) -> Option<String> {
-    let ports = active_symbol_ports(model);
-    let document = match model.load_active_symbol_document() {
-        Ok(document) => document,
-        Err(error) => return Some(error),
-    };
-    active_symbol_save_checks(model, &document, &ports)
-        .into_iter()
-        .find(|check| !check.passed)
-        .map(|check| check.refusal())
 }
 
 /// Bring the active symbol's pins back into agreement with the interface
@@ -176,13 +101,21 @@ pub(crate) fn update_active_symbol_pins_from_contract(
     if model.active_view_read_only() {
         return Err(read_only_master_message(model));
     }
-    let ports = active_symbol_ports(model);
-    if ports.is_empty() {
-        return Err(
-            "No schematic interface declares this cell, so there is no contract to update from."
-                .to_owned(),
-        );
-    }
+    let reference = model.workspace.content.active_view.clone();
+    let ports = match model.symbol_interface(&reference) {
+        SymbolInterface::Declared(ports) if !ports.is_empty() => ports,
+        SymbolInterface::Declared(_) => {
+            return Err(format!(
+                "The {} declares no pins, so there are none to update from.",
+                model.symbol_contract_source(&reference)
+            ));
+        }
+        SymbolInterface::SymbolDefined => {
+            return Err(
+                "This cell has no schematic, so its symbol defines its own pins.".to_owned(),
+            );
+        }
+    };
     let before = model.load_active_symbol_document()?;
     let metadata = load_active_symbol_editor_metadata(model, &before)?;
     let mut document = before.clone();
@@ -196,10 +129,8 @@ pub(crate) fn update_active_symbol_pins_from_contract(
     }
     let added = document.pins.len().saturating_sub(before.pins.len());
     let orphaned = document
-        .pin_findings(&ports)
-        .into_iter()
-        .filter(|finding| finding.kind == PinFindingKind::OrphanedPin)
-        .count();
+        .pin_summary(&SymbolInterface::Declared(ports))
+        .orphaned;
     record_symbol_edit(symbol, model, &before);
     store_active_symbol_editor_bundle(symbol, model, wb, &document, &metadata)?;
     Ok(format!(
@@ -489,6 +420,27 @@ pub(crate) fn store_active_symbol_document(
     })?;
     model.workspace.content.set_active_dirty(true);
     Ok(())
+}
+
+/// Put the active symbol back as `restore` writes it, the way Revert to
+/// saved does: the wires each placed instance holds follow the restored pins,
+/// and the symbol is left with no steps to undo or redo, since none of them
+/// leads from the restored drawing.
+pub(crate) fn revert_active_symbol_with<R>(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    restore: impl FnOnce(&mut Model) -> R,
+) -> R {
+    let key = model.workspace.content.active_key();
+    begin_symbol_parent_edit(symbol, model);
+    let restored = restore(model);
+    if let Ok(document) = model.load_active_symbol_document() {
+        apply_symbol_parent_edit(symbol, model, &document, &BTreeMap::new());
+    }
+    finish_symbol_parent_edit(symbol, model);
+    symbol.history.forget(&key);
+    symbol.editor.clear_selection();
+    restored
 }
 
 /// Run one complete symbol edit: its parent wiring is resolved before it
@@ -840,7 +792,12 @@ pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) 
             return;
         }
     };
-    let mut result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
+    let mut result = check_symbol_pins(
+        &inputs.document,
+        &inputs.interface,
+        inputs.binding.as_ref(),
+        &reference,
+    );
     // The symbol's own waivers, stored in the document the checks read.
     rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
     let found = result.total_count();
@@ -858,7 +815,18 @@ pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) 
     // counts. The findings themselves are what the page, the counts and
     // the canvas tour all read.
     let summary = if found == 0 {
-        "Symbol pin check: pins match the schematic.".to_owned()
+        match inputs.interface {
+            SymbolInterface::SymbolDefined => {
+                "Symbol pin check: the symbol defines its own pins.".to_owned()
+            }
+            SymbolInterface::Declared(_) if inputs.binding.is_some() => {
+                "Symbol pin check: pins match the model.".to_owned()
+            }
+            SymbolInterface::Declared(_) => format!(
+                "Symbol pin check: pins match the {}.",
+                model.symbol_contract_source(&reference)
+            ),
+        }
     } else {
         format!(
             "Symbol pin check: {}. See Problems.",

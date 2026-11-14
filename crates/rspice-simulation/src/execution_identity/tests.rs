@@ -1361,6 +1361,9 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::SupplyTiedToGround => 34,
         DrcViolationType::UnusedCellView => 35,
         DrcViolationType::UnknownSupplyRail => 36,
+        DrcViolationType::SymbolPinOrder => 37,
+        DrcViolationType::SymbolPinDirection => 38,
+        DrcViolationType::SymbolModelFamily => 39,
     };
     // Every rule the checker has, by the list a test in the design crate
     // holds to the enum: a rule added there is pinned here or this fails.

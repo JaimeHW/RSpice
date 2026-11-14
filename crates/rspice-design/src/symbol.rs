@@ -62,10 +62,10 @@ pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
 /// can continue to consume `rspice.symbol.document.v1` without silently
 /// discarding the richer authoring contract.
 pub const SYMBOL_EDITOR_METADATA_KEY: &str = "rspice.symbol.editor.v1";
-/// Schema 3 identifies a published revision by digest and ordered pin names
-/// rather than by object counts. Schema 2's counts are still accepted on
-/// load and dropped on the next write.
-pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 3;
+/// Schema 4 records each revision as the project save that wrote it: when it
+/// was saved, the digest of the artwork and the ordered pin names, with no
+/// note.
+pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 4;
 
 /// Resource and geometry limits for authored symbol metadata.
 ///
@@ -82,7 +82,8 @@ pub const MAX_SYMBOL_COORDINATE_ABS: i32 = 1_000_000_000;
 pub const MAX_SYMBOL_RADIUS: i32 = 1_000_000_000;
 pub const MAX_SYMBOL_TEXT_OBJECTS: usize = 16_384;
 pub const MAX_SYMBOL_TEXT_BYTES: usize = 16 * 1024;
-pub const MAX_SYMBOL_REVISION_NOTE_BYTES: usize = 4 * 1024;
+/// The revision records a symbol keeps; a save past this many lets the
+/// oldest go.
 pub const MAX_SYMBOL_REVISION_RECORDS: usize = 4_096;
 
 /// Terminal-grid spacing in schematic coordinate units.
@@ -460,13 +461,12 @@ pub struct SymbolEditorMetadata {
     pub schema_version: u16,
     pub attributes: Vec<SymbolAttribute>,
     pub revision: u64,
-    pub revision_note: String,
     pub revisions: Vec<SymbolRevisionRecord>,
 }
 
-/// One published symbol revision.
+/// One saved symbol revision: a project save that wrote changed artwork.
 ///
-/// The record identifies what was published, not how much of it there was.
+/// The record identifies what was saved, not how much of it there was.
 /// Counts cannot answer the question a revision history exists to answer —
 /// two documents with three pins and four shapes are routinely different
 /// documents, and a rename changes neither number. The digest settles
@@ -476,12 +476,12 @@ pub struct SymbolEditorMetadata {
 #[serde(deny_unknown_fields)]
 pub struct SymbolRevisionRecord {
     pub revision: u64,
-    pub note: String,
-    /// Content digest of the published document.
-    #[serde(default)]
+    /// When the save that wrote this revision ran, in milliseconds since the
+    /// Unix epoch.
+    pub saved_unix_ms: u64,
+    /// Content digest of the saved document.
     pub document_digest: String,
-    /// Pin names in netlist order at publication.
-    #[serde(default)]
+    /// Pin names in netlist order when saved.
     pub pin_names: Vec<String>,
 }
 
@@ -491,7 +491,6 @@ impl Default for SymbolEditorMetadata {
             schema_version: SYMBOL_EDITOR_METADATA_SCHEMA_VERSION,
             attributes: Vec::new(),
             revision: 0,
-            revision_note: String::new(),
             revisions: Vec::new(),
         }
     }
@@ -559,11 +558,6 @@ impl SymbolEditorMetadata {
                 self.schema_version
             ));
         }
-        if self.revision_note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES
-            || self.revision_note.chars().any(char::is_control)
-        {
-            return Err("Invalid symbol revision note".to_owned());
-        }
         if self.revisions.len() > MAX_SYMBOL_REVISION_RECORDS {
             return Err(format!(
                 "Invalid symbol editor metadata: {} revision records exceed the limit of {MAX_SYMBOL_REVISION_RECORDS}",
@@ -572,14 +566,8 @@ impl SymbolEditorMetadata {
         }
         let mut previous_revision = 0;
         for record in &self.revisions {
-            validate_symbol_text(&record.note, "revision note")?;
             for name in &record.pin_names {
                 validate_symbol_text(name, "revision pin name")?;
-            }
-            if record.note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES {
-                return Err(format!(
-                    "Invalid symbol editor metadata: revision note exceeds the limit of {MAX_SYMBOL_REVISION_NOTE_BYTES} bytes"
-                ));
             }
             if record.revision == 0 || record.revision <= previous_revision {
                 return Err(
@@ -654,39 +642,45 @@ impl SymbolEditorMetadata {
             .find(|attribute| attribute.kind == kind)
     }
 
-    pub fn publish_revision(
+    /// Record that a project save at `saved_unix_ms` writes `document`, and
+    /// answer the new revision number, or `None` when the latest revision is
+    /// already this artwork: a save that changes nothing about the symbol
+    /// records nothing.
+    pub fn record_saved_revision(
         &mut self,
         document: &SymbolDocument,
-        revision_note: &str,
-    ) -> Result<u64, String> {
-        let note = revision_note.trim();
-        if note.is_empty() {
-            return Err("A revision note is required.".to_owned());
+        saved_unix_ms: u64,
+    ) -> Option<u64> {
+        let digest = document.content_digest();
+        if self
+            .revisions
+            .last()
+            .is_some_and(|latest| latest.document_digest == digest)
+        {
+            return None;
         }
-        if note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES {
-            return Err(format!(
-                "The revision note exceeds the limit of {MAX_SYMBOL_REVISION_NOTE_BYTES} bytes."
-            ));
-        }
-        validate_symbol_text(note, "revision note")?;
-        if self.revisions.len() >= MAX_SYMBOL_REVISION_RECORDS {
-            return Err(format!(
-                "The symbol revision history reached its limit of {MAX_SYMBOL_REVISION_RECORDS} records."
-            ));
-        }
-        let revision = self
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| "The symbol revision counter is exhausted.".to_owned())?;
+        let revision = self.revision.saturating_add(1);
         self.revision = revision;
-        self.revision_note = note.to_owned();
+        if self.revisions.len() >= MAX_SYMBOL_REVISION_RECORDS {
+            self.revisions.remove(0);
+        }
         self.revisions.push(SymbolRevisionRecord {
             revision,
-            note: note.to_owned(),
-            document_digest: document.content_digest(),
+            saved_unix_ms,
+            document_digest: digest,
             pin_names: document.pins.iter().map(|pin| pin.name.clone()).collect(),
         });
-        Ok(revision)
+        Some(revision)
+    }
+
+    /// This metadata with the revision history `from` holds in place of its
+    /// own. The history records project saves, which an undo step does not
+    /// take back: restoring the attributes an earlier edit left must not
+    /// rewind the revision counter past a revision a save already wrote.
+    pub fn with_revision_history_of(mut self, from: &Self) -> Self {
+        self.revision = from.revision;
+        self.revisions.clone_from(&from.revisions);
+        self
     }
 }
 
@@ -729,12 +723,46 @@ pub struct SymbolDocument {
     pub waivers: crate::drc::DrcWaivers,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PinSummary {
-    Match,
-    Unplaced(usize),
-    Orphaned(usize),
-    NoSchematic,
+/// What a symbol's pins answer to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum SymbolInterface {
+    /// Nothing else in the cell declares its pins, so the symbol's own pins
+    /// are the cell's interface: a symbol drawn first is complete as it is.
+    SymbolDefined,
+    /// The cell's schematic, compiled module or bound model declares these
+    /// pins, in netlist order. A schematic may declare none.
+    Declared(Vec<PortSpec>),
+}
+
+impl SymbolInterface {
+    /// The declared pins; none where the symbol defines the interface.
+    pub fn ports(&self) -> &[PortSpec] {
+        match self {
+            Self::SymbolDefined => &[],
+            Self::Declared(ports) => ports,
+        }
+    }
+}
+
+/// How a symbol's pins stand against its interface, counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PinSummary {
+    /// The interface is declared and holds no pins, while the symbol has
+    /// some.
+    pub interface_empty: bool,
+    /// Declared pins the symbol has no pin for.
+    pub missing: usize,
+    /// Declared pins whose symbol pin has no terminal on the symbol.
+    pub unplaced: usize,
+    /// Symbol pins the interface does not declare.
+    pub orphaned: usize,
+}
+
+impl PinSummary {
+    /// Whether the pins and the interface agree.
+    pub fn matches(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1166,33 +1194,41 @@ impl SymbolDocument {
             .unwrap_or(0)
     }
 
-    pub fn pin_summary(&self, ports: &[PortSpec]) -> PinSummary {
+    /// How the pins stand against `interface`, counted.
+    pub fn pin_summary(&self, interface: &SymbolInterface) -> PinSummary {
+        let SymbolInterface::Declared(ports) = interface else {
+            return PinSummary::default();
+        };
         if ports.is_empty() {
-            return PinSummary::NoSchematic;
+            return PinSummary {
+                interface_empty: !self.pins.is_empty(),
+                ..PinSummary::default()
+            };
         }
         let port_names = port_name_set(ports);
-        let unplaced = ports
-            .iter()
-            .filter(|port| {
-                self.pin(&port.name)
-                    .is_none_or(|pin| pin.position.is_none())
-            })
-            .count();
-        if unplaced > 0 {
-            return PinSummary::Unplaced(unplaced);
+        let mut summary = PinSummary::default();
+        for port in ports {
+            match self.pin(&port.name) {
+                None => summary.missing += 1,
+                Some(pin) if pin.position.is_none() => summary.unplaced += 1,
+                Some(_) => {}
+            }
         }
-        let orphaned = self
+        summary.orphaned = self
             .pins
             .iter()
             .filter(|pin| !port_names.contains(&pin.name.to_ascii_lowercase()))
             .count();
-        if orphaned > 0 {
-            return PinSummary::Orphaned(orphaned);
-        }
-        PinSummary::Match
+        summary
     }
 
-    pub fn pin_findings(&self, ports: &[PortSpec]) -> Vec<PinFinding> {
+    /// Every pin finding against `interface`. A symbol that defines the
+    /// interface itself is checked only for terminals off the grid; one whose
+    /// interface declares no pins has every pin it carries reported as not in
+    /// that interface.
+    pub fn pin_findings(&self, interface: &SymbolInterface) -> Vec<PinFinding> {
+        let ports = interface.ports();
+        let declared = matches!(interface, SymbolInterface::Declared(_));
         let port_names = port_name_set(ports);
         let mut findings = Vec::new();
         for port in ports {
@@ -1207,7 +1243,7 @@ impl SymbolDocument {
             }
         }
         for pin in &self.pins {
-            if !port_names.contains(&pin.name.to_ascii_lowercase()) && !ports.is_empty() {
+            if declared && !port_names.contains(&pin.name.to_ascii_lowercase()) {
                 findings.push(PinFinding {
                     kind: PinFindingKind::OrphanedPin,
                     pin_name: pin.name.clone(),
@@ -1569,8 +1605,8 @@ mod validation_tests {
         };
         let mut metadata = SymbolEditorMetadata::for_document(&document);
         let revision = metadata
-            .publish_revision(&document, "Initial reviewed symbol")
-            .expect("revision publishes");
+            .record_saved_revision(&document, 1_763_000_000_000)
+            .expect("changed artwork records a revision");
         let mut view = View::new("symbol", ViewType::Symbol);
         view.metadata.insert(
             SYMBOL_EDITOR_METADATA_KEY.to_owned(),
@@ -1590,6 +1626,7 @@ mod validation_tests {
              objects it happened to contain"
         );
         assert!(restored.revisions[0].pin_names.is_empty());
+        assert_eq!(restored.revisions[0].saved_unix_ms, 1_763_000_000_000);
         assert_eq!(
             restored
                 .attribute(SymbolAttributeKind::Reference)
@@ -1597,6 +1634,58 @@ mod validation_tests {
                 .default_value,
             "U?"
         );
+    }
+
+    #[test]
+    fn a_save_records_a_revision_only_when_the_artwork_changed() {
+        let mut document = SymbolDocument::default();
+        let mut metadata = SymbolEditorMetadata::for_document(&document);
+
+        assert_eq!(metadata.record_saved_revision(&document, 10), Some(1));
+        assert_eq!(
+            metadata.record_saved_revision(&document, 20),
+            None,
+            "saving the same artwork again is not a new revision"
+        );
+        document.pins.push(SymbolPin::new(
+            "A",
+            PortDirection::In,
+            Some(Point::new(-20, 0)),
+        ));
+        assert_eq!(metadata.record_saved_revision(&document, 30), Some(2));
+
+        assert_eq!(metadata.revision, 2);
+        let saved: Vec<(u64, u64)> = metadata
+            .revisions
+            .iter()
+            .map(|record| (record.revision, record.saved_unix_ms))
+            .collect();
+        assert_eq!(saved, [(1, 10), (2, 30)]);
+        assert_eq!(metadata.revisions[1].pin_names, ["A"]);
+        metadata.validate().expect("the history stays valid");
+    }
+
+    #[test]
+    fn a_full_revision_history_lets_the_oldest_record_go() {
+        let mut document = SymbolDocument::default();
+        let mut metadata = SymbolEditorMetadata::for_document(&document);
+        for step in 0..=MAX_SYMBOL_REVISION_RECORDS {
+            document.origin = Point::new(i32::try_from(step).expect("small step"), 0);
+            assert!(
+                metadata.record_saved_revision(&document, 1).is_some(),
+                "a save is never refused for the length of the history"
+            );
+        }
+
+        assert_eq!(metadata.revisions.len(), MAX_SYMBOL_REVISION_RECORDS);
+        assert_eq!(metadata.revisions[0].revision, 2);
+        assert_eq!(
+            metadata.revision,
+            u64::try_from(MAX_SYMBOL_REVISION_RECORDS + 1).expect("fits")
+        );
+        metadata
+            .validate()
+            .expect("the trimmed history stays valid");
     }
 
     #[test]

@@ -25,12 +25,12 @@ use rspice_schematic_editor::view::{
     viewport::Viewport,
 };
 
-use super::{PortSpec, SymbolDocument, SymbolEditorMetadata, SymbolLibrary};
+use super::SymbolLibrary;
 use crate::schematic::view::{CanvasFacts, CanvasParts};
-use crate::state::{SchematicNetHighlighting, SchematicProbe};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::state::{
+    PortSpec, SchematicNetHighlighting, SchematicProbe, SymbolDocument, SymbolEditorMetadata,
+};
+use crate::ui::tokens::Tokens;
 
 /// How far the parent recedes behind the symbol: the share of the canvas
 /// colour laid over it. What it draws stays legible, its wires included, so
@@ -203,43 +203,4 @@ fn draw_parent(
 
 fn unannotated_probe(_: &SchematicProbe) -> ProbeVisualStatus {
     ProbeVisualStatus::Pending
-}
-
-/// Ask what becomes of unsaved symbol edits before the in-place edit ends.
-pub(super) fn show_leaving_question(ctx: &egui::Context, state: &mut CanvasParts<'_>) {
-    let Some(session) = state
-        .symbol_in_place()
-        .filter(|session| session.leaving.is_some())
-    else {
-        return;
-    };
-    let cell = session.symbol.cell.clone();
-    let title = format!("Save the {cell} symbol?");
-    let consequence = format!(
-        "The {cell} symbol has edits that are not saved. Saving publishes them to every \
-         instance of {cell}; discarding puts the symbol back as it was."
-    );
-    let choice = Dialog::new(&title, "Save")
-        .description(&consequence)
-        .size(DialogSize::Confirmation)
-        .secondary("Discard")
-        .secondary_leading()
-        .ghost("Cancel")
-        .show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&consequence)
-                        .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                        .color(t.color.text),
-                )
-                .wrap(),
-            );
-        });
-    match choice {
-        DialogChoice::Primary => state.save_and_leave_symbol_in_place(),
-        DialogChoice::Secondary => state.discard_and_leave_symbol_in_place(),
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.stay_in_symbol_in_place(),
-        DialogChoice::None => {}
-    }
 }

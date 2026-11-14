@@ -65,8 +65,10 @@ fn pins_section(
     // The interface the symbol answers to is stated here, on the list of
     // pins that would have to change, rather than in a section of its own
     // restating the inspector's pin contract.
-    let mismatched = !ports.is_empty()
-        && !matches!(document.pin_summary(ports), crate::state::PinSummary::Match);
+    let interface = cx
+        .model
+        .symbol_interface(&cx.model.workspace.content.active_view);
+    let mismatched = !document.pin_summary(&interface).matches();
     let count = document.pins.len();
     section_header(
         ui,

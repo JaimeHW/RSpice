@@ -26,17 +26,15 @@
 //! its gestures over the same parts.
 
 use crate::state::{
-    BusDeclaration, BusParseError, CellViewRef, Point, PortSpec, SymbolDocument,
-    SymbolEditorMetadata,
+    BusDeclaration, BusParseError, CellViewRef, Point, SymbolDocument, SymbolEditorMetadata,
 };
 #[cfg(test)]
 use crate::workbench::app_state::AppState;
 use crate::workbench::{
     app::{
-        SymbolInPlace, SymbolInPlaceRefusal, active_symbol_save_checks, deny_read_only_edit,
-        finish_symbol_parent_edit, hierarchy_master_for_component, in_place_placement,
-        in_place_session, in_place_session_mut, place_floating_paste,
-        publish_active_symbol_revision, reconcile_conductor_route, record_symbol_edit,
+        SymbolInPlace, SymbolInPlaceRefusal, deny_read_only_edit, finish_symbol_parent_edit,
+        hierarchy_master_for_component, in_place_placement, in_place_session, in_place_session_mut,
+        place_floating_paste, reconcile_conductor_route, record_symbol_edit,
         selected_hierarchy_master, selected_instance_veriloga_source,
         selected_symbol_in_place_target, start_canvas_bus, start_canvas_wire,
         store_symbol_canvas_frame, symbol_editor_request_source, sync_active_schematic,
@@ -53,7 +51,6 @@ use crate::workbench::{
     state::WorkbenchSession,
 };
 use rspice_design::drc::{DrcLocation, DrcSeverity};
-use rspice_design::symbol::publication::SymbolSaveCheck;
 use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
@@ -567,32 +564,6 @@ impl CanvasParts<'_> {
         symbol_editor_request_source(self.model, self.workbench)
     }
 
-    /// [`active_symbol_save_checks`] over these parts.
-    pub(crate) fn active_symbol_save_checks(
-        &self,
-        document: &SymbolDocument,
-        ports: &[PortSpec],
-    ) -> Vec<SymbolSaveCheck> {
-        active_symbol_save_checks(self.model, document, ports)
-    }
-
-    /// [`publish_active_symbol_revision`] over these parts.
-    pub(crate) fn publish_active_symbol_revision(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &mut SymbolEditorMetadata,
-        revision_note: &str,
-    ) -> Result<u64, String> {
-        publish_active_symbol_revision(
-            &mut self.design.symbol,
-            self.model,
-            self.workbench,
-            document,
-            metadata,
-            revision_note,
-        )
-    }
-
     /// [`finish_symbol_parent_edit`] over these parts.
     pub(crate) fn finish_symbol_parent_edit(&mut self) {
         finish_symbol_parent_edit(&mut self.design.symbol, self.model);
@@ -631,36 +602,6 @@ impl CanvasParts<'_> {
     /// Where the edited instance puts its symbol on the parent.
     pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
         in_place_placement(self.symbol_in_place()?, self.model)
-    }
-
-    pub(crate) fn save_and_leave_symbol_in_place(&mut self) {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .save_and_leave_symbol_in_place();
-    }
-
-    pub(crate) fn discard_and_leave_symbol_in_place(&mut self) {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .discard_and_leave_symbol_in_place();
-    }
-
-    pub(crate) fn stay_in_symbol_in_place(&mut self) {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .stay_in_symbol_in_place();
-    }
-
-    pub(crate) fn symbol_in_place_saved(&mut self) {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .symbol_in_place_saved();
-    }
-
-    pub(crate) fn symbol_in_place_save_cancelled(&mut self) {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .symbol_in_place_save_cancelled();
     }
 
     /// Land the floating copy where it sits now.

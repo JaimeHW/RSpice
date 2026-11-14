@@ -141,31 +141,16 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
     assert_eq!(parent.document().wires, wires, "no parent wire moved");
 }
 
-/// Save publishes the edit to the master: a second instance, turned the
-/// other way, connects the moved pin where the edit put it.
+/// An in-place edit is an edit of the master: leaving keeps it without a
+/// question, and a second instance, turned the other way, connects the moved
+/// pin where the edit put it.
 #[test]
-fn saving_in_place_updates_every_instance_of_the_symbol() {
+fn an_in_place_edit_reaches_every_instance_and_leaving_keeps_it() {
     let (first, second) = (Point::new(100, 80), Point::new(200, 80));
     let mut fixture = Fixture::new(&[
         (first, Rotation::R0, false),
         (second, Rotation::R180, false),
     ]);
-    let revision = |fixture: &Fixture| {
-        let document = fixture
-            .app
-            .state
-            .model
-            .load_symbol_document(&fixture.symbol)
-            .unwrap();
-        fixture
-            .app
-            .state
-            .model
-            .load_symbol_editor_metadata(&fixture.symbol, &document)
-            .unwrap()
-            .revision
-    };
-    let before = revision(&fixture);
     fixture.enter(0);
     let from = fixture.screen(first + Point::new(-40, -10));
     let to = fixture.screen(first + Point::new(-40, 20));
@@ -173,16 +158,12 @@ fn saving_in_place_updates_every_instance_of_the_symbol() {
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, 20)));
 
     fixture.key(egui::Key::Escape);
-    assert!(fixture.leaving(), "Escape with an edit asks first");
-    // Save, then the save dialog's own Save.
-    fixture.key(egui::Key::Enter);
-    assert!(fixture.app.state.design.symbol.editor.save_dialog_open);
-    // The revision note the save dialog asks for, typed into its field.
-    fixture.frame(vec![egui::Event::Text("Move pin A".into())]);
-    fixture.key(egui::Key::Enter);
-
-    assert!(fixture.on_parent(), "the save finished leaving");
-    assert!(revision(&fixture) > before, "the save published a revision");
+    assert!(fixture.on_parent(), "Escape with an edit leaves at once");
+    assert_eq!(
+        fixture.symbol_pin("A"),
+        Some(Point::new(-40, 20)),
+        "leaving kept the edit"
+    );
     let terminal = fixture
         .terminals(1)
         .into_iter()
@@ -192,11 +173,10 @@ fn saving_in_place_updates_every_instance_of_the_symbol() {
     assert_eq!(terminal, second + Point::new(40, -20));
 }
 
-/// Escape and Return leave at once when nothing changed. With an edit,
-/// Escape asks; Cancel stays with the edit kept, and Discard puts the
-/// symbol back as it was before leaving.
+/// Escape and Return leave at once, with or without an edit, and ask
+/// nothing: the symbol is project data, saved with the project.
 #[test]
-fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
+fn leaving_in_place_asks_nothing_and_keeps_every_edit() {
     let position = Point::new(100, 80);
     let mut fixture = Fixture::new(&[(position, Rotation::R0, false)]);
     fixture.enter(0);
@@ -240,28 +220,12 @@ fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
     fixture.press_drag_release(from, to);
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, 20)));
     fixture.key(egui::Key::Escape);
-    assert!(fixture.leaving(), "Escape with an edit asks");
-    fixture.key(egui::Key::Escape);
-    assert!(!fixture.leaving(), "Escape in the question cancels it");
-    assert!(
-        crate::workbench::app::in_place_session(
-            &fixture.app.state.design.symbol.in_place,
-            &fixture.app.state.model
-        )
-        .is_some(),
-        "and stays"
+    assert!(fixture.on_parent(), "Escape with an edit leaves");
+    assert_eq!(
+        fixture.symbol_pin("A"),
+        Some(Point::new(-40, 20)),
+        "the edit stays"
     );
-    assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, 20)));
-
-    fixture.key(egui::Key::Escape);
-    assert!(fixture.leaving());
-    fixture
-        .app
-        .state
-        .navigation()
-        .discard_and_leave_symbol_in_place();
-    assert!(fixture.on_parent(), "Discard leaves");
-    assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, -10)));
 }
 
 /// Zoom previous follows the canvas in front. A symbol still edited in place
@@ -567,14 +531,6 @@ impl Fixture {
             .load_symbol_document(&self.symbol)
             .unwrap();
         document.pin(name).and_then(|pin| pin.position)
-    }
-
-    fn leaving(&self) -> bool {
-        crate::workbench::app::in_place_session(
-            &self.app.state.design.symbol.in_place,
-            &self.app.state.model,
-        )
-        .is_some_and(|session| session.leaving.is_some())
     }
 
     fn on_parent(&self) -> bool {

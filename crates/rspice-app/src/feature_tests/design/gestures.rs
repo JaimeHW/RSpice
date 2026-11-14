@@ -67,7 +67,6 @@ fn symbol_draft_survives_passive_window_projection() {
         fixture.app.state.design.symbol.editor.pending_polyline = points.clone();
         fixture.app.state.design.symbol.editor.select_shape(0);
         fixture.app.state.design.symbol.editor.dragging_origin = true;
-        fixture.app.state.design.symbol.editor.save_revision_note = "Owner draft".into();
         fixture.app.state.design.symbol.editor.clipboard.shapes = document.body.clone();
         let primary = fixture.app.state.workbench.window_session.primary();
         let layout = fixture.app.state.workbench.current_workspace_layout();
@@ -90,16 +89,6 @@ fn symbol_draft_survives_passive_window_projection() {
                     .symbol
                     .editor
                     .pending_polyline
-                    .is_empty()
-            );
-            assert!(
-                fixture
-                    .app
-                    .state
-                    .design
-                    .symbol
-                    .editor
-                    .save_revision_note
                     .is_empty()
             );
             assert_eq!(
@@ -149,10 +138,6 @@ fn symbol_draft_survives_passive_window_projection() {
                 .history
                 .undo_depth(&primary_view.key()),
             0
-        );
-        assert_eq!(
-            fixture.app.state.design.symbol.editor.save_revision_note,
-            "Owner draft"
         );
         assert!(fixture.app.state.design.symbol.editor.dragging_origin);
         if other_is_symbol {

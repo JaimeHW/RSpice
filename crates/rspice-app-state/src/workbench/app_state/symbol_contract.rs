@@ -13,9 +13,12 @@ use rspice_design::symbol::generated::{
     GENERATED_PORTS_KEY, decode_ports, generated_interface_document,
 };
 
+use rspice_design::symbol::publication::{EncodedSymbolEditorBundle, bound_interface};
+
 use super::model::{Model, interface_pins, port_electrical_type};
 use crate::state::{
-    CellViewRef, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
+    CellViewRef, ModelBoundSymbolDefinition, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY,
+    SymbolDocument, SymbolEditorMetadata, SymbolInterface, ViewType, load_model_bound_symbol,
 };
 
 impl Model {
@@ -29,56 +32,96 @@ impl Model {
         reference: &CellViewRef,
     ) -> Result<SymbolPinCheckInputs, String> {
         let document = self.load_symbol_document(reference)?;
-        let revision = self
-            .load_symbol_editor_metadata(reference, &document)?
-            .revision;
-        let ports = self.symbol_ports(reference);
         Ok(SymbolPinCheckInputs {
-            revision,
             document,
-            ports,
+            interface: self.symbol_interface(reference),
+            binding: self.symbol_model_binding(reference),
         })
     }
 
-    /// The interface contract one cell's symbol is checked against.
+    /// The model one symbol view is bound to, if any.
+    pub fn symbol_model_binding(
+        &self,
+        reference: &CellViewRef,
+    ) -> Option<ModelBoundSymbolDefinition> {
+        self.library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .and_then(|view| load_model_bound_symbol(view).ok().flatten())
+    }
+
+    /// What one cell's symbol answers to: the model it is bound to, else the
+    /// interface its schematic or compiled module declares, else nothing but
+    /// its own pins.
     ///
     /// Addressed by reference rather than only by what is in front of the
     /// reader, because the currency of a published pin finding is decided by
-    /// the contract that finding was derived from — and navigating away from
-    /// a symbol does not change that symbol's contract.
+    /// the interface that finding was derived from — and navigating away from
+    /// a symbol does not change that symbol's interface.
+    pub fn symbol_interface(&self, reference: &CellViewRef) -> SymbolInterface {
+        match self.symbol_model_binding(reference) {
+            Some(definition) => bound_interface(&definition),
+            None => self.drawn_symbol_interface(reference),
+        }
+    }
+
+    /// The pins one cell's schematic or compiled module declares for its
+    /// symbol; none where the symbol defines the interface itself.
     pub fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
+        match self.drawn_symbol_interface(reference) {
+            SymbolInterface::SymbolDefined => Vec::new(),
+            SymbolInterface::Declared(ports) => ports,
+        }
+    }
+
+    /// The interface the cell's own drawings declare: its schematic, or with
+    /// no schematic pins the module's last clean compile, or the ports a
+    /// generated symbol was drawn from. A schematic that exists and declares
+    /// no pins is a declaration too, of none; a cell with no schematic and no
+    /// module leaves the symbol to define the interface.
+    fn drawn_symbol_interface(&self, reference: &CellViewRef) -> SymbolInterface {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.content.active_view == schematic_ref {
-            return self.schematic.document().interface_ports();
+            return SymbolInterface::Declared(self.schematic.document().interface_ports());
         }
-        if let Some(schematic) = self
+        let schematic_ports = self
             .workspace
             .content
             .schematic_buffers
             .get(&schematic_ref.key())
-        {
-            let ports = schematic.document().interface_ports();
-            if !ports.is_empty() {
-                return ports;
-            }
+            .map(|schematic| schematic.document().interface_ports());
+        if let Some(ports) = schematic_ports.as_ref().filter(|ports| !ports.is_empty()) {
+            return SymbolInterface::Declared(ports.clone());
         }
 
         let cell = self
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell));
-        // With no schematic, the module's last clean compile is the contract.
-        if let Some(ports) = cell
-            .and_then(module_interface_view)
+        let module = cell.and_then(module_interface_view);
+        if let Some(ports) = module
             .and_then(|view| metadata_ports(&view.metadata))
             .filter(|ports| !ports.is_empty())
         {
-            return ports;
+            return SymbolInterface::Declared(ports);
         }
-        cell.and_then(|cell| cell.get_view(&reference.view))
+        let schematic_exists = schematic_ports.is_some()
+            || cell
+                .and_then(|cell| cell.get_view(&schematic_ref.view))
+                .is_some_and(|view| view.view_type == ViewType::Schematic);
+        if schematic_exists || module.is_some() {
+            return SymbolInterface::Declared(schematic_ports.unwrap_or_default());
+        }
+        match cell
+            .and_then(|cell| cell.get_view(&reference.view))
             .and_then(|view| view.metadata.get(GENERATED_PORTS_KEY))
             .map(|encoded| decode_ports(encoded))
-            .unwrap_or_default()
+            .filter(|ports| !ports.is_empty())
+        {
+            Some(ports) => SymbolInterface::Declared(ports),
+            None => SymbolInterface::SymbolDefined,
+        }
     }
 
     /// What the interface of one cell's symbol is read from, in the words
@@ -190,8 +233,66 @@ impl Model {
             .map(|schematic| schematic.content_stamp())
     }
 
-    /// One cell's symbol authoring metadata, which is where its published
-    /// revision is recorded.
+    /// Record the save about to write `reference`: a new revision, dated
+    /// `saved_unix_ms`, when the symbol's artwork differs from what its last
+    /// revision recorded. Returns the revision recorded, if one was.
+    ///
+    /// Only an authored symbol in a library the project writes has a
+    /// revision history; a symbol still drawn from generated ports, or one a
+    /// read-only library holds, records none.
+    pub fn record_symbol_save(
+        &mut self,
+        reference: &CellViewRef,
+        saved_unix_ms: u64,
+    ) -> Result<Option<u64>, String> {
+        let authored = self
+            .library_manager
+            .get_library(&reference.library)
+            .filter(|library| !library.read_only)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .is_some_and(|view| {
+                view.view_type == ViewType::Symbol
+                    && view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+            });
+        if !authored {
+            return Ok(None);
+        }
+        let document = self.load_symbol_document(reference)?;
+        let mut metadata = self.load_symbol_editor_metadata(reference, &document)?;
+        let Some(revision) = metadata.record_saved_revision(&document, saved_unix_ms) else {
+            return Ok(None);
+        };
+        let bundle = EncodedSymbolEditorBundle::encode(&document, &metadata)?;
+        self.library_manager
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.store_symbol_editor_bundle(&reference.cell, &reference.view, bundle)
+            })
+            .ok_or_else(|| format!("View '{}' not found", reference.display_path()))?;
+        Ok(Some(revision))
+    }
+
+    /// Every symbol view in a library the project writes.
+    pub fn writable_symbol_views(&self) -> Vec<CellViewRef> {
+        let mut views = Vec::new();
+        for library in self.library_manager.libraries_sorted() {
+            if library.read_only {
+                continue;
+            }
+            for cell in library.cells.values() {
+                for view in cell.views.values() {
+                    if view.view_type == ViewType::Symbol {
+                        views.push(CellViewRef::new(&library.name, &cell.name, &view.name));
+                    }
+                }
+            }
+        }
+        views
+    }
+
+    /// One cell's symbol authoring metadata, which is where its revision
+    /// history is recorded.
     pub fn load_symbol_editor_metadata(
         &self,
         reference: &CellViewRef,
@@ -209,15 +310,11 @@ impl Model {
     }
 }
 
-/// Everything one symbol view's pin checks were derived from.
-///
-/// The published revision as well as the artwork, because a revision is what
-/// the instances placed against this symbol were wired to: republishing the
-/// same drawing under a new one is a new contract, and a finding measured
-/// against the old one no longer describes it.
+/// Everything one symbol view's pin checks were derived from: the artwork,
+/// the interface it answers to, and the model it is bound to.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SymbolPinCheckInputs {
-    pub(in crate::workbench) revision: u64,
     pub document: SymbolDocument,
-    pub ports: Vec<PortSpec>,
+    pub interface: SymbolInterface,
+    pub binding: Option<ModelBoundSymbolDefinition>,
 }

@@ -216,8 +216,6 @@ pub(crate) enum DesignCommand {
     /// Bring the symbol's pins back into agreement with the interface its
     /// schematic declares.
     SymbolUpdatePinsFromContract,
-    /// Validate the symbol against its publication contract, then save it.
-    SymbolSave,
     /// Edit the selected instance's symbol master where the instance stands
     /// on its parent schematic.
     EditSymbolInPlace,
@@ -410,7 +408,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 100] = [
+    pub(crate) const ALL: [Self; 99] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -508,7 +506,6 @@ impl DesignCommand {
         Self::SymbolRotatePin,
         Self::SymbolMirrorPin,
         Self::SymbolUpdatePinsFromContract,
-        Self::SymbolSave,
         Self::EditSymbolInPlace,
         Self::ExitSymbolInPlace,
     ];
@@ -619,7 +616,6 @@ impl DesignCommand {
             Self::SymbolRotatePin => CommandKey::new("symbol-rotate-pin"),
             Self::SymbolMirrorPin => CommandKey::new("symbol-mirror-pin"),
             Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
-            Self::SymbolSave => CommandKey::new("save-symbol"),
             Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
             Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
         }
@@ -1048,13 +1044,6 @@ impl DesignCommand {
             ),
             Self::SymbolUpdatePinsFromContract => (
                 "Update pins from contract",
-                "Design",
-                palette,
-                symbol_canvas,
-                NONE,
-            ),
-            Self::SymbolSave => (
-                "Validate and save symbol",
                 "Design",
                 palette,
                 symbol_canvas,

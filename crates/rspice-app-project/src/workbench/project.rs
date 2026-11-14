@@ -534,6 +534,12 @@ fn schematic_in_front(reads: &Reads<'_, ProjectFeature>) -> bool {
         )
 }
 
+/// Whether a symbol is the drawing in front.
+fn symbol_in_front(reads: &Reads<'_, ProjectFeature>) -> bool {
+    reads.wb.workspace == Workspace::Design
+        && reads.model.workspace.content.active_view_type() == ViewType::Symbol
+}
+
 /// Whether the open project holds work a save would write, read as the
 /// project lifecycle reads the application.
 fn project_has_unsaved_changes(reads: &Reads<'_, ProjectFeature>) -> bool {
@@ -584,8 +590,18 @@ impl CommandSet for ProjectCommand {
                 "open a schematic or testbench",
             ),
             Self::RevisionHistory => (open, "open a project"),
+            // A symbol in front is checked and saved with the project: its
+            // checks are advice, so they never stand between it and the save.
+            Self::CheckAndSave if symbol_in_front(reads) => (
+                open && !reads.model.active_view_read_only(),
+                if open {
+                    "the symbol is read-only"
+                } else {
+                    "no project is open"
+                },
+            ),
             Self::CheckAndSave if !schematic_in_front(reads) => {
-                (false, "open an editable schematic or testbench")
+                (false, "open an editable schematic, testbench or symbol")
             }
             Self::CheckAndSave => (
                 !reads.model.schematic_edit_read_only(),
@@ -656,6 +672,14 @@ impl CommandSet for ProjectCommand {
                 cx.model,
                 cx.platform,
             ),
+            // Saving a symbol in front runs its checks, so Check and save
+            // there is the save itself.
+            Self::CheckAndSave
+                if cx.wb.workspace == Workspace::Design
+                    && cx.model.workspace.content.active_view_type() == ViewType::Symbol =>
+            {
+                cx.wb.outbox.push(ProjectFileAction::Save);
+            }
             Self::CheckAndSave => open_check_and_save_dialog(&mut check_and_save_parts(cx)),
         }
     }

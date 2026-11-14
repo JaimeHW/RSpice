@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument};
+use super::{
+    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
+};
 use crate::library::View;
 use crate::schematic::component::Component;
 use crate::schematic::document::SchematicDocument;
@@ -83,12 +85,14 @@ pub struct SymbolParentEdit {
     pub parents: Vec<SymbolParentWiring>,
 }
 
-/// Committed symbol edits and publication depths, keyed by cellview.
+/// Committed symbol edits, keyed by cellview.
+///
+/// Whether a symbol has unsaved edits is the project's question, answered by
+/// comparing it with the last project save; the history only steps edits.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolHistory {
     undo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
     redo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
-    save_points: HashMap<String, usize>,
     /// The edit whose parent wiring is held open, by the cellview it edits.
     parent_edit: Option<(String, SymbolParentEdit)>,
 }
@@ -107,21 +111,6 @@ impl SymbolHistory {
 
     pub fn take_parent_edit(&mut self) -> Option<SymbolParentEdit> {
         self.parent_edit.take().map(|(_, edit)| edit)
-    }
-
-    /// Whether the cellview carries edits its last published revision does
-    /// not contain. This is the single authority: no surface re-derives
-    /// dirtiness by comparing documents or reading a stored modified flag.
-    pub fn is_dirty(&self, key: &str) -> bool {
-        let depth = self.undo_depth(key);
-        depth != self.save_points.get(key).copied().unwrap_or(0)
-    }
-
-    /// Record that everything on the stack up to here is published.
-    pub fn mark_save_point(&mut self, key: impl Into<String>) {
-        let key = key.into();
-        let depth = self.undo_stacks.get(&key).map_or(0, Vec::len);
-        self.save_points.insert(key, depth);
     }
 
     pub fn undo_depth(&self, key: &str) -> usize {
@@ -180,7 +169,10 @@ impl SymbolHistory {
 
     /// Forget the edits waiting to be redone, for edits the author threw
     /// away rather than undid.
-    pub fn discard_redo(&mut self, key: &str) {
+    /// Drop every step held for `key`: the document went back to a state
+    /// its history did not lead to, so no step of it applies any more.
+    pub fn forget(&mut self, key: &str) {
+        self.undo_stacks.remove(key);
         self.redo_stacks.remove(key);
     }
 }
@@ -453,10 +445,10 @@ pub fn restore_symbol_snapshot_in_view(view: &mut View, snapshot: &SymbolDocumen
             view.metadata.remove(SYMBOL_DOCUMENT_METADATA_KEY);
         }
     }
-    match &snapshot.symbol_editor_metadata {
+    match restored_editor_metadata(view, snapshot) {
         Some(encoded) => {
             view.metadata
-                .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded.clone());
+                .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded);
         }
         None => {
             view.metadata.remove(SYMBOL_EDITOR_METADATA_KEY);
@@ -479,6 +471,32 @@ pub fn restore_symbol_snapshot_in_view(view: &mut View, snapshot: &SymbolDocumen
             view.metadata.remove("ports");
         }
     }
+}
+
+/// The editor metadata restoring `snapshot` leaves in `view`: the snapshot's
+/// attributes, under the revision history the view holds now.
+///
+/// A revision records a project save, and an undo does not take a save back.
+/// Restoring the snapshot's own history would rewind the counter, and the
+/// next save would number a different drawing with a revision an earlier
+/// save already wrote.
+fn restored_editor_metadata(view: &View, snapshot: &SymbolDocumentSnapshot) -> Option<String> {
+    let history = view
+        .metadata
+        .get(SYMBOL_EDITOR_METADATA_KEY)
+        .and_then(|encoded| serde_json::from_str::<SymbolEditorMetadata>(encoded).ok())
+        .filter(|current| current.revision > 0);
+    let Some(history) = history else {
+        return snapshot.symbol_editor_metadata.clone();
+    };
+    let restored = match &snapshot.symbol_editor_metadata {
+        Some(encoded) => match serde_json::from_str::<SymbolEditorMetadata>(encoded) {
+            Ok(metadata) => metadata,
+            Err(_) => return Some(encoded.clone()),
+        },
+        None => SymbolEditorMetadata::for_document(&snapshot.document),
+    };
+    serde_json::to_string(&restored.with_revision_history_of(&history)).ok()
 }
 
 /// Rewrite the terminal names of every instance of `reference` in one sheet.
@@ -530,4 +548,49 @@ pub fn rename_instance_terminals(
         }
     }
     renamed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::ViewType;
+
+    fn stored(view: &mut View, document: &SymbolDocument, metadata: &SymbolEditorMetadata) {
+        document.store_in_view(view).expect("the document stores");
+        view.metadata.insert(
+            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
+            metadata.encode().expect("the metadata encodes"),
+        );
+    }
+
+    /// An undo puts the drawing back; it does not take back the save that
+    /// recorded a revision since, so the next save cannot reuse its number.
+    #[test]
+    fn undoing_past_a_save_keeps_the_revision_the_save_recorded() {
+        let before = SymbolDocument::default();
+        let mut view = View::new("symbol", ViewType::Symbol);
+        let metadata = SymbolEditorMetadata::for_document(&before);
+        stored(&mut view, &before, &metadata);
+        let snapshot = symbol_metadata_snapshot_from_view(&view, &before);
+
+        let after = SymbolDocument {
+            origin: Point::new(10, 0),
+            ..SymbolDocument::default()
+        };
+        let mut saved = metadata.clone();
+        assert_eq!(saved.record_saved_revision(&after, 7), Some(1));
+        stored(&mut view, &after, &saved);
+
+        restore_symbol_snapshot_in_view(&mut view, &snapshot);
+
+        assert_eq!(
+            SymbolDocument::load_from_view(&view).expect("the document loads"),
+            before
+        );
+        let restored =
+            SymbolEditorMetadata::load_from_view(&view, &before).expect("the metadata loads");
+        assert_eq!(restored.revision, 1);
+        assert_eq!(restored.revisions.len(), 1);
+        assert_eq!(restored.attributes, metadata.attributes);
+    }
 }

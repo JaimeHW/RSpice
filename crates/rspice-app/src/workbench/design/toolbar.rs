@@ -378,11 +378,6 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
         show: preview_as_placed_toggle,
         overflow: None,
     }),
-    labelled(
-        DesignCommand::SymbolSave.key(),
-        WorkbenchIcon::Save,
-        "Save symbol",
-    ),
     ToolbarEntry::Only(
         symbol_in_place,
         &[labelled(

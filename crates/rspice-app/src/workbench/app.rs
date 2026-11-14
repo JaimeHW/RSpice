@@ -176,9 +176,8 @@ pub(crate) use actions::workspace::{
     highlight_active_failure_sites, log_anchor_refusal, selected_hierarchy_master,
     selected_instance_veriloga_source,
     symbol_document::{
-        active_symbol_ports, active_symbol_save_checks, finish_symbol_parent_edit,
-        generate_active_symbol_document, load_active_symbol_editor_metadata,
-        publish_active_symbol_revision, record_symbol_edit, store_symbol_canvas_frame,
+        active_symbol_ports, finish_symbol_parent_edit, generate_active_symbol_document,
+        load_active_symbol_editor_metadata, record_symbol_edit, store_symbol_canvas_frame,
         symbol_editor_copy_available, symbol_editor_lock_message, symbol_editor_request_source,
     },
     symbol_in_place::{

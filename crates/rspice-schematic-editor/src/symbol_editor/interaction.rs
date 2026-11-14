@@ -140,9 +140,6 @@ pub fn bind_canvas_source(session: &mut SymbolEditorSession, source: SymbolReque
         session.marquee_start = None;
         session.marquee_current = None;
         session.clear_draft();
-        session.save_dialog_open = false;
-        session.save_revision_note.clear();
-        session.save_error = None;
         if !same_view {
             session.clear_selection();
         }

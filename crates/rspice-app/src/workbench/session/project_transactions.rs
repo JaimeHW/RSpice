@@ -51,6 +51,7 @@ use rspice_project::lifecycle::SaveContinuationEvent;
 
 use crate::services::recent_files::RecentKind;
 use crate::workbench::app::ConfirmationAction;
+use crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{
     Leaving, show_configuration_page_in,
 };
@@ -903,6 +904,15 @@ impl AppState {
         if let Err(error) = self.commit_inline_component_edit() {
             self.prompt(format!("Inspector edit was not applied: {error}"));
             return SaveRequestOutcome::Failed(error);
+        }
+        // A symbol in front is checked with every save, so the Problems page
+        // states what the save wrote. The checks are advice: whatever they
+        // find, the save goes ahead.
+        if self.workbench.workspace == Workspace::Design
+            && self.model.workspace.content.active_view_type() == ViewType::Symbol
+        {
+            let facts = self.slot_facts();
+            run_active_symbol_pin_checks(&mut self.model, facts);
         }
         save_scope_for_platform(self, scope)
     }

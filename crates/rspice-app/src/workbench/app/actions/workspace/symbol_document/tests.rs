@@ -1,10 +1,8 @@
-//! Cases for the symbol document's edit, save and reconciliation
-//! transactions.
+//! Cases for the symbol document's edit and reconciliation transactions.
 //!
 //! The claims here are about what a commit carries beyond geometry: whether
-//! the editor knows it has unpublished work, whether a save its own checks
-//! refuse can still happen, and whether a pin rename reaches the instances
-//! that are wired to it.
+//! a pin rename reaches the instances that are wired to it, and what the pin
+//! checks say about the interface the symbol answers to.
 
 use super::*;
 use crate::workbench::design::test_host::DesignTestHost;
@@ -140,110 +138,6 @@ fn pin_index(document: &SymbolDocument, name: &str) -> usize {
         .iter()
         .position(|pin| pin.name.eq_ignore_ascii_case(name))
         .unwrap_or_else(|| panic!("{name} is declared by the interface"))
-}
-
-#[test]
-fn the_save_point_tracks_publication_not_the_stored_view() {
-    let mut state = state_with_open_symbol(0);
-    let key = state.model.workspace.content.active_key();
-    let document = contract_matching_document(&state);
-    let mut metadata = SymbolEditorMetadata::for_document(&document);
-
-    assert!(
-        !state.design.symbol.history.is_dirty(&key),
-        "an untouched symbol is not dirty"
-    );
-
-    let before = state
-        .model
-        .load_active_symbol_document()
-        .expect("document loads");
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
-    state
-        .store_active_symbol_editor_bundle(&document, &metadata)
-        .expect("edit stores");
-
-    assert!(
-        state.design.symbol.history.is_dirty(&key),
-        "an edit that was never published is unpublished work, however \
-         faithfully the project library was written"
-    );
-
-    crate::workbench::app::publish_active_symbol_revision(
-        &mut state.design.symbol,
-        &mut state.model,
-        &mut state.workbench,
-        &document,
-        &mut metadata,
-        "first cut",
-    )
-    .expect("a contract-matching symbol publishes");
-
-    assert_eq!(metadata.revision, 1);
-    assert!(
-        !state.design.symbol.history.is_dirty(&key),
-        "publication is the save point"
-    );
-
-    let published = state
-        .model
-        .load_active_symbol_document()
-        .expect("document loads");
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &published);
-    let mut edited = document.clone();
-    edited.body.push(SymbolShape::Circle {
-        center: Point::new(30, 30),
-        radius: 5,
-    });
-    state
-        .store_active_symbol_editor_bundle(&edited, &metadata)
-        .expect("second edit stores");
-
-    assert!(state.design.symbol.history.is_dirty(&key));
-
-    state
-        .undo_active_symbol_document()
-        .expect("undo runs on a writable view");
-
-    assert!(
-        !state.design.symbol.history.is_dirty(&key),
-        "undoing back to the save point is as clean as never having edited"
-    );
-}
-
-#[test]
-fn a_symbol_that_fails_its_own_checks_is_refused_by_name() {
-    let mut state = state_with_open_symbol(0);
-    let mut document = contract_matching_document(&state);
-    let out = pin_index(&document, "OUT");
-    document.pins[out].position = Some(Point::new(43, 0));
-    let mut metadata = SymbolEditorMetadata::for_document(&document);
-    state
-        .store_active_symbol_editor_bundle(&document, &metadata)
-        .expect("edit stores");
-
-    let refusal = state
-        .refuse_unsavable_active_symbol()
-        .expect("an off-grid terminal blocks publication");
-    assert!(
-        refusal.contains("pin placement") || refusal.contains("off-grid terminals"),
-        "the refusal names the row that blocked it: {refusal}"
-    );
-
-    let error = crate::workbench::app::publish_active_symbol_revision(
-        &mut state.design.symbol,
-        &mut state.model,
-        &mut state.workbench,
-        &document,
-        &mut metadata,
-        "note",
-    )
-    .expect_err("publication is refused");
-    assert_eq!(error, refusal);
-    assert_eq!(
-        metadata.revision, 0,
-        "a refused publication must not consume a revision number"
-    );
 }
 
 #[test]

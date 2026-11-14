@@ -37,8 +37,7 @@ use crate::workbench::app::actions::property_edit::{
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
     active_symbol_pin_finding_count, active_symbol_ports, clear_active_symbol_pin_checks,
-    refuse_unsavable_active_symbol, run_active_symbol_pin_checks,
-    update_active_symbol_pins_from_contract,
+    run_active_symbol_pin_checks, update_active_symbol_pins_from_contract,
 };
 use crate::workbench::app::actions::workspace::symbol_in_place::{
     SymbolInPlaceExit, in_place_session, selected_symbol_in_place_target,
@@ -460,8 +459,7 @@ impl CommandSet for DesignCommand {
             | Self::SymbolCircleTool
             | Self::SymbolArcTool
             | Self::SymbolPolygonTool
-            | Self::SymbolTextTool
-            | Self::SymbolSave => {
+            | Self::SymbolTextTool => {
                 (!editable_symbol(reads)).then_some("command is unavailable in this context")
             }
             Self::SymbolRotatePin | Self::SymbolMirrorPin => {
@@ -969,16 +967,6 @@ impl CommandSet for DesignCommand {
                     Ok(text) | Err(text) => cx.wb.prompt(text),
                 }
             }
-            // The checks run before the dialog opens, so a symbol that cannot
-            // be published says which row blocked it instead of presenting a
-            // save transaction with a disabled primary control.
-            Self::SymbolSave => match refuse_unsavable_active_symbol(cx.model) {
-                Some(refusal) => cx.wb.prompt(refusal),
-                None => {
-                    cx.state.symbol.editor.save_dialog_open = true;
-                    cx.state.symbol.editor.save_error = None;
-                }
-            },
             Self::EditSymbolInPlace => {
                 navigation(cx).edit_selected_symbol_in_place();
             }

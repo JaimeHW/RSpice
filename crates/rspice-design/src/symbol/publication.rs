@@ -1,188 +1,30 @@
-//! Symbol publication rules, paired metadata encoding, and pin reports.
+//! Symbol pin checks, paired metadata encoding, and pin reports.
 
 #[cfg(test)]
 mod tests;
 
 use super::{
     PinFindingKind, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument,
-    SymbolEditorMetadata,
+    SymbolEditorMetadata, SymbolInterface,
 };
 use crate::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use crate::library::View;
-use rspice_design_model::{
-    cell_view::CellViewRef,
-    port::{PortDirection, PortSpec},
-    symbol_pin::{SymbolElectricalType, SymbolPinSide},
-};
+use rspice_design_model::{cell_view::CellViewRef, port::PortSpec};
 use rspice_model_library::symbol::ModelBoundSymbolDefinition;
 
-/// One row of the symbol's publication contract.
-///
-/// Every row is computed from the document and its interface alone, so the
-/// same rows decide a headless "Validate and save symbol" and fill the
-/// dialog's table. A row that renders one verdict and enforces another is
-/// the defect this split exists to make impossible.
-#[derive(Debug, Clone)]
-pub struct SymbolSaveCheck {
-    pub label: &'static str,
-    pub expected: String,
-    pub observed: String,
-    pub passed: bool,
-}
-
-impl SymbolSaveCheck {
-    /// The console line a refusal reports, naming the row that blocked it.
-    pub fn refusal(&self) -> String {
-        format!(
-            "Symbol not saved - {} check expected {}, found {}",
-            self.label.to_ascii_lowercase(),
-            self.expected,
-            self.observed
-        )
-    }
-}
-
-/// The publication contract of `document`, judged against the interface it
-/// answers to and the model definition it is bound to, if any.
-pub fn symbol_save_checks(
-    definition: Option<&ModelBoundSymbolDefinition>,
-    cell: &str,
-    document: &SymbolDocument,
-    ports: &[PortSpec],
-) -> Vec<SymbolSaveCheck> {
-    let mut expected_names = ports
-        .iter()
-        .map(|port| port.name.clone())
-        .collect::<Vec<_>>();
-    let expected_directions = if let Some(definition) = definition {
-        let mut pins = definition.pins.iter().collect::<Vec<_>>();
-        pins.sort_by_key(|pin| pin.order);
-        expected_names = pins.iter().map(|pin| pin.name.clone()).collect();
+/// The interface a symbol bound to `definition` answers to: the model's pins,
+/// in its netlist order.
+pub fn bound_interface(definition: &ModelBoundSymbolDefinition) -> SymbolInterface {
+    let mut pins = definition.pins.iter().collect::<Vec<_>>();
+    pins.sort_by_key(|pin| pin.order);
+    SymbolInterface::Declared(
         pins.into_iter()
-            .map(|pin| {
-                (
-                    pin.electrical_type,
-                    pin.direction,
-                    pin.side,
-                    pin.name.clone(),
-                )
+            .map(|pin| PortSpec {
+                name: pin.name.clone(),
+                direction: pin.direction,
             })
-            .collect::<Vec<_>>()
-    } else {
-        ports
-            .iter()
-            .map(|port| {
-                (
-                    match port.direction {
-                        PortDirection::Supply => SymbolElectricalType::Power,
-                        _ => SymbolElectricalType::Analog,
-                    },
-                    port.direction,
-                    match port.direction {
-                        PortDirection::In => SymbolPinSide::Left,
-                        PortDirection::Out | PortDirection::InOut => SymbolPinSide::Right,
-                        PortDirection::Supply => SymbolPinSide::Top,
-                    },
-                    port.name.clone(),
-                )
-            })
-            .collect()
-    };
-    let observed_names = document
-        .pins
-        .iter()
-        .map(|pin| pin.name.clone())
-        .collect::<Vec<_>>();
-    // A model definition states each pin's type and direction outright. A
-    // bare interface states a direction, and the type is the pin's author's.
-    let bound = definition.is_some();
-    let disagreeing = expected_directions
-        .iter()
-        .zip(&document.pins)
-        .find(|((electrical, direction, _, name), pin)| {
-            let answers = if bound {
-                pin.electrical_type() == *electrical && pin.direction == *direction
-            } else {
-                pin.states_direction(*direction)
-            };
-            !(pin.name.eq_ignore_ascii_case(name) && answers)
-        })
-        .map(|(_, pin)| pin.name.as_str());
-    let electrical_match =
-        expected_directions.len() == document.pins.len() && disagreeing.is_none();
-    let placement_valid = document
-        .pins
-        .iter()
-        .all(|pin| pin.position.is_some() && pin.terminal_on_grid());
-    // The same finding the symbol check publishes as `SymbolPinOffGrid`, so
-    // the dialog and the check console can never disagree about the count.
-    let off_grid = document
-        .pin_findings(ports)
-        .into_iter()
-        .filter(|finding| finding.kind == PinFindingKind::PinOffGrid)
-        .count();
-    let mut checks = vec![
-        SymbolSaveCheck {
-            label: "Pin count",
-            expected: expected_names.len().to_string(),
-            observed: document.pins.len().to_string(),
-            passed: expected_names.len() == document.pins.len(),
-        },
-        SymbolSaveCheck {
-            label: "Netlist order",
-            expected: expected_names.join(" "),
-            observed: observed_names.join(" "),
-            passed: expected_names.len() == observed_names.len()
-                && expected_names
-                    .iter()
-                    .zip(&observed_names)
-                    .all(|(expected, observed)| expected.eq_ignore_ascii_case(observed)),
-        },
-        SymbolSaveCheck {
-            label: if bound {
-                "Electrical types"
-            } else {
-                "Pin directions"
-            },
-            expected: if bound {
-                "bound contract"
-            } else {
-                "the interface"
-            }
-            .to_owned(),
-            observed: match disagreeing {
-                _ if electrical_match => "matched".to_owned(),
-                Some(pin) => format!("mismatch at {pin}"),
-                None => "mismatch".to_owned(),
-            },
-            passed: electrical_match,
-        },
-        SymbolSaveCheck {
-            label: "Pin placement",
-            expected: "placed on terminal grid".to_owned(),
-            observed: if placement_valid {
-                "all placed".to_owned()
-            } else {
-                "unplaced or off grid".to_owned()
-            },
-            passed: placement_valid,
-        },
-        SymbolSaveCheck {
-            label: "Off-grid terminals",
-            expected: "0".to_owned(),
-            observed: off_grid.to_string(),
-            passed: off_grid == 0,
-        },
-    ];
-    if let Some(definition) = definition {
-        checks.push(SymbolSaveCheck {
-            label: "Model family",
-            expected: definition.identity.cell.clone(),
-            observed: cell.to_owned(),
-            passed: definition.identity.cell == cell,
-        });
-    }
-    checks
+            .collect(),
+    )
 }
 
 /// Validated encodings of a symbol document and its editor metadata.
@@ -219,35 +61,129 @@ impl EncodedSymbolEditorBundle {
     }
 }
 
-/// Check symbol pins and retain every finding with its cellview location.
+/// Check a symbol against the interface it answers to, retaining every
+/// finding with its cellview location.
+///
+/// `binding` is the model the symbol is bound to, if any; its pins are then
+/// the interface, and their electrical types and the model's cell are checked
+/// too. Every finding is a statement on the Problems page: none of them stops
+/// the symbol being saved.
 pub fn check_symbol_pins(
     document: &SymbolDocument,
-    ports: &[PortSpec],
+    interface: &SymbolInterface,
+    binding: Option<&ModelBoundSymbolDefinition>,
     reference: &CellViewRef,
 ) -> DrcResult {
-    let findings = document.pin_findings(ports);
-    let mut result = DrcResult::new();
-    result.completed = true;
+    let mut found: Vec<(DrcViolationType, String, DrcLocation)> = Vec::new();
+    let pin_location = |pin_name: &str| DrcLocation::SymbolPin {
+        reference: reference.clone(),
+        pin_name: pin_name.to_owned(),
+        point: document.pin(pin_name).and_then(|pin| pin.position),
+    };
+    let cell_location = || DrcLocation::CellView {
+        reference: reference.clone(),
+    };
 
-    for (index, finding) in findings.iter().enumerate() {
+    for finding in document.pin_findings(interface) {
         let violation_type = match finding.kind {
             PinFindingKind::UnplacedPin => DrcViolationType::SymbolUnplacedPin,
             PinFindingKind::OrphanedPin => DrcViolationType::SymbolOrphanedPin,
             PinFindingKind::PinOffGrid => DrcViolationType::SymbolPinOffGrid,
         };
-        let point = document.pin(&finding.pin_name).and_then(|pin| pin.position);
         let message = format!("{}: {}", violation_type.description(), finding.pin_name);
+        found.push((violation_type, message, pin_location(&finding.pin_name)));
+    }
+
+    let ports = interface.ports();
+    if let Some((expected, observed)) = pin_order_difference(document, ports) {
+        found.push((
+            DrcViolationType::SymbolPinOrder,
+            format!(
+                "{}: expected {expected}, found {observed}",
+                DrcViolationType::SymbolPinOrder.description()
+            ),
+            cell_location(),
+        ));
+    }
+
+    for pin in &document.pins {
+        let disagrees = match binding {
+            Some(definition) => definition
+                .pins
+                .iter()
+                .find(|declared| declared.name.eq_ignore_ascii_case(&pin.name))
+                .is_some_and(|declared| {
+                    pin.electrical_type() != declared.electrical_type
+                        || pin.direction != declared.direction
+                }),
+            None => ports
+                .iter()
+                .find(|port| port.name.eq_ignore_ascii_case(&pin.name))
+                .is_some_and(|port| !pin.states_direction(port.direction)),
+        };
+        if disagrees {
+            let violation_type = DrcViolationType::SymbolPinDirection;
+            let message = format!("{}: {}", violation_type.description(), pin.name);
+            found.push((violation_type, message, pin_location(&pin.name)));
+        }
+    }
+
+    if let Some(definition) = binding
+        && definition.identity.cell != reference.cell
+    {
+        found.push((
+            DrcViolationType::SymbolModelFamily,
+            format!(
+                "{}: {}",
+                DrcViolationType::SymbolModelFamily.description(),
+                definition.identity.cell
+            ),
+            cell_location(),
+        ));
+    }
+
+    let mut result = DrcResult::new();
+    result.completed = true;
+    for (index, (violation_type, message, location)) in found.into_iter().enumerate() {
         result.add_violation(DrcViolation::new(
             index + 1,
             violation_type,
             message,
-            DrcLocation::SymbolPin {
-                reference: reference.clone(),
-                pin_name: finding.pin_name.clone(),
-                point,
-            },
+            location,
         ));
     }
-
     result
+}
+
+/// The interface's pin names and the symbol's, each in order, where the
+/// symbol carries exactly the interface's pins in a different order.
+fn pin_order_difference(document: &SymbolDocument, ports: &[PortSpec]) -> Option<(String, String)> {
+    let expected = ports
+        .iter()
+        .map(|port| port.name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let observed = document
+        .pins
+        .iter()
+        .map(|pin| pin.name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let mut expected_set = expected.clone();
+    let mut observed_set = observed.clone();
+    expected_set.sort();
+    observed_set.sort();
+    (expected != observed && expected_set == observed_set).then(|| {
+        (
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            document
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    })
 }

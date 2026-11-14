@@ -236,7 +236,7 @@ pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceB
 pub use stimulus_library::library::StimulusLibrary;
 pub use symbol::{
     PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SymbolAttributeKind, SymbolDocument,
-    SymbolEditorMetadata, SymbolPin, SymbolShape,
+    SymbolEditorMetadata, SymbolInterface, SymbolPin, SymbolShape,
 };
 #[cfg(test)]
 pub use symbol_resolver::ResolvedCellSymbol;
@@ -271,7 +271,8 @@ pub use workspace::{SavedOutputDisplayIntent, SpecificationComparison};
 #[cfg(test)]
 mod symbol_document_tests {
     use super::{
-        PinFindingKind, PinSummary, Point, PortDirection, PortSpec, SymbolDocument, View, ViewType,
+        PinFindingKind, PinSummary, Point, PortDirection, PortSpec, SymbolDocument,
+        SymbolInterface, View, ViewType,
     };
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
@@ -297,7 +298,10 @@ mod symbol_document_tests {
 
         let names: Vec<&str> = doc.pins.iter().map(|pin| pin.name.as_str()).collect();
         assert_eq!(names, ["INP", "INN", "OUT", "VDD", "VSS"]);
-        assert_eq!(doc.pin_summary(&ota_ports()), PinSummary::Match);
+        assert!(
+            doc.pin_summary(&SymbolInterface::Declared(ota_ports()))
+                .matches()
+        );
         assert!(doc.pins.iter().all(|pin| pin.position.is_some()));
         assert!(doc.pins.iter().all(|pin| pin.terminal_on_grid()));
         assert!(!doc.body.is_empty(), "generated symbols include a body");
@@ -360,7 +364,7 @@ mod symbol_document_tests {
             doc.pin("INP").expect("INP exists").offset,
             "a new pin takes a free offset rather than stacking on one in use"
         );
-        assert_eq!(doc.pin_summary(&ports), PinSummary::Match);
+        assert!(doc.pin_summary(&SymbolInterface::Declared(ports)).matches());
     }
 
     #[test]
@@ -368,7 +372,13 @@ mod symbol_document_tests {
         let doc = SymbolDocument::generated_from_ports(&ota_ports());
         let ports = vec![port("INP", PortDirection::In)];
 
-        assert_eq!(doc.pin_summary(&ports), PinSummary::Orphaned(4));
+        assert_eq!(
+            doc.pin_summary(&SymbolInterface::Declared(ports)),
+            PinSummary {
+                orphaned: 4,
+                ..PinSummary::default()
+            }
+        );
     }
 
     #[test]
@@ -376,7 +386,7 @@ mod symbol_document_tests {
         let mut doc = SymbolDocument::generated_from_ports(&ota_ports());
         doc.pin_mut("OUT").expect("OUT exists").position = Some(Point::new(13, 0));
 
-        let findings = doc.pin_findings(&ota_ports());
+        let findings = doc.pin_findings(&SymbolInterface::Declared(ota_ports()));
 
         assert!(
             findings
@@ -387,10 +397,11 @@ mod symbol_document_tests {
     }
 
     #[test]
-    fn no_schematic_ports_is_an_idle_symbol_contract() {
-        let doc = SymbolDocument::default();
+    fn a_symbol_that_defines_its_interface_has_nothing_to_report() {
+        let doc = SymbolDocument::generated_from_ports(&ota_ports());
 
-        assert_eq!(doc.pin_summary(&[]), PinSummary::NoSchematic);
+        assert!(doc.pin_summary(&SymbolInterface::SymbolDefined).matches());
+        assert!(doc.pin_findings(&SymbolInterface::SymbolDefined).is_empty());
     }
 }
 

@@ -13,7 +13,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::FileWorkflowIo;
 use crate::io::ProjectSnapshot;
 use crate::services::session::SessionKept;
-use crate::state::{CellViewRef, LibraryManager};
+use crate::state::{CellViewRef, LibraryManager, ViewType};
+use crate::workbench::app::actions::workspace::symbol_document::revert_active_symbol_with;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::app_state::session::autosave::{self, AutosaveRestore};
@@ -186,7 +187,18 @@ fn revert_cell_view(
     baseline: &ProjectSnapshot,
     reference: &CellViewRef,
 ) -> Result<(), ProjectLifecycleError> {
-    match project_lifecycle::revert_cell_view(&mut state.model, baseline, reference)? {
+    // A symbol in front is reverted as a symbol edit is made: the wires its
+    // placed instances hold follow the pins back to where they were saved.
+    let symbol = state.model.workspace.content.active_view == *reference
+        && state.model.workspace.content.active_view_type() == ViewType::Symbol;
+    let reverted = if symbol {
+        revert_active_symbol_with(&mut state.design.symbol, &mut state.model, |model| {
+            project_lifecycle::revert_cell_view(model, baseline, reference)
+        })
+    } else {
+        project_lifecycle::revert_cell_view(&mut state.model, baseline, reference)
+    };
+    match reverted? {
         CellViewRevert::Removed { source_changed } => {
             state.prune_workspace_after_view_deleted(
                 &reference.library,
@@ -198,7 +210,11 @@ fn revert_cell_view(
             }
         }
         CellViewRevert::Restored { active } => {
-            if active {
+            // The symbol's editor reads the restored drawing anew; the sheet
+            // behind it is not the document that was reverted.
+            if symbol {
+                state.bump_active_schematic_epoch();
+            } else if active {
                 state.restore_active_schematic_from_workspace();
             }
             if project_lifecycle::revert_cell_view_sources(&mut state.model, baseline, reference)? {

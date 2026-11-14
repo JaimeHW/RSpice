@@ -6,11 +6,9 @@ pub(crate) mod interaction;
 use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use super::symbols::SymbolLibrary;
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::schematic::view::{CanvasFacts, CanvasFrame, CanvasParts, DesignSurfaceRequest};
-use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
+use crate::schematic::view::{CanvasFacts, CanvasFrame, DesignSurfaceRequest};
+use crate::state::SymbolDocument;
 use crate::ui::theme;
-use crate::ui::widgets::DialogChoice;
 use crate::workbench::app::{
     active_symbol_ports, deny_read_only_edit, generate_active_symbol_document,
     load_active_symbol_editor_metadata, symbol_editor_copy_available, symbol_editor_lock_message,
@@ -86,11 +84,6 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     {
         apply_surface_request(canvas, request);
     }
-    let dirty = canvas
-        .design
-        .symbol
-        .history
-        .is_dirty(&canvas.model.workspace.content.active_key());
     if document.body.is_empty()
         && !ports.is_empty()
         && let Some(request) = surface::empty_generate_state(
@@ -167,11 +160,6 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
                     &canvas.model.workspace.content.active_view,
                 ),
             }
-            // Edited in place, the canvas is the parent sheet, and leaving with
-            // unsaved edits asks instead.
-            if in_place.is_none() {
-                surface::unsaved_changes_notice(ui, rect, dirty);
-            }
             // The canvas takes keyboard focus on every press for its shortcuts, so
             // only focus that Tab moved here shows the ring: a press never frames
             // the drawing. Painted after the artwork so the ring is not drawn over.
@@ -205,64 +193,20 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
         .inner;
     // No breadcrumb overlay: the document tab and the inspector's eyebrow
     // both name the view this canvas is drawing.
-    surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
+    let reference = &canvas.model.workspace.content.active_view;
+    let interface_source = if canvas.model.symbol_model_binding(reference).is_some() {
+        "model"
+    } else {
+        canvas.model.symbol_contract_source(reference)
+    };
+    surface::canvas_check_note(
+        ui.ctx(),
+        document.pin_summary(&canvas.model.symbol_interface(reference)),
+        interface_source,
+        stage,
+    );
     // After the canvas has taken the keyboard for the click that opened it.
     interaction::show_text_entry(ui.ctx(), &mut canvas.parts(), viewport);
-    show_save_symbol_dialog(
-        ui.ctx(),
-        &mut canvas.parts(),
-        &document,
-        &mut editor,
-        &ports,
-    );
-    in_place::show_leaving_question(ui.ctx(), &mut canvas.parts());
-}
-
-fn show_save_symbol_dialog(
-    ctx: &egui::Context,
-    state: &mut CanvasParts<'_>,
-    document: &SymbolDocument,
-    editor: &mut SymbolEditorMetadata,
-    ports: &[PortSpec],
-) {
-    if !state.design.symbol.editor.save_dialog_open {
-        return;
-    }
-    let checks = state.active_symbol_save_checks(document, ports);
-    let can_publish = !state.active_view_read_only();
-    let choice = surface::show_save_symbol_dialog(
-        ctx,
-        &checks,
-        editor.revision,
-        &mut state.design.symbol.editor.save_revision_note,
-        state.design.symbol.editor.save_error.as_deref(),
-        can_publish,
-    );
-    match choice {
-        DialogChoice::Primary => {
-            let note = state.design.symbol.editor.save_revision_note.clone();
-            match state.publish_active_symbol_revision(document, editor, &note) {
-                Ok(revision) => {
-                    state.design.symbol.editor.save_dialog_open = false;
-                    state.design.symbol.editor.save_revision_note.clear();
-                    state.design.symbol.editor.save_error = None;
-                    state.model.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        format!("Saved symbol revision {revision}"),
-                    );
-                    state.symbol_in_place_saved();
-                }
-                Err(error) => state.design.symbol.editor.save_error = Some(error),
-            }
-        }
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.design.symbol.editor.save_dialog_open = false;
-            state.design.symbol.editor.save_error = None;
-            state.symbol_in_place_save_cancelled();
-        }
-        DialogChoice::Secondary | DialogChoice::None => {}
-    }
 }
 
 pub(crate) fn apply_surface_request(

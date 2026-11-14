@@ -1285,6 +1285,9 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::SupplyTiedToGround => 34,
         DrcViolationType::UnusedCellView => 35,
         DrcViolationType::UnknownSupplyRail => 36,
+        DrcViolationType::SymbolPinOrder => 37,
+        DrcViolationType::SymbolPinDirection => 38,
+        DrcViolationType::SymbolModelFamily => 39,
     }
 }
 

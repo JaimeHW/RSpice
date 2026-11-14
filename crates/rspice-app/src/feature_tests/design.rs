@@ -85,6 +85,7 @@ mod symbol_in_place;
 mod symbol_inspector;
 mod symbol_inspector_drawn;
 mod symbol_pin_checks;
+mod symbol_project_data;
 mod symbol_surface_requests;
 mod touch_flow;
 mod transient_annotations;

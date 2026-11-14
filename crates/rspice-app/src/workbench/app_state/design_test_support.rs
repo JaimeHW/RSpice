@@ -16,8 +16,8 @@ use crate::workbench::app::actions::workspace::history::{
 };
 use crate::workbench::app::actions::workspace::inline_edit_authority;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    can_undo_active_symbol_document, redo_active_symbol_document, refuse_unsavable_active_symbol,
-    store_active_symbol_editor_bundle, undo_active_symbol_document,
+    active_symbol_pin_finding_count, can_undo_active_symbol_document, redo_active_symbol_document,
+    run_active_symbol_pin_checks, store_active_symbol_editor_bundle, undo_active_symbol_document,
 };
 use crate::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use crate::workbench::state::InlineEditAuthority;
@@ -88,9 +88,27 @@ impl AppState {
         )
     }
 
-    /// [`refuse_unsavable_active_symbol`] for the session's model.
-    pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
-        refuse_unsavable_active_symbol(&self.model)
+    /// [`run_active_symbol_pin_checks`] for the session.
+    pub(crate) fn run_active_symbol_pin_checks(&mut self) {
+        let facts = self.slot_facts();
+        run_active_symbol_pin_checks(&mut self.model, facts);
+    }
+
+    /// [`active_symbol_pin_finding_count`] for the session's model.
+    pub(crate) fn active_symbol_pin_finding_count(&self) -> Option<usize> {
+        active_symbol_pin_finding_count(&self.model)
+    }
+
+    /// The levels of the open symbol's published pin findings, once its
+    /// checks have run.
+    pub(crate) fn active_symbol_pin_finding_levels(
+        &self,
+    ) -> Option<Vec<super::diagnostic_store::DiagnosticLevel>> {
+        let subject = self.model.workspace.content.active_view.clone();
+        self.model
+            .diagnostics
+            .batch(&super::diagnostic_store::DiagnosticInputs::SymbolPins { subject })
+            .map(|batch| batch.records.iter().map(|record| record.level).collect())
     }
 
     /// [`can_undo_active_symbol_document`] for the session.

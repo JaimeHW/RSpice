@@ -839,6 +839,7 @@ pub fn save_native(
     };
 
     let result = (|| {
+        record_saved_symbol_revisions(state, scope);
         let working = snapshot(state)?;
         let candidate = match scope {
             SaveScope::AllDocuments => working,
@@ -875,6 +876,61 @@ pub fn save_native(
         .authority
         .cancel_transaction();
     result
+}
+
+/// Give each symbol this save writes changed a revision of its own, dated
+/// now, before the snapshot is taken, so the record is part of what the save
+/// writes.
+///
+/// A project never saved has nothing to compare against: every symbol it
+/// writes is new to its file. A symbol whose artwork its last revision
+/// already holds records nothing, so a save that fails and is tried again
+/// does not record twice.
+fn record_saved_symbol_revisions(state: &mut dyn LifecycleSourceMut, scope: SaveScope) {
+    let saved: Vec<CellViewRef> = {
+        let view = state.lifecycle_view();
+        if view
+            .platform
+            .project_lifecycle
+            .authority
+            .accepted()
+            .is_none()
+        {
+            view.model.writable_symbol_views()
+        } else {
+            let documents = match scope {
+                SaveScope::AllDocuments => dirty_documents(&view),
+                SaveScope::ActiveDocument if active_document_is_dirty(&view) => {
+                    vec![active_document(&view)]
+                }
+                SaveScope::ActiveDocument => Vec::new(),
+            };
+            documents
+                .into_iter()
+                .filter_map(|document| match document {
+                    ProjectDocumentId::CellView(reference) => Some(reference),
+                    _ => None,
+                })
+                .collect()
+        }
+    };
+    if saved.is_empty() {
+        return;
+    }
+    let now = rspice_app_state::state::stimulus_library::now_unix_ms();
+    let model = state.lifecycle_parts().model;
+    for reference in saved {
+        if let Err(error) = model.record_symbol_save(&reference, now) {
+            model.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The revision of {} was not recorded: {error}",
+                    reference.display_path()
+                ),
+            );
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -943,6 +999,9 @@ pub fn prepare_browser_save(
     let context = browser_operation_context(state.model, state.platform);
     let saved_document = active_document(state);
     let result = (|| {
+        if !project_copy {
+            record_saved_symbol_revisions(state, scope);
+        }
         let working = snapshot(state)?;
         let candidate = if project_copy || scope == SaveScope::AllDocuments {
             working

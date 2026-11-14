@@ -436,14 +436,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
     // reader, the whole design, and the check that gates a save.
     design(DesignCommand::CheckCellview).access('L'),
     design(DesignCommand::CheckDesign).access('K'),
-    MenuEntry::Only(
-        MenuContext::NotSymbolView,
-        &[project(ProjectCommand::CheckAndSave).access('C')],
-    ),
-    MenuEntry::Only(
-        MenuContext::SymbolView,
-        &[design(DesignCommand::SymbolSave).access('V')],
-    ),
+    project(ProjectCommand::CheckAndSave).access('C'),
     MenuEntry::submenu("Violations", VIOLATIONS_MENU).access('I'),
     design(DesignCommand::RuleSetup).access('G'),
     MenuEntry::Only(
@@ -911,7 +904,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::RotateSelection => Some(WorkbenchIcon::Rotate),
             DesignCommand::MirrorSelectionHorizontal => Some(WorkbenchIcon::Mirror),
             DesignCommand::MirrorSelectionVertical => Some(WorkbenchIcon::MirrorVertical),
-            DesignCommand::SymbolSave => Some(WorkbenchIcon::Save),
             DesignCommand::ExitSymbolInPlace => Some(WorkbenchIcon::ArrowUp),
             _ => None,
         };

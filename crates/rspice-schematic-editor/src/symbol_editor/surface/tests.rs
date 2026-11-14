@@ -84,27 +84,51 @@ fn generation_button_returns_its_source_only_when_enabled() {
     }
 }
 
+/// A symbol that matches, or that defines the interface itself, has nothing
+/// said about it; a schematic that declares no pins is said so in those
+/// words; a mismatch is stated by kind with exact counts.
 #[test]
-fn save_button_requires_passing_checks_a_note_and_publish_capability() {
-    for (passed, note, can_publish, accepted) in [
-        (true, "Reviewed", true, true),
-        (false, "Reviewed", true, false),
-        (true, " ", true, false),
-        (true, "Reviewed", false, false),
-    ] {
-        let checks = [SymbolSaveCheck {
-            label: "Pin count",
-            expected: "1".to_owned(),
-            observed: "1".to_owned(),
-            passed,
-        }];
-        let mut note = note.to_owned();
-        let mut selected = false;
-        click_label("Save symbol revision", |ctx| {
-            selected |=
-                show_save_symbol_dialog(ctx.ctx(), &checks, 3, &mut note, None, can_publish)
-                    == DialogChoice::Primary;
-        });
-        assert_eq!(selected, accepted);
-    }
+fn the_canvas_note_states_each_interface_case_in_its_own_words() {
+    assert!(canvas_check_lines(PinSummary::default(), "schematic").is_empty());
+    assert_eq!(
+        canvas_check_lines(
+            PinSummary {
+                interface_empty: true,
+                ..PinSummary::default()
+            },
+            "schematic"
+        ),
+        ["The schematic declares no pins"]
+    );
+    assert_eq!(
+        canvas_check_lines(
+            PinSummary {
+                interface_empty: false,
+                missing: 2,
+                unplaced: 0,
+                orphaned: 1,
+            },
+            "schematic"
+        ),
+        [
+            "2 schematic pins have no symbol pin",
+            "1 pin is not in the schematic"
+        ]
+    );
+    assert_eq!(
+        canvas_check_lines(
+            PinSummary {
+                interface_empty: false,
+                missing: 1,
+                unplaced: 3,
+                orphaned: 2,
+            },
+            "module"
+        ),
+        [
+            "1 module pin has no symbol pin",
+            "2 pins are not in the module",
+            "3 pins are not placed"
+        ]
+    );
 }

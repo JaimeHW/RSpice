@@ -728,7 +728,7 @@ const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
         "---",
         "Check cellview | check-cellview | Ctrl+E | on",
         "Check design | check-design |  | on",
-        "Validate and save symbol | save-symbol |  | on",
+        "Check and save… | check-and-save | Ctrl+Shift+E | on",
         "Violations >",
         "  Next violation | next-violation | ] | off: the last check found no violations",
         "  Previous violation | previous-violation | [ | off: the last check found no violations",

@@ -1064,44 +1064,6 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
     );
 }
 
-/// `DesignCommand::SymbolSave` owns the same contract the dialog renders. Opening
-/// the transaction on a symbol that cannot be published would present a save
-/// the user cannot complete and never say why.
-#[test]
-fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
-    use crate::state::{
-        Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
-    };
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = Workspace::Design;
-
-    let document = SymbolDocument {
-        pins: vec![SymbolPin::new(
-            "OUT",
-            PortDirection::Out,
-            Some(Point::new(43, 0)),
-        )],
-        ..SymbolDocument::default()
-    };
-    let mut symbol_view = View::new("symbol", ViewType::Symbol);
-    document.store_in_view(&mut symbol_view).expect("stores");
-    let mut amp = Cell::new("amp");
-    amp.add_view(symbol_view);
-    let mut library = Library::new("work");
-    library.add_cell(amp);
-    app.state.model.library_manager.add_library(library);
-    app.state
-        .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-
-    app.execute_command_key(DesignCommand::SymbolSave.key());
-
-    assert!(
-        !app.state.design.symbol.editor.save_dialog_open,
-        "a refused save must not open a transaction it cannot complete"
-    );
-}
-
 /// The stale-interface repair fixture: `work/div` with two ports, one
 /// instance of it in the active schematic bound to the interface as it stood
 /// at placement, and a testbench around the instance so the deck has a

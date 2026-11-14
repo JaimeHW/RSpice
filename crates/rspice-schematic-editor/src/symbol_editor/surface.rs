@@ -1,17 +1,14 @@
-//! Symbol editor status, overlays and publication form over explicit display inputs.
+//! Symbol editor status and overlays over explicit display inputs.
 
 use super::{interaction::SymbolRequestSource, session::SymbolEditorSession};
 use egui::{Align2, Color32, Rect, Stroke, Ui, vec2};
-use rspice_design::symbol::{PinSummary, SymbolDocument, publication::SymbolSaveCheck};
+use rspice_design::symbol::{PinSummary, SymbolDocument};
 use rspice_design_model::port::PortSpec;
 use rspice_ui_kit::{
     accessibility::counted,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{
-        Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-        PROBLEM_MARK_SIDE, Problem, paint_problem_mark,
-    },
+    widgets::{Button, PROBLEM_MARK_SIDE, Problem, paint_problem_mark},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,43 +88,54 @@ pub fn invalid_symbol_document_state(ui: &mut Ui, error: &str) {
     });
 }
 
-/// The pin contract's standing, where the drawing is: the one statement of a
-/// mismatch in the editor, in view while a pin is being placed.
+/// What the canvas says about the pins against their interface, one line
+/// each, in the words of `source`, the drawing the interface is read from.
 ///
-/// A symbol whose pins answer its interface shows nothing. There is no note
-/// reading that the contract matches, because a reader who is not told
-/// otherwise is being told that.
-pub fn canvas_check_note(
-    ctx: &egui::Context,
-    document: &SymbolDocument,
-    ports: &[PortSpec],
-    stage: Rect,
-) {
+/// A symbol whose pins answer its interface, or that defines the interface
+/// itself, says nothing: a reader who is not told otherwise is being told
+/// that.
+pub fn canvas_check_lines(summary: PinSummary, source: &str) -> Vec<String> {
+    if summary.interface_empty {
+        return vec![format!("The {source} declares no pins")];
+    }
+    let mut lines = Vec::new();
+    if summary.missing > 0 {
+        let missing = summary.missing;
+        lines.push(if missing == 1 {
+            format!("1 {source} pin has no symbol pin")
+        } else {
+            format!("{missing} {source} pins have no symbol pin")
+        });
+    }
+    if summary.orphaned > 0 {
+        lines.push(format!(
+            "{} {} not in the {source}",
+            counted(summary.orphaned, "pin", "pins"),
+            if summary.orphaned == 1 { "is" } else { "are" }
+        ));
+    }
+    if summary.unplaced > 0 {
+        lines.push(format!(
+            "{} {} not placed",
+            counted(summary.unplaced, "pin", "pins"),
+            if summary.unplaced == 1 { "is" } else { "are" }
+        ));
+    }
+    lines
+}
+
+/// The pin contract's standing, where the drawing is: the one statement of a
+/// mismatch in the editor, in view while a pin is being placed. A mismatch is
+/// a warning; nothing here stops the symbol being saved.
+pub fn canvas_check_note(ctx: &egui::Context, summary: PinSummary, source: &str, stage: Rect) {
     if ctx.content_rect().width() <= 820.0 {
         return;
     }
+    let lines = canvas_check_lines(summary, source);
+    if lines.is_empty() {
+        return;
+    }
     let t = Tokens::get(ctx);
-    let (message, problem) = match document.pin_summary(ports) {
-        PinSummary::Match => return,
-        PinSummary::Unplaced(count) => (
-            format!(
-                "{count} declared pin{} unplaced",
-                if count == 1 { "" } else { "s" }
-            ),
-            Problem::Failure,
-        ),
-        PinSummary::Orphaned(count) => (
-            format!(
-                "{count} pin{} not in the schematic",
-                if count == 1 { "" } else { "s" }
-            ),
-            Problem::Failure,
-        ),
-        PinSummary::NoSchematic => (
-            "No schematic interface declares this cell".to_owned(),
-            Problem::Warning,
-        ),
-    };
     egui::Area::new(egui::Id::new("symbol-editor.canvas-check-note"))
         .order(egui::Order::Middle)
         .pivot(Align2::RIGHT_TOP)
@@ -135,84 +143,22 @@ pub fn canvas_check_note(
         .constrain_to(stage)
         .interactable(false)
         .show(ctx, |ui| {
-            overlay_frame(ui, &t, t.color.border, |ui| {
-                let (mark, _) = ui.allocate_exact_size(
-                    vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
-                    egui::Sense::hover(),
-                );
-                paint_problem_mark(ui.painter(), mark, problem);
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text),
-                );
-            });
-        });
-}
-
-fn symbol_save_dialog_body(
-    ui: &mut Ui,
-    checks: &[SymbolSaveCheck],
-    current_revision: u64,
-    revision_note: &mut String,
-) -> Option<egui::Id> {
-    let t = Tokens::get(ui.ctx());
-    let column_width = (ui.available_width() - ui.spacing().item_spacing.x * 3.0) / 4.0;
-    egui::Grid::new("symbol-editor.save-checks")
-        .num_columns(4)
-        .striped(true)
-        .min_col_width(column_width)
-        .show(ui, |ui| {
-            for heading in ["Check", "Expected", "Observed", "Status"] {
-                ui.label(
-                    egui::RichText::new(heading)
-                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
-            }
-            ui.end_row();
-            for check in checks {
-                ui.label(check.label);
-                ui.label(
-                    egui::RichText::new(&check.expected)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                );
-                ui.label(
-                    egui::RichText::new(&check.observed)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                );
-                // A check that passed is the row's normal state and says so
-                // in the table's own ink; only the blocking one is coloured.
-                ui.label(if check.passed {
-                    egui::RichText::new("pass").color(t.color.text)
-                } else {
-                    egui::RichText::new("blocked").color(t.color.err)
+            for line in lines {
+                overlay_frame(ui, &t, t.color.border, |ui| {
+                    let (mark, _) = ui.allocate_exact_size(
+                        vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+                        egui::Sense::hover(),
+                    );
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(line)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.text),
+                    );
                 });
-                ui.end_row();
             }
         });
-    ui.add_space(10.0);
-    ui.label(
-        egui::RichText::new(format!(
-            "Revision note \u{00b7} next revision {}",
-            current_revision.saturating_add(1)
-        ))
-        .font(theme::sans(tokens::FS_1, FontWeight::Medium)),
-    );
-    let response = ui.add(
-        egui::TextEdit::singleline(revision_note)
-            .hint_text("Describe the reviewed symbol change")
-            .desired_width(f32::INFINITY),
-    );
-    if revision_note.trim().is_empty() {
-        ui.label(
-            egui::RichText::new("A revision note is required.")
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-        );
-    }
-    Some(response.id)
 }
 
 fn overlay_frame(ui: &mut Ui, t: &Tokens, stroke: Color32, body: impl FnOnce(&mut Ui)) {
@@ -281,55 +227,6 @@ pub fn read_only_banner(
     requested
 }
 
-/// The one thing a strip across the editor is worth saying: that what is on
-/// the canvas is not what the sheets are placing.
-///
-/// A published revision and a revision counter are not states a reader acts
-/// on, and the strip stood permanently to report them. With the symbol saved
-/// there is no strip at all.
-/// The notice a symbol with unsaved edits carries, along the foot of its
-/// `canvas`.
-///
-/// Over the drawing rather than above it, and claiming no layout: a row that
-/// arrives with the first edit would move the canvas under the pointer and
-/// end the drag that made the edit.
-pub fn unsaved_changes_notice(ui: &mut Ui, canvas: Rect, dirty: bool) {
-    const NOTICE: &str = "Unsaved changes: Save symbol records them as a new revision.";
-    if !dirty {
-        return;
-    }
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let band = Rect::from_min_max(
-        egui::pos2(canvas.left(), canvas.bottom() - 22.0),
-        canvas.right_bottom(),
-    );
-    let painter = ui.painter_at(canvas);
-    painter.rect_filled(band, 0.0, c.bg_inset);
-    painter.hline(band.x_range(), band.top() + 0.5, Stroke::new(1.0, c.border));
-    let mark = Rect::from_center_size(
-        egui::pos2(
-            band.left() + 12.0 + PROBLEM_MARK_SIDE * 0.5,
-            band.center().y,
-        ),
-        egui::Vec2::splat(PROBLEM_MARK_SIDE),
-    );
-    paint_problem_mark(&painter, mark, Problem::Warning);
-    painter.text(
-        egui::pos2(mark.right() + 4.0, band.center().y),
-        egui::Align2::LEFT_CENTER,
-        NOTICE,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        c.text_dim,
-    );
-    let response = ui.interact(
-        band,
-        egui::Id::new("symbol-editor.unsaved-changes"),
-        egui::Sense::hover(),
-    );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, NOTICE));
-}
-
 pub fn empty_generate_state(
     ui: &mut Ui,
     source: &SymbolRequestSource,
@@ -372,45 +269,6 @@ pub fn empty_generate_state(
         },
     );
     requested
-}
-
-pub fn show_save_symbol_dialog(
-    ctx: &egui::Context,
-    checks: &[SymbolSaveCheck],
-    current_revision: u64,
-    revision_note: &mut String,
-    error: Option<&str>,
-    can_publish: bool,
-) -> DialogChoice {
-    let blocking = checks.iter().filter(|check| !check.passed).count();
-    let note_valid = !revision_note.trim().is_empty();
-    let blocking_title = format!("{blocking} blocking contract issue(s)");
-    let mut dialog = Dialog::new(
-        "Validate and save symbol",
-        "Save symbol revision",
-    )
-    .description("Pin order, electrical types and model binding are validated before this symbol revision replaces the current project view.")
-    .size(DialogSize::SimulationWorkflow)
-    .initial_height(520.0)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .ghost("Cancel")
-    .primary_enabled(blocking == 0 && note_valid && can_publish);
-    if let Some(error) = error {
-        dialog = dialog.transaction_state(
-            DialogTransactionTone::Error,
-            "Symbol revision was not saved",
-            error,
-        );
-    } else if blocking > 0 {
-        dialog = dialog.transaction_state(
-            DialogTransactionTone::Error,
-            &blocking_title,
-            "Resolve every failed contract row before publishing a symbol revision.",
-        );
-    }
-    dialog.show_with_initial_body_focus(ctx, |ui| {
-        symbol_save_dialog_body(ui, checks, current_revision, revision_note)
-    })
 }
 
 #[cfg(test)]
