@@ -602,7 +602,7 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "XM d d 0 0 bsimsoi_va",
             "XM",
             "bsimsoi_va",
-            "its floating body is still charging after 24 periods",
+            "harmonic balance and the transient disagree on the fundamental by a factor of 9",
         ),
         #[cfg(feature = "veriloga-model-mvsg-cmc")]
         (
