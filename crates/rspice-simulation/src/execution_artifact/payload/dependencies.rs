@@ -9,7 +9,6 @@ pub struct ResolvedExecutionDependencies {
     pub(super) snapshot_digest: Option<ContentDigest>,
     pub(super) bindings: Vec<PreparedDependencyBinding>,
     pub(super) artifacts: Vec<ExecutionArtifactEnvelope>,
-    #[serde(default)]
     pub(super) source: Option<DependencySourceContext>,
 }
 

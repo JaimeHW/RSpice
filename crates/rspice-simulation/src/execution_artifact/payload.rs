@@ -15,22 +15,17 @@ pub type EncodedArtifactTransfer<'a> = (String, Vec<std::borrow::Cow<'a, [f64]>>
 pub struct TransientTrajectoryArtifact {
     #[serde(with = "f64_bits_vec")]
     time: Vec<f64>,
-    #[serde(default)]
     current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     voltage_impulses: Option<rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
     #[serde(with = "f64_bits_map")]
     waveforms: BTreeMap<String, Vec<f64>>,
-    #[serde(default)]
     convergence: Option<Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>>,
     /// Spectra the producing solve recorded for the `.fft` cards it carried.
     ///
     /// They ride this envelope rather than a sibling artifact kind because the
     /// controller holds one artifact per producer: a transient with both a
     /// Fourier and an FFT dependent has to hand both from one payload.
-    /// Defaulted, so an artifact without spectra is byte-identical to one
-    /// produced before they existed — including its digest.
-    #[serde(default)]
     spectra: Vec<Arc<crate::results::RecordedFftSpectrum>>,
 }
 
@@ -531,7 +526,6 @@ pub struct DcOperatingPointSeedArtifact {
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
     nominal_supply_voltage: Option<f64>,
-    #[serde(default)]
     supply_source_names: Vec<String>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
@@ -1205,18 +1199,13 @@ fn encode_complex_values(writer: &mut CanonicalWriter, values: &[num_complex::Co
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HbStateArtifact {
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::HbOperatingPoint>,
     spectral_real: Vec<Vec<f64>>,
     spectral_imaginary: Vec<Vec<f64>>,
-    #[serde(default)]
     mna_branch_spectral_real: Vec<Vec<f64>>,
-    #[serde(default)]
     mna_branch_spectral_imaginary: Vec<Vec<f64>>,
-    #[serde(default)]
     integral_spectral_real: Vec<Vec<f64>>,
-    #[serde(default)]
     integral_spectral_imaginary: Vec<Vec<f64>>,
 }
 
@@ -1822,17 +1811,14 @@ struct TransferBufferRef {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TransientTrajectoryTransferMetadata {
-    #[serde(default)]
     current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     voltage_impulses: Option<rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
-    #[serde(default)]
     convergence: Option<
         rspice_simulation_contract::convergence_transport::ConvergenceTransport<TransferBufferRef>,
     >,
-    #[serde(default)]
     spectra: Vec<RecordedFftSpectrumTransferMetadata>,
 }
 
@@ -1920,15 +1906,11 @@ struct HbIntegralSpectrumTransferMetadata {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbStateTransferMetadata {
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
     config: rspice_core::analysis::HbConfig,
-    #[serde(default)]
     producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<HbSpectrumTransferMetadata>,
-    #[serde(default)]
     mna_branch_spectra: Vec<HbBranchSpectrumTransferMetadata>,
-    #[serde(default)]
     integral_spectra: Vec<HbIntegralSpectrumTransferMetadata>,
     iterations: usize,
     residual_norm: f64,
@@ -1940,7 +1922,6 @@ struct DcOperatingPointSeedTransferMetadata {
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
     nominal_supply_voltage: Option<f64>,
-    #[serde(default)]
     supply_source_names: Vec<String>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
@@ -1970,7 +1951,6 @@ struct ExecutionArtifactTransferMetadata {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ResolvedExecutionDependenciesTransferMetadata {
-    #[serde(default)]
     source: Option<DependencySourceContext>,
     snapshot_digest: Option<ContentDigest>,
     bindings: Vec<PreparedDependencyBinding>,

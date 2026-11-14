@@ -8,7 +8,6 @@ pub struct QpssStateArtifact {
     operating_point: Arc<QpssOperatingPoint>,
     spectral_real: Vec<Vec<f64>>,
     spectral_imaginary: Vec<Vec<f64>>,
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
 }
 
@@ -161,7 +160,6 @@ pub(super) struct QpssStateTransferMetadata {
     point: rspice_core::engine::QpssOperatingPointMetadata,
     real: Vec<TransferBufferRef>,
     imaginary: Vec<TransferBufferRef>,
-    #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
 }
 
