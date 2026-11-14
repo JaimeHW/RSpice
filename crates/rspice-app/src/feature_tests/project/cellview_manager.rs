@@ -7,6 +7,7 @@ use egui::{Modifiers, Rect, vec2};
 use crate::state::{Cell, CellViewRef, Library, View, ViewType};
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
+use crate::workbench::state::Workspace;
 use crate::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
 use crate::workbench::surfaces::library_cellview_manager::{resolve_symbol_reference, show};
 use crate::workbench::{RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute};
@@ -144,10 +145,13 @@ fn explicit_form_action_targets_the_selected_symbol() {
     );
 }
 
+/// What one frame told assistive technology: every node it drew.
+type FrameNodes = Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>;
+
 /// Press the manager's `button` on the Symbol & form page, in whole frames
-/// over an open project: the application after the press, and whether the
-/// frame that drew the press drew the dialog titled `title`.
-fn press_in_the_manager(button: &str, title: &str) -> (RSpiceApp, bool) {
+/// over an open project: the application after the press, and what the
+/// frame that drew the press drew.
+fn press_in_the_manager(button: &str) -> (RSpiceApp, FrameNodes) {
     let mut app = app_with_typed_symbol();
     app.state.open_project_session();
     app.state
@@ -204,10 +208,14 @@ fn press_in_the_manager(button: &str, title: &str) -> (RSpiceApp, bool) {
         4,
         vec![egui::Event::PointerMoved(at), press(true), press(false)],
     );
-    let drew = pressed.iter().any(|(_, node)| {
+    (app, pressed)
+}
+
+/// Whether a frame drew the dialog titled `title`.
+fn drew_dialog(nodes: &FrameNodes, title: &str) -> bool {
+    nodes.iter().any(|(_, node)| {
         node.role() == egui::accesskit::Role::Dialog && node.label() == Some(title)
-    });
-    (app, drew)
+    })
 }
 
 /// Edit component form… raises the form designer for the symbol the page
@@ -215,12 +223,9 @@ fn press_in_the_manager(button: &str, title: &str) -> (RSpiceApp, bool) {
 /// drew the press draws the dialog.
 #[test]
 fn edit_component_form_draws_the_form_designer_in_the_frame_that_pressed_it() {
-    let (app, drew) = press_in_the_manager(
-        "Edit component form\u{2026}",
-        "Open component form designer",
-    );
+    let (app, pressed) = press_in_the_manager("Edit component form\u{2026}");
     assert!(
-        drew,
+        drew_dialog(&pressed, "Open component form designer"),
         "the frame that drew the press draws the form designer"
     );
     assert_eq!(
@@ -234,11 +239,31 @@ fn edit_component_form_draws_the_form_designer_in_the_frame_that_pressed_it() {
 /// press draws the dialog.
 #[test]
 fn import_symbol_draws_the_importer_in_the_frame_that_pressed_it() {
-    let (app, drew) = press_in_the_manager("Import symbol\u{2026}", "Import symbol definition");
-    assert!(drew, "the frame that drew the press draws the importer");
+    let (app, pressed) = press_in_the_manager("Import symbol\u{2026}");
+    assert!(
+        drew_dialog(&pressed, "Import symbol definition"),
+        "the frame that drew the press draws the importer"
+    );
     assert_eq!(
         app.state.design.symbol_import.binding_source,
         Some(CellViewRef::new("authoring", "amp", "symbol"))
+    );
+}
+
+/// Open symbol editor takes the reader to the symbol the page shows, in
+/// Design, before the frame that drew the press is over: that frame leaves
+/// Design in front with the symbol open, off the manager's route.
+#[test]
+fn open_symbol_editor_lands_in_design_in_the_frame_that_pressed_it() {
+    let (app, _) = press_in_the_manager("Open symbol editor");
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        app.state.model.workspace.content.active_view,
+        CellViewRef::new("authoring", "amp", "symbol")
+    );
+    assert_ne!(
+        app.state.workbench.current_route().surface_id(),
+        SurfaceId::LibraryCellviewManager
     );
 }
 
