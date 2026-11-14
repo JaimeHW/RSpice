@@ -372,6 +372,17 @@ fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmRe
             supply,
         );
         let prev = ctx.int_state(index);
+        // Without a located crossing the event is dated at the timepoint whose
+        // sample first reads past the threshold, not at an interpolated
+        // crossing, as ngspice-46 dates it: the analog call queues the
+        // instance at its own TIME (icm/digital/adc_bridge/cfunc.mod:217-257,
+        // `cm_event_queue(TIME)`, which xspice/cm/cmevt.c:251 queues at that
+        // instant), and the event pass after the timepoint is accepted runs
+        // the queue up to it (spicelib/analysis/dctran.c:615), so the event
+        // call (cfunc.mod:270) posts the output at that timepoint plus its
+        // delay. A ramp through 0.45 V at 450 ns under a 30 ns maximum step
+        // gives the edge at 461.96 ns in both, the accepted point at
+        // 460.96 ns plus 1 ns.
         let (new_state, dated) = located_adc_decision(ctx, index, prev, in_low, in_high)
             .unwrap_or_else(|| (adc_bridge_state(v_in, prev, in_low, in_high), ctx.time));
 
