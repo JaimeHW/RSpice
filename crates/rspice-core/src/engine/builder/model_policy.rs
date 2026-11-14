@@ -458,6 +458,70 @@ pub(super) fn missing_advanced_mos_builtin_error(
     ))
 }
 
+/// The generated module, and the feature that compiles it in, of a Xyce `Q`
+/// card that selects VBIC 1.3 by LEVEL: 11 (`vbic13`, or `vbic13_3t_et` with a
+/// thermal terminal) and 12 (`vbic13_4t`). The generated route runs the card
+/// where the module is compiled in. Every build has a native VBIC, so where
+/// the module is not compiled in that runs the card instead, and the result
+/// says so ([`record_native_substitution`]).
+pub(super) fn native_port_of_generated_bjt(
+    spice_dialect: SpiceDialect,
+    model_type: &str,
+    level: Option<f64>,
+    terminals: usize,
+) -> Option<(&'static str, &'static str)> {
+    if spice_dialect != SpiceDialect::Xyce
+        || is_lpnp_bjt_model_type(model_type)
+        || resolve_bjt_type_from_model(model_type).is_none()
+    {
+        return None;
+    }
+    let level = level?;
+    if bjt_level_matches(level, 11.0) {
+        Some(if terminals >= 4 {
+            ("vbic13_3t_et", "veriloga-model-vbic13-3t-et")
+        } else {
+            ("vbic13", "veriloga-model-vbic13")
+        })
+    } else if bjt_level_matches(level, 12.0) {
+        Some(("vbic13_4t", "veriloga-model-vbic13-4t"))
+    } else {
+        None
+    }
+}
+
+/// Record that `element` ran the native `ran` in place of the generated
+/// `requested` module this build does not compile in, and warn once per run.
+/// A user who asked for a model by its card must hear that a different
+/// implementation of it ran.
+pub(super) fn record_native_substitution(
+    circuit: &mut CircuitData,
+    element: &str,
+    model: &str,
+    (requested, feature): (&str, &str),
+    ran: &str,
+) {
+    let line = format!(
+        "{element}: model '{model}' selects the generated {requested} module, which this \
+         build does not include (feature {feature}); the native {ran} runs it"
+    );
+    if crate::log_scope::first_saying(&line) {
+        log::warn!("{line}");
+    }
+    circuit
+        .build_backends
+        .merge(&crate::backends::ExecutionBackends {
+            substitutions: vec![crate::backends::ModelSubstitution {
+                instance: element.to_owned(),
+                model: model.to_owned(),
+                requested: requested.to_owned(),
+                feature: feature.to_owned(),
+                ran: ran.to_owned(),
+            }],
+            ..crate::backends::ExecutionBackends::default()
+        });
+}
+
 pub(super) fn bjt_level_matches(level: f64, expected: f64) -> bool {
     level.is_finite() && level == expected
 }

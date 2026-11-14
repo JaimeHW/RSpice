@@ -150,3 +150,56 @@ fn a_generated_compact_model_is_named_by_its_module() {
         "{ran}"
     );
 }
+
+/// EKV 2.6 by LEVEL runs the generated `ekv_va` where it is compiled in.
+/// Without it the native EKV 2.6 port runs the card, and the result and the
+/// log both say so.
+#[cfg(not(feature = "veriloga-model-ekv-va"))]
+#[test]
+fn ekv_by_level_without_its_generated_module_runs_the_native_port_and_says_so() {
+    let (ran, log) = crate::log_capture::lines_logged(log::LevelFilter::Warn, || {
+        ran("* EKV 2.6\n\
+             vdd d 0 dc 1.8\n\
+             vg g 0 dc 1.2\n\
+             m1 d g 0 0 ekvm w=10u l=1u\n\
+             .model ekvm nmos level=260\n\
+             .op\n.end\n")
+    });
+    let [substitution] = ran.substitutions.as_slice() else {
+        panic!("one substitution: {ran}")
+    };
+    assert!(substitution.instance.eq_ignore_ascii_case("m1"), "{ran}");
+    assert!(substitution.model.eq_ignore_ascii_case("ekvm"), "{ran}");
+    assert_eq!(substitution.requested, "ekv_va");
+    assert_eq!(substitution.feature, "veriloga-model-ekv-va");
+    assert_eq!(substitution.ran, "EKV 2.6");
+    assert!(
+        ran.to_string()
+            .ends_with("ran the native EKV 2.6 in place of ekv_va (feature veriloga-model-ekv-va)"),
+        "{ran}"
+    );
+    assert!(
+        log.iter()
+            .any(|line| line.contains("ekv_va") && line.contains("native EKV 2.6")),
+        "{log:?}"
+    );
+}
+
+/// A Xyce `Q` card selects VBIC 1.3 by LEVEL=11 and 12; without the generated
+/// module the native VBIC runs it and says so. Read as ngspice, the same card
+/// asks for no generated module, so nothing was substituted.
+#[cfg(not(feature = "veriloga-model-vbic13"))]
+#[test]
+fn vbic_by_xyce_level_without_its_generated_module_runs_the_native_port_and_says_so() {
+    let deck = "* VBIC\nvc c 0 5\nvb b 0 0.7\nrc c cc 1k\nq1 cc b 0 qm\n\
+                .model qm NPN LEVEL=11\n.op\n.end\n";
+    let ran = ran_as(SpiceDialect::Xyce, deck);
+    let [substitution] = ran.substitutions.as_slice() else {
+        panic!("one substitution: {ran}")
+    };
+    assert!(substitution.instance.eq_ignore_ascii_case("q1"), "{ran}");
+    assert_eq!(substitution.requested, "vbic13");
+    assert_eq!(substitution.feature, "veriloga-model-vbic13");
+    assert_eq!(substitution.ran, "VBIC");
+    assert!(ran_as(SpiceDialect::Ngspice, deck).substitutions.is_empty());
+}

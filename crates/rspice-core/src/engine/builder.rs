@@ -8206,6 +8206,20 @@ impl Engine {
                                 || !device_model.real_vector_expr_params.is_empty()
                                 || !device_model.integer_vector_params.is_empty(),
                         )?;
+                        if let Some(generated) = native_port_of_generated_bjt(
+                            self.config.spice_dialect,
+                            &device_model.model_type,
+                            params_map.get("LEVEL").copied(),
+                            element.nodes.len(),
+                        ) {
+                            record_native_substitution(
+                                &mut circuit,
+                                &element.name,
+                                model,
+                                generated,
+                                "VBIC",
+                            );
+                        }
                         bjt = rebuilt(bjt, |bjt| bjt.with_params(&params_map));
                     } else if let Some(card) = foundation_model {
                         let mut effective_params = card.params.clone();
@@ -8838,9 +8852,9 @@ impl Engine {
                     }
 
                     // EKV 2.6 LEVEL=260 has a native validated runtime when
-                    // generated Verilog-A builtins are not enabled. Feature
-                    // builds with the generated EKV builtin route before this
-                    // point.
+                    // the generated EKV module is not compiled in. Builds with
+                    // it route before this point; here the native port runs
+                    // the card, and the result says so.
                     if native_ekv26_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
@@ -8850,6 +8864,13 @@ impl Engine {
                             "EKV26 MOSFET",
                         )?;
                         let model_key = native_model_key.clone();
+                        record_native_substitution(
+                            &mut circuit,
+                            &element.name,
+                            &model_key,
+                            ("ekv_va", "veriloga-model-ekv-va"),
+                            "EKV 2.6",
+                        );
                         reject_deferred_native_mos_model_params(
                             &element.name,
                             &model_key,
