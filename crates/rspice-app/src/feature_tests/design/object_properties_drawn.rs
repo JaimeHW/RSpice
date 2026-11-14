@@ -6,9 +6,7 @@ use crate::state::DesignNote;
 use crate::state::DesignNoteKind;
 use crate::state::Point;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::object_properties::tests::{
-    declared_bus, draft_resolution_key, key_event, render,
-};
+use crate::workbench::app::dialogs::object_properties::tests::{declared_bus, key_event, render};
 use crate::workbench::app::dialogs::object_properties::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
@@ -362,4 +360,12 @@ fn accessibility_tree_exposes_modal_fields_and_actions() {
             node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
         }));
     }
+}
+
+/// What a repaint's cached resolution is keyed by, over the model it reads.
+pub(crate) fn draft_resolution_key(
+    state: &AppState,
+    draft: &ObjectPropertiesDraft,
+) -> DraftResolutionKey {
+    crate::workbench::app::dialogs::object_properties::draft_resolution_key(&state.model, draft)
 }

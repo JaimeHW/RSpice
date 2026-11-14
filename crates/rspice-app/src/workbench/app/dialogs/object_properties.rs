@@ -487,7 +487,10 @@ fn resolve_draft_for_repaint(
     (validation, bus_choices)
 }
 
-pub(crate) fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
+pub(crate) fn draft_resolution_key(
+    model: &Model,
+    draft: &ObjectPropertiesDraft,
+) -> DraftResolutionKey {
     let (target_matches_baseline, draft_source) = match draft {
         ObjectPropertiesDraft::Bus(draft) => (
             model
@@ -1062,7 +1065,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::{BusParseError, BusTargetKind, NetLabel, Point, Wire};
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
     pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -1076,7 +1079,7 @@ pub(crate) mod tests {
 
     /// What a repaint's cached resolution is keyed by, over the model it reads.
     pub(crate) fn draft_resolution_key(
-        state: &AppState,
+        state: &DesignTestHost,
         draft: &ObjectPropertiesDraft,
     ) -> DraftResolutionKey {
         super::draft_resolution_key(&state.model, draft)
@@ -1141,7 +1144,7 @@ pub(crate) mod tests {
 
     #[test]
     fn repaint_resolution_cache_key_tracks_draft_topology_and_baseline_authority() {
-        let mut state = crate::workbench::app_state::AppState::default();
+        let mut state = DesignTestHost::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         state
             .model
