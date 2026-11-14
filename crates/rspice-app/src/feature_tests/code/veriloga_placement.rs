@@ -4,14 +4,17 @@
 //! These pins create a device through the form, compile it the way a
 //! worker's answer is published, and press what the compile result offers.
 
-use super::veriloga_interface::compile_and_publish;
+use super::veriloga_interface::{compile_and_publish, press_strip_button};
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
-use crate::workbench::app::veriloga_design_tests::open_project_app;
+use crate::workbench::app::veriloga_design_tests::{
+    open_in_design, open_project_app, themed_context,
+};
 use crate::workbench::app::veriloga_interface_tests::edit_source;
+use crate::workbench::app_state::prompt_text;
 use crate::workbench::state::Workspace;
 
 const LIBRARY: &str = "behavioral";
@@ -50,6 +53,12 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
         .commit_new_veriloga_device()
         .expect("the device is created");
     (app, reference, origin)
+}
+
+/// The schematic canvas's interaction, which holds the keyboard once a
+/// placement is armed.
+fn canvas() -> egui::Id {
+    egui::Id::new("rspice-schematic-canvas-interaction")
 }
 
 fn offered(app: &RSpiceApp) -> Option<VerilogAPlacementHandoff> {
@@ -127,6 +136,102 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
     );
     assert_eq!(binding.terminal_order, ["inp", "out"]);
     assert!(offered(&app).is_none(), "the offer is taken");
+}
+
+/// Place, pressed on the strip, is carried out in the frame it is pressed
+/// in: the schematic it named is open on the Design canvas with the device
+/// armed, the offer is taken, and the canvas holds the keyboard.
+#[test]
+fn pressing_place_arms_the_device_on_the_design_canvas_in_the_pressing_frame() {
+    let (mut app, reference, origin) = device_created_from_a_schematic();
+    edit_source(&mut app, TWO_PORTS);
+    compile_and_publish(&mut app);
+    open_in_design(&mut app.state, &reference);
+    let ctx = themed_context();
+
+    press_strip_button(&ctx, &mut app, "Place in bench");
+
+    assert_eq!(app.state.model.workspace.content.active_view, origin);
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        app.state.model.schematic.session.editor.tool,
+        Tool::Place(ComponentType::CellInstance)
+    );
+    let binding = &app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_library_cell
+        .as_ref()
+        .expect("the device is armed")
+        .binding;
+    assert_eq!(
+        (
+            binding.library.as_str(),
+            binding.cell.as_str(),
+            binding.view.as_str()
+        ),
+        (LIBRARY, "gain", "veriloga")
+    );
+    assert!(offered(&app).is_none(), "the offer is taken");
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(canvas()),
+        "the canvas holds the keyboard"
+    );
+}
+
+/// Place refused when it is taken changes nothing but the status line: the
+/// route and the page stay as they were, nothing is armed, the offer
+/// stands, and the canvas is not handed the keyboard.
+#[test]
+fn a_refused_place_changes_no_route_and_gives_no_focus_only_the_prompt() {
+    let (mut app, reference, _) = device_created_from_a_schematic();
+    edit_source(&mut app, TWO_PORTS);
+    compile_and_publish(&mut app);
+    open_in_design(&mut app.state, &reference);
+    // The strip still offers the device, but a netlist template that cannot
+    // bind it makes the cell view unplaceable, so the take refuses.
+    {
+        let mut library = app
+            .state
+            .model
+            .library_manager
+            .edit_library(LIBRARY)
+            .expect("the library is writable");
+        let mut metadata = library
+            .library()
+            .get_cell("gain")
+            .and_then(|cell| cell.get_view("veriloga"))
+            .expect("the device's view")
+            .metadata
+            .clone();
+        metadata.insert("netlist.template".to_owned(), "not a template".to_owned());
+        library.replace_view_metadata("gain", "veriloga", metadata);
+    }
+    let ctx = themed_context();
+    let route = app.state.workbench.current_route();
+
+    press_strip_button(&ctx, &mut app, "Place in bench");
+
+    assert_eq!(app.state.workbench.current_route(), route);
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none()
+    );
+    assert!(offered(&app).is_some(), "the offer stands");
+    assert_ne!(ctx.memory(|memory| memory.focused()), Some(canvas()));
+    let prompt = prompt_text(&app.state.workbench).expect("the refusal is said");
+    assert!(prompt.contains("cannot be placed yet"), "{prompt}");
 }
 
 /// The offer belongs to one compile result: a later compile does not make it

@@ -15,7 +15,9 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
-use crate::workbench::app::veriloga_design_tests::{open_in_design, open_project_app};
+use crate::workbench::app::veriloga_design_tests::{
+    DESKTOP, frame_with, open_in_design, open_project_app,
+};
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
@@ -143,6 +145,35 @@ pub(super) fn view<'a>(
         .get_library(&reference.library)?
         .get_cell(&reference.cell)?
         .get_view(name)
+}
+
+/// Press the Verilog-A page's interface strip button named `name`, as a
+/// screen reader does: the page settles, and in the next frame, the
+/// pressing frame, the button is pressed. Nothing is drawn after it.
+pub(super) fn press_strip_button(ctx: &egui::Context, app: &mut RSpiceApp, name: &str) {
+    use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+
+    frame_with(ctx, app, DESKTOP, Vec::new());
+    let output = frame_with(ctx, app, DESKTOP, Vec::new());
+    let button = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .find(|(_, node)| node.role() == Role::Button && node.label() == Some(name))
+        .map(|(id, _)| *id)
+        .unwrap_or_else(|| panic!("the strip offers {name}"));
+    frame_with(
+        ctx,
+        app,
+        DESKTOP,
+        vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: button,
+            data: None,
+        })],
+    );
 }
 
 fn stated_ports(app: &RSpiceApp, reference: &CellViewRef) -> Vec<SourceViewPort> {

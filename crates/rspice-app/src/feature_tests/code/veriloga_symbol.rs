@@ -2,7 +2,9 @@
 //! placed by role, a hand-drawn symbol kept through a recompile and Update
 //! symbol, and Open symbol taking the module to the symbol editor.
 
-use super::veriloga_interface::{add_module_cell, compile_and_publish, view};
+use std::collections::BTreeSet;
+
+use super::veriloga_interface::{add_module_cell, compile_and_publish, press_strip_button, view};
 use crate::state::{CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
@@ -14,6 +16,7 @@ use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
 };
+use crate::workbench::state::Workspace;
 use rspice_design::symbol::SymbolShape;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 use rspice_design_model::symbol_pin::SymbolPinSide;
@@ -179,6 +182,33 @@ fn update_symbol_lands_in_the_editor_with_the_new_pin_selected() {
             .effective_selection()
             .pins
             .contains("en")
+    );
+}
+
+/// Update symbol, pressed on the strip, is carried out in the frame it is
+/// pressed in: the symbol editor is open on the updated symbol with exactly
+/// the pins the update added selected.
+#[test]
+fn pressing_update_symbol_opens_the_symbol_with_exactly_its_new_pins_selected() {
+    let mut app = open_project_app();
+    let reference = compiled_amplifier(&mut app);
+    hand_draw(&mut app, &reference);
+    edit_source(&mut app, &amplifier(", en, sel"));
+    compile_and_publish(&mut app);
+    let ctx = themed_context();
+
+    press_strip_button(&ctx, &mut app, "Update symbol");
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        app.state.model.workspace.content.active_view,
+        CellViewRef::new(&reference.library, &reference.cell, GENERATED_SYMBOL_VIEW)
+    );
+    let updated = symbol(&app, &reference);
+    assert!(updated.pin("en").is_some() && updated.pin("sel").is_some());
+    assert_eq!(
+        app.state.design.symbol.editor.effective_selection().pins,
+        BTreeSet::from(["en".to_owned(), "sel".to_owned()])
     );
 }
 
