@@ -8231,6 +8231,12 @@ pub mod runtime {
     r#"
     }
     pub use event_control::*;
+    mod periodic {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/periodic.rs"),
+    r#"
+    }
+    pub use periodic::{GeneratedPeriodicFrame, GeneratedPeriodicKind};
 
     #[derive(Debug, Clone, Default, PartialEq)]
     pub struct GeneratedVerilogARollbackState {
@@ -8279,6 +8285,8 @@ pub mod runtime {
 
     impl GeneratedEvalContext<'_> {
         pub fn limiting_enabled(&self) -> bool { true }
+        // No periodic analysis runs here, so no site is carried.
+        pub fn periodic_frame(&self) -> Option<&GeneratedPeriodicFrame> { None }
         pub fn node_voltage(&self, node: usize) -> Value {
             self.voltages.get(node).copied().unwrap_or(0.0)
         }

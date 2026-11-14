@@ -488,11 +488,12 @@ pub(super) fn generate_state_file_with_extensions(
     .unwrap();
     writeln!(
         out,
-        "    pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[{}];",
+        "    pub const HB_PERIODIC_SITES: &'static [{}::GeneratedPeriodicKind] = &[{}];",
+        options.runtime_path,
         extensions
             .harmonic_balance_periodic_sites
             .iter()
-            .map(|kind| format!("rspice_veriloga_runtime::GeneratedPeriodicKind::{kind}"))
+            .map(|kind| format!("{}::GeneratedPeriodicKind::{kind}", options.runtime_path))
             .collect::<Vec<_>>()
             .join(", ")
     )
