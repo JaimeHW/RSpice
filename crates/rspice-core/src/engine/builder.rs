@@ -7972,7 +7972,7 @@ impl Engine {
                                 width,
                                 length,
                                 mult,
-                                diode_model_param(&model_params, "XW").unwrap_or(0.0),
+                                diode_model_param(model_params, "XW").unwrap_or(0.0),
                                 scale,
                             ))
                         }
@@ -7983,7 +7983,7 @@ impl Engine {
                         .or(derived.map(|(area, _)| area))
                         .or_else(|| {
                             (!dimensioned)
-                                .then(|| diode_model_param(&model_params, "AREA"))
+                                .then(|| diode_model_param(model_params, "AREA"))
                                 .flatten()
                         })
                         .unwrap_or(1.0);
@@ -7991,7 +7991,7 @@ impl Engine {
                         .or(derived.map(|(_, perimeter)| perimeter))
                         .or_else(|| {
                             (!dimensioned)
-                                .then(|| diode_model_param(&model_params, "PJ"))
+                                .then(|| diode_model_param(model_params, "PJ"))
                                 .flatten()
                         })
                         .unwrap_or(0.0);
@@ -8032,7 +8032,7 @@ impl Engine {
                         // model card; the oxide thicknesses are model-only.
                         let instance_or_model = |names: &[&str], model_name: &str| -> f64 {
                             instance_param(instance_params, names)
-                                .or_else(|| diode_model_param(&model_params, model_name))
+                                .or_else(|| diode_model_param(model_params, model_name))
                                 .unwrap_or(0.0)
                         };
                         diode.set_overlap_capacitance(
@@ -8041,10 +8041,10 @@ impl Engine {
                             instance_or_model(&["LM"], "LM"),
                             instance_or_model(&["WP"], "WP"),
                             instance_or_model(&["LP"], "LP"),
-                            diode_model_param(&model_params, "XOM").unwrap_or(1e4),
-                            diode_model_param(&model_params, "XOI").unwrap_or(1e4),
-                            diode_model_param(&model_params, "XM").unwrap_or(0.0),
-                            diode_model_param(&model_params, "XP").unwrap_or(0.0),
+                            diode_model_param(model_params, "XOM").unwrap_or(1e4),
+                            diode_model_param(model_params, "XOI").unwrap_or(1e4),
+                            diode_model_param(model_params, "XM").unwrap_or(0.0),
+                            diode_model_param(model_params, "XP").unwrap_or(0.0),
                             scale,
                         );
                     }
@@ -8074,7 +8074,7 @@ impl Engine {
                         && (diode.sidewall_current_given || diode.sidewall_cj0 != 0.0)
                         && (diode.sidewall_emission_given || !diode.sidewall_current_given)
                         && let Some(rsw) =
-                            diode_model_param(&model_params, "RSW").filter(|rsw| *rsw > 0.0)
+                            diode_model_param(model_params, "RSW").filter(|rsw| *rsw > 0.0)
                         && let Some(resistance) = diode.rsw_resistance(rsw)
                     {
                         let swint =
