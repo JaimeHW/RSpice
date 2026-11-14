@@ -221,8 +221,11 @@ fn source_time_defaults_remain_attached_to_the_original_transient() {
                 } else if source.starts_with("SIN") || dialect == SpiceDialect::Xyce {
                     (std::f64::consts::TAU * 1e6 * time).sin()
                 } else {
-                    (std::f64::consts::TAU * 5e6 * time
-                        + 0.01 * (std::f64::consts::TAU * 500e6 * time).sin())
+                    // The ngspice manual's SFFM defaults (section 4.1.5): FC
+                    // 500/TSTOP, FS 5/TSTOP, MDI 90 (ngspice-47 swaps the two
+                    // frequencies, against its manual).
+                    (std::f64::consts::TAU * 500e6 * time
+                        + 90.0 * (std::f64::consts::TAU * 5e6 * time).sin())
                     .sin()
                 };
                 assert!(

@@ -154,28 +154,53 @@ r1 1 0 1k
     );
 }
 
-#[test]
-fn exp_omitted_timing_uses_ngspice_tstep_defaults_end_to_end() {
-    let deck = "\
+const EXP_DEFAULT_TIMING: &str = "\
 * exp default timing
 v1 1 0 exp(0 1)
 r1 1 0 1k
 .tran 1n 4n
 .end
 ";
-    let (times, values) = transient_node_values(deck, "1", 4.0e-9, 1.0e-9);
+
+/// `EXP(0 1)` under the ngspice dialect takes the ngspice manual's defaults
+/// (section 4.1.3): TD1 = 0, TAU1 = TAU2 = TSTEP, TD2 = TD1 + TSTEP.
+/// ngspice-47 delays the rise by TSTEP, against its manual.
+#[test]
+fn exp_omitted_timing_uses_the_ngspice_manual_defaults_end_to_end() {
+    let (times, values) = transient_node_values_with_config(
+        EXP_DEFAULT_TIMING,
+        "1",
+        4.0e-9,
+        1.0e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+    );
     for (t, v) in times.iter().zip(values.iter()) {
-        let expected = exp_reference(*t, 0.0, 1.0, 1.0e-9, 1.0e-9, 2.0e-9, 1.0e-9);
+        let expected = exp_reference(*t, 0.0, 1.0, 0.0, 1.0e-9, 1.0e-9, 1.0e-9);
         assert!(
             (v - expected).abs() < TOL,
             "defaulted exp at t={t}: got {v}, formula {expected}"
         );
     }
     assert!(
-        times.iter().any(|t| (t - 1.0e-9).abs() < 1e-15)
-            && times.iter().any(|t| (t - 2.0e-9).abs() < 1e-15),
-        "defaulted TD1 and TD2 must be breakpoint timepoints"
+        times.iter().any(|t| (t - 1.0e-9).abs() < 1e-15),
+        "the defaulted TD2 must be a breakpoint timepoint"
     );
+}
+
+/// `EXP(0 1)` under RSpice's own rules: QSPICE refuses an EXP without TD1
+/// and TAU1, so they take LTspice 26's 0, an ideal rise at 0 s, and QSPICE
+/// never falls when TD2 and TAU2 are left out. The card steps to V2 and holds.
+#[test]
+fn exp_omitted_timing_steps_and_holds_under_rspices_rules_end_to_end() {
+    let (times, values) = transient_node_values(EXP_DEFAULT_TIMING, "1", 4.0e-9, 1.0e-9);
+    assert!(times.len() > 3, "expected a transient");
+    for (t, v) in times.iter().zip(values.iter()) {
+        let expected = if *t > 0.0 { 1.0 } else { 0.0 };
+        assert!(
+            (v - expected).abs() < TOL,
+            "defaulted exp at t={t}: got {v}, expected {expected}"
+        );
+    }
 }
 
 #[test]

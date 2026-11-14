@@ -10431,10 +10431,9 @@ mod tests {
                     "PULSE(0 1 0 0 0 0.25u 1u)",
                     dialect == crate::config::SpiceDialect::Ngspice,
                 ),
-                (
-                    "PULSE(0 1 0 1n 1n 0.25u)",
-                    dialect == crate::config::SpiceDialect::Xyce,
-                ),
+                // An omitted PER is TSTOP in both dialects: the ngspice
+                // manual (section 4.1.1) and Xyce 7.10 fire the pulse once.
+                ("PULSE(0 1 0 1n 1n 0.25u)", true),
             ] {
                 let netlist = Netlist::parse(&format!(
                     "unknown source basis\nV1 out 0 {waveform}\nR1 out 0 1k\n.end\n"
