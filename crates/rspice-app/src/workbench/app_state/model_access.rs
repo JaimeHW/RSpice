@@ -160,6 +160,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn publish_active_design_check_result(
         &mut self,
         result: DrcResult,

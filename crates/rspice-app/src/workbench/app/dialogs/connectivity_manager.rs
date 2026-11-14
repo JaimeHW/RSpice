@@ -30,12 +30,16 @@ use rspice_design::drc::{
 };
 use rspice_design::hierarchy::HierarchySource;
 
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::NavigationParts;
 use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::conductor_routes::start_canvas_wire;
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::simulation::SimulationController;
+use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
@@ -121,7 +125,7 @@ impl Default for ConnectivityManagerDialogState {
 }
 
 impl ConnectivityManagerDialogState {
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         *self = Self::default();
     }
 
@@ -1279,19 +1283,22 @@ impl ConnectivityManager<'_> {
 }
 
 /// Reveal one finding of the report on the canvas, on the view it is drawn
-/// on, with the manager closed.
-pub(crate) fn reveal_connectivity_target(state: &mut AppState, target: RevealTarget) {
+/// on, over the navigation parts. The caller closes the manager first.
+pub(crate) fn reveal_connectivity_target(
+    mut navigation: NavigationParts<'_>,
+    target: RevealTarget,
+) {
     // The checks locate a terminal or a bare point on the projected
     // document, which lays later sheets a stride along; the canvas centres
     // on it where its sheet draws it. A point read off the editor's own
     // document is on no stride, and stays where it is.
-    let sheets = state
+    let sheets = navigation
         .model
         .workspace
         .content
         .design_management
         .sheet_catalog(
-            &state
+            &navigation
                 .model
                 .workspace
                 .content
@@ -1328,11 +1335,10 @@ pub(crate) fn reveal_connectivity_target(state: &mut AppState, target: RevealTar
         }
         other => other,
     };
-    state.design.connectivity_manager.close();
-    state.workbench.workspace = crate::workbench::state::Workspace::Design;
+    navigation.wb.workspace = crate::workbench::state::Workspace::Design;
     if let RevealTarget::Label { view_key, .. } = &target
         && *view_key
-            != state
+            != navigation
                 .model
                 .workspace
                 .content
@@ -1340,9 +1346,9 @@ pub(crate) fn reveal_connectivity_target(state: &mut AppState, target: RevealTar
                 .key()
         && let Some(reference) = CellViewRef::from_key(view_key)
     {
-        state.open_workspace_view(reference);
+        navigation.open_workspace_view(reference);
     }
-    let schematic = &mut state.model.schematic;
+    let schematic = &mut navigation.model.schematic;
     schematic.session.editor.selection.clear();
     schematic.session.editor.net_highlight.clear();
     match target {
@@ -1395,124 +1401,89 @@ pub(crate) fn reveal_connectivity_target(state: &mut AppState, target: RevealTar
     }
 }
 
-/// Open the generated netlist on its source map, at the first line it maps,
-/// with the manager closed.
-pub(crate) fn open_connectivity_source_map(state: &mut AppState) {
-    state.design.connectivity_manager.close();
-    state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-    state.workbench.navigator_visible = true;
-    state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-    state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
-    state.workbench.set_navigator_filter("source mapping");
-    if let Some(line) = state
-        .model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-        .and_then(|document| document.generated_artifact())
-        .and_then(|artifact| artifact.source_map().first())
-        .map(|entry| entry.generated_line())
+/// Apply the repairs and the policy change the reader chose, as one undo
+/// transaction validated on a copy, then rebuild the report over the result
+/// and publish its check, which reads the runs as `review_markers` shows them.
+pub(crate) fn apply_selected_connectivity_repairs(
+    dialog: &mut ConnectivityManagerDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    runs: &mut RunsState,
+    run_controller: &mut SimulationController,
+    review_markers: SchematicReviewMarkerVisibility,
+) -> Result<(), String> {
+    connectivity_authority_error(dialog, model).map_or(Ok(()), Err)?;
+    if model.schematic.session.read_only
+        || model.active_view_read_only()
+        || model.safe_mode.project_read_only()
     {
-        state.code.netlist.cursor_line = line.saturating_sub(1);
-        state.code.netlist.requested_line = Some(line);
+        return Err("The active schematic or project is read-only.".to_owned());
     }
-}
-
-impl RSpiceApp {
-    pub(in crate::workbench) fn apply_selected_connectivity_repairs(
-        &mut self,
-    ) -> Result<(), String> {
-        connectivity_authority_error(&self.state.design.connectivity_manager, &self.state.model)
-            .map_or(Ok(()), Err)?;
-        if self.state.model.schematic.session.read_only
-            || self.state.model.active_view_read_only()
-            || self.state.model.safe_mode.project_read_only()
-        {
-            return Err("The active schematic or project is read-only.".to_owned());
-        }
-        let dialog = &self.state.design.connectivity_manager;
-        let selected = dialog
-            .report
-            .repairs
-            .iter()
-            .filter(|repair| {
-                repair.action.is_some() && dialog.selected_repairs.contains(&repair.id)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let policy_changed = dialog.policy_changed();
-        if selected.is_empty() && !policy_changed {
-            return Err("Select at least one validated repair or change a policy.".to_owned());
-        }
-        let mut contract_candidate = (*self.state.model.workspace.content.connectivity).clone();
-        contract_candidate.policy = dialog.policy.clone();
-        validate_policy_authority(&contract_candidate.policy, &contract_candidate)?;
-        contract_candidate.validate()?;
-        let mut candidate = self.state.model.schematic.clone();
-        for repair in &selected {
-            apply_repair_to_candidate(&mut candidate, repair)?;
-        }
-        if !selected.is_empty() {
-            candidate.recalculate_runtime_state();
-            validate_repair_candidate(&self.state.model, &candidate, &contract_candidate.policy)?;
-            let after = SchematicSnapshot::capture(candidate.document());
-            let changed = self.state.model.schematic.with_undo(
-                "apply reviewed connectivity repairs",
-                move |schematic| {
+    let selected = dialog
+        .report
+        .repairs
+        .iter()
+        .filter(|repair| repair.action.is_some() && dialog.selected_repairs.contains(&repair.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let policy_changed = dialog.policy_changed();
+    if selected.is_empty() && !policy_changed {
+        return Err("Select at least one validated repair or change a policy.".to_owned());
+    }
+    let mut contract_candidate = (*model.workspace.content.connectivity).clone();
+    contract_candidate.policy = dialog.policy.clone();
+    validate_policy_authority(&contract_candidate.policy, &contract_candidate)?;
+    contract_candidate.validate()?;
+    let mut candidate = model.schematic.clone();
+    for repair in &selected {
+        apply_repair_to_candidate(&mut candidate, repair)?;
+    }
+    if !selected.is_empty() {
+        candidate.recalculate_runtime_state();
+        validate_repair_candidate(model, &candidate, &contract_candidate.policy)?;
+        let after = SchematicSnapshot::capture(candidate.document());
+        let changed =
+            model
+                .schematic
+                .with_undo("apply reviewed connectivity repairs", move |schematic| {
                     schematic.apply_snapshot(&after);
                     schematic.recalculate_runtime_state();
-                },
-            );
-            if !changed {
-                return Err(
-                    "The reviewed repairs no longer change the active schematic.".to_owned(),
-                );
-            }
-            self.state.sync_active_schematic_to_workspace();
+                });
+        if !changed {
+            return Err("The reviewed repairs no longer change the active schematic.".to_owned());
         }
-        if policy_changed {
-            *self.state.model.workspace.content.connectivity = contract_candidate;
-            self.state.model.workspace.content.project_metadata_dirty = true;
-        }
-        self.invalidate_simulation_preflight();
-        self.state
-            .model
-            .netlist_artifacts
-            .current_generation_input_digest = None;
-        let count = selected.len();
-        let policy = self
-            .state
-            .model
-            .workspace
-            .content
-            .connectivity
-            .policy
-            .clone();
-        let report = build_report(&self.state.model, &policy)?;
-        let authority = SchematicEditAuthority::capture(&self.state);
-        self.state
-            .publish_active_design_check_result(report.drc.clone())?;
-        let dialog = &mut self.state.design.connectivity_manager;
-        dialog.report = report;
-        dialog.authority = Some(authority);
-        dialog.contract_at_open = (*self.state.model.workspace.content.connectivity).clone();
-        dialog.policy = policy;
-        dialog.selected_repairs.clear();
-        dialog.error = None;
-        // How many repairs went in, and whether the policy went with them.
-        // That the apply was one transaction is not the reader's problem.
-        dialog.receipt = Some(format!(
-            "Applied {count} repair{}{}",
-            if count == 1 { "" } else { "s" },
-            if policy_changed {
-                " \u{00b7} policy saved"
-            } else {
-                ""
-            }
-        ));
-        Ok(())
+        sync_active_schematic(model, workbench);
     }
+    if policy_changed {
+        *model.workspace.content.connectivity = contract_candidate;
+        model.workspace.content.project_metadata_dirty = true;
+    }
+    rspice_app_runs::workbench::preflight::invalidate(&mut runs.preflight, run_controller);
+    model.netlist_artifacts.current_generation_input_digest = None;
+    let count = selected.len();
+    let policy = model.workspace.content.connectivity.policy.clone();
+    let report = build_report(model, &policy)?;
+    let authority = SchematicEditAuthority::capture(&*model);
+    model
+        .publish_active_design_check_result(report.drc.clone(), runs.slot_facts(review_markers))?;
+    dialog.report = report;
+    dialog.authority = Some(authority);
+    dialog.contract_at_open = (*model.workspace.content.connectivity).clone();
+    dialog.policy = policy;
+    dialog.selected_repairs.clear();
+    dialog.error = None;
+    // How many repairs went in, and whether the policy went with them.
+    // That the apply was one transaction is not the reader's problem.
+    dialog.receipt = Some(format!(
+        "Applied {count} repair{}{}",
+        if count == 1 { "" } else { "s" },
+        if policy_changed {
+            " \u{00b7} policy saved"
+        } else {
+            ""
+        }
+    ));
+    Ok(())
 }
 
 fn connectivity_authority_error(
