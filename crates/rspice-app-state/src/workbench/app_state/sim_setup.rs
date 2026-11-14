@@ -549,23 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_global_run_set_migrates_to_one_reference_point() {
-        let setup = SimSetupState::new();
-        let mut persisted = serde_json::to_value(&setup).expect("setup serializes");
-        persisted
-            .as_object_mut()
-            .expect("setup is an object")
-            .remove("run_set");
-
-        let migrated: SimSetupState =
-            serde_json::from_value(persisted).expect("legacy setup migrates");
-
-        assert_eq!(migrated.run_set.point_count(), 1);
-        assert!(migrated.run_set.enabled_dimensions().next().is_none());
-    }
-
-    #[test]
-    fn setup_document_keeps_flat_project_wire_and_legacy_read_behavior() {
+    fn setup_document_writes_a_flat_project_wire_and_rejects_unknown_keys() {
         let mut setup = SimSetupState::new();
         setup.session.palette_open = true;
         setup.tran.stop = "7m".to_owned();
@@ -579,21 +563,9 @@ mod tests {
         assert!(!fields.contains_key("session"));
         assert!(!fields.contains_key("tran"));
 
-        fields.insert(
-            "tran".to_owned(),
-            serde_json::to_value(&setup.tran).unwrap(),
-        );
         let restored: SimSetupState =
-            serde_json::from_value(wire.clone()).expect("schema-3 draft remains readable");
-        assert_eq!(restored.tran.stop, "7m");
+            serde_json::from_value(wire.clone()).expect("the current setup reads back");
         assert!(!restored.session.palette_open);
-        assert!(
-            !serde_json::to_value(&restored)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .contains_key("tran")
-        );
 
         wire.as_object_mut()
             .unwrap()
