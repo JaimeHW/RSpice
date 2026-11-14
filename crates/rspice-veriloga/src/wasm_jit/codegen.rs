@@ -10,6 +10,7 @@ use wasm_encoder::{
 use wasmparser::{Encoding, Parser, Payload, Validator};
 
 use super::abi::*;
+use super::locals::{MAX_FUNCTION_LOCALS, SpillGlobals, WasmBody};
 use super::{
     WASM_JIT_ABI_VERSION, WASM_JIT_CONTRACT_SECTION, WASM_JIT_EMITTER_VERSION,
     WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, WasmJitError, WasmJitResult,
@@ -213,7 +214,9 @@ pub(crate) struct WasmFusedKernel {
 
 #[cfg(test)]
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
-    encode_value_module(encode_value_body(PlanProgramRef::Postfix(program))?)
+    let mut globals = SpillGlobals::default();
+    let body = encode_value_body(PlanProgramRef::Postfix(program), &mut globals)?;
+    encode_value_module(body, &globals)
 }
 
 /// Wrap one encoded value body in a single-entry module.
@@ -221,7 +224,7 @@ pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec
 /// Single-entry modules exist for the encoder tests; production publishes the
 /// whole model as one module.
 #[cfg(test)]
-fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
+fn encode_value_module(body: Function, globals: &SpillGlobals) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
 
     encode_capability_types(&mut module);
@@ -230,6 +233,9 @@ fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
     let mut functions = FunctionSection::new();
     functions.function(ENTRY_TYPE_INDEX);
     module.section(&functions);
+    if let Some(section) = globals.section() {
+        module.section(&section);
+    }
 
     let mut exports = ExportSection::new();
     exports.export(
@@ -252,6 +258,14 @@ fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
     code.function(&body);
     module.section(&code);
     Ok(module.finish())
+}
+
+/// Encode one already-lowered program as a single-entry module.
+#[cfg(test)]
+fn single_value_module(ssa: &Program) -> WasmJitResult<Vec<u8>> {
+    let mut globals = SpillGlobals::default();
+    let body = encode_value_body_from_ssa(ssa, &mut globals)?;
+    encode_value_module(body, &globals)
 }
 
 pub(crate) fn emit_verified_value_program_set(
@@ -342,9 +356,10 @@ fn encode_model_program_set(
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
+    let mut globals = SpillGlobals::default();
     let value_bodies = programs
         .iter()
-        .map(|program| encode_value_body(*program))
+        .map(|program| encode_value_body(*program, &mut globals))
         .collect::<WasmJitResult<Vec<_>>>()?;
     let function_count = u32::try_from(value_bodies.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
@@ -362,6 +377,9 @@ fn encode_model_program_set(
         functions.function(ENTRY_TYPE_INDEX);
     }
     module.section(&functions);
+    if let Some(section) = globals.section() {
+        module.section(&section);
+    }
 
     let mut exports = ExportSection::new();
     for index in 0..function_count {
@@ -422,14 +440,17 @@ fn encode_model_program_set(
 /// Both forms reach the same encoder, the same helper imports and the same
 /// module validator: a postfix entry is lifted into SSA the way it always was,
 /// and a block entry is already in that form.
-fn encode_value_body(program: PlanProgramRef<'_>) -> WasmJitResult<Function> {
+fn encode_value_body(
+    program: PlanProgramRef<'_>,
+    globals: &mut SpillGlobals,
+) -> WasmJitResult<Function> {
     match program {
         PlanProgramRef::Postfix(program) => {
             let ssa = Program::lower_executable(program)
                 .map_err(|error| WasmJitError::Encoding(error.to_string()))?;
-            encode_value_body_from_ssa(&ssa)
+            encode_value_body_from_ssa(&ssa, globals)
         }
-        PlanProgramRef::Blocks(program) => encode_value_body_from_ssa(program.ssa()),
+        PlanProgramRef::Blocks(program) => encode_value_body_from_ssa(program.ssa(), globals),
     }
 }
 
@@ -438,7 +459,20 @@ fn encode_value_body(program: PlanProgramRef<'_>) -> WasmJitResult<Function> {
 /// Taking the SSA directly is what lets the branch form of a conditional reach
 /// this encoder through the same locals, helpers and module validator as the
 /// shipped select form.
-fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
+fn encode_value_body_from_ssa(
+    ssa: &Program,
+    globals: &mut SpillGlobals,
+) -> WasmJitResult<Function> {
+    encode_value_body_within(ssa, MAX_FUNCTION_LOCALS, globals)
+}
+
+/// [`encode_value_body_from_ssa`] with locals allowed up to `limit`, so a test
+/// can make a small body spill.
+fn encode_value_body_within(
+    ssa: &Program,
+    limit: u32,
+    globals: &mut SpillGlobals,
+) -> WasmJitResult<Function> {
     let verifier = |error: crate::jit::JitError| WasmJitError::Encoding(error.to_string());
     let loops = ssa.loop_ranges().map_err(verifier)?;
     // One scratch local per block parameter of the widest merge, used only to
@@ -459,11 +493,7 @@ fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
     // body it encoded before this guard existed.
     let loop_count = u32::try_from(loops.len())
         .map_err(|_| WasmJitError::Encoding("SSA loop count exceeds u32".into()))?;
-    let locals: Vec<(u32, ValType)> = [(local_count, ValType::F64), (loop_count, ValType::I32)]
-        .into_iter()
-        .filter(|(count, _)| *count != 0)
-        .collect();
-    let mut body = Function::new(locals);
+    let mut body = WasmBody::new([(local_count, ValType::F64), (loop_count, ValType::I32)]);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
     let mut labels = Vec::new();
@@ -479,7 +509,7 @@ fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
     )?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
-    Ok(body)
+    Ok(body.into_allocated_function(limit, globals))
 }
 
 /// The `i32` local counting trips of the loop at `index`.
@@ -513,7 +543,7 @@ fn loop_counter_index(
 /// [`WASM_JIT_STATUS_RUNTIME_ERROR`], which is the whole diagnostic this
 /// backend's runtime carries — it has no host context to record a message in,
 /// and the assignment guard builds nothing more specific either.
-fn emit_back_edge_guard(body: &mut Function, counter: u32) {
+fn emit_back_edge_guard(body: &mut WasmBody, counter: u32) {
     body.instruction(&WasmInstruction::LocalGet(counter));
     body.instruction(&WasmInstruction::I32Const(1));
     body.instruction(&WasmInstruction::I32Add);
@@ -576,7 +606,7 @@ enum WasmLabel {
 /// limit is per entry.
 #[allow(clippy::too_many_arguments)]
 fn emit_block_region(
-    body: &mut Function,
+    body: &mut WasmBody,
     ssa: &Program,
     start: crate::jit::ssa::BlockId,
     stop: Option<crate::jit::ssa::BlockId>,
@@ -708,7 +738,7 @@ fn emit_block_region(
 /// per entry and repeats through the back edge's `br`, never through here.
 #[allow(clippy::too_many_arguments)]
 fn emit_loop(
-    body: &mut Function,
+    body: &mut WasmBody,
     ssa: &Program,
     header: &crate::jit::ssa::BasicBlock,
     range: crate::jit::ssa::LoopRange,
@@ -807,7 +837,7 @@ fn branch_depth(labels: &[WasmLabel], header: crate::jit::ssa::BlockId) -> Optio
 /// every argument through it costs one extra copy per parameter on the edges
 /// that need it and nothing anywhere else.
 fn emit_edge_arguments(
-    body: &mut Function,
+    body: &mut WasmBody,
     ssa: &Program,
     edge: &crate::jit::ssa::Edge,
     scratch_base: usize,
@@ -860,7 +890,7 @@ fn encode_assignment_kernel(
     let scratch_f64_local = 1_u32
         .checked_add(i32_locals)
         .ok_or_else(|| WasmJitError::Encoding("assignment local index overflow".into()))?;
-    let mut body = Function::new([(i32_locals, ValType::I32), (1, ValType::F64)]);
+    let mut body = WasmBody::new([(i32_locals, ValType::I32), (1, ValType::F64)]);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
     emit_assignments(
@@ -872,7 +902,7 @@ fn encode_assignment_kernel(
     )?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
-    Ok(body)
+    Ok(body.into_function())
 }
 
 /// Locals used by a fused kernel body. Local 0 is the frame-offset parameter,
@@ -910,7 +940,7 @@ fn encode_fused_kernel(
             kernel.assignment_kernel
         )));
     }
-    let mut body = Function::new([(KERNEL_I32_LOCAL_COUNT, ValType::I32), (1, ValType::F64)]);
+    let mut body = WasmBody::new([(KERNEL_I32_LOCAL_COUNT, ValType::I32), (1, ValType::F64)]);
     debug_assert_eq!(KERNEL_VALUE_LOCAL, 1 + KERNEL_I32_LOCAL_COUNT);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
@@ -1000,7 +1030,7 @@ fn encode_fused_kernel(
 
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
-    Ok(body)
+    Ok(body.into_function())
 }
 
 /// Push `program_active[index]` as an i32, or zero when the array is too short.
@@ -1008,7 +1038,7 @@ fn encode_fused_kernel(
 /// A short array deactivates the stamp rather than reading out of bounds: the
 /// device always sizes it to the stamp count, and failing closed keeps a
 /// malformed frame from publishing an unevaluated contribution.
-fn emit_program_active_load(body: &mut Function, index: u32) {
+fn emit_program_active_load(body: &mut WasmBody, index: u32) {
     // A branch rather than a `select`, because `select` evaluates both arms:
     // the byte load has to stay inside the range check or a malformed frame
     // traps the whole module instead of deactivating one stamp.
@@ -1040,7 +1070,7 @@ fn emit_program_active_load(body: &mut Function, index: u32) {
 /// Consumes the value from the stack. `!(|v| < inf)` is true for both NaN and
 /// either infinity, which is exactly the exponent-mask test the x64 driver
 /// emits.
-fn emit_non_finite_guard(body: &mut Function) {
+fn emit_non_finite_guard(body: &mut WasmBody) {
     body.instruction(&WasmInstruction::F64Abs);
     body.instruction(&WasmInstruction::F64Const(f64::INFINITY.into()));
     body.instruction(&WasmInstruction::F64Lt);
@@ -1066,10 +1096,10 @@ fn emit_non_finite_guard(body: &mut Function) {
 /// caller reading a stale zero and stamping it as a real contribution or
 /// derivative, which is a wrong answer rather than a reported failure.
 fn emit_f64_array_store(
-    body: &mut Function,
+    body: &mut WasmBody,
     array: (u64, u64),
     index: u32,
-    value: &dyn Fn(&mut Function),
+    value: &dyn Fn(&mut WasmBody),
 ) {
     let (pointer_offset, length_offset) = array;
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
@@ -1111,7 +1141,7 @@ fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize>
 
 /// The common helper ABI carries a site and at most one scalar operand for
 /// control tasks. Keep the returned value out of the error branch's stack.
-fn emit_task_helper(body: &mut Function, opcode: i32, site: u32, operand: bool, scratch: u32) {
+fn emit_task_helper(body: &mut WasmBody, opcode: i32, site: u32, operand: bool, scratch: u32) {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(opcode));
     body.instruction(&WasmInstruction::I32Const(site as i32));
@@ -1133,7 +1163,7 @@ fn emit_task_helper(body: &mut Function, opcode: i32, site: u32, operand: bool, 
 }
 
 fn emit_assignments(
-    body: &mut Function,
+    body: &mut WasmBody,
     assignments: &[WasmAssignment],
     scalar_count: u32,
     loop_depth: u32,
@@ -1278,7 +1308,7 @@ const ASSIGNMENT_STATUS_LOCAL: u32 = 1;
 const ASSIGNMENT_SLOT_LOCAL: u32 = 2;
 const ASSIGNMENT_LOOP_COUNTER_BASE_LOCAL: u32 = 3;
 
-fn emit_value_entry_call(body: &mut Function, entry: u32, scalar_count: u32) -> WasmJitResult<()> {
+fn emit_value_entry_call(body: &mut WasmBody, entry: u32, scalar_count: u32) -> WasmJitResult<()> {
     if entry >= scalar_count {
         return Err(WasmJitError::Encoding(format!(
             "assignment references scalar entry {entry} outside count {scalar_count}"
@@ -1294,7 +1324,7 @@ fn emit_value_entry_call(body: &mut Function, entry: u32, scalar_count: u32) -> 
     Ok(())
 }
 
-fn emit_variable_range_guard(body: &mut Function, base: u32, len: u32) -> WasmJitResult<()> {
+fn emit_variable_range_guard(body: &mut WasmBody, base: u32, len: u32) -> WasmJitResult<()> {
     if len == 0 {
         return Err(WasmJitError::Encoding(
             "indexed assignment has zero-length storage".into(),
@@ -1315,7 +1345,7 @@ fn emit_variable_range_guard(body: &mut Function, base: u32, len: u32) -> WasmJi
     Ok(())
 }
 
-fn emit_return_existing_error(body: &mut Function) {
+fn emit_return_existing_error(body: &mut WasmBody) {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Load(i32_mem(
         FRAME_ERROR_STATUS_OFFSET,
@@ -1389,6 +1419,7 @@ fn verify_value_module_shape(
     let mut contracts = 0_u32;
     let mut code_starts = 0_u32;
     let mut code_bodies = 0_u32;
+    let mut global_sections = 0_u32;
     for payload in Parser::new(0).parse_all(bytes) {
         match payload.map_err(|error| WasmJitError::BinaryValidation(error.to_string()))? {
             Payload::Version { encoding, .. } => {
@@ -1571,6 +1602,43 @@ fn verify_value_module_shape(
                 }
             }
             Payload::CodeSectionEntry(_) => code_bodies += 1,
+            // The locals a value entry spilled past the engines' limit: each
+            // mutable, numeric and starting at zero, and never exported.
+            Payload::GlobalSection(reader) => {
+                global_sections += 1;
+                for global in reader {
+                    let global =
+                        global.map_err(|error| WasmJitError::Contract(error.to_string()))?;
+                    let mut init = global.init_expr.get_operators_reader();
+                    let zero = match init
+                        .read()
+                        .map_err(|error| WasmJitError::Contract(error.to_string()))?
+                    {
+                        wasmparser::Operator::I32Const { value } => value == 0,
+                        wasmparser::Operator::I64Const { value } => value == 0,
+                        wasmparser::Operator::F32Const { value } => value.bits() == 0,
+                        wasmparser::Operator::F64Const { value } => value.bits() == 0,
+                        _ => false,
+                    };
+                    let ends = matches!(init.read(), Ok(wasmparser::Operator::End));
+                    if !global.ty.mutable
+                        || global.ty.shared
+                        || !matches!(
+                            global.ty.content_type,
+                            wasmparser::ValType::I32
+                                | wasmparser::ValType::I64
+                                | wasmparser::ValType::F32
+                                | wasmparser::ValType::F64
+                        )
+                        || !zero
+                        || !ends
+                    {
+                        return Err(WasmJitError::Contract(
+                            "value-module global is not a zeroed mutable spill slot".into(),
+                        ));
+                    }
+                }
+            }
             Payload::End(_) => {}
             _ => {
                 return Err(WasmJitError::Contract(
@@ -1588,6 +1656,7 @@ fn verify_value_module_shape(
         contracts,
         code_starts,
         code_bodies,
+        global_sections <= 1,
     ) != (
         1,
         CAPABILITY_TYPE_COUNT,
@@ -1597,6 +1666,7 @@ fn verify_value_module_shape(
         1,
         1,
         expected_count,
+        true,
     ) {
         return Err(WasmJitError::Contract(format!(
             "value-module section shape mismatch: version={version} types={types} imports={imports} functions={functions} exports={exports} contracts={contracts} code_starts={code_starts} code_bodies={code_bodies}"
@@ -1605,7 +1675,7 @@ fn verify_value_module_shape(
     Ok(())
 }
 
-fn emit_frame_guard(body: &mut Function) {
+fn emit_frame_guard(body: &mut WasmBody) {
     for (offset, expected, comparison) in [
         (
             FRAME_MAGIC_OFFSET,
@@ -1642,7 +1712,7 @@ enum GuardComparison {
     AtLeast,
 }
 
-fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitResult<()> {
+fn emit_instruction(body: &mut WasmBody, instruction: &Instruction) -> WasmJitResult<()> {
     let op = instruction.op();
     let operands = instruction.operands();
     match op {
@@ -1873,10 +1943,10 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
 /// are already available, and the operands are re-read from their locals
 /// rather than spilled to scratch.
 fn emit_extremum(
-    body: &mut Function,
+    body: &mut WasmBody,
     kind: ExtremumOp,
-    left: &dyn Fn(&mut Function) -> WasmJitResult<()>,
-    right: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+    left: &dyn Fn(&mut WasmBody) -> WasmJitResult<()>,
+    right: &dyn Fn(&mut WasmBody) -> WasmJitResult<()>,
 ) -> WasmJitResult<()> {
     // Outer select's "condition true" arm: the left operand is NaN, so the
     // result is whatever the right operand is (NaN included).
@@ -1913,8 +1983,8 @@ fn emit_extremum(
 }
 
 fn emit_is_zero_magnitude(
-    body: &mut Function,
-    operand: &dyn Fn(&mut Function) -> WasmJitResult<()>,
+    body: &mut WasmBody,
+    operand: &dyn Fn(&mut WasmBody) -> WasmJitResult<()>,
 ) -> WasmJitResult<()> {
     operand(body)?;
     body.instruction(&WasmInstruction::F64Abs);
@@ -1924,7 +1994,7 @@ fn emit_is_zero_magnitude(
 }
 
 fn emit_binary(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     op: WasmInstruction<'static>,
 ) -> WasmJitResult<()> {
@@ -1935,7 +2005,7 @@ fn emit_binary(
 }
 
 fn emit_rhs_const(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     value: f64,
     op: WasmInstruction<'static>,
@@ -1947,7 +2017,7 @@ fn emit_rhs_const(
 }
 
 fn emit_lhs_const(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     value: f64,
     op: WasmInstruction<'static>,
@@ -1959,7 +2029,7 @@ fn emit_lhs_const(
 }
 
 fn emit_compare(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     compare: CompareOp,
     rhs: Option<f64>,
@@ -1983,7 +2053,7 @@ fn emit_compare(
 }
 
 fn emit_logical(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     logical: LogicalOp,
 ) -> WasmJitResult<()> {
@@ -2004,7 +2074,7 @@ fn emit_logical(
 }
 
 fn emit_logical_const(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     logical: LogicalOp,
     rhs: bool,
@@ -2025,7 +2095,7 @@ fn emit_logical_const(
 }
 
 fn emit_truthy(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     operand: usize,
 ) -> WasmJitResult<()> {
@@ -2044,7 +2114,7 @@ fn emit_truthy(
 /// bytecode and native backends do. That is what lets the call site skip the
 /// error-status reload and branch that every stateful helper needs.
 fn emit_pure_math_call(
-    body: &mut Function,
+    body: &mut WasmBody,
     op: NativeOp,
     operands: &[crate::jit::ssa::ValueId],
 ) -> WasmJitResult<bool> {
@@ -2068,7 +2138,7 @@ fn emit_pure_math_call(
 }
 
 fn emit_helper_call(
-    body: &mut Function,
+    body: &mut WasmBody,
     op: NativeOp,
     operands: &[crate::jit::ssa::ValueId],
     result: crate::jit::ssa::ValueId,
@@ -2141,7 +2211,7 @@ fn emit_helper_call(
 }
 
 fn emit_slice_helper_call(
-    body: &mut Function,
+    body: &mut WasmBody,
     descriptor: HelperDescriptor,
     operands: &[crate::jit::ssa::ValueId],
     result: crate::jit::ssa::ValueId,
@@ -2208,7 +2278,7 @@ fn emit_slice_helper_call(
 }
 
 fn emit_checked_helper_result(
-    body: &mut Function,
+    body: &mut WasmBody,
     result: crate::jit::ssa::ValueId,
 ) -> WasmJitResult<()> {
     let result_local = value_local(result.index())?;
@@ -2433,7 +2503,7 @@ fn extremum_code(op: ExtremumOp) -> i32 {
     }
 }
 
-fn emit_voltage_node(body: &mut Function, node: VoltageNode) -> WasmJitResult<()> {
+fn emit_voltage_node(body: &mut WasmBody, node: VoltageNode) -> WasmJitResult<()> {
     match node {
         VoltageNode::Terminal(index) => emit_f64_array_load(
             body,
@@ -2454,13 +2524,13 @@ fn emit_voltage_node(body: &mut Function, node: VoltageNode) -> WasmJitResult<()
     }
 }
 
-fn emit_frame_f64_load(body: &mut Function, offset: u64) {
+fn emit_frame_f64_load(body: &mut WasmBody, offset: u64) {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::F64Load(f64_mem(offset)));
 }
 
 fn emit_f64_array_load(
-    body: &mut Function,
+    body: &mut WasmBody,
     pointer_offset: u64,
     length_offset: u64,
     index: usize,
@@ -2478,7 +2548,7 @@ fn emit_f64_array_load(
 /// and use a wide address calculation so wasm32 pointer arithmetic cannot wrap
 /// a malformed frame back into unrelated linear memory.
 fn emit_evaluation_state_dynamic_load(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
 ) -> WasmJitResult<()> {
     emit_operand(body, operands, 0)?;
@@ -2529,7 +2599,7 @@ fn emit_evaluation_state_dynamic_load(
 }
 
 fn emit_evaluation_state_dynamic_address(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
 ) -> WasmJitResult<()> {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
@@ -2546,7 +2616,7 @@ fn emit_evaluation_state_dynamic_address(
 }
 
 fn emit_u8_array_load(
-    body: &mut Function,
+    body: &mut WasmBody,
     pointer_offset: u64,
     length_offset: u64,
     index: usize,
@@ -2564,7 +2634,7 @@ fn emit_u8_array_load(
     Ok(())
 }
 
-fn emit_bounds_guard(body: &mut Function, length_offset: u64, index: usize) -> WasmJitResult<()> {
+fn emit_bounds_guard(body: &mut WasmBody, length_offset: u64, index: usize) -> WasmJitResult<()> {
     let required = index
         .checked_add(1)
         .ok_or_else(|| WasmJitError::Encoding("array bound overflow".into()))?;
@@ -2580,7 +2650,7 @@ fn emit_bounds_guard(body: &mut Function, length_offset: u64, index: usize) -> W
     Ok(())
 }
 
-fn emit_status_return(body: &mut Function, status: i32) {
+fn emit_status_return(body: &mut WasmBody, status: i32) {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(status));
     body.instruction(&WasmInstruction::I32Store(i32_mem(
@@ -2590,7 +2660,7 @@ fn emit_status_return(body: &mut Function, status: i32) {
     body.instruction(&WasmInstruction::Return);
 }
 
-fn emit_clear_error_status(body: &mut Function) {
+fn emit_clear_error_status(body: &mut WasmBody) {
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::I32Store(i32_mem(
@@ -2599,7 +2669,7 @@ fn emit_clear_error_status(body: &mut Function) {
 }
 
 fn emit_operand(
-    body: &mut Function,
+    body: &mut WasmBody,
     operands: &[crate::jit::ssa::ValueId],
     index: usize,
 ) -> WasmJitResult<()> {
@@ -4232,8 +4302,7 @@ endmodule
             .expect("lower the postfix program")
             .with_branching_conditionals()
             .expect("re-express conditionals as branches");
-        let body = encode_value_body_from_ssa(&ssa).expect("encode the branch-form body");
-        let bytes = encode_value_module(body).expect("assemble the module");
+        let bytes = single_value_module(&ssa).expect("encode the branch-form module");
         Validator::new()
             .validate_all(&bytes)
             .expect("branch-form module is valid WebAssembly");
@@ -4535,8 +4604,7 @@ endmodule
             (-1.0, 3.0, 6.0, 9.0),
         ] {
             let ssa = Program::loop_fixture_for_test(limit, scale).expect("build the loop program");
-            let body = encode_value_body_from_ssa(&ssa).expect("encode the loop body");
-            let bytes = encode_value_module(body).expect("assemble the module");
+            let bytes = single_value_module(&ssa).expect("encode the loop module");
             Validator::new()
                 .validate_all(&bytes)
                 .expect("the loop module is valid WebAssembly");
@@ -4550,11 +4618,48 @@ endmodule
         }
     }
 
+    /// The same loop with its locals capped below what it needs. The values
+    /// past the cap go through the module's spill globals, the module keeps
+    /// the shape the verifier allows, and every call computes, bit for bit,
+    /// what the unspilled module does.
+    #[test]
+    fn a_loop_past_the_locals_limit_spills_to_globals_and_computes_the_same() {
+        let engine = Engine::default();
+        for (limit, scale, first, second) in [
+            (20.0_f64, 3.0_f64, 1.0_f64, 2.0_f64),
+            (100.0, 0.5, -4.0, 7.5),
+            (-1.0, 3.0, 6.0, 9.0),
+        ] {
+            let ssa = Program::loop_fixture_for_test(limit, scale).expect("build the loop program");
+            let mut globals = SpillGlobals::default();
+            let body =
+                encode_value_body_within(&ssa, 3, &mut globals).expect("encode the spilled loop");
+            assert!(
+                !globals.types().is_empty(),
+                "three locals are too few for the loop"
+            );
+            let bytes = encode_value_module(body, &globals).expect("assemble the spilled module");
+            Validator::new()
+                .validate_all(&bytes)
+                .expect("the spilled module is valid WebAssembly");
+            verify_value_module_shape(&bytes, 1, &[], &[], true)
+                .expect("spill globals are a shape the verifier allows");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            let expected = Program::loop_fixture_expectation(limit, scale, first, second);
+            for _ in 0..2 {
+                assert_eq!(
+                    call_value_entry(&mut store, &memory, &instance, &[first, second]).to_bits(),
+                    expected.to_bits(),
+                    "spilled loop with limit={limit} scale={scale} first={first} second={second}"
+                );
+            }
+        }
+    }
+
     /// Assemble one already-lowered program into a validated single-entry
     /// module.
     fn loop_module(ssa: &Program) -> Vec<u8> {
-        let body = encode_value_body_from_ssa(ssa).expect("encode the loop body");
-        let bytes = encode_value_module(body).expect("assemble the module");
+        let bytes = single_value_module(ssa).expect("encode the loop module");
         Validator::new()
             .validate_all(&bytes)
             .expect("the loop module is valid WebAssembly");
@@ -4636,8 +4741,7 @@ endmodule
         for (trips, value) in [(3.0_f64, 5.0_f64), (1.0, -2.5), (0.0, 7.0), (6.0, 0.25)] {
             let ssa = Program::empty_block_loop_fixture_for_test(trips)
                 .expect("build the empty-block loop");
-            let body = encode_value_body_from_ssa(&ssa).expect("encode the loop body");
-            let bytes = encode_value_module(body).expect("assemble the module");
+            let bytes = single_value_module(&ssa).expect("encode the loop module");
             Validator::new()
                 .validate_all(&bytes)
                 .expect("the loop module is valid WebAssembly");

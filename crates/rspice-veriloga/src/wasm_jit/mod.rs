@@ -13,6 +13,7 @@ mod codegen;
 mod dispatch;
 #[cfg(any(target_arch = "wasm32", test))]
 mod executable;
+mod locals;
 #[cfg(any(target_arch = "wasm32", test))]
 mod run_models;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -160,7 +161,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 20;
 /// Version 58 lowers higher derivatives through a table's active affine segment.
 /// Version 59 retains table interpolation across the finite binary64 range.
 /// Version 60 preserves table derivative payloads through slope division.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 60;
+/// Version 61 shares a value entry's locals across disjoint live ranges and
+/// spills to mutable globals past the engines' locals limit.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 61;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
