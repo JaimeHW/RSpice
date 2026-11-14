@@ -1,11 +1,11 @@
-//! Copy and rename paths for the project's physical layout documents.
-//!
-//! A layout is keyed by the exact Library/Cell/View identity that owns it, so
-//! every identity move has to carry it: the document's own owner, and every
-//! master that a layout elsewhere in the project places from that identity. A
-//! move leaving either behind orphans a layout no surface can address again.
+//! Copying and renaming cells, libraries and views carries their physical layouts, run
+//! through the whole application.
 
-use super::*;
+use crate::state::{
+    Cell, CellViewRef, LayoutEdit, LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint,
+    LayoutTransform, View, ViewType,
+};
+use crate::workbench::app::actions::workspace::tests::*;
 
 #[test]
 fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters() {

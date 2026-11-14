@@ -527,4 +527,4 @@ pub(crate) fn bump_active_schematic_epoch(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
