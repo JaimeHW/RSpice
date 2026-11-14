@@ -2,8 +2,8 @@
 mx	tran	interp	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
 mx	tran	native	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
 mx	tran	worker	pass	rec (O6) [156] |a−e|=1.076e-5 allowed 5.000e-5 (a=5.063464e-1, e=5.063356e-1)
-proc	tran	interp	pass	proc (O6) net d event 17: |Δt|=3.388e-21 allowed 1.000e-12
-proc	tran	native	pass	proc (O6) net d event 17: |Δt|=3.388e-21 allowed 1.000e-12
+proc	tran	interp	pass	filter (O6) [12] |a−e|=8.015e-6 allowed 5.000e-5 (a=5.774946e-1, e=5.775027e-1)
+proc	tran	native	pass	filter (O6) [12] |a−e|=8.015e-6 allowed 5.000e-5 (a=5.774946e-1, e=5.775027e-1)
 proc	tran	worker	refused	xspice.d_process.program; label="line 22"; instance=aproc form=structured; token-form=structured; analysis-form=location; site=line 22
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
