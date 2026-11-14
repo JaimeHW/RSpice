@@ -130,13 +130,6 @@ struct VerilogAModelBinding {
     model: Option<veriloga_cache::CachedVerilogAModel>,
 }
 
-/// Every refusal the analog Verilog-A X-card route raises, built once.
-///
-/// The mixed route has the same helper in `mixed_modules.rs`; the two agree
-/// deliberately, because a deck author moving a module from one route to the
-/// other by adding a process must not see the same mistake reported in a
-/// different vocabulary.
-#[cfg(feature = "veriloga")]
 /// Point an elaboration refusal of an instance at the card that wrote it,
 /// when the site that raised it knew no narrower place: the element the
 /// flattener hands the builder carries no line, so the flattener files the
@@ -160,6 +153,13 @@ fn at_instance_card(
     }
 }
 
+/// Every refusal the analog Verilog-A X-card route raises, built once.
+///
+/// The mixed route has the same helper in `mixed_modules.rs`; the two agree
+/// deliberately, because a deck author moving a module from one route to the
+/// other by adding a process must not see the same mistake reported in a
+/// different vocabulary.
+#[cfg(feature = "veriloga")]
 fn refuse_veriloga_instance(
     instance: &str,
     module: &str,
