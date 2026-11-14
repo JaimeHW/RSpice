@@ -1110,9 +1110,9 @@ fn carrier_refusal(
     Some(refusal)
 }
 
-/// Generated compact models whose residual the generator proves but whose
-/// harmonics no settled transient has confirmed, or one contradicts, with
-/// what is missing or wrong.
+/// Generated compact models, named in any case as SPICE names are, whose
+/// residual the generator proves but whose harmonics no settled transient has
+/// confirmed, or one contradicts, with what is missing or wrong.
 #[cfg(feature = "veriloga-builtins-base")]
 const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
     (
@@ -1169,7 +1169,7 @@ fn hb_generated_refusal<const PROBE_DEVICES: bool>(
             .or_else(|| {
                 HB_UNVERIFIED_GENERATED_MODELS
                     .iter()
-                    .find(|(model, _)| *model == device.model_name)
+                    .find(|(model, _)| model.eq_ignore_ascii_case(device.model_name))
                     .map(|(_, reason)| *reason)
             })
             .or_else(|| {
