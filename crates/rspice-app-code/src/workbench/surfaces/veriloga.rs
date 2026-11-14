@@ -1,7 +1,7 @@
 //! The Verilog-A source editor.
 //!
 //! A Verilog-A module is a view of a cell, so its editor is a Design-workspace
-//! document: the shell's `show_in_design` draws it, editor only, while the
+//! document: the shell draws it on the Design stage, editor only, while the
 //! inspector dock states the module's facts. It edits the bundle
 //! `ProjectWorkspace::active_source_owner` names, which is the bundle every
 //! command, dock and dialog resolves too.
@@ -21,7 +21,11 @@ use crate::workbench::{MessageId, WorkbenchSession};
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
-use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
+use crate::workbench::app::actions::veriloga_placement::{
+    take_offered_veriloga_placement, veriloga_placement_target,
+};
+use crate::workbench::app::actions::veriloga_symbol::update_active_veriloga_symbol_in;
+use crate::workbench::code::commands::VerilogAStripRequest;
 use crate::workbench::documents::code_workspace::{
     CodeEditorLanguage, CodeWorkspaceRuntimeState, EditorFindings, show_veriloga_document_versioned,
 };
@@ -117,9 +121,9 @@ fn page_editor(
     }
 }
 
-/// Draw a Verilog-A cell view in the code feature's context, and say what
-/// the reader pressed on the interface strip.
-pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction> {
+/// Draw a Verilog-A cell view in the code feature's context, and carry out
+/// what the reader pressed on the interface strip once it has drawn.
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // Import and compile results are consumed by the frame loop, so a result
     // that lands while the editor is off screen is still published. Only what
     // needs this surface's pointer and context stays here.
@@ -185,7 +189,43 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> Option<InterfaceAction
         );
         ui.allocate_rect(available, Sense::hover());
     });
-    pressed
+    match pressed {
+        None => {}
+        Some(InterfaceAction::UpdateSymbol) => update_symbol(cx),
+        Some(InterfaceAction::Place) => {
+            if let Err(error) = place_offered_device(cx, ui.ctx()) {
+                cx.wb.prompt(error);
+            }
+        }
+    }
+}
+
+/// Update symbol: bring the open view's hand-edited symbol into step with
+/// its module and say what happened, then ask design to take its author
+/// to it with the pins it gained selected, ready to be placed.
+pub fn update_symbol(cx: &mut Cx<'_, CodeFeature>) {
+    if let Some((symbol, pins)) = update_active_veriloga_symbol_in(cx.model, cx.wb) {
+        cx.wb
+            .outbox
+            .push(VerilogAStripRequest::OpenUpdatedSymbol { symbol, pins });
+    }
+}
+
+/// Place in <schematic>: take the placement the compile result offers,
+/// then ask design to switch to its schematic and arm the device there,
+/// as the shelf arms a cell, with the canvas in `ctx` taking the keyboard.
+pub fn place_offered_device(
+    cx: &mut Cx<'_, CodeFeature>,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    let (target, binding) =
+        take_offered_veriloga_placement(&mut cx.state.code_workspace.veriloga.receipt, cx.model)?;
+    cx.wb.outbox.push(VerilogAStripRequest::Place {
+        target,
+        binding: Box::new(binding),
+        ctx: ctx.clone(),
+    });
+    Ok(())
 }
 
 fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
@@ -683,7 +723,7 @@ fn interface_strip(
 }
 
 /// What the reader pressed on the interface strip.
-pub enum InterfaceAction {
+enum InterfaceAction {
     /// Update symbol, beside a hand-edited symbol's drift.
     UpdateSymbol,
     /// Place the new device in the schematic the strip named.

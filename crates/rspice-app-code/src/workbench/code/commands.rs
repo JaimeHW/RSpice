@@ -16,7 +16,7 @@ use crate::io::NetlistFormat;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{ProjectSourceLanguage, ProjectSourceRole};
+use crate::state::{CellViewRef, LibraryCellInstance, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{
     Drain, EditorViewCommand, Request, SourceEditorRequest, StandardCommand, StructuralCommand,
@@ -204,6 +204,32 @@ pub enum NetlistEditorRequest {
 }
 
 impl Request for NetlistEditorRequest {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// What the Verilog-A page's interface strip asks of design once its
+/// press has done the code feature's part. Raised by the press, and
+/// answered by design straight after the call that raised it.
+#[derive(Clone, Debug)]
+pub enum VerilogAStripRequest {
+    /// Update symbol updated the symbol: open `symbol` in the symbol
+    /// editor, where it is finished by hand, with the `pins` it gained
+    /// selected, ready to be placed.
+    OpenUpdatedSymbol {
+        symbol: Option<CellViewRef>,
+        pins: Vec<String>,
+    },
+    /// Place took the offered placement: switch to the schematic `target`
+    /// and arm the device `binding` there, as the shelf arms a cell, with
+    /// the canvas in `ctx` taking the keyboard.
+    Place {
+        target: CellViewRef,
+        binding: Box<LibraryCellInstance>,
+        ctx: egui::Context,
+    },
+}
+
+impl Request for VerilogAStripRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 

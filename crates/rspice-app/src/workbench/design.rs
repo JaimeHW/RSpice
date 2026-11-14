@@ -28,7 +28,9 @@ use crate::schematic::view::selection_transform::{
 use crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet;
 use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
 use crate::schematic::view::{highlight_selected_net, selected_net, transient_annotation_status};
-use crate::state::{ComponentType, GridStyle, SchematicAnnotationVisibility, Tool};
+use crate::state::{
+    CellViewRef, ComponentType, GridStyle, LibraryCellInstance, SchematicAnnotationVisibility, Tool,
+};
 use crate::workbench::app::actions::property_edit::{
     open_selected_object_properties_in, selected_object_properties_available_in,
 };
@@ -1271,6 +1273,37 @@ pub(crate) fn own_modal_dialog_open(design: &DesignState, dialog_gate: bool) -> 
         };
         counts && (dialog.is_open)(design)
     })
+}
+
+/// What the code feature's Verilog-A page asks of design once its
+/// interface strip's press has done the code feature's part.
+impl DesignFeature {
+    /// Open the symbol Update symbol updated in the symbol editor, where it
+    /// is finished by hand, with the pins it gained selected, ready to be
+    /// placed.
+    pub(crate) fn open_updated_veriloga_symbol(
+        cx: &mut Cx<'_, Self>,
+        symbol: Option<CellViewRef>,
+        pins: Vec<String>,
+    ) {
+        navigation(cx).open_symbol_with_pins_selected(symbol, pins);
+    }
+
+    /// Switch to the schematic the offered placement names and arm the
+    /// device there, as the shelf arms a cell.
+    pub(crate) fn place_veriloga_device(
+        cx: &mut Cx<'_, Self>,
+        target: CellViewRef,
+        binding: LibraryCellInstance,
+        ctx: &Context,
+    ) {
+        navigation(cx).arm_cell_in_schematic(target, binding);
+        // The canvas takes the keyboard, as the shelf leaves it, so R, M
+        // and Esc work before the pointer reaches the sheet. No status
+        // line: the armed cursor is the answer, and a sentence about it
+        // outlives the arm.
+        rspice_schematic_editor::view::canvas::request_focus(ctx);
+    }
 }
 
 /// The feature's dialog steps, each over the parts of the design slot it

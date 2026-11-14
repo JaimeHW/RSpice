@@ -16,7 +16,9 @@ use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
 };
+use crate::workbench::features;
 use crate::workbench::state::Workspace;
+use crate::workbench::surfaces::veriloga;
 use rspice_design::symbol::SymbolShape;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 use rspice_design_model::symbol_pin::SymbolPinSide;
@@ -165,7 +167,8 @@ fn update_symbol_lands_in_the_editor_with_the_new_pin_selected() {
     edit_source(&mut app, &amplifier(", en"));
     compile_and_publish(&mut app);
 
-    app.state.update_active_veriloga_symbol();
+    veriloga::update_symbol(&mut features::cx(&mut app));
+    app.after_contribution();
     let ctx = themed_context();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());

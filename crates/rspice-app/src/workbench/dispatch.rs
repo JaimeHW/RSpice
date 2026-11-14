@@ -21,7 +21,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
-use crate::workbench::code::commands::{CodeRequest, NetlistEditorRequest};
+use crate::workbench::code::commands::{CodeRequest, NetlistEditorRequest, VerilogAStripRequest};
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
@@ -198,8 +198,11 @@ impl RSpiceApp {
     /// model-bound symbol, the generated deck at an instance's card and the
     /// copy-cell dialog), which the surface once did in place, so every
     /// later answer reads those workspaces as the surface left them; then
-    /// the commands it ran next and what it said once they had run, the print
-    /// workflow it asked for, the snap that follows a new schematic grid, the
+    /// what the Verilog-A page's interface strip asked of design once its
+    /// press had done the code feature's part (the updated symbol to open,
+    /// the offered device to arm), which the shell once did as the page
+    /// returned; then the commands it ran next and what it said once they
+    /// had run, the print workflow it asked for, the snap that follows a new schematic grid, the
     /// shortcut resolver's reset when a shortcut library was put in use, the
     /// open waveform view starting again from changed defaults, the dataset
     /// export, the analysis instance a results command asked for, the
@@ -235,6 +238,31 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, request: DesignSurfaceRequest| answer_surface_request(&mut app.state, request),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: VerilogAStripRequest| match request {
+                VerilogAStripRequest::OpenUpdatedSymbol { symbol, pins } => {
+                    crate::workbench::design::DesignFeature::open_updated_veriloga_symbol(
+                        &mut features::cx(app),
+                        symbol,
+                        pins,
+                    );
+                }
+                VerilogAStripRequest::Place {
+                    target,
+                    binding,
+                    ctx,
+                } => {
+                    crate::workbench::design::DesignFeature::place_veriloga_device(
+                        &mut features::cx(app),
+                        target,
+                        *binding,
+                        &ctx,
+                    );
+                }
+            },
         );
         requests::drain(
             self,

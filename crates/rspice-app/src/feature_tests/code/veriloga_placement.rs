@@ -17,7 +17,9 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::prompt_text;
+use crate::workbench::features;
 use crate::workbench::state::Workspace;
+use crate::workbench::surfaces::veriloga;
 
 const LIBRARY: &str = "behavioral";
 
@@ -110,9 +112,9 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
         Some(origin.clone())
     );
 
-    app.state
-        .place_offered_veriloga_device()
+    veriloga::place_offered_device(&mut features::cx(&mut app), &egui::Context::default())
         .expect("the device arms");
+    app.after_contribution();
 
     assert_eq!(app.state.model.workspace.content.active_view, origin);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);

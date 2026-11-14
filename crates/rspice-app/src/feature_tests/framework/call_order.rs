@@ -430,7 +430,9 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
 /// it raised answered. The netlist editor's commit, undo and redo go before
 /// all of it, as when the editor made them while the page drew. What the
 /// schematic canvas asked of the results workspace goes straight after, as
-/// when the canvas wrote it in place. The commands the call ran next go next, so a report's Save is carried out
+/// when the canvas wrote it in place. What the Verilog-A page's interface
+/// strip asked of design follows, as when the shell carried the press out
+/// as the page returned. The commands the call ran next go next, so a report's Save is carried out
 /// before anything else the call raised.
 const AFTER_CONTRIBUTION: &[Step] = &[
     (
@@ -450,6 +452,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     (
         "0.2",
         &["|app, request: DesignSurfaceRequest| answer_surface_request(&mut app.state, request)"],
+    ),
+    (
+        "0.3",
+        &[
+            "|app, request: VerilogAStripRequest| match request {",
+            "crate::workbench::design::DesignFeature::open_updated_veriloga_symbol(",
+            "crate::workbench::design::DesignFeature::place_veriloga_device(",
+        ],
     ),
     ("1", &["|app, Execute(key)| app.execute_command_key(key)"]),
     (
@@ -823,7 +833,13 @@ const DESIGN_STAGE: &[Step] = &[
     ),
     (
         "Verilog-A source",
-        &["code_adapters::show_in_design(ui, app);"],
+        &[
+            "let application_modal = app.state.application_modal_open();",
+            "veriloga::prepare(&mut features::cx(app));",
+            "veriloga::show(",
+            "veriloga::source_menu_open(&ctx, &app.state.workbench)",
+            ".with_application_modal(application_modal),",
+        ],
     ),
     (
         "touch strip",
@@ -1623,8 +1639,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        33,
-        "`after_contribution` answers exactly the thirty-three requests it lists"
+        34,
+        "`after_contribution` answers exactly the thirty-four requests it lists"
     );
 }
 

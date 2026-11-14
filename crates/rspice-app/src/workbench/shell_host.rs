@@ -85,8 +85,8 @@ impl Host for RSpiceApp {
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
                 use crate::workbench::surfaces::{
-                    automation, code_adapters, library_cellview_manager, netlist, project,
-                    simulate, stimulus, verify,
+                    automation, library_cellview_manager, netlist, project, simulate, stimulus,
+                    verify, veriloga,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -166,9 +166,15 @@ impl Host for RSpiceApp {
                     }
                     // The design feature draws the document in its context.
                     // Code's Verilog-A tab draws a Verilog-A view's source
-                    // under the feature's banners and tool options. The touch
-                    // strip draws last, over the canvas the document drew,
-                    // reading its commands' answers only where it draws.
+                    // under the feature's banners and tool options, in the
+                    // code feature's context: the page puts its editor in
+                    // front, then draws holding the source menu's answers
+                    // while the menu is open or opening, and whether an
+                    // application-modal dialog is open. What its interface
+                    // strip asks of design is answered once the stage has
+                    // drawn. The touch strip draws last, over the canvas the
+                    // document drew, reading its commands' answers only where
+                    // it draws.
                     Workspace::Design => {
                         use crate::workbench::design::DesignFeature;
 
@@ -176,7 +182,16 @@ impl Host for RSpiceApp {
                             == ViewType::VerilogA;
                         features::show_surface::<DesignFeature>(app, ui);
                         if verilog_a {
-                            code_adapters::show_in_design(ui, app);
+                            let application_modal = app.state.application_modal_open();
+                            veriloga::prepare(&mut features::cx(app));
+                            let ctx = ui.ctx().clone();
+                            veriloga::show(
+                                ui,
+                                &mut features::cx_with_menu_answers(app, |app| {
+                                    veriloga::source_menu_open(&ctx, &app.state.workbench)
+                                })
+                                .with_application_modal(application_modal),
+                            );
                         }
                         if let Some(canvas) = app.state.design.touch_strip_canvas.take()
                             && app.state.workbench.current_route().surface_id()

@@ -205,14 +205,13 @@ pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
     pub(crate) use rspice_app_code::workbench::surfaces::automation;
-    pub use rspice_app_workbench::workbench::surfaces::*;
-    pub(crate) mod code_adapters;
     pub(crate) use rspice_app_code::workbench::surfaces::netlist;
     pub(crate) use rspice_app_project::workbench::surfaces::library_cellview_manager;
     pub(crate) use rspice_app_project::workbench::surfaces::project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
+    pub use rspice_app_workbench::workbench::surfaces::*;
     pub(crate) mod stimulus;
-    pub(super) use rspice_app_code::workbench::surfaces::veriloga;
+    pub(crate) use rspice_app_code::workbench::surfaces::veriloga;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
 }
 pub(crate) mod tools;
