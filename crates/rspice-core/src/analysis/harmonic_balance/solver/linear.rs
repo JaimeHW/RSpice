@@ -367,7 +367,6 @@ fn operator_coefficient(
     difference: Option<Value>,
 ) -> Result<Option<Complex64>, String> {
     use super::HbOperatorTransfer as Transfer;
-    let complex = |(re, im): (Value, Value)| Complex64::new(re, im);
     Ok(Some(match transfer {
         Transfer::Integral => match difference {
             None if omega == 0.0 => return Ok(None),
@@ -385,7 +384,7 @@ fn operator_coefficient(
             None => filter.transfer_at(omega),
             Some(delta) => filter.transfer_divided_difference(omega, omega + delta),
         }
-        .map(complex)
+        .map(|(re, im)| Complex64::new(re, im))
         .map_err(|error| format!("has no transfer at omega={omega}: {error}"))?,
         #[cfg(feature = "veriloga")]
         Transfer::Delay(delay) => wave_coefficient(omega, *delay, difference),
