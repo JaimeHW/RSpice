@@ -1,7 +1,6 @@
 //! Native EKV 2.6 validation against Xyce 7.10.
 
 use num_complex::Complex64;
-use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
@@ -762,7 +761,7 @@ fn ekv26_noise_contribution_table_reads_the_same_on_either_route() {
             "vin",
             &frequencies,
             300.15,
-            &NoAbort,
+            &rspice_core::NoAbort,
         )
         .expect("EKV26 noise analysis runs");
 
