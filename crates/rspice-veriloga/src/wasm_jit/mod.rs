@@ -14,6 +14,8 @@ mod dispatch;
 #[cfg(any(target_arch = "wasm32", test))]
 mod executable;
 #[cfg(any(target_arch = "wasm32", test))]
+mod run_models;
+#[cfg(any(target_arch = "wasm32", test))]
 mod runtime;
 
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +31,10 @@ pub(crate) use dispatch::dispatch_model_entry;
 pub use dispatch::install_browser_dispatcher;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use executable::{WasmJitExecutable, WasmJitExecutableEntry};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use run_models::admit as admit_browser_model;
+#[cfg(target_arch = "wasm32")]
+pub use run_models::{collect_browser_models, with_browser_run_models};
 #[cfg(target_arch = "wasm32")]
 pub use runtime::{
     WasmJitRuntimeSession, eval_op_slice_v1, eval_op_v1, math1_v1, math2_v1, with_runtime_session,

@@ -3069,7 +3069,13 @@ impl VerilogADevice {
         /// Mirrors `WASM_JIT_CACHE_MAX_MODELS` in the browser worker.
         const WASM_CACHE_MAX_MODELS: usize = 64;
 
-        type CacheEntry = (WasmCompileCacheKey, Result<Arc<WasmJitExecutable>, String>);
+        // The model artifact stays beside its executable: a host collecting
+        // the models a build asks for takes the artifact either way.
+        type Compiled = (
+            Arc<WasmJitExecutable>,
+            Arc<crate::wasm_jit::WasmJitModelArtifact>,
+        );
+        type CacheEntry = (WasmCompileCacheKey, Result<Compiled, String>);
         thread_local! {
             /// Most-recently-used first.
             static WASM_CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
@@ -3081,7 +3087,7 @@ impl VerilogADevice {
             module: model.name.clone(),
             layout: compiled_model_layout_identity(model),
         };
-        WASM_CACHE.with(|cache| {
+        let (executable, module) = WASM_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
             if let Some(index) = cache.iter().position(|(key, _)| *key == cache_key) {
                 let entry = cache.remove(index);
@@ -3091,13 +3097,17 @@ impl VerilogADevice {
             }
 
             let compiled = crate::wasm_jit::compile_model_value_module(model, artifact)
-                .and_then(|module| WasmJitExecutable::from_artifact(model, &module))
-                .map(Arc::new)
+                .and_then(|module| {
+                    let executable = WasmJitExecutable::from_artifact(model, &module)?;
+                    Ok((Arc::new(executable), Arc::new(module)))
+                })
                 .map_err(|error| error.to_string());
             cache.insert(0, (cache_key, compiled.clone()));
             cache.truncate(WASM_CACHE_MAX_MODELS);
             compiled.map_err(VmError::WasmJit)
-        })
+        })?;
+        crate::wasm_jit::admit_browser_model(&module, &model.name).map_err(VmError::WasmJit)?;
+        Ok(executable)
     }
 
     /// Check if this device is using native compiled code.
