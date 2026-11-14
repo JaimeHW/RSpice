@@ -194,16 +194,16 @@ jobs:
         with:
           key: veriloga-corpus
           cache-on-failure: true
-      - name: Corpus golden gates (43 models)
+      - name: Corpus golden gates on every generated model
         # The four correctness gates: finite evaluation at every probe point,
         # gmin reaching the devices that read it, stamped Jacobians against a
         # numerical derivative of the stamped currents, and stamped reactive
         # blocks against a numerical derivative of the recovered charge.
         #
-        # Nightly rather than per-commit because the feature compiles all 43
-        # CMC models. Serial threads and a raised stack because the generated
-        # bodies are large enough to overflow the 2 MB the test harness gives a
-        # spawned thread.
+        # Nightly rather than per-commit because the feature compiles every
+        # generated model in the catalog. Serial threads and a raised stack
+        # because the generated bodies are large enough to overflow the 2 MB
+        # the test harness gives a spawned thread.
         #
         # The suite lives in rspice-conformance, not rspice-core: it moved there
         # with the rest of the validation code. Pointed at the old package this
@@ -228,7 +228,7 @@ jobs:
         run: >-
           cargo test --locked --release -p rspice-conformance --features veriloga-builtins
           --test generated_veriloga_model_routing
-      - name: Replay captured Verilog-A fingerprints (43 models)
+      - name: Replay every generated model's captured Verilog-A fingerprints
         # Snapshot replay is deliberately separate from the independent
         # derivative gates above: replay detects behavioral drift, while the
         # oracle determines whether the captured derivative is mathematically
@@ -239,7 +239,7 @@ jobs:
         run: >-
           cargo run --locked --release -p rspice-conformance
           --features veriloga-builtins --bin rspice-veriloga-golden -- verify
-      - name: Measure 43-model stamp performance
+      - name: Measure every generated model's stamp performance
         id: stamp
         # Keep model timings and the same-run BSIM4 reference as evidence.
         # Different model equations and sizes do not have a universal runtime
@@ -300,10 +300,11 @@ jobs:
       - name: Core library units against the generated catalog
         # Debug, as `cargo test` builds these units everywhere else, so none of
         # the release tree above is shared. The device library's units hold
-        # all 43 models to the adapter's contracts in one build. rspice-core's
-        # model-gated units take three: DIODE_CMC, R2_CMC, VBIC13 and VBIC13_4T
-        # with the noise runtime; EKV with it, for the EKV 2.6 oracle deck;
-        # and EKV without it, where the catalog carries no noise.
+        # every generated model to the adapter's contracts in one build.
+        # rspice-core's model-gated units take three: DIODE_CMC, R2_CMC,
+        # VBIC13 and VBIC13_4T with the noise runtime; EKV with it, for the
+        # EKV 2.6 oracle deck; and EKV without it, where the catalog carries
+        # no noise.
         if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"

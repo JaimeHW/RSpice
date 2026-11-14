@@ -245,11 +245,12 @@ jobs:
       # Generated compact models through the periodic analyses, with the two
       # models this lane builds: R2_CMC against its native twin and DIODE_CMC
       # against RSpice's settled transient. The other families' fixtures
-      # compile only with their own model features.
+      # compile only with their own model features. The noise runtime lets
+      # R2_CMC's periodic noise fold against its native twin's.
       - name: Test generated compact models through harmonic balance
         run: >-
           cargo test --locked -p rspice-core
-          --features veriloga,veriloga-model-diode-cmc,veriloga-model-r2-cmc
+          --features veriloga,veriloga-model-diode-cmc,veriloga-model-r2-cmc,veriloga-builtins-noise
           --test generated generated_hb::
 
   test-libraries:
