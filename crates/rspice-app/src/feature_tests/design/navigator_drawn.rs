@@ -1,14 +1,14 @@
 //! The navigator drawn through a whole application: its sheet scope, occurrence rows and
 //! bands, references, wireless net selection, section folds and keyboard walk.
 
+use super::navigator::{
+    NavigatorPanel, interface_design, recursive_design, two_sheet_named_signals,
+};
 use crate::schematic::view::sheet_visibility::SheetScope;
 use crate::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::navigator::hierarchy_tree::{DesignTreeRow, OccurrenceState};
-use crate::workbench::design::navigator::tests::{
-    NavigatorPanel, add_master, click_events, interface_design, painted_panel, placed,
-    recursive_design, two_sheet_named_signals,
-};
+use crate::workbench::design::navigator::tests::{add_master, click_events, painted_panel, placed};
 use crate::workbench::design::navigator::*;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
@@ -180,7 +180,12 @@ fn design_with_a_broken_master() -> RSpiceApp {
     components.push(placed(102, "XGONE", "work", "missing"));
     components.push(placed(103, "XGONE2", "work", "missing"));
     app.state.sync_active_schematic_to_workspace();
-    add_master(&mut app.state, "work", "child", SchematicState::default());
+    add_master(
+        &mut app.state.model,
+        "work",
+        "child",
+        SchematicState::default(),
+    );
     app
 }
 

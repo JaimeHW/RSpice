@@ -1,6 +1,7 @@
 //! The navigator's object rails drawn through a whole application: ports, vector pins,
 //! excitations and RF ports, and the occurrences each rail answers about.
 
+use super::navigator::{NavigatorPanel, interface_design, two_sheet_named_signals};
 use crate::schematic::view::sheet_visibility::SheetScope;
 use crate::state::CellViewRef;
 use crate::state::ComponentType;
@@ -474,7 +475,7 @@ fn hierarchical_excitations() -> RSpiceApp {
         .document_mut_for_test()
         .components
         .push(rf_port(712, "P1", "port=1 z0=50"));
-    add_master(&mut app.state, "work", "afe", child);
+    add_master(&mut app.state.model, "work", "afe", child);
     app
 }
 

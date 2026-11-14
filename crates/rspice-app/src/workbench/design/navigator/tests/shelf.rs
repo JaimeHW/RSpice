@@ -16,6 +16,7 @@ use crate::schematic::{
 use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::state::{ComponentType, engine_only_xspice_devices};
+use crate::workbench::RSpiceApp;
 use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
 
 /// The shelf's built-in Verilog-A rows read and stand as the Library page
