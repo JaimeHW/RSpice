@@ -492,33 +492,36 @@ pub(super) fn active_sheet_has_objects(model: &Model) -> bool {
             .any(|object| object_is_on_active_sheet(model, object.id))
 }
 
-/// A cell view with two sheets: `active_ids` stay on the active Sheet 1 and
-/// `hidden_ids` belong to Sheet 2. Shared by the canvas modules' tests.
+/// A cell view with two sheets ([`seed_two_sheets`]) in a new whole
+/// application. Shared by the canvas modules' tests.
 #[cfg(test)]
 pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
+    let mut state = AppState::default();
+    seed_two_sheets(&mut state.model, active_ids, hidden_ids);
+    state
+}
+
+/// Give the model's active cell view two sheets: `active_ids` stay on the
+/// active Sheet 1 and `hidden_ids` belong to Sheet 2. What the model holds
+/// is all a sheet is, so the design test host and the whole application are
+/// seeded alike.
+#[cfg(test)]
+pub(crate) fn seed_two_sheets(model: &mut Model, active_ids: &[u64], hidden_ids: &[u64]) {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
-    let mut state = AppState::default();
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let key = model.workspace.content.active_schematic_reference().key();
     let all_ids = active_ids
         .iter()
         .chain(hidden_ids)
         .copied()
         .collect::<Vec<_>>();
-    let first = state
-        .model
+    let first = model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", all_ids)
         .expect("first sheet");
-    let catalog = state
-        .model
+    let catalog = model
         .workspace
         .content
         .design_management
@@ -541,7 +544,6 @@ pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppStat
             .expect("hidden assignments");
     }
     catalog.set_active(first).expect("active sheet");
-    state
 }
 
 #[cfg(test)]
