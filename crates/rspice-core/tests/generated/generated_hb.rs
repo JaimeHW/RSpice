@@ -107,6 +107,7 @@ fn period_spectrum(time: &[f64], waveform: &[f64], end: f64, samples: usize) -> 
 /// own transient once that has settled. A thermal terminal is a node of its
 /// own, which the model's thermal network defines: grounding it would add a
 /// second constraint where the model already holds it at ambient.
+/// The larger MOSFET models need `RUST_MIN_STACK=67108864` in a debug build.
 ///
 /// Settle test: the transient starts from rest (UIC), so no DC solve decides
 /// the fixture, and runs `PERIODS` periods at a step of at most T/512; the
@@ -163,6 +164,20 @@ fn generated_models_reach_the_settled_transients_steady_state() {
             "GaAs FET (Angelov)",
             "VDD vdd 0 3\nV1 in 0 SIN(-0.5 0.3 1meg)\nRG in g 1k\nRD vdd d 100\n\
              XA d g 0 angelov\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimcmg110")]
+        (
+            "FinFET (BSIM-CMG)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+             XM d g 0 0 bsimcmg110\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimsotb-va")]
+        (
+            "thin-BOX SOI MOSFET (HiSIM-SOTB)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+             XM d g 0 0 hisimsotb_va\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-bsimimg")]
