@@ -1912,16 +1912,26 @@ impl Engine {
             dt,
             ctx.coupled_tline_refs,
         );
-        let generic_switch_snapshot = ctx
-            .xyce_one_step_order2
-            .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
-        circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
-        if let Some((before_values, before_rhs)) = generic_switch_snapshot {
-            for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
+        if ctx.xyce_one_step_order2 && circuit.generic_switches.is_empty() {
+            // No switch stamps here, so the value each entry held before the
+            // switch stamps is its value now: the half-weight blend runs in
+            // place, the same operations, without a copy to start from.
+            for value in matrix.values_mut().iter_mut().chain(rhs.iter_mut()) {
+                let before = *value;
                 *value = before + 0.5 * (*value - before);
             }
-            for (value, before) in rhs.iter_mut().zip(before_rhs) {
-                *value = before + 0.5 * (*value - before);
+        } else {
+            let generic_switch_snapshot = ctx
+                .xyce_one_step_order2
+                .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
+            circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
+            if let Some((before_values, before_rhs)) = generic_switch_snapshot {
+                for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
+                    *value = before + 0.5 * (*value - before);
+                }
+                for (value, before) in rhs.iter_mut().zip(before_rhs) {
+                    *value = before + 0.5 * (*value - before);
+                }
             }
         }
 
