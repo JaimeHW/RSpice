@@ -299,6 +299,9 @@ pub struct KluSolver {
     /// Left row equilibration applied to both A and b. The solution is in the
     /// original coordinates because no column scaling is applied.
     row_scale: Vec<Value>,
+    /// Whether the last scaling pass left `row_scale` and `a_entry_scale`
+    /// the identity.
+    unit_row_scale: bool,
     /// Factor-time row scale aligned with the original CSC values. Reusing
     /// these scales during refactor removes a random row-scale gather from
     /// every nonzero on the Newton hot path.
@@ -315,6 +318,17 @@ pub struct KluSolver {
     /// Successful full numeric factorizations performed by this solver.
     #[cfg(test)]
     full_factorization_count: u64,
+    /// Those of them that confirmed the stored pivot sequence instead of
+    /// searching for it.
+    #[cfg(test)]
+    confirmed_factorization_count: u64,
+    /// For each pivot column, where its pivot row stood among the column's
+    /// unpivoted rows in the order the factorization's reach found them:
+    /// L keeps that order with the pivot row taken out.
+    pivot_slot: Vec<u32>,
+    /// Whether the pivot order, the L/U pattern and the pivot slots are the
+    /// ones a full factorization built, rather than a checkpoint's.
+    searched_pattern: bool,
     factor_workspace: FactorWorkspace,
     /// Whether L/U currently hold a valid factorization.
     factored: bool,
@@ -390,6 +404,8 @@ impl KluSolver {
         self.lost_digits = None;
         self.factored = true;
         self.pivots_reused = false;
+        self.searched_pattern = false;
+        self.unit_row_scale = false;
         Ok(())
     }
 
@@ -511,6 +527,9 @@ impl KluSolver {
         self.lost_digits = None;
         self.use_diag_recip = false;
         self.factored = false;
+        self.pivot_slot.clear();
+        self.searched_pattern = false;
+        self.unit_row_scale = false;
     }
 
     /// Whether the symbolic analysis matches this pattern instance.
@@ -654,6 +673,7 @@ impl KluSolver {
     /// Compute max-row equilibration, matching the robust default used by
     /// KLU-family production solvers. A numerically empty row is singular.
     fn update_row_scaling(&mut self, values: &[Value]) -> Result<(), SolverError> {
+        self.unit_row_scale = false;
         self.row_scale.resize(self.n, 0.0);
         self.row_scale.fill(0.0);
         for col in 0..self.n {
@@ -688,8 +708,10 @@ impl KluSolver {
             for scale in &mut self.row_scale {
                 *scale = finite_reciprocal_scale(*scale);
             }
+            self.unit_row_scale = false;
         } else {
             self.row_scale.fill(1.0);
+            self.unit_row_scale = true;
         }
         self.a_entry_scale.resize(values.len(), 1.0);
         for (index, &row) in self.a_rows.iter().enumerate() {
@@ -816,9 +838,26 @@ impl KluSolver {
                 self.a_rows.len()
             )));
         }
-        self.update_row_scaling(values)?;
+        // With row scaling off, a confirmation over the identity scale needs
+        // no scaling pass first: it reads no scale, and it confirms no matrix
+        // that pass refuses, because a non-finite entry or a numerically
+        // empty row leaves some column without a confirmable pivot.
+        let confirm_unscaled =
+            self.searched_pattern && self.row_scaling_disabled && self.unit_row_scale;
+        if !confirm_unscaled {
+            self.update_row_scaling(values)?;
+        }
         self.update_twin_pivots(values)?;
+        if self.searched_pattern && self.confirm_pivot_sequence(values, pivot_tolerance) {
+            return Ok(());
+        }
+        self.searched_pattern = false;
+        if confirm_unscaled {
+            self.update_row_scaling(values)?;
+        }
         let n = self.n;
+        self.pivot_slot.clear();
+        reserve_for(&mut self.pivot_slot, n)?;
         let col_ptr = &self.a_col_ptr;
         let row_idx = &self.a_rows;
         let ws = &mut self.factor_workspace;
@@ -972,10 +1011,12 @@ impl KluSolver {
             };
             let mut max_abs = 0.0_f64;
             let mut max_row = usize::MAX;
+            let mut max_slot = 0;
             let mut diag_abs = -1.0_f64;
+            let mut diag_slot = 0;
             reserve_for(l_rows, nonpivot_rows.len())?;
             reserve_for(l_vals, nonpivot_rows.len())?;
-            for &row in nonpivot_rows.iter() {
+            for (slot, &row) in nonpivot_rows.iter().enumerate() {
                 if current_block.is_some_and(|block| self.row_block[row] != block) {
                     continue;
                 }
@@ -983,19 +1024,22 @@ impl KluSolver {
                 if v > max_abs {
                     max_abs = v;
                     max_row = row;
+                    max_slot = slot;
                 }
                 if row == preferred_row {
                     diag_abs = v;
+                    diag_slot = slot;
                 }
             }
             if max_row == usize::MAX || max_abs == 0.0 || !max_abs.is_finite() {
                 return Err(SolverError::SingularMatrix);
             }
-            let pivot_row = if diag_abs >= pivot_tolerance * max_abs {
-                preferred_row
+            let (pivot_row, pivot_slot) = if diag_abs >= pivot_tolerance * max_abs {
+                (preferred_row, diag_slot)
             } else {
-                max_row
+                (max_row, max_slot)
             };
+            self.pivot_slot.push(pivot_slot as u32);
             let pivot_val = x[pivot_row];
             let pivot_abs = pivot_val.abs();
             if self.absolute_pivot_tolerance > 0.0
@@ -1098,11 +1142,202 @@ impl KluSolver {
         };
         self.factored = true;
         self.pivots_reused = false;
+        self.searched_pattern = true;
         #[cfg(test)]
         {
             self.full_factorization_count = self.full_factorization_count.saturating_add(1);
         }
         Ok(())
+    }
+
+    /// A full factorization's reach, its elimination order and the order of
+    /// each L column follow from the pattern and the pivot sequence alone,
+    /// so one that selects the pivots the last full factorization selected
+    /// repeats that factorization's searches exactly. This performs its
+    /// arithmetic over the stored pattern instead, confirming each pivot
+    /// with the same threshold test over the column's unpivoted rows in the
+    /// order the search visited them, and keeps the result only if every
+    /// pivot is confirmed: the factors are then bit for bit the full
+    /// factorization's. False, with the work vector clean, means a pivot
+    /// moved or the full factorization would refuse a value here; the
+    /// caller then factors from the search.
+    fn confirm_pivot_sequence(&mut self, values: &[Value], pivot_tolerance: Value) -> bool {
+        if self.eliminate_on_stored_pivots(values, pivot_tolerance) {
+            #[cfg(test)]
+            {
+                self.full_factorization_count = self.full_factorization_count.saturating_add(1);
+                self.confirmed_factorization_count =
+                    self.confirmed_factorization_count.saturating_add(1);
+            }
+            true
+        } else {
+            self.factored = false;
+            self.work.fill(0.0);
+            false
+        }
+    }
+
+    /// [`Self::confirm_pivot_sequence`]'s elimination, column for column the
+    /// full factorization's, in pivot space. False at the first column that
+    /// does not confirm its stored pivot.
+    fn eliminate_on_stored_pivots(&mut self, values: &[Value], pivot_tolerance: Value) -> bool {
+        let x = &mut self.work;
+        // The full factorization leaves every row's pivot position here.
+        let pivot_of_row = &self.factor_workspace.pinv;
+        let blocked = self.block_count > 1;
+        let direct_factorization_division = self.direct_factorization_division;
+        let mut use_diag_recip = true;
+        let mut reciprocal_pivot_growth = Value::INFINITY;
+        let mut min_abs_pivot = Value::INFINITY;
+        let mut max_abs_pivot: Value = 0.0;
+        let mut lost_digits = false;
+        for j in 0..self.n {
+            let a_col = self.col_perm[j] as usize;
+            let mut input_col_max: Value = 0.0;
+            for idx in self.a_col_ptr[a_col]..self.a_col_ptr[a_col + 1] {
+                let scaled_value = values[idx] * self.a_entry_scale[idx];
+                input_col_max = input_col_max.max(scaled_value.abs());
+                // The search zeroes each row it reaches and then adds the
+                // entry, which turns a negative zero positive.
+                x[self.a_scatter[idx] as usize] = 0.0 + scaled_value;
+            }
+
+            let (u_begin, u_end) = (self.u_col_ptr[j], self.u_col_ptr[j + 1]);
+            let mut u_col_max = 0.0_f64;
+            for ui in u_begin..u_end - 1 {
+                let k = self.u_rows[ui] as usize;
+                let alpha = x[k];
+                if !alpha.is_finite() {
+                    return false;
+                }
+                self.u_vals[ui] = alpha;
+                u_col_max = u_col_max.max(alpha.abs());
+                if alpha != 0.0 {
+                    let (ls, le) = (self.l_col_ptr[k], self.l_col_ptr[k + 1]);
+                    for (&row, &lv) in self.l_rows[ls..le].iter().zip(&self.l_vals[ls..le]) {
+                        let updated = x[row as usize] - alpha * lv;
+                        if !updated.is_finite() {
+                            return false;
+                        }
+                        x[row as usize] = updated;
+                    }
+                }
+                x[k] = 0.0;
+            }
+
+            // Form L with the stored pivot while running the threshold test
+            // over the unpivoted rows in the search's order, the pivot row in
+            // the slot L leaves out for it.
+            let pivot_val = x[j];
+            x[j] = 0.0;
+            if !pivot_val.is_finite() {
+                return false;
+            }
+            let pivot_recip = 1.0 / pivot_val;
+            let current_block = self.col_block.get(a_col).copied();
+            let preferred_row = match self.twin_row_for_col.get(a_col) {
+                Some(&row) if row != u32::MAX => row as usize,
+                _ => self
+                    .matched_row_for_col
+                    .get(a_col)
+                    .map_or(a_col, |&row| row as usize),
+            };
+            let preferred_pos = pivot_of_row[preferred_row];
+            let mut max_abs = 0.0_f64;
+            let mut max_pos = usize::MAX;
+            let mut diag_abs = -1.0_f64;
+            let mut consider = |pos: usize, value: Value| {
+                if blocked
+                    && current_block
+                        .is_some_and(|block| self.row_block[self.row_perm[pos] as usize] != block)
+                {
+                    return;
+                }
+                let magnitude = value.abs();
+                if magnitude > max_abs {
+                    max_abs = magnitude;
+                    max_pos = pos;
+                }
+                if pos == preferred_pos {
+                    diag_abs = magnitude;
+                }
+            };
+            let (l_begin, l_end) = (self.l_col_ptr[j], self.l_col_ptr[j + 1]);
+            let slot = l_begin + self.pivot_slot[j] as usize;
+            for li in l_begin..l_end {
+                if li == slot {
+                    consider(j, pivot_val);
+                }
+                let pos = self.l_rows[li] as usize;
+                let v = x[pos];
+                x[pos] = 0.0;
+                if !v.is_finite() {
+                    return false;
+                }
+                consider(pos, v);
+                let factor_value = if direct_factorization_division {
+                    v / pivot_val
+                } else if pivot_recip.is_finite() {
+                    v * pivot_recip
+                } else {
+                    v / pivot_val
+                };
+                if !factor_value.is_finite() {
+                    return false;
+                }
+                self.l_vals[li] = factor_value;
+            }
+            if slot == l_end {
+                consider(j, pivot_val);
+            }
+            if max_pos == usize::MAX || max_abs == 0.0 || !max_abs.is_finite() {
+                return false;
+            }
+            let pivot_pos = if diag_abs >= pivot_tolerance * max_abs {
+                preferred_pos
+            } else {
+                max_pos
+            };
+            if pivot_pos != j {
+                return false;
+            }
+            let pivot_abs = pivot_val.abs();
+            if self.absolute_pivot_tolerance > 0.0
+                && pivot_abs / self.row_scale[self.row_perm[j] as usize]
+                    < self.absolute_pivot_tolerance
+            {
+                return false;
+            }
+            min_abs_pivot = min_abs_pivot.min(pivot_abs);
+            max_abs_pivot = max_abs_pivot.max(pivot_abs);
+            lost_digits |= pivot_abs < CANCELLED_PIVOT_RATIO * input_col_max;
+            use_diag_recip &= pivot_recip.is_finite();
+            self.u_diag_recip[j] = pivot_recip;
+            self.u_vals[u_end - 1] = pivot_val;
+            u_col_max = u_col_max.max(pivot_abs);
+            if u_col_max > 0.0 {
+                reciprocal_pivot_growth = reciprocal_pivot_growth.min(input_col_max / u_col_max);
+            }
+        }
+        self.use_diag_recip = use_diag_recip;
+        self.lost_digits = Some(lost_digits);
+        self.diagnostics = KluDiagnostics {
+            reciprocal_pivot_growth: if reciprocal_pivot_growth.is_finite() {
+                reciprocal_pivot_growth
+            } else {
+                0.0
+            },
+            diagonal_rcond: if max_abs_pivot > 0.0 {
+                min_abs_pivot / max_abs_pivot
+            } else {
+                0.0
+            },
+            min_abs_pivot,
+            max_abs_pivot,
+        };
+        self.factored = true;
+        self.pivots_reused = false;
+        true
     }
 
     /// Depth-first reach over L's columns, marking visited rows and
@@ -2474,6 +2709,90 @@ mod tests {
 
         solver.factor(&values).expect("fresh numeric factor");
         assert_eq!(solver.row_perm[0] as usize, alternate_row);
+    }
+
+    /// Everything a full factorization leaves for solves and diagnostics,
+    /// printed so negative zeros count.
+    fn factor_image(solver: &KluSolver) -> String {
+        format!(
+            "{:?} {:?} {:?} {} {:?} {}",
+            solver.capture_numeric_checkpoint(),
+            solver.u_diag_recip,
+            solver.pivot_slot,
+            solver.use_diag_recip,
+            solver.lost_digits,
+            solver.pivots_reused
+        )
+    }
+
+    /// A full factorization that selects the pivots the last one selected
+    /// confirms them over the stored pattern instead of searching, and
+    /// leaves the factors a search from scratch leaves, bit for bit, with
+    /// and without row scaling and across an extreme row. One whose pivot
+    /// moves, or whose values a search refuses, searches.
+    #[test]
+    fn a_full_factorization_confirms_unmoved_pivots_bit_for_bit() {
+        let mut rng = Rng(0xC1AC_0011);
+        for n in [5, 17, 40] {
+            let (col_ptr, rows, base, _) = random_system(&mut rng, n);
+            for (row_scaling, extreme_row) in [(false, None), (true, None), (true, Some(n / 2))] {
+                let mut values = base.clone();
+                if let Some(extreme) = extreme_row {
+                    for (value, &row) in values.iter_mut().zip(&rows) {
+                        if row == extreme {
+                            *value *= 1e160;
+                        }
+                    }
+                }
+                let fresh = |values: &[Value]| {
+                    let mut searched = KluSolver::new();
+                    searched.set_row_scaling_enabled(row_scaling);
+                    searched.analyze(n, &col_ptr, &rows).unwrap();
+                    searched.factor(values).map(|()| searched)
+                };
+                let mut solver = KluSolver::new();
+                solver.set_row_scaling_enabled(row_scaling);
+                solver.analyze(n, &col_ptr, &rows).unwrap();
+                solver.factor(&values).unwrap();
+                for _ in 0..4 {
+                    for value in &mut values {
+                        *value *= 1.0 + 1e-3 * (rng.unit() - 0.5);
+                    }
+                    solver.factor(&values).unwrap();
+                    assert_eq!(
+                        factor_image(&solver),
+                        factor_image(&fresh(&values).unwrap())
+                    );
+                }
+                assert_eq!(solver.confirmed_factorization_count, 4, "n={n}");
+
+                let mut refused = values.clone();
+                refused[n] = Value::NAN;
+                assert_eq!(
+                    format!("{:?}", solver.factor(&refused).unwrap_err()),
+                    format!("{:?}", fresh(&refused).err().unwrap())
+                );
+                solver.factor(&values).unwrap();
+                assert_eq!(
+                    factor_image(&solver),
+                    factor_image(&fresh(&values).unwrap())
+                );
+            }
+        }
+
+        // The preferred row falls below the threshold beside its column.
+        let mut solver = KluSolver::new();
+        solver.analyze(2, &[0, 2, 4], &[0, 1, 0, 1]).unwrap();
+        let first_column = solver.col_perm[0] as usize;
+        let preferred_row = solver.matched_row_for_col[first_column] as usize;
+        let offset = |row: usize, column: usize| column * 2 + row;
+        let mut values = vec![1.0, 1.0, 1.0, 1.0];
+        values[offset(1 - preferred_row, 1 - first_column)] = 2.0;
+        solver.factor(&values).unwrap();
+        values[offset(preferred_row, first_column)] = 1.0e-4;
+        solver.factor(&values).unwrap();
+        assert_eq!(solver.confirmed_factorization_count, 0);
+        assert_eq!(solver.row_perm[0] as usize, 1 - preferred_row);
     }
 
     #[test]
