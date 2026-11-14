@@ -14,6 +14,7 @@ mod cell_deletion_transactions;
 mod connectivity_manager_drawn;
 mod context_menu;
 mod create_model_bound_symbol_drawn;
+mod current_finding_marks;
 mod design_checks;
 mod design_note_placement_drawn;
 mod design_review_comments;

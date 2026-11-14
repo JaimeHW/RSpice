@@ -1,6 +1,6 @@
-//! What the canvas marks for the current finding beyond its own badge.
+//! A loop of sources drawn and checked, and the identity its finding
+//! carries: what the current-finding tests build on.
 
-use super::*;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, NetLabel, Point, View, ViewType};
 use crate::workbench::app_state::AppState;
 use rspice_design::drc::DrcViolationType;
@@ -99,37 +99,4 @@ pub(crate) fn loop_finding(state: &AppState, subject: &CellViewRef) -> uuid::Uui
             (finding.violation_type == DrcViolationType::SourceToSource).then_some(identity)
         })
         .expect("the loop is published")
-}
-
-/// With a loop current, every source in it is marked where it is drawn, in
-/// the finding's own severity colour; with nothing current, nothing is.
-#[test]
-fn every_source_in_the_current_loop_is_marked() {
-    let mut state = AppState::default();
-    state.open_project_session();
-    let (top, _, sources) = draw_source_loop(&mut state);
-    assert_eq!(
-        related_marks(&crate::schematic::view::canvas_facts(&state)),
-        None,
-        "no finding is current"
-    );
-
-    state
-        .model
-        .diagnostics
-        .set_current_finding(Some(loop_finding(&state, &top)));
-    let (severity, mut marked) = related_marks(&crate::schematic::view::canvas_facts(&state))
-        .expect("the loop's sources are marked");
-
-    let mut drawn: Vec<Point> = sources.iter().map(|source| source.position).collect();
-    marked.sort_by_key(|point| (point.x, point.y));
-    drawn.sort_by_key(|point| (point.x, point.y));
-    assert_eq!(
-        marked, drawn,
-        "each of the three sources, where it is drawn"
-    );
-    assert_eq!(
-        severity,
-        DrcViolationType::SourceToSource.default_severity()
-    );
 }
