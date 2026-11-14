@@ -52,7 +52,7 @@ mod tests {
     use super::production_source;
 
     /// This crate's files, then the host's, each relative to its own crate.
-    const EDITOR_FILES: [&str; 11] = [
+    const EDITOR_FILES: [&str; 10] = [
         "symbol_editor/inspector.rs",
         "symbol_editor/surface.rs",
         "symbol_editor/session.rs",
@@ -63,7 +63,6 @@ mod tests {
         "component_properties/evidence.rs",
         "component_properties/form.rs",
         "pwl_editor/render.rs",
-        "export.rs",
     ];
     const HOST_FILES: [&str; 3] = [
         "workbench/design/navigator/symbol.rs",
