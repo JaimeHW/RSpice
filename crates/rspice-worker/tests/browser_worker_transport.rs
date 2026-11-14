@@ -897,6 +897,70 @@ fn a_two_file_unit_with_a_local_header_runs_in_the_worker() {
     assert_sealed_clock_runs_in_the_worker(13, &deck, runtimes);
 }
 
+/// A file the HDL reads that the run did not seal is a located warning in
+/// the browser, for `$readmemh` and for a read-mode `$fopen` alike: the
+/// browser has no file system, so the message names the cause, and each
+/// record carries the call's file and line to the run's checks.
+#[wasm_bindgen_test]
+fn an_unsealed_file_the_hdl_reads_is_a_located_warning_in_the_worker() {
+    const ROM: &str = "`timescale 1ns/1ps\nmodule rom(q);\n  output q;\n  reg q;\n  \
+                       reg [7:0] mem [0:3];\n  integer fd;\n  initial begin\n    q = 1'b0;\n    \
+                       $readmemh(\"rom.hex\", mem);\n    fd = $fopen(\"rom.hex\", \"r\");\n    \
+                       #5 q = 1'b1;\n  end\nendmodule\n";
+    let (deck, runtimes) =
+        deck_with_sealed_module("Worker unsealed file", &[("rom.v", ROM)], &["rom.v"], "rom");
+    let mut request = worker_request_json(
+        22,
+        serde_json::json!({"Transient": {
+            "stop_time": 10e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] = runtimes;
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let records = metadata["outcome"]["Success"]["Transient"]["checks"]["hdl"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the run completes with its checks: {metadata}"));
+    let missing = "`rom.hex` is not among the run's sealed files";
+    let located: Vec<(String, u64, String)> = records
+        .iter()
+        .map(|record| {
+            (
+                record["text"].as_str().unwrap_or_default().to_owned(),
+                record["origin"]["line"].as_u64().unwrap_or_default(),
+                record["origin"]["file"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect();
+    for (task, line) in [("$readmemh", 9), ("$fopen", 10)] {
+        let record = records
+            .iter()
+            .zip(&located)
+            .find(|(_, (text, _, _))| text.starts_with(task))
+            .unwrap_or_else(|| panic!("no {task} record: {located:?}"));
+        let (text, at, file) = record.1;
+        assert_eq!(text, &format!("{task}: {missing}"), "{located:?}");
+        assert_eq!(*at, line, "{located:?}");
+        assert!(file.ends_with("rom.v"), "{located:?}");
+        assert!(
+            record.0["stream"].to_string().contains("Warning"),
+            "a warning: {}",
+            record.0
+        );
+    }
+}
+
 /// The worker runs `deck` with its sealed runtime set: `q` toggles every
 /// 5 ns, and the default `d2a` drives the 1 kΩ load through its 20 Ω
 /// `rhi`/`rlo` from 3.3 V or 0 V.

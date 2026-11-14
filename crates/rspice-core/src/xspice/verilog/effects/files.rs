@@ -644,6 +644,19 @@ pub(crate) enum WriteTarget {
     Channel(usize),
 }
 
+/// What a read of `name` says when the file is not there.
+///
+/// In the browser a run reads only the files it sealed, so a missing file is
+/// one the run was not given, and the message says that; elsewhere it is
+/// simply not where the run looked.
+pub(crate) fn missing_for_reading(name: &str) -> String {
+    if cfg!(target_arch = "wasm32") {
+        format!("`{name}` is not among the run's sealed files")
+    } else {
+        format!("cannot open `{name}` for reading")
+    }
+}
+
 /// Why `$fopen` returned 0.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OpenFailure {
@@ -756,7 +769,14 @@ impl HdlFiles {
             None
         };
         if mode.existing && existing.is_none() {
-            return Err(OpenFailure::Quiet);
+            // Section 17.2.1's ordinary failure, but in the browser a file is
+            // missing because the run did not seal it, which only a warning
+            // tells the user.
+            return Err(if cfg!(target_arch = "wasm32") {
+                OpenFailure::Warn(missing_for_reading(name))
+            } else {
+                OpenFailure::Quiet
+            });
         }
         if mode.write && existing.is_none() && !options.store.can_create(&path) {
             return Err(OpenFailure::Quiet);

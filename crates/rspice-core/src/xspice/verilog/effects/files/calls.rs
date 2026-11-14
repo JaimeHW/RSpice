@@ -19,7 +19,7 @@ use super::super::{
 };
 use super::readmem::{self, Readmem};
 use super::scan::{self, ScanContext, TextSource};
-use super::{EBADF, OpenFailure, WriteTarget, text_bytes};
+use super::{EBADF, OpenFailure, WriteTarget, missing_for_reading, text_bytes};
 use crate::xspice::verilog::store::DigitalSignalStore;
 
 /// C's `EOF`.
@@ -694,12 +694,7 @@ impl HdlEffects {
         {
             Ok(Some(text)) => text,
             Ok(None) => {
-                self.warn(
-                    plan,
-                    site,
-                    clock,
-                    &format!("cannot open `{name}` for reading"),
-                );
+                self.warn(plan, site, clock, &missing_for_reading(&name));
                 return Ok(());
             }
             Err(message) => {
