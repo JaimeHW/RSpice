@@ -762,7 +762,6 @@ pub struct PeriodicStateArtifact {
     operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
     result_floquet_real: Vec<f64>,
     result_floquet_imag: Vec<f64>,
-    #[serde(default)]
     floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
     #[serde(default)]
     floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
@@ -1131,7 +1130,6 @@ fn encode_floquet_evidence(
             writer.f64(certificate.max_backward_error);
             writer.f64(certificate.qualification_tolerance);
         }
-        rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown => writer.u8(3),
     }
 }
 
@@ -1895,7 +1893,6 @@ struct PeriodicStateTransferMetadata {
     period_detected: bool,
     result_floquet_real: TransferBufferRef,
     result_floquet_imag: TransferBufferRef,
-    #[serde(default)]
     floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
     #[serde(default)]
     floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,

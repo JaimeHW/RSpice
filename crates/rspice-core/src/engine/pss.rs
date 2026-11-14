@@ -269,9 +269,6 @@ fn pss_encode_floquet_evidence(hasher: &mut blake3::Hasher, evidence: &FloquetSp
                 &certificate.qualification_tolerance.to_bits().to_le_bytes(),
             );
         }
-        FloquetSpectrumEvidence::LegacyUnknown => {
-            pss_identity_field(hasher, "floquet_evidence.kind", &[3]);
-        }
     }
 }
 
@@ -6393,7 +6390,7 @@ mod tests {
 
         for unqualified_evidence in [
             FloquetSpectrumEvidence::NotComputed,
-            FloquetSpectrumEvidence::LegacyUnknown,
+            FloquetSpectrumEvidence::NoDynamicModes,
         ] {
             let (_, mut analysis, mut nonempty_state) = retained_parts();
             analysis.monodromy = vec![vec![0.5]];

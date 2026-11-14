@@ -56,7 +56,6 @@ impl PayloadProjection<'_> {
             self.pole_zero_count(&format!("finite_{role}s"), roots.len())?;
             let (state, certificate) = match evidence {
                 RootSetEvidenceDocument::NotRequested => ("not_requested", None),
-                RootSetEvidenceDocument::LegacyUnknown => ("legacy_unknown", None),
                 RootSetEvidenceDocument::QualifiedEmpty { certificate } => {
                     ("qualified_empty", Some(certificate))
                 }

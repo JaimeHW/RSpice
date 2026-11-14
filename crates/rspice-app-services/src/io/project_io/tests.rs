@@ -1017,8 +1017,24 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                     real: -3.0,
                     imaginary: 0.0,
                 }],
-                pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
-                zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+                    certificate: crate::state::PoleZeroSpectrumCertificate {
+                        problem_order: 1,
+                        infinite_count: 0,
+                        max_backward_error: 0.0,
+                        qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                        asymptotically_stable: None,
+                    },
+                },
+                zero_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+                    certificate: crate::state::PoleZeroSpectrumCertificate {
+                        problem_order: 1,
+                        infinite_count: 0,
+                        max_backward_error: 0.0,
+                        qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                        asymptotically_stable: None,
+                    },
+                },
                 gain: Some(4.0),
             },
         ),

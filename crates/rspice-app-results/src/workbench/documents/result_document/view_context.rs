@@ -389,12 +389,52 @@ mod tests {
         assert_eq!(maximized.primary_analysis_index, Some(1));
     }
 
+    /// A zero-order periodic result: no dynamic modes, so nothing can be unstable.
+    fn zero_mode_periodic(analysis_type: AnalysisType) -> Option<AnalysisResultPayload> {
+        use crate::state::{
+            FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+            PstbStabilityClassificationEvidence,
+        };
+        match analysis_type {
+            AnalysisType::Pss => Some(AnalysisResultPayload::PssFloquet {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                iterations: Some(1),
+                residual_norm: Some(0.0),
+                multipliers: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            }),
+            AnalysisType::Pstb => Some(AnalysisResultPayload::Pstb {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                stability_threshold: Some(1.0),
+                probe_instance: Some("LPROBE".to_owned()),
+                detect_subharmonics: Some(false),
+                modes: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+                stability_classification: PstbStabilityClassificationEvidence::Stable,
+                min_stability_margin_db: None,
+                max_multiplier_magnitude: Some(0.0),
+                num_unstable: Some(0),
+                subharmonics: Vec::new(),
+                converged: Some(true),
+                iterations: Some(0),
+            }),
+            _ => None,
+        }
+    }
+
     #[test]
     fn table_accepts_payload_only_and_zero_mode_periodic_results() {
         for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
-            let analysis = AnalysisResult::new(1, analysis_type, "Periodic").with_result_payload(
-                AnalysisResultPayload::legacy_periodic_marker(analysis_type).unwrap(),
-            );
+            let analysis = AnalysisResult::new(1, analysis_type, "Periodic")
+                .with_result_payload(zero_mode_periodic(analysis_type).unwrap());
             assert!(analysis_supports_viewer(ResultViewer::Table, &analysis));
             assert!(!analysis_supports_viewer(ResultViewer::Waves, &analysis));
         }

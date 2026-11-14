@@ -59,7 +59,6 @@ pub struct PssResult {
 
     /// Provenance proving whether `floquet_multipliers` is complete and
     /// strictly residual-qualified.
-    #[cfg_attr(feature = "veriloga", serde(default))]
     pub floquet_evidence: FloquetSpectrumEvidence,
 
     /// Explicit driven/autonomous policy for interpreting a unity multiplier.
@@ -194,7 +193,7 @@ impl PssResult {
     /// Classify stability from the retained Floquet multipliers.
     ///
     /// Only a complete, finite, strictly qualified spectrum can be Stable,
-    /// Unstable, or Marginal. All legacy, uncomputed, or inconsistent data is
+    /// Unstable, or Marginal. All uncomputed or inconsistent data is
     /// Indeterminate.
     pub fn stability_verdict(&self) -> PssStabilityVerdict {
         classify_floquet_stability(

@@ -674,7 +674,6 @@ const fn floquet_manifest_evidence_label(
         crate::floquet::FloquetSpectrumEvidence::NotComputed => "not computed",
         crate::floquet::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
         crate::floquet::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
-        crate::floquet::FloquetSpectrumEvidence::LegacyUnknown => "legacy evidence unknown",
     }
 }
 
@@ -1076,11 +1075,43 @@ mod tests {
     }
     #[test]
     fn periodic_payload_manifest_uses_complete_floquet_semantics() {
+        use crate::floquet::{
+            FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+            PstbStabilityClassificationEvidence,
+        };
         let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS", 0.0).with_result_payload(
-            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap(),
+            AnalysisResultPayload::PssFloquet {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                iterations: Some(1),
+                residual_norm: Some(0.0),
+                multipliers: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            },
         );
         let pstb = AnalysisResult::new(2, AnalysisType::Pstb, "PSTB", 0.0).with_result_payload(
-            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pstb).unwrap(),
+            AnalysisResultPayload::Pstb {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                stability_threshold: Some(1.0),
+                probe_instance: Some("LPROBE".to_owned()),
+                detect_subharmonics: Some(false),
+                modes: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+                stability_classification: PstbStabilityClassificationEvidence::Stable,
+                min_stability_margin_db: None,
+                max_multiplier_magnitude: Some(0.0),
+                num_unstable: Some(0),
+                subharmonics: Vec::new(),
+                converged: Some(true),
+                iterations: Some(0),
+            },
         );
 
         let pss = row_for_analysis(pss);
@@ -1089,12 +1120,12 @@ mod tests {
         assert_eq!(pss.precision, "complex128");
         assert_eq!(pstb.precision, "complex128");
         assert!(
-            pss.stored_values.contains("retained PSS multipliers"),
+            pss.stored_values.contains("0 complete PSS multipliers"),
             "{}",
             pss.stored_values
         );
         assert!(
-            pstb.stored_values.contains("retained PSTB modes"),
+            pstb.stored_values.contains("0 complete PSTB modes"),
             "{}",
             pstb.stored_values
         );

@@ -787,11 +787,51 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     assert!(bundle.contains("settling_time"));
 }
 
+/// A zero-order periodic result: no dynamic modes, so nothing can be unstable.
+fn zero_mode_periodic(analysis_type: AnalysisType) -> Option<AnalysisResultPayload> {
+    use crate::state::{
+        FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+        PstbStabilityClassificationEvidence,
+    };
+    match analysis_type {
+        AnalysisType::Pss => Some(AnalysisResultPayload::PssFloquet {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            iterations: Some(1),
+            residual_norm: Some(0.0),
+            multipliers: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        }),
+        AnalysisType::Pstb => Some(AnalysisResultPayload::Pstb {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            stability_threshold: Some(1.0),
+            probe_instance: Some("LPROBE".to_owned()),
+            detect_subharmonics: Some(false),
+            modes: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            stability_classification: PstbStabilityClassificationEvidence::Stable,
+            min_stability_margin_db: None,
+            max_multiplier_magnitude: Some(0.0),
+            num_unstable: Some(0),
+            subharmonics: Vec::new(),
+            converged: Some(true),
+            iterations: Some(0),
+        }),
+        _ => None,
+    }
+}
+
 /// A periodic payload's row names the data and states the physics: how many
 /// multipliers or modes, the orbit, and the stability verdict. How the
-/// spectrum was qualified is the engine's own bookkeeping and used to be
-/// spelled out twice on the row ("0 retained multipliers; completeness
-/// unavailable · legacy evidence unknown").
+/// spectrum was qualified is the engine's own bookkeeping and stays off the
+/// row.
 #[test]
 fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
     for (analysis_type, canonical, expected_name, noun) in [
@@ -808,9 +848,8 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
             "modes",
         ),
     ] {
-        let analysis = AnalysisResult::new(41, analysis_type, expected_name).with_result_payload(
-            AnalysisResultPayload::legacy_periodic_marker(analysis_type).unwrap(),
-        );
+        let analysis = AnalysisResult::new(41, analysis_type, expected_name)
+            .with_result_payload(zero_mode_periodic(analysis_type).unwrap());
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let presentation = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
@@ -826,7 +865,7 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
         assert_eq!(artifact.viewer, crate::workbench::ResultViewer::Table);
         let value = artifact.value.as_deref().unwrap();
         assert!(value.starts_with(&format!("0 {noun}")), "{value}");
-        assert!(value.contains("indeterminate"), "{value}");
+        assert!(value.contains(" · driven orbit · stable"), "{value}");
         for internal in ["retained", "completeness", "legacy", "qualified"] {
             assert!(!value.contains(internal), "{internal} in {value}");
         }

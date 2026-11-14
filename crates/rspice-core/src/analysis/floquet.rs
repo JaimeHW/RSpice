@@ -21,15 +21,6 @@ pub enum FloquetSpectrumEvidence {
         /// Certificate covering the complete associated multiplier vector.
         certificate: FloquetSpectrumCertificate,
     },
-    /// Legacy data retained multipliers without a numerical certificate.
-    LegacyUnknown,
-}
-
-impl Default for FloquetSpectrumEvidence {
-    /// Missing durable evidence is legacy-unknown, never newly qualified.
-    fn default() -> Self {
-        Self::LegacyUnknown
-    }
 }
 
 impl FloquetSpectrumEvidence {
@@ -44,7 +35,7 @@ impl FloquetSpectrumEvidence {
     pub fn certificate(&self) -> Option<&FloquetSpectrumCertificate> {
         match self {
             Self::Qualified { certificate } => Some(certificate),
-            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => None,
+            Self::NotComputed | Self::NoDynamicModes => None,
         }
     }
 
@@ -63,7 +54,6 @@ impl FloquetSpectrumEvidence {
                     && certificate.problem_order == multipliers.len()
                     && !multipliers.is_empty()
             }
-            Self::LegacyUnknown => true,
         }
     }
 }
@@ -208,7 +198,7 @@ mod tests {
         assert_eq!(
             classify_floquet_stability(
                 &roots,
-                &FloquetSpectrumEvidence::LegacyUnknown,
+                &FloquetSpectrumEvidence::NotComputed,
                 FloquetOrbitKind::Driven,
                 None,
                 FLOQUET_UNIT_CIRCLE_BAND,

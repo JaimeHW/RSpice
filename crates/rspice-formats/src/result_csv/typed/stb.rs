@@ -137,7 +137,6 @@ pub(super) fn prepare(response: &StbResult) -> EncodedTypedCsv {
                     RootSetEvidence::Qualified { .. } => "qualified",
                     RootSetEvidence::Approximate { .. } => "approximate",
                     RootSetEvidence::NotRequested => "not_requested",
-                    RootSetEvidence::LegacyUnknown => "legacy_unknown",
                 }
                 .into(),
             );

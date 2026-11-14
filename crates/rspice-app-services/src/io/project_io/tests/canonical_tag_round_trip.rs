@@ -30,6 +30,47 @@ fn rf_run_tasks() -> Vec<(CanonicalAnalysisKind, Vec<usize>)> {
 /// A sealed run written exactly as `ProjectSimulationResults` writes it, with
 /// `retained` leading results kept — a run may be cancelled partway, and the
 /// retained results are then a prefix of the task list.
+/// A zero-order periodic result: no dynamic modes, so nothing can be unstable.
+fn zero_mode_periodic(analysis_type: AnalysisType) -> Option<AnalysisResultPayload> {
+    use crate::state::{
+        FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+        PstbStabilityClassificationEvidence,
+    };
+    match analysis_type {
+        AnalysisType::Pss => Some(AnalysisResultPayload::PssFloquet {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            iterations: Some(1),
+            residual_norm: Some(0.0),
+            multipliers: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        }),
+        AnalysisType::Pstb => Some(AnalysisResultPayload::Pstb {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            stability_threshold: Some(1.0),
+            probe_instance: Some("LPROBE".to_owned()),
+            detect_subharmonics: Some(false),
+            modes: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            stability_classification: PstbStabilityClassificationEvidence::Stable,
+            min_stability_margin_db: None,
+            max_multiplier_magnitude: Some(0.0),
+            num_unstable: Some(0),
+            subharmonics: Vec::new(),
+            converged: Some(true),
+            iterations: Some(0),
+        }),
+        _ => None,
+    }
+}
+
 fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
     let snapshot = ContentDigest::from_bytes(SNAPSHOT);
     let rows = rf_run_tasks();
@@ -68,7 +109,7 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
                         )
                         .expect("a retained result names its authenticated task"),
                     );
-            if let Some(payload) = AnalysisResultPayload::legacy_periodic_marker(analysis_type) {
+            if let Some(payload) = zero_mode_periodic(analysis_type) {
                 result = result.with_result_payload(payload);
             }
             run.add_analysis(result);

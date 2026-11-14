@@ -187,29 +187,29 @@ fn sealed_code_model_data_files_travel_with_the_worker_request() {
 
 #[test]
 fn pole_zero_worker_result_accepts_numeric_and_missing_gain_with_explicit_evidence() {
-    let legacy: WorkerSimulationResult = serde_json::from_str(
-        r#"{"PoleZero":{"poles":[[-1.0,2.0]],"zeros":[[-3.0,0.0]],"pole_evidence":{"status":"legacy_unknown"},"zero_evidence":{"status":"legacy_unknown"},"gain":4.25}}"#,
+    let numeric: WorkerSimulationResult = serde_json::from_str(
+        r#"{"PoleZero":{"poles":[],"zeros":[],"pole_evidence":{"status":"not_requested"},"zero_evidence":{"status":"not_requested"},"gain":4.25}}"#,
     )
-    .expect("legacy numeric pole-zero gain deserializes");
+    .expect("numeric pole-zero gain deserializes");
     assert!(matches!(
-        legacy,
+        numeric,
         WorkerSimulationResult::PoleZero {
             gain: Some(4.25),
-            pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::NotRequested,
+            zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::NotRequested,
             ..
         }
     ));
 
     let missing: WorkerSimulationResult =
-        serde_json::from_str(r#"{"PoleZero":{"poles":[[-1.0,2.0]],"zeros":[[-3.0,0.0]],"pole_evidence":{"status":"legacy_unknown"},"zero_evidence":{"status":"legacy_unknown"}}}"#)
+        serde_json::from_str(r#"{"PoleZero":{"poles":[],"zeros":[],"pole_evidence":{"status":"not_requested"},"zero_evidence":{"status":"not_requested"}}}"#)
             .expect("missing pole-zero gain deserializes as unavailable");
     assert!(matches!(
         missing,
         WorkerSimulationResult::PoleZero {
             gain: None,
-            pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::NotRequested,
+            zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::NotRequested,
             ..
         }
     ));

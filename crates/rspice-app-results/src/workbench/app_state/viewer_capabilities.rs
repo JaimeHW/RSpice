@@ -679,8 +679,16 @@ mod tests {
                 imaginary: 2.0,
             }],
             zeros: Vec::new(),
-            pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+                certificate: crate::state::PoleZeroSpectrumCertificate {
+                    problem_order: 1,
+                    infinite_count: 0,
+                    max_backward_error: 0.0,
+                    qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                    asymptotically_stable: None,
+                },
+            },
+            zero_evidence: crate::state::PoleZeroRootSetEvidence::NotRequested,
             gain: Some(3.5),
         });
 

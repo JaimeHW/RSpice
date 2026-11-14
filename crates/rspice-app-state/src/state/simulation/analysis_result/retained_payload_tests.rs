@@ -2,6 +2,19 @@
 
 use super::*;
 
+fn exact_roots(count: u64) -> PoleZeroRootSetEvidence {
+    PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            problem_order: count,
+            infinite_count: 0,
+            max_backward_error: 0.0,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(count).unwrap(),
+            asymptotically_stable: None,
+        },
+    }
+}
+
 fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
     FloquetSpectrumCertificateEvidence {
         problem_order,
@@ -84,15 +97,6 @@ fn pss_floquet_payload_requires_core_authentic_complete_evidence() {
     };
     certificate.qualification_tolerance *= 2.0;
     assert!(inflated.validate_for(AnalysisType::Pss).is_err());
-
-    let legacy = AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap();
-    assert!(legacy.validate_for(AnalysisType::Pss).is_ok());
-    let mut forged_legacy = legacy;
-    let AnalysisResultPayload::PssFloquet { period_s, .. } = &mut forged_legacy else {
-        unreachable!()
-    };
-    *period_s = Some(1.0);
-    assert!(forged_legacy.validate_for(AnalysisType::Pss).is_err());
 }
 
 #[test]
@@ -237,12 +241,6 @@ fn durable_floquet_scalars_are_central_and_never_fabricate_a_stability_bool() {
             .iter()
             .any(|name| name == "pstb.is_stable" || name == "pstb.stability")
     );
-
-    let legacy = AnalysisResult::new(2, AnalysisType::Pstb, "legacy").with_result_payload(
-        AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pstb).unwrap(),
-    );
-    assert!(legacy.scalar_evidence("pstb.mode_count").is_empty());
-    assert!(legacy.scalar_evidence_names().is_empty());
 }
 
 #[test]
@@ -408,8 +406,8 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
             imaginary: 2.0,
         }],
         zeros: Vec::new(),
-        pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+        pole_evidence: exact_roots(1),
+        zero_evidence: PoleZeroRootSetEvidence::NotRequested,
         gain: Some(1.0),
     };
     assert!(payload.validate_for(AnalysisType::PoleZero).is_ok());
@@ -421,8 +419,8 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
             imaginary: 2.0,
         }],
         zeros: Vec::new(),
-        pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+        pole_evidence: exact_roots(1),
+        zero_evidence: PoleZeroRootSetEvidence::NotRequested,
         gain: None,
     };
     assert!(
@@ -437,8 +435,8 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
             imaginary: 0.0,
         }],
         zeros: Vec::new(),
-        pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+        pole_evidence: exact_roots(1),
+        zero_evidence: PoleZeroRootSetEvidence::NotRequested,
         gain: Some(1.0),
     };
     assert!(invalid.validate_for(AnalysisType::PoleZero).is_err());
@@ -446,8 +444,8 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
     let invalid_gain = AnalysisResultPayload::PoleZero {
         poles: Vec::new(),
         zeros: Vec::new(),
-        pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+        pole_evidence: PoleZeroRootSetEvidence::NotRequested,
+        zero_evidence: PoleZeroRootSetEvidence::NotRequested,
         gain: Some(f64::INFINITY),
     };
     assert!(invalid_gain.validate_for(AnalysisType::PoleZero).is_err());
@@ -480,32 +478,37 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
 }
 
 #[test]
-fn pole_zero_payload_deserializes_legacy_numeric_and_missing_gain() {
-    let legacy: AnalysisResultPayload =
-        serde_json::from_str(r#"{"kind":"pole_zero","poles":[],"zeros":[],"gain":4.25}"#)
-            .expect("legacy numeric pole-zero gain deserializes");
+fn pole_zero_payload_requires_root_evidence_and_reads_a_missing_gain_as_unavailable() {
+    let numeric: AnalysisResultPayload = serde_json::from_str(
+        r#"{"kind":"pole_zero","poles":[],"zeros":[],"pole_evidence":{"status":"not_requested"},"zero_evidence":{"status":"not_requested"},"gain":4.25}"#,
+    )
+    .expect("numeric pole-zero gain deserializes");
     assert!(matches!(
-        legacy,
+        numeric,
         AnalysisResultPayload::PoleZero {
             gain: Some(4.25),
-            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: PoleZeroRootSetEvidence::NotRequested,
+            zero_evidence: PoleZeroRootSetEvidence::NotRequested,
             ..
         }
     ));
 
-    let missing: AnalysisResultPayload =
-        serde_json::from_str(r#"{"kind":"pole_zero","poles":[],"zeros":[]}"#)
-            .expect("missing pole-zero gain deserializes as unavailable");
+    let missing: AnalysisResultPayload = serde_json::from_str(
+        r#"{"kind":"pole_zero","poles":[],"zeros":[],"pole_evidence":{"status":"not_requested"},"zero_evidence":{"status":"not_requested"}}"#,
+    )
+    .expect("missing pole-zero gain deserializes as unavailable");
     assert!(matches!(
         missing,
-        AnalysisResultPayload::PoleZero {
-            gain: None,
-            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            ..
-        }
+        AnalysisResultPayload::PoleZero { gain: None, .. }
     ));
+
+    assert!(
+        serde_json::from_str::<AnalysisResultPayload>(
+            r#"{"kind":"pole_zero","poles":[],"zeros":[],"gain":4.25}"#
+        )
+        .is_err(),
+        "a pole-zero payload without root evidence is refused"
+    );
 }
 
 #[test]

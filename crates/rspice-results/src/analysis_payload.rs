@@ -211,9 +211,7 @@ pub enum AnalysisResultPayload {
     PoleZero {
         poles: Vec<ComplexResultValue>,
         zeros: Vec<ComplexResultValue>,
-        #[serde(default)]
         pole_evidence: PoleZeroRootSetEvidence,
-        #[serde(default)]
         zero_evidence: PoleZeroRootSetEvidence,
         /// Finite DC gain when defined. Missing legacy fields deserialize as
         /// unavailable; legacy numeric fields deserialize as `Some(value)`.
@@ -224,13 +222,13 @@ pub enum AnalysisResultPayload {
     /// such as the monodromy matrix and shooting state are intentionally not
     /// part of the project result contract.
     PssFloquet {
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         period_s: Option<f64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         fundamental_frequency_hz: Option<f64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         iterations: Option<u64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         residual_norm: Option<f64>,
         multipliers: Vec<PssFloquetMultiplierEvidence>,
         floquet_evidence: FloquetSpectrumEvidence,
@@ -241,9 +239,9 @@ pub enum AnalysisResultPayload {
     /// Durable periodic-stability evidence. `modes` is the complete sorted
     /// spectrum; ordinary result waveforms remain presentation-only subsets.
     Pstb {
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         period_s: Option<f64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         fundamental_frequency_hz: Option<f64>,
         /// Exact outer multiplier-magnitude boundary used by the producer.
         stability_threshold: Option<f64>,
@@ -260,14 +258,14 @@ pub enum AnalysisResultPayload {
         /// None is a real current result when there is no applicable
         /// non-trivial mode; it is never represented by infinity.
         min_stability_margin_db: Option<f64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         max_multiplier_magnitude: Option<f64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         num_unstable: Option<u64>,
         subharmonics: Vec<u64>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         converged: Option<bool>,
-        /// Absent only on an authenticated schema-v16 migration marker.
+        /// Required; validation refuses a payload without it.
         iterations: Option<u64>,
     },
     Sensitivity {
@@ -351,45 +349,6 @@ pub enum AnalysisResultPayload {
 }
 
 impl AnalysisResultPayload {
-    /// Construct the only truthful periodic-stability payload that can be
-    /// added while migrating a pre-v17 successful result. No numerical
-    /// evidence or orbit policy is inferred from presentation waveforms.
-    pub fn legacy_periodic_marker(analysis_type: AnalysisType) -> Option<Self> {
-        match analysis_type {
-            AnalysisType::Pss => Some(Self::PssFloquet {
-                period_s: None,
-                fundamental_frequency_hz: None,
-                iterations: None,
-                residual_norm: None,
-                multipliers: Vec::new(),
-                floquet_evidence: FloquetSpectrumEvidence::LegacyUnknown,
-                orbit_kind: FloquetOrbitKindEvidence::LegacyUnknown,
-                trivial_multiplier_index: None,
-                stability_verdict: FloquetStabilityVerdictEvidence::Indeterminate,
-            }),
-            AnalysisType::Pstb => Some(Self::Pstb {
-                period_s: None,
-                fundamental_frequency_hz: None,
-                stability_threshold: None,
-                probe_instance: None,
-                detect_subharmonics: None,
-                modes: Vec::new(),
-                floquet_evidence: FloquetSpectrumEvidence::LegacyUnknown,
-                orbit_kind: FloquetOrbitKindEvidence::LegacyUnknown,
-                trivial_multiplier_index: None,
-                stability_verdict: FloquetStabilityVerdictEvidence::Indeterminate,
-                stability_classification: PstbStabilityClassificationEvidence::Indeterminate,
-                min_stability_margin_db: None,
-                max_multiplier_magnitude: None,
-                num_unstable: None,
-                subharmonics: Vec::new(),
-                converged: None,
-                iterations: None,
-            }),
-            _ => None,
-        }
-    }
-
     pub fn scalar_evidence(&self, name: &str) -> Option<ScalarEvidenceCandidate> {
         let value = match self {
             Self::PssFloquet {

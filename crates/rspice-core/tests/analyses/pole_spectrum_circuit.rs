@@ -132,7 +132,7 @@ fn stability_evidence_survives_physical_scaling_and_result_documents() {
             let ResultPayload::PoleZero(payload) = restored.payload() else {
                 panic!("PZ payload");
             };
-            assert_eq!(payload.to_pole_evidence(), result.pole_evidence);
+            assert_eq!(payload.to_pole_evidence(), Some(result.pole_evidence));
         }
     }
 }

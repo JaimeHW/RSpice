@@ -42,7 +42,7 @@ impl FloquetSpectrumCertificateEvidence {
 }
 
 /// Provenance for a durable Floquet multiplier vector.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FloquetSpectrumEvidence {
     /// Stability post-processing was not performed.
@@ -53,10 +53,6 @@ pub enum FloquetSpectrumEvidence {
     Qualified {
         certificate: FloquetSpectrumCertificateEvidence,
     },
-    /// Truthful state for a project written before Floquet certificates were
-    /// retained. It never proves a stability classification.
-    #[default]
-    LegacyUnknown,
 }
 
 impl FloquetSpectrumEvidence {
@@ -64,13 +60,13 @@ impl FloquetSpectrumEvidence {
     pub const fn certificate(&self) -> Option<FloquetSpectrumCertificateEvidence> {
         match self {
             Self::Qualified { certificate } => Some(*certificate),
-            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => None,
+            Self::NotComputed | Self::NoDynamicModes => None,
         }
     }
 
     fn is_consistent_with_count(&self, multiplier_count: usize) -> bool {
         match self {
-            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => multiplier_count == 0,
+            Self::NotComputed | Self::NoDynamicModes => multiplier_count == 0,
             Self::Qualified { certificate } => {
                 multiplier_count > 0
                     && certificate.is_strictly_qualified()
@@ -90,22 +86,16 @@ impl FloquetSpectrumEvidence {
                     certificate: certificate.as_core()?,
                 })
             }
-            Self::LegacyUnknown => {
-                Some(rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown)
-            }
         }
     }
 }
 
 /// Orbit policy used to interpret a retained Floquet spectrum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FloquetOrbitKindEvidence {
     Driven,
     Autonomous,
-    /// The producing project did not retain an orbit policy.
-    #[default]
-    LegacyUnknown,
 }
 
 /// Evidence-aware periodic stability verdict.
@@ -170,7 +160,7 @@ impl PssFloquetRef<'_> {
         let Self {
             period_s,
             fundamental_frequency_hz,
-            iterations: _iterations,
+            iterations,
             residual_norm,
             multipliers,
             evidence,
@@ -178,27 +168,10 @@ impl PssFloquetRef<'_> {
             trivial_multiplier_index,
             verdict,
         } = self;
-        if matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
-            || orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
-        {
-            let exact_legacy_marker = period_s.is_none()
-                && fundamental_frequency_hz.is_none()
-                && _iterations.is_none()
-                && residual_norm.is_none()
-                && multipliers.is_empty()
-                && matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
-                && orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
-                && trivial_multiplier_index.is_none()
-                && verdict == FloquetStabilityVerdictEvidence::Indeterminate;
-            return exact_legacy_marker.then_some(()).ok_or_else(|| {
-                "legacy PSS Floquet evidence is not an exact migration marker".to_owned()
-            });
-        }
-
         let (Some(period_s), Some(frequency_hz), Some(_), Some(residual_norm)) = (
             period_s,
             fundamental_frequency_hz,
-            _iterations,
+            iterations,
             residual_norm,
         ) else {
             return Err("current PSS Floquet payload is missing global metrics".to_owned());
@@ -296,31 +269,6 @@ impl PstbRef<'_> {
             converged,
             iterations,
         } = self;
-        if matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
-            || orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
-        {
-            let exact_legacy_marker = period_s.is_none()
-                && fundamental_frequency_hz.is_none()
-                && stability_threshold.is_none()
-                && probe_instance.is_none()
-                && detect_subharmonics.is_none()
-                && modes.is_empty()
-                && matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
-                && orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
-                && trivial_multiplier_index.is_none()
-                && verdict == FloquetStabilityVerdictEvidence::Indeterminate
-                && classification == PstbStabilityClassificationEvidence::Indeterminate
-                && min_stability_margin_db.is_none()
-                && max_multiplier_magnitude.is_none()
-                && num_unstable.is_none()
-                && subharmonics.is_empty()
-                && converged.is_none()
-                && iterations.is_none();
-            return exact_legacy_marker
-                .then_some(())
-                .ok_or_else(|| "legacy PSTB evidence is not an exact migration marker".to_owned());
-        }
-
         let (
             Some(period_s),
             Some(frequency_hz),
@@ -513,9 +461,6 @@ fn expected_trivial_floquet_index(
                     "Floquet phase-mode index does not fit the durable contract".to_owned()
                 })
         }
-        FloquetOrbitKindEvidence::LegacyUnknown => {
-            Err("current Floquet evidence has an unknown orbit policy".to_owned())
-        }
     }
 }
 
@@ -537,9 +482,6 @@ fn derive_floquet_verdict(
     let orbit_kind = match orbit_kind {
         FloquetOrbitKindEvidence::Driven => rspice_core::analysis::FloquetOrbitKind::Driven,
         FloquetOrbitKindEvidence::Autonomous => rspice_core::analysis::FloquetOrbitKind::Autonomous,
-        FloquetOrbitKindEvidence::LegacyUnknown => {
-            return Ok(FloquetStabilityVerdictEvidence::Indeterminate);
-        }
     };
     let trivial_multiplier_index = trivial_multiplier_index
         .map(usize::try_from)

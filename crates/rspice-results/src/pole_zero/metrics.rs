@@ -159,7 +159,6 @@ mod tests {
         data.roots.push(ComplexRoot::pole(-1.0, 0.0));
         for evidence in [
             crate::pole_zero::PoleZeroRootSetEvidence::NotRequested,
-            crate::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
             crate::pole_zero::PoleZeroRootSetEvidence::Approximate {
                 certificate: crate::pole_zero::PoleZeroSpectrumCertificate {
                     problem_order: 1,

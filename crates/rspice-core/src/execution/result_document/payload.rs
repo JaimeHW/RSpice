@@ -2088,10 +2088,8 @@ impl PoleZeroPayload {
         }
         finite_optional("pole-zero DC gain", self.dc_gain)?;
         finite_optional("pole-zero high-frequency gain", self.high_frequency_gain)?;
-        self.pole_evidence.validate("pole")?;
-        self.zero_evidence.validate("zero")?;
-        let poles = self.to_pole_evidence();
-        let zeros = self.to_zero_evidence();
+        let poles = self.pole_evidence.validate("pole")?;
+        let zeros = self.zero_evidence.validate("zero")?;
         let pole_roots = complex_roots(&self.poles);
         let zero_roots = complex_roots(&self.zeros);
         if !poles.is_consistent_with(&pole_roots) || !zeros.is_consistent_with(&zero_roots) {
@@ -2103,13 +2101,15 @@ impl PoleZeroPayload {
         Ok(())
     }
 
-    /// Rebuild the core evidence for [`Self::poles`].
-    pub fn to_pole_evidence(&self) -> RootSetEvidence {
+    /// Rebuild the core evidence for [`Self::poles`]; `None` when its
+    /// certificate fails its own validity contract.
+    pub fn to_pole_evidence(&self) -> Option<RootSetEvidence> {
         self.pole_evidence.to_core()
     }
 
-    /// Rebuild the core evidence for [`Self::zeros`].
-    pub fn to_zero_evidence(&self) -> RootSetEvidence {
+    /// Rebuild the core evidence for [`Self::zeros`]; `None` when its
+    /// certificate fails its own validity contract.
+    pub fn to_zero_evidence(&self) -> Option<RootSetEvidence> {
         self.zero_evidence.to_core()
     }
 }
@@ -2139,52 +2139,40 @@ pub enum RootSetEvidenceDocument {
     Approximate {
         certificate: SpectrumCertificateDocument,
     },
-    /// Roots restored from an older result that carried no evidence.
-    LegacyUnknown,
 }
 
 impl RootSetEvidenceDocument {
-    fn validate(&self, role: &'static str) -> Result<(), ResultDocumentError> {
-        let certificate = match self {
-            Self::NotRequested | Self::LegacyUnknown => return Ok(()),
-            Self::QualifiedEmpty { certificate }
-            | Self::Qualified { certificate }
-            | Self::Approximate { certificate } => certificate,
-        };
-        finite("root-set backward error", certificate.max_backward_error)?;
-        finite(
-            "root-set qualification tolerance",
-            certificate.qualification_tolerance,
-        )?;
-        if certificate.to_core().is_none() {
-            return Err(ResultDocumentError::Malformed {
+    fn validate(&self, role: &'static str) -> Result<RootSetEvidence, ResultDocumentError> {
+        if let Self::QualifiedEmpty { certificate }
+        | Self::Qualified { certificate }
+        | Self::Approximate { certificate } = self
+        {
+            finite("root-set backward error", certificate.max_backward_error)?;
+            finite(
+                "root-set qualification tolerance",
+                certificate.qualification_tolerance,
+            )?;
+        }
+        self.to_core()
+            .ok_or_else(|| ResultDocumentError::Malformed {
                 location: "root-set certificate",
                 detail: format!("{role} spectrum certificate fails its own validity contract"),
-            });
-        }
-        Ok(())
+            })
     }
 
-    fn to_core(&self) -> RootSetEvidence {
-        match self {
+    fn to_core(&self) -> Option<RootSetEvidence> {
+        Some(match self {
             Self::NotRequested => RootSetEvidence::NotRequested,
-            Self::LegacyUnknown => RootSetEvidence::LegacyUnknown,
-            Self::QualifiedEmpty { certificate } => certificate
-                .to_core()
-                .map_or(RootSetEvidence::LegacyUnknown, |certificate| {
-                    RootSetEvidence::QualifiedEmpty { certificate }
-                }),
-            Self::Qualified { certificate } => certificate
-                .to_core()
-                .map_or(RootSetEvidence::LegacyUnknown, |certificate| {
-                    RootSetEvidence::Qualified { certificate }
-                }),
-            Self::Approximate { certificate } => certificate
-                .to_core()
-                .map_or(RootSetEvidence::LegacyUnknown, |certificate| {
-                    RootSetEvidence::Approximate { certificate }
-                }),
-        }
+            Self::QualifiedEmpty { certificate } => RootSetEvidence::QualifiedEmpty {
+                certificate: certificate.to_core()?,
+            },
+            Self::Qualified { certificate } => RootSetEvidence::Qualified {
+                certificate: certificate.to_core()?,
+            },
+            Self::Approximate { certificate } => RootSetEvidence::Approximate {
+                certificate: certificate.to_core()?,
+            },
+        })
     }
 }
 
@@ -2192,7 +2180,6 @@ impl From<&RootSetEvidence> for RootSetEvidenceDocument {
     fn from(evidence: &RootSetEvidence) -> Self {
         match evidence {
             RootSetEvidence::NotRequested => Self::NotRequested,
-            RootSetEvidence::LegacyUnknown => Self::LegacyUnknown,
             RootSetEvidence::QualifiedEmpty { certificate } => Self::QualifiedEmpty {
                 certificate: SpectrumCertificateDocument::from(*certificate),
             },
@@ -2703,8 +2690,6 @@ pub enum FloquetEvidenceDocument {
     Qualified {
         certificate: FloquetCertificateDocument,
     },
-    /// Multipliers restored without a numerical certificate.
-    LegacyUnknown,
 }
 
 impl From<&FloquetSpectrumEvidence> for FloquetEvidenceDocument {
@@ -2712,7 +2697,6 @@ impl From<&FloquetSpectrumEvidence> for FloquetEvidenceDocument {
         match evidence {
             FloquetSpectrumEvidence::NotComputed => Self::NotComputed,
             FloquetSpectrumEvidence::NoDynamicModes => Self::NoDynamicModes,
-            FloquetSpectrumEvidence::LegacyUnknown => Self::LegacyUnknown,
             FloquetSpectrumEvidence::Qualified { certificate } => Self::Qualified {
                 certificate: FloquetCertificateDocument {
                     problem_order: certificate.problem_order,

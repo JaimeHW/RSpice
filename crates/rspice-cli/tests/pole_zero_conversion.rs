@@ -251,7 +251,6 @@ fn pole_zero_comparison_checks_identity_and_qualification_independently_of_toler
     for case in [
         "input",
         "output",
-        "unknown",
         "approximate",
         "not_requested",
         "stability",
@@ -261,7 +260,6 @@ fn pole_zero_comparison_checks_identity_and_qualification_independently_of_toler
         match case {
             "input" => payload["input"] = json!("I(other,0)"),
             "output" => payload["output"] = json!("V(other,0)"),
-            "unknown" => payload["poleEvidence"] = json!({"evidence":"legacy-unknown"}),
             "not_requested" => payload["zeroEvidence"] = json!({"evidence":"not-requested"}),
             "approximate" => {
                 payload["poleEvidence"]["evidence"] = json!("approximate");
@@ -400,7 +398,7 @@ fn malformed_pole_zero_evidence_cannot_be_compared_or_blessed() {
             }
             "conflict" => {
                 let mut second = marker.clone();
-                second["name"] = json!("pz:poles_evidence(legacy_unknown)");
+                second["name"] = json!("pz:poles_evidence(approximate)");
                 columns.push(second);
             }
             _ => panic!("unknown case"),

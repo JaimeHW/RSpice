@@ -598,11 +598,8 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     result_period_detected: bool,
     result_floquet_real: WorkerF64Series,
     result_floquet_imag: WorkerF64Series,
-    #[serde(default)]
     result_floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
-    #[serde(default)]
     result_floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
-    #[serde(default)]
     result_trivial_floquet_multiplier_index: Option<usize>,
     analysis_iterations: usize,
     analysis_final_residual: f64,
@@ -611,17 +608,11 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     analysis_floquet_real: WorkerF64Series,
     analysis_floquet_imag: WorkerF64Series,
     analysis_is_stable: bool,
-    #[serde(default = "indeterminate_floquet_verdict")]
     analysis_floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
-    #[serde(default)]
     analysis_floquet_authenticated: bool,
     #[serde(default)]
     shooting_state_basis: Vec<String>,
     shooting_state: WorkerF64Series,
-}
-
-fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
-    rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
 }
 
 impl WorkerPssOperatingPointTransport {
@@ -1830,26 +1821,22 @@ mod pss_floquet_contract_tests {
     }
 
     #[test]
-    fn retained_pss_transport_missing_evidence_stays_legacy_and_is_rejected() {
-        let (transport, buffers) = transport();
-        let mut encoded = serde_json::to_value(transport).unwrap();
-        let object = encoded.as_object_mut().unwrap();
-        object.remove("result_floquet_evidence");
-        object.remove("result_floquet_orbit_kind");
-        object.remove("result_trivial_floquet_multiplier_index");
-        object.remove("analysis_floquet_verdict");
-        object.remove("analysis_floquet_authenticated");
-        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
-        assert_eq!(
-            restored.result_floquet_evidence,
-            rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown
-        );
-        assert!(!restored.analysis_floquet_authenticated);
-        assert_eq!(
-            restored.analysis_floquet_verdict,
-            rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
-        );
-        assert!(restored.into_operating_point(&buffers).is_err());
+    fn retained_pss_transport_without_floquet_evidence_is_refused() {
+        let (transport, _) = transport();
+        let encoded = serde_json::to_value(transport).unwrap();
+        for field in [
+            "result_floquet_evidence",
+            "result_floquet_orbit_kind",
+            "analysis_floquet_verdict",
+            "analysis_floquet_authenticated",
+        ] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<WorkerPssOperatingPointTransport>(missing).is_err(),
+                "{field}"
+            );
+        }
     }
 
     #[test]

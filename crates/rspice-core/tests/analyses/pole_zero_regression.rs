@@ -430,7 +430,7 @@ fn root_evidence_invariants_reject_mismatched_vectors() {
 }
 
 #[test]
-fn approximate_and_legacy_poles_have_indeterminate_stability() {
+fn approximate_poles_have_indeterminate_stability() {
     let strict_tolerance = 128.0 * f64::EPSILON;
     let certificate = SpectrumCertificate::new(1, 0, 1.0e-9, strict_tolerance)
         .expect("a complete spectrum below the hard residual limit is valid");
@@ -447,9 +447,6 @@ fn approximate_and_legacy_poles_have_indeterminate_stability() {
         result.pole_evidence,
         RootSetEvidence::Approximate { .. }
     ));
-    assert_eq!(result.stability_verdict(), StabilityVerdict::Indeterminate);
-
-    result.pole_evidence = RootSetEvidence::LegacyUnknown;
     assert_eq!(result.stability_verdict(), StabilityVerdict::Indeterminate);
 }
 

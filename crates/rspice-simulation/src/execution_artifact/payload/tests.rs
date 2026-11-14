@@ -1194,11 +1194,11 @@ fn periodic_state_artifact_rejects_floquet_contract_and_compatibility_tamper() {
     let periodic = Arc::unwrap_or_clone(periodic);
     periodic.validate().unwrap();
 
-    let mut legacy = periodic.clone();
-    legacy.floquet_evidence = rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown;
-    legacy.floquet_verdict = rspice_core::analysis::FloquetStabilityVerdict::Indeterminate;
-    legacy.floquet_authenticated = false;
-    assert!(legacy.validate().is_err());
+    let mut unqualified = periodic.clone();
+    unqualified.floquet_evidence = rspice_core::analysis::FloquetSpectrumEvidence::NotComputed;
+    unqualified.floquet_verdict = rspice_core::analysis::FloquetStabilityVerdict::Indeterminate;
+    unqualified.floquet_authenticated = false;
+    assert!(unqualified.validate().is_err());
 
     let mut inflated = periodic.clone();
     let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
@@ -1274,11 +1274,7 @@ fn dependency_transfer_missing_floquet_metadata_never_becomes_qualified() {
     let metadata = serde_json::to_string(&metadata).unwrap();
     let error = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
         .expect_err("missing Floquet evidence must fail closed");
-    assert!(
-        error.to_string().contains("authenticated Floquet")
-            || error.to_string().contains("complete Floquet evidence"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("floquet_evidence"), "{error}");
 }
 
 #[test]

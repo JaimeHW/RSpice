@@ -215,8 +215,6 @@ pub enum RootSetEvidence {
     /// The spectrum is complete and usable, but its residual exceeds the
     /// strict qualification threshold while remaining below the hard limit.
     Approximate { certificate: SpectrumCertificate },
-    /// Roots loaded from an older result that carried no numerical evidence.
-    LegacyUnknown,
 }
 
 impl RootSetEvidence {
@@ -225,7 +223,7 @@ impl RootSetEvidence {
             Self::QualifiedEmpty { certificate }
             | Self::Qualified { certificate }
             | Self::Approximate { certificate } => certificate.asymptotically_stable = Some(stable),
-            Self::NotRequested | Self::LegacyUnknown => {}
+            Self::NotRequested => {}
         }
     }
 
@@ -245,13 +243,13 @@ impl RootSetEvidence {
         }
     }
 
-    /// Numerical certificate, when this evidence came from a new computation.
+    /// Numerical certificate, when the evidence carries one.
     pub fn certificate(&self) -> Option<&SpectrumCertificate> {
         match self {
             Self::QualifiedEmpty { certificate }
             | Self::Qualified { certificate }
             | Self::Approximate { certificate } => Some(certificate),
-            Self::NotRequested | Self::LegacyUnknown => None,
+            Self::NotRequested => None,
         }
     }
 
@@ -274,7 +272,6 @@ impl RootSetEvidence {
                     && !certificate.is_strictly_qualified()
                     && certificate.finite_count() == roots.len()
             }
-            Self::LegacyUnknown => true,
         }
     }
 

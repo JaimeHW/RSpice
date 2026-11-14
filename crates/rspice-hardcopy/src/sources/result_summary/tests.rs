@@ -68,8 +68,24 @@ fn typed_pole_zero_summary_preserves_native_payload_and_exact_values() {
             real: -3.0,
             imaginary: 0.0,
         }],
-        pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown,
+        pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::Qualified {
+            certificate: rspice_results::pole_zero::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 0.0,
+                qualification_tolerance: rspice_results::pole_zero::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                asymptotically_stable: None,
+            },
+        },
+        zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::Qualified {
+            certificate: rspice_results::pole_zero::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 0.0,
+                qualification_tolerance: rspice_results::pole_zero::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                asymptotically_stable: None,
+            },
+        },
         gain: Some(4.0),
     };
     let analysis: AnalysisResult = AnalysisResult::new(3, AnalysisType::PoleZero, "PZ", 0.0)

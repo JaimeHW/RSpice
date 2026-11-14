@@ -98,8 +98,8 @@ impl Default for PoleZeroData {
             name: String::new(),
             roots: Vec::new(),
             gain: None,
-            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: PoleZeroRootSetEvidence::NotRequested,
+            zero_evidence: PoleZeroRootSetEvidence::NotRequested,
         }
     }
 }

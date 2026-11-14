@@ -1071,9 +1071,6 @@ const fn floquet_evidence_label(
         rspice_results::floquet::FloquetSpectrumEvidence::NotComputed => "not computed",
         rspice_results::floquet::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
         rspice_results::floquet::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
-        rspice_results::floquet::FloquetSpectrumEvidence::LegacyUnknown => {
-            "legacy evidence unknown"
-        }
     }
 }
 
@@ -1083,7 +1080,6 @@ const fn floquet_orbit_label(
     match orbit {
         rspice_results::floquet::FloquetOrbitKindEvidence::Driven => "driven",
         rspice_results::floquet::FloquetOrbitKindEvidence::Autonomous => "autonomous",
-        rspice_results::floquet::FloquetOrbitKindEvidence::LegacyUnknown => "legacy unknown",
     }
 }
 

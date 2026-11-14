@@ -25,7 +25,6 @@ pub(super) fn retain_floquet_evidence(
                 qualification_tolerance: certificate.qualification_tolerance,
             },
         }),
-        CoreEvidence::LegacyUnknown => Ok(FloquetSpectrumEvidence::LegacyUnknown),
     }
 }
 

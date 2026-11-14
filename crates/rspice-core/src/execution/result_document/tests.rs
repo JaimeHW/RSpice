@@ -1672,7 +1672,11 @@ fn sensitivity_transfer_and_pole_zero_documents_have_no_series() {
     };
     assert_eq!(payload.poles, vec![ComplexSample::new(-1.0e6, 0.0)]);
     assert!(payload.zeros.is_empty());
-    assert!(payload.to_pole_evidence().is_qualified());
+    assert!(
+        payload
+            .to_pole_evidence()
+            .is_some_and(|evidence| evidence.is_qualified())
+    );
     assert_eq!(payload.zero_evidence, RootSetEvidenceDocument::NotRequested);
     assert_eq!(payload.dc_gain, Some(1.0));
 }

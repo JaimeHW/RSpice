@@ -49,7 +49,7 @@ impl PoleZeroSpectrumCertificate {
 }
 
 /// Qualification state attached to one retained pole or zero vector.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PoleZeroRootSetEvidence {
     NotRequested,
@@ -62,10 +62,6 @@ pub enum PoleZeroRootSetEvidence {
     Approximate {
         certificate: PoleZeroSpectrumCertificate,
     },
-    /// Truthful migration state for results written before certificates were
-    /// retained. This state never proves stability.
-    #[default]
-    LegacyUnknown,
 }
 
 impl PoleZeroRootSetEvidence {
@@ -73,7 +69,6 @@ impl PoleZeroRootSetEvidence {
         use rspice_core::analysis::pole_zero::RootSetEvidence;
         Some(match self {
             Self::NotRequested => RootSetEvidence::NotRequested,
-            Self::LegacyUnknown => RootSetEvidence::LegacyUnknown,
             Self::QualifiedEmpty { certificate } => RootSetEvidence::QualifiedEmpty {
                 certificate: certificate.as_core()?,
             },
@@ -93,7 +88,6 @@ impl PoleZeroRootSetEvidence {
             Self::QualifiedEmpty { .. } => "qualified empty",
             Self::Qualified { .. } => "qualified",
             Self::Approximate { .. } => "approximate",
-            Self::LegacyUnknown => "legacy unknown",
         }
     }
 
@@ -103,7 +97,7 @@ impl PoleZeroRootSetEvidence {
             Self::QualifiedEmpty { certificate }
             | Self::Qualified { certificate }
             | Self::Approximate { certificate } => Some(*certificate),
-            Self::NotRequested | Self::LegacyUnknown => None,
+            Self::NotRequested => None,
         }
     }
 
@@ -133,7 +127,6 @@ impl PoleZeroRootSetEvidence {
                 !certificate.is_strictly_qualified()
                     && u64::try_from(certificate.finite_count()).ok() == Some(root_count)
             }),
-            Self::LegacyUnknown => true,
         }
     }
 }

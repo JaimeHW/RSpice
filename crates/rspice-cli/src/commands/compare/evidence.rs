@@ -18,7 +18,6 @@ pub(super) fn true_indicator(data: &WaveformData, column: usize) -> bool {
 pub(super) fn problems(data: &WaveformData) -> Vec<String> {
     let root_evidence: &[&str] = &[
         "not_requested",
-        "legacy_unknown",
         "qualified_empty",
         "qualified",
         "approximate",

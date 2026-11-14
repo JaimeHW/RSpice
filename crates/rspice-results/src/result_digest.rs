@@ -1340,7 +1340,6 @@ fn encode_stb_response(
                     R::QualifiedEmpty { .. } => 1,
                     R::Qualified { .. } => 2,
                     R::Approximate { .. } => 3,
-                    R::LegacyUnknown => 4,
                 };
                 let certificate = spectrum.evidence.certificate();
                 writer.u8(
@@ -1670,7 +1669,6 @@ fn encode_floquet_spectrum_evidence(
             writer.u8(2);
             encode_floquet_spectrum_certificate(writer, *certificate);
         }
-        FloquetSpectrumEvidence::LegacyUnknown => writer.u8(3),
     }
 }
 
@@ -1687,7 +1685,6 @@ const fn floquet_orbit_kind_tag(orbit_kind: FloquetOrbitKindEvidence) -> u8 {
     match orbit_kind {
         FloquetOrbitKindEvidence::Driven => 0,
         FloquetOrbitKindEvidence::Autonomous => 1,
-        FloquetOrbitKindEvidence::LegacyUnknown => 2,
     }
 }
 
@@ -1745,7 +1742,6 @@ fn encode_pole_zero_root_evidence(
             });
             encode_pole_zero_certificate(writer, *certificate);
         }
-        PoleZeroRootSetEvidence::LegacyUnknown => writer.u8(4),
     }
 }
 

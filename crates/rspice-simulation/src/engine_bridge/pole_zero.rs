@@ -162,7 +162,6 @@ fn retained_root_evidence(
         RootSetEvidence::Approximate { certificate } => Ok(PoleZeroRootSetEvidence::Approximate {
             certificate: retained_certificate(*certificate)?,
         }),
-        RootSetEvidence::LegacyUnknown => Ok(PoleZeroRootSetEvidence::LegacyUnknown),
     }
 }
 

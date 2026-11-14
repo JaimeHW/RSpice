@@ -602,13 +602,11 @@ fn harmonic_tuple(indices: &[i32]) -> String {
     format!("({})", indices.join(", "))
 }
 
-/// Which orbit the multipliers were taken about, when the run recorded it.
-/// A run that did not is not a fact about the circuit, so it says nothing.
+/// Which orbit the multipliers were taken about.
 fn floquet_orbit_navigator_label(orbit: crate::state::FloquetOrbitKindEvidence) -> String {
     match orbit {
         crate::state::FloquetOrbitKindEvidence::Driven => " · driven orbit".to_owned(),
         crate::state::FloquetOrbitKindEvidence::Autonomous => " · autonomous orbit".to_owned(),
-        crate::state::FloquetOrbitKindEvidence::LegacyUnknown => String::new(),
     }
 }
 

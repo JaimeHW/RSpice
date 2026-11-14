@@ -656,6 +656,16 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
         scalar.clone().result_data_digest()
     );
 
+    let exact_root = PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
+            problem_order: 1,
+            infinite_count: 0,
+            max_backward_error: 0.0,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+        },
+    };
     let positive_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
         AnalysisResultPayload::PoleZero {
             poles: vec![ComplexResultValue {
@@ -663,8 +673,8 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
                 imaginary: 0.0,
             }],
             zeros: Vec::new(),
-            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: exact_root.clone(),
+            zero_evidence: PoleZeroRootSetEvidence::NotRequested,
             gain: Some(1.0),
         },
     );
@@ -675,8 +685,8 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
                 imaginary: -0.0,
             }],
             zeros: Vec::new(),
-            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
-            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            pole_evidence: exact_root,
+            zero_evidence: PoleZeroRootSetEvidence::NotRequested,
             gain: Some(1.0),
         },
     );
