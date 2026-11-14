@@ -49,11 +49,21 @@ fn frequencies_are_scaled_as_decimals_before_binary_rounding() {
                 "{source}"
             );
             assert_eq!(
-                data.get_signal("S11_RE").unwrap().data[0].to_bits(),
+                data.signals
+                    .iter()
+                    .find(|signal| signal.name == "S11_RE")
+                    .unwrap()
+                    .data[0]
+                    .to_bits(),
                 5e-324_f64.to_bits()
             );
             assert_eq!(
-                data.get_signal("S11_IM").unwrap().data[0].to_bits(),
+                data.signals
+                    .iter()
+                    .find(|signal| signal.name == "S11_IM")
+                    .unwrap()
+                    .data[0]
+                    .to_bits(),
                 (-0.0_f64).to_bits()
             );
         }
@@ -83,7 +93,12 @@ fn independent_noise_frequency_units_preserve_subnormals() {
         let data = read_touchstone_bytes("noise.s2p", source.as_bytes()).unwrap();
         assert_eq!(data.x_signal.as_ref().unwrap().data, [2e-321]);
         assert_eq!(
-            data.get_signal("Rn").unwrap().x_values.as_deref(),
+            data.signals
+                .iter()
+                .find(|signal| signal.name == "Rn")
+                .unwrap()
+                .x_values
+                .as_deref(),
             Some([1e-321].as_slice())
         );
     }

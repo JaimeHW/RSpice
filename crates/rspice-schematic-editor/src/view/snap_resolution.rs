@@ -325,7 +325,7 @@ mod tests {
         for (zoom, query) in [(1.0, Point::new(6, 0)), (2.0, Point::new(3, 0))] {
             let mut engine = engine.clone();
             engine.snap_radius = target_acquisition_radius(&viewport(zoom));
-            let result = engine.find_snap_target(query, &[], &[], &junctions);
+            let result = engine.find_snap_target_resolved(query, &[], &[], &junctions, |_| None);
             assert_eq!(result.target_type(), Some(&SnapTargetType::Junction));
             assert_eq!(result.snapped_position, Point::origin());
         }

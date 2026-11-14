@@ -811,7 +811,7 @@ mod tests {
                 .session
                 .editor
                 .snap_engine
-                .find_snap_target(Point::new(6, 6), &[], &[], &[]);
+                .find_snap_target_resolved(Point::new(6, 6), &[], &[], &[], |_| None);
             assert_eq!(
                 snapped.snapped_position, expected_position,
                 "{choice:?} must be the snap engine's real behavior, not display-only state"

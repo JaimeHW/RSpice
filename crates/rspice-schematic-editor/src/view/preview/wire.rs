@@ -353,10 +353,13 @@ mod tests {
         document
             .net_labels
             .push(NetLabel::new(1, terminal_position, "VOUT"));
-        let terminal =
-            editor
-                .snap_engine
-                .find_snap_target(terminal_position, &document.components, &[], &[]);
+        let terminal = editor.snap_engine.find_snap_target_resolved(
+            terminal_position,
+            &document.components,
+            &[],
+            &[],
+            |_| None,
+        );
         let expected = format!(
             "Pin R7.{} | net VOUT",
             terminal.terminal_name().expect("terminal target")
@@ -367,11 +370,12 @@ mod tests {
         );
 
         let wire = Wire::segment(41, Point::new(60, 20), Point::new(80, 20));
-        let unknown_wire = editor.snap_engine.find_snap_target(
+        let unknown_wire = editor.snap_engine.find_snap_target_resolved(
             Point::new(80, 20),
             &[],
             std::slice::from_ref(&wire),
             &[],
+            |_| None,
         );
         let copy = wire_snap_feedback_copy(&preview(&document, &editor), &unknown_wire)
             .expect("target copy");

@@ -795,7 +795,9 @@ mod tests {
             for column in 1..=5 {
                 assert_eq!(
                     reopened
-                        .get_signal(&format!("S{row}{column}_RE"))
+                        .signals
+                        .iter()
+                        .find(|signal| signal.name == format!("S{row}{column}_RE"))
                         .unwrap_or_else(|| panic!("S{row}{column}_RE is missing"))
                         .data[0],
                     (row * 10 + column) as f64 / 100.0,
@@ -818,7 +820,9 @@ mod tests {
             for column in 1..=3 {
                 assert_eq!(
                     reopened
-                        .get_signal(&format!("S{row}{column}_RE"))
+                        .signals
+                        .iter()
+                        .find(|signal| signal.name == format!("S{row}{column}_RE"))
                         .unwrap_or_else(|| panic!("S{row}{column}_RE is missing"))
                         .data[0],
                     (row * 10 + column) as f64 / 100.0,
@@ -996,7 +1000,13 @@ mod tests {
         let reopened = crate::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
             .expect("Touchstone export reopens");
         assert_eq!(
-            reopened.get_signal("S11_RE").unwrap().data[0].to_bits(),
+            reopened
+                .signals
+                .iter()
+                .find(|signal| signal.name == "S11_RE")
+                .unwrap()
+                .data[0]
+                .to_bits(),
             exact.to_bits()
         );
     }

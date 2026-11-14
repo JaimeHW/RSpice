@@ -991,7 +991,9 @@ mod tests {
         let name = format!("S{row}{column}");
         let component = |suffix: &str| {
             dataset
-                .get_signal(&format!("{name}_{suffix}"))
+                .signals
+                .iter()
+                .find(|signal| signal.name == format!("{name}_{suffix}"))
                 .unwrap_or_else(|| panic!("{name}_{suffix} is missing"))
                 .data[index]
         };
@@ -1295,8 +1297,24 @@ mod tests {
         .expect("valid Touchstone v2");
         assert_eq!(dataset.point_count(), 2);
         assert_eq!(dataset.metadata["z0_ports"], "50,75");
-        assert_eq!(dataset.get_signal("S12_RE").unwrap().data, [0.2, 0.6]);
-        assert_eq!(dataset.get_signal("S21_RE").unwrap().data, [0.3, 0.7]);
+        assert_eq!(
+            dataset
+                .signals
+                .iter()
+                .find(|signal| signal.name == "S12_RE")
+                .unwrap()
+                .data,
+            [0.2, 0.6]
+        );
+        assert_eq!(
+            dataset
+                .signals
+                .iter()
+                .find(|signal| signal.name == "S21_RE")
+                .unwrap()
+                .data,
+            [0.3, 0.7]
+        );
     }
 
     #[test]

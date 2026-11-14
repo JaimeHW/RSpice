@@ -260,11 +260,6 @@ impl WaveformDataset {
         self.signals.push(signal);
     }
 
-    /// Get signal by name
-    pub fn get_signal(&self, name: &str) -> Option<&WaveformSignal> {
-        self.signals.iter().find(|s| s.name == name)
-    }
-
     /// Signal count
     pub fn signal_count(&self) -> usize {
         self.signals.len()

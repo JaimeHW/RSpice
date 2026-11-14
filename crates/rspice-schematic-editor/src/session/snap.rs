@@ -21,7 +21,7 @@
 //!
 //! ```ignore
 //! let engine = SnapEngine::default();
-//! let result = engine.find_snap_target(cursor_pos, &schematic);
+//! let result = engine.find_snap_target_resolved(cursor_pos, &components, &wires, &junctions, |_| None);
 //! if result.show_indicator {
 //!     draw_snap_indicator(result.snapped_position);
 //! }
@@ -349,72 +349,6 @@ impl SnapEngine {
         }
     }
 
-    /// Find the best snap target for a given position
-    ///
-    /// # Arguments
-    /// * `pos` - The cursor position in grid coordinates
-    /// * `components` - All components in the schematic
-    /// * `wires` - All wires in the schematic
-    /// * `junctions` - All junction points in the schematic
-    ///
-    /// # Returns
-    /// A SnapResult containing the snapped position and target info
-    pub fn find_snap_target(
-        &self,
-        pos: Point,
-        components: &[Component],
-        wires: &[Wire],
-        junctions: &[Junction],
-    ) -> SnapResult {
-        // If snapping is disabled, return position as-is
-        if !self.enabled {
-            return SnapResult::no_snap(pos);
-        }
-
-        // Collect all potential targets
-        let mut candidates: Vec<SnapTarget> = Vec::new();
-
-        // 1. Collect terminal targets
-        if self.snap_to_terminals {
-            self.collect_terminal_targets(pos, components, &mut candidates);
-        }
-
-        // 2. Collect junction targets
-        if self.snap_to_junctions {
-            self.collect_junction_targets(pos, junctions, &mut candidates);
-        }
-
-        // 3. Collect wire endpoint targets
-        if self.snap_to_wire_endpoints {
-            self.collect_wire_endpoint_targets(pos, wires, &mut candidates);
-        }
-
-        // 4. Collect wire segment targets
-        if self.snap_to_wire_segments {
-            self.collect_wire_segment_targets(pos, wires, &mut candidates);
-        }
-
-        // Filter by snap radius and find best candidate
-        let radius_sq = (self.snap_radius as f64).powi(2);
-        candidates.retain(|t| t.distance * t.distance <= radius_sq);
-
-        if let Some(best) = self.select_best_target(&candidates) {
-            return SnapResult::with_target(best, pos);
-        }
-
-        // Fallback to grid snap
-        if self.snap_to_grid {
-            let snapped = self.snap_to_grid_point(pos);
-            if snapped != pos {
-                let dist = ((snapped.x - pos.x).pow(2) + (snapped.y - pos.y).pow(2)) as f64;
-                let target = SnapTarget::grid(snapped, dist.sqrt());
-                return SnapResult::with_target(target, pos);
-            }
-        }
-
-        SnapResult::grid_only(pos, pos)
-    }
-
     /// Find the best snap target, resolving cell-instance terminals through
     /// authored symbol geometry when the caller has frame-local symbol context.
     pub fn find_snap_target_resolved<'a>(
@@ -469,24 +403,6 @@ impl SnapEngine {
         }
 
         SnapResult::grid_only(pos, pos)
-    }
-
-    /// Collect terminal snap targets from components
-    fn collect_terminal_targets(
-        &self,
-        pos: Point,
-        components: &[Component],
-        candidates: &mut Vec<SnapTarget>,
-    ) {
-        for comp in components {
-            for (name, term_pos) in comp.terminal_positions() {
-                let dx = (term_pos.x - pos.x) as f64;
-                let dy = (term_pos.y - pos.y) as f64;
-                let dist = (dx * dx + dy * dy).sqrt();
-
-                candidates.push(SnapTarget::terminal(term_pos, comp.id, name, dist));
-            }
-        }
     }
 
     fn collect_terminal_targets_resolved<'a>(
@@ -758,12 +674,12 @@ mod tests {
         );
     }
 
-    /// With no nearby targets and a coarse grid, find_snap_target falls back to
+    /// With no nearby targets and a coarse grid, the snap engine falls back to
     /// a Grid target (no indicator) at the nearest intersection.
     #[test]
     fn grid_fallback_with_coarse_grid() {
         let engine = engine_with(|e| e.grid_size = 10);
-        let result = engine.find_snap_target(Point::new(13, 17), &[], &[], &[]);
+        let result = engine.find_snap_target_resolved(Point::new(13, 17), &[], &[], &[], |_| None);
         assert_eq!(result.snapped_position, Point::new(10, 20));
         assert!(!result.show_indicator);
         assert_eq!(result.target_type(), Some(&SnapTargetType::Grid));
@@ -773,7 +689,7 @@ mod tests {
     #[test]
     fn grid_fallback_on_grid_cursor_is_grid_only() {
         let engine = engine_with(|e| e.grid_size = 10);
-        let result = engine.find_snap_target(Point::new(10, 20), &[], &[], &[]);
+        let result = engine.find_snap_target_resolved(Point::new(10, 20), &[], &[], &[], |_| None);
         assert_eq!(result.snapped_position, Point::new(10, 20));
         assert!(result.target.is_none());
         assert!(!result.show_indicator);
@@ -810,7 +726,8 @@ mod tests {
         let engine = SnapEngine::default();
         let comps = [resistor(1, Point::origin())]; // "-" terminal at (20, 0)
         let junctions = [Junction::new(7, Point::new(21, 0))];
-        let result = engine.find_snap_target(Point::new(21, 0), &comps, &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::new(21, 0), &comps, &[], &junctions, |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::Terminal {
@@ -828,7 +745,8 @@ mod tests {
         let engine = SnapEngine::default();
         let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
         let junctions = [Junction::new(7, Point::new(1, 0))];
-        let result = engine.find_snap_target(Point::origin(), &[], &wires, &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::origin(), &[], &wires, &junctions, |_| None);
         assert_eq!(result.target_type(), Some(&SnapTargetType::Junction));
         assert_eq!(result.snapped_position, Point::new(1, 0));
     }
@@ -839,7 +757,7 @@ mod tests {
         let engine = SnapEngine::default();
         let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
         // Endpoint (0,0) is sqrt(2) away; segment point (1,0) is 1 away.
-        let result = engine.find_snap_target(Point::new(1, 1), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(1, 1), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireEndpoint {
@@ -858,7 +776,8 @@ mod tests {
             Junction::new(1, Point::new(2, 0)),
             Junction::new(2, Point::new(0, 1)),
         ];
-        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None);
         assert_eq!(result.snapped_position, Point::new(0, 1));
     }
 
@@ -871,7 +790,8 @@ mod tests {
     fn target_exactly_at_radius_snaps() {
         let engine = SnapEngine::default(); // snap_radius = 2
         let junctions = [Junction::new(1, Point::new(2, 0))];
-        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None);
         assert_eq!(result.target_type(), Some(&SnapTargetType::Junction));
         assert_eq!(result.snapped_position, Point::new(2, 0));
     }
@@ -881,7 +801,8 @@ mod tests {
     fn target_just_outside_radius_does_not_snap() {
         let engine = SnapEngine::default();
         let junctions = [Junction::new(1, Point::new(2, 1))];
-        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None);
         assert!(result.target.is_none());
         assert_eq!(result.snapped_position, Point::origin());
     }
@@ -893,13 +814,14 @@ mod tests {
         let default_engine = SnapEngine::default();
         assert!(
             default_engine
-                .find_snap_target(Point::origin(), &[], &[], &junctions)
+                .find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None)
                 .target
                 .is_none()
         );
         let mut wide = SnapEngine::new();
         wide.snap_radius = 3;
-        let result = wide.find_snap_target(Point::origin(), &[], &[], &junctions);
+        let result =
+            wide.find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None);
         assert_eq!(result.snapped_position, Point::new(3, 0));
     }
 
@@ -915,7 +837,8 @@ mod tests {
             e.grid_size = 10;
         });
         let junctions = [Junction::new(1, Point::new(13, 17))];
-        let result = engine.find_snap_target(Point::new(13, 17), &[], &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::new(13, 17), &[], &[], &junctions, |_| None);
         assert_eq!(result.snapped_position, Point::new(13, 17));
         assert!(result.target.is_none());
         assert!(!result.show_indicator);
@@ -927,7 +850,8 @@ mod tests {
     fn class_flags_gate_targets() {
         let engine = engine_with(|e| e.snap_to_junctions = false);
         let junctions = [Junction::new(1, Point::new(1, 0))];
-        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        let result =
+            engine.find_snap_target_resolved(Point::origin(), &[], &[], &junctions, |_| None);
         assert!(result.target.is_none());
     }
 
@@ -968,7 +892,7 @@ mod tests {
         let engine = SnapEngine::default();
         let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
 
-        let result = engine.find_snap_target(Point::new(0, 1), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(0, 1), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireEndpoint {
@@ -977,7 +901,8 @@ mod tests {
             })
         );
 
-        let result = engine.find_snap_target(Point::new(10, 1), &[], &wires, &[]);
+        let result =
+            engine.find_snap_target_resolved(Point::new(10, 1), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireEndpoint {
@@ -993,7 +918,7 @@ mod tests {
     fn degenerate_wires_handled() {
         let engine = SnapEngine::default();
         let wires = [Wire::new(1, vec![Point::new(5, 5)]), Wire::new(2, vec![])];
-        let result = engine.find_snap_target(Point::new(5, 6), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(5, 6), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireEndpoint {
@@ -1002,7 +927,8 @@ mod tests {
             })
         );
 
-        let result = engine.find_snap_target(Point::new(50, 50), &[], &wires, &[]);
+        let result =
+            engine.find_snap_target_resolved(Point::new(50, 50), &[], &wires, &[], |_| None);
         assert!(result.target.is_none());
     }
 
@@ -1017,7 +943,7 @@ mod tests {
         });
         let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
 
-        let result = engine.find_snap_target(Point::new(5, 1), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(5, 1), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireSegment {
@@ -1028,7 +954,7 @@ mod tests {
         assert_eq!(result.snapped_position, Point::new(5, 0));
 
         // Projection lands on the start vertex: no segment candidate.
-        let result = engine.find_snap_target(Point::new(0, 1), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(0, 1), &[], &wires, &[], |_| None);
         assert!(result.target.is_none());
     }
 
@@ -1043,11 +969,11 @@ mod tests {
             engine.snap_to_wire_endpoints = false;
         });
 
-        let grid = engine.find_snap_target(Point::new(17, 3), &[], &wires, &[]);
+        let grid = engine.find_snap_target_resolved(Point::new(17, 3), &[], &wires, &[], |_| None);
         assert_eq!(grid.snapped_position, Point::new(20, 0));
 
         engine.snap_to_grid = false;
-        let free = engine.find_snap_target(Point::new(17, 3), &[], &wires, &[]);
+        let free = engine.find_snap_target_resolved(Point::new(17, 3), &[], &wires, &[], |_| None);
         assert_eq!(free.snapped_position, Point::new(17, 0));
         assert!(free.show_indicator);
     }
@@ -1060,7 +986,8 @@ mod tests {
             3,
             vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
         )];
-        let result = engine.find_snap_target(Point::new(11, 5), &[], &wires, &[]);
+        let result =
+            engine.find_snap_target_resolved(Point::new(11, 5), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireSegment {
@@ -1076,7 +1003,7 @@ mod tests {
     fn diagonal_segment_snap() {
         let engine = SnapEngine::default();
         let wires = [Wire::segment(3, Point::origin(), Point::new(10, 10))];
-        let result = engine.find_snap_target(Point::new(6, 4), &[], &wires, &[]);
+        let result = engine.find_snap_target_resolved(Point::new(6, 4), &[], &wires, &[], |_| None);
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireSegment {

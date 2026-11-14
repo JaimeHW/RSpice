@@ -1071,7 +1071,13 @@ fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
             .map(|signal| signal.data.as_slice()),
         Some(&[1.0e3, 1.0e4, 1.0e5][..])
     );
-    assert!(dataset.get_signal("V(out)").is_none());
+    assert!(
+        dataset
+            .signals
+            .iter()
+            .find(|signal| signal.name == "V(out)")
+            .is_none()
+    );
 }
 
 #[test]
@@ -1349,21 +1355,29 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     );
     assert_eq!(
         dataset
-            .get_signal("re(V(out))")
+            .signals
+            .iter()
+            .find(|signal| signal.name == "re(V(out))")
             .map(|signal| signal.data.as_slice()),
         Some(&[0.8, 1.6][..])
     );
     assert_eq!(
         dataset
-            .get_signal("im(V(out))")
+            .signals
+            .iter()
+            .find(|signal| signal.name == "im(V(out))")
             .map(|signal| signal.data.as_slice()),
         Some(&[0.6, 1.2][..])
     );
     let current_real_signal = dataset
-        .get_signal("re(I(V1)[sb=+0])")
+        .signals
+        .iter()
+        .find(|signal| signal.name == "re(I(V1)[sb=+0])")
         .expect("exact current real components are exported");
     let current_imag_signal = dataset
-        .get_signal("im(I(V1)[sb=+0])")
+        .signals
+        .iter()
+        .find(|signal| signal.name == "im(I(V1)[sb=+0])")
         .expect("exact current imaginary components are exported");
     assert_eq!(current_real_signal.unit, "A");
     assert_eq!(current_imag_signal.unit, "A");
@@ -1446,10 +1460,26 @@ fn touchstone_noise_retained_export_preserves_independent_grid() {
         .unwrap();
     let restored = rspice_formats::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
     assert_eq!(
-        restored.get_signal("Rn").unwrap().x_values.as_deref(),
+        restored
+            .signals
+            .iter()
+            .find(|signal| signal.name == "Rn")
+            .unwrap()
+            .x_values
+            .as_deref(),
         Some([2e6].as_slice())
     );
-    assert!((restored.get_signal("Sopt_IM").unwrap().data[0] + 0.5).abs() < 1e-14);
+    assert!(
+        (restored
+            .signals
+            .iter()
+            .find(|signal| signal.name == "Sopt_IM")
+            .unwrap()
+            .data[0]
+            + 0.5)
+            .abs()
+            < 1e-14
+    );
     assert!(prepare_single_analysis_dataset(&analysis, &waveforms, false).is_err());
     let network_only = analysis.waveforms[..4].iter().collect::<Vec<_>>();
     let dataset = prepare_single_analysis_dataset(&analysis, &network_only, true).unwrap();
@@ -1626,7 +1656,15 @@ fn displayed_digits_never_reduce_csv_source_precision() {
     );
 
     let datasets = io.datasets.borrow();
-    assert_eq!(datasets[0].get_signal("V(out)").unwrap().data, vec![exact]);
+    assert_eq!(
+        datasets[0]
+            .signals
+            .iter()
+            .find(|signal| signal.name == "V(out)")
+            .unwrap()
+            .data,
+        vec![exact]
+    );
 }
 
 #[test]

@@ -296,23 +296,71 @@ mod tests {
                 dataset.metadata["noise_reference_temperature_kelvin"],
                 "290"
             );
-            assert_eq!(dataset.get_signal("Rn").unwrap().data, [15.0; 3]);
-            assert_eq!(dataset.get_signal("Rn").unwrap().unit, "Ω");
             assert_eq!(
-                dataset.get_signal("Rn").unwrap().x_values.as_deref(),
+                dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Rn")
+                    .unwrap()
+                    .data,
+                [15.0; 3]
+            );
+            assert_eq!(
+                dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Rn")
+                    .unwrap()
+                    .unit,
+                "Ω"
+            );
+            assert_eq!(
+                dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Rn")
+                    .unwrap()
+                    .x_values
+                    .as_deref(),
                 Some([1.5e6, 2.0e6, 4.0e6].as_slice())
             );
-            assert!((dataset.get_signal("Sopt_IM").unwrap().data[0] + 0.5).abs() < 1e-14);
             assert!(
-                (dataset.get_signal("Fmin").unwrap().data[0] - 10.0_f64.powf(0.3)).abs() < 1e-14
+                (dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Sopt_IM")
+                    .unwrap()
+                    .data[0]
+                    + 0.5)
+                    .abs()
+                    < 1e-14
+            );
+            assert!(
+                (dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Fmin")
+                    .unwrap()
+                    .data[0]
+                    - 10.0_f64.powf(0.3))
+                .abs()
+                    < 1e-14
             );
             let text = WaveformWriter::new(WaveformFormat::Touchstone)
                 .write_text(&dataset)
                 .unwrap();
             let restored = read_touchstone_bytes("noise.s2p", text.as_bytes()).unwrap();
             for name in ["Rn", "Fmin", "Sopt_RE", "Sopt_IM"] {
-                let expected = dataset.get_signal(name).unwrap();
-                let actual = restored.get_signal(name).unwrap();
+                let expected = dataset
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == *name)
+                    .unwrap();
+                let actual = restored
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == *name)
+                    .unwrap();
                 assert_eq!(actual.x_values, expected.x_values);
                 for (a, b) in actual.data.iter().zip(&expected.data) {
                     assert!((a - b).abs() < 1e-13, "{name}: {a} != {b}");
@@ -336,7 +384,12 @@ mod tests {
             "1.5 0 0 0 15\n2 0 1 0 15\n3 0 1 180 15\n",
         );
         let mut dataset = read_touchstone_bytes("noise.ts", source.as_bytes()).unwrap();
-        let real = &dataset.get_signal("Sopt_RE").unwrap().data;
+        let real = &dataset
+            .signals
+            .iter()
+            .find(|signal| signal.name == "Sopt_RE")
+            .unwrap()
+            .data;
         // A source matched to the option line (75 ohms) reflects +0.5 in
         // the 25-ohm port-1 reference; open and short remain +1 and -1.
         for (actual, expected) in real.iter().zip([0.5, 1.0, -1.0]) {
@@ -349,7 +402,9 @@ mod tests {
         assert!(text.contains("[Reference] 2.5e1 1e2"));
         let restored = read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
         for (actual, expected) in restored
-            .get_signal("Sopt_RE")
+            .signals
+            .iter()
+            .find(|signal| signal.name == "Sopt_RE")
             .unwrap()
             .data
             .iter()
@@ -395,7 +450,15 @@ mod tests {
             assert!((rows[0][1] - 10.0 * 3.0_f64.log10()).abs() < 1e-14);
             assert_eq!(rows[0][4], if version == 1 { 0.4 } else { 30.0 });
         }
-        assert_eq!(dataset.get_signal("Rn").unwrap().data, [15.0]);
+        assert_eq!(
+            dataset
+                .signals
+                .iter()
+                .find(|signal| signal.name == "Rn")
+                .unwrap()
+                .data,
+            [15.0]
+        );
         dataset
             .metadata
             .insert("noise_reference_temperature_kelvin".into(), "145".into());
@@ -424,9 +487,23 @@ mod tests {
             let baseline = read_touchstone_bytes("noise.s2p", source.as_bytes()).unwrap();
             let repeated = source.replace("1.5 3", "# Hz S RI R 50\n1.5 3");
             let actual = read_touchstone_bytes("noise.s2p", repeated.as_bytes()).unwrap();
-            assert_eq!(actual.get_signal("Rn").unwrap().data, [15.0; 3]);
             assert_eq!(
-                actual.get_signal("Rn").unwrap().x_values.as_deref(),
+                actual
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Rn")
+                    .unwrap()
+                    .data,
+                [15.0; 3]
+            );
+            assert_eq!(
+                actual
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == "Rn")
+                    .unwrap()
+                    .x_values
+                    .as_deref(),
                 Some([1.5e6, 2e6, 4e6].as_slice())
             );
             let writer = WaveformWriter::new(WaveformFormat::Touchstone);

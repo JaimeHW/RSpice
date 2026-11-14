@@ -81,48 +81,6 @@ pub fn probed_net(signal: &str) -> Option<(&str, NetQuantity)> {
     })
 }
 
-/// Which carriers the last run produced for one net.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct NetCarriers {
-    /// The net has an analog node voltage.
-    pub analog: bool,
-    /// The net has a digital event trace.
-    pub digital: bool,
-}
-
-/// What probing a net on the schematic adds to the waveform.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetProbe {
-    /// The signal the probe adds: `V(n)` for an analog net and for a
-    /// converted boundary net, `D(n)` for a digital net, which the waveform
-    /// draws as a logic or bus lane.
-    pub adds: String,
-    /// A converted boundary net carries both sides; its digital side, `D(n)`,
-    /// is offered beside the voltage rather than added with it.
-    pub digital_side: Option<String>,
-}
-
-/// The probe one net offers, or `None` when the run traced no carrier of it.
-pub fn net_probe(net: &str, carriers: NetCarriers) -> Option<NetProbe> {
-    let voltage = NetQuantity::Voltage.of(net);
-    let digital = NetQuantity::Digital.of(net);
-    match (carriers.analog, carriers.digital) {
-        (true, true) => Some(NetProbe {
-            adds: voltage,
-            digital_side: Some(digital),
-        }),
-        (true, false) => Some(NetProbe {
-            adds: voltage,
-            digital_side: None,
-        }),
-        (false, true) => Some(NetProbe {
-            adds: digital,
-            digital_side: None,
-        }),
-        (false, false) => None,
-    }
-}
-
 /// Why a result signal could not be located on the schematic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocateSignalError {
@@ -425,33 +383,6 @@ mod tests {
         assert_eq!(probed_net(" v(out) "), Some(("out", NetQuantity::Voltage)));
         assert_eq!(probed_net("D(a)-D(b)"), None);
         assert_eq!(probed_net("I(r1)"), None);
-    }
-
-    #[test]
-    fn a_converted_boundary_net_adds_its_voltage_and_offers_its_digital_side() {
-        let both = NetCarriers {
-            analog: true,
-            digital: true,
-        };
-        assert_eq!(
-            net_probe("q", both),
-            Some(NetProbe {
-                adds: "V(q)".to_owned(),
-                digital_side: Some("D(q)".to_owned()),
-            })
-        );
-        let digital = NetCarriers {
-            analog: false,
-            digital: true,
-        };
-        assert_eq!(net_probe("ok", digital).unwrap().adds, "D(ok)");
-        assert_eq!(net_probe("ok", digital).unwrap().digital_side, None);
-        let analog = NetCarriers {
-            analog: true,
-            digital: false,
-        };
-        assert_eq!(net_probe("out", analog).unwrap().adds, "V(out)");
-        assert_eq!(net_probe("none", NetCarriers::default()), None);
     }
 
     #[test]
