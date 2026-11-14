@@ -59,8 +59,9 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
         Some(DiagnosticRoute::Anchor(LogAnchor::Symbol { pin_name, .. })) if pin_name == "IN"
     ));
 
+    // A pin the symbol has not placed is a warning: it never stops a save.
     let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    assert_eq!(listed.counts().errors, batch.records.len());
+    assert_eq!(listed.counts().warnings, batch.records.len());
     let row = (0..listed.len())
         .filter_map(|index| listed.row(index))
         .find(|row| row.id == unplaced.canonical.diagnostic_id)
