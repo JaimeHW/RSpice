@@ -48,7 +48,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     );
     assert_eq!(
         app.command_availability(ProjectCommand::CheckAndSave.key()),
-        CommandAvailability::Disabled("open an editable schematic or testbench")
+        CommandAvailability::Disabled("open an editable schematic, testbench or symbol")
     );
 
     app.state.workbench.activate(Workspace::Design);
