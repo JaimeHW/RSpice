@@ -1127,6 +1127,30 @@ impl BuiltinVerilogADevices {
     }
 }
 
+/// A generated instance's state as a shooting period map sees it.
+#[cfg(feature = "veriloga-builtins-base")]
+#[doc(hidden)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GeneratedPeriodicStructure {
+    /// The circuit nodes each of its bound source branches ties, a voltage
+    /// contribution fixing their difference (ground, 0, for a branch with one
+    /// terminal). The difference is the model's to solve, not a state.
+    pub ties: Vec<(usize, usize)>,
+    /// The circuit nodes, other than ground, that carry its state: those
+    /// whose voltages its charges are functions of, and its private unknowns
+    /// (a probed flow's current). A private unknown can be the current of a
+    /// branch whose arm moves with bias, so it may tie nodes the stamp pattern
+    /// alone cannot show tied; as a coordinate it keeps the period's start
+    /// solvable in either arm.
+    pub state_nodes: Vec<usize>,
+    /// The bound source branches (1-based solution branch indices) whose
+    /// equations the reactive stamp can write: each can store flux (an
+    /// inductance, a `ddt` of its current in its voltage contribution), whose
+    /// current no node voltage fixes. [`BuiltinVerilogAInstance::stores_flux`]
+    /// says whether one does at the instance's parameters.
+    pub flux_branches: Vec<usize>,
+}
+
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
     #[doc(hidden)]
@@ -1703,6 +1727,76 @@ impl BuiltinVerilogAInstance {
         }
         self.terminal_current_aliases = aliases;
         Ok(())
+    }
+
+    /// What a shooting period map needs to know of this instance's state,
+    /// read from the stamp pattern the generator took from the model's own
+    /// calls, so it holds whatever the parameters and bias.
+    #[doc(hidden)]
+    pub fn periodic_structure(&self) -> GeneratedPeriodicStructure {
+        let Some(descriptor) = builtins::descriptor(self.model_name) else {
+            return GeneratedPeriodicStructure::default();
+        };
+        let pattern = descriptor.stamp_pattern;
+        let nodes = descriptor.total_node_count.min(self.nodes.len());
+        let mut structure = GeneratedPeriodicStructure::default();
+        for (local, &branch) in self.branches.iter().enumerate() {
+            if branch == 0 {
+                continue;
+            }
+            let axis = descriptor.total_node_count + local;
+            let mut terminals = pattern
+                .resistive
+                .iter()
+                .filter(|&&(row, column)| column == axis && row < nodes)
+                .map(|&(row, _)| self.nodes[row]);
+            match (terminals.next(), terminals.next()) {
+                (Some(pos), Some(neg)) if pos != neg => structure.ties.push((pos, neg)),
+                (Some(pos), None) if pos != 0 => structure.ties.push((pos, 0)),
+                _ => {}
+            }
+            if pattern
+                .reactive
+                .iter()
+                .any(|&(row, column)| row == axis || column == axis)
+            {
+                structure.flux_branches.push(branch);
+            }
+        }
+        structure.state_nodes = pattern
+            .reactive
+            .iter()
+            .chain(pattern.dynamic)
+            .filter(|&&(_, column)| column < nodes)
+            .map(|&(_, column)| self.nodes[column])
+            .filter(|&node| node > 0)
+            .chain(self.non_electrical_node_indices())
+            .collect();
+        structure.state_nodes.sort_unstable();
+        structure.state_nodes.dedup();
+        structure
+    }
+
+    /// Whether a source branch of this instance stores flux at its
+    /// parameters: a `ddt` operand of the model moves when the current of a
+    /// branch in [`GeneratedPeriodicStructure::flux_branches`] does. Probed
+    /// at zero bias on a copy, so the live instance is untouched; a model
+    /// that cannot be evaluated there is taken to store flux.
+    #[doc(hidden)]
+    pub fn stores_flux(&self, num_nodes: usize, simparams: GeneratedSimulationParameters) -> bool {
+        let flux_branches = self.periodic_structure().flux_branches;
+        let Some(&last) = flux_branches.iter().max() else {
+            return false;
+        };
+        let mut solution = vec![0.0; num_nodes + last];
+        let Some(at_rest) = self.dynamic_charges_at(&solution, num_nodes, simparams) else {
+            return true;
+        };
+        for &branch in &flux_branches {
+            solution[num_nodes + branch - 1] = 1.0;
+        }
+        self.dynamic_charges_at(&solution, num_nodes, simparams)
+            .is_none_or(|carrying| carrying.current != at_rest.current)
     }
 
     /// Bound circuit node IDs occupied by private mathematical states.

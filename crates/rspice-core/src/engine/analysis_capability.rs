@@ -989,13 +989,15 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Why shooting refuses a generated model with a source branch: its period
-/// map fixes every node the model reaches at the period start, and a voltage
-/// contribution already ties some of them, so the consistent start would fix
-/// them twice.
+/// Why shooting refuses a generated model whose source branch stores flux at
+/// its parameters: the period map's state is node voltages, and an
+/// inductance's state is its branch current, which none of them fixes. An
+/// Angelov card with a 1 mH drain inductance, admitted, settles 0.18 V off
+/// the transient's DC level.
 #[cfg(feature = "veriloga-builtins-base")]
-const PSS_GENERATED_SOURCE_BRANCH: &str = "it has a voltage contribution (a source branch), which \
-     ties nodes the shooting coordinates would each fix at the period start";
+const PSS_GENERATED_FLUX: &str = "a voltage contribution takes the time derivative of its \
+     branch current (an inductance), and the shooting state fixes node voltages, not branch \
+     currents";
 
 /// Why shooting refuses a generated model with an operator site harmonic
 /// balance carries as an unknown of its own: its period map integrates the
@@ -1030,8 +1032,9 @@ fn hb_generated_refusal(
             })
             .or_else(|| {
                 (matches!(analysis, CapabilityAnalysis::Pss)
-                    && device.branches.iter().any(|&branch| branch > 0))
-                .then_some(PSS_GENERATED_SOURCE_BRANCH)
+                    && device
+                        .stores_flux(circuit.num_nodes(), circuit.generated_simulation_parameters))
+                .then_some(PSS_GENERATED_FLUX)
             })
         else {
             continue;

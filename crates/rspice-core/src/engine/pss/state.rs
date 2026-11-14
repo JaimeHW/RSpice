@@ -337,6 +337,19 @@ impl PssStateBasis {
                 add(pos, neg, ForestValue::Zero)?;
             }
         }
+        // A generated model's source branch fixes the difference of the nodes
+        // it ties (the model solves it from the rest of the state), so those
+        // nodes are one before any of them can take a coordinate.
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated: Vec<_> = circuit
+            .generated_veriloga_devices()
+            .iter()
+            .map(|instance| instance.periodic_structure())
+            .collect();
+        #[cfg(feature = "veriloga-builtins-base")]
+        for &(pos, neg) in generated.iter().flat_map(|structure| &structure.ties) {
+            add(pos, neg, ForestValue::Zero)?;
+        }
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit.capacitors.capacitances[index] != 0.0
                 && add(
@@ -457,17 +470,30 @@ impl PssStateBasis {
                 }
             }
         }
-        // A generated model's charges are opaque functions of its node
-        // voltages, so every node it reaches is a coordinate unless a
-        // source or another storage branch already fixes it. A node that
-        // stores nothing only adds a column the period map does not move.
+        // A generated model's state is the voltages its charges are opaque
+        // functions of, as its stamp pattern names them, and its private
+        // unknowns, so each is a coordinate unless a source, a source branch
+        // of the model or another storage branch already fixes it. A node
+        // that holds neither is solved at the period start. A private unknown
+        // stays a coordinate because a bias-dependent arm can make it a
+        // branch current (DIODE_CMC's probed junction current): left free,
+        // the start's consistency matrix is singular.
         #[cfg(feature = "veriloga-builtins-base")]
-        for (device, instance) in circuit.generated_veriloga_devices().iter().enumerate() {
-            for (slot, &pos) in instance.nodes.iter().enumerate() {
-                if pos != 0 && add(pos, 0, ForestValue::State(charge_branches.len()))? {
+        for ((device, instance), structure) in circuit
+            .generated_veriloga_devices()
+            .iter()
+            .enumerate()
+            .zip(&generated)
+        {
+            for &pos in &structure.state_nodes {
+                if add(pos, 0, ForestValue::State(charge_branches.len()))? {
                     charge_branches.push(ChargeBranch::Generated {
                         device,
-                        slot,
+                        slot: instance
+                            .nodes
+                            .iter()
+                            .position(|&node| node == pos)
+                            .unwrap_or(0),
                         pos,
                         neg: 0,
                     });

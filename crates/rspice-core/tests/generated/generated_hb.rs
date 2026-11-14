@@ -514,9 +514,10 @@ fn compare_with_settled_transient(
     );
 }
 
-/// Why shooting refuses a generated model with a source branch.
-const SOURCE_BRANCH: &str = "it has a voltage contribution (a source branch), which ties nodes \
-                             the shooting coordinates would each fix at the period start";
+/// Why shooting refuses a generated model whose source branch stores flux.
+#[cfg(feature = "veriloga-model-angelov")]
+const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
+                    inductance), and the shooting state fixes node voltages, not branch currents";
 
 /// Why shooting refuses a generated model with a site harmonic balance
 /// carries as an unknown of its own.
@@ -525,9 +526,10 @@ const CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balanc
                             transient has confirmed shooting's period map on it";
 
 /// Shooting reaches the same settled transient for every fixture harmonic
-/// balance does, under the same allowance, or refuses the model before
-/// solving: the period map integrates each generated model's charges from the
-/// state the period starts at.
+/// balance does, under the same allowance, or refuses before solving a model
+/// with a site harmonic balance carries as an unknown of its own: the period
+/// map integrates each generated model's charges from the state the period
+/// starts at, with the nodes its own source branches tie taken as one.
 #[test]
 fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     let mut failures = Vec::new();
@@ -541,12 +543,11 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
                 .with_tolerance(1e-9),
         ) {
             Ok(result) => result.result,
-            // A model with a source branch, or with a site harmonic balance
-            // carries as an unknown of its own, is refused before solving, by
-            // name and reason (see `shooting_refuses_a_generated_model_by_its_reason`).
+            // A model with a site harmonic balance carries as an unknown of
+            // its own is refused before solving, by name and reason (see
+            // `shooting_refuses_a_generated_model_by_its_reason`).
             Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
-                if refusal.detail.ends_with(SOURCE_BRANCH)
-                    || refusal.detail.ends_with(CARRIED_SITE) =>
+                if refusal.detail.ends_with(CARRIED_SITE) =>
             {
                 eprintln!("{family}: shooting refuses it: {}", refusal.detail);
                 continue;
@@ -656,9 +657,10 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
 }
 
 /// Shooting refuses the generated models harmonic balance refuses, before
-/// solving, by instance and module, with the generator's reason, and one
-/// with a voltage contribution (HICUM/L0) or a site harmonic balance carries
-/// as an unknown of its own (the ASM-ESD diode), with that reason.
+/// solving, by instance and module, with the generator's reason, one with a
+/// site harmonic balance carries as an unknown of its own (the ASM-ESD
+/// diode), and one whose source branch stores flux at its parameters, with
+/// that reason.
 #[test]
 fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
@@ -674,8 +676,15 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
         ),
         #[cfg(feature = "veriloga-model-asmesd-dio")]
         ("XA d 0 asmesd_dio", "XA", "asmesd_dio", CARRIED_SITE),
-        #[cfg(feature = "veriloga-model-hicuml0va")]
-        ("XQ d d 0 0 t hicuml0va", "XQ", "hicuml0va", SOURCE_BRANCH),
+        // A 1 mH drain inductance: admitted, the period map misses its
+        // current and shooting stops short of the settled transient.
+        #[cfg(feature = "veriloga-model-angelov")]
+        (
+            "MA d d 0 am\n.model am angelov ld=1m",
+            "MA",
+            "angelov",
+            FLUX,
+        ),
     ];
     for (card, instance, module, reason) in cases {
         let deck =
