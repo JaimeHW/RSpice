@@ -231,6 +231,142 @@ fn complex(actual: &[Complex64], expected: &[Complex64], tolerance: Tolerance) -
     )
 }
 
+/// Points per decade of the grid a root set's transfer function is compared
+/// on: a spacing of 10^(1/50), 4.7 %, resolves a resonance down to that
+/// relative half-width, a Q of about 10. Each oracle root's own frequency is
+/// a point too, where the response is most sensitive to that root.
+const RESPONSE_POINTS_PER_DECADE: f64 = 50.0;
+
+/// Compare two root sets through the transfer function each defines,
+/// `H(jω) = Π(1 − jω/z) / Π(1 − jω/p)` (a root at the origin contributes
+/// `jω/ω₀`, ω₀ the grid's lowest frequency), on one frequency grid: log-spaced
+/// over the decades the roots of both sets span, widened to `band` (rad/s,
+/// the deck's own `.ac` range) when given, plus each oracle root's `|e|` and
+/// `|Im e|`. The gain is the transfer-function quantity's to compare; this
+/// compares the shape the roots give it.
+///
+/// One root of an ill-conditioned spectrum may move far more than the
+/// response it belongs to, and the response is what the roots are for. A move
+/// δ of a root r still moves H by about |δ|/|Re r| ≥ |δ|/|r| near ω = |Im r|,
+/// so the response is never blind to a root that moved. Root counts must
+/// agree, as for the root-by-root comparison.
+pub fn root_response(
+    actual: &Measured,
+    expected: &Expected,
+    band: Option<[f64; 2]>,
+    tolerance: Tolerance,
+) -> Verdict {
+    let (
+        Measured::Roots { poles, zeros },
+        Expected::Measured(Measured::Roots {
+            poles: expected_poles,
+            zeros: expected_zeros,
+        }),
+    ) = (actual, expected)
+    else {
+        return compare(actual, expected, tolerance);
+    };
+    for (label, actual, expected) in [
+        ("pole", poles, expected_poles),
+        ("zero", zeros, expected_zeros),
+    ] {
+        if actual.len() != expected.len() {
+            return Verdict::fail(format!(
+                "{label} count differs: RSpice {}, oracle {}",
+                actual.len(),
+                expected.len()
+            ));
+        }
+    }
+    let (Some(abs_db), Some(abs_deg)) = (tolerance.abs_db, tolerance.abs_deg) else {
+        return Verdict::fail("a root response needs abs_db and abs_deg");
+    };
+    let all = [poles, zeros, expected_poles, expected_zeros];
+    let Some(grid) = response_grid(&all, [expected_poles, expected_zeros], band) else {
+        return Verdict::pass(0.0, "no roots and no band to compare over".into());
+    };
+    let omega_zero = grid[0];
+    let mut worst = (0.0f64, -1.0f64, 0.0, 0.0);
+    for &omega in &grid {
+        let actual = response(poles, zeros, omega, omega_zero);
+        let expected = response(expected_poles, expected_zeros, omega, omega_zero);
+        let (db, deg) = db_deg(actual, expected);
+        let severity = if db.is_finite() && deg.is_finite() {
+            (db.abs() / abs_db.max(f64::MIN_POSITIVE))
+                .max(deg.abs() / abs_deg.max(f64::MIN_POSITIVE))
+        } else {
+            f64::INFINITY
+        };
+        if severity > worst.1 {
+            worst = (omega, severity, db, deg);
+        }
+    }
+    let (omega, severity, db, deg) = worst;
+    Verdict::from_severity(
+        severity,
+        format!(
+            "H(jω) Δ={db:.3e} dB, {deg:.3e}° allowed {abs_db:e} dB, {abs_deg:e}° at ω={omega:.4e} rad/s; {} points over {:.0e}..{:.0e} rad/s",
+            grid.len(),
+            grid[0],
+            grid[grid.len() - 1]
+        ),
+    )
+}
+
+/// The frequencies, rad/s ascending, a root response is compared at; `None`
+/// when no root is off the origin and no band is given.
+fn response_grid(
+    all: &[&Vec<Complex64>],
+    oracle: [&Vec<Complex64>; 2],
+    band: Option<[f64; 2]>,
+) -> Option<Vec<f64>> {
+    let magnitudes = all
+        .iter()
+        .flat_map(|roots| roots.iter())
+        .map(|root| root.norm())
+        .filter(|magnitude| *magnitude > 0.0 && magnitude.is_finite());
+    let (mut low, mut high) = magnitudes.fold((f64::INFINITY, 0.0f64), |(low, high), magnitude| {
+        (low.min(magnitude), high.max(magnitude))
+    });
+    if let Some([start, stop]) = band {
+        low = low.min(start);
+        high = high.max(stop);
+    }
+    if !(low.is_finite() && high > 0.0) {
+        return None;
+    }
+    let first = low.log10().floor();
+    let last = high.log10().ceil().max(first + 1.0);
+    let steps = ((last - first) * RESPONSE_POINTS_PER_DECADE).round() as usize;
+    let mut grid: Vec<f64> = (0..=steps)
+        .map(|step| 10f64.powf(first + step as f64 / RESPONSE_POINTS_PER_DECADE))
+        .collect();
+    for root in oracle.iter().flat_map(|roots| roots.iter()) {
+        grid.extend(
+            [root.norm(), root.im.abs()]
+                .into_iter()
+                .filter(|omega| *omega > 0.0 && omega.is_finite()),
+        );
+    }
+    grid.sort_by(f64::total_cmp);
+    grid.dedup();
+    Some(grid)
+}
+
+/// `Π(1 − s/z) / Π(1 − s/p)` at `s = jω`, a root at the origin as `s/ω₀`.
+fn response(poles: &[Complex64], zeros: &[Complex64], omega: f64, omega_zero: f64) -> Complex64 {
+    let s = Complex64::new(0.0, omega);
+    let factor = |root: &Complex64| {
+        if *root == Complex64::new(0.0, 0.0) {
+            s / omega_zero
+        } else {
+            Complex64::new(1.0, 0.0) - s / root
+        }
+    };
+    zeros.iter().map(factor).product::<Complex64>()
+        / poles.iter().map(factor).product::<Complex64>()
+}
+
 fn roots(
     label: &str,
     actual: &[Complex64],
@@ -565,6 +701,60 @@ mod tests {
             Complex64::from_polar(1.0, -3.1),
         );
         assert!(deg.abs() < 10.0, "phase must wrap: {deg}");
+    }
+
+    #[test]
+    fn a_root_set_is_compared_through_the_response_it_defines() {
+        let tolerance = Tolerance {
+            abs_db: Some(8.7e-4),
+            abs_deg: Some(5.7e-3),
+            ..Tolerance::default()
+        };
+        // A lightly damped zero pair 6.7e4 off the axis, as C5's, and a pole.
+        let zero = Complex64::new(6.7e4, 5.9e5);
+        let pole = Complex64::new(-1.1e6, 0.0);
+        let set = |zero: Complex64| Measured::Roots {
+            poles: vec![pole],
+            zeros: vec![zero, zero.conj()],
+        };
+        let expected = Expected::Measured(set(zero));
+        let same = root_response(&set(zero), &expected, None, tolerance);
+        assert!(same.pass && same.severity == 0.0, "{}", same.detail);
+        assert!(
+            same.detail.contains("over 1e5..1e7 rad/s"),
+            "{}",
+            same.detail
+        );
+        // A move of 2.4 shifts H by about 2.4/6.7e4 = 3.6e-5 at ω = 5.9e5.
+        let moved = root_response(
+            &set(zero + Complex64::new(0.0, 2.4)),
+            &expected,
+            None,
+            tolerance,
+        );
+        assert!(moved.pass, "{}", moved.detail);
+        assert!(moved.severity > 0.1, "{}", moved.detail);
+        // Ten times that, 3.6e-4 of |H|, is a different response.
+        let far = root_response(
+            &set(zero + Complex64::new(0.0, 24.0)),
+            &expected,
+            None,
+            tolerance,
+        );
+        assert!(!far.pass, "{}", far.detail);
+        assert!(far.detail.contains("at ω=5.9000e5 rad/s"), "{}", far.detail);
+        // The deck's band widens the grid; counts must agree.
+        let banded = root_response(&set(zero), &expected, Some([1.0, 1e9]), tolerance);
+        assert!(
+            banded.detail.contains("over 1e0..1e9 rad/s"),
+            "{}",
+            banded.detail
+        );
+        let missing = Measured::Roots {
+            poles: vec![],
+            zeros: vec![zero, zero.conj()],
+        };
+        assert!(!root_response(&missing, &expected, None, tolerance).pass);
     }
 
     #[test]

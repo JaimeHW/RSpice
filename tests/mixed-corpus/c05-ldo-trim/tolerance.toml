@@ -369,11 +369,12 @@ why = "ngspice perturbation accuracy"
 id = "pz"
 analysis = "pz"
 variants = ["mx"]
-kind = "pz"
+kind = "pz-h"
 smax = 6.283185307179586e8
 oracle = "O5"
-rel = 1e-6
-why = "same equations and solver; roots below 2π·100 MHz"
+abs_db = 8.7e-4
+abs_deg = 5.7e-3
+why = "same equations on builds that differ only in libm, compared as the response H(jω) the roots below 2π·100 MHz define: H carries each eigen solve's backward error, ≤ n·u (n = 14) of ‖A‖ ≈ 2e15 (the THz parasitic poles), seen from the axis through the zero pair 6.7e4 away, ≤ 5e-5 of |H|; allowed 1e-4: 20·log10(1 + 1e-4) dB and 1e-4 rad"
 
 [[q]]
 id = "pz"

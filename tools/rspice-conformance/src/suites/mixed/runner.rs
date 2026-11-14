@@ -803,9 +803,31 @@ fn evaluate_quantity(
                     Err(error) => return QuantityOutcome::OracleError(error),
                 },
             };
-            QuantityOutcome::Compared(compare(&actual, &expected, tolerance))
+            QuantityOutcome::Compared(if kind == "pz-h" {
+                let band = deck_ac_band(&design.deck_path(variant, analysis));
+                super::compare::root_response(&actual, &expected, band, tolerance)
+            } else {
+                compare(&actual, &expected, tolerance)
+            })
         }
     }
+}
+
+/// The frequency range, in rad/s, of `deck`'s `.ac` card (its last two
+/// values, start and stop), if it has one.
+fn deck_ac_band(deck: &Path) -> Option<[f64; 2]> {
+    let source = std::fs::read_to_string(deck).ok()?;
+    let (_, card) = super::design::deck_cards(&source)
+        .into_iter()
+        .find(|(name, _)| name == ".ac")?;
+    let mut values = card
+        .split_whitespace()
+        .rev()
+        .filter_map(|word| rspice_core::netlist::lexer::parse_spice_value_complete(word).ok());
+    let stop = values.next()?;
+    let start = values.next()?;
+    (start > 0.0 && stop > start)
+        .then(|| [std::f64::consts::TAU * start, std::f64::consts::TAU * stop])
 }
 
 /// `quantity` with its points moved onto the frequencies RSpice solved, for an
@@ -1401,6 +1423,32 @@ pub fn ledger_counts(rows: &[Row]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pole_zero_deck_lends_the_response_its_ac_range() {
+        let dir = std::env::temp_dir().join(format!("rspice_ac_band_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let with_ac = dir.join("with.cir");
+        std::fs::write(
+            &with_ac,
+            "* deck\nv1 in 0 ac 1\nr1 in 0 1k\n.ac dec 10 1 10meg\n.pz in 0 in 0 vol pz\n.end\n",
+        )
+        .unwrap();
+        let without = dir.join("without.cir");
+        std::fs::write(
+            &without,
+            "* deck\nv1 in 0 1\nr1 in 0 1k\n.pz in 0 in 0 vol pz\n.end\n",
+        )
+        .unwrap();
+        let [start, stop] = deck_ac_band(&with_ac).expect("the .ac range");
+        assert!((start - std::f64::consts::TAU).abs() < 1e-12, "{start}");
+        assert!(
+            (stop / (std::f64::consts::TAU * 1e7) - 1.0).abs() < 1e-12,
+            "{stop}"
+        );
+        assert_eq!(deck_ac_band(&without), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn every_design_in_the_corpus_passes_its_integrity_checks() {

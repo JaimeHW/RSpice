@@ -373,7 +373,7 @@ pub fn check_quantity_keys(text: &str) -> Result<(), String> {
 }
 
 /// The measure kinds `tolerance.toml` may name.
-pub const MEASURE_KINDS: [&str; 24] = [
+pub const MEASURE_KINDS: [&str; 25] = [
     "op",
     "held_at",
     "interp_at",
@@ -392,6 +392,7 @@ pub const MEASURE_KINDS: [&str; 24] = [
     "tf",
     "stb",
     "pz",
+    "pz-h",
     "sens",
     "events",
     "codes",
@@ -781,6 +782,19 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
     }
     if quantity.why.trim().is_empty() {
         findings.push(format!("{slug}: quantity {id} has no why"));
+    }
+    // Roots from a closed form or a captured simulator keep the strict
+    // root-by-root check; only RSpice's own twin compares the response.
+    if kind == "pz-h" && quantity.oracle != "O5" {
+        findings.push(format!(
+            "{slug}: quantity {id}: pz-h compares RSpice with its own twin (O5); against {} compare the roots (pz)",
+            quantity.oracle
+        ));
+    }
+    if kind == "pz-h" && (quantity.abs_db.is_none() || quantity.abs_deg.is_none()) {
+        findings.push(format!(
+            "{slug}: quantity {id}: pz-h needs abs_db and abs_deg"
+        ));
     }
     match quantity.oracle.as_str() {
         "O6" => match quantity.expect.as_deref() {

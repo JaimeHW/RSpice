@@ -289,7 +289,7 @@ pub fn evaluate(
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             scalar_list(observation, &refs)
         }
-        "pz" => {
+        "pz" | "pz-h" => {
             let smax = spec.smax.unwrap_or(f64::INFINITY);
             let keep = |roots: &[[f64; 2]]| {
                 let mut roots: Vec<Complex64> = roots
