@@ -133,7 +133,7 @@ pub(crate) fn apply_canvas_request(
     if let Some(before) = outcome.undo_before {
         // A new gesture: whatever an earlier one held open is over.
         state.finish_symbol_parent_edit();
-        state.record_symbol_edit(&before);
+        state.record_symbol_edit(&before, &outcome.step);
     }
     if outcome.changed {
         if let Err(error) = state.store_symbol_canvas_frame(document, metadata) {

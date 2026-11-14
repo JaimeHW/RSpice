@@ -570,8 +570,8 @@ impl CanvasParts<'_> {
     }
 
     /// [`record_symbol_edit`] over these parts.
-    pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
-        record_symbol_edit(&mut self.design.symbol, self.model, before);
+    pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument, step: &str) {
+        record_symbol_edit(&mut self.design.symbol, self.model, before, step);
     }
 
     /// [`store_symbol_canvas_frame`] over these parts.

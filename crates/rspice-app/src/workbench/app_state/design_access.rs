@@ -167,7 +167,12 @@ impl AppState {
             return Ok(());
         }
         self.store_active_symbol_document(&document)?;
-        record_symbol_edit(&mut self.design.symbol, &self.model, &before);
+        record_symbol_edit(
+            &mut self.design.symbol,
+            &self.model,
+            &before,
+            "Edit waivers",
+        );
         Ok(())
     }
 }

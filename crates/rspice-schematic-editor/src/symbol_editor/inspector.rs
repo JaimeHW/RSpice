@@ -79,7 +79,8 @@ pub struct SymbolInspectorRequest {
     pub document: SymbolDocument,
     pub metadata: SymbolEditorMetadata,
     pub intent: SymbolCommitIntent,
-    pub undo_before: Vec<SymbolDocument>,
+    /// Each undo step the panel took, with the name Undo gives it.
+    pub undo_before: Vec<(SymbolDocument, String)>,
     pub changed: bool,
     pub open_parameter_form: bool,
 }
@@ -153,13 +154,18 @@ pub fn show(
 struct InspectorEdit {
     selection: SymbolSelection,
     session: SymbolInspectorSession,
-    undo_before: Vec<SymbolDocument>,
+    undo_before: Vec<(SymbolDocument, String)>,
     open_parameter_form: bool,
 }
 
 impl InspectorEdit {
+    /// Record an undo step named for what the panel is editing: "Edit pin IN".
     fn record_undo(&mut self, document: &SymbolDocument) {
-        self.undo_before.push(document.clone());
+        let step = format!(
+            "Edit {}",
+            super::session::selection_subject(document, &self.selection)
+        );
+        self.undo_before.push((document.clone(), step));
     }
     fn select_pin(&mut self, name: impl Into<String>) {
         self.selection = SymbolSelection::single_pin(name);

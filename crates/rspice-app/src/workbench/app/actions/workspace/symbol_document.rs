@@ -131,7 +131,7 @@ pub(crate) fn update_active_symbol_pins_from_contract(
     let orphaned = document
         .pin_summary(&SymbolInterface::Declared(ports))
         .orphaned;
-    record_symbol_edit(symbol, model, &before);
+    record_symbol_edit(symbol, model, &before, "Update pins from contract");
     store_active_symbol_editor_bundle(symbol, model, wb, &document, &metadata)?;
     Ok(format!(
         "Symbol pins updated from the interface contract: {added} added, {orphaned} left orphaned"
@@ -293,6 +293,7 @@ pub(crate) fn undo_active_symbol_document(
     let current = model.load_active_symbol_document()?;
     let mut current_snapshot = active_symbol_metadata_snapshot(model, &current);
     current_snapshot.renames = previous.inverted_renames();
+    current_snapshot.step.clone_from(&previous.step);
     symbol.history.finish_undo(key, current_snapshot);
     restore_active_symbol_snapshot(symbol, model, &previous)?;
     Ok(true)
@@ -314,6 +315,7 @@ pub(crate) fn redo_active_symbol_document(
     let current = model.load_active_symbol_document()?;
     let mut current_snapshot = active_symbol_metadata_snapshot(model, &current);
     current_snapshot.renames = next.inverted_renames();
+    current_snapshot.step.clone_from(&next.step);
     symbol.history.finish_redo(key, current_snapshot);
     restore_active_symbol_snapshot(symbol, model, &next)?;
     Ok(true)
@@ -392,7 +394,8 @@ pub(crate) fn generate_active_symbol_document(
 fn record_symbol_metadata_edit(symbol: &mut SymbolUiState, model: &Model, before: &SymbolDocument) {
     const MAX_SYMBOL_UNDO: usize = 128;
     let key = model.workspace.content.active_key();
-    let snapshot = active_symbol_metadata_snapshot(model, before);
+    let mut snapshot = active_symbol_metadata_snapshot(model, before);
+    snapshot.step = "Generate symbol".to_owned();
     push_symbol_undo_snapshot(symbol, key, snapshot, MAX_SYMBOL_UNDO);
 }
 
@@ -676,14 +679,17 @@ fn apply_symbol_pin_renames(
     renamed
 }
 
+/// Record the edit away from `before` as one undo step called `step`.
 pub(crate) fn record_symbol_edit(
     symbol: &mut SymbolUiState,
     model: &Model,
     before: &SymbolDocument,
+    step: &str,
 ) {
     const MAX_SYMBOL_UNDO: usize = 128;
     let key = model.workspace.content.active_key();
-    let snapshot = active_symbol_snapshot(model, before);
+    let mut snapshot = active_symbol_snapshot(model, before);
+    snapshot.step = step.to_owned();
     push_symbol_undo_snapshot(symbol, key, snapshot, MAX_SYMBOL_UNDO);
 }
 

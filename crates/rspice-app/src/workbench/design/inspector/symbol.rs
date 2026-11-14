@@ -53,8 +53,8 @@ pub(crate) fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolI
     {
         return;
     }
-    for before in request.undo_before {
-        record_symbol_edit(&mut cx.state.symbol, cx.model, &before);
+    for (before, step) in request.undo_before {
+        record_symbol_edit(&mut cx.state.symbol, cx.model, &before, &step);
     }
     cx.state.symbol.editor.set_selection(request.selection);
     if request.open_parameter_form {

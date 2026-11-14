@@ -299,7 +299,7 @@ fn apply_current_symbol_edit_request(
         capabilities,
     );
     if let Some(before) = outcome.undo_before {
-        record_symbol_edit(symbol, model, &before);
+        record_symbol_edit(symbol, model, &before, &outcome.step);
     }
     if outcome.changed {
         let stored = match metadata {

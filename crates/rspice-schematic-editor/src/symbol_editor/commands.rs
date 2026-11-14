@@ -2,9 +2,10 @@
 
 use super::interaction::{SymbolEditCapabilities, SymbolEditOutcome, SymbolRequestSource};
 use super::session::{
-    SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, mirror_point_h_about,
-    mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about, rotate_point_ccw_about,
-    rotate_point_cw_about, rotate_shape_ccw_about, rotate_shape_cw_about,
+    SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, label_name,
+    mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about,
+    rotate_point_ccw_about, rotate_point_cw_about, rotate_shape_ccw_about, rotate_shape_cw_about,
+    selection_subject,
 };
 use rspice_design::symbol::{
     SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign,
@@ -86,6 +87,7 @@ pub fn apply_edit(
                         document,
                         metadata,
                         &selection,
+                        "Rotate",
                         rotate_point_cw_about,
                         rotate_shape_cw_about,
                         &mut outcome,
@@ -94,6 +96,7 @@ pub fn apply_edit(
                         document,
                         metadata,
                         &selection,
+                        "Rotate",
                         rotate_point_ccw_about,
                         rotate_shape_ccw_about,
                         &mut outcome,
@@ -102,6 +105,7 @@ pub fn apply_edit(
                         document,
                         metadata,
                         &selection,
+                        "Mirror",
                         mirror_point_h_about,
                         mirror_shape_h_about,
                         &mut outcome,
@@ -110,6 +114,7 @@ pub fn apply_edit(
                         document,
                         metadata,
                         &selection,
+                        "Mirror",
                         mirror_point_v_about,
                         mirror_shape_v_about,
                         &mut outcome,
@@ -124,6 +129,7 @@ pub fn apply_edit(
             session.text_draft = None;
             if !text.trim().is_empty() {
                 outcome.undo_before = Some(Box::new(document.clone()));
+                outcome.step = "Add text".to_owned();
                 document.body.push(SymbolShape::Text {
                     anchor,
                     text,
@@ -221,6 +227,7 @@ fn paste(
     let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
     let delta = target - center;
     outcome.undo_before = Some(Box::new(document.clone()));
+    outcome.step = "Paste".to_owned();
     let mut selection = SymbolSelection::default();
     for mut shape in clipboard.shapes {
         shape.translate(delta);
@@ -298,6 +305,17 @@ fn delete(
         session.clipboard = clipboard;
     }
     if changed {
+        let only_labels = selection.pins.is_empty() && selection.shapes.is_empty();
+        outcome.step = match (only_labels, selection.attributes.first()) {
+            (true, Some(kind)) if selection.attributes.len() == 1 => {
+                format!("Hide {} label", label_name(*kind).to_lowercase())
+            }
+            (true, _) => "Hide labels".to_owned(),
+            (false, _) => {
+                let verb = if cut { "Cut" } else { "Delete" };
+                format!("{verb} {}", selection_subject(&before, selection))
+            }
+        };
         outcome.undo_before = Some(Box::new(before));
         session.clear_selection();
     }
@@ -308,6 +326,7 @@ fn transform_selection(
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
     selection: &SymbolSelection,
+    verb: &str,
     pin_transform: impl Fn(Point, Point) -> Point,
     shape_transform: impl Fn(&mut SymbolShape, Point),
     outcome: &mut SymbolEditOutcome,
@@ -350,6 +369,7 @@ fn transform_selection(
         }
     }
     if changed {
+        outcome.step = format!("{verb} {}", selection_subject(&before, selection));
         outcome.undo_before = Some(Box::new(before));
     }
     outcome.changed = changed;

@@ -643,7 +643,12 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
             .contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
     );
 
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
+    crate::workbench::app::record_symbol_edit(
+        &mut state.design.symbol,
+        &state.model,
+        &before,
+        "Edit",
+    );
     state
         .store_active_symbol_document(&SymbolDocument {
             body: vec![crate::state::SymbolShape::Dot {
@@ -740,7 +745,12 @@ fn symbol_undo_history_is_scoped_to_active_view() {
         name_anchor: Point::new(-20, -20),
         ..SymbolDocument::default()
     };
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before_a);
+    crate::workbench::app::record_symbol_edit(
+        &mut state.design.symbol,
+        &state.model,
+        &before_a,
+        "Edit",
+    );
     state
         .store_active_symbol_document(&after_a)
         .expect("store amp_a symbol");
@@ -801,7 +811,12 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
     state
         .store_active_symbol_editor_bundle(&document, &baseline)
         .expect("baseline symbol bundle stores");
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &document);
+    crate::workbench::app::record_symbol_edit(
+        &mut state.design.symbol,
+        &state.model,
+        &document,
+        "Edit",
+    );
     let mut edited = baseline.clone();
     edited
         .attribute_mut(crate::state::SymbolAttributeKind::Value)

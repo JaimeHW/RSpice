@@ -105,7 +105,12 @@ fn pins_section(
                     0,
                 ),
             );
-            record_symbol_edit(&mut cx.state.symbol, cx.model, &before);
+            record_symbol_edit(
+                &mut cx.state.symbol,
+                cx.model,
+                &before,
+                &format!("Add pin {name}"),
+            );
             match store_active_symbol_editor_bundle(
                 &mut cx.state.symbol,
                 cx.model,

@@ -160,6 +160,7 @@ fn deleting_a_selected_label_hides_it() {
         outcome.undo_before.is_some(),
         "the hide is a step undo takes back"
     );
+    assert_eq!(outcome.step, "Hide value label");
     let shown = |kind| metadata.attribute(kind).map(|attribute| attribute.shown);
     assert_eq!(shown(SymbolAttributeKind::Value), Some(false));
     assert_eq!(shown(SymbolAttributeKind::Reference), Some(true));

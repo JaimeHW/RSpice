@@ -276,7 +276,12 @@ fn a_pin_rename_reaches_every_placed_instance() {
         .model
         .load_active_symbol_document()
         .expect("document loads");
-    crate::workbench::app::record_symbol_edit(&mut state.design.symbol, &state.model, &before);
+    crate::workbench::app::record_symbol_edit(
+        &mut state.design.symbol,
+        &state.model,
+        &before,
+        "Edit",
+    );
     commit_active_symbol_edit(
         &mut state.design.symbol,
         &mut state.model,

@@ -688,6 +688,41 @@ fn whole_or_tenths(value: f64) -> String {
     }
 }
 
+/// What a symbol label is called where one is named.
+pub const fn label_name(kind: rspice_design::symbol::SymbolAttributeKind) -> &'static str {
+    use rspice_design::symbol::SymbolAttributeKind;
+    match kind {
+        SymbolAttributeKind::Reference => "Reference",
+        SymbolAttributeKind::Value => "Value",
+        SymbolAttributeKind::Model => "Model",
+    }
+}
+
+/// What `selection` holds, as an undo step names what it acted on:
+/// "pin IN", "rectangle", "value label" or "3 items".
+pub fn selection_subject(
+    document: &rspice_design::symbol::SymbolDocument,
+    selection: &SymbolSelection,
+) -> String {
+    let count = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
+    if count == 1 {
+        if let Some(name) = selection.pins.first() {
+            return format!("pin {name}");
+        }
+        if let Some(shape) = selection
+            .shapes
+            .first()
+            .and_then(|index| document.body.get(*index))
+        {
+            return shape_kind(shape).to_lowercase();
+        }
+        if let Some(kind) = selection.attributes.first() {
+            return format!("{} label", label_name(*kind).to_lowercase());
+        }
+    }
+    rspice_ui_kit::accessibility::counted(count, "item", "items")
+}
+
 fn point_in_bounds(
     point: rspice_design_model::Point,
     min: rspice_design_model::Point,

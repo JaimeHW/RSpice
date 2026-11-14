@@ -38,6 +38,10 @@ pub struct SymbolDocumentSnapshot {
     /// written when a rename is committed, and inverted each time the edit
     /// crosses between the undo and redo stacks.
     pub renames: std::collections::BTreeMap<String, String>,
+    /// What the edit between this snapshot and its neighbour is called, as
+    /// Undo and Redo name it: "Move pin IN". It crosses between the undo
+    /// and redo stacks with the edit.
+    pub step: String,
 }
 
 impl SymbolDocumentSnapshot {
@@ -49,6 +53,7 @@ impl SymbolDocumentSnapshot {
             generated_metadata: None,
             ports_metadata: None,
             renames: std::collections::BTreeMap::new(),
+            step: String::new(),
         }
     }
 
@@ -149,6 +154,23 @@ impl SymbolHistory {
         self.redo_stacks
             .get(key)
             .is_some_and(|stack| !stack.is_empty())
+    }
+
+    /// The name of the step Undo would take back, where the edit named it.
+    pub fn undo_step(&self, key: &str) -> Option<&str> {
+        Self::named_step(self.undo_stacks.get(key))
+    }
+
+    /// The name of the step Redo would take again, where the edit named it.
+    pub fn redo_step(&self, key: &str) -> Option<&str> {
+        Self::named_step(self.redo_stacks.get(key))
+    }
+
+    fn named_step(stack: Option<&Vec<SymbolDocumentSnapshot>>) -> Option<&str> {
+        stack
+            .and_then(|stack| stack.last())
+            .map(|snapshot| snapshot.step.as_str())
+            .filter(|step| !step.is_empty())
     }
 
     pub fn pop_undo(&mut self, key: &str) -> Option<SymbolDocumentSnapshot> {
@@ -418,6 +440,7 @@ pub fn symbol_snapshot_from_view(
         generated_metadata: view.metadata.get("generated").cloned(),
         ports_metadata: view.metadata.get("ports").cloned(),
         renames: std::collections::BTreeMap::new(),
+        step: String::new(),
     }
 }
 
@@ -432,6 +455,7 @@ pub fn symbol_metadata_snapshot_from_view(
         generated_metadata: view.metadata.get("generated").cloned(),
         ports_metadata: view.metadata.get("ports").cloned(),
         renames: std::collections::BTreeMap::new(),
+        step: String::new(),
     }
 }
 

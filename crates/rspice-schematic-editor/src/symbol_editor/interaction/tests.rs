@@ -364,6 +364,45 @@ fn press_drag_draws_a_segment_a_rectangle_and_a_circle() {
     }
 }
 
+/// Each canvas edit names the step Undo and Redo take: drawing a rectangle
+/// is "Add rectangle", dragging it is "Move rectangle".
+#[test]
+fn canvas_edits_name_their_undo_step() {
+    let mut document = SymbolDocument::default();
+    let mut session = armed(SymbolTool::Rectangle);
+    let clicked = SymbolCanvasInput {
+        clicked: true,
+        ..Default::default()
+    };
+    feed(&mut session, &mut document, Point::new(40, 40), clicked);
+    let drawn = feed(&mut session, &mut document, Point::new(80, 80), clicked);
+    assert!(drawn.undo_before.is_some());
+    assert_eq!(drawn.step, "Add rectangle");
+
+    let mut session = armed(SymbolTool::Select);
+    feed(
+        &mut session,
+        &mut document,
+        Point::new(40, 60),
+        SymbolCanvasInput {
+            drag_started: true,
+            dragged: true,
+            ..Default::default()
+        },
+    );
+    let moved = feed(
+        &mut session,
+        &mut document,
+        Point::new(50, 60),
+        SymbolCanvasInput {
+            dragged: true,
+            ..Default::default()
+        },
+    );
+    assert!(moved.undo_before.is_some());
+    assert_eq!(moved.step, "Move rectangle");
+}
+
 /// An armed drawing tool draws over what is there: pressing on an existing
 /// shape neither selects it nor moves it.
 #[test]

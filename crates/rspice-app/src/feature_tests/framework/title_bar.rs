@@ -905,6 +905,27 @@ fn undo_redo_and_repeat_name_what_they_act_on() {
     assert_eq!(edit_rows(&app)[2], "Repeat draw wire");
 }
 
+/// The symbol editor's Undo and Redo name the step they take, as the
+/// schematic's do.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn symbol_undo_and_redo_name_the_step_they_take() {
+    let mut app = symbol_view_app();
+    let edit_rows = |app: &RSpiceApp| {
+        shown_rows(ApplicationMenu::Edit, app)
+            .into_iter()
+            .take(2)
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>()
+    };
+    app.state.design.symbol.editor.select_shape(0);
+    app.execute(Command::Delete.key());
+    assert_eq!(edit_rows(&app), ["Undo delete dot", "Redo"]);
+
+    app.execute(Command::Undo.key());
+    assert_eq!(edit_rows(&app), ["Undo", "Redo delete dot"]);
+}
+
 /// Deselect all clears the selection Select all made, and is grey with
 /// nothing selected.
 #[cfg(not(target_arch = "wasm32"))]

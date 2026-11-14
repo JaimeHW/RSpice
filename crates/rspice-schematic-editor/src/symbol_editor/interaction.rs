@@ -13,6 +13,7 @@ use rspice_vocabulary::product::ProjectId;
 
 use super::session::{
     SymbolArcSweep, SymbolEditorSession, SymbolSelection, SymbolTextDraft, SymbolTool, bearing,
+    label_name, selection_subject, shape_kind,
 };
 use super::{
     SymbolViewport, hit_label, hit_origin, hit_pin, hit_shape, snap_point, snap_to_terminal_grid,
@@ -169,6 +170,8 @@ pub struct SymbolEditCapabilities {
 pub struct SymbolEditOutcome {
     pub changed: bool,
     pub undo_before: Option<Box<SymbolDocument>>,
+    /// What the undo step is called, as Undo and Redo name it: "Move pin IN".
+    pub step: String,
     pub edit_denied: bool,
     /// Why a requested edit was refused, for the host to tell the author.
     pub refusal: Option<String>,
@@ -207,9 +210,10 @@ impl CanvasEdit<'_> {
         true
     }
 
-    fn record_undo(&mut self, document: &SymbolDocument) {
+    fn record_undo(&mut self, document: &SymbolDocument, step: impl FnOnce() -> String) {
         if self.outcome.undo_before.is_none() {
             self.outcome.undo_before = Some(Box::new(document.clone()));
+            self.outcome.step = step();
         }
     }
 }
@@ -279,7 +283,8 @@ fn handle_canvas_interaction(
         if delta == Point::origin() || group_lands_on_a_pin(edit, document, delta) {
             return false;
         }
-        record_drag_symbol_edit(edit, document);
+        let moved = selection_subject(document, &edit.session.effective_selection());
+        record_drag_symbol_edit(edit, document, || format!("Move {moved}"));
         translate_selection(edit, document, editor, delta);
         edit.session.dragging_group = Some(body_point);
         return true;
@@ -305,7 +310,7 @@ fn handle_canvas_interaction(
             if document.pin(&name) == Some(&moved) {
                 return false;
             }
-            record_drag_symbol_edit(edit, document);
+            record_drag_symbol_edit(edit, document, || format!("Move pin {name}"));
             if let Some(pin) = document.pin_mut(&name) {
                 *pin = moved;
                 return true;
@@ -323,7 +328,9 @@ fn handle_canvas_interaction(
             .attribute(kind)
             .is_some_and(|attribute| attribute.position != body_point)
         {
-            record_drag_symbol_edit(edit, document);
+            record_drag_symbol_edit(edit, document, || {
+                format!("Move {} label", label_name(kind).to_lowercase())
+            });
             if let Some(attribute) = editor.attribute_mut(kind) {
                 attribute.position = body_point;
             }
@@ -338,7 +345,7 @@ fn handle_canvas_interaction(
             return false;
         }
         if document.origin != body_point {
-            record_drag_symbol_edit(edit, document);
+            record_drag_symbol_edit(edit, document, || "Move origin".to_owned());
             document.origin = body_point;
             return true;
         }
@@ -352,7 +359,8 @@ fn handle_canvas_interaction(
         }
         let delta = body_point - last_point;
         if delta != Point::origin() && shape_index < document.body.len() {
-            record_drag_symbol_edit(edit, document);
+            let moved = shape_kind(&document.body[shape_index]).to_lowercase();
+            record_drag_symbol_edit(edit, document, || format!("Move {moved}"));
             if let Some(shape) = document.body.get_mut(shape_index) {
                 shape.translate(delta);
                 edit.session.dragging_shape = Some((shape_index, body_point));
@@ -509,11 +517,15 @@ fn take_back_point(session: &mut SymbolEditorSession) {
     }
 }
 
-fn record_drag_symbol_edit(edit: &mut CanvasEdit<'_>, document: &SymbolDocument) {
+fn record_drag_symbol_edit(
+    edit: &mut CanvasEdit<'_>,
+    document: &SymbolDocument,
+    step: impl FnOnce() -> String,
+) {
     if edit.session.drag_undo_recorded {
         return;
     }
-    edit.record_undo(document);
+    edit.record_undo(document, step);
     edit.session.drag_undo_recorded = true;
 }
 
@@ -652,7 +664,7 @@ fn place_selected_pin(
     }
     let changed = document.pin(&name).and_then(|pin| pin.position) != Some(point);
     if changed {
-        edit.record_undo(document);
+        edit.record_undo(document, || format!("Place pin {name}"));
     }
     if let Some(pin) = document.pin_mut(&name) {
         *pin = placed;
@@ -705,7 +717,9 @@ fn finish_pending_polyline(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocum
     if edit.deny_read_only_edit() {
         return false;
     }
-    edit.record_undo(document);
+    edit.record_undo(document, || {
+        if closed { "Add polygon" } else { "Add line" }.to_owned()
+    });
     let points = std::mem::take(&mut edit.session.pending_polyline);
     document.body.push(SymbolShape::Polyline { points, closed });
     select_last_shape(edit.session, document);
@@ -771,7 +785,7 @@ fn add_rectangle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point
         return false;
     }
     edit.session.shape_start = None;
-    edit.record_undo(document);
+    edit.record_undo(document, || "Add rectangle".to_owned());
     document.body.push(rectangle_shape(start, point));
     select_last_shape(edit.session, document);
     true
@@ -809,7 +823,7 @@ fn add_circle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: P
         return false;
     }
     edit.session.shape_start = None;
-    edit.record_undo(document);
+    edit.record_undo(document, || "Add circle".to_owned());
     document.body.push(SymbolShape::Circle { center, radius });
     select_last_shape(edit.session, document);
     true
@@ -838,7 +852,7 @@ fn add_arc_point(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point
     };
     edit.session.shape_start = None;
     edit.session.arc_sweep = None;
-    edit.record_undo(document);
+    edit.record_undo(document, || "Add arc".to_owned());
     document.body.push(shape);
     select_last_shape(edit.session, document);
     true

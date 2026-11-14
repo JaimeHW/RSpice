@@ -56,7 +56,7 @@ pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<
     let label = command.spec().label;
     let named = match command {
         Command::Undo | Command::Redo if command.is_enabled(app) => {
-            schematic_step_name(app, command == Command::Undo)
+            drawing_step_name(app, command == Command::Undo)
                 .map(|step| format!("{label} {}", lower_first_word(step)))
         }
         Command::RepeatLastCommand => {
@@ -69,9 +69,9 @@ pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<
 }
 
 /// The name of the step Undo (`undo`) or Redo would take, where that step
-/// is the schematic editor's own: its history names each step. The netlist
-/// page's and the project's histories, and the symbol editor's, do not.
-fn schematic_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
+/// is the schematic or symbol editor's own: their histories name each step.
+/// The netlist page's and the project's histories do not.
+fn drawing_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
     let state = &app.state;
     let elsewhere = if undo {
         (netlist_page_is_visible(state)
@@ -86,11 +86,19 @@ fn schematic_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
             ))
             || state.model.can_redo_project_design()
     };
-    if elsewhere
-        || state.workbench.active_source_editor.is_some()
-        || active_symbol_editor(app)
-        || !active_schematic_editor(app)
-    {
+    if elsewhere || state.workbench.active_source_editor.is_some() {
+        return None;
+    }
+    if active_symbol_editor(app) {
+        let key = state.model.workspace.content.active_key();
+        let history = &state.design.symbol.history;
+        return if undo {
+            history.undo_step(&key)
+        } else {
+            history.redo_step(&key)
+        };
+    }
+    if !active_schematic_editor(app) {
         return None;
     }
     let history = state.model.schematic.history();

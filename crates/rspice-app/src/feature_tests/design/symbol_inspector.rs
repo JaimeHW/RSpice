@@ -16,7 +16,9 @@ fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {
     for changed in 0..4 {
         editor.app.state.design.symbol.editor.select_shape(0);
         let mut request = editor.frame(Vec::new());
-        request.undo_before.push(before.clone());
+        request
+            .undo_before
+            .push((before.clone(), "Edit".to_owned()));
         request.document.origin = Point::new(20, 30);
         request.changed = true;
         match changed {
