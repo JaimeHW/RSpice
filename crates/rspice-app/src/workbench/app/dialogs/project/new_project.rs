@@ -9,8 +9,7 @@
 //! the reader edits it, after which the two are independent — a mirror that
 //! keeps overwriting a deliberate choice is worse than no mirror.
 
-use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
-use crate::workbench::app_state::AppState;
+use crate::state::workspace::DEFAULT_PROJECT_LIBRARY;
 use crate::workbench::workflows::project_workflow::NewProjectParams;
 
 /// Draft identity for one New project transaction.
@@ -61,18 +60,6 @@ impl NewProjectDialogState {
             None => Ok("Nothing is written to disk until you save."),
         }
     }
-}
-
-/// Open the transaction with the default library and top cell. The project
-/// name starts empty because it is the one field with no defensible default:
-/// requiring it is the point of the dialog.
-pub(crate) fn open_new_project_dialog(state: &mut AppState) {
-    state.project.new_project = NewProjectDialogState {
-        open: true,
-        library: DEFAULT_PROJECT_LIBRARY.to_owned(),
-        top_cell: DEFAULT_TOP_CELL.to_owned(),
-        ..NewProjectDialogState::default()
-    };
 }
 
 /// Mirror a project name into a library-name segment: lowercase, every

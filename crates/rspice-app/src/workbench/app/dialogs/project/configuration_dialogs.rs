@@ -22,8 +22,7 @@ use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration, delete_refusal,
 };
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
-use crate::workbench::app_state::{AppState, Model, PlatformState};
-use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationSelection, used_for_runs,
@@ -154,25 +153,6 @@ impl ConfigurationDialogState {
     }
 }
 
-/// Hold `action`, which takes the open project away, while the Configuration
-/// page has edits that are not applied: the page asks to apply or discard
-/// them first, then goes on with it. Returns whether it held the action.
-pub(crate) fn hold_for_configuration_edits(
-    state: &mut AppState,
-    action: ConfirmationAction,
-    recent: Option<(std::path::PathBuf, RecentKind)>,
-) -> bool {
-    if !state
-        .project
-        .configuration
-        .is_dirty(&state.model.workspace.content.configuration_sets)
-    {
-        return false;
-    }
-    state.project.configuration_dialog.leaving = Some(Leaving { action, recent });
-    true
-}
-
 /// Which dialog to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigurationDialogRequest {
@@ -225,15 +205,6 @@ pub(crate) fn open_configuration_dialog(
 
 fn name_id() -> Id {
     Id::new("rspice.configuration-dialog.name")
-}
-
-/// Bring the Project > Configuration page forward.
-pub(in crate::workbench) fn show_configuration_page(state: &mut AppState) {
-    show_configuration_page_in(
-        &state.platform,
-        &mut state.workbench,
-        &mut state.project.project_page,
-    );
 }
 
 /// [`show_configuration_page`] over the parts it reads and writes.
@@ -429,43 +400,6 @@ pub(crate) fn answer_leaving(
         }
         DialogChoice::Ghost | DialogChoice::Cancelled | DialogChoice::None => LeavingAnswer::Stay,
     }
-}
-
-/// Go on with `leaving` once the configuration edits are settled: ask about
-/// the project's unsaved work first, as the request itself does, or hand back
-/// the action to carry out now. An applied edit is unsaved work too: the
-/// project changed.
-// The shell runs this until the project feature's dialogs read the models port.
-pub(crate) fn go_on_leaving(
-    state: &mut AppState,
-    Leaving { action, recent }: Leaving,
-) -> Option<(
-    ConfirmationAction,
-    Option<std::path::PathBuf>,
-    Option<RecentKind>,
-)> {
-    if let ConfirmationAction::CloseProject(destination) = action {
-        // The close review closes at once when nothing is left unsaved.
-        state
-            .workbench
-            .project_review_dialog
-            .show_close_project(destination);
-        return None;
-    }
-    let drafts = if action == ConfirmationAction::Exit {
-        ModelsPort::has_unsaved_authoring_changes(&*state.models)
-    } else {
-        ModelsPort::model_editor_has_unsaved_changes(&*state.models)
-    };
-    if !drafts && !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
-        let (path, kind) = recent.unzip();
-        return Some((action, path, kind));
-    }
-    match recent {
-        Some((path, kind)) => state.workbench.confirmation_dialog.show_recent(path, kind),
-        None => state.workbench.confirmation_dialog.show(action),
-    }
-    None
 }
 
 fn new_dialog(

@@ -11,8 +11,6 @@ use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::app_state::{Model, PlatformState};
 #[cfg(not(target_arch = "wasm32"))]
@@ -1103,28 +1101,6 @@ pub(crate) fn settle_closed_project(
     model.model_library_manager = model_library_manager;
     platform.browser_project_save_name = None;
     model_restore_errors
-}
-
-#[cfg(test)]
-pub(crate) fn apply_loaded_project(
-    state: &mut AppState,
-    project: ProjectSnapshot,
-    origin: ProjectLoadOrigin<'_>,
-) -> bool {
-    let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                report_lifecycle_error(
-                    &mut state.model,
-                    &mut state.workbench,
-                    error,
-                    "Project open blocked",
-                );
-                return false;
-            }
-        };
-    state.apply_loaded_project_authorized(project, origin, None, transaction)
 }
 
 /// A project read for opening, validated and taken apart before it replaces

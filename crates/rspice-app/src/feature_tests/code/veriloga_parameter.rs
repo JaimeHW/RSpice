@@ -11,6 +11,7 @@ use crate::state::{
     CellViewRef, Point, PropertySheet, PropertyType, PropertyValue, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::project_transactions::WholeStateValidation;
 use crate::workbench::app::veriloga_design_tests::{open_in_design, open_project_app};
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::AppState;

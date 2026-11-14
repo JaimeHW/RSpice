@@ -382,7 +382,7 @@ impl Command {
                 None => app.state.prompt("No placement or edit has run yet."),
             },
             Self::ConfigurationSets => {
-                crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
+                crate::workbench::session::project_transactions::show_configuration_page(
                     &mut app.state,
                 );
             }

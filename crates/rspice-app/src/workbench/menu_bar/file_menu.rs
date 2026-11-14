@@ -38,7 +38,7 @@ pub(crate) fn dispatch_file_menu_action(
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectNew) {
                 return;
             }
-            crate::workbench::app::open_new_project_dialog(state);
+            crate::workbench::app::project_transactions::open_new_project_dialog(state);
         }
         FileMenuAction::OpenProject => {
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectOpen) {
@@ -135,7 +135,7 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
 }
 
 fn request_exit(state: &mut AppState) {
-    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+    if crate::workbench::app::project_transactions::hold_for_configuration_edits(
         state,
         ConfirmationAction::Exit,
         None,
@@ -168,7 +168,7 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+    if crate::workbench::app::project_transactions::hold_for_configuration_edits(
         state, action, None,
     ) {
         return true;

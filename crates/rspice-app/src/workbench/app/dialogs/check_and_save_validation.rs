@@ -22,7 +22,7 @@ use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app_state::design_checks::CheckScope;
-use crate::workbench::app_state::{AppState, Model, PlatformState, SlotFacts};
+use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::framework::feature::{CodePort, DesignPort};
 use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleSource, LifecycleView, ResultPresentationSource,
@@ -66,22 +66,6 @@ pub(crate) struct ValidationReads<'a> {
     pub(crate) presentation: &'a dyn ResultPresentationSource,
     pub(crate) design: &'a dyn DesignPort,
     pub(crate) code: &'a dyn CodePort,
-}
-
-impl<'a> ValidationReads<'a> {
-    /// What a report reads, from the whole application state.
-    pub(crate) fn of(state: &'a AppState) -> Self {
-        let lifecycle = state.lifecycle_view();
-        Self {
-            model: lifecycle.model,
-            platform: lifecycle.platform,
-            facts: state.slot_facts(),
-            workspace: lifecycle.workspace,
-            presentation: lifecycle.presentation,
-            design: &*state.design,
-            code: &*state.code,
-        }
-    }
 }
 
 impl LifecycleSource for ValidationReads<'_> {
@@ -763,20 +747,6 @@ impl CheckAndSaveValidationReport {
         })
     }
 
-    /// [`Self::collect`] in the whole application state.
-    pub(crate) fn collect_in(state: &AppState) -> Result<Self, String> {
-        Self::collect(&ValidationReads::of(state))
-    }
-
-    /// The report the dialog opens on, its checks run first in a copy of
-    /// `state`, so the state a test built is left as it was.
-    #[cfg(test)]
-    pub(crate) fn validate(state: &AppState) -> Result<Self, String> {
-        let mut state = state.clone();
-        run_design_checks_in(&mut state);
-        Self::collect_in(&state)
-    }
-
     pub(crate) fn can_save(&self) -> bool {
         self.blockers.is_empty()
     }
@@ -1066,17 +1036,6 @@ pub(crate) fn run_design_checks(
             wb.prompt(prompt);
         }
     }
-}
-
-/// [`run_design_checks`] in the whole application state.
-pub(crate) fn run_design_checks_in(state: &mut AppState) {
-    let facts = state.slot_facts();
-    run_design_checks(
-        &mut state.model,
-        &state.platform,
-        facts,
-        &mut state.workbench,
-    );
 }
 
 /// The design checks a report decides from, and how far each reaches.

@@ -934,6 +934,7 @@ mod tests {
         SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, Wire,
     };
+    use crate::workbench::app::project_transactions::WholeStateValidation;
 
     /// The preview's fallback timing names the plan's default transient, and
     /// the type that owns that default lives above the layer the preview does,

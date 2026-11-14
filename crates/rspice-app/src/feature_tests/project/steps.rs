@@ -2,6 +2,7 @@
 
 use crate::state::{Cell, Library, View, ViewType};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::project_transactions::WholeStateValidation;
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{CommandSet, FeatureRegistry};
 use crate::workbench::framework::requests::Drain;

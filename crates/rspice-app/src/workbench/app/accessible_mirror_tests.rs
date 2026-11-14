@@ -178,7 +178,7 @@ fn a_compile_result_reaches_the_live_region_even_when_it_reads_the_same() {
 #[test]
 fn a_dialog_s_field_names_and_values_are_mirrored() {
     let mut app = open_project_app();
-    crate::workbench::app::open_new_project_dialog(&mut app.state);
+    crate::workbench::app::project_transactions::open_new_project_dialog(&mut app.state);
     let ctx = themed_context();
     for _ in 0..3 {
         frame(&ctx, &mut app, DESKTOP);

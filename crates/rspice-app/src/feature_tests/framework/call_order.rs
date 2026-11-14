@@ -247,9 +247,9 @@ const SHOW: &[Step] = &[
     (
         "11.25",
         &[
-            "tools::examples_browser::open_confirmed(&mut app.state)",
+            "open_confirmed(&mut app.state)",
             "tools::examples_browser::show(ctx, &mut features::cx(app))",
-            "tools::examples_browser::request_example(&mut app.state, example)",
+            "request_example(&mut app.state, example)",
         ],
     ),
     (

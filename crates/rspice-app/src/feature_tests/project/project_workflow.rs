@@ -10,13 +10,14 @@ use std::path::Path;
 
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
 use crate::state::ActiveViewer;
+use crate::workbench::app::project_transactions::apply_loaded_project;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, ProjectCloseDestination, SaveScope,
 };
 use crate::workbench::workflows::project_workflow::{
     LiveProjectApply, NewProjectParams, ProjectLoadOrigin, SaveRequestOutcome,
-    apply_loaded_project, live_mirror_save_block, project_save_dialog_default_name,
+    live_mirror_save_block, project_save_dialog_default_name,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

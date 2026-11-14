@@ -12,6 +12,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::SchematicIoError;
 use crate::io::{FileWorkflowIo, ProjectSnapshot};
 use crate::product::TransactionId;
+use crate::state::write_policy::LocalSafeModeOptions;
 use crate::state::{SchematicState, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -42,10 +43,19 @@ use crate::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
     OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome,
 };
+use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
+
+use crate::services::recent_files::RecentKind;
+use crate::workbench::app::ConfirmationAction;
+use crate::workbench::app::dialogs::project::configuration_dialogs::{
+    Leaving, show_configuration_page_in,
+};
+
+pub(crate) mod check_and_save;
 
 /// Replacing the open project with a new one: the project's phases over its
 /// own parts, with the shell's steps between them, in the order the
@@ -841,7 +851,7 @@ impl AppState {
             return false;
         }
         let destination = ProjectCloseDestination::EmptyWorkbench;
-        if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+        if crate::workbench::app::project_transactions::hold_for_configuration_edits(
             self,
             crate::workbench::app::ConfirmationAction::CloseProject(destination),
             None,
@@ -1287,6 +1297,134 @@ fn live_host(state: &mut AppState) -> LiveHost<'_> {
         design: &*state.design,
         code: &*state.code,
     }
+}
+
+/// Bring the Project > Configuration page forward.
+pub(in crate::workbench) fn show_configuration_page(state: &mut AppState) {
+    show_configuration_page_in(
+        &state.platform,
+        &mut state.workbench,
+        &mut state.project.project_page,
+    );
+}
+
+/// Go on with `leaving` once the configuration edits are settled: ask about
+/// the project's unsaved work first, as the request itself does, or hand back
+/// the action to carry out now. An applied edit is unsaved work too: the
+/// project changed.
+// The shell runs this until the project feature's dialogs read the models port.
+pub(crate) fn go_on_leaving(
+    state: &mut AppState,
+    Leaving { action, recent }: Leaving,
+) -> Option<(
+    ConfirmationAction,
+    Option<std::path::PathBuf>,
+    Option<RecentKind>,
+)> {
+    if let ConfirmationAction::CloseProject(destination) = action {
+        // The close review closes at once when nothing is left unsaved.
+        state
+            .workbench
+            .project_review_dialog
+            .show_close_project(destination);
+        return None;
+    }
+    let drafts = if action == ConfirmationAction::Exit {
+        ModelsPort::has_unsaved_authoring_changes(&*state.models)
+    } else {
+        ModelsPort::model_editor_has_unsaved_changes(&*state.models)
+    };
+    if !drafts && !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+        let (path, kind) = recent.unzip();
+        return Some((action, path, kind));
+    }
+    match recent {
+        Some((path, kind)) => state.workbench.confirmation_dialog.show_recent(path, kind),
+        None => state.workbench.confirmation_dialog.show(action),
+    }
+    None
+}
+
+/// Replace the session with a new project holding `example`, named after it.
+///
+/// The project is not saved: [`show`] asks where once this succeeds.
+pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> Result<(), String> {
+    let params = NewProjectParams {
+        name: example.name.to_owned(),
+        ..NewProjectParams::default()
+    };
+    state.create_new_project_with(&params)?;
+    load_example(example.name, &mut state.model.schematic);
+    state.sync_active_schematic_to_workspace();
+    Ok(())
+}
+
+/// Open `name` as a new project, then ask where to save it.
+fn open_example(state: &mut AppState, name: &str) {
+    if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
+        && create_example_project(state, example).is_ok()
+    {
+        state.save_project_as();
+    }
+}
+
+/// Open the example New project's prompt let through, once the project it
+/// replaces was saved or let go.
+pub(crate) fn open_confirmed(state: &mut AppState) {
+    if let Some(name) = state.project.examples_confirmed.take() {
+        open_example(state, &name);
+    }
+}
+
+/// Open `example` in place of the open project, asking first about any
+/// changes it has, as New project does.
+pub(crate) fn request_example(state: &mut AppState, example: Example) {
+    let unsaved = state.platform.project_lifecycle.is_open()
+        && (crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+            || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
+    if unsaved {
+        state
+            .workbench
+            .confirmation_dialog
+            .show_example(example.name);
+    } else {
+        open_example(state, example.name);
+    }
+}
+
+/// Enter the safe-mode subset the current runtime can enforce. The exact
+/// pre-safe-mode session is serialized before any state is replaced and is
+/// used by AppState persistence until this process exits.
+pub(crate) fn start_local_safe_mode(
+    state: &mut crate::workbench::app_state::AppState,
+    options: LocalSafeModeOptions,
+) -> Result<(), String> {
+    use crate::workbench::lifecycle::recovery as services;
+
+    services::check_safe_mode_start(&state.model, options)?;
+
+    state.sync_active_schematic_to_workspace();
+    let preserved_session = serde_json::to_string(&*state)
+        .map_err(|error| format!("The current session could not be protected: {error}"))?;
+
+    if options.isolate_prior_documents && state.platform.project_lifecycle.is_open() {
+        if !state.close_project_discard(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        ) {
+            return Err("The current project could not be isolated safely".to_owned());
+        }
+    } else if options.isolate_prior_documents {
+        state.project.project_launcher_open = false;
+    }
+    if options.reset_layout {
+        state.workbench.reset_layout();
+    }
+    services::activate_safe_mode(&mut state.model, options, preserved_session);
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Project);
+    services::record_safe_mode_started(&mut state.model, options);
+    Ok(())
 }
 
 #[cfg(test)]

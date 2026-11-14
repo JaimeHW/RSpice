@@ -293,7 +293,9 @@ impl RSpiceApp {
                 Some(example) => self.state.project.examples_confirmed = Some(example),
                 // The confirmation resolved what happens to the *current*
                 // project; the new one still has to be named before it exists.
-                None => crate::workbench::app::open_new_project_dialog(&mut self.state),
+                None => crate::workbench::app::project_transactions::open_new_project_dialog(
+                    &mut self.state,
+                ),
             },
             ConfirmationAction::ProjectOpen => {
                 let opened = open_project(&mut self.state);
@@ -330,7 +332,7 @@ impl RSpiceApp {
     /// the current document has unsaved changes.
     pub(crate) fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
         if recent.kind == crate::services::recent_files::RecentKind::Project
-            && crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+            && crate::workbench::app::project_transactions::hold_for_configuration_edits(
                 &mut self.state,
                 ConfirmationAction::OpenRecent,
                 Some((recent.path.clone(), recent.kind)),

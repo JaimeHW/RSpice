@@ -4,8 +4,9 @@
 use egui::Context;
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::check_and_save::{NEWER_CHANGES, complete_validated_save};
+use crate::workbench::app::dialogs::check_and_save::NEWER_CHANGES;
 use crate::workbench::app_state::AppState;
+use crate::workbench::session::project_transactions::check_and_save::complete_validated_save;
 
 /// A save that landed closes the form, and edits that missed it are
 /// said in the record rather than in a dialog left open to say it.

@@ -4,7 +4,7 @@ use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
-use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
+use crate::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::commands::{
@@ -16,6 +16,7 @@ use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::{ProjectFileAction, StandardCommand};
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::session::project_transactions::go_on_leaving;
 use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };

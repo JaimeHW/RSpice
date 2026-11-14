@@ -4,6 +4,7 @@
 //! These pins compile real modules and publish them through the frame loop's
 //! own poll, then read what the library, the schematic and the deck say.
 
+use crate::workbench::app::project_transactions::WholeStateValidation;
 use std::sync::mpsc;
 
 use crate::state::VerilogAInterfaceOutcome;

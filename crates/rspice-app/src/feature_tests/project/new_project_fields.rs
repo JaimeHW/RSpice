@@ -2,9 +2,8 @@
 //! mirror, what Create waits for, and how a refused name reads.
 
 use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
-use crate::workbench::app::dialogs::project::new_project::{
-    NewProjectDialogState, open_new_project_dialog,
-};
+use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use crate::workbench::app::project_transactions::open_new_project_dialog;
 use crate::workbench::app_state::AppState;
 
 fn opened() -> NewProjectDialogState {

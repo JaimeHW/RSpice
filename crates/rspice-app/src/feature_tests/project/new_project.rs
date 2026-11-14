@@ -1,9 +1,8 @@
 //! Creating a project handed to the shell, against creating it in place.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::project::new_project::{
-    NewProjectDialogState, open_new_project_dialog,
-};
+use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use crate::workbench::app::project_transactions::open_new_project_dialog;
 use crate::workbench::project::commands::ProjectRequest;
 
 use super::with_cx;

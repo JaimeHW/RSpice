@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use crate::state::AnalysisType;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::session::project_transactions::create_example_project;
+use crate::workbench::session::project_transactions::request_example;
 use crate::workbench::simulate::commands::SimulateCommand;
-use crate::workbench::tools::examples_browser::{
-    create_example_project, open_refusal, request_example, show,
-};
+use crate::workbench::tools::examples_browser::{open_refusal, show};
 
 /// Every example opens as a project whose default plan the engine
 /// prepares and authorizes, through the path the toolbar's Run takes:

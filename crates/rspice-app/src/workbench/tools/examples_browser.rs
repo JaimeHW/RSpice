@@ -13,12 +13,11 @@ use egui::{Context, Sense, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
-use crate::workbench::app_state::{AppState, Model, PlatformState};
-use crate::workbench::framework::feature::{Cx, ModelsPort};
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::slots::ProjectState;
-use crate::workbench::workflows::project_workflow::NewProjectParams;
-use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
+use rspice_app_state::workbench::examples::{EXAMPLES, Example};
 
 /// The name column every row shares.
 const NAME_COLUMN: f32 = 220.0;
@@ -26,53 +25,6 @@ const NAME_COLUMN: f32 = 220.0;
 /// words keep the dialog's left edge, and the highlight runs out to the
 /// frame, as a table row's fill does.
 const HIGHLIGHT_BLEED: f32 = crate::ui::widgets::DIALOG_BODY_INSET;
-
-/// Replace the session with a new project holding `example`, named after it.
-///
-/// The project is not saved: [`show`] asks where once this succeeds.
-pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> Result<(), String> {
-    let params = NewProjectParams {
-        name: example.name.to_owned(),
-        ..NewProjectParams::default()
-    };
-    state.create_new_project_with(&params)?;
-    load_example(example.name, &mut state.model.schematic);
-    state.sync_active_schematic_to_workspace();
-    Ok(())
-}
-
-/// Open `name` as a new project, then ask where to save it.
-fn open_example(state: &mut AppState, name: &str) {
-    if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
-        && create_example_project(state, example).is_ok()
-    {
-        state.save_project_as();
-    }
-}
-
-/// Open the example New project's prompt let through, once the project it
-/// replaces was saved or let go.
-pub(crate) fn open_confirmed(state: &mut AppState) {
-    if let Some(name) = state.project.examples_confirmed.take() {
-        open_example(state, &name);
-    }
-}
-
-/// Open `example` in place of the open project, asking first about any
-/// changes it has, as New project does.
-pub(crate) fn request_example(state: &mut AppState, example: Example) {
-    let unsaved = state.platform.project_lifecycle.is_open()
-        && (crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-            || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
-    if unsaved {
-        state
-            .workbench
-            .confirmation_dialog
-            .show_example(example.name);
-    } else {
-        open_example(state, example.name);
-    }
-}
 
 /// Why Open is refused, if it is: configuration edits not applied, which
 /// no save prompt resolves.

@@ -2,12 +2,14 @@
 //! save, what only advises, what each finding names, and when the report
 //! goes stale.
 
+use crate::workbench::app::project_transactions::WholeStateValidation;
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 
 use crate::state::{ComponentType, Point};
 use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveFindingLevel, CheckAndSaveValidationReport, run_design_checks_in,
+    CheckAndSaveFindingLevel, CheckAndSaveValidationReport,
 };
+use crate::workbench::app::project_transactions::run_design_checks_in;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::SaveScope;
 

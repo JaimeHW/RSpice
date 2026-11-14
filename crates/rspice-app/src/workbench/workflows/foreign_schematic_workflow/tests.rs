@@ -973,7 +973,8 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
 #[test]
 fn an_imported_sheet_draws_the_same_with_its_source_gone() {
     use crate::state::ComponentType;
-    use crate::workbench::workflows::project_workflow::{ProjectLoadOrigin, apply_loaded_project};
+    use crate::workbench::app::project_transactions::apply_loaded_project;
+    use crate::workbench::workflows::project_workflow::ProjectLoadOrigin;
 
     let folder = drawing_folder();
     std::fs::write(

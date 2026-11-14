@@ -18,6 +18,7 @@ use crate::workbench::code::CodeFeature;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
+use crate::workbench::session::project_transactions::{open_confirmed, request_example};
 use crate::workbench::state::pane_focus::Pane;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
@@ -179,9 +180,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // The example New project's prompt let through opens first. Then the
     // Examples dialog draws in the project feature's context, and the example
     // it asked for is requested in place of the open project as it returns.
-    tools::examples_browser::open_confirmed(&mut app.state);
+    open_confirmed(&mut app.state);
     if let Some(example) = tools::examples_browser::show(ctx, &mut features::cx(app)) {
-        tools::examples_browser::request_example(&mut app.state, example);
+        request_example(&mut app.state, example);
     }
     // Shortcuts and dialogs record the intent to run; the pass itself belongs
     // to the frame loop, so a caller never has to name the workflow to ask

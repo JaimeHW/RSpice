@@ -9,6 +9,8 @@ mod recovery;
 
 use recovery::*;
 
+use crate::workbench::session::project_transactions::start_local_safe_mode;
+
 use std::path::Path;
 
 use egui::{
