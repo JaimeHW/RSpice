@@ -39,7 +39,8 @@ fn a_spectre_export_copies_its_sources_beside_the_deck_and_names_them_relatively
     let deck_path = folder.join("amp.scs");
 
     action_export_netlist_with_io(
-        &mut user.app.state,
+        &mut user.app.state.model,
+        &mut user.app.state.workbench,
         crate::io::NetlistFormat::Spectre,
         &SavesTo(deck_path.clone()),
     );

@@ -317,7 +317,8 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         }
         CodeRequest::ExportNetlist(format) => {
             crate::workbench::menu_bar::action_export_netlist_with_io(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.workbench,
                 format,
                 app.export_workflow_io.as_ref(),
             );
@@ -329,7 +330,10 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             );
         }
         CodeRequest::GenerateNetlist => {
-            crate::workbench::menu_bar::action_view_netlist(&mut app.state);
+            crate::workbench::menu_bar::action_view_netlist(
+                &mut app.state.model,
+                &mut app.state.workbench,
+            );
             activate_workspace(app, Workspace::Netlist);
         }
         CodeRequest::ShowInNetlist => app.state.show_selected_instance_in_netlist(),

@@ -1,57 +1,55 @@
-//! File ▸ Export ▸ Netlist and View Netlist over the session: the deck the
-//! code feature generates, prompted, recorded and saved through the
-//! session. These take the session whole, so they stay in the shell when
-//! the code feature moves into a crate of its own.
+//! File ▸ Export ▸ Netlist and View Netlist: the deck the code feature
+//! generates, recorded in the model's Console and saved through the export
+//! workflow. A refusal is prompted on the session's status bar.
 
 use super::netlist_export::{
-    GeneratedNetlist, build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
+    build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
 };
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::AppState;
+use crate::workbench::WorkbenchSession;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::Workspace;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub(crate) fn action_export_netlist_with_io(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    let netlist_content =
-        if state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-            if state.model.netlist_artifacts.generated_source.is_empty() {
-                state.prompt("There is no generated netlist to export.");
+    let netlist_content = if wb.workspace == Workspace::Netlist {
+        if model.netlist_artifacts.generated_source.is_empty() {
+            wb.prompt("There is no generated netlist to export.");
+            return;
+        }
+        if model.netlist_artifacts.generation_error.is_some()
+            || model.netlist_artifacts.generated_input_digest
+                != model.netlist_artifacts.current_generation_input_digest
+        {
+            wb.prompt("The generated netlist is out of date; regenerate it to export.");
+            return;
+        }
+        model.netlist_artifacts.generated_source.clone()
+    } else {
+        if model.schematic.document().components.is_empty() {
+            wb.prompt("No circuit to export. Add components first.");
+            return;
+        }
+        match build_menu_netlist_in(model) {
+            Ok(generated) => {
+                record_netlist_warnings_in(model, generated.warnings);
+                generated.source
+            }
+            Err(reasons) => {
+                model.report_failure("Netlist export failed", reasons.join("; "));
                 return;
             }
-            if state.model.netlist_artifacts.generation_error.is_some()
-                || state.model.netlist_artifacts.generated_input_digest
-                    != state
-                        .model
-                        .netlist_artifacts
-                        .current_generation_input_digest
-            {
-                state.prompt("The generated netlist is out of date; regenerate it to export.");
-                return;
-            }
-            state.model.netlist_artifacts.generated_source.clone()
-        } else {
-            if state.model.schematic.document().components.is_empty() {
-                state.prompt("No circuit to export. Add components first.");
-                return;
-            }
-            match build_menu_netlist(state) {
-                Ok(generated) => {
-                    record_netlist_warnings(state, generated.warnings);
-                    generated.source
-                }
-                Err(reasons) => {
-                    state.report_failure("Netlist export failed", reasons.join("; "));
-                    return;
-                }
-            }
-        };
+        }
+    };
 
     let default_name = format!(
         "{}.{}",
-        state.model.export_file_stem("circuit"),
+        model.export_file_stem("circuit"),
         format.extension()
     );
 
@@ -80,7 +78,7 @@ pub(crate) fn action_export_netlist_with_io(
                         .map_or_else(|| "netlist".into(), |stem| stem.to_string_lossy());
                     let export = super::netlist_compat::spice_to_ahdl_export(
                         &netlist_content,
-                        &state.model.workspace,
+                        &model.workspace,
                         &deck_stem,
                     );
                     (export.netlist, export.sources)
@@ -88,7 +86,7 @@ pub(crate) fn action_export_netlist_with_io(
                 _ => (netlist_content, Vec::new()),
             };
             if !sources.is_empty() && !io.saved_paths_are_reopenable() {
-                state.prompt(
+                wb.prompt(
                     "This netlist uses project Verilog-A sources; export it from the Netlist \
                      page as a self-contained bundle.",
                 );
@@ -112,7 +110,7 @@ pub(crate) fn action_export_netlist_with_io(
                 Ok(()) => {
                     let detail = (!sources.is_empty())
                         .then(|| format!("{} Verilog-A source files beside it", sources.len()));
-                    state.record(
+                    model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
@@ -123,29 +121,29 @@ pub(crate) fn action_export_netlist_with_io(
                         ),
                     );
                 }
-                Err(e) => state.report_failure("Netlist export failed", e.to_string()),
+                Err(e) => model.report_failure("Netlist export failed", e.to_string()),
             }
         }
         Ok(None) => {
             // User cancelled - no message needed
         }
-        Err(e) => state.report_failure("Netlist export failed", e.to_string()),
+        Err(e) => model.report_failure("Netlist export failed", e.to_string()),
     }
 }
 
-pub(crate) fn action_view_netlist(state: &mut AppState) {
-    if state.model.schematic.document().components.is_empty() {
-        state.prompt("No circuit to netlist. Add components first.");
+pub(crate) fn action_view_netlist(model: &mut Model, wb: &mut WorkbenchSession) {
+    if model.schematic.document().components.is_empty() {
+        wb.prompt("No circuit to netlist. Add components first.");
         return;
     }
 
-    let netlist_content = match build_menu_netlist(state) {
+    let netlist_content = match build_menu_netlist_in(model) {
         Ok(generated) => {
-            record_netlist_warnings(state, generated.warnings);
+            record_netlist_warnings_in(model, generated.warnings);
             generated.source
         }
         Err(reasons) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 netlist_failure_text("Netlist generation", &reasons),
@@ -156,25 +154,10 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
 
     // The Netlist workspace this command opens shows the deck itself.
     let total_lines = netlist_content.lines().count();
-    state.model.simulation.source.netlist_content = netlist_content;
-    state.record(
+    model.simulation.source.netlist_content = netlist_content;
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!("Generated the netlist ({total_lines} lines)."),
     );
-}
-
-/// Generate the design's deck.
-///
-/// Nothing here writes the Console. A command that asked for the deck records
-/// the outcome; the Netlist page states it where the deck would be. The error
-/// is every reason the generator refused, in its order.
-pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, Vec<String>> {
-    build_menu_netlist_in(&state.model)
-}
-
-/// Record a generated deck's warnings, once each, as the Console's account of
-/// what the generator substituted or ignored.
-pub(crate) fn record_netlist_warnings(state: &mut AppState, warnings: Vec<String>) {
-    record_netlist_warnings_in(&mut state.model, warnings);
 }
