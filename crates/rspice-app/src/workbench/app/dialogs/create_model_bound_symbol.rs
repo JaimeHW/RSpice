@@ -3,7 +3,7 @@
 //! State, controller, renderer, and verification are intentionally split so
 //! this governed workflow can scale without returning to the former GUI shell.
 
-mod controller;
+pub(crate) mod controller;
 mod render;
 pub(crate) mod state;
 

@@ -225,7 +225,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     Ok(())
 }
 
-pub(super) fn validate_create_symbol_draft(
+pub(crate) fn validate_create_symbol_draft(
     draft: &CreateModelBoundSymbolDialogState,
     model: &Model,
 ) -> Result<(), String> {
@@ -650,7 +650,7 @@ pub(crate) fn symbol_attribute_definition(
     build_symbol_definition(model, &draft)
 }
 
-pub(super) fn build_symbol_definition(
+pub(crate) fn build_symbol_definition(
     model: &Model,
     draft: &CreateModelBoundSymbolDialogState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
@@ -1167,7 +1167,7 @@ const fn model_device_prefix(model_type: ModelType) -> &'static str {
 // The domain-owned construction plan is the final authority after every
 // retained UI authority check. Conversion happens once at the transaction
 // boundary, so controls edit typed draft input and never mutate a live cell.
-pub(super) fn commit_create_model_bound_symbol(
+pub(crate) fn commit_create_model_bound_symbol(
     draft: &mut CreateModelBoundSymbolDialogState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,

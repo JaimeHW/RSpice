@@ -166,7 +166,7 @@ pub(crate) struct CreateSymbolPinDraft {
 }
 
 impl CreateSymbolPinDraft {
-    pub(super) fn new(
+    pub(crate) fn new(
         name: impl Into<String>,
         electrical_type: CreateSymbolPinType,
         side: CreateSymbolPinSide,
@@ -328,7 +328,7 @@ impl CreateModelBoundSymbolDialogState {
         }
     }
 
-    pub(super) fn select_source(&mut self, mode: CreateSymbolSourceMode) {
+    pub(crate) fn select_source(&mut self, mode: CreateSymbolSourceMode) {
         if mode == self.source_mode || !self.source_available(mode) {
             return;
         }
