@@ -23,14 +23,14 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Design rule setup";
-const PRIMARY: &str = "Apply";
+pub(crate) const PRIMARY: &str = "Apply";
 const DESCRIPTION: &str = "The severity each design rule is reported at in this project, and \
     whether a finding of it may be waived. Saved with the project.";
 
 /// What the last column states, for a reader who asks.
 const LOWEST_ALLOWED: &str = "The lowest severity this project may report the rule at; a finding     on an instance the deck cannot write is held at the second where one is named";
 /// Why Apply is unavailable while the draft is the project's deck.
-const UNCHANGED: &str = "No rule's severity has changed.";
+pub(crate) const UNCHANGED: &str = "No rule's severity has changed.";
 
 /// Why an option below a rule's floor cannot be chosen.
 const REFUSES_THE_RUN: &str = "A finding of this rule refuses the run whatever it is reported as";
@@ -76,7 +76,7 @@ fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
 /// Draw the dialog while it is open, over its draft, the review markers the
 /// drawing shows, the model and the run tier. Returns whether the draft was
 /// applied, so the caller drops any run prepared under the old deck.
-pub(in crate::workbench) fn render_rule_setup_dialog(
+pub(crate) fn render_rule_setup_dialog(
     rule_setup: &mut RuleSetupDialogState,
     review_markers: SchematicReviewMarkerVisibility,
     model: &mut Model,
@@ -210,7 +210,7 @@ fn severity_options() -> Vec<String> {
         .collect()
 }
 
-const INHERIT_DEFAULT: &str = "Default";
+pub(crate) const INHERIT_DEFAULT: &str = "Default";
 
 fn rule_row(
     ui: &mut Ui,
@@ -304,18 +304,6 @@ mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
     use crate::workbench::app_state::AppState;
-
-    /// Draw the dialog as the frame's step does, over the whole state.
-    fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
-        let review_markers = state.design.schematic_visibility.review_markers;
-        super::render_rule_setup_dialog(
-            &mut state.design.rule_setup,
-            review_markers,
-            &mut state.model,
-            &mut state.runs,
-            ctx,
-        )
-    }
 
     /// Apply the draft as the dialog's Apply does, over the whole state.
     fn apply_rule_setup(state: &mut AppState) {
@@ -416,76 +404,5 @@ mod tests {
             unread_issue(&app.state.design.rule_setup.draft),
             Some(DeckIssue::UnsupportedSchema { version: 9 })
         ));
-    }
-
-    /// The table is inside the dialog its header and footer bound: every
-    /// cell ends left of the footer's last button. On the manager size the
-    /// rows ran about 180 points past the header and the footer, which
-    /// stopped at the size's width while the surface grew under the table.
-    /// Apply, unavailable on an unchanged deck, says why in the footer.
-    #[test]
-    fn the_rule_table_stays_inside_its_dialog() {
-        let mut app = RSpiceApp::test_instance();
-        open_rule_setup(
-            &mut app.state.design.rule_setup,
-            &app.state.model,
-            &mut app.state.workbench,
-            &app.state.platform,
-        );
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut shapes = Vec::new();
-        for _ in 0..4 {
-            shapes = ctx
-                .run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1440.0, 900.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let _ = render_rule_setup_dialog(ui.ctx(), &mut app.state);
-                    },
-                )
-                .shapes;
-        }
-        let texts = shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) => Some((
-                    text.galley.text().to_owned(),
-                    egui::Rect::from_min_size(text.pos, text.galley.size()),
-                )),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let at = |wanted: &str| {
-            texts
-                .iter()
-                .find(|(text, _)| text == wanted)
-                .map(|(_, rect)| *rect)
-                .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
-        };
-        let footer_end = at(PRIMARY).right();
-        for wanted in ["Lowest allowed", "DRC-OFF-SHEET-CONNECTOR-WITHOUT-PARTNER"] {
-            assert!(
-                at(wanted).right() < footer_end,
-                "{wanted:?} ends at {}, past the footer's {footer_end}",
-                at(wanted).right()
-            );
-        }
-        assert!(texts.iter().all(|(text, _)| text != "Floor"));
-        let _ = at(UNCHANGED);
-        // Every project select shows its whole choice, and the inheriting
-        // one does not restate the Default column beside it.
-        let _ = at(INHERIT_DEFAULT);
-        for (text, _) in &texts {
-            assert!(
-                !text.contains('\u{2026}') && !text.starts_with("Default ("),
-                "a severity reads {text:?}"
-            );
-        }
     }
 }

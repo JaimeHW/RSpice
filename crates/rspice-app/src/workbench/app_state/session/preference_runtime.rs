@@ -16,7 +16,7 @@ impl RSpiceApp {
     /// the same finding the explicit check would state. A frame with no edit
     /// costs nothing; one that waits for an edit to settle asks for the frame
     /// that ends the wait.
-    pub(in crate::workbench) fn refresh_live_checks(&mut self, ctx: &egui::Context) {
+    pub(crate) fn refresh_live_checks(&mut self, ctx: &egui::Context) {
         self.refresh_live_checks_at(ctx, Instant::now());
     }
 

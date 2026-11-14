@@ -5,7 +5,6 @@
 
 mod deletion_integrity;
 mod physical_layouts;
-mod sheet_membership;
 mod show_in_netlist;
 mod symbol_wire_remap;
 

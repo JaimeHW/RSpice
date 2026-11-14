@@ -43,7 +43,7 @@ const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
 /// practical. This key is the final authority that prevents an otherwise
 /// valid edit path from leaving a prepared run or preflight receipt behind.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FrameSimulationInput {
+pub(crate) struct FrameSimulationInput {
     topology_version: u64,
     analysis_plan: Option<(
         crate::product::SimulationPlanId,
@@ -52,7 +52,7 @@ struct FrameSimulationInput {
 }
 
 impl FrameSimulationInput {
-    fn capture(state: &AppState) -> Self {
+    pub(crate) fn capture(state: &AppState) -> Self {
         Self {
             topology_version: state.model.schematic.topology_version(),
             analysis_plan: state
@@ -344,7 +344,7 @@ impl RSpiceApp {
     /// into the results and the generated netlist, the authoring recovery
     /// point is captured, and a project the frame replaced takes the old
     /// project's automation authority with it.
-    fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
+    pub(crate) fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
         self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame);
         let state = &mut self.state;
         if let Some(projection) = crate::workbench::synchronize_schematic_cross_probe(
@@ -788,7 +788,7 @@ impl RSpiceApp {
         crate::workbench::show(ui, self);
     }
 
-    fn capture_application_window_projection(
+    pub(crate) fn capture_application_window_projection(
         &mut self,
         window: crate::workbench::ApplicationWindowId,
     ) {
@@ -811,7 +811,7 @@ impl RSpiceApp {
         }
     }
 
-    fn project_application_window(
+    pub(crate) fn project_application_window(
         &mut self,
         window: crate::workbench::ApplicationWindowId,
         fallback_layout: crate::workbench::state::WorkspaceLayoutState,
@@ -854,7 +854,7 @@ impl RSpiceApp {
         true
     }
 
-    fn render_secondary_application_windows(&mut self, ctx: &Context) {
+    pub(crate) fn render_secondary_application_windows(&mut self, ctx: &Context) {
         let primary = self.state.workbench.window_session.primary();
         self.capture_application_window_projection(primary);
         let secondary = self.state.workbench.window_session.secondary_window_ids();
@@ -1162,7 +1162,7 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 // =============================================================================
 
 #[cfg(test)]
-mod gesture_tests;
+pub(crate) mod gesture_tests;
 
 #[cfg(test)]
 mod wiring_acceptance;
@@ -1182,9 +1182,6 @@ pub(crate) mod veriloga_interface_tests;
 mod run_flow_tests;
 #[cfg(test)]
 pub(crate) mod veriloga_flow_tests;
-
-#[cfg(test)]
-mod touch_flow_tests;
 
 #[cfg(test)]
 mod tests {

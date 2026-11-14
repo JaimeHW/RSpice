@@ -16,7 +16,7 @@ pub(in crate::workbench) mod create_model_bound_symbol;
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
 pub(crate) mod design_management;
 pub(in crate::workbench) mod design_request;
-pub(in crate::workbench) mod design_review_comments;
+pub(crate) mod design_review_comments;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults;
 #[cfg(test)]
@@ -29,7 +29,7 @@ pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support;
 pub(in crate::workbench) mod engineering_table;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
-pub(in crate::workbench) mod find_replace;
+pub(crate) mod find_replace;
 pub(in crate::workbench) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
@@ -50,14 +50,14 @@ pub(in crate::workbench) mod property_dialog;
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;
 pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
-pub(in crate::workbench) mod rule_setup;
-pub(in crate::workbench) mod selection;
+pub(crate) mod rule_setup;
+pub(crate) mod selection;
 pub(crate) mod source_document;
 pub(crate) mod source_find;
 pub(crate) mod source_language_tools;
 pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
-pub(in crate::workbench) mod symbol_definition;
+pub(crate) mod symbol_definition;
 pub(in crate::workbench) mod veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::window_session;

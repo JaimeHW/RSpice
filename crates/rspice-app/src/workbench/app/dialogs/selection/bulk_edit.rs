@@ -37,8 +37,8 @@ use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
-const TITLE: &str = "Bulk edit";
-const PRIMARY: &str = "Apply";
+pub(crate) const TITLE: &str = "Bulk edit";
+pub(crate) const PRIMARY: &str = "Apply";
 
 const BULK_PROPERTIES: [SelectionBulkProperty; 13] = [
     SelectionBulkProperty::ModelSection,
@@ -232,7 +232,7 @@ pub(crate) struct SelectionBulkEditDialogState {
     pub(crate) unset_behavior: SelectionBulkUnsetBehavior,
     /// The sections a model section can be set to, from the libraries the
     /// matched instances are bound to. Resolved when the filter changes.
-    bound_sections: Vec<String>,
+    pub(crate) bound_sections: Vec<String>,
     authority: Option<SelectionBulkEditAuthority>,
     pub(crate) error: Option<String>,
     pub(crate) body_scroll_offset: f32,
@@ -310,7 +310,7 @@ pub(crate) fn open_selection_bulk_edit_dialog(
     };
 }
 
-pub(in crate::workbench) fn render_selection_bulk_edit_dialog(
+pub(crate) fn render_selection_bulk_edit_dialog(
     bulk_edit: &mut SelectionBulkEditDialogState,
     filters: &mut SelectionBulkFilterSession,
     model: &mut Model,
@@ -1789,4 +1789,4 @@ fn wildcard_match(pattern: &str, candidate: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

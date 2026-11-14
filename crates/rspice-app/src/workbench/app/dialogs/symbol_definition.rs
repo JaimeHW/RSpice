@@ -6,11 +6,11 @@
 //! atomic project-library publication together so neither native nor browser
 //! builds can bypass the same contract.
 
-mod import_workflow;
+pub(crate) mod import_workflow;
 mod parameter_form_workflow;
 mod render;
 mod source_picker;
-mod state;
+pub(crate) mod state;
 
 pub(in crate::workbench) use render::render_symbol_definition_dialogs;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};

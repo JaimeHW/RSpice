@@ -2,9 +2,14 @@
 //! draws, opened as its command opens it and drawn by the real frame through
 //! the feature's own context.
 
+mod bulk_edit;
 mod canvas;
 mod context_menu;
+mod design_review_comments;
 mod drag_work;
+mod find_replace;
+mod gestures;
+mod import_workflow;
 mod inline_instance;
 mod inspector;
 mod inspector_veriloga_modules;
@@ -12,12 +17,18 @@ mod mobile_controls;
 mod navigator;
 mod netlist_first;
 mod raster_review;
+mod rename;
+mod rename_transactions;
+mod rule_setup;
 mod scene;
 mod selection_drag;
+mod sheet_membership;
 mod shelf;
 mod stimulus_browser;
 mod stimulus_surface;
+mod symbol_actions;
 mod symbol_inspector;
+mod touch_flow;
 mod wiring;
 
 use egui::accesskit::{Node, Role};

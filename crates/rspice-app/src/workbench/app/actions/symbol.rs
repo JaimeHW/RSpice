@@ -208,7 +208,7 @@ pub(crate) fn delete_selected_symbol_item(
     apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
-fn symbol_edit_request(
+pub(crate) fn symbol_edit_request(
     symbol: &SymbolUiState,
     model: &Model,
     wb: &WorkbenchSession,
@@ -312,4 +312,4 @@ fn apply_current_symbol_edit_request(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -15,7 +15,7 @@ pub(in crate::workbench) mod reveal;
 pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(crate) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
-mod symbol;
+pub(crate) mod symbol;
 #[cfg(test)]
 pub(crate) use rspice_app_simulate::workbench::app::actions::tuning_staging;
 pub(crate) use symbol::{

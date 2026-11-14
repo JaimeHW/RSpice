@@ -5,8 +5,8 @@
 //! primary pointer the platform drives from it. Nothing is set up by hand once
 //! the sheet exists.
 
-use super::*;
 use crate::state::{ComponentType, Point, SchematicState, Tool};
+use crate::workbench::app::*;
 use crate::workbench::state::Workspace;
 use egui::{Event, Pos2, Rect, TouchPhase, Vec2};
 
