@@ -1,7 +1,7 @@
 # variant	analysis	route	outcome	detail
 xs	tran	interp	pass	fdiv (O6) [0] |a−e|=1.346e-12 allowed 5.000e-11 (a=9.999865e-8, e=1.000000e-7)
 xs	tran	native	pass	fdiv (O6) [0] |a−e|=1.346e-12 allowed 5.000e-11 (a=9.999865e-8, e=1.000000e-7)
-xs	tran	worker	fail	resource: resource: Resource limit exceeded for waveform values a browser run can hand back: requested 25005075, limit 16777216
+xs	tran	worker	pass	fdiv (O6) [0] |a−e|=8.145e-13 allowed 5.000e-11 (a=9.999919e-8, e=1.000000e-7)
 mx	tran	interp	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540855e-6, e=5.703179e-6)
 mx	tran	native	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540855e-6, e=5.703179e-6)
 mx	tran	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
@@ -25,7 +25,7 @@ mx	ac@lock	native	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB
 mx	ac@lock	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width
 xs	mc-tran	interp	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
 xs	mc-tran	native	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
-xs	mc-tran	worker	fail	resource: resource: Resource limit exceeded for waveform values a browser run can hand back: requested 24995850, limit 16777216
+xs	mc-tran	worker	pass	fdiv (O6) trial 3: [0] |a−e|=2.415e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
 mx	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	native	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	worker	gap	harness gap: Verilog-A module 'vco_pwl' sealed on this 64-bit host holds the index 18446744073709551615, which the 32-bit worker cannot read; the browser seals in the worker's own address width

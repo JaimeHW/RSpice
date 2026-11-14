@@ -46,11 +46,9 @@ impl WorkerQpacResultTransport {
             .checked_mul(tuples)
             .and_then(|n| points.checked_mul(2).and_then(|p| n.checked_add(p)))
             .ok_or("QPAC payload shape overflow")?;
-        if tuples == 0
-            || rows > MAX_WORKER_F64_VALUES / 2
-            || expected > MAX_WORKER_F64_VALUES / 2
-            || self.real.len() != expected
-        {
+        // Every count is read from the metadata, so the packed buffer it
+        // must equal bounds `rows` before anything is allocated from it.
+        if tuples == 0 || self.real.len() != expected {
             return Err("QPAC packed buffers differ from the bounded sweep layout".into());
         }
         let mut lengths = vec![tuples; rows];

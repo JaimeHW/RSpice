@@ -1,6 +1,16 @@
-//! Portable numeric-series representation and transfer limits for the worker protocol.
+//! Portable numeric-series representation for the worker protocol.
+//!
+//! Every numeric array crosses the worker boundary as its own transferable
+//! `Float64Array`. A response costs one copy out of the worker's linear
+//! memory and one copy into the receiver's; `postMessage` moves the buffers
+//! between the threads without copying them. Neither side caps how many
+//! values or buffers cross: a run needs the memory its result needs, and an
+//! allocation the memory cannot give is refused as that allocation, with the
+//! size it asked for ([`try_f64_buffer`]).
 
 use serde::{Deserialize, Serialize};
+
+use crate::resource_failure::ResourceFailure;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WorkerF64Series {
@@ -8,55 +18,43 @@ pub enum WorkerF64Series {
     Buffer { buffer: usize, len: usize },
 }
 
-pub const MAX_WORKER_F64_VALUES: usize = 16_777_216;
-pub const MAX_WORKER_TRANSFER_BUFFERS: usize = 65_536;
+/// A zeroed buffer of `len` values for `object`, or the allocation failure
+/// naming the bytes it needed.
+///
+/// A receiver copies each transferred array into its own memory with this,
+/// so a result larger than the memory left to it is refused by name instead
+/// of aborting the program. In 32-bit WebAssembly no allocation can exceed
+/// `isize::MAX` bytes (2 GiB) and the whole memory is at most 4 GiB; both
+/// arrive here as the same refusal.
+pub fn try_f64_buffer(len: usize, object: &str) -> Result<Vec<f64>, ResourceFailure> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|error| f64_allocation_failure(object, len, &error.to_string()))?;
+    values.resize(len, 0.0);
+    Ok(values)
+}
 
+/// The refusal for `len` values of `object` that could not be allocated.
+pub fn f64_allocation_failure(object: &str, len: usize, reason: &str) -> ResourceFailure {
+    ResourceFailure::Allocation {
+        object: object.to_owned(),
+        detail: format!(
+            "{len} values ({} bytes) were needed: {reason}",
+            len.saturating_mul(std::mem::size_of::<f64>())
+        ),
+    }
+}
+
+/// The total value count of a request's transfer buffers, or the overflow
+/// that makes it unrepresentable on this platform.
 pub fn checked_worker_request_numeric_total(
     current_total: usize,
-    buffer_index: usize,
     buffer_len: usize,
 ) -> Result<usize, String> {
-    if buffer_len > MAX_WORKER_F64_VALUES {
-        return Err(format!(
-            "worker request transport buffer {buffer_index} contains {buffer_len} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-        ));
-    }
-    let total = current_total
+    current_total
         .checked_add(buffer_len)
-        .ok_or_else(|| "worker request numeric size overflows this platform".to_owned())?;
-    if total > MAX_WORKER_F64_VALUES {
-        return Err(format!(
-            "worker request contains more than {MAX_WORKER_F64_VALUES} numerical values"
-        ));
-    }
-    Ok(total)
-}
-
-pub fn validate_worker_request_transfer_buffers(buffers: &[Vec<f64>]) -> Result<(), String> {
-    validate_worker_request_transfer_buffer_lengths(buffers.iter().map(Vec::len))
-}
-
-pub fn validate_worker_request_transfer_buffer_lengths(
-    lengths: impl IntoIterator<Item = usize>,
-) -> Result<(), String> {
-    let lengths = lengths.into_iter();
-    let (lower_bound, upper_bound) = lengths.size_hint();
-    let declared_count = upper_bound.unwrap_or(lower_bound);
-    if declared_count > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(format!(
-            "worker request contains {declared_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-        ));
-    }
-    let mut total = 0usize;
-    for (index, len) in lengths.enumerate() {
-        if index >= MAX_WORKER_TRANSFER_BUFFERS {
-            return Err(format!(
-                "worker request contains more than {MAX_WORKER_TRANSFER_BUFFERS} transfer buffers"
-            ));
-        }
-        total = checked_worker_request_numeric_total(total, index, len)?;
-    }
-    Ok(())
+        .ok_or_else(|| "worker request numeric size overflows this platform".to_owned())
 }
 
 impl WorkerF64Series {
@@ -75,21 +73,8 @@ impl WorkerF64Series {
 
     pub fn into_vec(self, buffers: &[Vec<f64>]) -> Result<Vec<f64>, String> {
         match self {
-            Self::Inline(values) => {
-                if values.len() > MAX_WORKER_F64_VALUES {
-                    return Err(format!(
-                        "inline worker series contains {} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
-                        values.len()
-                    ));
-                }
-                Ok(values)
-            }
+            Self::Inline(values) => Ok(values),
             Self::Buffer { buffer, len } => {
-                if len > MAX_WORKER_F64_VALUES {
-                    return Err(format!(
-                        "transferable buffer {buffer} declares {len} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-                    ));
-                }
                 let values = buffers
                     .get(buffer)
                     .ok_or_else(|| format!("missing transferable buffer {buffer}"))?;
@@ -113,5 +98,38 @@ impl WorkerF64Series {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_buffer_the_memory_cannot_hold_is_refused_with_the_size_it_needed() {
+        assert_eq!(
+            try_f64_buffer(3, "x").expect("three values fit"),
+            vec![0.0; 3]
+        );
+        let len = usize::MAX / 4;
+        let failure = try_f64_buffer(len, "transfer buffer 7").expect_err("cannot be had");
+        let ResourceFailure::Allocation { object, detail } = &failure else {
+            panic!("an allocation failure, not {failure:?}")
+        };
+        assert_eq!(object, "transfer buffer 7");
+        assert!(
+            detail.starts_with(&format!(
+                "{len} values ({} bytes) were needed: ",
+                usize::MAX
+            )),
+            "{detail}"
+        );
+        assert_eq!(failure.code(), "allocation_failed");
+    }
+
+    #[test]
+    fn a_request_total_only_refuses_what_this_platform_cannot_count() {
+        assert_eq!(checked_worker_request_numeric_total(10, 20), Ok(30));
+        assert!(checked_worker_request_numeric_total(usize::MAX, 1).is_err());
     }
 }

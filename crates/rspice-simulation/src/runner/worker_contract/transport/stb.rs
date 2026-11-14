@@ -55,11 +55,7 @@ impl WorkerCircuitPoles {
         })
     }
 
-    fn into_response(
-        self,
-        buffers: &[Vec<f64>],
-        remaining: usize,
-    ) -> Result<CircuitPoleEvidence, String> {
+    fn into_response(self, buffers: &[Vec<f64>]) -> Result<CircuitPoleEvidence, String> {
         Ok(match self {
             Self::NotComputed => CircuitPoleEvidence::NotComputed,
             Self::Unavailable { cause } => CircuitPoleEvidence::Unavailable { cause },
@@ -70,9 +66,8 @@ impl WorkerCircuitPoles {
             } => {
                 if !matches!(roots, WorkerF64Series::Buffer { .. })
                     || !roots.len().is_multiple_of(2)
-                    || roots.len() > remaining
                 {
-                    return Err("circuit poles require a bounded dedicated buffer".into());
+                    return Err("circuit poles require a dedicated buffer of pairs".into());
                 }
                 let values = roots.into_vec(buffers)?;
                 if crate::execution_identity::f64_sequence_digest(
@@ -123,11 +118,7 @@ impl WorkerStbResultTransport {
             .bode_points
             .len()
             .checked_mul(9)
-            .filter(|n| {
-                n.saturating_add(response.circuit_poles.retained_value_count())
-                    <= MAX_WORKER_F64_VALUES
-            })
-            .ok_or("STB evidence exceeds worker limit")?;
+            .ok_or("STB evidence size overflows this platform")?;
         let mut values = Vec::new();
         values.try_reserve_exact(len).map_err(|e| e.to_string())?;
         for p in response.bode_points {
@@ -161,7 +152,6 @@ impl WorkerStbResultTransport {
         if !matches!(self.points, WorkerF64Series::Buffer { .. })
             || n == 0
             || !n.is_multiple_of(9)
-            || n > MAX_WORKER_F64_VALUES
             || n > limits.max_result_values
             || n / 9 > limits.max_analysis_points
         {
@@ -176,9 +166,7 @@ impl WorkerStbResultTransport {
             }
         };
         let mut response = StbResult::new();
-        response.circuit_poles = self
-            .circuit_poles
-            .into_response(buffers, MAX_WORKER_F64_VALUES.saturating_sub(n))?;
+        response.circuit_poles = self.circuit_poles.into_response(buffers)?;
         response
             .bode_points
             .try_reserve_exact(n / 9)

@@ -72,31 +72,19 @@ impl WorkerDcSweepEvidence {
     }
 }
 
-pub(super) fn validate_dc_transport_size(
-    axis: &WorkerF64Series,
+pub(super) fn validate_dc_transport_coverage(
     waveforms: &[WorkerWaveformTransport],
     evidence: Option<&WorkerDcSweepEvidence>,
 ) -> Result<(), String> {
     let evidence =
         evidence.ok_or_else(|| "Worker DC transport is missing exact curve evidence".to_owned())?;
-    let (members, coordinates) = match &evidence.family {
-        WorkerDcSweepFamily::Single => (1, 0),
-        WorkerDcSweepFamily::Nested { values, .. } => (values.len(), values.len()),
-        WorkerDcSweepFamily::Retraced => (2, 0),
+    let members = match &evidence.family {
+        WorkerDcSweepFamily::Single => 1,
+        WorkerDcSweepFamily::Nested { values, .. } => values.len(),
+        WorkerDcSweepFamily::Retraced => 2,
     };
     if evidence.quantities.len().checked_mul(members) != Some(waveforms.len()) {
         return Err("Worker DC curves do not cover the declared sweep space".to_owned());
-    }
-    let values = waveforms
-        .iter()
-        .fold(axis.len().saturating_add(coordinates), |total, trace| {
-            total
-                .saturating_add(trace.x_values.len())
-                .saturating_add(trace.y_values.len())
-                .saturating_add(trace.y_imag.as_ref().map_or(0, WorkerF64Series::len))
-        });
-    if values > MAX_WORKER_F64_VALUES {
-        return Err("DC curves and coordinate evidence exceed the worker numeric limit".to_owned());
     }
     Ok(())
 }

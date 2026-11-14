@@ -304,7 +304,7 @@ fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             checks: Default::default(),
         })),
     };
-    let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
     assert!(!metadata.contains("\"Inline\""));
     assert!(
@@ -339,37 +339,5 @@ fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             .into_response()
             .unwrap_err()
             .contains("previous-state solution digest")
-    );
-
-    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::DcOp {
-        mna_solution, ..
-    }) = &mut transport.response.outcome
-    else {
-        panic!("expected DC OP transport")
-    };
-    *mna_solution = WorkerF64Series::Buffer {
-        buffer: 1,
-        len: MAX_WORKER_F64_VALUES + 1,
-    };
-    assert!(transport.into_response().unwrap_err().contains("exceeding"));
-}
-
-#[test]
-fn worker_request_ingress_limits_are_checked_before_copy() {
-    assert_eq!(checked_worker_request_numeric_total(10, 0, 20).unwrap(), 30);
-    assert!(
-        checked_worker_request_numeric_total(0, 0, MAX_WORKER_F64_VALUES + 1)
-            .unwrap_err()
-            .contains("buffer 0")
-    );
-    assert!(
-        checked_worker_request_numeric_total(MAX_WORKER_F64_VALUES, 1, 1)
-            .unwrap_err()
-            .contains("more than")
-    );
-    assert!(
-        validate_worker_request_transfer_buffer_lengths([MAX_WORKER_F64_VALUES, 1])
-            .unwrap_err()
-            .contains("more than")
     );
 }

@@ -80,25 +80,11 @@ fn dc_worker_refuses_missing_or_inconsistent_curve_evidence() {
 }
 
 #[test]
-fn dc_worker_rejects_coordinate_aliasing_and_expansion_before_copying_buffers() {
+fn dc_worker_rejects_coordinate_aliasing_before_copying_buffers() {
     let original = WorkerResponseTransport::from_response(response()).unwrap();
     let mut alias = serde_json::to_value(&original.response).unwrap();
     let dc = &mut alias["outcome"]["Success"]["DcSweep"];
     dc["evidence"]["family"]["values"] = dc["sweep_values"].clone();
     let alias = with_metadata(&original, alias);
     assert!(alias.into_response().is_err());
-
-    let mut oversized = serde_json::to_value(&original.response).unwrap();
-    let dc = &mut oversized["outcome"]["Success"]["DcSweep"];
-    for trace in dc["waveforms"].as_array_mut().unwrap() {
-        trace["y_values"] =
-            serde_json::json!({"Buffer":{"buffer":0,"len":MAX_WORKER_F64_VALUES / 6}});
-    }
-    let oversized = with_metadata(&original, oversized);
-    assert!(
-        oversized
-            .into_response()
-            .unwrap_err()
-            .contains("numeric limit")
-    );
 }

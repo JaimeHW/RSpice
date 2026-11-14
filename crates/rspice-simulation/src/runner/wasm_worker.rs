@@ -59,8 +59,7 @@ mod browser {
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
         WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
         take_worker_request_checkpoint, take_worker_request_op_previous_state,
-        validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
-        worker_response_from_value,
+        validate_worker_response_id, worker_response_from_value,
     };
     use crate::runner::{NetlistInput, SimulationRequest};
     use crate::status::{
@@ -949,17 +948,6 @@ mod browser {
                 ))
             })?;
         let dependency_buffer_count = dependency_buffers.len();
-        validate_worker_request_transfer_buffer_lengths(
-            dependency_buffers
-                .iter()
-                .map(|values| values.len())
-                .chain(op_buffers.iter().map(Vec::len)),
-        )
-        .map_err(|error| {
-            SimulationError::InvalidConfig(format!(
-                "failed to prepare simulation request transfer: {error}"
-            ))
-        })?;
 
         validate_worker_request_checkpoint_lengths(
             dependency_buffers

@@ -57,9 +57,6 @@ pub(super) fn validate_worker_response_before_transport(
             ..
         } = result.as_ref()
     {
-        if quality.transfer_value_count() > MAX_WORKER_F64_VALUES {
-            return Err("Convergence evidence exceeds the worker numeric payload limit".to_owned());
-        }
         quality.validate()?;
     }
     if let WorkerOutcome::Success(result) = &response.outcome {
@@ -75,7 +72,7 @@ pub(super) fn validate_worker_response_before_transport(
                 )
                 .map_err(|e| e.to_string())?;
         }
-        validate_transient_source_payload_size(result)?;
+        validate_soa_source_history(result)?;
         if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
             && let Some(history) = &events.current_impulses
         {
@@ -141,20 +138,6 @@ pub(super) fn validate_worker_response_before_transport(
             ..
         } = result.as_ref()
     {
-        if let Some(previous_state) = configuration.previous_state.as_ref()
-            && previous_state.solution.len() > MAX_WORKER_F64_VALUES
-        {
-            return Err(format!(
-                "worker DC operating-point response contains {} previous-state MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
-                previous_state.solution.len()
-            ));
-        }
-        if mna_solution.len() > MAX_WORKER_F64_VALUES {
-            return Err(format!(
-                "worker DC operating-point response contains {} MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
-                mna_solution.len()
-            ));
-        }
         return validate_worker_dc_op_state(
             configuration,
             mna_node_names,
@@ -180,128 +163,26 @@ pub(super) fn validate_worker_response_before_transport(
         reference_impedances_ohm: Some(references),
         ..
     } = result.as_ref()
-    {
-        if references.is_empty()
+        && (references.is_empty()
             || references
                 .iter()
-                .any(|value| !value.is_finite() || *value <= 0.0)
-        {
-            return Err(
-                "S-parameter worker references must be nonempty, finite and positive".to_owned(),
-            );
-        }
-        if references.len() > MAX_WORKER_F64_VALUES {
-            return Err("S-parameter worker reference count exceeds the payload limit".to_owned());
-        }
+                .any(|value| !value.is_finite() || *value <= 0.0))
+    {
+        return Err(
+            "S-parameter worker references must be nonempty, finite and positive".to_owned(),
+        );
     }
     if let WorkerSimulationResult::Hb {
-        frequencies,
-        waveforms,
-        operating_point,
-        ..
+        operating_point, ..
     } = result.as_ref()
     {
         operating_point
             .validate()
             .map_err(|error| error.to_string())?;
-        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
-            count
-                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
-                .ok_or_else(|| {
-                    "retained HB response buffer count overflows this platform".to_owned()
-                })
-        })?;
-        let transfer_buffer_count = operating_point
-            .spectral_state()
-            .len()
-            .checked_add(operating_point.mna_branch_spectral_state().len())
-            .and_then(|count| count.checked_add(operating_point.integral_spectra().len()))
-            .ok_or_else(|| "retained HB response buffer count overflows this platform".to_owned())?
-            .checked_mul(2)
-            .and_then(|count| count.checked_add(waveform_buffer_count))
-            .and_then(|count| count.checked_add(1))
-            .ok_or_else(|| {
-                "retained HB response buffer count overflows this platform".to_owned()
-            })?;
-        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
-            return Err(format!(
-                "retained HB response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-            ));
-        }
-        let mut numeric_values = frequencies.len();
-        for waveform in waveforms {
-            numeric_values = numeric_values
-                .checked_add(waveform.x_values.len())
-                .and_then(|count| count.checked_add(waveform.y_values.len()))
-                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
-                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
-        }
-        for spectrum in operating_point.spectral_state() {
-            numeric_values = numeric_values
-                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
-                    "retained HB response size overflows this platform".to_owned()
-                })?)
-                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
-        }
-        for spectrum in operating_point.mna_branch_spectral_state().iter().chain(
-            operating_point
-                .integral_spectra()
-                .iter()
-                .map(|spectrum| &spectrum.coefficients),
-        ) {
-            numeric_values = numeric_values
-                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
-                    "retained HB response size overflows this platform".to_owned()
-                })?)
-                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
-        }
-        if numeric_values > MAX_WORKER_F64_VALUES {
-            return Err(format!(
-                "retained HB response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-            ));
-        }
         return Ok(());
     }
-    if let WorkerSimulationResult::Pstb {
-        modes,
-        mode_indices,
-        waveforms,
-        ..
-    } = result.as_ref()
-    {
+    if let WorkerSimulationResult::Pstb { .. } = result.as_ref() {
         validate_worker_pstb_result(result)?;
-        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
-            count
-                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
-                .ok_or_else(|| {
-                    "PSTB worker response buffer count overflows this platform".to_owned()
-                })
-        })?;
-        let transfer_buffer_count = waveform_buffer_count.checked_add(6).ok_or_else(|| {
-            "PSTB worker response buffer count overflows this platform".to_owned()
-        })?;
-        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
-            return Err(format!(
-                "PSTB worker response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-            ));
-        }
-        let mut numeric_values = modes
-            .len()
-            .checked_mul(5)
-            .and_then(|count| count.checked_add(mode_indices.len()))
-            .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
-        for waveform in waveforms {
-            numeric_values = numeric_values
-                .checked_add(waveform.x_values.len())
-                .and_then(|count| count.checked_add(waveform.y_values.len()))
-                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
-                .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
-        }
-        if numeric_values > MAX_WORKER_F64_VALUES {
-            return Err(format!(
-                "PSTB worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-            ));
-        }
         return Ok(());
     }
     let WorkerSimulationResult::Pss {
@@ -330,63 +211,6 @@ pub(super) fn validate_worker_response_before_transport(
     };
     validation.map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
     pss_display_projection(operating_point, reporting_times)?;
-    let transfer_buffer_count = analysis
-        .result
-        .waveforms
-        .len()
-        .checked_add(analysis.result.branch_waveforms.len())
-        .and_then(|count| count.checked_add(analysis.monodromy.len()))
-        .and_then(|count| count.checked_add(6 + usize::from(!reporting_times.is_empty())))
-        .ok_or_else(|| "retained PSS response buffer count overflows this platform".to_owned())?;
-    if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(format!(
-            "retained PSS response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-        ));
-    }
-    let mut numeric_values = analysis
-        .result
-        .time
-        .len()
-        .checked_add(reporting_times.len())
-        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
-    for waveform in analysis
-        .result
-        .waveforms
-        .iter()
-        .chain(&analysis.result.branch_waveforms)
-    {
-        numeric_values = numeric_values
-            .checked_add(waveform.values.len())
-            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
-    }
-    for row in &analysis.monodromy {
-        numeric_values = numeric_values
-            .checked_add(row.len())
-            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
-    }
-    numeric_values = numeric_values
-        .checked_add(
-            analysis
-                .result
-                .floquet_multipliers
-                .len()
-                .checked_mul(2)
-                .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?,
-        )
-        .and_then(|count| {
-            analysis
-                .floquet_multipliers
-                .len()
-                .checked_mul(2)
-                .and_then(|values| count.checked_add(values))
-        })
-        .and_then(|count| count.checked_add(operating_point.shooting_state().len()))
-        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
-    if numeric_values > MAX_WORKER_F64_VALUES {
-        return Err(format!(
-            "retained PSS response contains {numeric_values} unique numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-        ));
-    }
     Ok(())
 }
 
@@ -410,26 +234,6 @@ fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), S
     };
     for (index, measurement) in measurements.iter().enumerate() {
         measurement.validate_current_evidence(&format!("worker measurement[{index}]"))?;
-    }
-    Ok(())
-}
-
-pub(super) fn validate_worker_transfer_buffers(buffers: &[Vec<f64>]) -> Result<(), String> {
-    if buffers.len() > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(format!(
-            "worker response contains {} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit",
-            buffers.len()
-        ));
-    }
-    let numeric_values = buffers.iter().try_fold(0usize, |total, values| {
-        total
-            .checked_add(values.len())
-            .ok_or_else(|| "worker response numeric size overflows this platform".to_owned())
-    })?;
-    if numeric_values > MAX_WORKER_F64_VALUES {
-        return Err(format!(
-            "worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-        ));
     }
     Ok(())
 }
@@ -470,15 +274,9 @@ impl WorkerOutcomeTransport {
     }
 }
 
-#[cfg(any(feature = "browser-worker", test))]
+pub(crate) use rspice_simulation_contract::worker_transport::WorkerF64Series;
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use rspice_simulation_contract::worker_transport::checked_worker_request_numeric_total;
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) use rspice_simulation_contract::worker_transport::validate_worker_request_transfer_buffer_lengths;
-#[cfg(any(feature = "browser-worker", feature = "test-support", test))]
-pub(crate) use rspice_simulation_contract::worker_transport::validate_worker_request_transfer_buffers;
-pub(crate) use rspice_simulation_contract::worker_transport::{
-    MAX_WORKER_F64_VALUES, MAX_WORKER_TRANSFER_BUFFERS, WorkerF64Series,
-};
 
 impl WorkerOpPreviousStateTransport {
     pub(super) fn from_previous_state(
@@ -490,12 +288,6 @@ impl WorkerOpPreviousStateTransport {
             &previous_state.branch_names,
             &previous_state.solution,
         )?;
-        if previous_state.solution.len() > MAX_WORKER_F64_VALUES {
-            return Err(format!(
-                "OP previous-state solution contains {} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
-                previous_state.solution.len()
-            ));
-        }
         Ok(Self::from_validated_previous_state(previous_state, buffers))
     }
 
@@ -1102,8 +894,7 @@ impl WorkerPstbModesTransport {
 
     fn into_modes(self, buffers: &[Vec<f64>]) -> Result<Vec<WorkerPstbFloquetMode>, String> {
         let len = self.multiplier_real.len();
-        if len > MAX_WORKER_F64_VALUES
-            || self.multiplier_imaginary.len() != len
+        if self.multiplier_imaginary.len() != len
             || self.exponent_real.len() != len
             || self.exponent_imaginary.len() != len
             || self.probe_participation.len() != len
@@ -1362,97 +1153,7 @@ impl WorkerOpConfigTransport {
 
 /// The numerical values and transfer buffers a waveform result (transient,
 /// SOA or AC) takes on the worker transport, or `None` for any other result.
-pub(super) fn waveform_transfer_size(result: &WorkerSimulationResult) -> Option<(usize, usize)> {
-    let (axis, waveforms, quality, references) = match result {
-        WorkerSimulationResult::Transient {
-            time,
-            waveforms,
-            convergence,
-            ..
-        }
-        | WorkerSimulationResult::Soa {
-            time,
-            waveforms,
-            convergence,
-            ..
-        } => (time, waveforms, convergence, None),
-        WorkerSimulationResult::Ac {
-            frequencies,
-            waveforms,
-            convergence,
-            reference_impedances_ohm,
-            ..
-        } => (
-            frequencies,
-            waveforms,
-            convergence,
-            reference_impedances_ohm.as_ref(),
-        ),
-        _ => return None,
-    };
-    let mut values = axis
-        .len()
-        .saturating_add(references.map_or(0, Vec::len))
-        .saturating_add(quality.as_ref().map_or(
-            0,
-            rspice_results::convergence_quality::TransientConvergenceEvidence::transfer_value_count,
-        ));
-    let mut buffers = 1usize
-        .saturating_add(usize::from(references.is_some()))
-        .saturating_add(quality.as_ref().map_or(0, |quality| {
-            2 + usize::from(quality.initialization.is_some())
-        }));
-    if let WorkerSimulationResult::Soa {
-        source_history: Some(source),
-        ..
-    } = result
-    {
-        values = values.saturating_add(source.value_count());
-        buffers = buffers
-            .saturating_add(1)
-            .saturating_add(source.waveforms.len());
-    }
-    if let WorkerSimulationResult::Transient { events, .. } = result
-        && let Some(history) = &events.current_impulses
-    {
-        values = values.saturating_add(2);
-        for trace in &history.traces {
-            values = values.saturating_add(trace.numeric_value_count());
-        }
-    }
-    if let WorkerSimulationResult::Transient { events, .. } = result
-        && let Some(history) = &events.voltage_impulses
-    {
-        values = values.saturating_add(2);
-        for trace in &history.traces {
-            values = values.saturating_add(trace.numeric_value_count());
-        }
-    }
-    if let WorkerSimulationResult::Transient { spectra, .. } = result {
-        for spectrum in spectra {
-            values = values.saturating_add(spectrum.numeric_value_count());
-            buffers = buffers.saturating_add(3);
-        }
-    }
-    for waveform in waveforms {
-        values = values
-            .saturating_add(waveform.x_values.len())
-            .saturating_add(waveform.y_values.len())
-            .saturating_add(waveform.y_imag.as_ref().map_or(0, Vec::len));
-        buffers = buffers.saturating_add(2 + usize::from(waveform.y_imag.is_some()));
-    }
-    Some((values, buffers))
-}
-
-fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Result<(), String> {
-    let Some((values, buffers)) = waveform_transfer_size(result) else {
-        return Ok(());
-    };
-    if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(
-            "Waveform and convergence evidence exceed the worker transfer limit".to_owned(),
-        );
-    }
+fn validate_soa_source_history(result: &WorkerSimulationResult) -> Result<(), String> {
     if let WorkerSimulationResult::Soa {
         source_history: Some(source),
         time,
@@ -1503,11 +1204,18 @@ pub(crate) struct WorkerWaveformTransport {
 }
 
 impl WorkerWaveformTransport {
+    /// `x_values` is the buffer of an identical series the transfer already
+    /// carries, when there is one.
     #[cfg(any(feature = "browser-worker", test))]
-    pub(super) fn from_waveform(waveform: WorkerWaveform, buffers: &mut Vec<Vec<f64>>) -> Self {
+    fn from_waveform(
+        waveform: WorkerWaveform,
+        x_values: Option<WorkerF64Series>,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
         Self {
             name: waveform.name,
-            x_values: WorkerF64Series::from_vec(waveform.x_values, buffers),
+            x_values: x_values
+                .unwrap_or_else(|| WorkerF64Series::from_vec(waveform.x_values, buffers)),
             y_values: WorkerF64Series::from_vec(waveform.y_values, buffers),
             y_unit: waveform.y_unit,
             is_complex: waveform.is_complex,
@@ -1565,15 +1273,55 @@ impl WorkerWaveformTransport {
     }
 }
 
+/// Each waveform's series as transfer buffers, every x series crossing once.
+///
+/// A waveform sampled on an axis the transfer already carries (its result's
+/// own time or frequency axis, or the previous waveform's x series) names
+/// that buffer instead of sending its own copy. A transient's signals all
+/// share its time axis, which used to cross once per signal: about half of
+/// a transient's transfer, and of its receiver's copy.
 #[cfg(any(feature = "browser-worker", test))]
 pub(super) fn transport_waveforms(
     waveforms: Vec<WorkerWaveform>,
     buffers: &mut Vec<Vec<f64>>,
 ) -> Vec<WorkerWaveformTransport> {
+    // The candidates: the result's own series, carried before its waveforms,
+    // and each x series sent so far, the latest first. A waveform's y values
+    // are never an axis.
+    let mut axes: Vec<usize> = (0..buffers.len()).collect();
     waveforms
         .into_iter()
-        .map(|waveform| WorkerWaveformTransport::from_waveform(waveform, buffers))
+        .map(|waveform| {
+            let shared = axes
+                .iter()
+                .rev()
+                .copied()
+                .find(|&index| same_bits(&buffers[index], &waveform.x_values))
+                .map(|buffer| WorkerF64Series::Buffer {
+                    buffer,
+                    len: waveform.x_values.len(),
+                });
+            let carried = shared.is_some();
+            let waveform = WorkerWaveformTransport::from_waveform(waveform, shared, buffers);
+            if let WorkerF64Series::Buffer { buffer, .. } = waveform.x_values {
+                // The latest match moves to the front of the search.
+                if carried {
+                    axes.retain(|&index| index != buffer);
+                }
+                axes.push(buffer);
+            }
+            waveform
+        })
         .collect()
+}
+
+#[cfg(any(feature = "browser-worker", test))]
+fn same_bits(carried: &[f64], values: &[f64]) -> bool {
+    carried.len() == values.len()
+        && carried
+            .iter()
+            .zip(values)
+            .all(|(carried, value)| carried.to_bits() == value.to_bits())
 }
 
 pub(super) fn worker_waveforms_from_transport(

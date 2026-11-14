@@ -12,7 +12,6 @@ impl WorkerResponseTransport {
             id: response.id,
             outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers)?,
         };
-        validate_worker_transfer_buffers(&buffers)?;
         Ok(Self {
             protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
             response,
@@ -29,8 +28,6 @@ impl WorkerResponseTransport {
                 self.protocol
             ));
         }
-        validate_worker_transfer_buffers(&self.buffers)?;
-
         let response = WorkerResponse {
             id: self.response.id,
             outcome: self.response.outcome.into_outcome(&self.buffers)?,

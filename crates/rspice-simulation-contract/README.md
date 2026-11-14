@@ -59,8 +59,10 @@ requests and results as the `worker_*` types. Each side refuses a peer whose
 protocol differs from `worker_protocol::WORKER_REQUEST_TRANSPORT_PROTOCOL` or
 `WORKER_RESPONSE_TRANSPORT_PROTOCOL`, whose doc comments say what each recent
 revision changed. Numeric series cross inline or as indexed transfer buffers
-(`WorkerF64Series`), bounded by `worker_transport::MAX_WORKER_F64_VALUES` and
-`MAX_WORKER_TRANSFER_BUFFERS`.
+(`WorkerF64Series`); a waveform on its result's axis names the axis buffer
+instead of sending its own copy. No count bounds a transfer: a receiver that
+cannot allocate a buffer refuses it as that allocation
+(`worker_transport::try_f64_buffer`).
 
 ## Feature flags
 

@@ -395,7 +395,7 @@ impl WorkerSimulationResultTransport {
                 measurements,
                 checks,
             } => {
-                dc_sweep::validate_dc_transport_size(&sweep_values, &waveforms, evidence.as_ref())?;
+                dc_sweep::validate_dc_transport_coverage(&waveforms, evidence.as_ref())?;
                 Ok(WorkerSimulationResult::DcSweep {
                     evidence: evidence
                         .map(|evidence| evidence.into_evidence(buffers))

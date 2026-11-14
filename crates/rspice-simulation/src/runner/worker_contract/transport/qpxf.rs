@@ -48,8 +48,6 @@ impl WorkerQpxfResultTransport {
             || coordinates == 0
             || coordinates > 65_536
             || paths == 0
-            || rows > MAX_WORKER_F64_VALUES / 2
-            || paths > MAX_WORKER_F64_VALUES / 2
         {
             return Err("QPXF retained dimensions exceed worker limits".into());
         }
@@ -63,7 +61,9 @@ impl WorkerQpxfResultTransport {
             .checked_mul(grid.len())
             .and_then(|n| paths.checked_mul(points).and_then(|p| n.checked_add(p)))
             .ok_or("QPXF payload shape overflow")?;
-        if expected > MAX_WORKER_F64_VALUES / 2 || self.real.len() != expected {
+        // The packed buffer it must equal bounds `rows` and `paths` before
+        // anything is allocated from them.
+        if self.real.len() != expected {
             return Err("QPXF packed data differs from its bounded adjoint/transfer layout".into());
         }
         let mut lengths = vec![grid.len(); rows];

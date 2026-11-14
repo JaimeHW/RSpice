@@ -243,21 +243,22 @@ fn behavioral_reference_error_round_trips_through_worker_contract() {
 }
 
 #[test]
-fn a_result_too_large_to_hand_back_answers_as_the_limit_it_exceeds() {
-    // One buffer for the time axis and two per waveform: one waveform more
-    // than the transport's buffers hold.
-    let waveforms = MAX_WORKER_TRANSFER_BUFFERS / 2;
+fn a_transient_sends_its_time_axis_once_and_every_waveform_reads_it_back() {
+    // More waveforms than any count the transport once held (65,536 buffers):
+    // nothing bounds a transfer but the memory each side can allocate.
+    let waveforms = 40_000;
+    let time = vec![0.0, 1.0e-9, 2.0e-9];
     let result = WorkerSimulationResult::Transient {
         spectra: Vec::new(),
         testbench_errors: Vec::new(),
         checks: Default::default(),
         convergence: None,
-        time: vec![0.0],
+        time: time.clone(),
         waveforms: (0..waveforms)
             .map(|index| WorkerWaveform {
                 name: format!("V(n{index})"),
-                x_values: vec![0.0],
-                y_values: vec![0.0],
+                x_values: time.clone(),
+                y_values: vec![index as f64; 3],
                 y_unit: "V".to_string(),
                 is_complex: false,
                 y_imag: None,
@@ -268,28 +269,60 @@ fn a_result_too_large_to_hand_back_answers_as_the_limit_it_exceeds() {
     };
 
     let response = WorkerResponse::from_result_for_transfer(9, Ok(SimulationResult::from(result)));
-    let expected = WorkerSimulationError::ResourceLimit {
-        resource: "waveform buffers a browser run can hand back".to_string(),
-        requested: MAX_WORKER_TRANSFER_BUFFERS + 1,
-        limit: MAX_WORKER_TRANSFER_BUFFERS,
+    let transport = WorkerResponseTransport::from_response(response.clone()).expect("encodes");
+    // The axis once, then one y buffer per waveform: each x names the axis.
+    assert_eq!(transport.buffers.len(), 1 + waveforms);
+    assert_eq!(transport.buffers[0], time);
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+        time: axis,
+        waveforms: sent,
+        ..
+    }) = &transport.response.outcome
+    else {
+        panic!("expected a transient transport")
     };
-    assert_eq!(response.outcome, WorkerOutcome::Failure(expected));
+    assert!(sent.iter().all(|waveform| waveform.x_values == *axis));
 
-    // The answer crosses the transport the encoder refused the result on.
-    let error = WorkerResponseTransport::from_response(response)
-        .expect("the limit encodes")
-        .into_response()
-        .expect("the limit decodes")
-        .into_result()
-        .expect_err("the run failed");
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "Resource limit exceeded for waveform buffers a browser run can hand back: \
-             requested {}, limit {MAX_WORKER_TRANSFER_BUFFERS}",
-            MAX_WORKER_TRANSFER_BUFFERS + 1
-        )
+    assert_eq!(transport.into_response().expect("decodes"), response);
+}
+
+#[test]
+fn waveforms_on_their_own_axes_each_send_one_and_share_it() {
+    let sweep =
+        |points: usize, scale: f64| (0..points).map(|i| i as f64 * scale).collect::<Vec<_>>();
+    let waveform = |name: &str, x: Vec<f64>| WorkerWaveform {
+        name: name.to_string(),
+        y_values: vec![1.0; x.len()],
+        x_values: x,
+        y_unit: "V".to_string(),
+        is_complex: false,
+        y_imag: None,
+    };
+    let mut buffers = Vec::new();
+    let sent = transport::transport_waveforms(
+        vec![
+            waveform("a", sweep(4, 1.0)),
+            waveform("b", sweep(4, 1.0)),
+            waveform("c", sweep(4, 2.0)),
+            waveform("d", sweep(4, 1.0)),
+            // The same values with another sign bit are another series.
+            waveform("e", vec![-0.0, 1.0, 2.0, 3.0]),
+        ],
+        &mut buffers,
     );
+    let x = |index: usize| match sent[index].x_values {
+        WorkerF64Series::Buffer { buffer, .. } => buffer,
+        WorkerF64Series::Inline(_) => panic!("x values cross as buffers"),
+    };
+    assert_eq!(x(1), x(0));
+    assert_ne!(x(2), x(0));
+    assert_eq!(x(3), x(0));
+    assert_ne!(x(4), x(0));
+    // Three x series and five y series.
+    assert_eq!(buffers.len(), 8);
+    let decoded = transport::worker_waveforms_from_transport(sent, &buffers).expect("decodes");
+    assert_eq!(decoded[3].x_values, sweep(4, 1.0));
+    assert_eq!(decoded[4].x_values[0].to_bits(), (-0.0f64).to_bits());
 }
 
 #[test]
@@ -1194,18 +1227,6 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
                 .contains("solution digest")
         );
 
-        let mut oversized = transport.clone();
-        oversized
-            .request
-            .op_previous_state
-            .as_mut()
-            .unwrap()
-            .solution = WorkerF64Series::Buffer {
-            buffer: 0,
-            len: MAX_WORKER_F64_VALUES + 1,
-        };
-        assert!(oversized.into_request().unwrap_err().contains("exceeding"));
-
         let mut duplicate = transport;
         let WorkerSimulationRequest::Config(config) = &mut duplicate.request.request.request else {
             panic!("expected configured OP request")
@@ -1932,10 +1953,8 @@ fn worker_transport_extracts_transient_waveform_buffers() {
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
 
     assert_eq!(transport.protocol, WORKER_RESPONSE_TRANSPORT_PROTOCOL);
-    assert_eq!(
-        transport.buffers,
-        vec![vec![0.0, 1.0], vec![0.0, 1.0], vec![0.2, 0.4]]
-    );
+    // The waveform's x values are the time axis, which crosses once.
+    assert_eq!(transport.buffers, vec![vec![0.0, 1.0], vec![0.2, 0.4]]);
     match &transport.response.outcome {
         WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
             time,
@@ -1945,11 +1964,11 @@ fn worker_transport_extracts_transient_waveform_buffers() {
             assert_eq!(time, &WorkerF64Series::Buffer { buffer: 0, len: 2 });
             assert_eq!(
                 waveforms[0].x_values,
-                WorkerF64Series::Buffer { buffer: 1, len: 2 }
+                WorkerF64Series::Buffer { buffer: 0, len: 2 }
             );
             assert_eq!(
                 waveforms[0].y_values,
-                WorkerF64Series::Buffer { buffer: 2, len: 2 }
+                WorkerF64Series::Buffer { buffer: 1, len: 2 }
             );
             assert_eq!(waveforms[0].y_imag, None);
         }
@@ -2016,7 +2035,8 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
         })),
     };
     let ac_transport = WorkerResponseTransport::from_response(ac.clone()).unwrap();
-    assert_eq!(ac_transport.buffers.len(), 4);
+    // Frequencies (also the waveform's x values), y and the imaginary part.
+    assert_eq!(ac_transport.buffers.len(), 3);
     assert_eq!(ac_transport.into_response().expect("ac reconstructs"), ac);
 
     let noise = WorkerResponse {
@@ -2261,11 +2281,11 @@ fn worker_transport_round_trips_hb_display_and_retained_state() {
         })),
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
-    assert_eq!(transport.buffers.len(), 8);
+    assert_eq!(transport.buffers.len(), 7);
     assert_eq!(transport.clone().into_response().unwrap(), response);
 
     let mut tampered = transport;
-    tampered.buffers[7][1] += 1.0;
+    tampered.buffers[6][1] += 1.0;
     assert!(
         tampered
             .into_response()
@@ -2344,7 +2364,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let error = missing
         .into_response()
         .expect_err("missing buffer must fail");
-    assert!(error.contains("missing transferable buffer 2"));
+    assert!(error.contains("missing transferable buffer 1"));
 
     let mut mismatched = WorkerResponseTransport::from_response(response).unwrap();
     mismatched.buffers[0].push(2.0);

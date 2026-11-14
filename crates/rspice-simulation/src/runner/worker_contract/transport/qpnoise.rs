@@ -19,9 +19,6 @@ impl WorkerQpnoiseResultTransport {
                 &rspice_core::NoAbort,
             )
             .map_err(|e| e.to_string())?;
-        if values.len() > MAX_WORKER_F64_VALUES {
-            return Err("QPNOISE evidence exceeds worker limit".into());
-        }
         Ok(Self {
             metadata,
             values: WorkerF64Series::from_vec(values, buffers),
@@ -31,10 +28,8 @@ impl WorkerQpnoiseResultTransport {
         self,
         buffers: &[Vec<f64>],
     ) -> Result<QpnoiseAnalysisResult, String> {
-        if !matches!(self.values, WorkerF64Series::Buffer { .. })
-            || self.values.len() > MAX_WORKER_F64_VALUES
-        {
-            return Err("QPNOISE requires a bounded dedicated numeric buffer".into());
+        if !matches!(self.values, WorkerF64Series::Buffer { .. }) {
+            return Err("QPNOISE requires a dedicated numeric buffer".into());
         }
         let limits = rspice_core::ResourceLimits::default();
         self.metadata

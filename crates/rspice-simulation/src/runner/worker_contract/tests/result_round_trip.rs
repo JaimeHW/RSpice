@@ -41,8 +41,8 @@ fn soa_reporting_worker_detaches_source_and_rejects_changed_reports() {
     assert!(encoded.contains("source_history"));
     assert_eq!(
         packet.buffers.len(),
-        5,
-        "report axis, x/y, source axis and values"
+        4,
+        "report axis (also the waveform's x values), y, source axis and values"
     );
     assert_eq!(packet.clone().into_response().unwrap(), expected);
     let source_values = packet

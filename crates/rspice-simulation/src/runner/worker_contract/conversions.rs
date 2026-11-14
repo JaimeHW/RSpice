@@ -785,11 +785,6 @@ pub(super) fn worker_request_from_value(
         .dyn_into::<js_sys::Array>()
         .map_err(|_| JsValue::from_str("worker request transport buffers must be an array"))?;
     let buffer_count = buffers.length() as usize;
-    if buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(JsValue::from_str(&format!(
-            "worker request contains {buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-        )));
-    }
     let mut numeric_values = 0usize;
     for index in 0..buffers.length() {
         let view = buffers
@@ -800,12 +795,9 @@ pub(super) fn worker_request_from_value(
                     "worker request transport buffer {index} is not a Float64Array"
                 ))
             })?;
-        numeric_values = checked_worker_request_numeric_total(
-            numeric_values,
-            index as usize,
-            view.length() as usize,
-        )
-        .map_err(|error| JsValue::from_str(&error))?;
+        numeric_values =
+            checked_worker_request_numeric_total(numeric_values, view.length() as usize)
+                .map_err(|error| JsValue::from_str(&error))?;
     }
 
     let byte_buffers = js_sys::Reflect::get(&value, &JsValue::from_str("byteBuffers"))
@@ -850,7 +842,11 @@ pub(super) fn worker_request_from_value(
                     "worker request transport buffer {index} is not a Float64Array"
                 ))
             })?;
-        let mut values = vec![0.0; view.length() as usize];
+        let mut values = rspice_simulation_contract::worker_transport::try_f64_buffer(
+            view.length() as usize,
+            &format!("worker request transfer buffer {index}"),
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
         view.copy_to(&mut values);
         decoded_buffers.push(values);
     }
@@ -876,34 +872,95 @@ pub(crate) fn worker_response_transport_value(
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     use wasm_bindgen::JsValue;
 
-    let transport = WorkerResponseTransport::from_response(response)
+    let WorkerResponseTransport {
+        protocol,
+        response,
+        buffers,
+    } = WorkerResponseTransport::from_response(response)
         .map_err(|error| JsValue::from_str(&error))?;
+    // Each buffer leaves this module's memory as its own Float64Array, which
+    // postMessage then transfers without copying. The JavaScript heap holds
+    // them, apart from this memory, and a buffer it cannot allocate fails the
+    // run as that allocation, with the size the result needed.
+    let total: usize = buffers.iter().map(Vec::len).sum();
+    let views = js_sys::Array::new();
+    let mut refusal = None;
+    for (index, values) in buffers.into_iter().enumerate() {
+        match new_float64_array(values.len()) {
+            Ok(view) => {
+                view.copy_from(&values);
+                views.push(&view);
+            }
+            Err(reason) => {
+                refusal = Some(
+                    rspice_simulation_contract::worker_transport::f64_allocation_failure(
+                        &format!("transfer buffer {index} of the browser run's result"),
+                        values.len(),
+                        &format!(
+                            "the browser refused it ({reason}); the result needs {total} values"
+                        ),
+                    ),
+                );
+                break;
+            }
+        }
+    }
+    let (response, views) = match refusal {
+        None => (response, views),
+        Some(failure) => (
+            WorkerResponseTransportMetadata {
+                id: response.id,
+                outcome: WorkerOutcomeTransport::Failure(WorkerSimulationError::ResourceFailure(
+                    failure,
+                )),
+            },
+            js_sys::Array::new(),
+        ),
+    };
+
     let message = js_sys::Object::new();
     js_sys::Reflect::set(
         &message,
         &JsValue::from_str("protocolVersion"),
-        &JsValue::from_f64(f64::from(transport.protocol)),
+        &JsValue::from_f64(f64::from(protocol)),
     )?;
     // Result identities and Monte Carlo seeds use the complete u64 range.
     // Structured clone carries BigInt exactly; the default JS-number encoder
     // rejects otherwise valid results above 2^53 - 1.
-    let response = transport
-        .response
+    let response = response
         .serialize(
             &serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true),
         )
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     js_sys::Reflect::set(&message, &JsValue::from_str("response"), &response)?;
-
-    let buffers = js_sys::Array::new();
-    for values in transport.buffers {
-        let view = js_sys::Float64Array::new_with_length(values.len() as u32);
-        view.copy_from(&values);
-        buffers.push(&view);
-    }
-    js_sys::Reflect::set(&message, &JsValue::from_str("buffers"), &buffers)?;
+    js_sys::Reflect::set(&message, &JsValue::from_str("buffers"), &views)?;
 
     Ok(JsValue::from(message))
+}
+
+/// A zeroed `Float64Array` of `len` values, or what the browser said when it
+/// could not allocate one (`new Float64Array(len)` throws a `RangeError`).
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn new_float64_array(len: usize) -> Result<js_sys::Float64Array, String> {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let describe = |error: JsValue| {
+        error
+            .dyn_ref::<js_sys::Error>()
+            .map(|error| String::from(error.message()))
+            .or_else(|| error.as_string())
+            .unwrap_or_else(|| format!("{error:?}"))
+    };
+    let constructor = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Float64Array"))
+        .map_err(describe)?
+        .dyn_into::<js_sys::Function>()
+        .map_err(describe)?;
+    js_sys::Reflect::construct(
+        &constructor,
+        &js_sys::Array::of1(&JsValue::from_f64(len as f64)),
+    )
+    .map(JsCast::unchecked_into)
+    .map_err(describe)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -940,13 +997,7 @@ pub(crate) fn worker_response_from_value(
             )
         })?;
 
-    let buffer_count = buffers.length() as usize;
-    if buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
-        return Err(SimulationError::InvalidConfig(format!(
-            "worker response contains {buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
-        )));
-    }
-    let mut numeric_values = 0usize;
+    let mut decoded_buffers = Vec::with_capacity(buffers.length() as usize);
     for index in 0..buffers.length() {
         let view = buffers
             .get(index)
@@ -956,31 +1007,13 @@ pub(crate) fn worker_response_from_value(
                     "worker response transport buffer {index} is not a Float64Array"
                 ))
             })?;
-        numeric_values = numeric_values
-            .checked_add(view.length() as usize)
-            .ok_or_else(|| {
-                SimulationError::InvalidConfig(
-                    "worker response numeric size overflows this platform".to_owned(),
-                )
-            })?;
-        if numeric_values > MAX_WORKER_F64_VALUES {
-            return Err(SimulationError::InvalidConfig(format!(
-                "worker response contains more than {MAX_WORKER_F64_VALUES} numerical values"
-            )));
-        }
-    }
-
-    let mut decoded_buffers = Vec::with_capacity(buffer_count);
-    for index in 0..buffers.length() {
-        let view = buffers
-            .get(index)
-            .dyn_into::<js_sys::Float64Array>()
-            .map_err(|_| {
-                SimulationError::InvalidConfig(format!(
-                    "worker response transport buffer {index} is not a Float64Array"
-                ))
-            })?;
-        let mut values = vec![0.0; view.length() as usize];
+        // The result's memory in this program: a run whose result does not
+        // fit is refused as the allocation, not aborted.
+        let mut values = rspice_simulation_contract::worker_transport::try_f64_buffer(
+            view.length() as usize,
+            &format!("the browser run's result transfer buffer {index}"),
+        )
+        .map_err(SimulationError::ResourceFailure)?;
         view.copy_to(&mut values);
         decoded_buffers.push(values);
     }
@@ -1025,25 +1058,11 @@ pub(super) fn pss_display_projection(
     } else {
         reporting_times
     };
-    let channels = result
-        .node_names
-        .iter()
-        .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
-        .count()
-        .saturating_add(result.branch_names.len());
-    // Reconstruction allocates an x and y series for each displayed channel.
-    let values = times
-        .len()
-        .saturating_mul(channels.saturating_mul(2).saturating_add(1));
-    if values > MAX_WORKER_F64_VALUES {
-        return Err(format!(
-            "PSS display requires {values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
-        ));
-    }
+    // The reporting times are the run's own, already held to its limits.
     rspice_core::analysis::transient::TransientOutputProjection::interpolate_times(
         &result.time,
         times,
-        MAX_WORKER_F64_VALUES,
+        times.len(),
     )
     .map_err(|error| error.to_string())
 }
