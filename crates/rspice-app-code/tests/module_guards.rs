@@ -62,6 +62,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "workflows"),
     ("workbench/app/dialogs/source_document.rs", "fixtures"),
     ("workbench/code.rs", "commands"),
+    ("workbench/code.rs", "netlist_first"),
     ("workbench/documents/netlist_document.rs", "fixtures"),
     ("workbench/documents/netlist_document.rs", "language"),
     ("workbench/surfaces/netlist.rs", "fixtures"),

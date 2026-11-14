@@ -1,10 +1,12 @@
 //! The code feature: the Netlist and Automation workspaces, the Verilog-A
-//! views the Design workspace opens, and the source editors they share.
+//! views the Design workspace opens, the landing Design shows for a project
+//! its deck owns, and the source editors they share.
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
 pub mod commands;
 mod docks;
+pub mod netlist_first;
 
 use egui::Context;
 
@@ -40,7 +42,7 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    Peers, Reads,
+    FeatureSurface, Peers, Reads,
 };
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{CodeState, netlist_shown_in, veriloga_compilation_in};
@@ -107,6 +109,11 @@ impl Feature for CodeFeature {
             show: docks::show_inspector,
             // Nothing the section draws holds an edit for the shell to commit.
             commit_pending_edit: |_, _| {},
+        });
+        // The landing a deck-owned project shows in Design while it has no
+        // schematic: the shell draws it in the document's place.
+        registry.surface(FeatureSurface {
+            show: netlist_first::show,
         });
     }
 }

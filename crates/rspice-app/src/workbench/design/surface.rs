@@ -1,7 +1,6 @@
 //! Hierarchical design document surface.
 
 pub(crate) mod layout_editor;
-pub(crate) mod netlist_first;
 mod tool_options;
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
@@ -16,8 +15,6 @@ use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CloudSessionPort, Cx};
 
 use super::super::design_system::{Problem, empty_state, paint_problem_mark};
-
-pub(in crate::workbench) use netlist_first::show as show_netlist_first;
 
 /// The surface the design feature registers: the document in front, in the
 /// feature's context. A canvas document leaves where it drew for the touch

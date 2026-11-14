@@ -2,13 +2,122 @@
 //! about the deck that owns the project and what its two actions run.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::surface::netlist_first::tests::{
-    NETLIST_FIRST_BASELINES, SUPPORTED_VIEWPORTS, netlist_first_app,
-};
-use crate::workbench::design::surface::netlist_first::*;
+use crate::workbench::code::CodeFeature;
+use crate::workbench::code::netlist_first::*;
 use crate::workbench::documents::netlist_document::root_deck_source_index;
+use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
 use egui::{Rect, Ui, Vec2, pos2, vec2};
+
+const DECK: &str = "Precision front-end bench\n\
+    * differential input stage\n\
+    V1 in 0 AC 1\n\
+    R1 in inn 4.7k\n\
+    C1 inn 0 220p\n\
+    M1 out inn 0 0 NFET W=10u L=1u\n\
+    .model NFET NMOS (LEVEL=1 VTO=0.7)\n\
+    .subckt buffer a y\n\
+    E1 y 0 a 0 1\n\
+    .ends\n\
+    .tran 1n 1u\n\
+    .op\n\
+    .end\n";
+
+const SUPPORTED_VIEWPORTS: [(&str, Vec2); 3] = [
+    ("1440x900", Vec2::new(1440.0, 900.0)),
+    ("820x1180", Vec2::new(820.0, 1180.0)),
+    ("390x844", Vec2::new(390.0, 844.0)),
+];
+#[derive(Clone, Copy)]
+struct NetlistFirstBaseline {
+    name: &'static str,
+    size: Vec2,
+    truncated: bool,
+    fingerprint: &'static str,
+}
+
+const NETLIST_FIRST_BASELINES: [NetlistFirstBaseline; 4] = [
+    NetlistFirstBaseline {
+        name: "design-netlist-first-1440x900",
+        size: Vec2::new(1440.0, 900.0),
+        truncated: false,
+        fingerprint: "0fe385bbc9e9e9184f5dcd7a1a423c8982a6d685ac699052a0705279088c0bae",
+    },
+    NetlistFirstBaseline {
+        name: "design-netlist-first-820x1180",
+        size: Vec2::new(820.0, 1180.0),
+        truncated: false,
+        fingerprint: "3896b344cd981b7bbaece1211152139c8cba4e47b26bc799e99f49926e97191e",
+    },
+    NetlistFirstBaseline {
+        name: "design-netlist-first-390x844",
+        size: Vec2::new(390.0, 844.0),
+        truncated: false,
+        fingerprint: "4b4438a47ded9018f41f5ea44b1567f16cc295544bd762628f7d3430bada79ab",
+    },
+    NetlistFirstBaseline {
+        name: "design-netlist-first-1440x900-truncated",
+        size: Vec2::new(1440.0, 900.0),
+        truncated: true,
+        fingerprint: "5e51b693fe0cbee83fb9c359f009e909f5980aa486653135d308e5ecba7314af",
+    },
+];
+
+pub(super) fn netlist_first_app() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state
+            .apply_imported_netlist(DECK.to_owned(), None, "front_end.sp")
+    );
+    assert!(app.state.is_netlist_first_without_schematic());
+    app
+}
+
+#[test]
+fn netlist_first_visual_baselines_cover_supported_viewports_and_truncation_and_are_unique() {
+    assert_eq!(NETLIST_FIRST_BASELINES.len(), SUPPORTED_VIEWPORTS.len() + 1);
+    assert_eq!(
+        NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
+            .iter()
+            .map(|baseline| baseline.size)
+            .collect::<Vec<_>>(),
+        SUPPORTED_VIEWPORTS.map(|(_, size)| size),
+        "the baseline table must cover every supported netlist-first viewport"
+    );
+    assert!(
+        NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
+            .iter()
+            .all(|baseline| !baseline.truncated)
+    );
+    let truncated = NETLIST_FIRST_BASELINES
+        .last()
+        .expect("truncated netlist-first baseline");
+    assert!(truncated.truncated);
+    assert_eq!(truncated.size, SUPPORTED_VIEWPORTS[0].1);
+    let names = NETLIST_FIRST_BASELINES
+        .iter()
+        .map(|baseline| baseline.name)
+        .collect::<std::collections::HashSet<_>>();
+    let fingerprints = NETLIST_FIRST_BASELINES
+        .iter()
+        .map(|baseline| baseline.fingerprint)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(names.len(), NETLIST_FIRST_BASELINES.len());
+    assert_eq!(
+        fingerprints.len(),
+        NETLIST_FIRST_BASELINES.len(),
+        "every supported viewport/state must have an independently reviewed fingerprint"
+    );
+}
+
+/// One pass of the landing the code feature registers, drawn over `app` in
+/// the context the shell lends it.
+fn landing(app: &mut RSpiceApp, ui: &mut Ui) {
+    let surface = CodeFeature::registry()
+        .surface_section()
+        .expect("the code feature registers the netlist-first landing");
+    (surface.show)(&mut features::surface_cx::<CodeFeature>(app, |_| false), ui);
+}
 
 fn truncated_netlist_first_app() -> RSpiceApp {
     let mut deck = String::from("Long resistor ladder bench\n");
@@ -28,7 +137,7 @@ fn netlist_first_canvas(size: Vec2, truncated: bool) -> crate::ui::raster::Canva
     } else {
         netlist_first_app()
     };
-    crate::ui::raster::render(size, |ui, _| show(ui, &mut app.state))
+    crate::ui::raster::render(size, |ui, _| landing(&mut app, ui))
 }
 
 fn regression_height(canvas: &crate::ui::raster::Canvas) -> usize {
@@ -52,11 +161,17 @@ fn netlist_first_empty_state_actions_use_the_canonical_commands() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
 
-    raise_netlist_first_action(&mut app.state, NetlistFirstAction::OpenNetlistWorkspace);
+    raise_netlist_first_action(
+        &mut app.state.workbench,
+        NetlistFirstAction::OpenNetlistWorkspace,
+    );
     app.after_contribution();
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
 
-    raise_netlist_first_action(&mut app.state, NetlistFirstAction::CreateSchematic);
+    raise_netlist_first_action(
+        &mut app.state.workbench,
+        NetlistFirstAction::CreateSchematic,
+    );
     app.after_contribution();
     assert!(app.state.project.new_cell_dialog);
     assert!(app.state.project.new_cell_create_schematic);
@@ -103,7 +218,7 @@ fn painted_text(size: Vec2, mut pass: impl FnMut(&mut Ui)) -> Vec<String> {
 #[test]
 fn the_page_names_the_deck_its_actions_and_its_facts() {
     let mut app = netlist_first_app();
-    let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
+    let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     for expected in [
         EYEBROW,
         "Open Netlist & Script Editor",
@@ -128,14 +243,17 @@ fn a_restored_session_shows_its_deck_before_the_editor_has_been_opened() {
     app.state = serde_json::from_str(&session).expect("session restores");
     assert!(app.state.is_netlist_first_without_schematic());
 
-    let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
+    let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     assert!(!text.contains("The deck has no source text."), "{text}");
     assert!(
         text.contains("R1 in inn 4.7k"),
         "deck lines missing in:\n{text}"
     );
     let index = root_deck_source_index(&app.state.model, &mut app.state.code.netlist);
-    assert_eq!(deck_facts(&app.state, &index).lines, 13);
+    assert_eq!(
+        deck_facts(&app.state.model, &app.state.code.netlist, &index).lines,
+        13
+    );
 }
 
 #[test]
@@ -144,7 +262,7 @@ fn the_landing_shows_the_deck_while_the_editor_shows_other_text() {
     // An include file open in the editor, or nothing projected into it yet.
     for editor in ["* models.inc\n.model NFET NMOS (LEVEL=1)\n", ""] {
         editor.clone_into(&mut app.state.model.simulation.source.netlist_content);
-        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
+        let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
         assert!(text.contains("Precision front-end bench"), "{text}");
         assert!(!text.contains("* models.inc"), "{text}");
     }
@@ -154,7 +272,7 @@ fn the_landing_shows_the_deck_while_the_editor_shows_other_text() {
 fn a_long_deck_truncates_behind_a_footer_that_counts_what_was_left_out() {
     let mut app = truncated_netlist_first_app();
 
-    let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app.state)).join("\n");
+    let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     assert!(
         text.contains("more lines"),
         "no truncation footer in:\n{text}"
@@ -187,7 +305,7 @@ fn the_page_paints_the_full_landing_at_all_supported_viewports() {
 fn the_two_column_landing_fills_both_columns() {
     let mut app = netlist_first_app();
     let size = vec2(1440.0, 900.0);
-    let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app.state));
+    let canvas = crate::ui::raster::render(size, |ui, _| landing(&mut app, ui));
 
     // Content column: 1240 centered in 1440 leaves 100 on each side. The
     // preview occupies the left column and the rail the last 322 points.

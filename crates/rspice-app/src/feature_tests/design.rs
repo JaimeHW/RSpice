@@ -50,8 +50,6 @@ mod navigator_rails;
 mod navigator_shelf;
 mod navigator_shelf_search;
 mod net_label_placement_drawn;
-mod netlist_first;
-mod netlist_first_drawn;
 mod object_properties_drawn;
 mod physical_layout_transactions;
 mod pin_port_placement_drawn;

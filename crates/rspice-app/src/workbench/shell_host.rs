@@ -81,7 +81,6 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
-                use crate::workbench::design::surface as design;
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
                 use crate::workbench::surfaces::{
@@ -160,9 +159,10 @@ impl Host for RSpiceApp {
                         project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));
                     }
                     // While a deck owns the project and no schematic is
-                    // drawn yet, its landing stands in for the document.
+                    // drawn yet, its landing stands in for the document,
+                    // drawn by the code feature in its context.
                     Workspace::Design if app.state.is_netlist_first_without_schematic() => {
-                        design::show_netlist_first(ui, &mut app.state);
+                        features::show_surface::<CodeFeature>(app, ui);
                     }
                     // The design feature draws the document in its context.
                     // Code's Verilog-A tab draws a Verilog-A view's source

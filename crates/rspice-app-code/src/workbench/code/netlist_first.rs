@@ -7,29 +7,31 @@
 //! idiom so the workbench's landing surfaces read as one product, and every
 //! fact on it is live document state: the deck preview, the outline counts,
 //! and the publication state all come from the project's own deck, indexed the
-//! way the Netlist workspace indexes it.
+//! way the Netlist workspace indexes it. It is the code feature's surface,
+//! drawn in that feature's context while the deck owns the project.
 
 use egui::{
-    Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Color32, Key, Layout, Modifiers, Rect, Response, ScrollArea, Sense, Stroke, Ui,
+    UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::state::command_catalog::CommandKey;
 use crate::state::{DependencyResolution, NetlistSourceIndex, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::AppState;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::app_state::Model;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, action_row, centered_content_rect, elide_text, paint_problem_mark,
     property_card, property_row, property_row_problem,
 };
 use crate::workbench::documents::netlist_document::{
-    OwnedNetlistPublicationState, owned_netlist_publication_state_in, root_deck_source_index,
+    NetlistDocumentState, OwnedNetlistPublicationState, owned_netlist_publication_state_in,
+    root_deck_source_index,
 };
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::Execute;
-use crate::workbench::state::Workspace;
+use crate::workbench::framework::feature::{Cx, Execute};
+use crate::workbench::state::WorkbenchSession;
 
 /// Geometry shared with the no-project landing, so the two landing surfaces
 /// sit on the same grid.
@@ -55,14 +57,14 @@ const PREVIEW_FOOTER_HEIGHT: f32 = 24.0;
 const PREVIEW_MIN_HEIGHT: f32 = 180.0;
 const STACKED_PREVIEW_HEIGHT: f32 = 320.0;
 
-pub(crate) const EYEBROW: &str = "NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC";
+pub const EYEBROW: &str = "NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC";
 const DESCRIPTION: &str = "This project is driven by its SPICE deck. The Netlist & Script Editor \
     owns source editing; simulation, probing, and results work exactly as in schematic projects. \
     Creating a schematic promotes this into a schematic-driven design.";
 const PREVIEW_ACTION_LABEL: &str = "Open the deck in the Netlist & Script Editor";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetlistFirstAction {
+pub enum NetlistFirstAction {
     OpenNetlistWorkspace,
     CreateSchematic,
 }
@@ -79,21 +81,25 @@ impl NetlistFirstAction {
 
 /// Run the action's command. The shell runs it once the surface has drawn,
 /// and the surface draws nothing after the action.
-pub(crate) fn raise_netlist_first_action(state: &mut AppState, action: NetlistFirstAction) {
-    state.workbench.outbox.push(Execute(action.command_key()));
+pub fn raise_netlist_first_action(wb: &mut WorkbenchSession, action: NetlistFirstAction) {
+    wb.outbox.push(Execute(action.command_key()));
 }
 
-pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
+/// The surface the code feature registers: the landing, in its context.
+pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     let mut action = None;
+    // The row dispatches this exact command, so it reads the command's own
+    // label rather than keeping a second copy of the workspace name.
+    let open_label = cx.commands.label(ids::NETLIST_WORKSPACE);
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            header(ui, state.model.workspace.content.project.name());
-            body(ui, state, &mut action);
+            header(ui, cx.model.workspace.content.project.name());
+            body(ui, cx.model, &mut cx.state.netlist, open_label, &mut action);
         });
     if let Some(action) = action {
-        raise_netlist_first_action(state, action);
+        raise_netlist_first_action(cx.wb, action);
     }
 }
 
@@ -172,9 +178,15 @@ fn header(ui: &mut Ui, project_name: &str) {
     });
 }
 
-fn body(ui: &mut Ui, state: &mut AppState, action: &mut Option<NetlistFirstAction>) {
-    let index = root_deck_source_index(&state.model, &mut state.code.netlist);
-    let facts = deck_facts(state, &index);
+fn body(
+    ui: &mut Ui,
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    open_label: &str,
+    action: &mut Option<NetlistFirstAction>,
+) {
+    let index = root_deck_source_index(model, netlist);
+    let facts = deck_facts(model, netlist, &index);
 
     let available = ui.available_rect_before_wrap();
     ui.allocate_rect(available, Sense::hover());
@@ -208,7 +220,7 @@ fn body(ui: &mut Ui, state: &mut AppState, action: &mut Option<NetlistFirstActio
         ScrollArea::vertical()
             .id_salt("workbench.design.netlist-first.rail")
             .auto_shrink([false, false])
-            .show(&mut right, |ui| rail(ui, &facts, action));
+            .show(&mut right, |ui| rail(ui, &facts, open_label, action));
     } else {
         let mut stacked = ui.new_child(
             UiBuilder::new()
@@ -223,17 +235,15 @@ fn body(ui: &mut Ui, state: &mut AppState, action: &mut Option<NetlistFirstActio
                 ui.set_min_width(content.width());
                 deck_preview(ui, &index, &facts, STACKED_PREVIEW_HEIGHT, action);
                 ui.add_space(16.0);
-                rail(ui, &facts, action);
+                rail(ui, &facts, open_label, action);
             });
     }
 }
 
-fn rail(ui: &mut Ui, facts: &DeckFacts, action: &mut Option<NetlistFirstAction>) {
+fn rail(ui: &mut Ui, facts: &DeckFacts, open_label: &str, action: &mut Option<NetlistFirstAction>) {
     for (title, detail, icon, primary, next) in [
         (
-            // The row dispatches this exact command, so it reads the command's
-            // own label rather than keeping a second copy of the workspace name.
-            Command::OpenWorkspace(Workspace::Netlist).spec().label,
+            open_label,
             "Deck source \u{00b7} outline \u{00b7} diagnostics \u{00b7} overlay",
             WorkbenchIcon::Code,
             true,
@@ -368,10 +378,23 @@ fn deck_preview(
         node.set_description(format!("{} \u{00b7} {} lines", facts.name, facts.lines));
     });
     theme::paint_focus_ring(ui, &response, rect);
-    if super::activated(ui, &response) {
+    if activated(ui, &response) {
         *action = Some(NetlistFirstAction::OpenNetlistWorkspace);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand);
+}
+
+/// Whether the preview was clicked or activated from the keyboard. The key is
+/// consumed here so nothing behind the page also acts on the same press.
+fn activated(ui: &Ui, response: &Response) -> bool {
+    if response.clicked() {
+        return true;
+    }
+    response.has_focus()
+        && ui.input_mut(|input| {
+            input.consume_key(Modifiers::NONE, Key::Enter)
+                || input.consume_key(Modifiers::NONE, Key::Space)
+        })
 }
 
 fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
@@ -555,23 +578,26 @@ const fn publication_presentation(
 
 /// Everything the page states about the deck, derived once per frame from the
 /// canonical document and the editor's own cached source index.
-pub(crate) struct DeckFacts {
-    pub(crate) name: String,
+pub struct DeckFacts {
+    pub name: String,
     dialect: Option<&'static str>,
-    pub(crate) lines: usize,
-    pub(crate) devices: usize,
-    pub(crate) analyses: usize,
-    pub(crate) models: usize,
-    pub(crate) subcircuits: usize,
-    pub(crate) dependencies: usize,
+    pub lines: usize,
+    pub devices: usize,
+    pub analyses: usize,
+    pub models: usize,
+    pub subcircuits: usize,
+    pub dependencies: usize,
     unresolved_dependencies: usize,
-    pub(crate) publication: Option<OwnedNetlistPublicationState>,
+    pub publication: Option<OwnedNetlistPublicationState>,
 }
 
-pub(crate) fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
-    let document = state.model.workspace.content.netlist_document.as_ref();
-    let name = state
-        .model
+pub fn deck_facts(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    index: &NetlistSourceIndex,
+) -> DeckFacts {
+    let document = model.workspace.content.netlist_document.as_ref();
+    let name = model
         .workspace
         .content
         .netlist_descriptor
@@ -586,8 +612,7 @@ pub(crate) fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFa
             })
         })
         .unwrap_or_else(|| "Untitled deck".to_owned());
-    let dialect = state
-        .model
+    let dialect = model
         .workspace
         .content
         .netlist_descriptor
@@ -620,11 +645,7 @@ pub(crate) fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFa
         (document.dependencies().len(), unresolved)
     });
     let publication = document.map(|document| {
-        owned_netlist_publication_state_in(
-            &state.model,
-            &state.code.netlist,
-            document.content_digest(),
-        )
+        owned_netlist_publication_state_in(model, netlist, document.content_digest())
     });
 
     DeckFacts {
@@ -638,112 +659,5 @@ pub(crate) fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFa
         dependencies,
         unresolved_dependencies,
         publication,
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::workbench::RSpiceApp;
-
-    const DECK: &str = "Precision front-end bench\n\
-        * differential input stage\n\
-        V1 in 0 AC 1\n\
-        R1 in inn 4.7k\n\
-        C1 inn 0 220p\n\
-        M1 out inn 0 0 NFET W=10u L=1u\n\
-        .model NFET NMOS (LEVEL=1 VTO=0.7)\n\
-        .subckt buffer a y\n\
-        E1 y 0 a 0 1\n\
-        .ends\n\
-        .tran 1n 1u\n\
-        .op\n\
-        .end\n";
-
-    pub(crate) const SUPPORTED_VIEWPORTS: [(&str, Vec2); 3] = [
-        ("1440x900", Vec2::new(1440.0, 900.0)),
-        ("820x1180", Vec2::new(820.0, 1180.0)),
-        ("390x844", Vec2::new(390.0, 844.0)),
-    ];
-    #[derive(Clone, Copy)]
-    pub(crate) struct NetlistFirstBaseline {
-        pub(crate) name: &'static str,
-        pub(crate) size: Vec2,
-        pub(crate) truncated: bool,
-        pub(crate) fingerprint: &'static str,
-    }
-
-    pub(crate) const NETLIST_FIRST_BASELINES: [NetlistFirstBaseline; 4] = [
-        NetlistFirstBaseline {
-            name: "design-netlist-first-1440x900",
-            size: Vec2::new(1440.0, 900.0),
-            truncated: false,
-            fingerprint: "0fe385bbc9e9e9184f5dcd7a1a423c8982a6d685ac699052a0705279088c0bae",
-        },
-        NetlistFirstBaseline {
-            name: "design-netlist-first-820x1180",
-            size: Vec2::new(820.0, 1180.0),
-            truncated: false,
-            fingerprint: "3896b344cd981b7bbaece1211152139c8cba4e47b26bc799e99f49926e97191e",
-        },
-        NetlistFirstBaseline {
-            name: "design-netlist-first-390x844",
-            size: Vec2::new(390.0, 844.0),
-            truncated: false,
-            fingerprint: "4b4438a47ded9018f41f5ea44b1567f16cc295544bd762628f7d3430bada79ab",
-        },
-        NetlistFirstBaseline {
-            name: "design-netlist-first-1440x900-truncated",
-            size: Vec2::new(1440.0, 900.0),
-            truncated: true,
-            fingerprint: "5e51b693fe0cbee83fb9c359f009e909f5980aa486653135d308e5ecba7314af",
-        },
-    ];
-
-    pub(crate) fn netlist_first_app() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        assert!(
-            app.state
-                .apply_imported_netlist(DECK.to_owned(), None, "front_end.sp")
-        );
-        assert!(app.state.is_netlist_first_without_schematic());
-        app
-    }
-
-    #[test]
-    fn netlist_first_visual_baselines_cover_supported_viewports_and_truncation_and_are_unique() {
-        assert_eq!(NETLIST_FIRST_BASELINES.len(), SUPPORTED_VIEWPORTS.len() + 1);
-        assert_eq!(
-            NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
-                .iter()
-                .map(|baseline| baseline.size)
-                .collect::<Vec<_>>(),
-            SUPPORTED_VIEWPORTS.map(|(_, size)| size),
-            "the baseline table must cover every supported netlist-first viewport"
-        );
-        assert!(
-            NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
-                .iter()
-                .all(|baseline| !baseline.truncated)
-        );
-        let truncated = NETLIST_FIRST_BASELINES
-            .last()
-            .expect("truncated netlist-first baseline");
-        assert!(truncated.truncated);
-        assert_eq!(truncated.size, SUPPORTED_VIEWPORTS[0].1);
-        let names = NETLIST_FIRST_BASELINES
-            .iter()
-            .map(|baseline| baseline.name)
-            .collect::<std::collections::HashSet<_>>();
-        let fingerprints = NETLIST_FIRST_BASELINES
-            .iter()
-            .map(|baseline| baseline.fingerprint)
-            .collect::<std::collections::HashSet<_>>();
-        assert_eq!(names.len(), NETLIST_FIRST_BASELINES.len());
-        assert_eq!(
-            fingerprints.len(),
-            NETLIST_FIRST_BASELINES.len(),
-            "every supported viewport/state must have an independently reviewed fingerprint"
-        );
     }
 }

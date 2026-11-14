@@ -813,17 +813,17 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
 ];
 
 /// The shell's `contribute`, at the Design stage. While a deck owns the
-/// project with no schematic drawn, its landing stands in for the document.
-/// Otherwise the design feature draws the document in its context, then
-/// code's Verilog-A tab draws a Verilog-A view's source under it, then the
-/// touch strip draws over the canvas the document drew, in a lend of its
-/// own taken where it draws.
+/// project with no schematic drawn, code's landing stands in for the
+/// document, in the code feature's context. Otherwise the design feature
+/// draws the document in its context, then code's Verilog-A tab draws a
+/// Verilog-A view's source under it, then the touch strip draws over the
+/// canvas the document drew, in a lend of its own taken where it draws.
 const DESIGN_STAGE: &[Step] = &[
     (
         "netlist-first landing",
         &[
             "Workspace::Design if app.state.is_netlist_first_without_schematic() => {\
-           design::show_netlist_first(ui, &mut app.state);\
+           features::show_surface::<CodeFeature>(app, ui);\
            }",
         ],
     ),
