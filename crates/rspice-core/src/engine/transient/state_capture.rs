@@ -279,7 +279,12 @@ impl Engine {
     /// segment takes them as they are rather than the differences of the
     /// mesh's rounded times. Over the accepted times and step sizes of a run
     /// that captured `image` (a capture time is a hard breakpoint of that
-    /// run), the segment repeats the run bit for bit.
+    /// run), the segment repeats the run bit for bit: a landing on a source
+    /// breakpoint is solved as the run solves it. An ideal switch whose
+    /// control crosses its threshold inside a step cuts it at the crossing,
+    /// so the change is dated where it happens rather than at the next mesh
+    /// time; there the segment departs from a run, which dates the change at
+    /// its first accepted point past the crossing.
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the event-shooting period map is its caller")
@@ -451,15 +456,53 @@ mod tests {
                                  .TRAN 10n 5u\n\
                                  .END\n";
 
+    /// The nonlinear deck driven by a pulse with ramps, so the segment lands
+    /// on corners: each is a breakpoint the run solves at its left limit and
+    /// restarts its integrator on leaving.
+    const PULSE_DECK: &str = "segment across pulse corners\n\
+                              V1 in 0 PULSE(0 2 0 20n 20n 480n 1u)\n\
+                              R0 in a 10\n\
+                              R1 a out 1k\n\
+                              C1 out 0 1n\n\
+                              D1 out 0 dclamp\n\
+                              R2 out m 100\n\
+                              L1 m 0 10u\n\
+                              .model dclamp d is=1e-14 cjo=2p\n\
+                              .TRAN 10n 5u\n\
+                              .END\n";
+
+    /// The nonlinear load behind an ideal hysteretic switch that a pulse
+    /// closes above 1.2 V and opens below 0.8 V, so the switch changes four
+    /// times inside the segment.
+    const SWITCH_DECK: &str = "segment across switch changes\n\
+                               V1 in 0 PULSE(0 2 0 20n 20n 480n 1u)\n\
+                               S1 in a in 0 sw\n\
+                               R1 a out 1k\n\
+                               C1 out 0 1n\n\
+                               D1 out 0 dclamp\n\
+                               R2 out m 100\n\
+                               L1 m 0 10u\n\
+                               .model sw sw vt=1 vh=0.2 ron=10 roff=1meg\n\
+                               .model dclamp d is=1e-14 cjo=2p\n\
+                               .TRAN 10n 5u\n\
+                               .END\n";
+
     /// A segment from a live image over a run's own later accepted times and
     /// steps is that run, bit for bit: the image's time is a capture, so a
     /// hard breakpoint the run restarts its integrator and predictor at, and
     /// the segment leaves it the same way, from the same accepted state and
-    /// sparse-solver state.
+    /// sparse-solver state. A pulse corner inside the segment is landed as
+    /// the run lands it: solved at the source's left limit, with the
+    /// integrator restarted on leaving it.
     #[test]
     fn a_segment_from_a_live_image_repeats_the_run_bit_for_bit() {
-        for deck in [RC_DECK, NONLINEAR_DECK] {
+        for deck in [RC_DECK, NONLINEAR_DECK, PULSE_DECK] {
             let (run, segment, first) = segment_of_its_own_run(deck);
+            assert_eq!(
+                segment.0.time,
+                run.0.time[first..],
+                "the segment lands on every mesh time and nowhere else"
+            );
             for node in ["in", "a", "out", "m"] {
                 let Some(from_run) = run.0.try_voltage_waveform_named(node) else {
                     continue;
@@ -485,6 +528,58 @@ mod tests {
                 bits(&run.1.solution),
                 "the segment ends on the state the run accepts there"
             );
+        }
+    }
+
+    /// A segment across ideal switch changes cuts its locked step where a
+    /// switch's control crosses the threshold its accepted state changes at,
+    /// so each change is dated at its crossing, and lands on every one of the
+    /// run's accepted times. The pulse ramps V(in) linearly, so the switch
+    /// opens where it falls through 0.8 V (2.512 us, 3.512 us) and closes
+    /// where it rises through 1.2 V (3.012 us).
+    ///
+    /// The run dates each change at its first accepted point past the
+    /// crossing instead, up to 8.2 ps late here (2.5119846 us, then
+    /// 2.5120082 us), and the ~0.6-1 mA the switch carries moves the 1 nF
+    /// capacitor by 0.6-1 mV/ns, so the segment leaves each change up to
+    /// about 5e-6 V from the run (5.0e-6 V measured at the worst point).
+    /// Without the cut the segment repeats the run bit for bit.
+    #[test]
+    fn a_segment_across_switch_changes_dates_them_at_their_crossings() {
+        let (run, segment, first) = segment_of_its_own_run(SWITCH_DECK);
+        let cuts: Vec<Value> = segment
+            .0
+            .time
+            .iter()
+            .copied()
+            .filter(|time| !run.0.time[first..].contains(time))
+            .collect();
+        assert_eq!(cuts.len(), 3, "one cut per switch change: {cuts:?}");
+        for (cut, crossing) in cuts.iter().zip([2.512e-6, 3.012e-6, 3.512e-6]) {
+            assert!(
+                (cut - crossing).abs() <= 1.0e-15,
+                "the change at {crossing:e} s is dated at {cut:e} s"
+            );
+        }
+        for node in ["in", "a", "out", "m"] {
+            let from_run = run.0.try_voltage_waveform_named(node).expect("run node");
+            let from_segment = segment
+                .0
+                .try_voltage_waveform_named(node)
+                .expect("segment node");
+            for (time, left) in run.0.time[first..].iter().zip(&from_run[first..]) {
+                let index = segment
+                    .0
+                    .time
+                    .iter()
+                    .position(|candidate| candidate == time)
+                    .unwrap_or_else(|| panic!("the segment lands on the run's {time:e} s"));
+                let right = from_segment[index];
+                assert!(
+                    (left - right).abs() <= 1.0e-5,
+                    "V({node}) at t={time:e} s: the run holds {left:e}, the segment {right:e}"
+                );
+            }
         }
     }
 
@@ -530,11 +625,6 @@ mod tests {
                     &NoAbort,
                 )
                 .expect("the segment converges");
-            assert_eq!(
-                segment.time,
-                run.time[first..],
-                "the segment lands on every mesh time"
-            );
             assert_eq!(end.time, captured[1].time);
             let last = captured.pop().expect("two captures");
             ((run, last), (segment, end), first)

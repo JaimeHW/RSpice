@@ -6352,6 +6352,18 @@ impl Engine {
             })
             .unwrap_or((None, None));
         let mut locked_cursor = 0usize;
+        // A segment run from a live image (a PSS event-shooting traversal)
+        // continues the run the image was captured from: its locked mesh
+        // fixes where it lands, but a landing on a source breakpoint is
+        // solved as the free run solves it (sources at their left limit, the
+        // integrator restarted on leaving it), so one period of the map is
+        // one period of the transient. It also cuts a locked step where an
+        // ideal switch crosses its threshold, so the period map moves the
+        // switch's change with the state.
+        let segment_from_image = locked_grid.is_some() && image.is_some();
+        let splits_switch_thresholds =
+            segment_from_image && (!circuit.vswitches.is_empty() || !circuit.iswitches.is_empty());
+        let mut locked_switch_split: Option<Value> = None;
         let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
             Some(&last) => last.min(tstop),
             None => tstop,
@@ -8009,6 +8021,15 @@ impl Engine {
                     {
                         step_target = step_target.min(breakpoint);
                     }
+                    // The cut is taken as found: the helper keeps it a floor
+                    // inside the step it was found in, and a tolerance wider
+                    // than that floor would refuse it and solve the same
+                    // step again.
+                    if let Some(split) =
+                        locked_switch_split.filter(|split| *split > t && *split < step_target)
+                    {
+                        step_target = split;
+                    }
                     // Whether `hinted_max_step` may subdivide the interval
                     // depends on which of the two locking contracts is in
                     // force, and they are told apart by whether the caller
@@ -8059,7 +8080,10 @@ impl Engine {
                         // original integration coefficients bit-for-bit.
                         locked_dt = scheduled_dt;
                     }
-                    (locked_dt, false)
+                    (
+                        locked_dt,
+                        segment_from_image && breakpoints.at_breakpoint(step_target),
+                    )
                 }
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
@@ -8452,7 +8476,7 @@ impl Engine {
             // activation inside it would be stepped over.
             let left_limit_landing = self.config.spice_dialect == SpiceDialect::BestAvailable
                 && at_breakpoint
-                && locked_grid.is_none()
+                && (locked_grid.is_none() || segment_from_image)
                 && !has_exact_transient_history;
             let breakpoint_clock = (left_limit_landing && exact_device_event_time.is_none())
                 .then(|| {
@@ -10959,6 +10983,25 @@ impl Engine {
             // finite source jump cannot satisfy that estimate at any smaller dt.
             let candidate_model_discontinuity =
                 reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
+            if splits_switch_thresholds
+                && !locked_replay_hidden_attempt
+                && let Some(split) = Self::locked_switch_split(
+                    &circuit,
+                    &solution,
+                    &new_solution,
+                    (t, step_time),
+                    timestep.hard_min_dt().max(1.0e-9 * dt),
+                )
+            {
+                locked_switch_split = Some(split);
+                retry_count += 1;
+                event_refinement_retries = event_refinement_retries.saturating_add(1);
+                self.record_convergence(|quality| quality.record_timestep_reduction());
+                trap_order = Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
+                restore_rejected_transient_nonlinear_state!();
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
+                continue;
+            }
 
             // Phase history must be accurate when its new interval is stored;
             // a later delayed query cannot repair an already accepted bracket.
@@ -12374,12 +12417,20 @@ impl Engine {
                     }
                     locked_cursor += 1;
                 }
-                accepted_step_hits_breakpoint(
-                    landed_device_event,
-                    false,
-                    lte_estimator.uses_accepted_solution_reference()
-                        && breakpoints.at_breakpoint(t),
-                )
+                if segment_from_image {
+                    accepted_step_hits_breakpoint(
+                        landed_device_event,
+                        at_breakpoint,
+                        breakpoints.at_breakpoint(t),
+                    )
+                } else {
+                    accepted_step_hits_breakpoint(
+                        landed_device_event,
+                        false,
+                        lte_estimator.uses_accepted_solution_reference()
+                            && breakpoints.at_breakpoint(t),
+                    )
+                }
             } else {
                 accepted_step_hits_breakpoint(
                     landed_device_event,

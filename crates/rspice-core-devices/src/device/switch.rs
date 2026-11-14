@@ -387,6 +387,42 @@ fn ideal_threshold_approach_limit(
     (limit.is_finite() && limit > 0.0).then_some(limit)
 }
 
+/// The fraction of a step at which the control's linear interpolant from
+/// `from` to `to` reaches the level that changes the `held` state. With a
+/// positive band an off switch turns on above `threshold + hysteresis` and an
+/// on switch off below `threshold - hysteresis`; a zero or negative band
+/// toggles where the control enters or leaves `[threshold + hysteresis,
+/// threshold - hysteresis]`, so the first of its two edges crossed counts. A
+/// step that starts or ends on the level does not cross it.
+fn ideal_threshold_crossing(
+    held: SwitchState,
+    threshold: Value,
+    hysteresis: Value,
+    from: Value,
+    to: Value,
+) -> Option<Value> {
+    let crossing = |level: Value| {
+        let (start, end) = (from - level, to - level);
+        (start != 0.0 && end != 0.0 && start.signum() != end.signum())
+            .then(|| start / (start - end))
+    };
+    let fraction = if hysteresis > 0.0 {
+        match held {
+            SwitchState::Off if to > from => crossing(threshold + hysteresis),
+            SwitchState::On if to < from => crossing(threshold - hysteresis),
+            _ => None,
+        }
+    } else if held == SwitchState::Transitioning {
+        None
+    } else {
+        [threshold + hysteresis, threshold - hysteresis]
+            .into_iter()
+            .filter_map(crossing)
+            .reduce(Value::min)
+    };
+    fraction.filter(|fraction| fraction.is_finite() && *fraction > 0.0 && *fraction < 1.0)
+}
+
 /// The state a switch with a positive hysteresis band takes at `control`:
 /// on above `upper`, off below `lower`, and inside the band the state it
 /// `held` at the last accepted point.
@@ -1190,6 +1226,42 @@ impl VoltageSwitch {
         )
     }
 
+    /// Where the step from `accepted` to `candidate` carries the control
+    /// across the threshold that changes the state the switch held at the
+    /// accepted point, as a fraction of the step on the control's linear
+    /// interpolant. A run on a locked mesh cuts the step there, so the switch
+    /// changes at its crossing rather than at whichever mesh point follows
+    /// it. `None` when the control keeps the held state over the step, and
+    /// for a smooth or curve switch, whose transition is resolved by what it
+    /// drives.
+    #[doc(hidden)]
+    pub fn threshold_crossing_fraction(
+        &self,
+        accepted: &[Value],
+        candidate: &[Value],
+    ) -> Option<Value> {
+        if !self.is_ideal() {
+            return None;
+        }
+        let control = |solution: &[Value]| {
+            let voltage = |node: NodeId| {
+                if node == 0 {
+                    0.0
+                } else {
+                    solution.get(node - 1).copied().unwrap_or(Value::NAN)
+                }
+            };
+            voltage(self.ctrl_pos) - voltage(self.ctrl_neg)
+        };
+        ideal_threshold_crossing(
+            self.accepted_state.unwrap_or(self.state),
+            self.vt,
+            self.vh,
+            control(accepted),
+            control(candidate),
+        )
+    }
+
     fn runtime(&self) -> SwitchRuntime {
         SwitchRuntime {
             state: self.state,
@@ -1879,6 +1951,27 @@ impl CurrentSwitch {
             now - self.control_current(accepted),
             1.0e-3,
             dt,
+        )
+    }
+
+    /// The fraction of the step from `accepted` to `candidate` at which the
+    /// control current crosses the threshold that changes the held state;
+    /// see [`VoltageSwitch::threshold_crossing_fraction`].
+    #[doc(hidden)]
+    pub fn threshold_crossing_fraction(
+        &self,
+        accepted: &[Value],
+        candidate: &[Value],
+    ) -> Option<Value> {
+        if !self.is_ideal() {
+            return None;
+        }
+        ideal_threshold_crossing(
+            self.accepted_state.unwrap_or(self.state),
+            self.it,
+            self.ih,
+            self.control_current(accepted),
+            self.control_current(candidate),
         )
     }
 
@@ -3091,7 +3184,32 @@ mod tests {
     use crate::config::ExpressionDialect;
     use crate::device::traits::NonlinearDevice;
 
-    use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
+    use super::{
+        CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch, ideal_threshold_crossing,
+    };
+
+    #[test]
+    fn an_ideal_switch_step_is_cut_where_its_control_crosses_the_held_states_threshold() {
+        // VT = 0.9, VH = 0.1: an off switch turns on above 1.0, an on one off
+        // below 0.8.
+        let cut = |held, from, to| ideal_threshold_crossing(held, 0.9, 0.1, from, to);
+        let near = |fraction: Option<f64>, expected: f64| {
+            fraction.is_some_and(|fraction| (fraction - expected).abs() <= 1.0e-12)
+        };
+        assert!(near(cut(SwitchState::Off, 0.0, 2.0), 0.5));
+        assert!(near(cut(SwitchState::On, 2.0, 0.0), 0.6));
+        // The held state's own threshold only, and only in its direction.
+        assert_eq!(cut(SwitchState::On, 0.0, 2.0), None);
+        assert_eq!(cut(SwitchState::Off, 2.0, 0.0), None);
+        assert_eq!(cut(SwitchState::Off, 0.0, 0.95), None);
+        // A step that ends on the level does not cross it.
+        assert_eq!(cut(SwitchState::Off, 0.0, 0.9 + 0.1), None);
+        // A negative band toggles at the first of its two edges.
+        assert!(near(
+            ideal_threshold_crossing(SwitchState::Off, 0.9, -0.1, 0.0, 1.6),
+            0.5
+        ));
+    }
 
     #[test]
     fn generic_switch_extracts_time_control_breakpoints() {
