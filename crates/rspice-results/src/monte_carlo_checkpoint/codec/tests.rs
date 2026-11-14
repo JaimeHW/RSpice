@@ -85,7 +85,7 @@ fn studio_monte_carlo_checkpoint_envelope_rejects_missing_verdicts_corruption_an
         match mutation {
             0 => malformed[0] ^= 1,
             1 => {
-                malformed[MAGIC.len()] = 9;
+                malformed[MAGIC.len()] = 1;
                 let size = malformed.len() - 32;
                 let digest = Sha256::digest(&malformed[..size]);
                 malformed[size..].copy_from_slice(&digest);
@@ -146,16 +146,9 @@ fn measurement_units_survive_checkpoint_resume_and_conflicting_units_refuse_merg
     use rspice_core::analysis::MeasurementUnit;
     let limits = ResourceLimits::default();
     let mut original = fixture();
-    let old_bytes = original.to_bytes_with_limits(limits, &NoAbort).unwrap();
-    assert_eq!(old_bytes[MAGIC.len()], 1);
-    assert_eq!(
-        StudyMonteCarloCheckpoint::from_bytes_with_limits(&old_bytes, limits, &NoAbort).unwrap(),
-        original
-    );
     original.observations.get_mut(&0).unwrap()[0].unit = Some(MeasurementUnit::Known("V".into()));
     original.observations.get_mut(&0).unwrap()[1].unit = Some(MeasurementUnit::Unknown);
     let bytes = original.to_bytes_with_limits(limits, &NoAbort).unwrap();
-    assert_eq!(bytes[MAGIC.len()], 2);
     let decoded =
         StudyMonteCarloCheckpoint::from_bytes_with_limits(&bytes, limits, &NoAbort).unwrap();
     assert_eq!(decoded, original);

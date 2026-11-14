@@ -414,17 +414,7 @@ impl StudyMonteCarloCheckpoint {
             .map_err(core_error)?;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGIC);
-        let version = if self
-            .observations
-            .values()
-            .flatten()
-            .any(|observation| observation.unit.is_some())
-        {
-            VERSION
-        } else {
-            1
-        };
-        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&VERSION.to_le_bytes());
         write_size(&mut bytes, numerical.len());
         bytes.extend_from_slice(&numerical);
         write_size(&mut bytes, self.measurements.len());
@@ -441,15 +431,13 @@ impl StudyMonteCarloCheckpoint {
                 if let Some(error) = &observation.error {
                     write_text(&mut bytes, error);
                 }
-                if version >= 2 {
-                    use rspice_core::analysis::MeasurementUnit;
-                    match &observation.unit {
-                        None => bytes.push(0),
-                        Some(MeasurementUnit::Unknown) => bytes.push(1),
-                        Some(MeasurementUnit::Known(symbol)) => {
-                            bytes.push(2);
-                            write_text(&mut bytes, symbol);
-                        }
+                use rspice_core::analysis::MeasurementUnit;
+                match &observation.unit {
+                    None => bytes.push(0),
+                    Some(MeasurementUnit::Unknown) => bytes.push(1),
+                    Some(MeasurementUnit::Known(symbol)) => {
+                        bytes.push(2);
+                        write_text(&mut bytes, symbol);
                     }
                 }
             }
@@ -492,7 +480,7 @@ impl StudyMonteCarloCheckpoint {
                 .try_into()
                 .map_err(|_| invalid("truncated version"))?,
         );
-        if version != 1 && version != VERSION {
+        if version != VERSION {
             return Err(invalid("unsupported envelope version"));
         }
         let size = reader.size()?;
@@ -539,19 +527,14 @@ impl StudyMonteCarloCheckpoint {
                     1 => (true, None),
                     _ => return Err(invalid("invalid verdict tag")),
                 };
-                let unit = if version == 1 {
-                    None
-                } else {
-                    use rspice_core::analysis::MeasurementUnit;
-                    match reader.take(1)?[0] {
-                        0 => None,
-                        1 => Some(MeasurementUnit::Unknown),
-                        2 => Some(
-                            MeasurementUnit::known(&reader.text()?)
-                                .map_err(|error| invalid(&error))?,
-                        ),
-                        _ => return Err(invalid("invalid measurement unit tag")),
-                    }
+                use rspice_core::analysis::MeasurementUnit;
+                let unit = match reader.take(1)?[0] {
+                    0 => None,
+                    1 => Some(MeasurementUnit::Unknown),
+                    2 => Some(
+                        MeasurementUnit::known(&reader.text()?).map_err(|error| invalid(&error))?,
+                    ),
+                    _ => return Err(invalid("invalid measurement unit tag")),
                 };
                 row.push(FamilyMeasurementEvidence {
                     unit,
