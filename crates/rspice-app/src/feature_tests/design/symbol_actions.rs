@@ -238,7 +238,21 @@ fn placing_text_is_one_edit_and_a_stale_request_places_nothing() {
     app.state.design.symbol.editor.tool = SymbolTool::Text;
     app.state.design.symbol.editor.text_draft = Some(draft());
 
-    app.state.place_symbol_text();
+    // What the entry does on Enter.
+    let request = symbol_text_request(
+        &mut app.state.design.symbol,
+        &app.state.model,
+        &mut app.state.workbench,
+    )
+    .unwrap();
+    let modal_open = app.state.application_modal_open();
+    apply_symbol_edit_request(
+        &mut app.state.design.symbol,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        modal_open,
+        request,
+    );
 
     let placed = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(
