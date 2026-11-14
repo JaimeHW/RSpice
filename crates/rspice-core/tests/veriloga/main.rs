@@ -15,6 +15,9 @@ mod log_capture;
 #[path = "../common/model_outcome.rs"]
 mod model_outcome;
 #[cfg(feature = "veriloga")]
+#[path = "../common/toggle_peer.rs"]
+mod toggle_peer;
+#[cfg(feature = "veriloga")]
 #[path = "../common/veriloga_source_fixture.rs"]
 mod veriloga_source_fixture;
 
@@ -30,6 +33,8 @@ mod capability_refusals;
 mod connect_module_insertion;
 #[cfg(feature = "veriloga")]
 mod connect_rule_parameters;
+#[cfg(feature = "veriloga")]
+mod d_process_coupled;
 mod device_engine_roundtrip;
 mod diode_native;
 mod expression_stack_safety;

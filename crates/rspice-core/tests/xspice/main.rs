@@ -1,5 +1,8 @@
 //! XSPICE code models, the event scheduler and digital waveform files.
 
+#[path = "../common/toggle_peer.rs"]
+mod toggle_peer;
+
 mod event_scheduler_checkpoint;
 mod event_scheduler_kernel;
 mod sync_contract;
