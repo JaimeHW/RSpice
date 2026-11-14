@@ -152,6 +152,11 @@ pub(crate) struct XspiceEventDispatch {
     /// gate-level design that is the handful of bridges among thousands of
     /// gates, and the stamp visits them in registration order as before.
     analog_stamp_instances: Vec<u32>,
+    /// The digital and the real event nets some instance that drives an
+    /// analog output reads, each ascending: where an event can step an
+    /// analog input.
+    #[cfg(feature = "veriloga")]
+    analog_facing: [Vec<NodeId>; 2],
 }
 
 impl XspiceEventDispatch {
@@ -194,6 +199,20 @@ impl XspiceEventDispatch {
             });
             dirty_dispatched.push(instance.supports_event_dirty_dispatch());
         }
+        #[cfg(feature = "veriloga")]
+        let analog_facing = [&digital_fanout, &real_fanout].map(|fanout| {
+            let mut nodes: Vec<NodeId> = fanout
+                .iter()
+                .filter(|(_, readers)| {
+                    readers
+                        .iter()
+                        .any(|reader| continuous_output_instances.binary_search(reader).is_ok())
+                })
+                .map(|(&node, _)| node)
+                .collect();
+            nodes.sort_unstable();
+            nodes
+        });
         Self {
             digital_fanout,
             real_fanout,
@@ -202,6 +221,8 @@ impl XspiceEventDispatch {
             dirty_dispatched,
             continuous_output_instances,
             analog_stamp_instances,
+            #[cfg(feature = "veriloga")]
+            analog_facing,
         }
     }
 
@@ -314,6 +335,36 @@ impl XspiceEventDispatch {
 }
 
 impl CircuitData {
+    /// Whether an event dated `since` or later reached an instance that
+    /// drives an analog output, on a net `counts` admits: whether the event
+    /// activity there stepped an analog input. An event that repeats a net's
+    /// value counts too.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn xspice_analog_input_event_since(
+        &mut self,
+        since: crate::Value,
+        counts: impl Fn(NodeId) -> bool,
+    ) -> bool {
+        if self.xspice_instances.is_empty() {
+            return false;
+        }
+        self.ensure_xspice_event_dispatch();
+        let Some(dispatch) = self.scheduler.xspice_event_dispatch.as_ref() else {
+            return false;
+        };
+        let values = &self.scheduler.xspice_event_values;
+        let [digital, real] = &dispatch.analog_facing;
+        let dated = |times: &crate::xspice::EventNodeMap<crate::Value>, node: &NodeId| {
+            times.get(node).is_some_and(|time| *time >= since) && counts(*node)
+        };
+        digital
+            .iter()
+            .any(|node| dated(&values.digital_event_times, node))
+            || real
+                .iter()
+                .any(|node| dated(&values.real_event_times, node))
+    }
+
     /// Discard the cached sensitivity map.
     ///
     /// Called wherever the instance list grows or the node numbering moves,

@@ -570,6 +570,28 @@ impl CircuitData {
             .any(MixedSignalHost::analog_reads_discrete_after_activity)
     }
 
+    /// Whether an event at the accepted point reached a converter on a net
+    /// a module shares with code models: an inout port's converter, or one
+    /// a code model drives beside a module port. A connect D/A changes from
+    /// the first instant after its edge, so the solution accepted there is
+    /// the left limit, as for a module's own D/A drive
+    /// (`MixedSignalHost::accepted_point_stepped_a_drive`), which reads only
+    /// its output ports' bits.
+    fn boundary_converter_stepped_at_accepted_point(&mut self) -> bool {
+        let Some(accepted) = self
+            .mixed_signal_hosts
+            .first()
+            .and_then(MixedSignalHost::accepted_seconds)
+            .filter(|accepted| *accepted > 0.0)
+        else {
+            return false;
+        };
+        let Some(bindings) = self.scheduler.mixed_xspice_bindings.clone() else {
+            return false;
+        };
+        self.xspice_analog_input_event_since(accepted, |node| bindings.contains_node(node))
+    }
+
     /// Register one elaborated mixed module.
     pub(crate) fn add_mixed_signal_host(
         &mut self,
@@ -1467,6 +1489,7 @@ impl CircuitData {
         if self.mixed_signal_hosts.is_empty() {
             return Ok(MixedCandidateInspection::default());
         }
+        let converter_stepped = self.boundary_converter_stepped_at_accepted_point();
         let mut trial = self.open_trial(
             Candidate {
                 time,
@@ -1482,7 +1505,7 @@ impl CircuitData {
             trial.settle(abort, voltages)?;
             // An A/D crossing this settled trial placed strictly inside its
             // own interval is a root the solver is asked to land on.
-            let mut refinement = trial.interior_root(minimum_timestep)?;
+            let mut refinement = trial.interior_root(minimum_timestep, converter_stepped)?;
             if refinement.is_some() {
                 return Ok(MixedCandidateInspection {
                     refinement,

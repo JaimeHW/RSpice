@@ -600,14 +600,18 @@ impl Trial<'_> {
     pub(in crate::circuit) fn interior_root(
         &self,
         minimum_timestep: Value,
+        converter_stepped: bool,
     ) -> Result<Option<Value>, SimulationError> {
         // A circuit fact, for the reason `digital_feedback` is one: the drive
         // that stepped at the accepted point and the A/D bridge whose crossing
-        // it carried can belong to two instances on one deck node.
-        let opened_on_drive_step = self
-            .hosts
-            .iter()
-            .any(MixedSignalHost::accepted_point_stepped_a_drive);
+        // it carried can belong to two instances on one deck node. A
+        // converter the circuit saw stepped there counts the same
+        // (`CircuitData::boundary_converter_stepped_at_accepted_point`).
+        let opened_on_drive_step = converter_stepped
+            || self
+                .hosts
+                .iter()
+                .any(MixedSignalHost::accepted_point_stepped_a_drive);
         let mut earliest: Option<Value> = None;
         for host in self.hosts.iter() {
             if let Some(target) = named(

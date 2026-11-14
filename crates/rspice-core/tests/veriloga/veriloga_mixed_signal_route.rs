@@ -1443,6 +1443,82 @@ fn a_net_a_module_and_a_code_model_both_drive_resolves_before_its_converter() {
     }
 }
 
+/// An inout port the module releases and drives, on a net an `adc_bridge`
+/// also drives and a 1k pull-up to 2 V loads, converted against a 3.3 V
+/// `vcc` so a driven 1 and a released net differ. The bidirectional converter's
+/// driving half converts every other driver of the net resolved together:
+/// the bridge alone while the port is released, the contention `x` while
+/// both drive opposite values, and the agreed 1 once they agree. The port
+/// releases until 10 ns, drives 1 until 20 ns, 0 until 30 ns and releases
+/// again; the bridge reads a step crossing its `in_high` at 16.6 ns.
+#[test]
+fn an_inout_port_on_a_net_a_code_model_drives_converts_the_resolved_net() {
+    use rspice_core::circuit::ConverterKind;
+
+    let model = ModelFile::new(
+        "split_pad",
+        r#"
+`include "disciplines.vams"
+module pad(io);
+    inout io;
+    reg d;
+    assign io = d;
+    initial begin
+        d = 1'bz;
+        #10 d = 1'b1;
+        #10 d = 1'b0;
+        #10 d = 1'bz;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* an inout port and a code model drive one loaded net\n\
+         vin in 0 pulse(0 1 16n 1n 1n 100n 200n)\n\
+         r1 in 0 1k\n\
+         a_adc [in] [io] adc\n\
+         .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
+         x1 io pad\n\
+         vpu pu 0 2\n\
+         rio io pu 1k\n\
+         .param vcc=3.3\n\
+         .va \"{}\" pad\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let circuit = Engine::default()
+        .build_circuit(&netlist)
+        .unwrap_or_else(|error| panic!("the net resolves before its converter: {error}"));
+    let insertions = circuit.converter_insertions();
+    assert_eq!(insertions.len(), 1, "one converter: {insertions:?}");
+    assert_eq!(insertions[0].kind, ConverterKind::Bidir, "{insertions:?}");
+    let supply = insertions[0].supply.as_ref().expect("a supply").level;
+    // The converter's strong 20 ohm against the 1k pull-up to 2 V.
+    let behind = |level: f64| (level * 1000.0 + 2.0 * 20.0) / 1020.0;
+
+    let result = run(&deck, 40.0e-9, 0.1e-9);
+    for (at, net) in [
+        (5.0e-9, Logic::Zero),
+        (13.0e-9, Logic::Unknown),
+        (18.5e-9, Logic::One),
+        (25.0e-9, Logic::Unknown),
+        (35.0e-9, Logic::One),
+    ] {
+        let value = volts_at(&result, "io", at);
+        println!("ATTRIBUTE at={at:e} v(io)={value:.9}");
+        let level = match net {
+            Logic::Zero => behind(0.0),
+            Logic::One => behind(supply),
+            _ => behind(supply / 2.0),
+        };
+        assert!(
+            (value - level).abs() < 1.0e-6,
+            "the converter drives the resolved {net:?} as {level} V at {at:e}, got {value}"
+        );
+    }
+}
+
 /// The one split a loaded net cannot take: the module's port is four-state
 /// and the code model on the net reads real values, so the net holds no one
 /// value a converter could carry. The refusal names the instance, the port,

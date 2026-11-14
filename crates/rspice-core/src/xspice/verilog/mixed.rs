@@ -6144,6 +6144,11 @@ impl MixedSignalHost {
         }
     }
 
+    /// The accepted time, once the transient has started.
+    pub(crate) fn accepted_seconds(&self) -> Option<f64> {
+        self.state.started.then_some(self.state.accepted_time)
+    }
+
     /// Whether the accepted point stepped a digital-to-analog drive: a D/A
     /// bridge or a converted output port whose bit moved there, or a discrete
     /// value the analog equations read at its left limit
