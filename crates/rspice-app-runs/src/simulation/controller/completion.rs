@@ -187,8 +187,7 @@ impl SimulationController {
                     // One member of a Monte Carlo or .STEP transient is named
                     // after the trial or point it solved, as its task is.
                     if let Some(member) = provenance.family_member() {
-                        analysis_result.label =
-                            format!("{} \u{00b7} {}", analysis_result.label, member.label());
+                        analysis_result.label = member.titled(&analysis_result.label);
                     }
                     let completed_instance = provenance.source_instance_id();
                     match self.retain_completed_analysis(

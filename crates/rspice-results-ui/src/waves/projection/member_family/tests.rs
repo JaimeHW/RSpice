@@ -234,3 +234,84 @@ fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
         .collect();
     assert_eq!(phases, [-45.0, -90.0]);
 }
+
+/// One run of an imported LTspice `stepped` rawfile: no prepared task, the
+/// run the file states on its import source.
+fn imported_run(index: usize, member: AnalysisResultFamilyMember) -> AnalysisResult<RetainedTrace> {
+    use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
+    let mut analysis = AnalysisResult::new(
+        index as u64 + 1,
+        AnalysisType::Transient,
+        member.titled("Imported · Transient Analysis"),
+        0.0,
+    )
+    .with_waveforms(vec![RetainedTrace::new(
+        "V(out)",
+        vec![0.0, 1.0],
+        vec![0.0, 1.0 / (index + 1) as f64],
+        "",
+    )]);
+    analysis.import_source = Some(ResultImportSource {
+        source_name: "rc_step.raw".to_owned(),
+        format: ResultImportFormat::SpiceRaw,
+        coordinate: None,
+        family_member: Some(member),
+    });
+    analysis
+}
+
+#[test]
+fn the_runs_of_an_imported_stepped_rawfile_draw_as_one_family() {
+    use rspice_results::provenance::AnalysisResultStepCoordinate;
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, r) in [1000.0, 2000.0, 4000.0].into_iter().enumerate() {
+        let member = AnalysisResultFamilyMember::StepPoint {
+            index,
+            coordinate: vec![AnalysisResultStepCoordinate {
+                name: "r".to_owned(),
+                value: r,
+            }],
+        };
+        run.analyses.push(imported_run(index, member));
+    }
+    let built = models(&run, &HashSet::new());
+    let [strip] = built.as_slice() else {
+        panic!("one strip for the runs, got {}", built.len());
+    };
+    assert_eq!(strip.subtitle, "Imported · Transient Analysis · 3 points");
+    let names: Vec<_> = strip
+        .traces
+        .iter()
+        .map(|trace| trace.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["V(out) · r = 1 k", "V(out) · r = 2 k", "V(out) · r = 4 k"]
+    );
+}
+
+#[test]
+fn runs_no_log_names_are_numbered_from_one_as_their_points() {
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for index in 0..2 {
+        let member = AnalysisResultFamilyMember::StepPoint {
+            index,
+            coordinate: Vec::new(),
+        };
+        run.analyses.push(imported_run(index, member));
+    }
+    assert_eq!(
+        run.analyses[0].label,
+        "Imported · Transient Analysis · point 1"
+    );
+    let built = models(&run, &HashSet::new());
+    let [strip] = built.as_slice() else {
+        panic!("one strip for the runs, got {}", built.len());
+    };
+    let names: Vec<_> = strip
+        .traces
+        .iter()
+        .map(|trace| trace.name.as_str())
+        .collect();
+    assert_eq!(names, ["V(out) · point 1", "V(out) · point 2"]);
+}

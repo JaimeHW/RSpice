@@ -394,3 +394,124 @@ fn run_rawfiles_carry_the_flags_ltspice_readers_decode_by() {
         "complex forward log"
     );
 }
+
+/// `rspice convert` opens the rawfiles LTspice wrote itself (UTF-16LE
+/// headers, single-precision signals, compression marks, fast access,
+/// complex AC), and its RSpice rawfile carries every value through to the
+/// application's reader unchanged.
+#[test]
+fn rawfiles_ltspice_wrote_convert_with_every_value() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-core-base/tests/fixtures/ltspice");
+    let dir = test_dir("raw_application_ltspice");
+    for (name, domain, points) in [
+        ("rc_tran.raw", WaveformDomain::Transient, 23),
+        ("rc_tran_double.raw", WaveformDomain::Transient, 23),
+        ("rc_fast.raw", WaveformDomain::Transient, 277),
+        ("rc_ac.raw", WaveformDomain::Ac, 121),
+        ("rc_noise.raw", WaveformDomain::Ac, 61),
+        ("rc_dc.raw", WaveformDomain::DcSweep, 21),
+        ("rc_step.raw", WaveformDomain::Transient, 105),
+    ] {
+        let source = fixtures.join(name);
+        let original = rspice_core::io::ltspice_raw::parse_raw_file(&source)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let output = dir.join(name);
+        convert(&source, &output, "raw");
+        let decoded =
+            decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+        assert_eq!(
+            (decoded.domain, decoded.coordinate.len()),
+            (domain, points),
+            "{name}"
+        );
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            bits(&decoded.coordinate),
+            bits(&original.waveforms[0].y),
+            "{name}"
+        );
+        for (signal, column) in decoded.signals.iter().zip(&original.waveforms[1..]) {
+            assert_eq!(signal.name, column.name, "{name}");
+            assert_eq!(
+                bits(&signal.real),
+                bits(&column.y),
+                "{name} {}",
+                signal.name
+            );
+            assert_eq!(
+                signal.imag.as_deref().map(bits),
+                column.y_imag.as_deref().map(bits),
+                "{name} {}",
+                signal.name
+            );
+        }
+    }
+}
+
+/// LTspice's operating point converts too: one point of every node voltage
+/// and branch current, drawn over no scale, each value carried unchanged.
+#[test]
+fn an_operating_point_ltspice_wrote_converts_with_every_value() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rspice-core-base/tests/fixtures/ltspice/rc_op.raw");
+    let original = rspice_core::io::ltspice_raw::parse_raw_file(&source).unwrap();
+    let dir = test_dir("raw_application_ltspice_op");
+    let output = dir.join("rc_op.raw");
+    convert(&source, &output, "raw");
+    let decoded = decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+    let values: Vec<_> = decoded
+        .signals
+        .iter()
+        .map(|signal| {
+            (
+                signal.name.as_str(),
+                signal.real.iter().map(|v| v.to_bits()).collect(),
+            )
+        })
+        .collect();
+    let expected: Vec<(&str, Vec<u64>)> = original
+        .waveforms
+        .iter()
+        .map(|column| {
+            (
+                column.name.as_str(),
+                column.y.iter().map(|v| v.to_bits()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(values, expected);
+}
+
+/// `rspice compare` opens every rawfile LTspice wrote, each layout, and finds
+/// it equal to itself at zero tolerance.
+#[test]
+fn every_rawfile_ltspice_wrote_compares_equal_to_itself() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-core-base/tests/fixtures/ltspice");
+    for name in [
+        "rc_tran.raw",
+        "rc_tran_double.raw",
+        "rc_fast.raw",
+        "rc_ac.raw",
+        "rc_noise.raw",
+        "rc_dc.raw",
+        "rc_op.raw",
+        "rc_step.raw",
+    ] {
+        let source = fixtures.join(name);
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "compare"])
+            .arg(&source)
+            .arg(&source)
+            .args(["--json", "--abstol", "0", "--reltol", "0"])
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{name}: {result:?}");
+    }
+}

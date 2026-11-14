@@ -402,7 +402,7 @@ Title: rc op then tran\nDate: Fri Nov 13 06:07:38  2026\nCommand: ngspice-46, Bu
 fn an_ngspice_op_then_tran_rawfile_imports_as_one_run_of_both_analyses() {
     use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
-    let parsed = parse_spice_raw(NGSPICE_OP_THEN_TRAN, ResultImportFormat::SpiceRaw)
+    let parsed = parse_spice_raw(NGSPICE_OP_THEN_TRAN, None, ResultImportFormat::SpiceRaw)
         .expect("a multi-plot rawfile imports");
     assert_eq!(parsed.analysis_type, AnalysisType::Transient);
     assert_eq!(parsed.sample_count, 3);
@@ -471,7 +471,7 @@ fn an_ngspice_op_then_tran_rawfile_imports_as_one_run_of_both_analyses() {
 fn spice_raw_and_psf_ascii_import_real_waveforms() {
     let raw = b"Title: fixture\nDate: now\nPlotname: Transient Analysis\nFlags: real double\nNo. Variables: 2\nNo. Points: 3\nVariables:\n\t0\ttime\ttime\n\t1\tV(out)\tvoltage\nValues:\n0\t0\n\t1\n1\t1e-9\n\t2\n2\t2e-9\n\t3\n";
     assert_basic(
-        parse_spice_raw(raw, ResultImportFormat::SpiceRaw).expect("SPICE RAW"),
+        parse_spice_raw(raw, None, ResultImportFormat::SpiceRaw).expect("SPICE RAW"),
         ResultImportFormat::SpiceRaw,
     );
     let psf = b"HEADER\n\"analysis\" \"tran\"\nSWEEP\n\"time\" \"s\"\nTRACE\n\"V(out)\" \"V\"\nVALUE\n0 1\n1e-9 2\n2e-9 3\nEND\n";
@@ -479,7 +479,7 @@ fn spice_raw_and_psf_ascii_import_real_waveforms() {
         parse_psf_ascii(psf, ResultImportFormat::PsfAscii).expect("PSF ASCII"),
         ResultImportFormat::PsfAscii,
     );
-    assert!(parse_spice_raw(&raw[..40], ResultImportFormat::SpiceRaw).is_err());
+    assert!(parse_spice_raw(&raw[..40], None, ResultImportFormat::SpiceRaw).is_err());
     assert!(parse_psf_ascii(&psf[..30], ResultImportFormat::PsfAscii).is_err());
 }
 
@@ -913,5 +913,99 @@ fn an_unknown_or_high_impedance_change_is_retained_as_its_code() {
         parsed.waveforms[0].y.as_slice(),
         &[0.5, 0.5],
         "the grid still projects an unresolved bit at its own level"
+    );
+}
+
+fn ltspice_fixture(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rspice-core-base/tests/fixtures/ltspice")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// Every layout LTspice 17.2.4 writes imports, UTF-16 header and all.
+#[test]
+fn rawfiles_ltspice_wrote_import() {
+    for (name, analysis_type, samples) in [
+        ("rc_tran.raw", AnalysisType::Transient, 23),
+        ("rc_tran_double.raw", AnalysisType::Transient, 23),
+        ("rc_fast.raw", AnalysisType::Transient, 277),
+        ("rc_ac.raw", AnalysisType::Ac, 121),
+        ("rc_noise.raw", AnalysisType::Ac, 61),
+        ("rc_dc.raw", AnalysisType::DcSweep, 21),
+        ("rc_op.raw", AnalysisType::DcSweep, 1),
+    ] {
+        let parsed = parse_result_dataset(name, &ltspice_fixture(name))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(
+            (parsed.analysis_type, parsed.sample_count),
+            (analysis_type, samples),
+            "{name}"
+        );
+    }
+}
+
+/// An LTspice `.step` rawfile holds every run in one plot; with its log
+/// beside it, each run imports as its own analysis named by its values, and
+/// the runs of the import are one family.
+#[test]
+fn an_ltspice_stepped_rawfile_imports_one_analysis_per_run_named_by_its_log() {
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+    use rspice_results::provenance::AnalysisResultFamilyMember;
+
+    let mut state = ResultsTestHost::default();
+    state.platform.project_lifecycle.authority.open_session();
+    stage_imported_result_dataset_beside(
+        &mut state.results_parts(),
+        "rc_step.raw",
+        &ltspice_fixture("rc_step.raw"),
+        Some(&ltspice_fixture("rc_step.log")),
+    )
+    .unwrap();
+    commit_result_import_draft(&mut state.results_parts()).unwrap();
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the import is shown");
+    let analyses: Vec<_> = run
+        .analyses
+        .iter()
+        .map(|analysis| {
+            let Some(AnalysisResultFamilyMember::StepPoint { index, coordinate }) =
+                analysis.family_member()
+            else {
+                panic!("{} names no run", analysis.label);
+            };
+            (
+                analysis.label.as_str(),
+                *index,
+                coordinate[0].value,
+                analysis.waveforms[0].x.len(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        analyses,
+        [
+            (
+                "Imported \u{b7} Transient Analysis \u{b7} r = 1 k",
+                0,
+                1000.0,
+                55
+            ),
+            (
+                "Imported \u{b7} Transient Analysis \u{b7} r = 2 k",
+                1,
+                2000.0,
+                31
+            ),
+            (
+                "Imported \u{b7} Transient Analysis \u{b7} r = 4 k",
+                2,
+                4000.0,
+                19
+            ),
+        ]
     );
 }

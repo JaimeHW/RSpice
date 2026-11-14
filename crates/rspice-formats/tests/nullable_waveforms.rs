@@ -27,6 +27,7 @@ fn project(sample: f64, complex: bool) -> ProjectSimulationResults {
         source_name: "gaps.raw".into(),
         format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
         coordinate: None,
+        family_member: None,
     });
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)

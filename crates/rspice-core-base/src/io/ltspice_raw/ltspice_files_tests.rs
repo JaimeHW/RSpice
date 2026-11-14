@@ -214,6 +214,42 @@ fn a_stepped_transient_reads_every_step_in_one_plot() {
 }
 
 #[test]
+fn a_stepped_plot_splits_into_its_runs_and_the_log_names_them() {
+    let runs = fixture("rc_step.raw").into_stepped_runs();
+    let shapes: Vec<_> = runs
+        .iter()
+        .map(|run| {
+            (
+                run.header.no_points,
+                run.waveforms[0].y.len(),
+                run.is_stepped(),
+            )
+        })
+        .collect();
+    assert_eq!(shapes, [(55, 55, false), (31, 31, false), (19, 19, false)]);
+    assert_bits(
+        column(&runs[0], "time").y[54],
+        0x3ed4_f8b5_88e3_68f0,
+        "run 1 time[54]",
+    );
+    assert_bits(
+        column(&runs[2], "V(out)").y[18],
+        0x3fe6_d4fd_8000_0000,
+        "run 3 V(out)[18]",
+    );
+    // The log LTspice wrote beside the rawfile, UTF-16LE with no byte-order
+    // mark, and the same text as UTF-8.
+    let log = fixture_bytes("rc_step.log");
+    let named = |r: f64| vec![("r".to_owned(), r)];
+    let expected = [named(1000.0), named(2000.0), named(4000.0)];
+    assert_eq!(ltspice_log_step_values(&log), expected);
+    let text = header_text::decode_text_lossy(&log).unwrap();
+    assert_eq!(ltspice_log_step_values(text.as_bytes()), expected);
+    // A plot that is not stepped is its one run.
+    assert_eq!(fixture("rc_tran.raw").into_stepped_runs().len(), 1);
+}
+
+#[test]
 fn a_byte_order_mark_before_an_ltspice_header_reads_the_same_file() {
     let bytes = fixture_bytes("rc_op.raw");
     let marked = [&[0xFF, 0xFE][..], &bytes].concat();

@@ -420,6 +420,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
                     source_name: "foreign.raw".into(),
                     format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
                     coordinate: None,
+                    family_member: None,
                 })
             }
         }

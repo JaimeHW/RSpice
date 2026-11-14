@@ -244,14 +244,18 @@ pub(super) fn parse_matlab_v5(
 // -------------------------------------------------------------------------
 // SPICE RAW
 
+/// Read a rawfile, with the simulator's log beside it when there is one: an
+/// LTspice `stepped` rawfile holds every `.step` run in one plot, and its
+/// log is what names each run's parameter values.
 pub(super) fn parse_spice_raw(
     bytes: &[u8],
+    log: Option<&[u8]>,
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let mut limits = rspice_core::ResourceLimits::default();
     limits.max_external_data_bytes = MAX_RESULT_DATASET_BYTES as usize;
     limits.max_external_data_values = MAX_RESULT_VALUES;
-    let decoded = rspice_formats::spice_raw::decode_spice_raw_plots(bytes, limits)
+    let decoded = rspice_formats::spice_raw::decode_spice_raw_plots_with_log(bytes, log, limits)
         .map_err(|error| adapter_error(format, error))?;
     // A rawfile holds one plot per analysis. The reader reviews the first one
     // drawn over a coordinate (an operating point is a scalar result, not the
@@ -264,9 +268,28 @@ pub(super) fn parse_spice_raw(
     let mut reviewed_parsed = None;
     let mut further = Vec::with_capacity(decoded.len().saturating_sub(1));
     for (index, plot) in decoded.into_iter().enumerate() {
+        // Each run of a stepped plot is its own analysis, titled by its run,
+        // and the runs of the file draw as one family.
+        let family_member =
+            plot.step.map(|step| {
+                rspice_results::provenance::AnalysisResultFamilyMember::StepPoint {
+                    index: step.index,
+                    coordinate: step
+                        .coordinate
+                        .into_iter()
+                        .map(|(name, value)| {
+                            rspice_results::provenance::AnalysisResultStepCoordinate { name, value }
+                        })
+                        .collect(),
+                }
+            });
+        let plot_name = match &family_member {
+            Some(member) => member.titled(&plot.plot_name),
+            None => plot.plot_name,
+        };
         let mut parsed = finish_numeric_dataset(format, plot.dataset).map_err(|error| {
             if several {
-                format!("{} plot: {error}", plot.plot_name)
+                format!("{plot_name} plot: {error}")
             } else {
                 error
             }
@@ -281,11 +304,12 @@ pub(super) fn parse_spice_raw(
             )
         });
         if index == reviewed {
-            reviewed_parsed = Some((plot.plot_name, parsed));
+            reviewed_parsed = Some((plot_name, family_member, parsed));
         } else {
             further.push(
                 crate::workbench::documents::result_document::import::ResultImportPlot {
-                    name: plot.plot_name,
+                    name: plot_name,
+                    family_member,
                     analysis_type: parsed.analysis_type,
                     coordinate_name: parsed.coordinate_name,
                     coordinate_unit: parsed.coordinate_unit,
@@ -296,11 +320,12 @@ pub(super) fn parse_spice_raw(
             );
         }
     }
-    let (reviewed_name, mut parsed) =
+    let (reviewed_name, reviewed_member, mut parsed) =
         reviewed_parsed.ok_or_else(|| adapter_error(format, "rawfile contains no variables"))?;
     if several {
         parsed.plots = Some(Arc::new(ResultImportPlots {
             reviewed: reviewed_name,
+            reviewed_member,
             further,
         }));
     }

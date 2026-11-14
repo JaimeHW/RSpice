@@ -39,10 +39,10 @@ pub(super) fn looks_utf16le(bytes: &[u8]) -> bool {
     bytes.starts_with(&UTF16LE_BOM) || matches!(bytes, [first, 0, ..] if *first != 0)
 }
 
-/// Decode the header that opens `bytes`, through its `Binary:` or `Values:`
-/// line, in the encoding its first bytes declare.
-pub(super) fn decode_header(bytes: &[u8]) -> Result<HeaderText, RawParseError> {
-    let (encoding, mut offset) = if bytes.starts_with(&UTF16LE_BOM) {
+/// The encoding the text opening `bytes` declares, and the length of its
+/// byte-order mark.
+fn detect_encoding(bytes: &[u8]) -> Result<(TextEncoding, usize), RawParseError> {
+    Ok(if bytes.starts_with(&UTF16LE_BOM) {
         (TextEncoding::Utf16Le, UTF16LE_BOM.len())
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
         return Err(RawParseError::UnsupportedFormat(
@@ -56,7 +56,13 @@ pub(super) fn decode_header(bytes: &[u8]) -> Result<HeaderText, RawParseError> {
         (TextEncoding::Utf16Le, 0)
     } else {
         (TextEncoding::Utf8, 0)
-    };
+    })
+}
+
+/// Decode the header that opens `bytes`, through its `Binary:` or `Values:`
+/// line, in the encoding its first bytes declare.
+pub(super) fn decode_header(bytes: &[u8]) -> Result<HeaderText, RawParseError> {
+    let (encoding, mut offset) = detect_encoding(bytes)?;
     let mut text = String::new();
     let mut line_number = 0usize;
     while offset < bytes.len() {
@@ -86,6 +92,24 @@ pub(super) fn decode_header(bytes: &[u8]) -> Result<HeaderText, RawParseError> {
         "the header ends after line {line_number} without a 'Binary:' or 'Values:' line, \
          so the file has no data section"
     )))
+}
+
+/// A whole text file in the encoding its first bytes declare, as a header is
+/// decoded: LTspice writes its log beside the rawfile in its header's
+/// UTF-16LE. A character that does not decode is replaced rather than
+/// refused, since such a file is read for what it states, never for data.
+pub(super) fn decode_text_lossy(bytes: &[u8]) -> Result<String, RawParseError> {
+    let (encoding, mark) = detect_encoding(bytes)?;
+    let body = bytes.get(mark..).unwrap_or_default();
+    Ok(match encoding {
+        TextEncoding::Utf8 => String::from_utf8_lossy(body).into_owned(),
+        TextEncoding::Utf16Le => char::decode_utf16(
+            body.chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]])),
+        )
+        .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect(),
+    })
 }
 
 /// The UTF-8 line that opens `rest`, with its terminator, and its length.

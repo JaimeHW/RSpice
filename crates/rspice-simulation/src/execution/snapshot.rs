@@ -500,7 +500,7 @@ impl PreparedTask {
         &mut self,
         member: rspice_results::provenance::AnalysisResultFamilyMember,
     ) {
-        self.label = format!("{} \u{00b7} {}", self.label, member.label());
+        self.label = member.titled(&self.label);
         self.family_member = Some(member);
     }
 

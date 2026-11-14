@@ -55,6 +55,9 @@ pub struct ResultImportDialogState {
 pub struct ResultImportPlots {
     /// The source's own title for the analysis the draft reviews.
     pub reviewed: String,
+    /// The `.step` run the reviewed analysis is, when the source held every
+    /// run of a sweep in one plot.
+    pub reviewed_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
     /// Every other analysis, in source order.
     pub further: Vec<ResultImportPlot>,
 }
@@ -70,6 +73,9 @@ pub struct ResultImportPlot {
     pub sample_count: usize,
     pub waveforms: Vec<crate::state::RetainedTrace>,
     pub event_payload: Option<crate::state::AnalysisResultPayload>,
+    /// The `.step` run this analysis is, as for
+    /// [`ResultImportPlots::reviewed_member`].
+    pub family_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
 }
 
 impl Default for ResultImportDialogState {

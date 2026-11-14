@@ -24,9 +24,11 @@ mod header_text;
 #[cfg(test)]
 mod ltspice_files_tests;
 mod metadata_options;
+mod stepped;
 mod table_metadata;
 pub use {
     metadata_options::write_raw_metadata_options,
+    stepped::ltspice_log_step_values,
     table_metadata::{raw_table_has_coordinate, raw_table_units, write_raw_table_layout_metadata},
 };
 

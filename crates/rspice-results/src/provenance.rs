@@ -159,18 +159,19 @@ impl PartialEq for AnalysisResultTransientState {
 
 impl Eq for AnalysisResultTransientState {}
 
-/// The member of a deck's Monte Carlo study or `.STEP` sweep a transient
-/// result solved, when its task was lowered to exactly one.
+/// The member of a Monte Carlo study or `.STEP` sweep a result is: the one
+/// its task was lowered to solve, or the run an imported file states (an
+/// LTspice `stepped` rawfile holds every run of a sweep).
 ///
-/// A study or sweep of a transient runs as one transient task per member, and
-/// each keeps its full result; this is what says which member a result is,
-/// so the members of one run read back as one family.
+/// A study or sweep runs as one task per member, and each keeps its full
+/// result; this is what says which member a result is, so the members of one
+/// run, solved or imported, read back as one family and are named one way.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "member", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AnalysisResultFamilyMember {
     /// Trial `index` of the deck's `.MC` study, in the card's own numbering.
     MonteCarloTrial { index: usize },
-    /// Point `index` of the deck's `.STEP` sweep, in sweep order, with the
+    /// Point `index` of the `.STEP` sweep, in sweep order from 0, with the
     /// value each swept axis takes there.
     StepPoint {
         index: usize,
@@ -239,13 +240,15 @@ impl AnalysisResultFamilyMember {
     }
 
     /// The member spelled the way a legend names it: `trial 3`, or the swept
-    /// values, `r = 2k`, with engineering prefixes.
+    /// values, `r = 2k`, with engineering prefixes. A point whose values no
+    /// one stated is numbered from 1, `point 1`, as a results table numbers
+    /// its points.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
             Self::MonteCarloTrial { index } => format!("trial {index}"),
             Self::StepPoint { index, coordinate } if coordinate.is_empty() => {
-                format!("point {index}")
+                format!("point {}", index + 1)
             }
             Self::StepPoint { coordinate, .. } => coordinate
                 .iter()
@@ -261,7 +264,15 @@ impl AnalysisResultFamilyMember {
         }
     }
 
-    fn validate(&self) -> Result<(), String> {
+    /// A result of this member titled the way every route names it, solved
+    /// or imported: its analysis's own title, then the member,
+    /// `Transient · r = 2 k`.
+    #[must_use]
+    pub fn titled(&self, title: &str) -> String {
+        format!("{title} \u{00b7} {}", self.label())
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if let Self::StepPoint { index, coordinate } = self {
             for axis in coordinate {
                 if axis.name.trim().is_empty() || !axis.value.is_finite() {

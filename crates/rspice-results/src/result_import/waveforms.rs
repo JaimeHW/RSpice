@@ -461,6 +461,7 @@ mod tests {
                     source_name: "gaps.raw".into(),
                     format: ResultImportFormat::SpiceRaw,
                     coordinate: None,
+                    family_member: None,
                 });
                 analysis.validate_retained_evidence().unwrap();
             }

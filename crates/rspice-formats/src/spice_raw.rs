@@ -71,6 +71,22 @@ pub struct DecodedRawPlot {
     /// The event histories the file's event plots carry. They belong to the
     /// file's one transient plot and ride on it; every other plot has none.
     pub events: Option<rspice_core::execution::RawEventTraces>,
+    /// The `.step` run this dataset is, when it came from an LTspice
+    /// `stepped` plot: such a plot holds every run, and reads as one dataset
+    /// per run, in run order.
+    pub step: Option<RawStep>,
+}
+
+/// One run of a `.step` sweep that an LTspice `stepped` plot holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawStep {
+    /// The run's place in the sweep, from 0, as a deck's `.step` point is
+    /// numbered.
+    pub index: usize,
+    /// The value each stepped parameter takes in this run, as the run's log
+    /// states it (`.step r=2000` is `("r", 2000.0)`). Empty when no log
+    /// beside the rawfile names the runs.
+    pub coordinate: Vec<(String, f64)>,
 }
 
 /// Read the one dataset a single-plot rawfile holds.
@@ -105,8 +121,26 @@ pub fn decode_spice_raw_plots(
     bytes: &[u8],
     limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<DecodedRawPlot>, RawReadError> {
+    decode_spice_raw_plots_with_log(bytes, None, limits)
+}
+
+/// [`decode_spice_raw_plots`], with the simulator's log beside the rawfile.
+///
+/// An LTspice `stepped` plot holds every run of a `.step` sweep, the scale
+/// restarting at its first value for each, and reads as one dataset per run.
+/// LTspice's log states each run's parameter values (`.step r=2000`); when
+/// it names as many runs as the plot holds, each run carries its values,
+/// and otherwise only its number.
+pub fn decode_spice_raw_plots_with_log(
+    bytes: &[u8],
+    log: Option<&[u8]>,
+    limits: rspice_core::ResourceLimits,
+) -> Result<Vec<DecodedRawPlot>, RawReadError> {
     let mut file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(bytes, limits)
         .map_err(RawReadError::Parse)?;
+    let logged_steps = log
+        .map(rspice_core::io::ltspice_raw::ltspice_log_step_values)
+        .unwrap_or_default();
     let events = rspice_core::execution::decode_event_plots(&file).map_err(RawReadError::Events)?;
     drop_noise_totals(&mut file.plots);
     let mut event_plots = 0_usize;
@@ -124,12 +158,34 @@ pub fn decode_spice_raw_plots(
         }
         let plot_name = parsed.header.plotname.trim().to_owned();
         let scalar = parsed.has_ordinal_axis().map_err(RawReadError::Parse)?;
-        decoded.push(DecodedRawPlot {
-            plot_name,
-            scalar,
-            dataset: decode_plot(parsed)?,
-            events: None,
-        });
+        if scalar || !parsed.is_stepped() {
+            decoded.push(DecodedRawPlot {
+                plot_name,
+                scalar,
+                dataset: decode_plot(parsed)?,
+                events: None,
+                step: None,
+            });
+            continue;
+        }
+        let runs = parsed.into_stepped_runs();
+        let named = logged_steps.len() == runs.len();
+        for (index, run) in runs.into_iter().enumerate() {
+            decoded.push(DecodedRawPlot {
+                plot_name: plot_name.clone(),
+                scalar,
+                dataset: decode_plot(run)?,
+                events: None,
+                step: Some(RawStep {
+                    index,
+                    coordinate: if named {
+                        logged_steps[index].clone()
+                    } else {
+                        Vec::new()
+                    },
+                }),
+            });
+        }
     }
     if event_plots > 0 {
         let mut transients = decoded
@@ -316,6 +372,9 @@ fn coordinate_domain(
         },
     )
 }
+
+#[cfg(test)]
+mod ltspice_step_tests;
 
 #[cfg(test)]
 mod tests {

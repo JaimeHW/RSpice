@@ -305,6 +305,20 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
         self.provenance.as_ref()
     }
 
+    /// The Monte Carlo trial or `.STEP` point this result is: the one its
+    /// producing task solved, or the run an imported source states.
+    #[must_use]
+    pub fn family_member(&self) -> Option<&crate::provenance::AnalysisResultFamilyMember> {
+        self.provenance
+            .as_ref()
+            .and_then(AnalysisResultProvenance::family_member)
+            .or_else(|| {
+                self.import_source
+                    .as_ref()
+                    .and_then(|source| source.family_member.as_ref())
+            })
+    }
+
     /// Exact scalar evidence exposed to specification and result-document
     /// consumers. Explicit `.MEAS` results take precedence over a same-named
     /// analysis-native scalar so one execution cannot be counted twice.

@@ -154,7 +154,12 @@ pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            stage_imported_result_dataset(state, &display_name, &bytes)
+            stage_imported_result_dataset_beside(
+                state,
+                &display_name,
+                &bytes,
+                companion_log(&path).as_deref(),
+            )
         }) {
             Ok(()) => true,
             Err(error) => {
@@ -200,6 +205,18 @@ fn result_import_block_reason(model: &Model, platform: &PlatformState) -> Option
     None
 }
 
+/// The simulator's log beside a rawfile, when there is one that reads:
+/// LTspice writes `deck.log` beside `deck.raw`, and it names the runs of a
+/// `stepped` rawfile. Any other source has no use for it.
+#[cfg(not(target_arch = "wasm32"))]
+fn companion_log(path: &Path) -> Option<Vec<u8>> {
+    let raw = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("raw"));
+    raw.then(|| read_native_file_bounded(&path.with_extension("log")).ok())
+        .flatten()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
     let file = std::fs::File::open(path)
@@ -241,10 +258,21 @@ pub fn stage_imported_result_dataset(
     source_name: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
+    stage_imported_result_dataset_beside(state, source_name, bytes, None)
+}
+
+/// [`stage_imported_result_dataset`], with the simulator's log that sat
+/// beside the selected file.
+fn stage_imported_result_dataset_beside(
+    state: &mut ResultsParts<'_>,
+    source_name: &str,
+    bytes: &[u8],
+    companion_log: Option<&[u8]>,
+) -> Result<(), String> {
     if let Some(reason) = result_import_block_reason(state.model, state.platform) {
         return Err(reason);
     }
-    let parsed = parse_result_dataset(source_name, bytes)?;
+    let parsed = parse_result_dataset_beside(source_name, bytes, companion_log)?;
     let signal_count = parsed.waveforms.len();
     *state.result_import = ResultImportDialogState {
         open: true,
@@ -402,6 +430,10 @@ fn commit_parsed_result_dataset(
     let mut analyses = Vec::new();
     let reviewed = ImportedAnalysis {
         title: parsed.plots.as_ref().map(|plots| plots.reviewed.clone()),
+        family_member: parsed
+            .plots
+            .as_ref()
+            .and_then(|plots| plots.reviewed_member.clone()),
         analysis_type,
         coordinate_name: parsed.coordinate_name,
         coordinate_unit: parsed.coordinate_unit,
@@ -420,6 +452,7 @@ fn commit_parsed_result_dataset(
     for plot in parsed.plots.iter().flat_map(|plots| &plots.further) {
         let further = ImportedAnalysis {
             title: Some(plot.name.clone()),
+            family_member: plot.family_member.clone(),
             analysis_type: plot.analysis_type,
             coordinate_name: plot.coordinate_name.clone(),
             coordinate_unit: plot.coordinate_unit.clone(),
@@ -517,6 +550,8 @@ fn commit_parsed_result_dataset(
 struct ImportedAnalysis {
     /// The source's own title, when it names its analyses.
     title: Option<String>,
+    /// The `.step` run the source says this analysis is.
+    family_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
     analysis_type: AnalysisType,
     coordinate_name: String,
     coordinate_unit: Option<String>,
@@ -568,6 +603,7 @@ impl ImportedAnalysis {
                 name: coordinate_name,
                 unit: self.coordinate_unit,
             }),
+            family_member: self.family_member,
         });
         Ok(analysis)
     }
@@ -1015,6 +1051,16 @@ pub fn parse_result_dataset(
     source_name: &str,
     bytes: &[u8],
 ) -> Result<ParsedResultDataset, String> {
+    parse_result_dataset_beside(source_name, bytes, None)
+}
+
+/// [`parse_result_dataset`], with the simulator's log that sat beside the
+/// file: a rawfile's log names the runs of an LTspice `.step`.
+fn parse_result_dataset_beside(
+    source_name: &str,
+    bytes: &[u8],
+    companion_log: Option<&[u8]>,
+) -> Result<ParsedResultDataset, String> {
     if bytes.is_empty() {
         return Err("the selected file is empty".to_owned());
     }
@@ -1052,7 +1098,7 @@ pub fn parse_result_dataset(
         ResultImportFormat::NumpyNpz => adapters::parse_npz(bytes, format),
         ResultImportFormat::MatlabV5 => adapters::parse_matlab_v5(bytes, format),
         ResultImportFormat::MatlabV73 => adapters::parse_matlab_v73(bytes, format),
-        ResultImportFormat::SpiceRaw => adapters::parse_spice_raw(bytes, format),
+        ResultImportFormat::SpiceRaw => adapters::parse_spice_raw(bytes, companion_log, format),
         ResultImportFormat::PsfAscii => adapters::parse_psf_ascii(bytes, format),
         ResultImportFormat::Vcd => adapters::parse_vcd(bytes, format),
         ResultImportFormat::Fst => adapters::parse_fst(bytes, format),

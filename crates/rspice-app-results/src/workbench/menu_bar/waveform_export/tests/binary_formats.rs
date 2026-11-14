@@ -449,6 +449,7 @@ fn hdf5_export_ui_retains_imported_coordinate_names_and_units() {
                 name: name.into(),
                 unit: unit.map(str::to_owned),
             }),
+            family_member: None,
         });
         let mut state = state_with_typed_result(analysis);
         state
@@ -544,6 +545,7 @@ fn binary_export_workflows_preserve_mixed_real_and_complex_traces_in_all_domains
                 source_name: "original.h5".into(),
                 format: ResultImportFormat::Hdf5,
                 coordinate: None,
+                family_member: None,
             });
             let mut state = state_with_typed_result(analysis);
             state

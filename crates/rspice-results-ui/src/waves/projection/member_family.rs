@@ -13,6 +13,10 @@
 //! copied; a decibel, phase or noise-density curve is the member's samples
 //! through the same projection the host's curve takes.
 //!
+//! The runs of an imported LTspice `stepped` rawfile are members the same
+//! way: each states its run on its import source, and
+//! [`AnalysisResult::family_member`] answers for either origin.
+//!
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -57,8 +61,7 @@ pub(super) fn member_families<A: AsRef<AnalysisResult<RetainedTrace>>>(
     let mut families: Vec<(AnalysisType, Vec<(usize, &AnalysisResultFamilyMember)>)> = Vec::new();
     for (index, analysis) in analyses.iter().map(AsRef::as_ref).enumerate() {
         let Some(member) = analysis
-            .provenance()
-            .and_then(|provenance| provenance.family_member())
+            .family_member()
             .filter(|_| draws_as_family(analysis.analysis_type) && !analysis.waveforms.is_empty())
         else {
             continue;

@@ -115,6 +115,7 @@ fn imported_dc_axes_use_retained_name_and_unit_instead_of_voltage_defaults() {
                     name: "source-axis".into(),
                     unit: unit.map(str::to_owned),
                 }),
+                family_member: None,
             });
         assert_eq!(
             model_axis(&mut state),
@@ -143,6 +144,7 @@ fn imported_overlays_require_compatible_coordinate_units() {
                     name: "bias".into(),
                     unit: unit.map(str::to_owned),
                 }),
+                family_member: None,
             });
             run.add_analysis(analysis);
             runs.push(run);

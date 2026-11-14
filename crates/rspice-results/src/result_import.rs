@@ -110,6 +110,11 @@ pub struct ResultImportSource {
         deserialize_with = "deserialize_coordinate"
     )]
     pub coordinate: Option<ResultImportCoordinate>,
+    /// The `.step` run the source says this analysis is, when one file held
+    /// every run of a sweep (an LTspice `stepped` rawfile). The runs of one
+    /// import then draw as one family, as a deck's `.step` members do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_member: Option<crate::provenance::AnalysisResultFamilyMember>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -178,6 +183,9 @@ impl ResultImportSource {
         }
         if let Some(coordinate) = &self.coordinate {
             coordinate.validate()?;
+        }
+        if let Some(member) = &self.family_member {
+            member.validate()?;
         }
         Ok(())
     }

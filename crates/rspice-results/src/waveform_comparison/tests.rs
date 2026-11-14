@@ -183,6 +183,7 @@ fn comparison_requires_compatible_import_coordinates_and_retains_their_units() {
                 name: "bias".into(),
                 unit: Some("A".into()),
             }),
+            family_member: None,
         });
     }
     let prepared = prepared_comparison_sources(
