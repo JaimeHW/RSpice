@@ -193,6 +193,12 @@ impl HbSolver {
                 linear[row] = false;
             }
         }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in &self.generated_nonlinear_devices {
+            for &row in device.rows() {
+                linear[row] = false;
+            }
+        }
         let mut pattern = BTreeSet::new();
         for &frequency in frequencies {
             check_abort(abort)?;

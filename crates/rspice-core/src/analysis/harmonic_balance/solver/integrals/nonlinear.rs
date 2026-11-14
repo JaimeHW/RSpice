@@ -386,6 +386,12 @@ impl HbSolver {
                 "native Verilog-A quasiperiodic sampling is unavailable".into(),
             ));
         }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self.generated_nonlinear_devices.is_empty() {
+            return Err(Error::InvalidCircuit(
+                "generated Verilog-A quasiperiodic sampling is unavailable".into(),
+            ));
+        }
         let mut rows = vec![Vec::new(); n];
         for &(row, col) in &pattern {
             rows[row].push(col);

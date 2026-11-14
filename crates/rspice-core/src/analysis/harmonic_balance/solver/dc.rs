@@ -868,12 +868,12 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0),
+                ExactMnaBranch::AuxiliaryState { branch_ordinal, .. } => (*branch_ordinal, 0, 0),
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_auxiliary())
+                || (node_pos == node_neg && !branch.has_no_terminals())
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "HB DC exact-MNA branch '{name}' has ordinal {branch_ordinal} and terminals ({node_pos}, {node_neg}); expected ordinal {expected_ordinal} within {} nodes",

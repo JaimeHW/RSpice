@@ -124,13 +124,15 @@ impl HbSolver {
             || self.has_veriloga_devices()
     }
 
-    #[cfg(feature = "veriloga")]
     fn has_veriloga_devices(&self) -> bool {
-        !self.veriloga_nonlinear_devices.is_empty()
-    }
-
-    #[cfg(not(feature = "veriloga"))]
-    fn has_veriloga_devices(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            return true;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self.generated_nonlinear_devices.is_empty() {
+            return true;
+        }
         false
     }
 
@@ -404,7 +406,10 @@ impl HbSolver {
         for name in device.ac_nqs_response_names() {
             let branch_ordinal = self.exact_mna_branches().len() + 1;
             self.try_push_periodic_mna_branch(
-                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                ExactMnaBranch::AuxiliaryState {
+                    branch_ordinal,
+                    canonical: false,
+                },
                 &name,
             )?;
         }
@@ -436,7 +441,10 @@ impl HbSolver {
         for name in device.ac_nqs_response_names() {
             let branch_ordinal = self.exact_mna_branches().len() + 1;
             self.try_push_periodic_mna_branch(
-                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                ExactMnaBranch::AuxiliaryState {
+                    branch_ordinal,
+                    canonical: false,
+                },
                 &name,
             )?;
         }
@@ -458,7 +466,10 @@ impl HbSolver {
         for name in device.periodic_rate_names().into_iter().flatten() {
             let branch_ordinal = self.exact_mna_branches().len() + 1;
             self.try_push_periodic_mna_branch(
-                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                ExactMnaBranch::AuxiliaryState {
+                    branch_ordinal,
+                    canonical: false,
+                },
                 &name,
             )?;
         }
@@ -635,6 +646,19 @@ impl HbSolver {
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "Verilog-A device '{}' produced invalid physical F/Q entries",
+                    device.name()
+                )));
+            }
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in &mut self.generated_nonlinear_devices {
+            if selected.is_some_and(|rows| !device.rows().iter().any(|&row| rows[row])) {
+                continue;
+            }
+            device.stamp_periodic_fq(solution, f, q)?;
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "generated Verilog-A device '{}' produced invalid physical F/Q entries",
                     device.name()
                 )));
             }

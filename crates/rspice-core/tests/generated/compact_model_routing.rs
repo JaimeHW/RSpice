@@ -541,20 +541,20 @@ Q1 cx bx 0 0 qmod
         );
     }
 
-    /// The periodic analyses answer from the declared capability table: a
-    /// generated Verilog-A compact model has no exact periodic MNA descriptor,
-    /// so harmonic balance refuses it by name instead of linearizing something
-    /// else.
+    /// The periodic analyses answer from the declared capability table:
+    /// MEXTRAM scales a `ddt` by a bias-dependent quantity, so its generator
+    /// could not prove its residual F(x) + dQ(x)/dt and harmonic balance
+    /// refuses it with that reason instead of linearizing something else.
     #[test]
     fn the_periodic_analyses_refuse_a_generated_compact_model_by_capability() {
         let netlist = netlist();
         let hb = engine()
             .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
-            .expect_err("a generated compact model has no exact periodic descriptor")
+            .expect_err("MEXTRAM's residual is not F(x) + dQ(x)/dt")
             .to_string();
         assert!(
-            hb.contains("generated Verilog-A compact-model equations"),
-            "harmonic balance must name the missing capability: {hb}"
+            hb.contains("it scales a `ddt` by a quantity that varies with bias"),
+            "harmonic balance must name the generator's reason: {hb}"
         );
 
         let pss = engine()

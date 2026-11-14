@@ -80,6 +80,7 @@ impl HbSolver {
             self.try_push_periodic_mna_branch(
                 ExactMnaBranch::AuxiliaryState {
                     branch_ordinal: physical + index + 1,
+                    canonical: false,
                 },
                 name,
             )?;

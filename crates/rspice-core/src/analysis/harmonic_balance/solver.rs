@@ -17,6 +17,8 @@ mod currents;
 mod dc;
 mod devices;
 mod envelope;
+#[cfg(feature = "veriloga-builtins-base")]
+mod generated_veriloga;
 mod integrals;
 mod krylov;
 mod linear;
@@ -30,6 +32,8 @@ mod result_builder;
 #[cfg(feature = "veriloga")]
 mod veriloga;
 
+#[cfg(feature = "veriloga-builtins-base")]
+use generated_veriloga::HbGeneratedDevice;
 #[cfg(feature = "veriloga")]
 use veriloga::HbVerilogADevice;
 
@@ -814,18 +818,37 @@ pub(crate) enum ExactMnaBranch {
         node_neg: usize,
     },
     /// Explicit descriptor coordinate without terminal incidence. Its complete
-    /// differential equation comes from native device F/Q sampling.
-    AuxiliaryState { branch_ordinal: usize },
+    /// differential equation comes from device F/Q sampling. A `canonical`
+    /// coordinate is one of the circuit's own MNA branches, whose device
+    /// stamps its row and its terminals' incidence itself (a generated compact
+    /// model's branch); every other one is registered after the circuit's
+    /// branches.
+    AuxiliaryState {
+        branch_ordinal: usize,
+        canonical: bool,
+    },
 }
 
 impl ExactMnaBranch {
+    /// A coordinate registered after the circuit's own branches.
     fn is_auxiliary(&self) -> bool {
+        matches!(
+            self,
+            Self::AuxiliaryState {
+                canonical: false,
+                ..
+            }
+        )
+    }
+
+    /// A coordinate the analysis gives no terminal incidence.
+    fn has_no_terminals(&self) -> bool {
         matches!(self, Self::AuxiliaryState { .. })
     }
 
     fn ordinal_and_terminals(&self) -> (usize, usize, usize) {
         match self {
-            Self::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0),
+            Self::AuxiliaryState { branch_ordinal, .. } => (*branch_ordinal, 0, 0),
             Self::VoltageSource {
                 branch_ordinal,
                 node_pos,
@@ -1067,6 +1090,10 @@ pub struct HbSolver {
     /// Verilog-A instances in the F/Q sampler, each with its primed charge probe.
     #[cfg(feature = "veriloga")]
     veriloga_nonlinear_devices: Vec<HbVerilogADevice>,
+    /// Generated compact models in the F/Q sampler, each with its primed
+    /// charge probe.
+    #[cfg(feature = "veriloga-builtins-base")]
+    generated_nonlinear_devices: Vec<HbGeneratedDevice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

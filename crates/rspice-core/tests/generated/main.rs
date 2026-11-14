@@ -5,5 +5,7 @@ mod compact_model_routing;
 mod generated_bsimsoi461_routing;
 mod generated_bundle_manifest_eol;
 #[cfg(feature = "veriloga-builtins-base")]
+mod generated_hb;
+#[cfg(feature = "veriloga-builtins-base")]
 mod generated_veriloga_feature_shards;
 mod generated_veriloga_runtime;

@@ -549,6 +549,12 @@ impl HbSolver {
                 "QPSS Verilog-A F/Q sampling is not connected".into(),
             ));
         }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self.generated_nonlinear_devices.is_empty() {
+            return Err(Error::InvalidCircuit(
+                "QPSS generated Verilog-A F/Q sampling is not connected".into(),
+            ));
+        }
         if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
             return Err(Error::InvalidCircuit(
                 "QPSS branch descriptors and names are misaligned".into(),
@@ -560,7 +566,7 @@ impl HbSolver {
             if ordinal != index + 1
                 || pos > self.num_nodes
                 || neg > self.num_nodes
-                || (pos == neg && !branch.is_auxiliary())
+                || (pos == neg && !branch.has_no_terminals())
             {
                 return Err(Error::InvalidCircuit(
                     "QPSS branch has invalid canonical MNA coordinates".into(),

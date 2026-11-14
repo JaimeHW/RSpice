@@ -18,6 +18,9 @@ enum PeriodicMnaRegistration {
     Ccvs(usize),
     BjtBase(usize),
     BehavioralVoltage(usize),
+    /// A generated compact model's own branch.
+    #[cfg(feature = "veriloga-builtins-base")]
+    GeneratedVerilogA,
 }
 
 pub(super) enum BehavioralBasis<'a> {
@@ -192,6 +195,15 @@ impl Engine {
         for device in circuit.veriloga_devices().iter() {
             solver
                 .try_add_veriloga_device(device.clone())
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            solver
+                .try_add_generated_veriloga_device(
+                    device.clone(),
+                    circuit.generated_simulation_parameters,
+                )
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         Ok(())
@@ -791,6 +803,30 @@ impl Engine {
             }
         }
 
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            for &ordinal in device.branches.iter().filter(|&&ordinal| ordinal > 0) {
+                let slot = ordinal
+                    .checked_sub(1)
+                    .and_then(|index| registrations.get_mut(index))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "generated Verilog-A device '{}' has an invalid periodic branch",
+                            device.instance_name
+                        ))
+                    })?;
+                if slot
+                    .replace(PeriodicMnaRegistration::GeneratedVerilogA)
+                    .is_some()
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "generated Verilog-A device '{}' duplicates a periodic MNA branch",
+                        device.instance_name
+                    )));
+                }
+            }
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -831,6 +867,15 @@ impl Engine {
                         .try_add_periodic_constitutive_port_branch(
                             bjt.node_bx,
                             bjt.node_bi,
+                            branch_ordinal,
+                            &canonical_branch_names[slot_index],
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
+                #[cfg(feature = "veriloga-builtins-base")]
+                PeriodicMnaRegistration::GeneratedVerilogA => {
+                    solver
+                        .try_add_periodic_device_branch(
                             branch_ordinal,
                             &canonical_branch_names[slot_index],
                         )

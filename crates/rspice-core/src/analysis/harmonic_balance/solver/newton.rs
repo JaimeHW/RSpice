@@ -188,7 +188,7 @@ impl ExactHbOperator<'_> {
             if ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_auxiliary())
+                || (node_pos == node_neg && !branch.has_no_terminals())
                 || matches!(branch, ExactMnaBranch::Inductor { inductance, .. } if !inductance.is_finite() || *inductance == 0.0)
                 || matches!(branch, ExactMnaBranch::Resistor { resistance, small_signal_resistance, .. } if !resistance.is_finite() || !small_signal_resistance.is_finite())
             {

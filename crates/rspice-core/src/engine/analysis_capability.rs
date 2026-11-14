@@ -390,6 +390,23 @@ const fn hb_admissible_veriloga() -> CellSupport {
     }
 }
 
+const HB_GENERATED_EVIDENCE: &[&str] = &[
+    "tests/generated/generated_hb.rs::a_generated_resistor_gives_its_native_twins_harmonics",
+    "tests/generated/generated_hb.rs::generated_models_reach_the_settled_transients_steady_state",
+    "tests/generated/generated_hb.rs::harmonic_balance_refuses_a_generated_model_by_its_reason",
+];
+
+/// Harmonic balance takes a generated compact model whose generator proved
+/// its residual `F(x) + dQ(x)/dt` with nothing kept between evaluations.
+const fn hb_admissible_generated() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::HbAdmissibleVerilogA,
+        token: HB_VERILOGA_OPERATOR,
+        condition: "every generated compact model whose generator proved its residual memoryless equations plus `ddt` of the charges it contributes (F(x) + dQ(x)/dt): no idt, idtmod, cross, above, timer, last_crossing or $abstime in its equations, and no variable the next evaluation reads back after the body assigned it",
+        evidence: HB_GENERATED_EVIDENCE,
+    }
+}
+
 const fn renderable(condition: &'static str, evidence: &'static [&'static str]) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::TransientNoiseRenderable,
@@ -489,6 +506,7 @@ pub const fn capability_cell(
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
             },
+            F::VerilogAGenerated if matches!(analysis, A::Hb) => hb_admissible_generated(),
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, true),
@@ -834,6 +852,50 @@ fn hb_veriloga_operator_refusal(
     None
 }
 
+/// The first Verilog-A instance of `family` harmonic balance cannot sample,
+/// refused by `analysis` with harmonic balance's reason.
+fn hb_admission_refusal(
+    circuit: &CircuitData,
+    family: CapabilityFamily,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    match family {
+        CapabilityFamily::VerilogAGenerated => hb_generated_refusal(circuit, analysis),
+        _ => hb_veriloga_operator_refusal(circuit, analysis),
+    }
+}
+
+/// Harmonic balance refuses a generated compact model whose generator could
+/// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason.
+fn hb_generated_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    #[cfg(feature = "veriloga-builtins-base")]
+    for device in circuit.generated_veriloga_devices().iter() {
+        let Some(reason) = device.harmonic_balance_refusal() else {
+            continue;
+        };
+        let instance = device.instance_name.clone();
+        let module = device.model_name.to_owned();
+        return Some(
+            UnsupportedCapabilityError::new(
+                HB_VERILOGA_OPERATOR,
+                format!(
+                    "{} does not support generated Verilog-A instance '{instance}' (module \
+                     '{module}'): {reason}",
+                    analysis.label()
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .for_instance(instance)
+            .for_module(module),
+        );
+    }
+    let _ = (circuit, analysis);
+    None
+}
+
 /// Whether the analysis solves for a periodic steady state, whose unknowns
 /// are the circuit's waveforms over one period and nothing else.
 #[cfg(feature = "veriloga")]
@@ -1000,7 +1062,7 @@ impl Engine {
                         }
                     }
                     InstanceGate::HbAdmissibleVerilogA => {
-                        if let Some(refusal) = hb_veriloga_operator_refusal(circuit, analysis) {
+                        if let Some(refusal) = hb_admission_refusal(circuit, family, analysis) {
                             return Err(refusal.into());
                         }
                     }

@@ -131,7 +131,10 @@ impl HbSolver {
                 let branch_ordinal = self.exact_mna_branches().len() + 1;
                 *row = self.num_nodes + self.exact_mna_branches().len();
                 self.try_push_periodic_mna_branch(
-                    ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                    ExactMnaBranch::AuxiliaryState {
+                        branch_ordinal,
+                        canonical: false,
+                    },
                     &format!("{}:{:?}{}:{role}", device.name, site.kind, site.slot),
                 )?;
             }
@@ -149,6 +152,27 @@ impl HbSolver {
                 transfer: network.transfer,
             })?;
         }
+        Ok(())
+    }
+
+    /// Add a generated compact model to the F/Q sampler. The generator must
+    /// have proved its residual `F(x) + dQ(x)/dt`, which the harmonic-balance
+    /// capability gate checks before the solver is built.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(crate) fn try_add_generated_veriloga_device(
+        &mut self,
+        device: crate::device::veriloga_builtins::BuiltinVerilogAInstance,
+        simparams: rspice_veriloga_runtime::GeneratedSimulationParameters,
+    ) -> Result<(), HbError> {
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let device = HbGeneratedDevice::try_new(
+            device,
+            self.config.fundamental_freq,
+            self.num_nodes,
+            unknowns,
+            simparams,
+        )?;
+        self.generated_nonlinear_devices.push(device);
         Ok(())
     }
 

@@ -356,6 +356,11 @@ const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body without `absd
 const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
      F(x) + dQ(x)/dt, with no other operator that keeps state and no variable kept between \
      time points";
+/// The condition behind a generated compact model's harmonic-balance
+/// residual, which its generator decides once per model.
+const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
+     charges it contributes, F(x) + dQ(x)/dt, with no operator that keeps state in time and \
+     no variable the next evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
@@ -684,9 +689,11 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::GeneratedVerilogA => PeriodicCapabilityDescriptor {
-            residual_jacobian: Inapplicable,
+            // The analysis capability gate refuses every model whose
+            // generator did not prove this, by the generator's reason.
+            residual_jacobian: Restricted(GENERATED_VERILOGA_HB_RESIDUAL),
             dynamic_state: Complete,
-            small_signal: Absent("generated Verilog-A compact-model equations"),
+            small_signal: Inapplicable,
             noise: Absent("periodic generated Verilog-A noise sources are not declared"),
             pss_state: Absent("generated Verilog-A integration state"),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
@@ -1284,6 +1291,12 @@ fn every_branch_has_a_periodic_owner(circuit: &CircuitData) -> bool {
     for bjt in &circuit.bjts.devices {
         if let Some(node) = bjt.mna_rbi_branch_matrix_node(circuit.num_nodes()) {
             mark(node - circuit.num_nodes(), &mut represented);
+        }
+    }
+    #[cfg(feature = "veriloga-builtins-base")]
+    for device in circuit.generated_veriloga_devices().iter() {
+        for &ordinal in &device.branches {
+            mark(ordinal, &mut represented);
         }
     }
 

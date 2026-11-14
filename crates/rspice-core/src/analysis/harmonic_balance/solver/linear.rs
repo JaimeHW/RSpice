@@ -499,6 +499,8 @@ impl HbSolver {
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
             veriloga_nonlinear_devices: Vec::new(),
+            #[cfg(feature = "veriloga-builtins-base")]
+            generated_nonlinear_devices: Vec::new(),
         })
     }
 
@@ -541,6 +543,8 @@ impl HbSolver {
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
             veriloga_nonlinear_devices: Vec::new(),
+            #[cfg(feature = "veriloga-builtins-base")]
+            generated_nonlinear_devices: Vec::new(),
         }
     }
 
@@ -958,6 +962,39 @@ impl HbSolver {
                 branch_ordinal,
                 node_pos,
                 node_neg,
+            },
+            name,
+        )
+    }
+
+    /// A branch unknown whose every equation entry, its terminal incidence
+    /// included, a sampled device supplies: a generated compact model's own
+    /// branch.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(crate) fn try_add_periodic_device_branch(
+        &mut self,
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        let expected_ordinal = self.periodic_mna_branches.len() + 1;
+        if branch_ordinal != expected_ordinal {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch '{name}' has canonical ordinal {branch_ordinal}; expected {expected_ordinal}"
+            )));
+        }
+        if self
+            .periodic_mna_branch_names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch name '{name}' is duplicated"
+            )));
+        }
+        self.try_push_periodic_mna_branch(
+            ExactMnaBranch::AuxiliaryState {
+                branch_ordinal,
+                canonical: true,
             },
             name,
         )
@@ -1458,7 +1495,9 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg, false),
-                ExactMnaBranch::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0, false),
+                ExactMnaBranch::AuxiliaryState { branch_ordinal, .. } => {
+                    (*branch_ordinal, 0, 0, false)
+                }
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -1467,7 +1506,7 @@ impl HbSolver {
             }
             if node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_auxiliary())
+                || (node_pos == node_neg && !branch.has_no_terminals())
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "exact linear MNA branch '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",

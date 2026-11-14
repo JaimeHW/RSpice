@@ -536,7 +536,7 @@ impl PeriodicConversionOperator<'_> {
                     self.num_nodes
                 )));
             }
-            if node_pos == node_neg && !branch.is_auxiliary() {
+            if node_pos == node_neg && !branch.has_no_terminals() {
                 return Err(HbError::InvalidCircuit(format!(
                     "{context} MNA branch #{branch_index} has identical terminals"
                 )));
