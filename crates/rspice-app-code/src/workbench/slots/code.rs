@@ -4,6 +4,7 @@
 //! collapsed; and what code shows other features.
 
 use crate::simulation::NetlistShown;
+use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::framework::feature::CodePort;
@@ -163,6 +164,10 @@ impl CodePort for CodeState {
             &self.netlist,
             messages,
         )
+    }
+
+    fn new_veriloga_device_available(&self, model: &crate::workbench::app_state::Model) -> bool {
+        new_veriloga_device_available_in(model)
     }
 
     fn read_only_veriloga_well(

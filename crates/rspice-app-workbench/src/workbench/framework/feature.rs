@@ -137,6 +137,13 @@ pub trait CodePort {
         model: &Model,
         messages: crate::workbench::localization::MessageCatalog,
     ) -> Option<String>;
+    /// Whether New Verilog-A device can make anything at all as `model`
+    /// stands: it needs a library it can write. A port with no device form
+    /// offers nothing.
+    fn new_veriloga_device_available(&self, model: &Model) -> bool {
+        let _ = model;
+        false
+    }
     /// A Verilog-A source, read-only, in the editor well the code feature
     /// draws: how another feature's page shows a source file it does not
     /// edit, such as a built-in model's on the Library page. `id` names the

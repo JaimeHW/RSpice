@@ -388,6 +388,13 @@ pub fn fresh_session_results() -> &'static dyn ResultsPort {
     &NullPorts
 }
 
+/// What the code feature shows in a fresh session: the same answers a
+/// [`FeatureHarness`] lends its feature as the code peer, for a test that
+/// lends a feature's parts without a harness.
+pub fn fresh_session_code() -> &'static dyn CodePort {
+    &NullPorts
+}
+
 /// A feature, its own state and what it runs, and the model and session its
 /// commands run over.
 pub struct FeatureHarness<F: Feature> {
