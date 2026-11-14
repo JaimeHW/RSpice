@@ -49,15 +49,15 @@ use rspice_schematic_editor::view::tool_input::ToolPointerView;
 mod stimulus;
 
 #[derive(Debug, Clone, Copy)]
-struct ContextCommand {
-    action: ContextAction,
+pub(crate) struct ContextCommand {
+    pub(crate) action: ContextAction,
     icon: ContextIcon,
-    label: &'static str,
+    pub(crate) label: &'static str,
     /// The command whose shortcut the row shows.
-    shortcut_command: Option<CommandKey>,
+    pub(crate) shortcut_command: Option<CommandKey>,
 }
 
-type ContextEntry = context_surface::ContextEntry<ContextCommand>;
+pub(crate) type ContextEntry = context_surface::ContextEntry<ContextCommand>;
 
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
     // What can be started on a bare sheet: only the empty canvas offers them.
@@ -341,7 +341,7 @@ fn is_bare_canvas(state: &CanvasFacts<'_>, target: ContextTarget) -> bool {
 }
 
 /// The Arrange page: the Design menu's Arrange submenu, group by group.
-const ARRANGE_ENTRIES: &[ContextEntry] = &[
+pub(crate) const ARRANGE_ENTRIES: &[ContextEntry] = &[
     arrange(ArrangeAction::RotateClockwise, ContextIcon::Rotate),
     arrange(ArrangeAction::RotateCounterClockwise, ContextIcon::Rotate),
     arrange(ArrangeAction::MirrorHorizontal, ContextIcon::Mirror),
@@ -524,7 +524,7 @@ fn selection_holds_a_standard_value(state: &CanvasFacts<'_>) -> bool {
 /// stimulus-library group instead of the master rows, which is also what lets
 /// the group in without turning the menu into a scroller. A rule with nothing
 /// left under it goes too.
-fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<ContextEntry> {
+pub(crate) fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
     let bare_canvas = is_bare_canvas(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
@@ -735,7 +735,7 @@ fn select_pointer_target(
 /// Select what the menu opens on, unless it is already in the selection,
 /// and name it as the menu's target. A net highlight stays lit on an
 /// instance the menu can descend into, so Descend carries it.
-fn select_context_target(
+pub(crate) fn select_context_target(
     state: &mut CanvasParts<'_>,
     target: Option<PointerTarget>,
 ) -> ContextTarget {
@@ -1038,7 +1038,7 @@ fn menu_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> Option<String
     (!is_bare_canvas(state, target)).then(|| selection_summary(state, target))
 }
 
-fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> String {
+pub(crate) fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> String {
     let selection = &state.model.schematic.session.editor.selection;
     let count = selection.components.len()
         + selection.wires.len()
@@ -1195,7 +1195,10 @@ fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> String {
     }
 }
 
-fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (bool, &'static str) {
+pub(crate) fn action_availability(
+    action: ContextAction,
+    state: &CanvasFacts<'_>,
+) -> (bool, &'static str) {
     let selection = &state.model.schematic.session.editor.selection;
     // Components, complete wires, and explicit junctions are clipboard and
     // deletion objects. Wire segments and vertices remain edit handles.
@@ -1540,7 +1543,7 @@ fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (bool,
     }
 }
 
-fn execute_context_action(
+pub(crate) fn execute_context_action(
     action: ContextAction,
     state: &mut CanvasParts<'_>,
     click_pos: Point,
@@ -1738,7 +1741,7 @@ fn show_sheet_properties(state: &mut CanvasParts<'_>) {
     state.workbench.outbox.push(RevealSheetSection);
 }
 
-fn open_operating_point(state: &mut CanvasParts<'_>) {
+pub(crate) fn open_operating_point(state: &mut CanvasParts<'_>) {
     // The inspector renders the *selected* analysis, so the hop selects the
     // operating point before it routes. Without this a run of [OP, TRAN] with
     // the transient selected landed on "not a DC operating-point result" —
@@ -1853,7 +1856,7 @@ fn operating_point_available(state: &CanvasFacts<'_>) -> bool {
     })
 }
 
-fn context_menu_binding(state: &CanvasFacts<'_>) -> Option<ContextMenuBinding> {
+pub(crate) fn context_menu_binding(state: &CanvasFacts<'_>) -> Option<ContextMenuBinding> {
     let (target, (x, y)) = state.design.interaction.context_target?;
     Some(ContextMenuBinding {
         source: super::requests::editor_request_source(state),
@@ -1864,7 +1867,7 @@ fn context_menu_binding(state: &CanvasFacts<'_>) -> Option<ContextMenuBinding> {
     })
 }
 
-fn context_menu_view(state: &CanvasFacts<'_>, ctx: &Context) -> Option<ContextMenuView> {
+pub(crate) fn context_menu_view(state: &CanvasFacts<'_>, ctx: &Context) -> Option<ContextMenuView> {
     let binding = context_menu_binding(state)?;
     let resolve = |entries: &[ContextEntry]| {
         entries
@@ -1914,7 +1917,7 @@ fn resolve_entry(
     })
 }
 
-fn apply_context_request(
+pub(crate) fn apply_context_request(
     state: &mut CanvasParts<'_>,
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,

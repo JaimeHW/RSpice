@@ -24,7 +24,7 @@ pub(super) fn picks_instance_to_descend(model: &Model, target: Option<PointerTar
         if hierarchy_master_for_component(model, id).is_some())
 }
 
-pub(super) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
+pub(crate) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
         || state.model.schematic.session.editor.tool != crate::state::Tool::Select
