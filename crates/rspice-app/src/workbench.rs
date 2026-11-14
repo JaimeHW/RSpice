@@ -87,12 +87,11 @@ pub(crate) mod chrome {
         pub(in crate::workbench) mod design;
     }
     pub(crate) mod toolbar {
-        pub use rspice_app_workbench::workbench::chrome::toolbar::*;
-        pub(in crate::workbench) mod code;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
         pub(in crate::workbench) use rspice_app_project::workbench::chrome::toolbar::project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
         pub(crate) use rspice_app_simulate::workbench::chrome::toolbar::simulate;
+        pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
 pub(crate) use rspice_app_cloud::workbench::cloud;
@@ -129,6 +128,7 @@ pub(crate) mod documents {
     pub(crate) use rspice_app_code::workbench::documents::code_workspace;
     pub(crate) use rspice_app_code::workbench::documents::editor_font;
     pub(crate) use rspice_app_code::workbench::documents::netlist_document;
+    #[cfg(test)]
     pub(crate) use rspice_app_code::workbench::documents::text_editor_commands;
     #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) use rspice_app_code::workbench::documents::virtual_text_editor;

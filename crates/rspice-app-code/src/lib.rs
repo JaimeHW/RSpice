@@ -53,7 +53,7 @@ pub mod simulation {
 
 pub mod workbench {
     pub(crate) use rspice_app_services::workbench::lifecycle;
-    pub(crate) use rspice_app_workbench::workbench::{framework, localization};
+    pub(crate) use rspice_app_workbench::workbench::{framework, layout, localization};
     pub(crate) use rspice_ui_kit::panels as design_system;
 
     #[cfg(any(test, feature = "test-support"))]

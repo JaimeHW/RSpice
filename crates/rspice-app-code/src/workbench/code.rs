@@ -7,6 +7,7 @@
 pub mod commands;
 mod docks;
 pub mod netlist_first;
+pub mod toolbar;
 
 use egui::Context;
 
@@ -101,6 +102,7 @@ impl Feature for CodeFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();
+        registry.toolbars(toolbar::TOOLBARS);
         registry.dialogs(DIALOGS);
         registry.navigator(FeatureNavigator {
             show: docks::show_navigator,

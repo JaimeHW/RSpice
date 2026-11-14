@@ -6,6 +6,7 @@
 //! to its left has run.
 
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_button_size};
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
@@ -13,11 +14,18 @@ use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
-    Cx, Reads, ToolbarAction, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarTool,
+    Cx, Reads, ToolbarAction, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarId, ToolbarTool,
 };
 use crate::workbench::layout::LayoutSpec;
 
-use super::{explicit_label_width, toolbar_icon_button_size};
+/// The toolbar of an open Verilog-A cell view.
+pub const VERILOGA_TOOLBAR: ToolbarId = ToolbarId::new("code.veriloga");
+/// The toolbar of the Code & Automation workspace.
+pub const NETLIST_TOOLBAR: ToolbarId = ToolbarId::new("code.netlist");
+
+/// Every toolbar the code feature registers.
+pub const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<CodeFeature>])] =
+    &[(VERILOGA_TOOLBAR, VERILOGA), (NETLIST_TOOLBAR, NETLIST)];
 
 /// A command drawn as a labelled button.
 const fn labelled(
@@ -49,7 +57,7 @@ const fn icon(key: CommandKey, icon: WorkbenchIcon) -> ToolbarEntry<CodeFeature>
 /// and every source tool are in the command palette as well, and Format in the
 /// editor's own menu. A schematic's placement and transform tools have nothing
 /// to act on here.
-pub(in crate::workbench) const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
+const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
     // The control is Cancel until the compile finishes, as Run is Stop.
     // Compile is asked first: Cancel ends the compile as it is pressed, and
     // asked first it would leave Compile to draw beside it for that frame.
@@ -204,7 +212,7 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
 /// primary is exported and compared, an owned deck is saved and run. The
 /// Automation page's source tools manage the document and search the
 /// closure.
-pub(in crate::workbench) const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
+const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         generated_deck_shown,
         &[
@@ -274,4 +282,22 @@ fn owned_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
 
 fn automation_page_shown(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.state.code_workspace.page == CodeWorkspacePage::Automation
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::framework::feature::FeatureRegistry;
+
+    /// The code feature registers each toolbar once, and both toolbars the
+    /// shell's lane chooses (an open Verilog-A cell view's and the Code &
+    /// Automation workspace's) are ones it registered.
+    #[test]
+    fn every_code_toolbar_the_shell_chooses_is_registered_once() {
+        assert_eq!(
+            FeatureRegistry::<CodeFeature>::build()
+                .validate_toolbars([VERILOGA_TOOLBAR, NETLIST_TOOLBAR]),
+            Ok(())
+        );
+    }
 }

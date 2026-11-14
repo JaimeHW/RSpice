@@ -404,7 +404,6 @@ impl Host for RSpiceApp {
             Point::Inspector(InspectorScope::Document(_)) => {}
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
-                use crate::workbench::chrome::toolbar::code::{NETLIST, VERILOGA};
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
@@ -415,6 +414,7 @@ impl Host for RSpiceApp {
                     simulation_tools, verification_tools,
                 };
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
+                use crate::workbench::code::toolbar::{NETLIST_TOOLBAR, VERILOGA_TOOLBAR};
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::toolbar::{
                     SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
@@ -451,8 +451,11 @@ impl Host for RSpiceApp {
                             if app.state.model.workspace.content.active_view_type()
                                 == Some(ViewType::VerilogA) =>
                         {
-                            features::show_toolbar_entries::<CodeFeature>(
-                                app, ui, VERILOGA, layout,
+                            features::show_toolbar::<CodeFeature>(
+                                app,
+                                ui,
+                                VERILOGA_TOOLBAR,
+                                layout,
                             );
                         }
                         Workspace::Design => {
@@ -491,7 +494,7 @@ impl Host for RSpiceApp {
                         Workspace::Verify => verification_tools(ui, app, layout),
                         Workspace::Models => models_tools(ui, app, layout),
                         Workspace::Netlist => {
-                            features::show_toolbar_entries::<CodeFeature>(app, ui, NETLIST, layout);
+                            features::show_toolbar::<CodeFeature>(app, ui, NETLIST_TOOLBAR, layout);
                         }
                     },
                 }

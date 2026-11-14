@@ -1004,7 +1004,7 @@ mod tests {
             "workbench/chrome/title_bar/code.rs",
             "workbench/chrome/title_bar/design.rs",
             "workbench/chrome/toolbar.rs",
-            "workbench/chrome/toolbar/code.rs",
+            "workbench/code/toolbar.rs",
             "workbench/design/toolbar.rs",
             "workbench/chrome/toolbar/models.rs",
             "workbench/chrome/toolbar/project.rs",
