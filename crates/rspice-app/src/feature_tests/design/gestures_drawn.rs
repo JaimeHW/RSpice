@@ -1,190 +1,11 @@
-//! Pointer transactions through real egui frames, navigation, and persistence.
+//! Pointer transactions through real egui frames, navigation and persistence, drawn through a
+//! whole application.
 
-use super::*;
 use crate::state::{ComponentType, Point, SchematicState, Tool, Wire};
-use crate::workbench::app_state::DragType;
+use crate::workbench::app::*;
+use crate::workbench::app_state::{AppState, DragType};
 use crate::workbench::state::Workspace;
-
-pub(crate) struct Fixture {
-    pub(crate) ctx: Context,
-    pub(crate) app: RSpiceApp,
-    pub(crate) origin: egui::Pos2,
-    time: f64,
-}
-
-impl Fixture {
-    pub(crate) fn new(wires: bool) -> Self {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        app.state.open_project_session();
-        app.state.workbench.activate(Workspace::Design);
-        app.state.model.schematic = SchematicState::default();
-        app.state.model.schematic.session.editor.needs_fit = false;
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .needs_drawing_sheet_fit = false;
-        if wires {
-            app.state.model.schematic.document_mut_for_test().wires = vec![
-                Wire::new(1, vec![Point::new(100, 100), Point::new(200, 100)]),
-                Wire::new(2, vec![Point::new(100, 100), Point::new(100, 200)]),
-            ];
-            app.state.model.schematic.recalculate_runtime_state();
-        } else {
-            app.state
-                .model
-                .schematic
-                .add_component(ComponentType::Resistor, Point::new(100, 100));
-        }
-        app.state.model.schematic.clear_undo_history();
-        app.state.model.schematic.session.is_dirty = false;
-        app.state.sync_active_schematic_to_workspace();
-        let mut fixture = Self {
-            ctx,
-            app,
-            origin: egui::Pos2::ZERO,
-            time: 0.0,
-        };
-        fixture.frame(vec![], true);
-        fixture
-    }
-
-    pub(crate) fn frame(&mut self, events: Vec<egui::Event>, focused: bool) {
-        self.time += 0.02;
-        let Self {
-            ctx,
-            app,
-            origin,
-            time,
-        } = self;
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(600.0, 400.0),
-                )),
-                events,
-                focused,
-                time: Some(*time),
-                ..Default::default()
-            },
-            |ui| {
-                app.state.reconcile_schematic_drag(ui.ctx(), false);
-                app.handle_shortcuts(ui.ctx());
-                *origin = ui.available_rect_before_wrap().min;
-                if app.state.model.workspace.content.active_view_type()
-                    == crate::state::ViewType::Symbol
-                {
-                    crate::schematic::symbol_editor::show(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
-                        None,
-                    );
-                } else {
-                    crate::schematic::view::render_schematic_view(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
-                        None,
-                    );
-                }
-                app.state.reconcile_schematic_drag(ui.ctx(), true);
-            },
-        );
-    }
-
-    pub(crate) fn button(&self, x: f32, pressed: bool) -> egui::Event {
-        egui::Event::PointerButton {
-            pos: self.origin + egui::vec2(x, 100.0),
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        }
-    }
-
-    pub(crate) fn drag(&mut self, expected: DragType) {
-        self.frame(
-            vec![
-                egui::Event::PointerMoved(self.origin + egui::vec2(100.0, 100.0)),
-                self.button(100.0, true),
-            ],
-            true,
-        );
-        self.frame(
-            vec![egui::Event::PointerMoved(
-                self.origin + egui::vec2(110.0, 100.0),
-            )],
-            true,
-        );
-        self.frame(
-            vec![egui::Event::PointerMoved(
-                self.origin + egui::vec2(170.0, 100.0),
-            )],
-            true,
-        );
-        assert_eq!(self.app.state.design.interaction.drag.drag_type, expected);
-        assert!(self.app.state.schematic_drag_in_progress());
-    }
-
-    pub(crate) fn second_document(&mut self) -> crate::state::CellViewRef {
-        use crate::state::{Cell, CellViewRef, OpenCellView, View, ViewType};
-        let original = self
-            .app
-            .state
-            .model
-            .workspace
-            .content
-            .active_schematic_reference();
-        let reference = CellViewRef::new(&original.library, "second", "schematic");
-        let mut cell = Cell::new(&reference.cell);
-        cell.add_view(View::new(&reference.view, ViewType::Schematic));
-        self.app
-            .state
-            .model
-            .library_manager
-            .get_library_mut(&reference.library)
-            .unwrap()
-            .add_cell(cell);
-        self.app
-            .state
-            .model
-            .workspace
-            .content
-            .open_views
-            .push(OpenCellView::new(reference.clone(), ViewType::Schematic));
-        self.app
-            .state
-            .model
-            .workspace
-            .insert_schematic_editor(reference.key(), SchematicState::default());
-        reference
-    }
-    pub(crate) fn enter_reused_master(&mut self) -> crate::state::CellViewRef {
-        use crate::state::LibraryCellInstance;
-        let master = self.second_document();
-        let child = self.app.state.model.schematic.clone();
-        self.app.state.model.schematic = SchematicState::default();
-        for x in [0, 200] {
-            self.app.state.model.schematic.add_library_cell_component(
-                Point::new(x, 0),
-                LibraryCellInstance::new(&master.library, &master.cell, &master.view),
-            );
-        }
-        self.app.state.sync_active_schematic_to_workspace();
-        self.app
-            .state
-            .model
-            .workspace
-            .insert_schematic_editor(master.key(), child);
-        self.app
-            .state
-            .navigation()
-            .descend_into_instance(Some("X1".into()), master.clone());
-        master
-    }
-}
+use egui::Context;
 
 #[test]
 fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
@@ -704,16 +525,6 @@ fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag()
     assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
 }
 
-fn key(key: egui::Key) -> egui::Event {
-    egui::Event::Key {
-        key,
-        physical_key: Some(key),
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::NONE,
-    }
-}
-
 /// Copy the fixture's resistor and Paste it, with the pointer over the
 /// canvas at screen `(x, 100)`.
 fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
@@ -941,4 +752,195 @@ fn after_escape_the_canvas_still_takes_its_keys() {
     assert_eq!(tool(&fixture), Tool::Select, "Esc drops the tool");
     tap(&mut fixture, egui::Key::W);
     assert_eq!(tool(&fixture), Tool::Wire, "W after Esc arms the wire tool");
+}
+
+pub(crate) struct Fixture {
+    pub(crate) ctx: Context,
+    pub(crate) app: RSpiceApp,
+    pub(crate) origin: egui::Pos2,
+    time: f64,
+}
+
+impl Fixture {
+    pub(crate) fn new(wires: bool) -> Self {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.model.schematic = SchematicState::default();
+        app.state.model.schematic.session.editor.needs_fit = false;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
+        if wires {
+            app.state.model.schematic.document_mut_for_test().wires = vec![
+                Wire::new(1, vec![Point::new(100, 100), Point::new(200, 100)]),
+                Wire::new(2, vec![Point::new(100, 100), Point::new(100, 200)]),
+            ];
+            app.state.model.schematic.recalculate_runtime_state();
+        } else {
+            app.state
+                .model
+                .schematic
+                .add_component(ComponentType::Resistor, Point::new(100, 100));
+        }
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
+        app.state.sync_active_schematic_to_workspace();
+        let mut fixture = Self {
+            ctx,
+            app,
+            origin: egui::Pos2::ZERO,
+            time: 0.0,
+        };
+        fixture.frame(vec![], true);
+        fixture
+    }
+
+    pub(crate) fn frame(&mut self, events: Vec<egui::Event>, focused: bool) {
+        self.time += 0.02;
+        let Self {
+            ctx,
+            app,
+            origin,
+            time,
+        } = self;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                focused,
+                time: Some(*time),
+                ..Default::default()
+            },
+            |ui| {
+                app.state.reconcile_schematic_drag(ui.ctx(), false);
+                app.handle_shortcuts(ui.ctx());
+                *origin = ui.available_rect_before_wrap().min;
+                if app.state.model.workspace.content.active_view_type()
+                    == crate::state::ViewType::Symbol
+                {
+                    crate::schematic::symbol_editor::show(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        None,
+                    );
+                } else {
+                    crate::schematic::view::render_schematic_view(
+                        ui,
+                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        None,
+                    );
+                }
+                app.state.reconcile_schematic_drag(ui.ctx(), true);
+            },
+        );
+    }
+
+    pub(crate) fn button(&self, x: f32, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: self.origin + egui::vec2(x, 100.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    pub(crate) fn drag(&mut self, expected: DragType) {
+        self.frame(
+            vec![
+                egui::Event::PointerMoved(self.origin + egui::vec2(100.0, 100.0)),
+                self.button(100.0, true),
+            ],
+            true,
+        );
+        self.frame(
+            vec![egui::Event::PointerMoved(
+                self.origin + egui::vec2(110.0, 100.0),
+            )],
+            true,
+        );
+        self.frame(
+            vec![egui::Event::PointerMoved(
+                self.origin + egui::vec2(170.0, 100.0),
+            )],
+            true,
+        );
+        assert_eq!(self.app.state.design.interaction.drag.drag_type, expected);
+        assert!(self.app.state.schematic_drag_in_progress());
+    }
+
+    pub(crate) fn second_document(&mut self) -> crate::state::CellViewRef {
+        use crate::state::{Cell, CellViewRef, OpenCellView, View, ViewType};
+        let original = self
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference();
+        let reference = CellViewRef::new(&original.library, "second", "schematic");
+        let mut cell = Cell::new(&reference.cell);
+        cell.add_view(View::new(&reference.view, ViewType::Schematic));
+        self.app
+            .state
+            .model
+            .library_manager
+            .get_library_mut(&reference.library)
+            .unwrap()
+            .add_cell(cell);
+        self.app
+            .state
+            .model
+            .workspace
+            .content
+            .open_views
+            .push(OpenCellView::new(reference.clone(), ViewType::Schematic));
+        self.app
+            .state
+            .model
+            .workspace
+            .insert_schematic_editor(reference.key(), SchematicState::default());
+        reference
+    }
+    pub(crate) fn enter_reused_master(&mut self) -> crate::state::CellViewRef {
+        use crate::state::LibraryCellInstance;
+        let master = self.second_document();
+        let child = self.app.state.model.schematic.clone();
+        self.app.state.model.schematic = SchematicState::default();
+        for x in [0, 200] {
+            self.app.state.model.schematic.add_library_cell_component(
+                Point::new(x, 0),
+                LibraryCellInstance::new(&master.library, &master.cell, &master.view),
+            );
+        }
+        self.app.state.sync_active_schematic_to_workspace();
+        self.app
+            .state
+            .model
+            .workspace
+            .insert_schematic_editor(master.key(), child);
+        self.app
+            .state
+            .navigation()
+            .descend_into_instance(Some("X1".into()), master.clone());
+        master
+    }
+}
+
+fn key(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
 }

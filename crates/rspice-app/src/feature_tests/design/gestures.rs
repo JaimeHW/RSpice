@@ -1,7 +1,7 @@
 //! Canvas gestures driven through a whole application's frame.
 
+use crate::feature_tests::design::gestures_drawn::Fixture;
 use crate::state::{Point, SchematicState, Tool};
-use crate::workbench::app::gesture_tests::Fixture;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::DragType;
 

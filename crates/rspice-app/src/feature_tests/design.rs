@@ -10,6 +10,7 @@ mod design_surface_drawn;
 mod drag_work;
 mod find_replace;
 mod gestures;
+mod gestures_drawn;
 mod import_workflow;
 mod inline_instance;
 mod inline_instance_drawn;

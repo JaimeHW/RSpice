@@ -1149,9 +1149,6 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 // =============================================================================
 
 #[cfg(test)]
-pub(crate) mod gesture_tests;
-
-#[cfg(test)]
 mod wiring_acceptance;
 
 #[cfg(test)]
