@@ -864,6 +864,7 @@ impl BackwardError {
 /// must still certify the complete original system after this projection.
 fn canonicalize_real_homogeneous_zero_constraints(
     csc: &SymbolicSparseColMat<usize>,
+    layout: &ResidualLayout,
     values: &[Value],
     rhs: &[Value],
     solution: &mut [Value],
@@ -871,6 +872,7 @@ fn canonicalize_real_homogeneous_zero_constraints(
 ) -> bool {
     canonicalize_homogeneous_zero_constraints(
         csc,
+        layout,
         values,
         rhs,
         solution,
@@ -881,6 +883,7 @@ fn canonicalize_real_homogeneous_zero_constraints(
 /// [`canonicalize_real_homogeneous_zero_constraints`] for a complex solve.
 fn canonicalize_complex_homogeneous_zero_constraints(
     csc: &SymbolicSparseColMat<usize>,
+    layout: &ResidualLayout,
     values: &[Complex64],
     rhs: &[Complex64],
     solution: &mut [Complex64],
@@ -888,6 +891,7 @@ fn canonicalize_complex_homogeneous_zero_constraints(
 ) -> bool {
     canonicalize_homogeneous_zero_constraints(
         csc,
+        layout,
         values,
         rhs,
         solution,
@@ -895,10 +899,48 @@ fn canonicalize_complex_homogeneous_zero_constraints(
     )
 }
 
-/// The homogeneous zero projection shared by the real and complex solves. The
-/// equations are the rows of `values`, or its columns when `transposed`.
+/// The equations of a homogeneous zero projection: the rows of `values`,
+/// read through `layout`, or its columns when `transposed`.
+struct HomogeneousEquations<'a, T> {
+    csc: &'a SymbolicSparseColMat<usize>,
+    layout: &'a ResidualLayout,
+    values: &'a [T],
+    rhs: &'a [T],
+    transposed: bool,
+}
+
+impl<T: RemnantScalar> HomogeneousEquations<'_, T> {
+    /// Visit each nonzero coefficient of each equation whose right-hand side
+    /// is exactly zero, as `(equation, unknown)`.
+    fn visit_terms(&self, mut visit: impl FnMut(usize, usize)) {
+        let (col_ptr, row_idx) = (self.csc.col_ptr(), self.csc.row_idx());
+        let layout = self.layout;
+        for (equation, &rhs) in self.rhs.iter().enumerate() {
+            if rhs != T::ZERO {
+                continue;
+            }
+            if self.transposed {
+                let span = col_ptr[equation]..col_ptr[equation + 1];
+                for (&unknown, &value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                    if value != T::ZERO {
+                        visit(equation, unknown);
+                    }
+                }
+            } else {
+                for position in layout.row_ptr[equation]..layout.row_ptr[equation + 1] {
+                    if self.values[layout.csc_idx[position]] != T::ZERO {
+                        visit(equation, layout.col_idx[position]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The homogeneous zero projection shared by the real and complex solves.
 fn canonicalize_homogeneous_zero_constraints<T: RemnantScalar>(
     csc: &SymbolicSparseColMat<usize>,
+    layout: &ResidualLayout,
     values: &[T],
     rhs: &[T],
     solution: &mut [T],
@@ -915,43 +957,43 @@ fn canonicalize_homogeneous_zero_constraints<T: RemnantScalar>(
         return false;
     }
 
-    // Each coefficient is visited once when counting each homogeneous
-    // equation's unknowns, once more when building the dependency graph, and
-    // once when its unknown is proven zero. XOR retains the identity of the
-    // remaining unknown when an equation becomes a singleton. Without a
-    // homogeneous equation of a single unknown nothing can be proven zero,
-    // and every backend-faithful solve asks, so the graph is built only when
-    // one exists.
-    let homogeneous_terms = || {
-        (0..ncols).flat_map(move |col| {
-            let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
-            csc.row_idx()[span.clone()]
-                .iter()
-                .zip(&values[span])
-                .filter(|&(_, &value)| value != T::ZERO)
-                .map(move |(&original_row, _)| {
-                    if transposed {
-                        (col, original_row)
-                    } else {
-                        (original_row, col)
-                    }
-                })
-                .filter(move |&(equation, _)| rhs[equation] == T::ZERO)
-        })
-    };
+    // Only a homogeneous equation can prove an unknown zero, so only those
+    // equations' coefficients are visited: once to count each one's unknowns,
+    // once more to build the dependency graph, and once when an unknown is
+    // proven zero. XOR retains the identity of the remaining unknown when an
+    // equation becomes a singleton. Without a homogeneous equation of a single
+    // unknown nothing can be proven zero, and every backend-faithful solve
+    // asks, so the graph is built only when one exists. What is proven is the
+    // closure of the singleton rule, whatever order the terms come in.
     let mut remaining = vec![0usize; nrows];
     let mut unknown_xor = vec![0usize; nrows];
-    for (equation, unknown) in homogeneous_terms() {
+    // Each unknown's equations are a span of `dependent_equations`;
+    // `dependent_start[unknown + 1]` counts them first.
+    let mut dependent_start = vec![0usize; ncols + 1];
+    let equations = HomogeneousEquations {
+        csc,
+        layout,
+        values,
+        rhs,
+        transposed,
+    };
+    equations.visit_terms(|equation, unknown| {
         remaining[equation] += 1;
         unknown_xor[equation] ^= unknown;
-    }
+        dependent_start[unknown + 1] += 1;
+    });
     if !remaining.contains(&1) {
         return false;
     }
-    let mut dependent_equations = vec![Vec::new(); ncols];
-    for (equation, unknown) in homogeneous_terms() {
-        dependent_equations[unknown].push(equation);
+    for unknown in 0..ncols {
+        dependent_start[unknown + 1] += dependent_start[unknown];
     }
+    let mut dependent_equations = vec![0usize; dependent_start[ncols]];
+    let mut next_dependent = dependent_start[..ncols].to_vec();
+    equations.visit_terms(|equation, unknown| {
+        dependent_equations[next_dependent[unknown]] = equation;
+        next_dependent[unknown] += 1;
+    });
 
     let mut proven_zero = vec![false; ncols];
     let mut pending = Vec::new();
@@ -973,7 +1015,8 @@ fn canonicalize_homogeneous_zero_constraints<T: RemnantScalar>(
             solution[unknown] = T::ZERO;
             changed = true;
         }
-        for &equation in &dependent_equations[unknown] {
+        let dependents = dependent_start[unknown]..dependent_start[unknown + 1];
+        for &equation in &dependent_equations[dependents] {
             remaining[equation] -= 1;
             unknown_xor[equation] ^= unknown;
             if remaining[equation] == 1 {
@@ -3496,6 +3539,7 @@ impl StaticMatrix {
                 let block = rhs_index * n..(rhs_index + 1) * n;
                 canonicalize_real_homogeneous_zero_constraints(
                     csc,
+                    residual_layout,
                     values,
                     &rhs[block.clone()],
                     &mut solution[block],
@@ -3524,6 +3568,7 @@ impl StaticMatrix {
             }
             if canonicalize_real_homogeneous_zero_constraints(
                 csc,
+                residual_layout,
                 values,
                 &rhs[begin..end],
                 &mut solution[begin..end],
@@ -4127,7 +4172,14 @@ impl StaticMatrix {
         // eligibility from the physical operator, then certify the complete
         // diagonally equivalent scaled system before unscaling. This preserves
         // the overflow protection that equilibration provides.
-        if canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation) {
+        if canonicalize_real_homogeneous_zero_constraints(
+            csc,
+            residual_layout,
+            values,
+            rhs,
+            solution,
+            operation,
+        ) {
             let canonical_error = componentwise_backward_error_with_layout_and_floors(
                 csc,
                 residual_layout,
@@ -4370,7 +4422,14 @@ impl StaticMatrix {
             // the certified path returns it. The pivots can leave a rounding
             // unit there, and a large conductance on that unknown's row turns
             // it into a residual no Newton test passes.
-            canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation);
+            canonicalize_real_homogeneous_zero_constraints(
+                csc,
+                residual_layout,
+                values,
+                rhs,
+                solution,
+                operation,
+            );
             return Ok(true);
         }
         let mut backward_error = match componentwise_backward_error_with_layout(
@@ -4454,7 +4513,14 @@ impl StaticMatrix {
             }
             backward_error = refined_error;
         }
-        if canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation) {
+        if canonicalize_real_homogeneous_zero_constraints(
+            csc,
+            residual_layout,
+            values,
+            rhs,
+            solution,
+            operation,
+        ) {
             let canonical_error = match componentwise_backward_error_with_layout(
                 csc,
                 residual_layout,
@@ -4570,6 +4636,7 @@ impl StaticMatrix {
         }
         if canonicalize_real_homogeneous_zero_constraints(
             &self.csc,
+            &self.residual_layout,
             &self.values,
             rhs,
             &mut solution,
@@ -6225,6 +6292,7 @@ impl ComplexMatrix {
         }
         Ok(canonicalize_complex_homogeneous_zero_constraints(
             &self.csc,
+            &self.residual_layout,
             &self.values,
             rhs,
             solution,
@@ -6777,6 +6845,7 @@ impl ComplexMatrix {
 
         let Self {
             csc,
+            residual_layout,
             values,
             lu,
             factorization_valid,
@@ -6900,8 +6969,14 @@ impl ComplexMatrix {
             backward_error = refined_error;
         }
 
-        if canonicalize_complex_homogeneous_zero_constraints(csc, values, rhs, solution, operation)
-        {
+        if canonicalize_complex_homogeneous_zero_constraints(
+            csc,
+            residual_layout,
+            values,
+            rhs,
+            solution,
+            operation,
+        ) {
             let canonical_error = complex_componentwise_backward_error(
                 csc,
                 &ws.scaled_values,
@@ -7643,6 +7718,7 @@ mod tests {
         let mut normal = [tiny, 1.0];
         assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &normal_rhs,
             &mut normal,
@@ -7671,6 +7747,7 @@ mod tests {
         let mut transposed = [1.0, tiny];
         assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &transpose_rhs,
             &mut transposed,
@@ -7697,6 +7774,7 @@ mod tests {
         let mut nonhomogeneous_singleton = [tiny, 1.0];
         assert!(!canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &[Value::from_bits(1), 4.0],
             &mut nonhomogeneous_singleton,
@@ -7708,6 +7786,7 @@ mod tests {
         let mut unconstrained = [tiny];
         assert!(!canonicalize_real_homogeneous_zero_constraints(
             &zero_coefficient.csc,
+            &zero_coefficient.residual_layout,
             &zero_coefficient.values,
             &[0.0],
             &mut unconstrained,
@@ -7724,6 +7803,7 @@ mod tests {
         let mut coupled = [tiny, 1.0];
         assert!(!canonicalize_real_homogeneous_zero_constraints(
             &multi_entry.csc,
+            &multi_entry.residual_layout,
             &multi_entry.values,
             &[0.0, 1.0],
             &mut coupled,
@@ -7734,6 +7814,7 @@ mod tests {
         let mut incomplete = [tiny, 2.0];
         assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &normal_rhs,
             &mut incomplete,
@@ -7792,6 +7873,7 @@ mod tests {
             let mut candidate = [tiny, -tiny, tiny, -0.0, 0.0, tiny, tiny];
             assert!(canonicalize_real_homogeneous_zero_constraints(
                 &matrix.csc,
+                &matrix.residual_layout,
                 &matrix.values,
                 &rhs,
                 &mut candidate,
@@ -7803,6 +7885,7 @@ mod tests {
             assert_eq!(&candidate[4..], &[0.0, tiny, tiny]);
             assert!(!canonicalize_real_homogeneous_zero_constraints(
                 &matrix.csc,
+                &matrix.residual_layout,
                 &matrix.values,
                 &rhs,
                 &mut candidate,
@@ -7902,6 +7985,7 @@ mod tests {
             assert!(
                 !canonicalize_real_homogeneous_zero_constraints(
                     &matrix.csc,
+                    &matrix.residual_layout,
                     &matrix.values,
                     &rhs,
                     &mut chained,
@@ -7972,6 +8056,7 @@ mod tests {
             let mut chained = remnants;
             assert!(!canonicalize_real_homogeneous_zero_constraints(
                 &matrix.csc,
+                &matrix.residual_layout,
                 &matrix.values,
                 &rhs,
                 &mut chained,
@@ -10009,6 +10094,7 @@ mod tests {
         let normal_rhs = [zero, Complex64::new(4.0, 0.0)];
         assert!(canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &normal_rhs,
             &mut normal,
@@ -10036,6 +10122,7 @@ mod tests {
         let transposed_rhs = [Complex64::new(2.0, 0.0), zero];
         assert!(canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &transposed_rhs,
             &mut transposed,
@@ -10062,6 +10149,7 @@ mod tests {
         let mut two_term_homogeneous = [one, tiny];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &[Complex64::new(2.0, 0.0), zero],
             &mut two_term_homogeneous,
@@ -10072,6 +10160,7 @@ mod tests {
         let mut nonhomogeneous_singleton = [tiny, one];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
+            &matrix.residual_layout,
             &matrix.values,
             &[Complex64::new(1.0, 0.0), Complex64::new(4.0, 0.0)],
             &mut nonhomogeneous_singleton,
@@ -10085,6 +10174,7 @@ mod tests {
         let mut singular_candidate = [tiny, zero];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &singular.csc,
+            &singular.residual_layout,
             &singular.values,
             &[zero, zero],
             &mut singular_candidate,
@@ -10104,6 +10194,7 @@ mod tests {
         let mut physical_coefficient_candidate = [tiny, one];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &underflow_matrix.csc,
+            &underflow_matrix.residual_layout,
             &underflow_matrix.values,
             &[zero, zero],
             &mut physical_coefficient_candidate,
@@ -10121,6 +10212,7 @@ mod tests {
         let mut erased_coefficient_candidate = [tiny, one];
         assert!(canonicalize_complex_homogeneous_zero_constraints(
             &underflow_matrix.csc,
+            &underflow_matrix.residual_layout,
             &underflowed_values,
             &[zero, zero],
             &mut erased_coefficient_candidate,
@@ -10135,6 +10227,7 @@ mod tests {
         let mut physical_rhs_candidate = [tiny];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &rhs_matrix.csc,
+            &rhs_matrix.residual_layout,
             &rhs_matrix.values,
             &physical_rhs,
             &mut physical_rhs_candidate,
@@ -10145,6 +10238,7 @@ mod tests {
         let mut erased_rhs_candidate = [tiny];
         assert!(canonicalize_complex_homogeneous_zero_constraints(
             &rhs_matrix.csc,
+            &rhs_matrix.residual_layout,
             &rhs_matrix.values,
             &[zero],
             &mut erased_rhs_candidate,
@@ -10477,6 +10571,7 @@ mod tests {
         assert!(
             !canonicalize_complex_homogeneous_zero_constraints(
                 &matrix.csc,
+                &matrix.residual_layout,
                 &matrix.values,
                 &rhs,
                 &mut singletons,
