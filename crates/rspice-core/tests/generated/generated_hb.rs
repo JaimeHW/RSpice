@@ -73,6 +73,69 @@ fn a_generated_resistor_gives_its_native_twins_harmonics() {
     );
 }
 
+/// VBIC 4T et against RSpice's native VBIC on one card, in a common-emitter
+/// stage: once with the thermal node grounded, and once self-heating through
+/// a thermal resistance and capacitance. Both are VBIC's equations; the
+/// generated model takes k and q from CODATA 2010 (`constants.vams`) where
+/// the native one takes ngspice's CODATA 2014 values, a 2.4e-7 difference in
+/// the thermal voltage that moves the collector current by about 30 times
+/// that at this bias. Allowance, fixed from that before the comparison: each
+/// of the DC term and harmonics 1-3 at the collector, the base and the
+/// thermal node within 1e-4 of the native collector fundamental.
+#[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+#[test]
+fn vbic_4t_et_gives_the_native_vbic_harmonics() {
+    let resistances = "RCX=10 RCI=10 RBX=10 RBI=10 RE=1 RBP=10 RS=10";
+    let stage = |card: &str| {
+        format!(
+            "* VBIC common emitter\nVCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\n\
+             RC vcc c 1k\n{card}\n.end\n"
+        )
+    };
+    let run = |deck: String| {
+        let netlist = Netlist::parse(&deck).expect("parse");
+        engine()
+            .run_hb(
+                &netlist,
+                HbConfig::new(F0)
+                    .with_harmonics(HARMONICS)
+                    .with_tolerance(1e-9),
+            )
+            .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"))
+    };
+    for (generated, native, nodes) in [
+        (
+            format!("Q1 c b 0 0 0 qv\n.model qv VBIC_4T_ET_CF {resistances}"),
+            format!("Q1 c b 0 0 qn\n.model qn NPN LEVEL=4 {resistances}"),
+            &["c", "b"][..],
+        ),
+        (
+            format!("Q1 c b 0 0 t qv\n.model qv VBIC_4T_ET_CF {resistances} RTH=300 CTH=1n"),
+            format!("Q1 c b 0 0 t qn\n.model qn NPN LEVEL=4 {resistances} RTH=300 CTH=1n"),
+            &["c", "b", "t"][..],
+        ),
+    ] {
+        let generated = run(stage(&generated));
+        let native = run(stage(&native));
+        let scale = spectrum(&native, "c")[1].norm();
+        for node in nodes {
+            let (twin, reference) = (spectrum(&generated, node), spectrum(&native, node));
+            for k in 0..=3 {
+                assert!(
+                    (twin[k] - reference[k]).norm() <= 1e-4 * scale,
+                    "V({node}) harmonic {k}: VBIC 4T et {} against native VBIC {}",
+                    twin[k],
+                    reference[k]
+                );
+            }
+        }
+        assert!(
+            spectrum(&native, "c")[2].norm() > 1e-3,
+            "the stage must make harmonics for the comparison to mean anything"
+        );
+    }
+}
+
 /// The one-sided Fourier coefficients of `waveform` over the period ending
 /// at `end`, sampled at `samples` uniform points by linear interpolation:
 /// `c_0` the mean and `c_k = (2/N) sum v(t_n) e^{-jk w t_n}`, the convention
@@ -157,6 +220,18 @@ fn generated_models_reach_the_settled_transients_steady_state() {
             "bipolar transistor (HICUM/L0)",
             "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
              XQ c b 0 0 t hicuml0va\n",
+            "c",
+        ),
+        // The VBIC 4T et source opens a zero series resistance rather than
+        // shorting it, so its default card leaves the terminals unconnected:
+        // the card gives the resistances, and a thermal resistance for the
+        // thermal node.
+        #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+        (
+            "self-heating bipolar transistor (VBIC 4T et)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+             Q1 c b 0 0 t qv\n.model qv VBIC_4T_ET_CF RCX=10 RCI=10 RBX=10 RBI=10 RE=1 RBP=10 \
+             RS=10 RTH=300 CTH=1n\n",
             "c",
         ),
         #[cfg(feature = "veriloga-model-angelov")]
