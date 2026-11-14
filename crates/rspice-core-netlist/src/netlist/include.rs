@@ -1112,6 +1112,36 @@ impl IncludeProcessor {
         finish_non_aborting_parse(self.expand_content_with_abort(content, current_path, &NoAbort))
     }
 
+    /// Expand as [`Self::expand_content`] does, offering each expanded line
+    /// to `rewrite` with the file and line that wrote it; a line `rewrite`
+    /// returns text for is replaced by that text. The expanded text alone
+    /// cannot say which file wrote a line, so a caller that sealed a directive
+    /// written in an included file rewrites it here, where it stands.
+    pub fn expand_content_rewriting(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        rewrite: &mut dyn FnMut(&NetlistSourceLocation, &str) -> Option<String>,
+    ) -> Result<String, ParseError> {
+        self.resolved_dependencies.clear();
+        let expanded = finish_non_aborting_parse(self.expand_content_mapped_with_abort(
+            content,
+            current_path,
+            &NoAbort,
+        ))?;
+        let mut output = String::with_capacity(expanded.rendered_bytes);
+        for item in &expanded.items {
+            if let ExpandedSourceItem::Line { text, origin } = item {
+                match rewrite(origin, text) {
+                    Some(rewritten) => output.push_str(&rewritten),
+                    None => output.push_str(text),
+                }
+                output.push('\n');
+            }
+        }
+        Ok(output)
+    }
+
     /// Recursively expand `.INCLUDE` and `.LIB` directives with cooperative
     /// cancellation.
     pub fn expand_content_with_abort(
@@ -2363,6 +2393,50 @@ mod tests {
         assert!(expanded.contains("R1 1 2 1"), "{expanded}");
         assert!(expanded.contains("R2 2 3 1"), "{expanded}");
         assert!(expanded.contains("R3 3 0 1"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A rewriting expansion offers each line with the file and line that
+    /// wrote it, so a line of an included file is replaced where it stands
+    /// and an identical line of the deck is not; the expansion is otherwise
+    /// the plain one, and records the same dependencies.
+    #[test]
+    fn a_rewriting_expansion_replaces_a_line_by_the_file_that_wrote_it() {
+        let dir = unique_include_temp_dir("rewriting");
+        std::fs::create_dir_all(dir.join("models")).expect("create rewrite fixture");
+        let deck_path = dir.join("deck.cir");
+        let included = dir.join("models").join("amp.inc");
+        std::fs::write(&included, "* amp\n.hdl \"amp.va\"\nX1 a b amp\n").expect("write include");
+        let deck = "deck\n.hdl \"amp.va\"\n.include \"models/amp.inc\"\n.end\n";
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let plain = processor
+            .expand_content(deck, &deck_path)
+            .expect("the deck expands");
+        let canonical = included.canonicalize().expect("canonical include");
+        let mut offered = Vec::new();
+        let rewritten = processor
+            .expand_content_rewriting(deck, &deck_path, &mut |origin, text| {
+                offered.push((origin.path.clone(), origin.line, text.to_owned()));
+                (origin
+                    .path
+                    .as_deref()
+                    .and_then(|path| path.canonicalize().ok())
+                    == Some(canonical.clone())
+                    && origin.line == 2)
+                    .then(|| ".veriloga \"sealed\" amp".to_owned())
+            })
+            .expect("the deck expands");
+        assert_eq!(
+            rewritten,
+            plain.replacen(".hdl \"amp.va\"\nX1", ".veriloga \"sealed\" amp\nX1", 1),
+            "{rewritten}"
+        );
+        assert!(
+            rewritten.starts_with("deck\n.hdl \"amp.va\"\n"),
+            "{rewritten}"
+        );
+        assert_eq!(offered.len(), plain.lines().count(), "{offered:?}");
+        assert_eq!(processor.resolved_dependencies().len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
