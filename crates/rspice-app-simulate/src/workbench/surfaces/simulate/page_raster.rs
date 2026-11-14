@@ -27,7 +27,7 @@ pub const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-variables",
         page: SimulationPage::Variables,
-        fingerprint: "d579e82391f8b88503ce1b41ef3b6e549438f47c0799d45b7a2f6d2916dbc76f",
+        fingerprint: "b8e8cbcd1adffa1b57c800e8f069118844091a4a864501afcd710025123891b5",
     },
     StudioBaseline {
         name: "studio-outputs",

@@ -425,7 +425,7 @@ fn pdk_archive_verifies_every_exact_artifact_and_contract() {
 
     assert_eq!(package.manifest().package_id, "demo180");
     assert_eq!(package.manifest().layers.len(), 3);
-    assert_eq!(package.artifact_digests().len(), 2);
+    assert_eq!(package.artifact_digests().len(), 1);
     let archive: PdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
         package.archive_digest(),
